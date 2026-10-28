@@ -26,6 +26,11 @@
   --attn-tone-bg: var(--pend-bg);
   --attn-tone-border: var(--pend-border);
 }
+.kt-attn[data-kind='task'] {
+  --attn-tone: var(--ok);
+  --attn-tone-bg: var(--ok-bg);
+  --attn-tone-border: var(--ok-border);
+}
 .kt-attn[data-kind='unknown'] {
   --attn-tone: var(--err);
   --attn-tone-bg: var(--err-bg);

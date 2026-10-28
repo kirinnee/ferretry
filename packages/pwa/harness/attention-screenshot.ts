@@ -4,6 +4,8 @@
  *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item chat
  *   panel-phone / panel-desktop   the pinned item above the composer
  *   details-phone / -desktop      the same, Details open
+ *   task-*                       a step-by-step to-do: ticked partly / fully, waiting on the ferret, the
+ *                                 phone deck mid-swipe right (Done) and left (Need more info), the desktop inbox
  *   sidebar / rail / drawer       unread rows, the Needs-you group, the Attention entry, the rail badges
  *
  *   bun harness/attention-screenshot.ts      # writes harness/out/attention/<scheme>/*.png
@@ -126,6 +128,48 @@ try {
         await page.close();
         page = await open(context, theme, 'board');
         await shot(page, scheme, `board-${label}`);
+        await page.close();
+      }
+
+      for (const [label, context] of [
+        ['phone', phone],
+        ['desktop', desktop],
+      ] as const) {
+        for (const view of ['task-partial', 'task-full', 'task-waiting']) {
+          page = await open(context, theme, view);
+          const mark = view === 'task-waiting' ? '[data-attention-history]' : '[data-attention-steps-count]';
+          await page
+            .locator(mark)
+            .first()
+            .evaluate(
+              (el, waiting) => el.scrollIntoView({ block: waiting ? 'end' : 'start' }),
+              view === 'task-waiting',
+            );
+          await page.waitForTimeout(150);
+          await shot(page, scheme, `${view}-${label}`);
+          await page.close();
+        }
+      }
+      page = await open(desktop, theme, 'task-inbox-desktop');
+      await shot(page, scheme, 'task-inbox-desktop', true);
+      await page.close();
+      for (const [direction, sign] of [
+        ['right', 1],
+        ['left', -1],
+      ] as const) {
+        page = await open(phone, theme, 'task-inbox-phone');
+        const box = await page.locator('.fy-attn-deck__top').boundingBox();
+        if (box === null) fail('no deck card to swipe');
+        else {
+          const y = box.y + box.height - 14;
+          await page.mouse.move(box.x + box.width / 2, y);
+          await page.mouse.down();
+          await page.mouse.move(box.x + box.width / 2 + sign * 60, y, { steps: 4 });
+          await page.mouse.move(box.x + box.width / 2 + sign * 110, y, { steps: 4 });
+          await page.waitForTimeout(250);
+          await shot(page, scheme, `task-swipe-${direction}-phone`);
+          await page.mouse.up();
+        }
         await page.close();
       }
 

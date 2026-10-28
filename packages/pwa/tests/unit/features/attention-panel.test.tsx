@@ -67,7 +67,7 @@ const board = (
 });
 
 interface Call {
-  readonly method: 'respond' | 'resolve' | 'dismiss';
+  readonly method: 'respond' | 'resolve' | 'dismiss' | 'needs-info' | 'progress';
   readonly id: string;
   readonly payload: unknown;
 }
@@ -94,6 +94,20 @@ const recordingClient = (settle: (call: Call) => Promise<void> = async () => und
       expect(at).toBe(daemon);
       expect(where).toBe(scope);
       const call: Call = { method: 'dismiss', id, payload: note };
+      calls.push(call);
+      await settle(call);
+    },
+    needsInfo: async (at, where, id, note) => {
+      expect(at).toBe(daemon);
+      expect(where).toBe(scope);
+      const call: Call = { method: 'needs-info', id, payload: note };
+      calls.push(call);
+      await settle(call);
+    },
+    progress: async (at, where, id, step, done) => {
+      expect(at).toBe(daemon);
+      expect(where).toBe(scope);
+      const call: Call = { method: 'progress', id, payload: { step, done } };
       calls.push(call);
       await settle(call);
     },

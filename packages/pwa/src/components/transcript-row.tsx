@@ -5,6 +5,7 @@ import { clockOfInstant } from '../lib/message-clock.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { HandoffNoticeRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
+import { ChatProse } from './chat-prose.tsx';
 import { CommandRow } from './command-row.tsx';
 import {
   HandoffBody,
@@ -23,9 +24,7 @@ import {
   type SendRetry,
   type SendSubmit,
 } from './ledger-message.tsx';
-import { Markdown } from './markdown.tsx';
 import { PackCallRow } from './pack-call.tsx';
-import { useReferenceSurface } from './reference-surface.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import { SentMessageRow } from './sent-message.tsx';
 import { type SendDismiss, type SendExpand, SettledSendNote } from './settled-send-note.tsx';
@@ -414,17 +413,9 @@ function speakerOf(entry: TranscriptEntry): string | undefined {
  * end up proving references differently. Outside a session workspace the context
  * is empty and reference-shaped text stays prose, which is correct: nothing there
  * can prove a callsign or a path.
- *
- * THE SINGLE `fy-render` OPT-IN. This is the one call site in the product that
- * passes `enableFyRender`, and that is the whole mechanism keeping inline
- * illustrations to an assistant's own message: every other `<Markdown>` surface
- * is inert by not naming the capability, so a `fy-render` fence pasted into a
- * file preview, a report or the composer renders as an escaped code fence with
- * no code on those surfaces at all. `tests/unit/fy-render-opt-in.test.ts` holds
- * the count at one. See `docs/fy-render.md`.
  */
 function AssistantProse({ text }: { readonly text: string }) {
-  return <Markdown enableFyRender text={text} {...useReferenceSurface()} />;
+  return <ChatProse text={text} />;
 }
 
 /** What a row with no label of its own is headed by. */

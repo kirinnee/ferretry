@@ -18,11 +18,12 @@ import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
 import {
   actionSentence,
   attentionConversationPath,
-  DISMISS_ACTION,
-  DONE_ACTION,
   type FailedAttentionAction,
   type InboxAction,
   type InboxCard,
+  isTask,
+  isWaitingOnFerret,
+  swipeMap,
 } from '../../lib/attention-inbox.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAttentionPath } from '../../lib/pages/routes.ts';
@@ -193,7 +194,7 @@ function RowFace({
   );
 }
 
-/** A phone's swipeable card: the row (a link into the chat) and Done / Dismiss as buttons. */
+/** A phone's swipeable card: the row (a link into the chat) and its two answers as buttons — Done / Dismiss, or on a to-do Done / Need more info. */
 function SwipeRow({
   card,
   now,
@@ -205,22 +206,35 @@ function SwipeRow({
   readonly onNavigate: (to: string) => void;
   readonly act: (action: InboxAction) => void;
 }) {
+  const map = swipeMap(card.item);
+  const first = map.right;
+  const second = map.left;
+  const waiting = isTask(card.item) && isWaitingOnFerret(card.item);
   return (
     <div className="fy-attn-swiperow">
       <RowFace card={card} now={now} onNavigate={onNavigate} onSelect={() => undefined} phone selected={false} />
+      {waiting ? (
+        <p className="fy-attn-swiperow__waiting m-0 text-meta text-muted" data-attention-waiting="" role="status">
+          Waiting on {inboxCardOrigin(card, onNavigate).ferret}
+        </p>
+      ) : null}
       <div className="fy-attn-swiperow__actions">
-        <button className="kt-btn kt-btn--sm" data-attention-done="" onClick={() => act(DONE_ACTION)} type="button">
-          Done
-        </button>
-        <button
-          className="kt-btn kt-btn--sm"
-          data-attention-dismiss=""
-          data-variant="ghost"
-          onClick={() => act(DISMISS_ACTION)}
-          type="button"
-        >
-          Dismiss
-        </button>
+        {first === undefined ? null : (
+          <button className="kt-btn kt-btn--sm" data-attention-done="" onClick={() => act(first)} type="button">
+            {first.label}
+          </button>
+        )}
+        {second === undefined ? null : (
+          <button
+            className="kt-btn kt-btn--sm"
+            {...(second.kind === 'dismiss' ? { 'data-attention-dismiss': '' } : { 'data-attention-needs-info': '' })}
+            data-variant="ghost"
+            onClick={() => act(second)}
+            type="button"
+          >
+            {second.label}
+          </button>
+        )}
       </div>
     </div>
   );
@@ -273,7 +287,9 @@ export function AttentionInboxPage({
               />
               <p className="fy-attn-inbox__hint">
                 {inbox.cards.length > 1 ? `${inbox.cards.length - 1} more after this one · ` : ''}
-                Swipe right for Done, left to dismiss
+                {inbox.cards.some(card => isTask(card.item))
+                  ? 'Swipe right for Done, left for Need more info'
+                  : 'Swipe right for Done, left to dismiss'}
               </p>
             </div>
           ) : (

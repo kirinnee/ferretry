@@ -160,10 +160,73 @@ export const inboxCards = (
 export type InboxAction =
   | { readonly kind: 'respond'; readonly label: string; readonly response: AttentionResponse }
   | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string };
+  | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }
+  | { readonly kind: 'needs-info'; readonly label: string; readonly note?: string };
 
 export const DONE_ACTION: InboxAction = { kind: 'resolve', label: 'Done' };
 export const DISMISS_ACTION: InboxAction = { kind: 'dismiss', label: 'Dismiss' };
+export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
+  kind: 'needs-info',
+  label: 'Need more info',
+};
+
+/** A to-do: the owner does something, nothing to choose. Its answers are Done and Need more info. */
+export const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
+
+/** The ferret was asked for more information and has not yet edited the item. */
+export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
+
+/** How many of an item's steps are ticked, out of how many; `complete` only when it has steps and all are. */
+export const stepsProgress = (
+  item: Pick<AttentionItem, 'steps' | 'stepsDone'>,
+): { readonly done: number; readonly total: number; readonly complete: boolean } => {
+  const total = item.steps?.length ?? 0;
+  const done = item.stepsDone?.length ?? 0;
+  return { done, total, complete: total > 0 && done >= total };
+};
+
+/** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
+export const tickedSteps = (
+  item: Pick<AttentionItem, 'steps' | 'stepsDone'>,
+  pending: ReadonlyMap<number, boolean> = new Map(),
+): ReadonlySet<number> => {
+  const ticked = new Set(item.stepsDone ?? []);
+  for (const [step, done] of pending) {
+    if (done) ticked.add(step);
+    else ticked.delete(step);
+  }
+  return ticked;
+};
+
+const clock = (instantValue: string, timeZone?: string): string =>
+  new Date(instantValue).toLocaleTimeString([], {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(timeZone === undefined ? {} : { timeZone }),
+  });
+
+/**
+ * What happened to a to-do since the owner first looked, in the owner's local time:
+ * "You asked for more info 10:42 · updated 10:44". `null` when nothing has.
+ */
+export const historyLine = (history: AttentionItem['history'], timeZone?: string): string | null => {
+  if (history === undefined || history.length === 0) return null;
+  const words = history.map(entry =>
+    entry.kind === 'needs-info'
+      ? `You asked for more info ${clock(entry.at, timeZone)}`
+      : `updated ${clock(entry.at, timeZone)}`,
+  );
+  return words.join(' · ');
+};
+
+/** The ferret edited this item after being asked: it needs the owner again, and says what changed. */
+export const updatedSinceAsked = (
+  item: Pick<AttentionItem, 'history' | 'waitingOn'>,
+): { readonly at: string; readonly note?: string } | null => {
+  const last = item.history?.at(-1);
+  if (item.waitingOn !== undefined || last === undefined || last.kind !== 'updated') return null;
+  return { at: last.at, ...(last.note === undefined ? {} : { note: last.note }) };
+};
 
 /**
  * The item's answers in the order a swipe takes them: an affirmative answer first (Approve, "The answer
@@ -271,13 +334,14 @@ export type SwipeDirection = 'right' | 'left' | 'up';
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
 
 /**
- * What each swipe does to a card: right is Done, left is Dismiss. A swipe never picks between a
- * card's options — those are buttons — and `up` stays free for a later gesture.
+ * What each swipe does to a card: right is Done, left is Dismiss — or, on a to-do, Need more info. A swipe
+ * never picks between a card's options — those are buttons — and `up` stays free for a later gesture.
  */
-export const swipeMap = (_item: Pick<AttentionItem, 'ask' | 'questions'>): SwipeMap => ({
-  right: DONE_ACTION,
-  left: DISMISS_ACTION,
-});
+export const swipeMap = (item: Pick<AttentionItem, 'ask' | 'questions' | 'waitingOn'>): SwipeMap => {
+  if (!isTask(item)) return { right: DONE_ACTION, left: DISMISS_ACTION };
+  // A to-do waiting on its ferret cannot be done yet, and asking again is the same request.
+  return isWaitingOnFerret(item) ? { left: DISMISS_ACTION } : { right: DONE_ACTION, left: NEEDS_INFO_ACTION };
+};
 
 /**
  * Which swipe, if any, an answer sits on — matched by meaning, because `inboxOptions` builds its
@@ -330,7 +394,7 @@ export const swipeIntent = (dx: number, dy: number, width: number, map: SwipeMap
  */
 export const replyAction = (item: Pick<AttentionItem, 'ask'>, text: string): InboxAction | null => {
   const answer = text.trim();
-  if (answer === '') return null;
+  if (answer === '' || isTask(item)) return null;
   if (item.ask?.kind === 'open-question')
     return { kind: 'respond', label: 'Reply', response: { kind: 'open-question', answer } };
   if (item.ask?.kind === 'answer-review')
@@ -345,6 +409,7 @@ export const replyAction = (item: Pick<AttentionItem, 'ask'>, text: string): Inb
 /** The words an undo toast uses for an action it is holding. */
 export const actionSentence = (action: InboxAction, id: AttentionId): string => {
   if (action.kind === 'dismiss') return `Dismissed !${id}`;
+  if (action.kind === 'needs-info') return `Asked for more info on !${id}`;
   if (action.label === 'Reply') return `Replied to !${id}`;
   if (action.kind === 'resolve') return `Marked !${id} done`;
   return `Answered !${id}: ${action.label}`;
