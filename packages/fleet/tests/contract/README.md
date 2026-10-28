@@ -33,6 +33,11 @@ Every positive claim sits beside the control that shows what it suppresses. A cl
 release is gated on the version the harness reports (`harnessVersion`), so `pinned` and `latest` each
 assert the behaviour of the version they measure.
 
+`terminal-transcript.test.ts` is not a claim about a harness: it pins the support code that reads a
+screen. A PTY delivers output in arbitrary chunks, so the transcript decodes as one stream; decoding each
+chunk alone turned a box-drawing character split across two chunks into `��` and failed a `/status`
+assertion intermittently on `macos-15`.
+
 ## Rules
 
 - **Fake credentials only.** Tokens are made up here (`FAKE`, `ROTATED<n>`). Nothing reads the

@@ -112,6 +112,23 @@ function plainScreen(raw: string): string {
 }
 
 /**
+ * Accumulates a pseudo-terminal's bytes as text. ONE decoder in streaming mode: a PTY delivers output
+ * in arbitrary chunks, and a box-drawing character such as `│` is
+ * three bytes, so decoding each chunk on its own turns a split character into U+FFFD and corrupts
+ * the very row a test is reading.
+ */
+export function terminalTranscript(): { feed(bytes: Uint8Array): void; text(): string } {
+  const decoder = new TextDecoder();
+  let raw = '';
+  return {
+    feed: bytes => {
+      raw += decoder.decode(bytes, { stream: true });
+    },
+    text: () => raw,
+  };
+}
+
+/**
  * Start `command` in a pseudo-terminal and wait until one of `settled` matches the screen or the
  * budget runs out. The process is killed either way: a launch screen is the measurement, and a
  * session that got further would only be waiting on the dead network.
@@ -128,7 +145,7 @@ export async function screenOf(
     afterwards?: { readonly type: string; readonly settled: readonly RegExp[] };
   },
 ): Promise<string> {
-  let raw = '';
+  const transcript = terminalTranscript();
   const child = Bun.spawn([...command], {
     cwd: options.cwd,
     env: options.env,
@@ -136,7 +153,7 @@ export async function screenOf(
       cols: options.cols ?? 120,
       rows: 40,
       data(_terminal, bytes) {
-        raw += new TextDecoder().decode(bytes);
+        transcript.feed(bytes);
       },
     },
   });
@@ -146,7 +163,7 @@ export async function screenOf(
   });
   const settle = async (settled: readonly RegExp[]) => {
     const deadline = Date.now() + (options.timeoutMs ?? 30_000);
-    while (Date.now() < deadline && !exited && !settled.some(pattern => pattern.test(plainScreen(raw)))) {
+    while (Date.now() < deadline && !exited && !settled.some(pattern => pattern.test(plainScreen(transcript.text())))) {
       await Bun.sleep(200);
     }
     // A frame often arrives in pieces; one more beat lets the rest of the settled screen land.
@@ -166,7 +183,7 @@ export async function screenOf(
   child.kill('SIGKILL');
   await child.exited;
   child.terminal?.close();
-  return plainScreen(raw);
+  return plainScreen(transcript.text());
 }
 
 export interface AppServer {
