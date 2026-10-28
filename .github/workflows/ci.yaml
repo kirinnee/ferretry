@@ -134,20 +134,20 @@ jobs:
         run: ./scripts/ci/nix-store-hygiene.sh
 
   pwa-screenshot:
-    name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }})
+    name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
     permissions:
       contents: read
     # Linux, deliberately NOT a macOS runner: the image already ships the same Google Chrome the
     # Integration Tests job's shared Chromium launches, so this needs no new tool and no further macOS
     # job. A sibling job rather than a step on an existing one, so it adds runner time and no wall clock.
-    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). The full gallery
-    # peaks at ~3.3GB, past a 2x4's memory, so on a pull request it keeps the 4x8: GitHub's free 4-core
-    # runner walked it in 643s against ~427s there, which would make it the critical path. It is a third
-    # of the Namespace bill, so splitting its two viewports into legs is the way to move it.
-    # `main: namespace` keeps a job on Namespace on `main` too. The unsplit gallery has it because 643s
-    # on GitHub is the slowest job of a `main` run by ~3 minutes, so every release would wait for it.
-    # The Settings walk fits a 2x4. Both walk their viewports one after the other: run at once, as three
-    # software-rendered Chromes on four cores, the full gallery timed out in 3 of 7 runs under load (#598).
+    # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). The Settings walk
+    # fits a 2x4. The full gallery is two legs, one viewport each, on GitHub's free runner on every event:
+    # unsplit it walked its viewports one after the other, 643s on GitHub against ~427s on a Namespace
+    # 4x8, a third of the Namespace bill. Separate jobs, not one job running both at once: that was three
+    # software-rendered Chromes on four cores, and it timed out in 3 of 7 runs under load (#598).
+    # `main: namespace` keeps a Namespace job on Namespace on `main` too. The unsplit gallery carried it
+    # because 643s on GitHub held every release back by ~3 minutes; each split leg takes about half that,
+    # so neither carries it (and `shape: github` takes `ubuntu-latest` whatever `main` says).
     runs-on: >-
       ${{
         (matrix.shape == 'github' || (github.event_name != 'pull_request' && matrix.main != 'namespace') || vars.CI_RUNNER_POOL == 'github')
@@ -166,7 +166,8 @@ jobs:
       matrix:
         include:
           - { scheme: light, scope: settings, shape: 2x4 }
-          - { scheme: dark, scope: full, shape: 4x8, main: namespace }
+          - { scheme: dark, scope: full, viewport: mobile, shape: github }
+          - { scheme: dark, scope: full, viewport: desktop, shape: github }
     steps:
       - uses: actions/checkout@v5
         with:
@@ -182,19 +183,20 @@ jobs:
       # clipping that shipped once already and every gate here would stay green. The script's header
       # says which frames this covers, which it does not, and why the assertion is the gate while the
       # images are only evidence.
-      - name: Prove the ${{ matrix.scope }} harness at both viewports in ${{ matrix.scheme }}
+      - name: Prove the ${{ matrix.scope }} harness at ${{ matrix.viewport || 'both viewports' }} in ${{ matrix.scheme }}
         env:
           SCHEME: ${{ matrix.scheme }}
           SCOPE: ${{ matrix.scope }}
-        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"
+          VIEWPORT: ${{ matrix.viewport }}
+        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE" ${VIEWPORT:+"$VIEWPORT"}
       # `always()` because a red run is the run whose frames matter most: the artifact carries this
-      # colour scheme at both viewports plus the run's full log, so a reviewer can see the panel that
+      # colour scheme at its viewports plus the run's full log, so a reviewer can see the panel that
       # broke instead of reading a geometry number and guessing.
       - name: Upload the captured ${{ matrix.scope }} frames
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}
+          name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}${{ matrix.viewport && format('-{0}', matrix.viewport) || '' }}
           path: packages/pwa/.artifacts/pwa-screenshot/
           if-no-files-found: warn
 

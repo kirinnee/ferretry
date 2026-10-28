@@ -50,17 +50,27 @@ set -euo pipefail
 # sibling matrix leg, so it costs runner time; its ~7 minutes sits under the E2E workflow every PR
 # already waits on, which is why it adds little or no wall clock.
 #
+# AND WHY `full` IS TWO LEGS, ONE VIEWPORT EACH. The harness walks its viewports one after the other,
+# so the full gallery took ~427s on a Namespace 4x8 and 643s on GitHub's free 4-core runner — a third
+# of the Namespace bill, or the PR's critical path. A third argument names one viewport, and CI runs
+# `full` as two jobs, one per viewport, on GitHub. They are separate JOBS on separate runners, which is
+# what keeps this clear of #598: that ran both viewports as child processes in ONE job, three
+# software-rendered Chromes on four cores, and timed out in 3 of 7 runs under load (#613 reverted it).
+# The harness owes every tally PER VIEWPORT and gives each own-context pass to exactly one viewport, so
+# a leg owes exactly its share, and both legs together owe what one unsplit run does.
+#
 # The `for` below iterates rather than substitutes because the two colour schemes are two full runs of
 # a dozen steps each, and `pre-paint.js` resolves the theme before first paint — a light capture is a
 # different first frame emulated at the browser context, not a class toggle inside one run.
 #
 # Local reproduction, identical to the job:
-#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh [dark|light] [settings|full]
+#   nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh [dark|light] [settings|full] [mobile|desktop]
 #
 # With no scheme it runs both in turn; CI passes one per matrix job so they run side by side. The
-# scope defaults to `settings`; `full` drops `--settings-only` and walks the whole gallery.
+# scope defaults to `settings`; `full` drops `--settings-only` and walks the whole gallery. The
+# viewport defaults to both, one after the other; naming one walks it alone and owes only its share.
 
-usage() { echo "❌ usage: $0 [dark|light] [settings|full]" >&2 && exit 2; }
+usage() { echo "❌ usage: $0 [dark|light] [settings|full] [mobile|desktop]" >&2 && exit 2; }
 
 schemes=(dark light)
 case "${1:-}" in
@@ -72,6 +82,12 @@ esac
 scope="${2:-settings}"
 case "${scope}" in
 settings | full) ;;
+*) usage ;;
+esac
+
+viewport="${3:-}"
+case "${viewport}" in
+"" | mobile | desktop) ;;
 *) usage ;;
 esac
 
@@ -91,12 +107,14 @@ artifact_dir="packages/pwa/.artifacts/pwa-screenshot"
 rm -rf "${artifact_dir}"
 mkdir -p "${artifact_dir}"
 
-echo "📝 Driving ${chrome} over the ${scope} harness at 390x844 and 1440x900"
+viewports="${viewport:-mobile + desktop}"
+echo "📝 Driving ${chrome} over the ${scope} harness at ${viewports}"
 
 for scheme in "${schemes[@]}"; do
   flags=()
   [ "${scope}" = "settings" ] && flags+=(--settings-only)
   [ "${scheme}" = "light" ] && flags+=(--light)
+  [ -n "${viewport}" ] && flags+=(--viewport "${viewport}")
   log="${artifact_dir}/${scheme}.log"
 
   # A stale directory would hand this scheme's artifact the previous scheme's frames, which is a quiet
@@ -114,8 +132,8 @@ for scheme in "${schemes[@]}"; do
   # worse than no artifact, because it reads like a truncated success.
   (cd packages/pwa && bun harness/screenshot.ts "${flags[@]}") 2>&1 | tee "${log}"
 
-  # THE CLOSING LINE, REQUIRED. The harness asserts its own tally and prints this only after both
-  # viewports have completed, so demanding it here is what separates "every check passed" from "the
+  # THE CLOSING LINE, REQUIRED. The harness asserts its own tally and prints this only after every
+  # viewport it walks has completed, so demanding it here is what separates "every check passed" from "the
   # checks stopped being reached". Without it, deleting the tally assertion upstream would leave a
   # green job that measures nothing — which is the specific way a gate like this dies.
   #
@@ -127,17 +145,17 @@ for scheme in "${schemes[@]}"; do
   # request. What is caught here without any review is the far likelier accident: checks that stop
   # running while the constant stays put.
   tally="$(grep '^✅ settings sideways-scroll checks: ' "${log}" || true)"
-  [ -z "${tally}" ] && echo "❌ the ${scheme} run exited 0 without reporting its sideways-scroll tally" >&2 && echo "   That is not a pass: the harness prints that line only once both viewports finish, so either" >&2 && echo "   the run ended early or the tally assertion in harness/screenshot.ts was removed" >&2 && exit 1
+  [ -z "${tally}" ] && echo "❌ the ${scheme} run exited 0 without reporting its sideways-scroll tally" >&2 && echo "   That is not a pass: the harness prints that line only once its viewports finish, so either" >&2 && echo "   the run ended early or the tally assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
   # The Machines geometry tally (one left edge, padding, spacing, the tab bar), required for the same
   # reason: the owner's "be careful of margins" is a gate only while its checks are still reached.
   geometry="$(grep '^✅ machines geometry checks: ' "${log}" || true)"
-  [ -z "${geometry}" ] && echo "❌ the ${scheme} run exited 0 without reporting its Machines geometry tally" >&2 && echo "   The harness prints it only once both viewports finish; either the run ended early or the" >&2 && echo "   MACHINES_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
+  [ -z "${geometry}" ] && echo "❌ the ${scheme} run exited 0 without reporting its Machines geometry tally" >&2 && echo "   The harness prints it only once its viewports finish; either the run ended early or the" >&2 && echo "   MACHINES_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
   # The terminal geometry tally (one cell per character, in a monospace face, in every theme family),
   # required for the same reason: `$ bun dev` shipped as `$  b u n  d e v` with every gate green.
   terminal="$(grep '^✅ terminal geometry checks: ' "${log}" || true)"
-  [ -z "${terminal}" ] && echo "❌ the ${scheme} run exited 0 without reporting its terminal geometry tally" >&2 && echo "   The harness prints it only once both viewports finish; either the run ended early or the" >&2 && echo "   TERMINAL_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
+  [ -z "${terminal}" ] && echo "❌ the ${scheme} run exited 0 without reporting its terminal geometry tally" >&2 && echo "   The harness prints it only once its viewports finish; either the run ended early or the" >&2 && echo "   TERMINAL_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
   # The session page's layout tally (conversation width, the tab strip, nothing under a split pane, in
   # every theme family), required for the same reason: each of the three shipped with every gate green.
@@ -149,6 +167,9 @@ for scheme in "${schemes[@]}"; do
   safe_area="$(grep '^✅ safe-area geometry checks: ' "${log}" || true)"
   [ -z "${safe_area}" ] && echo "❌ the ${scheme} run exited 0 without reporting its safe-area geometry tally" >&2 && echo "   The harness prints it only once the pass finishes; either the run ended early or the" >&2 && echo "   SAFE_AREA_GEOMETRY_CHECKS assertion in harness/screenshot.ts was removed" >&2 && exit 1
 
+  # A pass the other viewport's leg owes still prints its line, naming the owner ("0/0 … owed by the
+  # desktop run"), so all five lines are demanded of every leg and none is skipped by a leg it is owed by.
+  #
   # A zero-byte PNG is a capture that failed in a way Playwright did not raise. Cheap to check, and it
   # keeps the artifact honest: a reviewer who opens an empty file learns nothing and blames the viewer.
   empty="$(find packages/pwa/harness/out -maxdepth 1 -name '*.png' -size 0 -print -quit)"
@@ -162,4 +183,4 @@ for scheme in "${schemes[@]}"; do
   echo "📸 ${frames} ${scheme} frames -> ${artifact_dir}/${scheme}/"
 done
 
-echo "✅ The ${scope} harness passed at both viewports in ${schemes[*]}; frames are in ${artifact_dir}/"
+echo "✅ The ${scope} harness passed at ${viewports} in ${schemes[*]}; frames are in ${artifact_dir}/"
