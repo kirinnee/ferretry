@@ -149,6 +149,31 @@ describe('Attention in a conversation', () => {
     should(empty).deepEqual({ message: 'How is it going?', answers: [] });
   });
 
+  it('should leave a harness prompt out of the footer, while a reference still answers it', () => {
+    // Arrange
+    const harness = item('A6', {
+      source: 'question',
+      sourceRef: 'toolu_1',
+      subject: 'Which region first?',
+      ask: { kind: 'open-question' },
+      raisedBy: 'daemon',
+      raisedBySession: null,
+      raisedByName: null,
+    } as Partial<AttentionItem>);
+
+    // Act
+    const alone = conversationTurn('How is it going?', [harness], 'fy');
+    const mixed = conversationTurn('How is it going?', [harness, OPEN], 'fy');
+    const answered = conversationTurn('!A6 eu', [harness], 'fy');
+
+    // Assert
+    should(alone).deepEqual({ message: 'How is it going?', answers: [] });
+    should(mixed.message).endWith(
+      '[open attention: !A3 «Which region?» — if this message settles one, resolve it with `fy attention done <id>`]',
+    );
+    should(answered.answers.map(each => each.id)).deepEqual(['A6']);
+  });
+
   it('should take a chat answer only in the forms its ask accepts', () => {
     // Arrange / Act
     const open = conversationResponse(OPEN, '!A3 eu-west-1');
