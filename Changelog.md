@@ -1,5 +1,13 @@
 ## [4.93.0](https://github.com/kirinnee/ferretry/compare/v4.92.1...v4.93.0) (2026-10-28)
 
+### Features
+
+* **attention:** step-by-step instructions and progress on items ([#818](https://github.com/kirinnee/ferretry/issues/818)) ([9363a14](https://github.com/kirinnee/ferretry/commit/9363a14d05f3011154c48fd0e03c8d93b43871f5))
+
+### Fixes
+
+* **pwa:** capture the push-to-talk shortcut without relying on button focus ([#823](https://github.com/kirinnee/ferretry/issues/823)) ([a153124](https://github.com/kirinnee/ferretry/commit/a15312402e8809d386d09c2c1f4c3f5d1a4068e2))
+
 ## [4.92.1](https://github.com/kirinnee/ferretry/compare/v4.92.0...v4.92.1) (2026-10-28)
 
 ### Fixes
