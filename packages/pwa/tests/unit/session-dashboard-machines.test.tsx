@@ -32,10 +32,26 @@ const SOURCES: readonly MachineSource[] = [
   source(
     studio.daemonId,
     'studio',
-    [row('ivo', '/work/ferretry'), row('hadi', '/work/ferretry', { status: 'awaiting_question' })],
+    [
+      row('ivo', '/work/ferretry'),
+      row('hadi', '/work/ferretry', {
+        status: 'awaiting_question',
+        attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+      }),
+    ],
     'online',
   ),
-  source(LAPTOP, 'laptop', [row('pim', '/work/ferretry', { status: 'awaiting_user' })], 'offline'),
+  source(
+    LAPTOP,
+    'laptop',
+    [
+      row('pim', '/work/ferretry', {
+        status: 'awaiting_user',
+        attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+      }),
+    ],
+    'offline',
+  ),
 ];
 
 let view: Mounted | null = null;
@@ -124,7 +140,17 @@ describe('the Sessions page across every machine', () => {
 
   test('full density draws the full rows per machine, and an emptied machine says where its sessions went', async () => {
     const onlyAsking = [
-      source(LAPTOP, 'laptop', [row('ora', '/work/ferretry', { status: 'awaiting_question' })], 'online'),
+      source(
+        LAPTOP,
+        'laptop',
+        [
+          row('ora', '/work/ferretry', {
+            status: 'awaiting_question',
+            attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: '2026-07-31T12:00:00.000Z' },
+          }),
+        ],
+        'online',
+      ),
     ];
     view = await mount(
       dashboard({ allMachines: allMachinesView([...SOURCES.slice(0, 1), ...onlyAsking]), density: 'full' }).element,

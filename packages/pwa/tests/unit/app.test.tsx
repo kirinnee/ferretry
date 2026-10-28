@@ -2232,8 +2232,8 @@ describe('AppShell', () => {
         const scope = daemonSessionScope(alpha, 'shared');
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
-        // Nothing waiting: no "Needs you" strip, and the board stays one ⋯ row away.
-        expect(view.container.querySelector('button[data-attention-strip]')).toBeNull();
+        // Nothing waiting: no pinned "Needs you" block.
+        expect(view.container.querySelector('[data-attention-card]')).toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
 
@@ -2244,13 +2244,13 @@ describe('AppShell', () => {
         expect(attentionReads).toBeGreaterThan(initialAttentionReads);
         expect(store.attention.store.count(scope)).toBe(1);
 
-        // ONE indicator: the slim strip under the tabs, never a second chip in the header.
-        const strip = must(
-          view.container.querySelector<HTMLButtonElement>('button[data-attention-strip]'),
-          'the refreshed "Needs you" strip',
+        // The item is pinned above the composer, never a second chip in the header.
+        const pinned = must(
+          view.container.querySelector<HTMLElement>('[data-attention-panel] [data-attention-card]'),
+          'the refreshed pinned "Needs you" item',
         );
-        expect(strip.getAttribute('data-attention-strip')).toBe('1');
-        expect(strip.textContent).toContain('Needs you');
+        expect(pinned.getAttribute('data-pinned')).toBe('true');
+        expect(view.container.querySelector('section[aria-label="Needs you"][data-attention-panel]')).not.toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')?.textContent).toBe('!A3');
       } finally {
@@ -3995,9 +3995,13 @@ describe('the notifications settings card', () => {
     const { store, view, card } = await open();
 
     expect(store.notificationFilter.get().machines[beta.daemonId]).toBeUndefined();
+    const betaRow = must(
+      card.querySelector<HTMLElement>(`[data-machine-notification="${beta.daemonId}"]`),
+      'the per-machine row for beta',
+    );
     const machineSwitch = must(
-      switches(card).find(toggle => toggle.textContent?.includes('beta.example.test')),
-      'the per-machine switch for beta',
+      switches(betaRow).find(toggle => toggle.textContent?.includes('Show its notifications')),
+      'the per-machine mute switch for beta',
     );
     expect(machineSwitch.getAttribute('aria-checked')).toBe('true');
 

@@ -117,6 +117,7 @@ import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
+import { useAttentionReplies } from './hooks/use-attention-replies.ts';
 import {
   AttentionInboxContext,
   useAttentionInbox,
@@ -1004,7 +1005,11 @@ const browserEventStreamEnvironment: SessionEventStreamEnvironment = {
   random: () => Math.random(),
 };
 
-function SessionRoute({ connection, scope }: SessionChatPageProps) {
+function SessionRoute({
+  connection,
+  scope,
+  attentionOverride,
+}: SessionChatPageProps & { readonly attentionOverride?: string | null }) {
   const store = useAppStore();
   // The router's fetch, recorded for the Performance report like every other daemon read.
   const daemonFetch = useDaemonFetch();
@@ -1043,6 +1048,7 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
   // pairing rather than outliving it.
   const attentionStatus = useAttentionSession(store.attention, connection, scope);
   const attentionSnapshot = useAttentionSnapshot(store.attention, scope);
+  const attentionReplies = useAttentionReplies(store.attention, connection, scope);
   const attention = useMemo(
     () => ({ client: store.attention, snapshot: attentionSnapshot, status: attentionStatus }),
     [store.attention, attentionSnapshot, attentionStatus],
@@ -1503,8 +1509,11 @@ function SessionRoute({ connection, scope }: SessionChatPageProps) {
           }}
           browserLogin={store.browserLogin}
           attention={attention}
+          attentionReplies={attentionReplies}
           // A notification tap or an unread row names the item it opens at (`?attention=A3`).
-          attentionTarget={attentionTargetFromSearch(window.location.search)}
+          attentionTarget={
+            attentionOverride !== undefined ? attentionOverride : attentionTargetFromSearch(window.location.search)
+          }
           // Each navigation that names one re-targets it, so tapping the same item's notification again rings it again.
           attentionTargetKey={entryKey}
           chatWidth={controls.chatWidth}
@@ -1908,6 +1917,17 @@ function AttentionRoute(_: DaemonPageProps) {
       inbox={inbox}
       onNavigate={navigate}
       phone={phone}
+      renderChat={card => {
+        const target = inbox.connectionFor(card.daemonId);
+        return target === undefined ? null : (
+          <SessionRoute
+            attentionOverride={card.item.id}
+            connection={target}
+            key={card.key}
+            scope={daemonSessionScope(target, card.view.config.id)}
+          />
+        );
+      }}
     />
   );
 }

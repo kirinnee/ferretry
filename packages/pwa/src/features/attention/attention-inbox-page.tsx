@@ -1,28 +1,18 @@
 /**
- * THE ATTENTION INBOX — a first-class place, not a buried page: everything every ferret on every paired
- * machine is waiting on the reader for, newest needing you first, as the ONE card (`AttentionCard`).
+ * THE ATTENTION INBOX — everything every ferret on every paired machine is waiting on the reader for,
+ * newest needing you first.
  *
- * The same cards, two shapes:
+ * - A WIDER SCREEN gets two panes: the open items on the left (conversation, summary, ferret · machine,
+ *   age) and, on the right, the REAL chat of the selected item, with the item pinned above its composer
+ *   (the same block the chat page draws). Answering happens there, through the chat.
+ * - A PHONE gets the list alone; a row opens that ferret's chat at the item.
  *
- * - A PHONE gets the swipe deck (`AttentionSwipeDeck`): one card on top, swiped right / left / up for
- *   option 1 / 2 / 3, its buttons doing exactly the same.
- * - A WIDER SCREEN gets them all at once, as a grid, each focusable and answered with ← → ↑ as well as
- *   its buttons — the swipe's keyboard twin, said in each card's sr-only hint.
- *
- * EVERY ANSWER IS UNDOABLE, however it was given (swipe, arrow, option, reply, Done, Dismiss): it goes
- * to `inbox.deferred.schedule`, the card leaves at once, and the undo toast holds it for the window —
- * nothing reaches the machine before the window closes. The machine, not this page, then tells the
- * ferret ("[answer to !A3 «ask»] …"): the inbox never writes its own chat message.
- *
- * AN ANSWER THE MACHINE REFUSED COMES BACK on its card with the reason (`deferredState.failed`), and
- * answering again clears it. One whose card has gone in the meantime (the ferret resolved it, the
- * machine was unpaired) is said once, above the deck, until dismissed.
- *
- * It renders off the shell's `AttentionInbox` alone, so it render-tests with a fake one.
+ * The page renders off the shell's `AttentionInbox` alone, so it render-tests with a fake one; the chat
+ * pane is supplied by the host as `renderChat`.
  */
 
 import { ArrowRight, CheckCheck, X } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useRef } from 'react';
+import { type ReactNode, useId, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
 import {
@@ -37,8 +27,8 @@ import { daemonAttentionPath } from '../../lib/pages/routes.ts';
 import { AttentionCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
+import { attentionAge, attentionReference } from './attention-board.tsx';
 import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
-import { AttentionCardFrame, AttentionSwipeDeck } from './attention-swipe-deck.tsx';
 import { AttentionUndoToast } from './attention-undo-toast.tsx';
 
 /**
@@ -140,16 +130,66 @@ function InboxReading() {
 export interface AttentionInboxPageProps {
   readonly inbox: AttentionInbox;
   readonly onNavigate: (to: string) => void;
-  /** A phone deals the swipe deck; anything wider, the grid. */
+  /** A phone gets the list alone; a row opens the chat. */
   readonly phone: boolean;
   /** The clock card ages read; the browser's otherwise. */
   readonly now?: number;
   /** The clock the undo countdown reads; the browser's otherwise. */
   readonly clock?: () => number;
-  /** Forces reduced motion on or off; the reader's preference otherwise. */
-  readonly reducedMotion?: boolean;
-  /** Above the cards: the shell's "notifications are off for <machine>" banner, which draws nothing when none is. */
+  /** Above the list: the shell's "notifications are off for <machine>" banner, which draws nothing when none is. */
   readonly banner?: ReactNode;
+  /** The right pane: the selected item's real chat, pinned item and all. */
+  readonly renderChat?: (card: InboxCard) => ReactNode;
+}
+
+/** One row of the list: where it came from, what it asks, how long ago. */
+function InboxRow({
+  card,
+  selected,
+  now,
+  phone,
+  onSelect,
+  onNavigate,
+}: {
+  readonly card: InboxCard;
+  readonly selected: boolean;
+  readonly now: number | undefined;
+  readonly phone: boolean;
+  readonly onSelect: (key: string) => void;
+  readonly onNavigate: (to: string) => void;
+}) {
+  const origin = inboxCardOrigin(card, onNavigate);
+  const title = origin.task ?? origin.ferret;
+  const body = (
+    <>
+      <span className="fy-attn-row__title">{title}</span>
+      <span className="fy-attn-row__summary">{card.item.subject}</span>
+      <span className="fy-attn-row__meta">
+        {origin.task === undefined ? origin.machine : `${origin.ferret} · ${origin.machine}`} ·{' '}
+        {attentionReference(card.item.id)} · {attentionAge(card.item.waitingSince, now)}
+      </span>
+    </>
+  );
+  return (
+    <li>
+      {phone ? (
+        <RouteLink className="fy-attn-row" data-attention-row={card.key} onNavigate={onNavigate} to={origin.href}>
+          {body}
+        </RouteLink>
+      ) : (
+        <button
+          aria-current={selected || undefined}
+          className="fy-attn-row"
+          data-attention-row={card.key}
+          data-selected={selected || undefined}
+          onClick={() => onSelect(card.key)}
+          type="button"
+        >
+          {body}
+        </button>
+      )}
+    </li>
+  );
 }
 
 export function AttentionInboxPage({
@@ -158,30 +198,16 @@ export function AttentionInboxPage({
   phone,
   now,
   clock,
-  reducedMotion,
   banner,
+  renderChat,
 }: AttentionInboxPageProps) {
   const headingId = useId();
-  const host: CardHostProps = { inbox, onNavigate, now };
-  const schedule = (card: InboxCard, action: InboxAction): void => inbox.deferred.schedule(card, action);
-  // An answered card leaves the grid; when focus was in the grid, the card now in its place takes it.
-  const grid = useRef<HTMLUListElement | null>(null);
-  const refocusAt = useRef<number | null>(null);
-  const scheduleFromGrid = (card: InboxCard, index: number, action: InboxAction): void => {
-    if (grid.current?.contains(document.activeElement) === true) refocusAt.current = index;
-    schedule(card, action);
-  };
-  useEffect(() => {
-    const at = refocusAt.current;
-    if (at === null || inbox.cards.length === 0) return;
-    refocusAt.current = null;
-    const frames = grid.current?.querySelectorAll<HTMLElement>('[data-attention-frame]');
-    frames?.[Math.min(at, frames.length - 1)]?.focus();
-  }, [inbox.cards]);
+  const [chosen, setChosen] = useState<string | null>(null);
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
   const empty = inbox.cards.length === 0;
+  const selected = inbox.cards.find(card => card.key === chosen) ?? inbox.cards[0];
   return (
-    <main aria-labelledby={headingId} className="fy-attn-inbox" data-attention-inbox={phone ? 'deck' : 'grid'}>
+    <main aria-labelledby={headingId} className="fy-attn-inbox" data-attention-inbox={phone ? 'list' : 'panes'}>
       <header className="fy-attn-inbox__head">
         <h1 className="fy-attn-inbox__title" id={headingId}>
           Attention
@@ -191,11 +217,6 @@ export function AttentionInboxPage({
           {waitingWords(count)}
           {empty ? '' : ' · newest first, across every machine'}
         </p>
-        {phone || empty ? null : (
-          <p className="fy-attn-inbox__keys" aria-hidden="true">
-            Focus a card, then <kbd>→</kbd> <kbd>←</kbd> <kbd>↑</kbd> answer it
-          </p>
-        )}
       </header>
       {banner}
       <OrphanedFailures inbox={inbox} />
@@ -205,29 +226,27 @@ export function AttentionInboxPage({
         ) : (
           <InboxEmpty />
         )
-      ) : phone ? (
-        <>
-          <AttentionSwipeDeck
-            cards={inbox.cards}
-            onAct={schedule}
-            renderCard={(card, act) => renderInboxCard(host, card, act, true)}
-            {...(reducedMotion === undefined ? {} : { reducedMotion })}
-          />
-          <p className="fy-attn-inbox__hint">
-            {inbox.cards.length > 1 ? `${inbox.cards.length - 1} more after this one · ` : ''}
-            Swipe, or use the buttons
-          </p>
-        </>
       ) : (
-        <ul className="fy-attn-inbox__grid" aria-label="Waiting on you" ref={grid}>
-          {inbox.cards.map((card, index) => (
-            <li key={card.key}>
-              <AttentionCardFrame card={card} onAct={action => scheduleFromGrid(card, index, action)}>
-                {renderInboxCard(host, card, action => scheduleFromGrid(card, index, action), false)}
-              </AttentionCardFrame>
-            </li>
-          ))}
-        </ul>
+        <div className="fy-attn-inbox__body">
+          <ul aria-label="Waiting on you" className="fy-attn-inbox__list">
+            {inbox.cards.map(card => (
+              <InboxRow
+                card={card}
+                key={card.key}
+                now={now}
+                onNavigate={onNavigate}
+                onSelect={setChosen}
+                phone={phone}
+                selected={selected?.key === card.key}
+              />
+            ))}
+          </ul>
+          {phone || selected === undefined || renderChat === undefined ? null : (
+            <section aria-label="Conversation" className="fy-attn-inbox__chat" data-attention-chat={selected.key}>
+              {renderChat(selected)}
+            </section>
+          )}
+        </div>
       )}
       {inbox.reading && !empty ? <InboxReading /> : null}
       <AttentionUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />

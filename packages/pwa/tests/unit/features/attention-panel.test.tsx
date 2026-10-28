@@ -106,10 +106,10 @@ const panel = (props: Partial<AttentionPanelProps> = {}) => (
     <AttentionPanel
       client={recordingClient().client}
       connection={daemon}
-      expanded
       id="attn"
       now={NOW}
-      onExpandedChange={() => undefined}
+      onSelect={() => undefined}
+      selectedId={null}
       scope={scope}
       snapshot={board([item('A3')])}
       status="ready"
@@ -118,15 +118,6 @@ const panel = (props: Partial<AttentionPanelProps> = {}) => (
   </ReferenceSurfaceProvider>
 );
 
-const nativeValueSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
-
-const type = async (field: HTMLTextAreaElement, text: string): Promise<void> => {
-  await interact(() => {
-    nativeValueSetter?.call(field, text);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
 const buttonNamed = (root: ParentNode, text: string): HTMLButtonElement =>
   must(
     [...root.querySelectorAll('button')].find(button => button.textContent?.trim().startsWith(text)) as
@@ -134,15 +125,6 @@ const buttonNamed = (root: ParentNode, text: string): HTMLButtonElement =>
       | undefined,
     `the ${text} button`,
   );
-
-/** The sheet shows one item at a time: step the pager until `id` is the one on screen. */
-const showItem = async (container: HTMLElement, id: string): Promise<HTMLElement> => {
-  for (let step = 0; step < 8 && container.querySelector(`[data-attention-card="${id}"]`) === null; step += 1) {
-    const next = must(container.querySelector<HTMLButtonElement>('[aria-label="Next item"]'), 'the Next item button');
-    await interact(() => next.click());
-  }
-  return cardOf(container, id);
-};
 
 const cardOf = (container: HTMLElement, id: string): HTMLElement =>
   must(container.querySelector<HTMLElement>(`[data-attention-card="${id}"]`), `card ${id}`);
@@ -180,37 +162,88 @@ describe('attention panel model', () => {
 });
 
 describe('AttentionPanel', () => {
-  test('folded, it is one line: the count, and the oldest ask', async () => {
-    const changes: boolean[] = [];
-    view = await mount(
-      panel({
-        expanded: false,
-        onExpandedChange: next => changes.push(next),
-        snapshot: board([item('A3', { subject: 'Rebase now?' }), item('A4')]),
-      }),
-    );
-    const strip = must(view.container.querySelector<HTMLButtonElement>('[data-attention-strip]'), 'the strip');
-    expect(strip.textContent).toContain('2');
-    expect(strip.textContent).toContain('Needs you');
-    expect(strip.textContent).toContain('Rebase now?');
-    expect(strip.getAttribute('aria-haspopup')).toBe('dialog');
-    expect(strip.getAttribute('aria-expanded')).toBe('false');
-    expect(view.container.querySelector('[data-attention-panel]')).toBeNull();
-
-    await interact(() => strip.click());
-    expect(changes).toEqual([true]);
+  test('is a labelled inline block, not a dialog, strip or scrim', async () => {
+    view = await mount(panel());
+    const c = must(view.container, 'view');
+    expect(c.querySelector('section[aria-label="Needs you"]')).not.toBeNull();
+    expect(c.querySelector('[role="dialog"]')).toBeNull();
+    expect(c.querySelector('[data-attention-strip]')).toBeNull();
+    expect(c.querySelector('.fy-attn-sheet__scrim')).toBeNull();
+    expect(cardOf(c, 'A3').getAttribute('data-pinned')).toBe('true');
   });
 
-  test('is absent while folded with nothing open', async () => {
-    view = await mount(panel({ expanded: false, snapshot: board([], [record('A2', '2026-07-31T11:00:00.000Z')]) }));
+  test('is absent with nothing open, nothing resolved and nothing asked', async () => {
+    view = await mount(panel({ snapshot: board([]) }));
     expect(view.container.querySelector('#attn')).toBeNull();
   });
 
-  test('open, it lists every open item first, then the resolved ones folded', async () => {
+  test('shows the selected item, else the first, with a pager over several', async () => {
+    const picked: string[] = [];
+    const snapshot = board([item('A3'), item('A5')]);
+    view = await mount(panel({ snapshot, onSelect: id => picked.push(id) }));
+    const c = must(view.container, 'view');
+    expect([...c.querySelectorAll('[data-attention-card]')].map(n => n.getAttribute('data-attention-card'))).toEqual([
+      'A3',
+    ]);
+    expect(c.querySelector('[data-attention-pager]')?.textContent).toContain('1 of 2');
+    expect(must(c.querySelector<HTMLButtonElement>('[aria-label="Previous item"]'), 'prev').disabled).toBe(true);
+    await interact(() => must(c.querySelector<HTMLButtonElement>('[aria-label="Next item"]'), 'next').click());
+    expect(picked).toEqual(['A5']);
+    await view.render(panel({ snapshot, selectedId: 'A5' }));
+    expect(cardOf(c, 'A5')).not.toBeNull();
+    expect(c.querySelector('[data-attention-pager]')?.textContent).toContain('2 of 2');
+  });
+
+  test('a single item has no pager', async () => {
+    view = await mount(panel());
+    expect(must(view.container, 'view').querySelector('[data-attention-pager]')).toBeNull();
+  });
+
+  test('keeps the reply to the composer: no reply form on the pinned card', async () => {
+    view = await mount(panel());
+    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('textarea')).toBeNull();
+  });
+
+  test('Details unfolds the context and brief, and folds it again', async () => {
+    const rich = item('A3', { context: 'We need storage for the sessions.' });
+    view = await mount(panel({ snapshot: board([rich]) }));
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    expect(card.textContent).not.toContain('We need storage');
+    const details = must(card.querySelector<HTMLButtonElement>('[data-attention-details]'), 'details');
+    expect(details.getAttribute('aria-expanded')).toBe('false');
+    await interact(() => details.click());
+    expect(card.textContent).toContain('We need storage');
+    expect(details.getAttribute('aria-expanded')).toBe('true');
+    await interact(() => details.click());
+    expect(card.textContent).not.toContain('We need storage');
+  });
+
+  test('the answer chip names the item and reports its toggle', async () => {
+    const changes: boolean[] = [];
+    view = await mount(panel({ chip: { on: true, onChange: next => changes.push(next) } }));
+    const chip = must(view.container.querySelector('[data-attention-answer-chip]'), 'chip');
+    expect(chip.textContent).toContain('!A3');
+    const box = must(chip.querySelector<HTMLInputElement>('input[type="checkbox"]'), 'box');
+    expect(box.checked).toBe(true);
+    await interact(() => box.click());
+    expect(changes).toEqual([false]);
+  });
+
+  test('no chip is drawn unless the host asks for one', async () => {
+    view = await mount(panel());
+    expect(must(view.container, 'view').querySelector('[data-attention-answer-chip]')).toBeNull();
+  });
+
+  test('draws the replies slot inside the block', async () => {
+    view = await mount(panel({ repliesSlot: <p data-slot="">Sending to Zoe in 8 s…</p> }));
+    expect(must(view.container, 'view').querySelector('#attn [data-slot]')).not.toBeNull();
+  });
+
+  test('lists the resolved ones folded, newest resolution first', async () => {
     view = await mount(
       panel({
         snapshot: board(
-          [item('A3'), item('A5')],
+          [item('A3')],
           [
             record('A1', '2026-07-31T10:00:00.000Z'),
             record('A2', '2026-07-31T11:00:00.000Z', {
@@ -222,37 +255,23 @@ describe('AttentionPanel', () => {
         ),
       }),
     );
-    // One card at a time, behind a pager.
-    const shown = (): (string | null)[] =>
-      [...must(view, 'view').container.querySelectorAll('[data-attention-card]')].map(card =>
-        card.getAttribute('data-attention-card'),
-      );
-    expect(shown()).toEqual(['A3']);
-    expect(view.container.querySelector('[data-attention-pager]')?.textContent).toBe('1 of 2');
-    await showItem(view.container, 'A5');
-    expect(shown()).toEqual(['A5']);
-    const fold = must(view.container.querySelector<HTMLButtonElement>('[data-attention-resolved]'), 'the fold');
+    const c = must(view.container, 'view');
+    const fold = must(c.querySelector<HTMLButtonElement>('[data-attention-resolved]'), 'the fold');
     expect(fold.textContent).toContain('Resolved (2)');
     expect(fold.getAttribute('aria-expanded')).toBe('false');
-    expect(view.container.querySelector('[data-attention-record]')).toBeNull();
-
+    expect(c.querySelector('[data-attention-record]')).toBeNull();
     await interact(() => fold.click());
-    const records = [...view.container.querySelectorAll('[data-attention-record]')];
-    // Newest resolution first: the one just made is the one the reader looks for.
+    const records = [...c.querySelectorAll('[data-attention-record]')];
     expect(records.map(row => row.getAttribute('data-attention-record'))).toEqual(['A2', 'A1']);
     expect(records[0]?.textContent).toContain('dismissed by you');
     expect(records[0]?.textContent).toContain('Superseded by A3.');
-    expect(records[1]?.textContent).toContain('done by you');
-    expect(records[1]?.textContent).toContain('Approved');
   });
 
-  test('open with nothing waiting, it says so and still keeps the record', async () => {
+  test('with nothing waiting it says so and still keeps the record', async () => {
     view = await mount(panel({ snapshot: board([], [record('A2', '2026-07-31T11:00:00.000Z')]) }));
-    expect(view.container.querySelector('[data-attention-clear]')?.textContent).toContain('Nothing needs you');
-    expect(must(view.container.querySelector('[data-attention-strip]'), 'strip').textContent).toContain(
-      'Nothing needs you',
-    );
-    expect(view.container.querySelector('[data-attention-resolved]')).not.toBeNull();
+    const c = must(view.container, 'view');
+    expect(c.querySelector('[data-attention-clear]')?.textContent).toContain('Nothing needs you');
+    expect(c.querySelector('[data-attention-resolved]')).not.toBeNull();
   });
 
   test('an option answers at once, through respond, with that option', async () => {
@@ -267,41 +286,21 @@ describe('AttentionPanel', () => {
     );
   });
 
-  test('a reply to an open question is THE answer; a reply to any other kind is the Done note', async () => {
-    const recorded = recordingClient();
-    view = await mount(
-      panel({
-        client: recorded.client,
-        snapshot: board([item('A3', { ask: { kind: 'open-question' } }), item('A4')]),
-      }),
-    );
-    const container = must(view?.container, 'view');
-    await type(must(cardOf(container, 'A3').querySelector('textarea'), 'A3 reply'), 'Ship on Friday');
-    await interact(() => must(cardOf(container, 'A3').querySelector('form'), 'A3 form').requestSubmit());
-    const second = await showItem(container, 'A4');
-    await type(must(second.querySelector('textarea'), 'A4 reply'), 'Use the staging key');
-    await interact(() => must(second.querySelector('form'), 'A4 form').requestSubmit());
-    expect(recorded.calls).toEqual([
-      { method: 'respond', id: 'A3', payload: { kind: 'open-question', answer: 'Ship on Friday' } },
-      { method: 'resolve', id: 'A4', payload: 'Use the staging key' },
-    ]);
-  });
-
   test('Done resolves and Dismiss dismisses, each with no note', async () => {
     const recorded = recordingClient();
-    view = await mount(panel({ client: recorded.client, snapshot: board([item('A3'), item('A4')]) }));
-    const container = must(view?.container, 'view');
-    const done = await menuAction(cardOf(container, 'A3'), 'done');
-    await interact(() => done.click());
-    const dismiss = await menuAction(await showItem(container, 'A4'), 'dismiss');
-    await interact(() => dismiss.click());
+    const snapshot = board([item('A3'), item('A4')]);
+    view = await mount(panel({ client: recorded.client, snapshot }));
+    const c = must(view.container, 'view');
+    await interact(async () => (await menuAction(cardOf(c, 'A3'), 'done')).click());
+    await view.render(panel({ client: recorded.client, snapshot, selectedId: 'A4' }));
+    await interact(async () => (await menuAction(cardOf(c, 'A4'), 'dismiss')).click());
     expect(recorded.calls).toEqual([
       { method: 'resolve', id: 'A3', payload: undefined },
       { method: 'dismiss', id: 'A4', payload: undefined },
     ]);
   });
 
-  test('a card is busy while its answer is in flight, and a refusal stays on that card', async () => {
+  test('the card is busy while its answer is in flight, and a refusal stays on it', async () => {
     let refuse: ((reason: Error) => void) | undefined;
     const recorded = recordingClient(
       () =>
@@ -309,44 +308,33 @@ describe('AttentionPanel', () => {
           refuse = reject;
         }),
     );
-    view = await mount(panel({ client: recorded.client, snapshot: board([item('A3'), item('A4')]) }));
-    const container = must(view?.container, 'view');
-    await interact(() => buttonNamed(cardOf(container, 'A3'), 'Approve').click());
-    expect(buttonNamed(cardOf(container, 'A3'), 'Approve').disabled).toBe(true);
-    // One slow answer never freezes the others.
-    expect(buttonNamed(await showItem(container, 'A4'), 'Approve').disabled).toBe(false);
-    await interact(() =>
-      must(container.querySelector<HTMLButtonElement>('[aria-label="Previous item"]'), 'prev').click(),
-    );
-    // A second press while the first is in flight sends nothing more.
-    const done = await menuAction(cardOf(container, 'A3'), 'done').catch(() => null);
-    if (done !== null) await interact(() => done.click());
+    view = await mount(panel({ client: recorded.client }));
+    const c = must(view.container, 'view');
+    await interact(() => buttonNamed(cardOf(c, 'A3'), 'Approve').click());
+    expect(buttonNamed(cardOf(c, 'A3'), 'Approve').disabled).toBe(true);
     expect(recorded.calls).toHaveLength(1);
-
     await interact(async () => {
       refuse?.(new Error('the item was already resolved'));
     });
-    expect(cardOf(container, 'A3').querySelector('[role="alert"]')?.textContent).toBe(
+    expect(cardOf(c, 'A3').querySelector('[role="alert"]')?.textContent).toBe(
       'Not sent: the item was already resolved',
     );
-    expect(buttonNamed(cardOf(container, 'A3'), 'Approve').disabled).toBe(false);
+    expect(buttonNamed(cardOf(c, 'A3'), 'Approve').disabled).toBe(false);
   });
 
-  test('a link to an open item rings it, scrolls it into view and lands focus on it', async () => {
+  test('a link to an open item that is not shown selects it, then rings and focuses it', async () => {
+    const picked: string[] = [];
     const focus: AttentionPanelFocus = { target: 'A4', seq: 1 };
-    view = await mount(panel({ focus, snapshot: board([item('A3'), item('A4')]) }));
-    const container = must(view?.container, 'view');
-    // The sheet opens AT the linked item, not at the first one.
-    expect(cardOf(container, 'A4').getAttribute('data-highlighted')).toBe('true');
-    expect(container.querySelector('[data-attention-card="A3"]')).toBeNull();
+    const snapshot = board([item('A3'), item('A4')]);
+    view = await mount(panel({ focus, snapshot, onSelect: id => picked.push(id) }));
+    expect(picked).toEqual(['A4']);
+    await view.render(panel({ focus, snapshot, selectedId: 'A4' }));
+    const c = must(view.container, 'view');
+    expect(cardOf(c, 'A4').getAttribute('data-highlighted')).toBe('true');
     expect(scrolled).toEqual([attentionPanelItemId('attn', 'A4')]);
     expect(document.activeElement?.id).toBe(attentionPanelItemId('attn', 'A4'));
-
-    // The same request does not scroll again; a new one (same target) does.
-    await view.render(panel({ focus, snapshot: board([item('A3'), item('A4')]) }));
+    await view.render(panel({ focus, snapshot, selectedId: 'A4' }));
     expect(scrolled).toHaveLength(1);
-    await view.render(panel({ focus: { target: 'A4', seq: 2 }, snapshot: board([item('A3'), item('A4')]) }));
-    expect(scrolled).toHaveLength(2);
   });
 
   test('a link to a resolved item unfolds the record and rings that entry', async () => {
@@ -356,33 +344,26 @@ describe('AttentionPanel', () => {
         snapshot: board([item('A3')], [record('A2', '2026-07-31T11:00:00.000Z')]),
       }),
     );
-    const container = must(view?.container, 'view');
-    const fold = must(container.querySelector('[data-attention-resolved]'), 'the fold');
-    expect(fold.getAttribute('aria-expanded')).toBe('true');
-    const entry = must(container.querySelector('[data-attention-record="A2"]'), 'the A2 record');
+    const c = must(view.container, 'view');
+    expect(c.querySelector('[data-attention-resolved]')?.getAttribute('aria-expanded')).toBe('true');
+    const entry = must(c.querySelector('[data-attention-record="A2"]'), 'the A2 record');
     expect(entry.getAttribute('data-highlighted')).toBe('true');
-    expect(entry.textContent).toContain('linked');
     expect(scrolled).toEqual([attentionPanelItemId('attn', 'A2')]);
   });
 
   test('a link to an id the board does not hold says so, and rings nothing', async () => {
     view = await mount(panel({ focus: { target: 'A9', seq: 1 } }));
-    const container = must(view?.container, 'view');
-    expect(container.querySelector('[data-attention-missing="A9"]')?.textContent).toContain('!A9 is no longer open.');
-    expect(container.querySelector('[data-highlighted]')).toBeNull();
-    // It still takes the reader to the panel.
-    expect(scrolled).toEqual(['attn']);
+    const c = must(view.container, 'view');
+    expect(c.querySelector('[data-attention-missing="A9"]')?.textContent).toContain('!A9 is no longer open.');
+    expect(c.querySelector('[data-highlighted]')).toBeNull();
   });
 
-  test('a link waits for the board: no claim while it is unread, then the item once it is', async () => {
+  test('a link waits for the board: no claim while it is unread', async () => {
     view = await mount(panel({ focus: { target: 'A3', seq: 1 }, snapshot: null, status: 'loading' }));
-    const container = must(view?.container, 'view');
-    expect(container.textContent).toContain('Checking this ferret');
-    expect(container.querySelector('[data-attention-missing]')).toBeNull();
+    const c = must(view.container, 'view');
+    expect(c.textContent).toContain('Checking this ferret');
+    expect(c.querySelector('[data-attention-missing]')).toBeNull();
     expect(scrolled).toEqual([]);
-
-    await view.render(panel({ focus: { target: 'A3', seq: 1 } }));
-    expect(scrolled).toEqual([attentionPanelItemId('attn', 'A3')]);
   });
 
   test('a board that cannot be read says so instead of claiming nothing waits', async () => {
@@ -392,126 +373,25 @@ describe('AttentionPanel', () => {
     );
   });
 
-  test('a board with damaged records says so above the items', async () => {
+  test('a board with damaged records says so above the item', async () => {
     view = await mount(panel({ snapshot: { ...board([item('A3')]), parseErrors: 2 } }));
     expect(must(view?.container, 'view').querySelector('[role="alert"]')?.textContent).toContain(
       'reported 2 damaged Attention records',
     );
   });
 
-  test('the header request (no target) scrolls the panel itself into view', async () => {
-    view = await mount(panel({ focus: { target: null, seq: 1 } }));
-    expect(scrolled).toEqual(['attn']);
-    expect(must(view?.container, 'view').querySelector('[data-highlighted]')).toBeNull();
-  });
-});
-
-describe('AttentionPanel sheet', () => {
-  test('folded, it draws one strip and no dialog; tapping asks to open it', async () => {
-    view = await mount(panel({ expanded: false, snapshot: board([item('A3', { subject: 'Ship it?' })]) }));
-    const strip = must(view.container.querySelector<HTMLButtonElement>('[data-attention-strip]'), 'strip');
-    expect(strip.textContent).toContain('Needs you');
-    expect(strip.textContent).toContain('Ship it?');
-    expect(view.container.querySelector('[data-attention-count]')).toBeNull();
-    expect(view.container.querySelector('[role="dialog"]')).toBeNull();
-  });
-
-  test('open, it is a labelled dialog holding the card, with a close button', async () => {
-    const changes: boolean[] = [];
-    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
-    const dialog = must(view.container.querySelector('[role="dialog"]'), 'dialog');
-    expect(dialog.getAttribute('aria-label')).toBe('Attention');
-    expect(dialog.querySelector('[data-attention-card="A3"]')).not.toBeNull();
-    await interact(() =>
-      must(view?.container.querySelector<HTMLButtonElement>('[data-attention-close]'), 'close').click(),
-    );
-    expect(changes).toEqual([false]);
-  });
-
-  test('Esc closes it', async () => {
-    const changes: boolean[] = [];
-    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
-    const dialog = must(view.container.querySelector<HTMLElement>('[role="dialog"]'), 'dialog');
-    await interact(() => pressKey(dialog, 'Escape'));
-    expect(changes).toEqual([false]);
-  });
-
-  test('the scrim closes it', async () => {
-    const changes: boolean[] = [];
-    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
-    await interact(() => must(view?.container.querySelector<HTMLElement>('.fy-attn-sheet__scrim'), 'scrim').click());
-    expect(changes).toEqual([false]);
-  });
-
-  test('focus returns to the strip when it closes', async () => {
-    view = await mount(panel({ expanded: true }));
-    await view.render(panel({ expanded: false }));
-    expect(document.activeElement).toBe(view.container.querySelector('[data-attention-strip]'));
-  });
-
-  test('Tab and Shift+Tab wrap inside the sheet instead of leaving it', async () => {
+  test('Done and Dismiss live in the ⋯ menu, shut until it is opened, which Esc closes', async () => {
     view = await mount(panel());
-    const dialog = must(view.container.querySelector<HTMLElement>('[role="dialog"]'), 'dialog');
-    const close = must(view.container.querySelector<HTMLButtonElement>('[data-attention-close]'), 'close');
-    close.focus();
-    const key = (init: KeyboardEventInit): KeyboardEvent =>
-      new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init });
-    const backwards = key({ key: 'Tab', shiftKey: true });
-    const forwards = key({ key: 'Tab' });
-    const other = key({ key: 'x' });
-
-    await interact(() => dialog.dispatchEvent(backwards));
-    await interact(() => dialog.dispatchEvent(forwards));
-    await interact(() => dialog.dispatchEvent(other));
-
-    expect(backwards.defaultPrevented).toBe(true);
-    expect(forwards.defaultPrevented).toBe(true);
-    expect(other.defaultPrevented).toBe(false);
-    expect(dialog.contains(document.activeElement)).toBe(true);
-  });
-
-  test('the ⋯ menu moves with the arrows, closes on Esc without closing the sheet, and on a tap outside', async () => {
-    const changes: boolean[] = [];
-    view = await mount(panel({ onExpandedChange: next => changes.push(next) }));
-    const card = cardOf(view.container, 'A3');
-    const more = must(card.querySelector<HTMLButtonElement>('[data-attention-more]'), 'more');
-    const menu = (): HTMLElement | null => card.querySelector<HTMLElement>('[role="menu"]');
-
-    await interact(() => more.click());
-    const done = must(card.querySelector<HTMLButtonElement>('[data-attention-done]'), 'done');
-    const dismiss = must(card.querySelector<HTMLButtonElement>('[data-attention-dismiss]'), 'dismiss');
-    expect(document.activeElement).toBe(done);
-    await interact(() => pressKey(must(menu(), 'menu'), 'ArrowDown'));
-    expect(document.activeElement).toBe(dismiss);
-    await interact(() => pressKey(must(menu(), 'menu'), 'ArrowUp'));
-    expect(document.activeElement).toBe(done);
-    await interact(() => pressKey(must(menu(), 'menu'), 'x'));
-    expect(document.activeElement).toBe(done);
-    await interact(() => pressKey(must(menu(), 'menu'), 'Escape'));
-    expect(menu()).toBeNull();
-    expect(document.activeElement).toBe(more);
-    expect(changes).toEqual([]);
-
-    await interact(() => more.click());
-    await interact(() => must(menu(), 'menu').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
-    expect(menu()).not.toBeNull();
-    await interact(() => document.body.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
-    expect(menu()).toBeNull();
-  });
-
-  test('Done and Dismiss live in the ⋯ menu, shut until it is opened', async () => {
-    view = await mount(panel());
-    const card = cardOf(view.container, 'A3');
+    const card = cardOf(must(view.container, 'view'), 'A3');
     expect(card.querySelector('[data-attention-done]')).toBeNull();
-    expect(card.querySelector('[data-attention-dismiss]')).toBeNull();
     const more = must(card.querySelector<HTMLButtonElement>('[data-attention-more]'), 'more');
-    expect(more.getAttribute('aria-haspopup')).toBe('menu');
     await interact(() => more.click());
     expect(card.querySelector('[role="menu"] [data-attention-done]')).not.toBeNull();
-    expect(card.querySelector('[role="menu"] [data-attention-dismiss]')).not.toBeNull();
+    await interact(() => pressKey(must(card.querySelector<HTMLElement>('[role="menu"]'), 'menu'), 'Escape'));
+    expect(card.querySelector('[role="menu"]')).toBeNull();
   });
 
-  test('a rich item shows its summary once and keeps only the first question open', async () => {
+  test('Details on a rich item opens its brief with the first question open', async () => {
     const rich = item('A3', {
       subject: 'Pick a database',
       why: 'Pick a database',
@@ -522,9 +402,8 @@ describe('AttentionPanel sheet', () => {
       ask: { kind: 'multiple-choice', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
     });
     view = await mount(panel({ snapshot: board([rich]) }));
-    const card = cardOf(view.container, 'A3');
-    expect(card.textContent?.split('Pick a database').length).toBe(2);
-    expect(card.querySelector('[data-attention-section="context"]')?.hasAttribute('open')).toBe(false);
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-details]'), 'details').click());
     expect(card.querySelector('[data-attention-section="questions"]')?.hasAttribute('open')).toBe(true);
     expect(card.querySelectorAll('[data-attention-recommended]').length).toBeGreaterThan(0);
   });

@@ -19,7 +19,11 @@ const SESSIONS = [
   }),
   sessionView('maryah-1', {
     config: { teammate: 'maryah', label: 'Diene work', cwd: '/work/home-manager' },
-    state: { status: 'awaiting_user', lastActivityAt: recent },
+    state: {
+      status: 'awaiting_user',
+      attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
+      lastActivityAt: recent,
+    },
   }),
   sessionView('nameless', {
     config: {
@@ -59,6 +63,7 @@ const bar = (props: Partial<BarProps> = {}) => {
       onOpenPalette={() => calls.push('palette')}
       presentation="column"
       projects={[]}
+      groupNeedsYou={props.machineSources !== undefined}
       sessions={SESSIONS}
       {...props}
     />
@@ -76,6 +81,7 @@ describe('SessionsBar as a column', () => {
       config: { teammate: 'asker', cwd: '/work/ferretry', mode: 'interactive' },
       state: {
         status: 'awaiting_question',
+        attention: { open: 1, first: 'A1', ask: 'Rebase onto main first?', latestAt: recent },
         pendingQuestion: { toolUseId: 't1', questions: [{ question: 'Rebase onto main first?' }] },
       },
     });
@@ -83,7 +89,6 @@ describe('SessionsBar as a column', () => {
     const row = must(view.container.querySelector('[data-sbar-session="asker-1"]'), 'the asking row');
     expect(row.querySelector('[data-sbar-question]')?.textContent).toBe('Rebase onto main first?');
     expect(row.getAttribute('title')).toContain('Rebase onto main first?');
-    expect(row.querySelector('[data-sbar-waiting]')).not.toBeNull();
   });
 
   test('lists sessions by project, marks the open one, and badges the one that needs the reader', async () => {
@@ -105,10 +110,8 @@ describe('SessionsBar as a column', () => {
     expect(nameless.querySelector('.fy-sbar__sub')).toBeNull();
     expect(nameless.querySelector('[data-sbar-ferret]')).toBeNull();
     expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
-    expect(view.container.querySelector('[data-sbar-session="maryah-1"] [data-sbar-waiting]')).not.toBeNull();
-    expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-waiting]')).toBeNull();
     // Only a session that is actually waiting on a question echoes it.
-    expect(view.container.querySelector('[data-sbar-question]')).toBeNull();
+    expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-question]')).toBeNull();
     // A session with no callsign and no label falls back to its id rather than an empty row.
     expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe('nameless');
   });
@@ -298,7 +301,7 @@ describe('SessionsBar as a column', () => {
     await click(view.container.querySelector('[data-sbar-place="settings"]'), 'Settings');
     await click(view.container.querySelector('[data-sbar-new]'), 'New session');
     expect(calls).toEqual([
-      'navigate:/d/alpha/session/maryah-1',
+      'navigate:/d/alpha/session/maryah-1?attention=A1',
       'navigate:/d/alpha/settings',
       'navigate:/d/alpha/new',
     ]);
@@ -536,13 +539,17 @@ describe('SessionsBar as a rail', () => {
     view = await mount(element);
     expect(view.container.querySelector('[data-sessions-bar="rail"]')).not.toBeNull();
     const dots = [...view.container.querySelectorAll<HTMLAnchorElement>('.fy-sbar__dot')];
-    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual(['Maryah', 'nameless', 'Hadi']);
+    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
+      'Maryah — 1 open Attention item',
+      'nameless',
+      'Hadi',
+    ]);
     expect(dots.find(dot => dot.getAttribute('aria-current') === 'page')?.getAttribute('aria-label')).toBe('Hadi');
     expect(view.container.querySelector('[aria-label="Projects"]')?.getAttribute('aria-current')).toBe('page');
     await click(dots[0] ?? null, 'a dot');
     await click(view.container.querySelector('[data-sbar-expand]'), 'Expand');
     await click(view.container.querySelector('[data-app-bar-destination-search]'), 'the finder');
-    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1', 'expand', 'palette']);
+    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1?attention=A1', 'expand', 'palette']);
   });
 
   test('draws no expand control when its host offers none', async () => {
@@ -563,7 +570,7 @@ describe('SessionsBar as a phone drawer', () => {
     expect(drawer.querySelector('[data-sbar-collapse]')).toBeNull();
 
     await click(drawer.querySelector('[data-sbar-session="maryah-1"]'), 'a row');
-    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1']);
+    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1?attention=A1']);
     expect(closed).toBe(1);
 
     await click(drawer.querySelector('.fy-sbar__top button[aria-label="Close sessions"]'), 'the close button');
@@ -605,7 +612,10 @@ describe('SessionsBar across every machine', () => {
     sessionView('hadi-1', { config: { teammate: 'pim', label: 'Same id, other machine', cwd: '/work/site' } }),
     sessionView('ask-1', {
       config: { teammate: 'ora', label: 'A question', cwd: '/work/site' },
-      state: { status: 'awaiting_question' },
+      state: {
+        status: 'awaiting_question',
+        attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
+      },
     }),
   ];
   const sources = (betaReach: MachineSource['reach'] = 'offline'): readonly MachineSource[] => [
@@ -621,13 +631,12 @@ describe('SessionsBar across every machine', () => {
       [...pinned.querySelectorAll('[data-sbar-session]')].map(node => node.getAttribute('data-sbar-session')),
     ).toEqual(['maryah-1']);
     expect(pinned.querySelector('[data-machine-chip]')?.textContent).toBe('work-mac');
-    expect(pinned.querySelector('[data-sbar-waiting]')).toBeNull();
     const heads = [...view.container.querySelectorAll('.fy-sbar__machine-label')].map(node => node.textContent);
     expect(heads).toEqual(['work-mac', 'kirin-box']);
     const offline = must(view.container.querySelector('[data-machine-reach="offline"]'), 'the offline machine');
     expect(offline.querySelector('.fy-sbar__machine-reach')?.textContent).toBe('offline · last seen 5m');
     // The waiting session on the offline machine stays home with its badge.
-    expect(offline.querySelector('[data-sbar-session="ask-1"] [data-sbar-waiting]')).not.toBeNull();
+    expect(offline.querySelector('[data-sbar-session="ask-1"]')).not.toBeNull();
     // An online machine is said to be online without a word on screen.
     expect(view.container.querySelector('[data-sbar-machine-group="alpha"] .sr-only')?.textContent).toBe('online');
     // The same id on two machines: only this machine's is open, and only it reads this machine's learners.
@@ -749,8 +758,8 @@ describe('SessionsBar across every machine', () => {
     view = await mount(element);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
     expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'Ora on kirin-box',
-      'Maryah on work-mac',
+      'Ora on kirin-box — 1 open Attention item',
+      'Maryah on work-mac — 1 open Attention item',
       'Hadi on work-mac',
       'nameless on work-mac',
       'Pim on kirin-box',
@@ -758,6 +767,6 @@ describe('SessionsBar across every machine', () => {
     expect(dots.map(dot => dot.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
     expect(view.container.querySelector('[data-new-session-menu]')).not.toBeNull();
     await click(dots[0] ?? null, 'a dot');
-    expect(calls.at(-1)).toBe('navigate:/d/beta/session/ask-1');
+    expect(calls.at(-1)).toBe('navigate:/d/beta/session/ask-1?attention=A1');
   });
 });

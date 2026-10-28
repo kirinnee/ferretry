@@ -166,6 +166,8 @@ export interface AttentionActionsProps {
   readonly onSendReply: () => void;
   /** Several questions: one "Send answers" button replaces the options and the reply field. */
   readonly sendAnswers?: { readonly action: InboxAction | null; readonly onSend: () => void };
+  /** Draws the reply field. Off where the conversation's own composer is the reply. */
+  readonly showReply?: boolean;
   readonly onAct: (action: InboxAction) => void;
 }
 
@@ -182,6 +184,7 @@ export function AttentionActions({
   replyable,
   onSendReply,
   sendAnswers,
+  showReply = true,
   onAct,
 }: AttentionActionsProps) {
   const replyId = useId();
@@ -232,47 +235,51 @@ export function AttentionActions({
           ))}
         </fieldset>
       )}
-      <form
-        className="fy-attn-actions__row"
-        onSubmit={event => {
-          event.preventDefault();
-          onSendReply();
-        }}
-      >
-        <label className="sr-only" htmlFor={replyId}>
-          {replyLabel}
-        </label>
-        <div className="fy-attn-reply">
-          <textarea
-            className="kt-input fy-attn-reply__box"
-            disabled={busy}
-            id={replyId}
-            onChange={event => onReplyChange(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                onSendReply();
-              }
-            }}
-            placeholder={answering ? 'Write your answer…' : 'Reply…'}
-            rows={1}
-            value={reply}
-          />
-          <button
-            aria-label={answering ? 'Send answer' : 'Send reply'}
-            className="fy-attn-reply__send"
-            disabled={busy || replyable === null}
-            type="submit"
-          >
-            {busy ? (
-              <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
-            ) : (
-              <CornerDownLeft size={14} aria-hidden="true" />
-            )}
-          </button>
-        </div>
-        {menu}
-      </form>
+      {showReply ? (
+        <form
+          className="fy-attn-actions__row"
+          onSubmit={event => {
+            event.preventDefault();
+            onSendReply();
+          }}
+        >
+          <label className="sr-only" htmlFor={replyId}>
+            {replyLabel}
+          </label>
+          <div className="fy-attn-reply">
+            <textarea
+              className="kt-input fy-attn-reply__box"
+              disabled={busy}
+              id={replyId}
+              onChange={event => onReplyChange(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  onSendReply();
+                }
+              }}
+              placeholder={answering ? 'Write your answer…' : 'Reply…'}
+              rows={1}
+              value={reply}
+            />
+            <button
+              aria-label={answering ? 'Send answer' : 'Send reply'}
+              className="fy-attn-reply__send"
+              disabled={busy || replyable === null}
+              type="submit"
+            >
+              {busy ? (
+                <LoaderCircle size={14} className="animate-spin motion-reduce:animate-none" aria-hidden="true" />
+              ) : (
+                <CornerDownLeft size={14} aria-hidden="true" />
+              )}
+            </button>
+          </div>
+          {menu}
+        </form>
+      ) : (
+        <div className="fy-attn-actions__row">{menu}</div>
+      )}
     </div>
   );
 }

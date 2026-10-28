@@ -314,6 +314,12 @@ export const ResolvedAttentionItemSchema = z
   });
 export type ResolvedAttentionItem = z.infer<typeof ResolvedAttentionItemSchema>;
 
+export const AttentionRepliesSchema = z.strictObject({
+  pending: z.array(AttentionIdSchema).min(1).max(MAX_ATTENTION_RESOLUTIONS),
+  dueAt: InstantSchema,
+});
+export type AttentionReplies = z.infer<typeof AttentionRepliesSchema>;
+
 export const AttentionSnapshotSchema = z
   .object({
     v: z.literal(ATTENTION_SCHEMA_VERSION),
@@ -334,6 +340,7 @@ export const AttentionSnapshotSchema = z
      * phone or browser will hear of it until one turns notifications on.
      */
     enrolled: NonNegativeIntegerSchema.optional(),
+    replies: AttentionRepliesSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.count !== value.items.length) {
