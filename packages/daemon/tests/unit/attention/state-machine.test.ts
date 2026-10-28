@@ -853,3 +853,307 @@ describe('Attention state machine edit', () => {
     should(unknown.error.code).equal('not-found');
   });
 });
+
+describe('Attention state machine steps and progress', () => {
+  const STEPS = ['Open `fy config path`', 'Paste the **code** there', 'Press Enter'];
+  const progressOf = (actor: AttentionActor, id: AttentionId, step: number, done: boolean, at = SECOND) =>
+    ({ action: 'progress', actor, id, step, done, at }) satisfies AttentionCommand;
+
+  it('should store steps and body, dedupe on them, and replace them on a refresh', () => {
+    // Arrange
+    const first = raised(AGENT, { steps: STEPS, body: '## Why\nBecause.' });
+    const stable = raised(DAEMON, { source: 'task', sourceRef: 'F1', steps: STEPS });
+
+    // Act
+    const same = succeeded(
+      applyAttentionCommand(first.ledger, raiseCommand(AGENT, { steps: STEPS, body: '## Why\nBecause.' }, SECOND)),
+    );
+    const other = succeeded(
+      applyAttentionCommand(same.ledger, raiseCommand(AGENT, { steps: [...STEPS, 'Done'], body: undefined }, THIRD)),
+    );
+    const refreshed = succeeded(
+      applyAttentionCommand(
+        stable.ledger,
+        raiseCommand(DAEMON, { source: 'task', sourceRef: 'F1', steps: ['New step'], impact: 'Changed.' }, SECOND),
+      ),
+    );
+
+    // Assert
+    should(first.item?.steps).deepEqual(STEPS);
+    should(first.item?.body).equal('## Why\nBecause.');
+    should(same.changed).be.false();
+    should(other.snapshot.count).equal(2);
+    should(refreshed.change).equal('refreshed');
+    should(refreshed.item?.steps).deepEqual(['New step']);
+    should(refreshed.item?.body).be.undefined();
+  });
+
+  it('should tick and untick steps in order, report no change when already so, and keep the item open', () => {
+    // Arrange
+    const created = raised(AGENT, { steps: STEPS });
+
+    // Act
+    const ticked2 = succeeded(applyAttentionCommand(created.ledger, progressOf(HUMAN, 'A1', 2, true)));
+    const ticked0 = succeeded(applyAttentionCommand(ticked2.ledger, progressOf(AGENT, 'A1', 0, true)));
+    const again = succeeded(applyAttentionCommand(ticked0.ledger, progressOf(HUMAN, 'A1', 0, true)));
+    const unticked = succeeded(applyAttentionCommand(ticked0.ledger, progressOf(HUMAN, 'A1', 2, false)));
+    const cleared = succeeded(applyAttentionCommand(unticked.ledger, progressOf(HUMAN, 'A1', 0, false)));
+    const never = succeeded(applyAttentionCommand(created.ledger, progressOf(HUMAN, 'A1', 1, false)));
+
+    // Assert
+    should(ticked2.change).equal('progressed');
+    should(ticked2.item?.stepsDone).deepEqual([2]);
+    should(ticked0.item?.stepsDone).deepEqual([0, 2]);
+    should(ticked0.snapshot.count).equal(1);
+    should(again.changed).be.false();
+    should(unticked.item?.stepsDone).deepEqual([0]);
+    should(cleared.item?.stepsDone).be.undefined();
+    should('stepsDone' in (cleared.item ?? {})).be.false();
+    should(never.changed).be.false();
+  });
+
+  it('should refuse a step out of range, an item without steps, a stranger, and a closed or unknown item', () => {
+    // Arrange
+    const created = raised(AGENT, { steps: STEPS });
+    const plain = raised(AGENT);
+    const closed = succeeded(
+      applyAttentionCommand(created.ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const range = failed(applyAttentionCommand(created.ledger, progressOf(HUMAN, 'A1', 3, true)));
+    const none = failed(applyAttentionCommand(plain.ledger, progressOf(HUMAN, 'A1', 0, true)));
+    const stranger = failed(applyAttentionCommand(created.ledger, progressOf(OTHER_AGENT, 'A1', 0, true)));
+    const resolved = failed(applyAttentionCommand(closed.ledger, progressOf(HUMAN, 'A1', 0, true, THIRD)));
+    const unknown = failed(applyAttentionCommand(created.ledger, progressOf(HUMAN, 'A9', 0, true)));
+
+    // Assert
+    should(range.error.code).equal('invalid');
+    should(range.error.message).containEql('0 to 2');
+    should(none.error.message).containEql('no steps');
+    should(stranger.error.code).equal('forbidden');
+    should(resolved.error.code).equal('not-found');
+    should(unknown.error.code).equal('not-found');
+  });
+
+  it('should clear progress when an edit changes the steps and keep it when they are the same', () => {
+    // Arrange
+    const created = raised(AGENT, { steps: STEPS });
+    const ticked = succeeded(applyAttentionCommand(created.ledger, progressOf(HUMAN, 'A1', 1, true)));
+    const editWith = (patch: EditAttentionPatch): AttentionCommand => ({
+      action: 'edit',
+      actor: AGENT,
+      id: 'A1',
+      patch,
+      at: THIRD,
+    });
+
+    // Act
+    const sameSteps = succeeded(applyAttentionCommand(ticked.ledger, editWith({ steps: STEPS, body: 'More.' })));
+    const bodyOnly = succeeded(applyAttentionCommand(ticked.ledger, editWith({ body: 'Only a body.' })));
+    const newSteps = succeeded(applyAttentionCommand(ticked.ledger, editWith({ steps: ['One', 'Two'] })));
+
+    // Assert
+    should(sameSteps.item?.stepsDone).deepEqual([1]);
+    should(bodyOnly.item?.stepsDone).deepEqual([1]);
+    should(bodyOnly.item?.body).equal('Only a body.');
+    should(newSteps.item?.steps).deepEqual(['One', 'Two']);
+    should(newSteps.item?.stepsDone).be.undefined();
+  });
+
+  it('should keep ticks on a refresh with the same steps and clear them with new ones', () => {
+    // Arrange
+    const created = raised(DAEMON, { source: 'task', sourceRef: 'F2', steps: STEPS });
+    const ticked = succeeded(applyAttentionCommand(created.ledger, progressOf(HUMAN, 'A1', 0, true)));
+    const refresh = (steps: string[]): AttentionCommand =>
+      raiseCommand(DAEMON, { source: 'task', sourceRef: 'F2', steps, impact: 'Newer.' }, THIRD);
+
+    // Act
+    const kept = succeeded(applyAttentionCommand(ticked.ledger, refresh(STEPS)));
+    const reset = succeeded(applyAttentionCommand(ticked.ledger, refresh(['Other'])));
+
+    // Assert
+    should(kept.item?.stepsDone).deepEqual([0]);
+    should(reset.item?.stepsDone).be.undefined();
+  });
+});
+
+describe('Attention state machine progress on another agent’s item', () => {
+  it('should refuse a tick from an agent on an item a different agent raised', () => {
+    // Arrange
+    const created = raised(AGENT, { steps: ['One'] });
+    const foreign: AttentionLedger = {
+      ...created.ledger,
+      entries: [
+        {
+          lifecycle: 'active',
+          origin: OTHER_AGENT,
+          item: {
+            ...activeEntry(created.ledger).item,
+            raisedBy: 'agent',
+            raisedBySession: OTHER_AGENT.sessionId,
+            raisedByName: OTHER_AGENT.name,
+          },
+        },
+      ],
+    };
+
+    // Act
+    const refused = failed(
+      applyAttentionCommand(foreign, { action: 'progress', actor: AGENT, id: 'A1', step: 0, done: true, at: SECOND }),
+    );
+
+    // Assert
+    should(refused.error.code).equal('forbidden');
+  });
+});
+
+describe('Attention state machine needs-info', () => {
+  const ask = (ledger: AttentionLedger, note?: string, at = SECOND, actor: AttentionActor = HUMAN) =>
+    applyAttentionCommand(ledger, {
+      action: 'needs-info',
+      actor,
+      id: 'A1',
+      ...(note === undefined ? {} : { note }),
+      at,
+    });
+  const ferretEdit = (ledger: AttentionLedger, subject: string, at = THIRD) =>
+    applyAttentionCommand(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch: { subject }, at });
+
+  it('should keep the item open, mark it waiting on the ferret and count and record the request', () => {
+    // Arrange
+    const created = raised(AGENT, { ask: { kind: 'task' }, steps: ['Do it'] });
+
+    // Act
+    const asked = succeeded(ask(created.ledger, 'Which account?'));
+
+    // Assert
+    should(asked.change).equal('needs-info');
+    should(asked.item).containDeep({ id: 'A1', waitingOn: 'ferret', askedAt: SECOND, infoRequests: 1 });
+    should(asked.item?.history).deepEqual([{ at: SECOND, kind: 'needs-info', note: 'Which account?' }]);
+    should(asked.snapshot.count).equal(1);
+  });
+
+  it('should treat a second ask while the ferret has not answered as the same request', () => {
+    // Arrange
+    const asked = succeeded(ask(raised().ledger));
+
+    // Act
+    const again = succeeded(ask(asked.ledger, 'again', THIRD));
+
+    // Assert
+    should(again.change).equal('unchanged');
+    should(again.changed).be.false();
+    should(activeEntry(again.ledger).item.infoRequests).equal(1);
+  });
+
+  it('should refuse an agent, a missing or closed item, and an item no ferret raised', () => {
+    // Arrange
+    const created = raised();
+    const resolved = succeeded(
+      applyAttentionCommand(created.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', note: null, at: SECOND }),
+    );
+    const human = raised(HUMAN);
+
+    // Act
+    const byAgent = failed(ask(created.ledger, undefined, SECOND, AGENT));
+    const closed = failed(ask(resolved.ledger));
+    const unknown = failed(
+      applyAttentionCommand(created.ledger, { action: 'needs-info', actor: HUMAN, id: 'A9', at: SECOND }),
+    );
+    const unasked = failed(ask(human.ledger));
+
+    // Assert
+    should(byAgent.error.code).equal('forbidden');
+    should(closed.error.code).equal('not-found');
+    should(unknown.error.code).equal('not-found');
+    should(unasked.error.code).equal('invalid');
+  });
+
+  it('should clear the mark, add the history and report info-added when the ferret edits the item', () => {
+    // Arrange
+    const asked = succeeded(ask(raised().ledger, 'More?'));
+
+    // Act
+    const edited = succeeded(ferretEdit(asked.ledger, 'Approve the deploy now?'));
+
+    // Assert
+    should(edited.change).equal('info-added');
+    should(edited.item?.waitingOn).be.undefined();
+    should(edited.item?.askedAt).be.undefined();
+    should(edited.item?.infoRequests).equal(1);
+    should(edited.item?.history?.map(entry => entry.kind)).deepEqual(['needs-info', 'updated']);
+  });
+
+  it('should report an edit that changes nothing as unchanged and keep the request open', () => {
+    // Arrange
+    const created = raised();
+    const asked = succeeded(ask(created.ledger));
+
+    // Act
+    const same = succeeded(ferretEdit(asked.ledger, created.item?.subject ?? '', THIRD));
+
+    // Assert
+    should(same.change).equal('unchanged');
+    should(activeEntry(same.ledger).item.waitingOn).equal('ferret');
+  });
+
+  it('should not clear the mark when the owner edits it, and only report info-added once per request', () => {
+    // Arrange
+    const asked = succeeded(ask(raised().ledger));
+
+    // Act
+    const owner = succeeded(
+      applyAttentionCommand(asked.ledger, {
+        action: 'edit',
+        actor: HUMAN,
+        id: 'A1',
+        patch: { subject: 'Reworded by the owner' },
+        at: THIRD,
+      }),
+    );
+    const answered = succeeded(ferretEdit(owner.ledger, 'Reworded by the ferret'));
+    const later = succeeded(ferretEdit(answered.ledger, 'An ordinary later edit', '2026-07-30T13:00:00Z'));
+
+    // Assert
+    should(owner.change).equal('refreshed');
+    should(activeEntry(owner.ledger).item.waitingOn).equal('ferret');
+    should(answered.change).equal('info-added');
+    should(later.change).equal('refreshed');
+  });
+
+  it('should count a new request after the ferret answered, and bound the history to the newest twenty', () => {
+    // Arrange
+    let ledger = raised().ledger;
+    let at = 0;
+    const stamp = () => new Date(Date.UTC(2026, 7, 1, 0, at++)).toISOString();
+
+    // Act
+    for (let round = 0; round < 15; round += 1) {
+      ledger = succeeded(ask(ledger, `round ${round}`, stamp())).ledger;
+      ledger = succeeded(ferretEdit(ledger, `Subject ${round}`, stamp())).ledger;
+    }
+    const item = activeEntry(ledger).item;
+
+    // Assert
+    should(item.infoRequests).equal(15);
+    should(item.history).have.length(20);
+    should(item.history?.[19]?.kind).equal('updated');
+    const times = (item.history ?? []).map(entry => entry.at);
+    should(times).deepEqual([...times].sort());
+  });
+
+  it('should drop the waiting mark when the item is resolved', () => {
+    // Arrange
+    const asked = succeeded(ask(raised().ledger));
+
+    // Act
+    const resolved = succeeded(
+      applyAttentionCommand(asked.ledger, { action: 'resolve', actor: AGENT, id: 'A1', note: null, at: THIRD }),
+    );
+
+    // Assert
+    should(resolved.addressed?.waitingOn).be.undefined();
+    should(resolved.addressed?.askedAt).be.undefined();
+  });
+});

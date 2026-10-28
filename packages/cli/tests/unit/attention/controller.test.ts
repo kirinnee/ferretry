@@ -479,6 +479,57 @@ describe('attention controller edit', () => {
   });
 });
 
+describe('attention controller steps and body', () => {
+  const withInput = (files: Record<string, string>) => {
+    const gateway = new RecordingAttentionGateway(board, board);
+    const input = { read: async (path: string) => files[path] ?? '' };
+    return { gateway, controller: new AttentionController(gateway, new CapturingOutput(), SESSION, input) };
+  };
+
+  it('should raise steps and a body-file body, and replace them on edit', async () => {
+    // Arrange
+    const { gateway, controller } = withInput({ 'body.md': '## Notes', '-': '## From stdin' });
+
+    // Act
+    await controller.add(['Log in'], { step: ['Run `fy login`'], bodyFile: 'body.md' });
+    await controller.edit('A1', { step: ['One'], bodyFile: '-' });
+
+    // Assert
+    should(gateway.applied[0]?.request).containDeep({ steps: ['Run `fy login`'], body: '## Notes' });
+    should(gateway.applied[1]?.request).deepEqual({ action: 'edit', id: 'A1', steps: ['One'], body: '## From stdin' });
+  });
+
+  it('should refuse both bodies reading standard input, and a body-file where nothing reads one', async () => {
+    // Arrange
+    const { controller } = withInput({});
+    const { controller: bare } = build(SESSION);
+
+    // Act + Assert
+    await should(controller.add(['x'], { jsonFile: '-', bodyFile: '-' })).be.rejectedWith(
+      /cannot both read standard input/u,
+    );
+    await should(bare.add(['x'], { bodyFile: 'body.md' })).be.rejectedWith(/--body-file cannot be read here/u);
+  });
+
+  it('should tick a step counted from 1, untick it with --undo, and refuse a bad number', async () => {
+    // Arrange
+    const { gateway, controller } = withInput({});
+    const out = new CapturingOutput();
+    const loud = new AttentionController(gateway, out, SESSION);
+
+    // Act
+    await controller.step('!A1', '2', {});
+    await loud.step('A1', ' 1 ', { undo: true });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'progress', id: 'A1', step: 1, done: true });
+    should(gateway.applied[1]?.request).deepEqual({ action: 'progress', id: 'A1', step: 0, done: false });
+    should(out.messages[0]).containEql('unticked step 1 of !A1');
+    await should(controller.step('A1', '0', {})).be.rejectedWith(/counts from 1/u);
+    await should(controller.step('A1', 'two', {})).be.rejectedWith(/counts from 1/u);
+  });
+});
+
 describe('attention controller send-now', () => {
   it('should deliver the held answers now and name the items that went', async () => {
     // Arrange
@@ -505,5 +556,32 @@ describe('attention controller send-now', () => {
     // Assert
     should(gateway.flushed).deepEqual([SESSION]);
     should(out.messages).deepEqual([`no answers were held for ${SESSION} — nothing to send`]);
+  });
+});
+
+describe('attention controller needs-info', () => {
+  it('should ask for more information with the note, and say the item stays open', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
+
+    // Act
+    await controller.needsInfo('?A1', { note: '  Which account?  ' });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'needs-info', id: 'A1', note: 'Which account?' });
+    should(out.messages[0]).containEql('asked for more information on !A1');
+  });
+
+  it('should send no note when none was given, and reject a bad reference before the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = build(SESSION, snapshot([]));
+
+    // Act
+    await controller.needsInfo('A1', {});
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'needs-info', id: 'A1' });
+    await should(controller.needsInfo('nope', {})).be.rejected();
+    should(gateway.applied).have.length(1);
   });
 });

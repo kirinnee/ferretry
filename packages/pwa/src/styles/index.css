@@ -962,6 +962,26 @@ html[data-keyboard='open'] {
   }
 }
 
+/* WIDE LAYOUTS (iPad, desktop): the columns meet the bottom edge side by side, and each one owns its own
+   surface. The shell paying the inset around them left the page ground showing as an empty band under the
+   sidebar's surface, on the very strip the home indicator sits in. So the shell pays nothing and every
+   column pads its CONTENT by the inset, once, while its surface runs on to the edge. */
+@media (min-width: 768px) {
+  .kt-shell:has(> [data-sessions-bar]) {
+    padding-bottom: 0;
+  }
+  .fy-sbar--column,
+  .fy-sbar--rail {
+    padding-bottom: var(--safe-bottom);
+  }
+  .fy-sbar--rail {
+    padding-bottom: calc(var(--gap-sm) + var(--safe-bottom));
+  }
+  [data-shell-main] {
+    padding-bottom: var(--safe-bottom);
+  }
+}
+
 /* Nothing behind the app scrolls, ever. The shell IS the viewport, so a page
    scroll can only be an accident — iOS trying to scroll a focused input into
    view, or a rubber-band at the end of a transcript fling — and either one

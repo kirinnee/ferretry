@@ -16,6 +16,7 @@ import {
   decideNotificationReplay,
   directNotificationFingerprint,
   directNotificationPayload,
+  moreInfoNotificationPayload,
   notificationKey,
 } from './policy.ts';
 import {
@@ -151,15 +152,34 @@ export class NotificationService implements AttentionRaisedObserver {
     await this.attentionRaised(sessionId, item, snapshot);
   }
 
+  /** The one push an edit makes: the ferret added what the owner asked for. Total, once per request. */
+  async moreInfoAdded(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void> {
+    if (item.infoRequests === undefined) return;
+    await this.attentionRaised(sessionId, item, snapshot, item.infoRequests);
+  }
+
   /** Announces one committed item at most once under its durable board identity. */
-  async attentionRaised(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void> {
-    const key = notificationKey({ origin: 'attention', sessionId, attentionId: item.id });
+  async attentionRaised(
+    sessionId: string,
+    item: AttentionItem,
+    snapshot: AttentionSnapshot,
+    infoRequest?: number,
+  ): Promise<void> {
+    const key = notificationKey({
+      origin: 'attention',
+      sessionId,
+      attentionId: item.id,
+      ...(infoRequest === undefined ? {} : { infoRequest }),
+    });
     await this.options.serial
       .run(key, async () => {
         if ((await this.options.ledger.find(key)) !== undefined) return;
         const session = await this.options.sessions.describe(sessionId);
         if (session === undefined) return;
-        const payload = attentionNotificationPayload(sessionId, session, item, snapshot);
+        const payload =
+          infoRequest === undefined
+            ? attentionNotificationPayload(sessionId, session, item, snapshot)
+            : moreInfoNotificationPayload(sessionId, session, item, snapshot, infoRequest);
         const enrolled = (await this.options.push.list()).length;
         await this.options.ledger.append(
           NotificationRecordSchema.parse({
@@ -171,6 +191,7 @@ export class NotificationService implements AttentionRaisedObserver {
             attribution: attentionNotificationAttribution(item),
             sessionId,
             attentionId: item.id,
+            ...(infoRequest === undefined ? {} : { infoRequest }),
             sent: {
               kind: payload.kind,
               interactive: session.interactive,

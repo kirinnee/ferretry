@@ -763,14 +763,24 @@ describe('SettingsPage controls', () => {
     run(() => view.unmount());
   });
 
-  it('leaves text-scale choices visible but disabled when percentage adjustment is unsupported', () => {
+  it('says on the Text size card itself that the choice is this device only', () => {
+    const view = render(page());
+    const card = view.root.find(node => node.props['data-setting-id'] === 'text-size');
+    const scopes = card.findAll(node => node.props['data-setting-scope'] === 'device');
+
+    expect(scopes).not.toHaveLength(0);
+    run(() => view.unmount());
+  });
+
+  it('offers every text size as an enabled choice, whatever the engine says about text-size-adjust', () => {
     const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'CSS');
     Object.defineProperty(globalThis, 'CSS', { configurable: true, value: { supports: () => false } });
     try {
       const view = render(page());
-      expect(view.root.findByProps({ id: 'text-scale-unsupported' }).props.role).toBe('status');
-      for (const input of view.root.findAllByType('input').filter(input => input.props.name === 'text-scale'))
-        expect(input.props.disabled).toBe(true);
+      const inputs = view.root.findAllByType('input').filter(input => input.props.name === 'text-scale');
+      expect(inputs.map(input => input.props.value)).toEqual(['default', 'large', 'larger']);
+      for (const input of inputs) expect(input.props.disabled).toBeUndefined();
+      expect(view.root.findAllByProps({ id: 'text-scale-unsupported' })).toEqual([]);
       run(() => view.unmount());
     } finally {
       if (descriptor) Object.defineProperty(globalThis, 'CSS', descriptor);

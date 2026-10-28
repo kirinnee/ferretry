@@ -54,6 +54,8 @@ export const AttentionAskSchema = z.union([
   MultipleChoiceAskSchema,
   z.strictObject({ kind: z.literal('answer-review') }),
   z.strictObject({ kind: z.literal('open-question') }),
+  /** "Do this": the owner does something and nothing is chosen. Its answers are Done and Need more info. */
+  z.strictObject({ kind: z.literal('task') }),
 ]);
 export type AttentionAsk = z.infer<typeof AttentionAskSchema>;
 
@@ -90,6 +92,11 @@ export const MAX_ATTENTION_URGENCY_LENGTH = 120;
 export const MAX_ATTENTION_LINKS = 10;
 export const MAX_ATTENTION_LINK_LABEL_LENGTH = 120;
 export const MAX_ATTENTION_LINK_TARGET_LENGTH = 1_024;
+/** The most steps an item carries, and the longest one: each is Markdown, one thing to do. */
+export const MAX_ATTENTION_STEPS = 20;
+export const MAX_ATTENTION_STEP_LENGTH = 2_000;
+/** The longest instruction document an item carries, as one block of Markdown. */
+export const MAX_ATTENTION_BODY_LENGTH = 8_000;
 
 const prose = (maximum: number) => z.string().trim().min(1).max(maximum);
 
@@ -173,6 +180,10 @@ export const AttentionBriefShape = {
   urgency: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
   /** PRs, files and references worth opening. */
   links: z.array(AttentionLinkSchema).min(1).max(MAX_ATTENTION_LINKS).optional(),
+  /** Ordered Markdown steps the owner follows, one thing to do each: complete instructions, never a secret. */
+  steps: z.array(prose(MAX_ATTENTION_STEP_LENGTH)).min(1).max(MAX_ATTENTION_STEPS).optional(),
+  /** Instructions that are not a list, as one Markdown document. */
+  body: prose(MAX_ATTENTION_BODY_LENGTH).optional(),
 };
 
 /** The structured fields of an item, alone. */
@@ -188,6 +199,8 @@ export const attentionBriefOf = (value: AttentionBrief): AttentionBrief => ({
   ...(value.impact === undefined ? {} : { impact: value.impact }),
   ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
   ...(value.links === undefined ? {} : { links: value.links }),
+  ...(value.steps === undefined ? {} : { steps: value.steps }),
+  ...(value.body === undefined ? {} : { body: value.body }),
 });
 
 /**
@@ -213,6 +226,17 @@ export const recommendedAttentionOption = (
     .find(candidate => candidate !== undefined && labels.includes(candidate));
 };
 
+/** The most entries an item's history keeps, oldest dropped. */
+export const MAX_ATTENTION_HISTORY = 20;
+
+/** One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44". */
+export const AttentionHistoryEntrySchema = z.strictObject({
+  at: InstantSchema,
+  kind: z.enum(['needs-info', 'updated']),
+  note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+});
+export type AttentionHistoryEntry = z.infer<typeof AttentionHistoryEntrySchema>;
+
 export const AttentionDispositionSchema = z.enum(['done', 'dismissed']);
 export type AttentionDisposition = z.infer<typeof AttentionDispositionSchema>;
 
@@ -234,6 +258,16 @@ const AttentionItemBaseShape = {
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
   ...AttentionBriefShape,
+  /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
+  stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_ATTENTION_STEPS).optional(),
+  /** Set while the owner has asked the raising ferret for more information and it has not yet added any. */
+  waitingOn: z.literal('ferret').optional(),
+  /** When the owner asked; present exactly while `waitingOn` is. */
+  askedAt: InstantSchema.optional(),
+  /** How many times the owner has asked for more information: the request counter. */
+  infoRequests: PositiveIntegerSchema.optional(),
+  /** Bounded, oldest first: when the owner asked for more information and when the ferret added it. */
+  history: z.array(AttentionHistoryEntrySchema).min(1).max(MAX_ATTENTION_HISTORY).optional(),
 };
 
 export const AttentionItemSchema = z
@@ -260,6 +294,20 @@ export const AttentionItemSchema = z
   .superRefine((value, context) => {
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
       context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised attention' });
+    }
+    if ((value.waitingOn === undefined) !== (value.askedAt === undefined)) {
+      context.addIssue({ code: 'custom', message: 'waitingOn and askedAt are set together', path: ['askedAt'] });
+    }
+    if (value.stepsDone !== undefined) {
+      const done = value.stepsDone;
+      const ordered = done.every((step, index) => index === 0 || step > (done[index - 1] ?? -1));
+      if (!ordered || done.some(step => step >= (value.steps?.length ?? 0))) {
+        context.addIssue({
+          code: 'custom',
+          message: 'stepsDone must be sorted, unique and each below the number of steps',
+          path: ['stepsDone'],
+        });
+      }
     }
   });
 export type AttentionItem = z.infer<typeof AttentionItemSchema>;
@@ -393,6 +441,19 @@ export const AttentionActionRequestSchema = z.discriminatedUnion('action', [
     id: AttentionIdSchema,
     note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
     response: AttentionResponseSchema.optional(),
+  }),
+  /** Tick or untick one step of an open item: never resolves it, never pushes, never messages the ferret. */
+  z.strictObject({
+    action: z.literal('progress'),
+    id: AttentionIdSchema,
+    step: NonNegativeIntegerSchema,
+    done: z.boolean(),
+  }),
+  /** The owner asks the raising ferret for more information: the item stays open, marked waiting on the ferret. */
+  z.strictObject({
+    action: z.literal('needs-info'),
+    id: AttentionIdSchema,
+    note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
   }),
   z.strictObject({
     action: z.literal('dismiss'),

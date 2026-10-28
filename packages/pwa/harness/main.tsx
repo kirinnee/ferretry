@@ -1572,7 +1572,7 @@ function AppChromeHarness({ active }: { readonly active: string }) {
           sessions={WORKSPACE_FLEET}
         />
       )}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-shell-main="">
         {phone ? (
           <AppBar
             crumbs={
@@ -8512,7 +8512,7 @@ function SessionWorkspaceHarness() {
     >
       {hypermediaActions.host}
       {layout === 'drawer' ? null : bar('column')}
-      <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3">
+      <div className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3" data-shell-main="">
         <SessionChatPage
           chatWidth={WORKSPACE_CHAT_WIDTH}
           client={WORKSPACE_PAGE_CLIENT}

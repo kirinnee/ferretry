@@ -241,3 +241,23 @@ describe('Attention service', () => {
     should(isAttentionSessionId('a'.repeat(129))).be.false();
   });
 });
+
+describe('Attention service progress', () => {
+  it('should tick a step without announcing the item again, and refuse one that does not exist', async () => {
+    // Arrange
+    const observer = new Observer();
+    const { service } = createService(new MemoryRepository(), observer);
+    await service.raise(SESSION, { ...request, steps: ['One', 'Two'] }, AGENT);
+
+    // Act
+    const ticked = await service.progress(SESSION, 'A1', 1, true, { kind: 'human' });
+    const again = await service.progress(SESSION, 'A1', 1, true, AGENT);
+    const missing = await service.progress(SESSION, 'A1', 2, true, AGENT);
+
+    // Assert
+    should(ticked).containDeep({ ok: true, change: 'progressed', item: { stepsDone: [1] } });
+    should(again).containDeep({ ok: true, changed: false, change: 'unchanged' });
+    should(missing.ok).be.false();
+    should(observer.calls).have.length(1);
+  });
+});

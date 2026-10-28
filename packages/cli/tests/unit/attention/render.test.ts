@@ -376,3 +376,46 @@ describe('writing advice', () => {
     should(actual).containEql('fix it with `attention edit <id>`');
   });
 });
+
+describe('attention listing steps and body', () => {
+  it('should number the steps with a tick on the done ones, then show the body', () => {
+    // Act
+    const actual = renderAttentionList(
+      snapshot([
+        agentItem('A1', 'log in', {
+          steps: ['Run `fy login`', 'Paste the code', 'Press Enter'],
+          stepsDone: [0, 2],
+          body: 'Some\nnotes',
+        }),
+      ]),
+    );
+
+    // Assert
+    should(actual).containEql('steps (2/3 done):');
+    should(actual).containEql('1. ✓ Run `fy login`');
+    should(actual).containEql('2. · Paste the code');
+    should(actual).containEql('3. ✓ Press Enter');
+    should(actual).containEql('body: Some notes');
+  });
+});
+
+describe('attention to-do items', () => {
+  it('should say what a task wants and that it waits on the ferret once more information was asked', () => {
+    // Act
+    const plain = renderAttentionList(snapshot([agentItem('A2', 'log in', { ask: { kind: 'task' } })]));
+    const waiting = renderAttentionList(
+      snapshot([
+        agentItem('A2', 'log in', {
+          ask: { kind: 'task' },
+          waitingOn: 'ferret',
+          askedAt: '2026-07-31T09:10:00.000Z',
+        }),
+      ]),
+    );
+
+    // Assert
+    should(plain).containEql('to do: mark it done, or ask for more information');
+    should(plain).not.containEql('waiting on the ferret');
+    should(waiting).containEql('waiting on the ferret: more information asked 2026-07-31T09:10:00.000Z');
+  });
+});

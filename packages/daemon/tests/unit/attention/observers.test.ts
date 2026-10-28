@@ -8,6 +8,7 @@ import {
   AttentionConversation,
   type AttentionLedger,
   type AttentionLedgerRepository,
+  AttentionMoreInfoPush,
   type AttentionMutation,
   AttentionReplyDelivery,
   AttentionService,
@@ -348,5 +349,134 @@ describe('Attention board observers', () => {
     // Assert
     should(unreadable).deepEqual({ message: 'hello !A1', answers: [] });
     should(missing).deepEqual({ message: 'hello !A1', answers: [] });
+  });
+});
+
+describe('Attention board progress observers', () => {
+  it('should tell change observers about a tick, but tell the ferret nothing', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    await attention.raise(SESSION, { ...ASK, steps: ['Do it'] }, AGENT);
+    await attention.progress(SESSION, 'A1', 0, true, HUMAN);
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger);
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(changes.seen.map(each => each.change.change)).deepEqual(['created', 'progressed']);
+    should(changes.seen[1]?.change.item).containDeep({ id: 'A1', stepsDone: [0] });
+    should(messenger.sent).deepEqual([]);
+  });
+});
+
+describe('Attention needs-info delivery', () => {
+  const TASK = { ...ASK, ask: { kind: 'task' as const }, steps: ['Do it'] };
+
+  it('should tell the raising ferret once per request, and again for a new request after it answered', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger);
+    await attention.raise(SESSION, TASK, AGENT);
+
+    // Act
+    await attention.needsInfo(SESSION, 'A1', HUMAN, 'Which account?');
+    await attention.edit(SESSION, 'A1', { subject: 'Rebase onto main, which account?' }, AGENT);
+    await attention.needsInfo(SESSION, 'A1', HUMAN);
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(messenger.sent).deepEqual([
+      {
+        sessionId: SESSION,
+        message: '[needs more info !A1 «Rebase onto main now?»] Which account?',
+        id: 'A1~1',
+      },
+      {
+        sessionId: SESSION,
+        message: '[needs more info !A1 «Rebase onto main, which account?»] The owner needs more information.',
+        id: 'A1~2',
+      },
+    ]);
+  });
+
+  it('should never tell a ferret about a request by an agent, or on an item another session raised', async () => {
+    // Arrange
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger);
+    const item = (session: string): AttentionItem =>
+      ({
+        id: 'A1',
+        source: 'agent-raised',
+        sourceRef: null,
+        subject: 'Ask?',
+        why: 'why',
+        waitingSince: NOW,
+        howToResolve: 'how',
+        raisedBy: 'agent',
+        raisedBySession: session,
+        raisedByName: null,
+        waitingOn: 'ferret',
+        askedAt: NOW,
+        infoRequests: 1,
+      }) as AttentionItem;
+    const snapshot = {
+      v: 1 as const,
+      sessionId: SESSION,
+      items: [],
+      resolved: [],
+      count: 0,
+      parseErrors: 0,
+      updatedAt: NOW,
+    };
+
+    // Act
+    await delivery.changed(SESSION, {
+      change: 'needs-info',
+      actor: HUMAN,
+      via: 'board',
+      snapshot,
+      item: item('session-2'),
+    });
+    await delivery.changed(SESSION, {
+      change: 'needs-info',
+      actor: AGENT,
+      via: 'board',
+      snapshot,
+      item: item(SESSION),
+    });
+    await delivery.changed(SESSION, { change: 'needs-info', actor: HUMAN, via: 'board', snapshot });
+
+    // Assert
+    should(messenger.sent).deepEqual([]);
+  });
+});
+
+describe('Attention more-info push', () => {
+  it('should announce an edit that answered a request, once, and nothing for an ordinary edit', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const pushed: string[] = [];
+    const observer = new AttentionMoreInfoPush({
+      moreInfoAdded: async (_session, item) => {
+        pushed.push(`${item.id}~${item.infoRequests}`);
+      },
+    });
+    await attention.raise(SESSION, ASK, AGENT);
+    await attention.edit(SESSION, 'A1', { subject: 'An ordinary edit?' }, AGENT);
+    await attention.needsInfo(SESSION, 'A1', HUMAN);
+    await attention.edit(SESSION, 'A1', { subject: 'More info added?' }, AGENT);
+    await attention.edit(SESSION, 'A1', { subject: 'More info added?' }, AGENT);
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await observer.changed(sessionId, change);
+
+    // Assert
+    should(pushed).deepEqual(['A1~1']);
   });
 });

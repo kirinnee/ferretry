@@ -65,7 +65,7 @@ and the longest routing prompt:
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
 | Tools (terminals, browser pages)         | 1,001      | 250      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
-| Attention (raise a plain item)           | 911        | 228      | every agent runtime         |
+| Attention (raise an item, with steps)    | 1,027      | 257      | every agent runtime         |
 | Hypermedia                               | 1,585      | 396      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
@@ -74,7 +74,7 @@ and the longest routing prompt:
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
 `fy config guide`, which prints it. A test keeps the whole prompt, with the longest routing prompt, under
-6.7 KB and the Pack section itself under 1,050 characters. The routing line grew from a 150-character
+6.75 KB (the Attention section grew by 116 characters to teach `--step`, so its cap went from 950 to 1,050 and the whole-prompt cap from 6.7 KB) and the Pack section itself under 1,050 characters. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told.
 

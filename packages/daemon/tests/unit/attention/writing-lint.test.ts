@@ -74,3 +74,15 @@ describe('attention writing lint', () => {
     should(actual.join('\n')).not.match(/unexplained capitals/u);
   });
 });
+
+describe('attention writing lint steps and body', () => {
+  it('should not flag commands, paths or links inside steps and body', () => {
+    const actual = lintAttentionWriting({
+      ...clean,
+      steps: ['Run `fy login` then open https://example.com/a and edit packages/cli/src/main.ts (ABC-123)'],
+      body: '```sh\ncat ~/notes/todo\n```',
+    } as Parameters<typeof lintAttentionWriting>[0]);
+
+    should(actual).deepEqual([]);
+  });
+});
