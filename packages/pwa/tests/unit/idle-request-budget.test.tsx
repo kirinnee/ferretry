@@ -13,10 +13,10 @@
  * printing what it did ask, route by route, so the failure says which poller came back.
  *
  * WHAT IS REAL. The store, the carrier router and its sealed sessions to two in-memory daemons, every
- * poller, store and hook the shell mounts, and their timers — Bun's fake timers, advanced two seconds at a
- * time — with the real event loop let run between steps until the in-memory network is quiet, so the
- * sessions' WebCrypto settles before the clock moves again. The typed
- * client is a fake that counts every call by route, like the shell suite's; every other daemon read
+ * poller, store and hook the shell mounts, and their timers — on a manual clock advanced two seconds at a
+ * time (`../support/manual-clock.ts` says why it is not Bun's fake timers) — with the real event loop let
+ * run between steps until the in-memory network is quiet, so the sessions' WebCrypto settles before the
+ * clock moves again. The typed client is a fake that counts every call by route, like the shell suite's; every other daemon read
  * crosses the carrier and is counted where the in-memory daemon answers it. The session's live feed
  * proves itself every thirty seconds, as the daemon's does.
  *
@@ -24,7 +24,7 @@
  * everything) and the feed's first proof are behind it. Opening a page is not idling on it.
  */
 
-import { afterEach, beforeEach, describe, it, jest } from 'bun:test';
+import { afterEach, beforeEach, describe, it } from 'bun:test';
 import type { FyEvent, FyEventStreamIdle, SessionView } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import { act } from 'react';
@@ -39,6 +39,7 @@ import { createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { MemoryDeviceKeyStore } from '../support/device-keys.ts';
 import { mount } from '../support/dom.ts';
+import { installManualClock, type ManualClock } from '../support/manual-clock.ts';
 import { fetcherDaemons, newDaemonIdentity, relayCrypto, type ScriptedSocket, testDevice } from '../support/relay.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -312,7 +313,7 @@ const watched =
     return socket;
   };
 
-/** Real event-loop turns, which fake timers leave alone: what a sealed session's WebCrypto settles on. */
+/** Real event-loop turns, which the manual clock leaves alone: what a sealed session's WebCrypto settles on. */
 const turns = async (count: number): Promise<void> => {
   for (let turn = 0; turn < count; turn += 1) await new Promise(resolve => setImmediate(resolve));
 };
@@ -341,11 +342,15 @@ const settle = async (): Promise<void> => {
  */
 let abandoned = false;
 
+/** The clock the case running now moves; installed and restored around each case. */
+let clock: ManualClock | undefined;
+
 /** Moves the fake clock by `milliseconds`, a step at a time, letting the app's work land after each. */
 const idle = async (milliseconds: number): Promise<void> => {
   for (let elapsed = 0; elapsed < milliseconds && !abandoned; elapsed += STEP_MS)
     await act(async () => {
-      jest.advanceTimersByTime(STEP_MS);
+      if (clock === undefined) throw new Error('the idle budget moves a manual clock, and none is installed');
+      clock.advance(STEP_MS);
       await settle();
     });
 };
@@ -381,11 +386,12 @@ const verdict = (page: string, measured: { readonly counter: RouteCounter; reado
 describe('the idle request budget', () => {
   beforeEach(() => {
     abandoned = false;
-    jest.useFakeTimers();
+    clock = installManualClock();
   });
   afterEach(() => {
     abandoned = true;
-    jest.useRealTimers();
+    clock?.restore();
+    clock = undefined;
     window.history.replaceState({}, '', '/');
     localStorage.clear();
     resetSidePaneTabsStates();
