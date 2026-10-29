@@ -164,6 +164,21 @@ describe('readRecentMessages', () => {
     expect((await readRecentMessages(client, 's', 3)).map(entry => entry.text)).toEqual(['two', 'three', 'four']);
   });
 
+  it('gives up after its page budget, keeping what it found and where to resume', async () => {
+    let asked = 0;
+    const endless: MessagesClient = {
+      messages: async () => {
+        asked += 1;
+        return page([message('assistant', `page ${asked}`)], `p${asked}`);
+      },
+    };
+    const memory = new Map();
+    const found = await readRecentMessages(endless, 's', 2, memory);
+    expect(found.map(entry => entry.text)).toEqual(['page 39', 'page 40']);
+    expect(asked).toBe(40);
+    expect(memory.get('s')).toMatchObject({ from: 'p40' });
+  });
+
   it('resumes a remembered walk from its last page instead of the start', async () => {
     const pages = {
       start: page([message('assistant', 'one')], 'p2'),

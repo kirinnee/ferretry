@@ -242,6 +242,55 @@ describe('AttentionInboxPage list and card', () => {
     await mounted.unmount();
   });
 
+  it('clears Find on Escape, and leaves Escape alone while Find is empty', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'ship');
+      find.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rowTitles(mounted)).toEqual(['Ship it?']);
+    const escapeKey = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    const first = escapeKey();
+    await interact(() => find.dispatchEvent(first));
+    expect(first.defaultPrevented).toBe(true);
+    expect(rowTitles(mounted)).toHaveLength(3);
+    const second = escapeKey();
+    await interact(() => find.dispatchEvent(second));
+    expect(second.defaultPrevented).toBe(false);
+    await mounted.unmount();
+  });
+
+  it('says how long ago each of the ferret’s last messages was written', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [twoWay], {
+        readRecent: async () => [
+          { text: 'Cut the branch.', timestamp: '2026-08-01T10:00:00.000Z' },
+          { text: 'Raised it.', timestamp: '2026-08-01T12:00:00.000Z' },
+        ],
+      }),
+    );
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'fold').click(),
+    );
+    await flush();
+    expect([...mounted.container.querySelectorAll('.fy-attn-recent__when')].map(when => when.textContent)).toEqual([
+      '2h ago',
+      'just now',
+    ]);
+    await mounted.unmount();
+  });
+
+  it('on a phone card says "Updating" in its bar while boards are read', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [threeWay], { phone: true, initialOpen: threeWay.key, reading: true }),
+    );
+    expect(
+      must(mounted.container.querySelector('[data-attention-updating]'), 'Updating').closest('.fy-attn-inbox__cardbar'),
+    ).not.toBeNull();
+    await mounted.unmount();
+  });
+
   it('draws no machine filter while every item is on one machine', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, bare]));
     expect(mounted.container.querySelector('[data-attention-machine]')).toBeNull();

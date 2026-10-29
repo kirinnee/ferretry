@@ -414,6 +414,10 @@ interface ShellOptions {
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
   /** Complete Attention board returned by this daemon/session route. */
   readonly attention?: (sessionId: string) => AttentionSnapshot;
+  /** Attention actions a daemon was sent (POSTs to a session's board), as `sessionId:body`. */
+  readonly attentionPosts?: string[];
+  /** Each session's conversation as the messages route serves it, in one page; absent: an empty one. */
+  readonly messages?: (sessionId: string) => readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
   /** The Warden status this daemon answers; the default is a quiet, freshly swept one. */
   readonly wardenStatus?: () => Promise<WardenStatusView>;
   /** The "who needs you" feed this daemon answers; the default is a clean sweep. */
@@ -505,7 +509,7 @@ const appStore = async (
   for (const id of [ALPHA, BETA, GAMMA_ID, alphaRelayed.daemonId]) await deviceKeys.save(id, DEVICE_KEY);
   // The one fixture every daemon route below is answered by — over a real session on each daemon's
   // own address, and over the plain network for everything that is not a daemon.
-  const daemonFetch = async (input: RequestInfo | URL): Promise<Response> => {
+  const daemonFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     carrierRequests.push(url);
     // Every carrier this daemon publishes fails at transport, which is what a walk needs to see
@@ -517,6 +521,7 @@ const appStore = async (
     const attentionRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
     if (attentionRoute?.[1] !== undefined) {
       const sessionId = decodeURIComponent(attentionRoute[1]);
+      if (init?.method === 'POST') options.attentionPosts?.push(`${sessionId}:${String(init.body)}`);
       return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
     }
     // The Processes tab's list, which the open session reads for the count on its tab: nothing runs.
@@ -610,6 +615,18 @@ const appStore = async (
             ? options.transcript(connection.daemonId, sessionId)
             : (options.transcript ?? '');
         },
+        // A conversation's durable rows, in one page — what the Attention page's "Last messages" fold reads.
+        messages: async (sessionId: string) => ({
+          v: 1 as const,
+          sessionId,
+          messages: (options.messages?.(sessionId) ?? []).map((message, index) => ({
+            point: { v: 1 as const, byteOffset: index * 100, blockIndex: 0 },
+            role: message.role,
+            text: message.text,
+            selectionBinding: `binding-${index}`,
+          })),
+          nextCursor: null,
+        }),
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         // The configuration stream the shell keeps open for the machine on screen: like the live feed
@@ -2303,18 +2320,39 @@ describe('AppShell', () => {
   });
 
   it('mounts the selected item as its card beside the inbox, with no chat around it', async () => {
+    const posts: string[] = [];
+    const todo = { ...externalAttentionItem, ask: { kind: 'task' }, steps: ['Plug the key in', 'Approve it'] };
     const { view } = await renderShell(`/d/${ALPHA}/attention`, [alpha.daemonId], {
       sessions: ['shared'],
-      listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
-      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
-      attention: sessionId => attentionSnapshot(sessionId, [externalAttentionItem]),
+      listedAttention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => attentionSnapshot(sessionId, [todo as typeof externalAttentionItem]),
+      attentionPosts: posts,
+      messages: () => [
+        { role: 'assistant', text: 'Paired the laptop.' },
+        { role: 'user', text: 'ok' },
+        { role: 'assistant', text: 'Raised !A3 for the key.' },
+      ],
     });
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
       const pane = must(view.container.querySelector<HTMLElement>('[data-attention-pane]'), 'the card pane');
       expect(pane.querySelector('[data-attention-card]')?.getAttribute('data-attention-card')).toBe('A3');
-      expect(pane.querySelector('[data-attention-recent-toggle]')).not.toBeNull();
       expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
+      // The fold reads the ferret's own words through the session messages route.
+      await interact(() =>
+        must(pane.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'the fold').click(),
+      );
+      for (let turn = 0; turn < 4; turn += 1) await settle();
+      expect([...pane.querySelectorAll('[data-attention-recent-message]')].map(message => message.textContent)).toEqual(
+        ['Paired the laptop.', 'Raised !A3 for the key.'],
+      );
+      // A step ticks on the machine the card came from.
+      await interact(() =>
+        must(pane.querySelector<HTMLInputElement>('input[type="checkbox"]'), 'the first step').click(),
+      );
+      for (let turn = 0; turn < 4; turn += 1) await settle();
+      expect(posts.some(post => post.startsWith('shared:') && post.includes('"progress"'))).toBe(true);
     } finally {
       await view.unmount();
     }
