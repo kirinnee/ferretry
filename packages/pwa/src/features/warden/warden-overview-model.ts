@@ -466,7 +466,8 @@ export const fullTime = (at: string): string => {
 
 /** What the report dialog needs to open one report: where it is, which ferret, and how it ended. */
 export interface WardenReportTarget {
-  readonly sessionId: string;
+  /** The ferret the report is about; absent for a fleet-wide triage, whose report covers several. */
+  readonly sessionId?: string;
   readonly reportPath: string;
   readonly at?: string;
   readonly verdict?: WardenVerdictKind;

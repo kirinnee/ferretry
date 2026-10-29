@@ -88,12 +88,12 @@ export function InvestigationList({
                       {row.cost}
                     </span>
                   )}
-                  {reportPath !== undefined && row.sessionId !== undefined && (
+                  {reportPath !== undefined && (
                     <ReportButton
                       className="ml-auto sm:ml-0"
                       onClick={() =>
                         onOpenReport({
-                          sessionId: row.sessionId!,
+                          ...(row.sessionId === undefined ? {} : { sessionId: row.sessionId }),
                           reportPath,
                           ...(row.at === undefined ? {} : { at: row.at }),
                           ...(row.verdict === undefined ? {} : { verdict: row.verdict }),

@@ -116,7 +116,7 @@ function WardenOverviewBody({
       connection,
       verdict: {
         at: row.at ?? '',
-        targetSession: row.sessionId,
+        ...(row.sessionId === undefined ? {} : { targetSession: row.sessionId }),
         verdict: row.verdict ?? 'unknown',
         reportPath: row.reportPath,
       },
