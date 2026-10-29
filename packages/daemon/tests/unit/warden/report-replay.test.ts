@@ -7,6 +7,7 @@ import {
   defaultWardenConfig,
   detectAnomalies,
   firstResponse,
+  jevActsFor,
   jevRoute,
   foldLivenessSample,
   type LivenessTrack,
@@ -313,16 +314,17 @@ const jevAgreeing = (shape: ReportShape, sure: number): TriageDecision => {
   };
 };
 
-const DEFAULT_POLICY = {
+const policyFor = (shape: ReportShape) => ({
   leaveThreshold: defaultWardenConfig.guard.threshold,
   acts: defaultWardenConfig.jevActs,
   mayActAlone: defaultWardenConfig.mayActAlone,
-};
+  offered: jevActsFor({ kind: shape.kind }),
+});
 
 const routes = (shapes: readonly ReportShape[], sure: number): Record<string, number> => {
   const counted: Record<string, number> = {};
   for (const shape of shapes) {
-    const route = jevRoute(firstResponse(jevAgreeing(shape, sure), DEFAULT_POLICY), true);
+    const route = jevRoute(firstResponse(jevAgreeing(shape, sure), policyFor(shape)), true);
     counted[route] = (counted[route] ?? 0) + 1;
   }
   return counted;
@@ -351,10 +353,8 @@ describe('the 39 paid investigations, with Jev as first responder', () => {
     const raised = escalated.map(entry => entry.shape);
 
     // Act
-    const loop = firstResponse(
-      jevAgreeing(raised.find(shape => shape.real === true) as ReportShape, 0.95),
-      DEFAULT_POLICY,
-    );
+    const real = raised.find(shape => shape.real === true) as ReportShape;
+    const loop = firstResponse(jevAgreeing(real, 0.95), policyFor(real));
 
     // Assert
     should(routes(raised, 0.95)).deepEqual({ leave: 1, act: 1 });
