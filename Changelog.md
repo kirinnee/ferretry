@@ -1,3 +1,9 @@
+## [4.106.1](https://github.com/kirinnee/ferretry/compare/v4.106.0...v4.106.1) (2026-10-29)
+
+### Fixes
+
+* **pwa:** keep reader state when new chat messages arrive ([#892](https://github.com/kirinnee/ferretry/issues/892)) ([30a2b5e](https://github.com/kirinnee/ferretry/commit/30a2b5ef5d0701d3c0f8b5d864a20e10541895f2))
+
 ## [4.106.0](https://github.com/kirinnee/ferretry/compare/v4.105.5...v4.106.0) (2026-10-29)
 
 ### Features
