@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test';
 import {
-  MAX_ATTACHMENT_BYTES,
   attachmentApiPath,
   attachmentErrorCopy,
   attachmentErrorMessage,
@@ -14,8 +13,11 @@ import {
   isRetryableUnlockError,
   isTextExtraction,
   isTextExtractionFailure,
+  isTransientUploadFailure,
+  MAX_ATTACHMENT_BYTES,
   normalizeAttachmentMime,
   textExtractionFailureCopy,
+  UPLOAD_CONNECTION_DROPPED_COPY,
   unlockFailure,
   validateAttachmentFile,
 } from '../../src/lib/attachments.ts';
@@ -139,5 +141,42 @@ describe('attachments', () => {
     expect(formatAttachmentSize(20 * 1024)).toBe('20 KB');
     expect(formatAttachmentSize(2 * 1024 * 1024)).toBe('2.0 MB');
     expect(formatAttachmentSize(20 * 1024 * 1024)).toBe('20 MB');
+  });
+});
+
+describe('why an upload failed, when the daemon said nothing', () => {
+  const named = (name: string, message = 'x'): Error => Object.assign(new Error(message), { name });
+
+  test('names a dropped connection, a busy or failing machine, and a file the phone could not read', () => {
+    expect(attachmentErrorMessage(new Error('the relay socket closed'))).toBe(
+      `${UPLOAD_CONNECTION_DROPPED_COPY} — try again`,
+    );
+    expect(attachmentErrorMessage(named('CarrierUnavailableError', 'no carrier carried this request'))).toBe(
+      `${UPLOAD_CONNECTION_DROPPED_COPY} — try again`,
+    );
+    expect(attachmentErrorMessage({ status: 503, message: '' })).toBe(
+      'The machine could not store the file (HTTP 503) — try again',
+    );
+    expect(attachmentErrorMessage({ status: 429, message: '' })).toContain('too busy');
+    expect(attachmentErrorMessage({ status: 413, message: '' })).toBe('Files must be 20 MiB or smaller');
+    expect(attachmentErrorMessage(named('NotReadableError'))).toContain('could not read the file');
+    expect(attachmentErrorMessage(named('RangeError'))).toContain('too large');
+    expect(attachmentErrorMessage(named('DeviceNotAcceptedError'))).toContain('no longer paired');
+    expect(attachmentErrorMessage(named('TimeoutError'))).toContain('timed out');
+    // The relay's own 32 MiB refusal still reads as a size, not a dropped connection.
+    expect(
+      attachmentErrorMessage(named('RelaySessionError', 'this request body is over the 33554432-byte limit')),
+    ).toBe('Files must be 20 MiB or smaller');
+  });
+
+  test('retries only what a moment can change', () => {
+    expect(isTransientUploadFailure(new Error('the relay socket closed'))).toBe(true);
+    expect(isTransientUploadFailure({ status: 502 })).toBe(true);
+    expect(isTransientUploadFailure({ status: 429 })).toBe(true);
+    expect(isTransientUploadFailure({ status: 413 })).toBe(false);
+    expect(isTransientUploadFailure({ status: 415, code: 'attachment_unsupported_mime' })).toBe(false);
+    expect(isTransientUploadFailure(named('NotReadableError'))).toBe(false);
+    expect(isTransientUploadFailure(named('DeviceNotAcceptedError'))).toBe(false);
+    expect(isTransientUploadFailure(undefined)).toBe(false);
   });
 });

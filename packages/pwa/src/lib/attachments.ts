@@ -309,7 +309,65 @@ export const attachmentErrorMessage = (error: unknown): string => {
   if (/(?:^|[\\/])(?:home|tmp|var|private|attachments?)(?:[\\/]|$)/.test(message)) return ERROR_COPY.corrupt_attachment;
   if (typeof object?.status === 'number' && object.status >= 400 && object.status < 500 && rawMessage)
     return rawMessage;
-  return 'File could not be attached — try again';
+  return transportFailureCopy(error) ?? 'File could not be attached — try again';
+};
+
+/** Said when the connection to the machine ended before the upload's answer arrived. */
+export const UPLOAD_CONNECTION_DROPPED_COPY = 'The connection to this machine dropped before the upload finished';
+
+/** Said while an upload waits for one of the few that go at once to finish. */
+export const UPLOAD_QUEUED_COPY = 'waiting';
+
+/** Said between automatic attempts, so a dropped connection reads as one being handled. */
+export const uploadRetryingCopy = (attempt: number, attempts: number): string =>
+  `connection dropped — retrying (${attempt} of ${attempts})`;
+
+const errorName = (error: unknown): string =>
+  error !== null && typeof error === 'object' && typeof (error as { readonly name?: unknown }).name === 'string'
+    ? (error as { readonly name: string }).name
+    : '';
+
+const httpStatus = (error: unknown): number | undefined => {
+  const status =
+    error !== null && typeof error === 'object' ? (error as { readonly status?: unknown }).status : undefined;
+  return typeof status === 'number' ? status : undefined;
+};
+
+/**
+ * WHY an upload failed when the daemon gave no reason of its own — the cases that used to share one
+ * "try again". Each names what actually went wrong, because "try again" after a full upload over a
+ * phone connection is a minute of somebody's time: a file the phone could not read will fail the same
+ * way every time, while a dropped connection is worth one more try.
+ */
+const transportFailureCopy = (error: unknown): string | undefined => {
+  const name = errorName(error);
+  if (name === 'NotReadableError' || name === 'NotFoundError')
+    return 'This device could not read the file — remove it and add it again';
+  if (name === 'RangeError') return 'That file is too large for this device to send';
+  if (name === 'DeviceNotAcceptedError') return 'This device is no longer paired with that machine';
+  if (name === 'AbortError' || name === 'TimeoutError') return 'The upload timed out — try again';
+  const status = httpStatus(error);
+  if (status === 413) return ERROR_COPY.attachment_too_large;
+  if (status === 408 || status === 429) return `The machine was too busy to take the file (HTTP ${status}) — try again`;
+  if (status !== undefined && status >= 500) return `The machine could not store the file (HTTP ${status}) — try again`;
+  if (status === undefined && error instanceof Error) return `${UPLOAD_CONNECTION_DROPPED_COPY} — try again`;
+  return undefined;
+};
+
+/**
+ * Is this failure worth an automatic second attempt? Only what a moment can change: a connection that
+ * dropped, a machine that was busy or failed on its side. A refusal the daemon gave a reason for, a
+ * file the phone could not read and an unpaired device fail identically every time.
+ *
+ * Re-sending an upload is safe even when the first one may have landed: an upload only stores a file
+ * under a fresh id, and a send names the ids of the attempts that answered — never the lost one.
+ */
+export const isTransientUploadFailure = (error: unknown): boolean => {
+  const name = errorName(error);
+  if (['NotReadableError', 'NotFoundError', 'RangeError', 'DeviceNotAcceptedError'].includes(name)) return false;
+  const status = httpStatus(error);
+  if (status !== undefined) return status === 408 || status === 429 || status >= 500;
+  return error instanceof Error;
 };
 
 export const unlockFailure = (error: unknown): UnlockFailure => {
