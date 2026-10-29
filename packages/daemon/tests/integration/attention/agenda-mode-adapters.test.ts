@@ -38,4 +38,13 @@ describe('FileAgendaMigrationMarker', () => {
     should(after).be.true();
     should(document).deepEqual({ v: 1, ranAt: '2026-10-23T10:00:00.000Z', switchedOn: ['session-1'] });
   });
+
+  it('should refuse to guess when the record cannot be read, rather than run the migration again', async () => {
+    // Arrange: a directory where the document belongs reads as an error that is not "missing".
+    const root = await home();
+    const marker = new FileAgendaMigrationMarker(root);
+
+    // Act + Assert
+    await should(marker.ran()).be.rejectedWith({ code: 'EISDIR' });
+  });
 });

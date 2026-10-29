@@ -116,6 +116,8 @@ class FakeAttentionDaemon {
           ...(request.kind === undefined ? {} : { kind: request.kind }),
           ...(request.answers === undefined ? {} : { answers: request.answers }),
           ...attentionBriefOf(request),
+          ...(request.notice === true ? { notice: true } : {}),
+          ...(request.ping === true ? { ping: true } : {}),
           raisedBy: 'agent',
           raisedBySession: SESSION,
           raisedByName: null,
