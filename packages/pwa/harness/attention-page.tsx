@@ -590,7 +590,13 @@ const RESOLVED_SEVEN: readonly ResolvedAttentionItem[] = [
     'A11',
     320,
     { subject: 'Which login should the new runtime use?', ask: { kind: 'open-question' } },
-    { response: { kind: 'open-question', answer: 'The team login, please.' } },
+    {
+      response: {
+        kind: 'open-question',
+        answer:
+          'The team login, please — and keep the personal one for experiments only. If the team login hits its limit mid-run, fall back to the personal one rather than stopping, and tell me in the thread when you do.\n\nOne more thing: use the studio machine, not the laptop, so the long runs do not stop when the lid closes.',
+      },
+    },
   ),
   resolvedItem(
     'A10',
