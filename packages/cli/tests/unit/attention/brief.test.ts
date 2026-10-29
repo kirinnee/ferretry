@@ -186,6 +186,43 @@ describe('attention brief points and edits', () => {
     should(one).containDeep({ context: 'plain words' });
   });
 
+  it('should turn repeated premise and decided flags into bullets, and leave one value as written', () => {
+    // Arrange / Act
+    const several = add(['pick'], {
+      premise: ['the login expires', 'two plans fit'],
+      decided: ['use the shared account'],
+    });
+    const one = add(['pick'], { premise: 'plain words' });
+    const none = add(['pick'], {});
+
+    // Assert
+    should(several).containDeep({ premise: '- the login expires\n- two plans fit', decided: 'use the shared account' });
+    should(one).containDeep({ premise: 'plain words' });
+    should(none).not.have.property('premise');
+    should(none).not.have.property('decided');
+  });
+
+  it('should read premise and decided from a JSON body, and let a flag win', () => {
+    // Arrange
+    const file = parseBriefFile(JSON.stringify({ summary: 'Pick', premise: ['one', 'two'], decided: 'earlier' }));
+
+    // Act
+    const fromFile = add([], {}, file);
+    const flagged = add([], { premise: ['from the flag'] }, file);
+
+    // Assert
+    should(fromFile).containDeep({ premise: '- one\n- two', decided: 'earlier' });
+    should(flagged).containDeep({ premise: 'from the flag', decided: 'earlier' });
+  });
+
+  it('should compose an edit that replaces the premise and the decided points', () => {
+    // Arrange / Act
+    const request = composeEditRequest('A3', { premise: ['a', 'b'], decided: ['c'] }, undefined);
+
+    // Assert
+    should(request).deepEqual({ action: 'edit', id: 'A3', premise: '- a\n- b', decided: 'c' });
+  });
+
   it('should accept lists for context and impact in a JSON body', () => {
     // Arrange
     const file = parseBriefFile(JSON.stringify({ summary: 'Pick', context: ['one', 'two'], impact: 'plain' }));

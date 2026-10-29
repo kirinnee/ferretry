@@ -337,19 +337,32 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
-  it('swallows the click a drag ends in, so swiping across a button does not also press it', async () => {
+  it('swallows the click a drag ends in, so a swipe that ends over a button does not also press it', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay]));
     const right = must(
       deckTop(mounted).querySelector<HTMLButtonElement>('[data-attention-answer="right"]'),
       'Rebase now',
     );
-    await dragBy(mounted, 40, 0, right);
-    await release(right, 40, 0);
+    await release(await dragBy(mounted, 40, 0), 40, 0);
     await interact(() => right.click());
     expect(pending(fake)).toEqual([]);
     await interact(() => right.click());
     expect(pending(fake)).toEqual(['Rebase now']);
+    await mounted.unmount();
+  });
+
+  it('never starts a swipe on an answer button: pressing it simply answers', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const right = must(
+      deckTop(mounted).querySelector<HTMLButtonElement>('[data-attention-answer="right"]'),
+      'Rebase now',
+    );
+    await dragBy(mounted, 200, 0, right);
+    expect(stamp(mounted)).toBeNull();
+    await release(right, 200, 0);
+    expect(pending(fake)).toEqual([]);
     await mounted.unmount();
   });
 
@@ -559,39 +572,23 @@ describe('Discuss: the fixed answer that is always down', () => {
     return scroller;
   };
 
-  it('does not take a drag down or up that began mid-way through an overflowing detail: that is the reader scrolling', async () => {
+  it('never takes a drag that began in the detail, whatever it is scrolled to: the detail is for scrolling', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay]));
-    const scroller = overflowingDetail(mounted, 300);
-    const down = await dragBy(mounted, 0, 300, scroller);
-    expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(false);
-    await release(down, 0, 300);
-    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
+    for (const scrollTop of [0, 300, 700]) {
+      const scroller = overflowingDetail(mounted, scrollTop);
+      for (const [dx, dy] of [
+        [0, 300],
+        [0, -300],
+        [300, 0],
+      ] as const) {
+        const target = await dragBy(mounted, dx, dy, scroller);
+        expect(stamp(mounted)).toBeNull();
+        await release(target, dx, dy);
+      }
+    }
     expect(pendingActions(fake)).toEqual([]);
     expect(topId(mounted)).toBe('A3');
-    await mounted.unmount();
-  });
-
-  it('discusses from a drag down that began in an overflowing detail already scrolled to its top', async () => {
-    const fake = fakeInbox();
-    const mounted = await mount(deckPage(fake, [threeWay]));
-    const scroller = overflowingDetail(mounted, 0);
-    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
-    expect(pendingActions(fake)).toEqual([]);
-    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
-    expect(pendingActions(fake).map(action => action.kind)).toEqual(['discuss']);
-    await mounted.unmount();
-  });
-
-  it('gives the up answer from a drag up that began in an overflowing detail already scrolled to its bottom', async () => {
-    const fake = fakeInbox();
-    const mounted = await mount(deckPage(fake, [threeWay]));
-    const scroller = overflowingDetail(mounted, 700);
-    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
-    expect(pendingActions(fake)).toEqual([]);
-    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
-    expect(pendingActions(fake)).toHaveLength(1);
-    expect(pendingActions(fake)[0]?.kind).not.toBe('discuss');
     await mounted.unmount();
   });
 
@@ -607,11 +604,11 @@ describe('Discuss: the fixed answer that is always down', () => {
     await mounted.unmount();
   });
 
-  it('still discusses from a drag that starts in a detail that does not overflow', async () => {
+  it('discusses from a drag down that starts on the card header', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay]));
-    const scroller = must(deckTop(mounted).querySelector<HTMLElement>('[data-attention-scroll]'), 'the detail');
-    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
+    const header = must(deckTop(mounted).querySelector<HTMLElement>('.fy-attn-card__meta'), 'the header');
+    await release(await dragBy(mounted, 0, 300, header), 0, 300);
     expect(pendingActions(fake).map(action => action.kind)).toEqual(['discuss']);
     await mounted.unmount();
   });

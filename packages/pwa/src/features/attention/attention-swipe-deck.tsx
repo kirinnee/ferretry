@@ -12,20 +12,18 @@
  *   and nothing is sent; past it the card flies off and the answer is handed to `onAct` — which, in the
  *   inbox, holds it for the undo window (`DeferredAttentionActions`) rather than posting it.
  * - DOWN IS ALWAYS DISCUSS (`attentionCanDiscuss`, never one of the card's three answers): a deliberate drag
- *   down on a card a ferret raised asks to talk it through. The card's detail is its own scroller, so a
- *   VERTICAL SWIPE NEVER FIGHTS A SCROLL ({@link verticalTargets}): a drag from the header, the title or the
- *   answer bar is ours — the CSS gives those parts `touch-action: none` (`pan-up` when the card has no up
- *   answer), so the browser never takes it — and a drag that starts inside a detail that overflows counts
- *   as ↓ only when that detail was already scrolled to its top, and as ↑ only when it was already at its
- *   bottom. Anywhere else in the detail it is the reader scrolling. Either way it commits only past the
- *   same clear distance as a sideways swipe (`swipeThreshold`). The Discuss button and ArrowDown are the
- *   same answer for a reader who does not swipe.
+ *   down on a card a ferret raised asks to talk it through. It commits only past the same clear distance
+ *   as a sideways swipe (`swipeThreshold`). The Discuss button and ArrowDown are the same answer for a
+ *   reader who does not swipe.
+ * - A SWIPE STARTS ONLY FROM THE CARD'S HEAD ({@link startsInHandle}): its header and title. The detail
+ *   below is its own scroller and the answer bar is for pressing, so a drag there is the reader scrolling
+ *   or tapping, never an answer — the card is the full height of the screen, and most of it scrolls.
  * - A SCROLL IS NEVER A SWIPE. `touch-action` on the card hands the browser every direction the card does
  *   not use: with no up answer it keeps vertical panning entirely (`pan-y`), and with one it keeps only
  *   the downward pan (`pan-down`) — the detail inside it scrolls on that rule, and only the parts
  *   outside the detail narrow it for Discuss (above).
- *   A drag never starts in the reply box, and a drag that moved swallows the click it ends in, so
- *   swiping across a button does not also press it.
+ *   A drag that moved swallows the click it ends in, so a swipe that ends over a button does not also
+ *   press it.
  * - KEYBOARD AND SCREEN-READER PARITY: the same answers are the card's own buttons, and a focused card
  *   takes ←, →, ↑ and ↓ for the mapped answer ({@link AttentionCardFrame}), said in an sr-only hint.
  * - REDUCED MOTION (the OS preference, or Settings › Appearance › Motion) drops the fly-off and the
@@ -262,6 +260,13 @@ export const scrollStartOf = (target: EventTarget | null): ScrollStart | null =>
 const startsInField = (target: EventTarget | null): boolean =>
   target instanceof Element && target.closest('textarea, input, select, [contenteditable="true"]') !== null;
 
+/**
+ * A SWIPE STARTS ONLY FROM THE CARD'S HEAD — its header and its title, the part every card has in the same
+ * place. The detail is for scrolling and the answer bar for pressing, so neither ever turns into a swipe.
+ */
+const startsInHandle = (target: EventTarget | null): boolean =>
+  target instanceof Element && target.closest('.fy-attn-card__meta, [data-attention-title]') !== null;
+
 export interface AttentionSwipeDeckProps {
   /** The deck, newest first: the first card is on top. */
   readonly cards: readonly InboxCard[];
@@ -335,7 +340,12 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>): void => {
     swallowClick.current = false;
-    if (top === undefined || (event.pointerType === 'mouse' && event.button !== 0) || startsInField(event.target))
+    if (
+      top === undefined ||
+      (event.pointerType === 'mouse' && event.button !== 0) ||
+      startsInField(event.target) ||
+      !startsInHandle(event.target)
+    )
       return;
     gesture.current = {
       pointerId: event.pointerId,

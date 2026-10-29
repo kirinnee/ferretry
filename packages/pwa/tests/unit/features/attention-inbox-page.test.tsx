@@ -215,6 +215,50 @@ describe('AttentionInboxPage list and card', () => {
     await mounted.unmount();
   });
 
+  it('skips forward, several in a row, and past the last says "You skipped N" — Review starts over', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const skip = () =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-skip]'), 'Skip');
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBe('A2');
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBe('A1');
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBeUndefined();
+    const end = must(mounted.container.querySelector('[data-attention-queue-end]'), 'the end of the queue');
+    expect(end.textContent).toContain('You skipped 3 — review them now?');
+    expect(mounted.container.querySelector('[data-attention-row][aria-current]')).toBeNull();
+    await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click());
+    expect(paneItem(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('answering the last item after skipping the others ends the queue instead of jumping back to the first', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const skip = () =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-skip]'), 'Skip');
+    await interact(() => skip().click());
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBe('A1');
+    const done = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-answer="right"]'),
+      'Got it',
+    );
+    await interact(() => done.click());
+    expect(paneItem(mounted)).toBeUndefined();
+    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain(
+      'You skipped 2 — review them now?',
+    );
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-later]'), 'Later').click(),
+    );
+    const later = must(mounted.container.querySelector('[data-attention-queue-end="later"]'), 'caught up');
+    expect(later.textContent).toContain('All caught up for now');
+    expect(later.textContent).toContain('2 are still open');
+    expect(rowTitles(mounted)).toHaveLength(2);
+    await mounted.unmount();
+  });
+
   it('narrows to one machine and to what Find matches, and offers the way back when nothing does', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
     const machine = must(mounted.container.querySelector<HTMLSelectElement>('[data-attention-machine]'), 'machines');
@@ -385,8 +429,9 @@ describe('AttentionInboxPage list and card', () => {
     expect(inbox()).toBe('card');
     const top = mounted.container.querySelector('.fy-attn-deck__top');
     expect(top?.querySelector('[data-attention-title]')?.textContent).toBe('Ship it?');
+    // Only what comes AFTER the tapped item is dealt, and it was the last one.
     expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe(
-      '1 more after this one · Swipe ← Hold · → Ship · ↓ Discuss',
+      'Swipe ← Hold · → Ship · ↓ Discuss',
     );
     const link = top?.querySelector<HTMLAnchorElement>('a[href*="?attention="]');
     const href = link?.getAttribute('href') ?? '';
@@ -397,6 +442,28 @@ describe('AttentionInboxPage list and card', () => {
       must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-back]'), 'Back').click(),
     );
     expect(inbox()).toBe('list');
+    await mounted.unmount();
+  });
+
+  it('on a phone deals only the items AFTER the tapped one, skips forward, and ends with "You skipped N"', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], { phone: true, initialOpen: twoWay.key }));
+    const top = () => mounted.container.querySelector('.fy-attn-deck__top [data-attention-card]');
+    expect(top()?.getAttribute('data-attention-card')).toBe('A2');
+    expect(mounted.container.querySelectorAll('.fy-attn-deck__peek')).toHaveLength(1);
+    expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toContain('1 more after this one');
+    const skip = () =>
+      must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [data-attention-skip]'), 'Skip');
+    await interact(() => skip().click());
+    expect(top()?.getAttribute('data-attention-card')).toBe('A1');
+    await interact(() => skip().click());
+    expect(top()).toBeNull();
+    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain(
+      'You skipped 3 — review them now?',
+    );
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click(),
+    );
+    expect(top()?.getAttribute('data-attention-card')).toBe('A3');
     await mounted.unmount();
   });
 
@@ -595,33 +662,30 @@ describe('AttentionCard swipe hints', () => {
 });
 
 describe('AttentionCard context', () => {
-  it('shows a short context whole, and folds a long one behind Show more / Show less', async () => {
+  it('draws the context open and whole, however long, and nothing for a blank one', async () => {
     const short = await mount(
       <AttentionCard item={attentionItem('A7', { context: 'Halfway through.' })} onAct={() => {}} />,
     );
-    const shortContext = must(short.container.querySelector('.fy-attn-card__context'), 'the context');
-    expect(shortContext.textContent).toBe('Halfway through.');
-    expect(shortContext.hasAttribute('data-open')).toBe(true);
-    expect(short.container.querySelector('.fy-attn-card__more')).toBeNull();
+    const shortContext = must(short.container.querySelector('[data-attention-section="context"]'), 'the context');
+    expect(shortContext.textContent).toContain('Halfway through.');
+    expect(short.container.querySelector('[data-attention-body-toggle]')).toBeNull();
     await short.unmount();
 
     const long = await mount(
       <AttentionCard item={attentionItem('A6', { context: 'word '.repeat(80) })} onAct={() => {}} />,
     );
-    const context = (): Element => must(long.container.querySelector('.fy-attn-card__context'), 'the long context');
-    const more = (): HTMLButtonElement =>
-      must(long.container.querySelector<HTMLButtonElement>('.fy-attn-card__more'), 'the fold toggle');
-    expect(context().hasAttribute('data-open')).toBe(false);
-    expect(more().textContent).toBe('Show more');
-    await interact(() => more().click());
-    expect(context().hasAttribute('data-open')).toBe(true);
-    expect(more().getAttribute('aria-expanded')).toBe('true');
-    expect(more().textContent).toBe('Show less');
+    const longContext = must(
+      long.container.querySelector('[data-attention-section="context"] .fy-attn-sec__body'),
+      'the long context',
+    );
+    expect(longContext.textContent?.match(/word/gu)).toHaveLength(80);
+    expect(long.container.querySelector('[data-attention-body-toggle]')).toBeNull();
     await long.unmount();
 
-    // Blank context is no context at all.
-    const blank = await mount(<AttentionCard item={attentionItem('A5', { context: '   ' })} onAct={() => {}} />);
-    expect(blank.container.querySelector('.fy-attn-card__context')).toBeNull();
+    const blank = await mount(
+      <AttentionCard item={attentionItem('A5', { context: '   ', subject: 'Same', why: 'Same' })} onAct={() => {}} />,
+    );
+    expect(blank.container.querySelector('[data-attention-section="context"]')).toBeNull();
     await blank.unmount();
   });
 });

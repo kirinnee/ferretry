@@ -287,6 +287,10 @@ export type AttentionLink = z.infer<typeof AttentionLinkSchema>;
  * needs (docs/attention.md, "What an item says").
  */
 export const AttentionBriefShape = {
+  /** The situation the item comes out of — what is going on — in point form, so a cold reader starts here. */
+  premise: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
+  /** Earlier answers that bear on this one, in point form: what the owner already decided. */
+  decided: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** Jargon the item uses, each spelled out. */
   terms: z.array(AttentionTermSchema).min(1).max(MAX_ATTENTION_TERMS).optional(),
   /** What the owner is asked, one entry per decision. */
@@ -312,6 +316,8 @@ export type AttentionBrief = {
 
 /** Just the structured fields an item or a request carries, with the absent ones left out. */
 export const attentionBriefOf = (value: AttentionBrief): AttentionBrief => ({
+  ...(value.premise === undefined ? {} : { premise: value.premise }),
+  ...(value.decided === undefined ? {} : { decided: value.decided }),
   ...(value.terms === undefined ? {} : { terms: value.terms }),
   ...(value.questions === undefined ? {} : { questions: value.questions }),
   ...(value.recommendation === undefined ? {} : { recommendation: value.recommendation }),

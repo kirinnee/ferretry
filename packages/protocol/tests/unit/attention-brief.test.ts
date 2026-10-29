@@ -76,6 +76,43 @@ describe('attention brief', () => {
     should(singleAttentionQuestion(item)).be.undefined();
   });
 
+  it('should carry a premise and what was decided, turning a list into bullets, through the request and the item', () => {
+    // Arrange
+    const asList = {
+      premise: ['The work login expires every day', 'A plan exists'],
+      decided: ['Use the shared account'],
+    };
+    const asText = { premise: 'The work login expires every day.', decided: '- You chose the shared account' };
+
+    // Act
+    const request = AttentionActionRequestSchema.parse({
+      action: 'add',
+      subject: minimal.subject,
+      why: minimal.why,
+      howToResolve: minimal.howToResolve,
+      ask: { kind: 'open-question' },
+      ...asList,
+    });
+    const edit = AttentionActionRequestSchema.parse({ action: 'edit', id: 'A1', ...asList });
+    const item = AttentionItemSchema.parse({ ...minimal, ...asText });
+
+    // Assert
+    should(request).containDeep({
+      premise: '- The work login expires every day\n- A plan exists',
+      decided: '- Use the shared account',
+    });
+    should(edit).containDeep({ premise: '- The work login expires every day\n- A plan exists' });
+    should(attentionBriefOf(item)).deepEqual(asText);
+    should(attentionBriefOf(AttentionItemSchema.parse(minimal))).not.have.property('premise');
+    should(attentionBriefOf(AttentionItemSchema.parse(minimal))).not.have.property('decided');
+  });
+
+  it('should refuse a blank or oversized premise', () => {
+    // Arrange / Act / Assert
+    should(AttentionItemSchema.safeParse({ ...minimal, premise: '   ' }).success).be.false();
+    should(AttentionItemSchema.safeParse({ ...minimal, decided: 'x'.repeat(10_000) }).success).be.false();
+  });
+
   it('should carry steps, a body and progress, and refuse what is over the limit or inconsistent', () => {
     // Arrange
     const steps = ['Run `fy login`', 'Paste the code'];

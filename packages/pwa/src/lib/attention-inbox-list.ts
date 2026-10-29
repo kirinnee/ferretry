@@ -133,30 +133,34 @@ export const filterInboxResolved = (
       matchesWords(searchable(row.view, row.machineName, row.record), filter.query),
   );
 
+/** The selection past the last item: "You skipped N — review them?" rather than a jump back to the top. */
+export const QUEUE_END = '\u0000end';
+
 /**
- * Which item is selected now, given the order the list had when `chosen` was picked and the order it
- * has now. The chosen item while it is still listed; once it leaves (answered, dismissed, filtered out)
- * the item that came after it, else the one before it — so answering moves the reader on to the next
- * item instead of back to the top. `null` only when nothing is listed.
+ * Which item is selected now, given the order the list had when `chosen` was picked and the order it has
+ * now. THE QUEUE ONLY MOVES FORWARD: the chosen item while it is still listed; once it leaves (answered,
+ * dismissed, filtered out) the item that came after it; and past the last one {@link QUEUE_END} — never
+ * back to the first, so answering the sixth after skipping five does not deal the first again. `null`
+ * only when nothing is listed.
  */
 export const nextSelection = (
   before: readonly string[],
   chosen: string | null,
   now: readonly string[],
 ): string | null => {
-  if (chosen !== null && now.includes(chosen)) return chosen;
+  if (now.length === 0) return null;
+  if (chosen === null) return now[0] ?? null;
+  if (chosen === QUEUE_END || now.includes(chosen)) return chosen;
+  const at = before.indexOf(chosen);
+  if (at < 0) return now[0] ?? null;
   const listed = new Set(now);
-  const at = chosen === null ? -1 : before.indexOf(chosen);
-  if (at >= 0) {
-    const after = before.slice(at + 1).find(key => listed.has(key));
-    if (after !== undefined) return after;
-    const prior = before
-      .slice(0, at)
-      .reverse()
-      .find(key => listed.has(key));
-    if (prior !== undefined) return prior;
-  }
-  return now[0] ?? null;
+  return before.slice(at + 1).find(key => listed.has(key)) ?? QUEUE_END;
+};
+
+/** Skip: the item after `current`, or {@link QUEUE_END} past the last one. Several in a row is fine. */
+export const skipSelection = (order: readonly string[], current: string | null): string => {
+  const at = current === null ? -1 : order.indexOf(current);
+  return at < 0 ? (order[0] ?? QUEUE_END) : (order[at + 1] ?? QUEUE_END);
 };
 
 /** The key one step `by` from `current` in `order`, clamped at both ends; the first when none is current. */

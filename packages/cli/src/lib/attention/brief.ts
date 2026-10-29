@@ -33,8 +33,12 @@ export interface BriefFlags extends AskFlags {
   /** One line that describes the `up` answer. */
   readonly upWhy?: string;
   readonly why?: string;
-  /** Repeated: more than one becomes bullets. */
+  /** Repeated: the situation, one point each; more than one becomes bullets. */
+  readonly premise?: string | readonly string[];
+  /** Repeated: why it matters now, one point each; more than one becomes bullets. */
   readonly context?: string | readonly string[];
+  /** Repeated: earlier answers that bear on this, one point each. */
+  readonly decided?: string | readonly string[];
   readonly resolve?: string;
   /** `TERM=meaning`, repeated. */
   readonly term?: readonly string[];
@@ -69,7 +73,9 @@ const BriefFileSchema = z.strictObject({
   summary: z.string().optional(),
   up: z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]).optional(),
   why: z.string().optional(),
+  premise: Prose.optional(),
   context: Prose.optional(),
+  decided: Prose.optional(),
   resolve: z.string().optional(),
   kind: z.string().optional(),
   options: z.array(OptionInput).optional(),
@@ -140,7 +146,9 @@ export function composeAddRequest(
   const links = flags.link !== undefined && flags.link.length > 0 ? flags.link.map(link) : file.links?.map(link);
   const impact = prose(flags.impact) ?? prose(file.impact);
   const urgency = text(flags.urgency) ?? text(file.urgency);
+  const premise = prose(flags.premise) ?? prose(file.premise);
   const context = prose(flags.context) ?? prose(file.context);
+  const decided = prose(flags.decided) ?? prose(file.decided);
   const body = text(flags.body) ?? text(file.body);
   const answers = defaultAttentionAnswers(
     card.kind,
@@ -162,6 +170,8 @@ export function composeAddRequest(
     kind: card.kind,
     why: text(flags.why) ?? text(file.why) ?? subject,
     context: context ?? null,
+    ...(premise === undefined ? {} : { premise }),
+    ...(decided === undefined ? {} : { decided }),
     howToResolve: text(flags.resolve) ?? text(file.resolve) ?? DEFAULT_HOW_TO_RESOLVE,
     ...(ask === undefined ? {} : { ask }),
     ...(answers.length === 0 ? {} : { answers }),
@@ -390,7 +400,9 @@ function describeIssues(error: z.ZodError): string {
 export interface EditFlags {
   readonly title?: string;
   readonly summary?: string;
+  readonly premise?: string | readonly string[];
   readonly context?: string | readonly string[];
+  readonly decided?: string | readonly string[];
   readonly term?: readonly string[];
   /** The new wording of the item's questions, in order — as many as it has. */
   readonly question?: readonly string[];
@@ -417,7 +429,9 @@ export function composeEditRequest(
 ): Extract<AttentionActionRequest, { action: 'edit' }> {
   const summary = text(flags.summary);
   const title = text(flags.title) === undefined ? undefined : titleFrom(text(flags.title));
+  const premise = prose(flags.premise);
   const context = prose(flags.context);
+  const decided = prose(flags.decided);
   const impact = prose(flags.impact);
   const urgency = text(flags.urgency);
   const decision = text(flags.recommend);
@@ -441,7 +455,9 @@ export function composeEditRequest(
     id,
     ...(summary === undefined ? {} : { subject: summary }),
     ...(title === undefined ? {} : { title }),
+    ...(premise === undefined ? {} : { premise }),
     ...(context === undefined ? {} : { context }),
+    ...(decided === undefined ? {} : { decided }),
     ...(terms === undefined ? {} : { terms }),
     ...(questions === undefined ? {} : { questions }),
     ...(decision === undefined ? {} : { recommendation: { decision, ...(why === undefined ? {} : { why }) } }),

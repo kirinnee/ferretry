@@ -1,18 +1,25 @@
 /**
- * THE STRUCTURED PART OF AN ATTENTION ITEM, as collapsible sections: Context · Terms · Questions ·
- * Recommendation · Impact · Links, each only when the item has it. Every surface draws the same ones
- * (the inbox card, the in-ferret sheet and the board page), so a reader learns one layout.
+ * THE STRUCTURED PART OF AN ATTENTION ITEM, as sections in ONE fixed order, each only when the item has it:
+ * Premise · Context · The question · Already decided · Options · Recommendation · Impact · Terms · Steps ·
+ * More detail · Links. Every surface draws the same ones (the inbox card, the in-ferret sheet and the board
+ * page), so a reader learns one layout.
  *
- * Collapsed by default EXCEPT the first question: the reader sees what they are being asked without
- * opening anything. Native `<details>` — keyboard and screen-reader friendly, no state to lose.
+ * PREMISE AND CONTEXT ARE TWO THINGS. The premise is the situation the item comes out of — what is going
+ * on, in point form, so a cold reader starts there. The context is why it matters now. They have their own
+ * headings and their own look so they are never read as one block.
+ *
+ * Two layouts. The CARD's is open: every section is drawn in full under a small heading, because a card
+ * stands alone and nothing on it hides behind a click (only a long "More detail" is previewed). The
+ * BOARD's is collapsible: native `<details>`, closed except the first question.
  *
  * An item with SEVERAL questions and an open-question ask is answered one answer per question: each
  * question gets its own picker here, and the answers leave together (`composeQuestionAnswers`).
  */
 
-import type { AttentionItem, AttentionLink, AttentionQuestion } from '@ferretry/protocol';
-import { Check, ChevronRight, ExternalLink } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
+import type { AttentionItem, AttentionLink, AttentionQuestion, AttentionRecommendation } from '@ferretry/protocol';
+import { attentionCardKind, recommendedAttentionOption } from '@ferretry/protocol';
+import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, ExternalLink } from 'lucide-react';
+import { Fragment, type ReactNode, useId } from 'react';
 
 type AttentionProse = (text: string) => ReactNode;
 
@@ -49,7 +56,13 @@ interface QuestionAnswers {
 /** The word the badge on a recommended option says; a badge, so the pick never rests on colour alone. */
 const RECOMMENDED_WORD = 'Recommended';
 
-export function RecommendedBadge() {
+const OPTION_ARROWS: Readonly<Record<'left' | 'up' | 'right', ReactNode>> = {
+  left: <ArrowLeft aria-hidden="true" size={13} />,
+  up: <ArrowUp aria-hidden="true" size={13} />,
+  right: <ArrowRight aria-hidden="true" size={13} />,
+};
+
+function RecommendedBadge() {
   return (
     <span className="fy-attn-recommended" data-attention-recommended="">
       <Check aria-hidden="true" size={11} />
@@ -58,17 +71,38 @@ export function RecommendedBadge() {
   );
 }
 
+/**
+ * What the ask is called on this card: a note says what happened, a to-do is something to do, and only a
+ * card that asks something calls it a question.
+ */
+const askHeading = (item: Pick<AttentionItem, 'kind' | 'ask'>, several: boolean): string => {
+  if (several) return 'The questions';
+  const kind = attentionCardKind(item);
+  return kind === 'info' ? 'What happened' : kind === 'task' ? 'To do' : 'The question';
+};
+
 function Section({
   name,
   title,
+  fold,
   open = false,
   children,
 }: {
   readonly name: string;
   readonly title: string;
+  /** Collapsible (`<details>`) rather than always drawn open. */
+  readonly fold: boolean;
   readonly open?: boolean;
   readonly children: ReactNode;
 }) {
+  if (!fold) {
+    return (
+      <div className={`fy-attn-sec fy-attn-sec--open fy-attn-sec--${name}`} data-attention-section={name}>
+        <h4 className="fy-attn-sec__heading">{title}</h4>
+        <div className="fy-attn-sec__body">{children}</div>
+      </div>
+    );
+  }
   return (
     <details className="fy-attn-sec" data-attention-section={name} open={open}>
       <summary className="fy-attn-sec__title">
@@ -201,104 +235,177 @@ export interface AttentionBriefProps {
   readonly renderProse: AttentionProse;
   /** Present only when the item is answered one answer per question. */
   readonly picker?: QuestionAnswers;
-  /** Every section starts open: the card is open, so it shows everything it holds. */
-  readonly expanded?: boolean;
-  /** The card already says its recommendation above the detail; drawing it again would be noise. */
-  readonly showRecommendation?: boolean;
   /**
-   * The card already draws the ask, the recommendation and the options as its answers: a LONE question
-   * would only say the ask again in other words, so its section is left out. Several questions, or one
-   * answered here (a picker), still draw.
+   * Sections fold behind a `<summary>` (the board). `false` draws every section open under a small heading
+   * (the card). Default: collapsible.
+   */
+  readonly collapsible?: boolean;
+  /** Collapsible only: every section starts open. */
+  readonly expanded?: boolean;
+  /**
+   * The card already draws the ask: a LONE question would only say it again in other words, so its section
+   * is left out. Several questions, or one answered here (a picker), still draw.
    */
   readonly askShown?: boolean;
-  /** Drawn right after Context: the body and steps, which read as the context's continuation. */
-  readonly children?: ReactNode;
+  /** The ask itself, drawn at the head of "The question" — when it is not already the card's title. */
+  readonly ask?: string;
+  /** The item's `why` when it adds something, drawn with the context under "Why it matters now". */
+  readonly why?: string | null;
+  /** What to draw as the recommendation; defaults to the item's own. A lone question's pick goes here. */
+  readonly recommendation?: AttentionRecommendation | undefined;
+  /** Which way each option swipes, by label: the card draws it as an arrow in front of the option. */
+  readonly optionDirections?: Readonly<Record<string, 'left' | 'up' | 'right'>>;
+  /** The steps checklist, drawn under "Steps". */
+  readonly steps?: ReactNode;
+  /** The body, drawn under "More detail" — the one section that may start folded. */
+  readonly detail?: ReactNode;
 }
 
-/** The brief's sections, in order. `null` for an item with none, so an old item stays minimal. */
+/** The options of a choice, when at least one says what happens if it is picked: the point of listing them. */
+const describedOptions = (
+  item: AttentionItem,
+  several: boolean,
+): readonly { readonly label: string; readonly description?: string | undefined }[] => {
+  if (several) return [];
+  const options = item.ask?.kind === 'multiple-choice' ? item.ask.options : (item.questions?.[0]?.options ?? []);
+  return options.some(option => option.description !== undefined) ? options : [];
+};
+
+/** The brief's sections, in order. Nothing for an item with none, so an old item stays minimal. */
 export function AttentionBriefSections({
   item,
   renderProse,
   picker,
+  collapsible = true,
   expanded = false,
-  showRecommendation = true,
   askShown = false,
-  children,
+  ask,
+  why = null,
+  recommendation = item.recommendation,
+  optionDirections,
+  steps,
+  detail,
 }: AttentionBriefProps) {
+  const fold = collapsible;
+  const open = expanded || !collapsible;
+  const premise = item.premise?.trim() ? item.premise : null;
+  const decided = item.decided?.trim() ? item.decided : null;
   const context = item.context?.trim() ? item.context : null;
   const all = item.questions ?? [];
   const several = all.length > 1;
   const questions = askShown && !several && picker === undefined ? [] : all;
+  const options = describedOptions(item, several);
+  const pick = recommendedAttentionOption(item);
+  const termsLine = item.terms ?? null;
   return (
-    <div className="fy-attn-secs">
-      {context === null ? null : (
-        <Section name="context" open={expanded} title="Context">
-          <div className="fy-attn-prose">{renderProse(context)}</div>
+    <div className="fy-attn-secs" data-layout={fold ? 'fold' : 'open'}>
+      {premise === null ? null : (
+        <Section fold={fold} name="premise" open={open} title={fold ? "What's going on" : 'Premise'}>
+          <PointForm className="fy-attn-prose" text={premise} />
         </Section>
       )}
-      {children}
-      {item.terms === undefined ? null : (
-        <Section name="terms" open={expanded} title={`Terms (${item.terms.length})`}>
-          <dl className="fy-attn-terms">
-            {item.terms.map(entry => (
-              <div className="fy-attn-terms__row" key={entry.term}>
-                <dt>{entry.term}</dt>
-                <dd>{entry.meaning}</dd>
-              </div>
-            ))}
-          </dl>
+      {context === null && why === null ? null : (
+        <Section fold={fold} name="context" open={open} title="Context">
+          {why === null ? null : (
+            <div className="fy-attn-prose" data-attention-why="">
+              {renderProse(why)}
+            </div>
+          )}
+          {context === null ? null : <div className="fy-attn-prose">{renderProse(context)}</div>}
         </Section>
       )}
-      {questions.length === 0 ? null : (
-        <Section name="questions" open title={several ? `Questions (${questions.length})` : 'Question'}>
-          <ol className="fy-attn-q" data-several={several || undefined}>
-            {questions.map((question, index) =>
-              index === 0 || !several ? (
-                <li className="fy-attn-q__item" data-attention-question={index} key={question.question}>
-                  <Question
-                    index={index}
-                    numbered={several}
-                    picker={picker}
-                    question={question}
-                    showWhy={picker !== undefined || !several}
-                  />
+      {ask === undefined && questions.length === 0 ? null : (
+        <Section fold={fold} name="questions" open title={askHeading(item, several)}>
+          {ask === undefined ? null : (
+            <p className="fy-attn-card__ask" data-attention-ask="">
+              {ask}
+            </p>
+          )}
+          {questions.length === 0 ? null : (
+            <ol className="fy-attn-q" data-several={several || undefined}>
+              {questions.map((question, index) =>
+                index === 0 || !several ? (
+                  <li className="fy-attn-q__item" data-attention-question={index} key={question.question}>
+                    <Question
+                      index={index}
+                      numbered={several}
+                      picker={picker}
+                      question={question}
+                      showWhy={picker !== undefined || !several}
+                    />
+                  </li>
+                ) : (
+                  <li className="fy-attn-q__item" data-attention-question={index} key={question.question}>
+                    <details className="fy-attn-sec fy-attn-sec--nested" open={open}>
+                      <summary className="fy-attn-sec__title">
+                        <ChevronRight aria-hidden="true" className="fy-attn-sec__chevron" size={14} />
+                        {`${index + 1}. ${question.question}`}
+                        {(picker?.answers[index] ?? '') === '' ? null : (
+                          <Check aria-label="answered" className="fy-attn-q__done" size={12} />
+                        )}
+                      </summary>
+                      <div className="fy-attn-sec__body">
+                        <Question
+                          index={index}
+                          numbered={false}
+                          picker={picker}
+                          question={question}
+                          showWhy={picker !== undefined}
+                        />
+                      </div>
+                    </details>
+                  </li>
+                ),
+              )}
+            </ol>
+          )}
+        </Section>
+      )}
+      {decided === null ? null : (
+        <Section fold={fold} name="decided" open={open} title="Already decided">
+          <PointForm className="fy-attn-prose" text={decided} />
+        </Section>
+      )}
+      {options.length === 0 ? null : (
+        <Section fold={fold} name="options" open={open} title="Options">
+          <ul className="fy-attn-options">
+            {options.map(option => {
+              const direction = optionDirections?.[option.label.trim()];
+              return (
+                <li className="fy-attn-options__row" data-attention-option-detail={option.label} key={option.label}>
+                  {direction === undefined || fold ? null : (
+                    <span className="fy-attn-options__arrow" data-direction={direction}>
+                      {OPTION_ARROWS[direction]}
+                    </span>
+                  )}
+                  <span className="fy-attn-options__text">
+                    <strong>{option.label}</strong>
+                    {option.description === undefined ? null : (
+                      <span className="fy-attn-options__what"> — {option.description}</span>
+                    )}
+                    {pick === option.label.trim() && (fold || recommendation === undefined) ? (
+                      <RecommendedBadge />
+                    ) : null}
+                  </span>
                 </li>
-              ) : (
-                <li className="fy-attn-q__item" data-attention-question={index} key={question.question}>
-                  <details className="fy-attn-sec fy-attn-sec--nested" open={expanded}>
-                    <summary className="fy-attn-sec__title">
-                      <ChevronRight aria-hidden="true" className="fy-attn-sec__chevron" size={14} />
-                      {`${index + 1}. ${question.question}`}
-                      {(picker?.answers[index] ?? '') === '' ? null : (
-                        <Check aria-label="answered" className="fy-attn-q__done" size={12} />
-                      )}
-                    </summary>
-                    <div className="fy-attn-sec__body">
-                      <Question
-                        index={index}
-                        numbered={false}
-                        picker={picker}
-                        question={question}
-                        showWhy={picker !== undefined}
-                      />
-                    </div>
-                  </details>
-                </li>
-              ),
-            )}
-          </ol>
+              );
+            })}
+          </ul>
         </Section>
       )}
-      {item.recommendation === undefined || !showRecommendation ? null : (
-        <Section name="recommendation" open={expanded} title="Recommendation">
-          <p className="fy-attn-prose">
-            <strong>{item.recommendation.decision}</strong>
-            {item.recommendation.why === undefined ? null : <> — {item.recommendation.why}</>}
+      {recommendation === undefined ? null : (
+        <Section fold={fold} name="recommendation" open={open} title={fold ? 'Recommendation' : 'Recommended'}>
+          <p className="fy-attn-card__rec" data-attention-recommendation="">
+            <RecommendedBadge />
+            <span>
+              <strong>{recommendation.decision}</strong>
+              {recommendation.why === undefined ? null : <> — {recommendation.why}</>}
+            </span>
           </p>
         </Section>
       )}
       {item.impact === undefined && item.urgency === undefined ? null : (
-        <Section name="impact" open={expanded} title="Impact">
+        <Section fold={fold} name="impact" open={open} title="Impact">
           {item.impact === undefined ? null : <PointForm className="fy-attn-prose" text={item.impact} />}
           {item.urgency === undefined ? null : (
             <p className="fy-attn-prose">
@@ -307,8 +414,43 @@ export function AttentionBriefSections({
           )}
         </Section>
       )}
+      {steps === undefined ? null : (
+        <Section fold={fold} name="steps" open={open} title="Steps">
+          {steps}
+        </Section>
+      )}
+      {termsLine === null ? null : (
+        <Section fold={fold} name="terms" open={open} title={fold ? `Terms (${termsLine.length})` : 'Terms'}>
+          {fold ? (
+            <dl className="fy-attn-terms">
+              {termsLine.map(entry => (
+                <div className="fy-attn-terms__row" key={entry.term}>
+                  <dt>{entry.term}</dt>
+                  <dd>{entry.meaning}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="fy-attn-terms-line" data-attention-terms-line="">
+              {termsLine.map((entry, index) => (
+                <Fragment key={entry.term}>
+                  {index === 0 ? null : <span aria-hidden="true"> · </span>}
+                  <span className="fy-attn-terms-line__item">
+                    <strong>{entry.term}</strong> = {entry.meaning}
+                  </span>
+                </Fragment>
+              ))}
+            </p>
+          )}
+        </Section>
+      )}
+      {detail === undefined ? null : (
+        <Section fold={fold} name="more" open={open} title="More detail">
+          {detail}
+        </Section>
+      )}
       {item.links === undefined ? null : (
-        <Section name="links" open={expanded} title={`Links (${item.links.length})`}>
+        <Section fold={fold} name="links" open={open} title={fold ? `Links (${item.links.length})` : 'Links'}>
           <ul className="fy-attn-links">
             {item.links.map(link => (
               <li key={`${link.label ?? ''}\u0000${link.target}`}>

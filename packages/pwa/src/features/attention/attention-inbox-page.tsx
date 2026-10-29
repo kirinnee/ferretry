@@ -18,7 +18,7 @@
  */
 
 import { attentionCardAnswers, DISCUSS_LABEL } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, MessagesSquare, Search, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, MessagesSquare, Search, SkipForward, X } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
@@ -44,6 +44,8 @@ import {
   inboxRowAsk,
   inboxRowTitle,
   nextSelection,
+  QUEUE_END,
+  skipSelection,
   stepSelection,
 } from '../../lib/attention-inbox-list.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -100,6 +102,7 @@ const renderInboxCard = (
   card: InboxCard,
   act: (action: InboxAction) => void,
   swipeHints: boolean,
+  onSkip?: () => void,
 ) => {
   const origin = inboxCardOrigin(card, onNavigate);
   return (
@@ -107,6 +110,7 @@ const renderInboxCard = (
       error={failureFor(inbox.deferredState.failed, card.key)}
       item={card.item}
       key={card.key}
+      {...(onSkip === undefined ? {} : { onSkip })}
       onAct={act}
       origin={origin}
       swipeHints={swipeHints}
@@ -130,6 +134,44 @@ const renderInboxCard = (
     />
   );
 };
+
+/**
+ * Past the last item: the ones the reader skipped are still open. Said once, with the way back to them —
+ * never a silent jump to the top of the list. "Later" leaves them where they are: the reader is caught up
+ * for now, and the skipped cards wait in the inbox.
+ */
+function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonly onReview: () => void }) {
+  const [later, setLater] = useState(false);
+  if (later)
+    return (
+      <div className="fy-attn-end" data-attention-queue-end="later">
+        <span aria-hidden="true" className="fy-attn-inbox__empty-mark">
+          <CheckCheck size={24} />
+        </span>
+        <h2 className="fy-attn-end__title">All caught up for now</h2>
+        <p className="fy-attn-end__text">
+          Skipped cards wait in the inbox — {remaining} {remaining === 1 ? 'is' : 'are'} still open.
+        </p>
+      </div>
+    );
+  return (
+    <div className="fy-attn-end" data-attention-queue-end="">
+      <span aria-hidden="true" className="fy-attn-inbox__empty-mark">
+        <SkipForward size={24} />
+      </span>
+      <h2 className="fy-attn-end__title">You skipped {remaining} — review them now?</h2>
+      <div className="fy-attn-end__actions">
+        <button className="kt-btn" data-attention-review="" data-variant="primary" onClick={onReview} type="button">
+          Review skipped
+          <ArrowRight aria-hidden="true" size={14} />
+        </button>
+        <button className="kt-btn" data-attention-later="" onClick={() => setLater(true)} type="button">
+          Later
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** Refusals whose card is no longer on the deck: said once, until the reader dismisses them. */
 function OrphanedFailures({ inbox }: { readonly inbox: AttentionInbox }) {
@@ -573,7 +615,10 @@ export function AttentionInboxPage({
   const empty = inbox.cards.length === 0;
   const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readRecent, onProgress, recentOpen };
-  const cardOpen = phone && opened && filter === 'open' && selected !== undefined;
+  const atEnd = selectedKey === QUEUE_END;
+  const skip = (): void => setChosen(skipSelection(order, selectedKey));
+  const review = (): void => setChosen(order[0] ?? null);
+  const cardOpen = phone && opened && filter === 'open' && (selected !== undefined || atEnd);
 
   const header = (
     <header className="fy-attn-inbox__head">
@@ -630,22 +675,26 @@ export function AttentionInboxPage({
         selectedKey={phone ? null : selectedKey}
         showMachine={machines.length > 1}
       />
-      {phone || selected === undefined ? null : (
+      {phone ? null : atEnd ? (
+        <section aria-label="Skipped items" className="fy-attn-inbox__pane" data-attention-pane="end">
+          <QueueEnd onReview={review} remaining={visible.length} />
+        </section>
+      ) : selected === undefined ? null : (
         <section
           aria-label={`${inboxRowTitle(selected.item)} — selected item`}
           className="fy-attn-inbox__pane"
           data-attention-pane={selected.key}
         >
-          {renderInboxCard(host, selected, action => inbox.deferred.schedule(selected, action), false)}
+          {renderInboxCard(host, selected, action => inbox.deferred.schedule(selected, action), false, skip)}
         </section>
       )}
     </div>
   );
 
   if (cardOpen) {
-    // The phone's full-screen card: the chosen item on top, the ones after it next in line.
-    const at = Math.max(0, visible.indexOf(selected));
-    const deck = [...visible.slice(at), ...visible.slice(0, at)];
+    // The phone's full-screen card: the chosen item on top, the ones AFTER it next in line — never the
+    // ones before it, so the queue only moves forward; past the last one, the skipped ones are offered.
+    const deck = selected === undefined ? [] : visible.slice(Math.max(0, visible.indexOf(selected)));
     return (
       <main aria-labelledby={headingId} className="fy-attn-inbox" data-attention-inbox="card">
         <header className="fy-attn-inbox__cardbar">
@@ -662,18 +711,28 @@ export function AttentionInboxPage({
           ) : null}
         </header>
         <OrphanedFailures inbox={inbox} />
-        <div className="fy-attn-inbox__deck" data-attention-deck-host="">
-          <AttentionSwipeDeck
-            cards={deck}
-            onAct={(card, action) => inbox.deferred.schedule(card, action)}
-            {...(reducedMotion === undefined ? {} : { reducedMotion })}
-            renderCard={(card, act) => renderInboxCard(host, card, act, true)}
-          />
-          <p className="fy-attn-inbox__hint">
-            {deck.length > 1 ? `${deck.length - 1} more after this one · ` : ''}
-            {swipeHintFor(deck[0])}
-          </p>
-        </div>
+        {atEnd ? (
+          // The end sits where the card did, at its height: the deck's peek gap and hint line are kept.
+          <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">
+            <QueueEnd onReview={review} remaining={visible.length} />
+            <p aria-hidden="true" className="fy-attn-inbox__hint" />
+          </div>
+        ) : (
+          <div className="fy-attn-inbox__deck" data-attention-deck-host="">
+            <AttentionSwipeDeck
+              cards={deck}
+              onAct={(card, action) => inbox.deferred.schedule(card, action)}
+              {...(reducedMotion === undefined ? {} : { reducedMotion })}
+              renderCard={(card, act) =>
+                renderInboxCard(host, card, act, true, card.key === selectedKey ? skip : undefined)
+              }
+            />
+            <p className="fy-attn-inbox__hint">
+              {deck.length > 1 ? `${deck.length - 1} more after this one · ` : ''}
+              {swipeHintFor(deck[0])}
+            </p>
+          </div>
+        )}
         <AttentionUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
       </main>
     );

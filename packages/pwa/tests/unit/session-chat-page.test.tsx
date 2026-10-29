@@ -2442,7 +2442,10 @@ describe('SessionChatPage', () => {
     });
 
     test('a new navigation to the SAME item re-targets it', () => {
-      const props = { attention: attentionModel([attentionItem], [resolvedItem]), attentionTarget: 'A3' as const };
+      const props = {
+        attention: attentionModel([attentionItem, { ...attentionItem, id: 'A2' as const }], [resolvedItem]),
+        attentionTarget: 'A3' as const,
+      };
       const page = renderSessionChatPage(chatPage({ ...props, attentionTargetKey: 'entry-1' }));
       try {
         run(() => panel(page.root).props.onSelect('A2'));
