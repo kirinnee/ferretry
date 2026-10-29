@@ -247,6 +247,35 @@ describe('fetch enhancement transport', () => {
     should(actual).deepEqual({ kind: 'status', status: 502 });
   });
 
+  it('should still answer oversized when the stream it cut off cannot be cancelled', async () => {
+    // Arrange — a reader whose cancel throws as soon as it is called, after it has sent too much
+    let cancelAttempts = 0;
+    const transport = new FetchEnhancementTransport(
+      async () =>
+        ({
+          ok: true,
+          status: 200,
+          headers: new Headers(),
+          body: {
+            getReader: () => ({
+              read: async () => ({ done: false, value: new Uint8Array(64) }),
+              cancel: () => {
+                cancelAttempts += 1;
+                throw new Error('already detached');
+              },
+            }),
+          },
+        }) as unknown as Response,
+    );
+
+    // Act
+    const actual = await transport.send({ ...request, maxResponseBytes: 16 });
+
+    // Assert
+    should(actual).deepEqual({ kind: 'oversized' });
+    should(cancelAttempts).equal(1);
+  });
+
   it('should report a bodiless error response without attempting a cancel', async () => {
     // Arrange
     const transport = new FetchEnhancementTransport();

@@ -210,4 +210,15 @@ describe('ExplicitDaemonConfig', () => {
     should(written.analyticsPricingSources).deepEqual([{ ...configuredSource, lastSyncedAt: syncedAt }]);
     should(JSON.parse(await readFile(homePath, 'utf8'))).deepEqual(home);
   });
+
+  it('should surface a --config path it cannot read rather than treating it as not written yet', async () => {
+    // Arrange — a directory where the document should be: present, but not readable as a file.
+    const directory = await tempDirectory('fyd-explicit-unreadable');
+    const path = join(directory, 'daemon.json');
+    await mkdir(path);
+    const store = new ExplicitDaemonConfig(path);
+
+    // Act + Assert
+    await should(store.readPricing()).be.rejected();
+  });
 });

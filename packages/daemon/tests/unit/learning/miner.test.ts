@@ -211,6 +211,44 @@ test('mines only a session with resolved provenance and aggregates verified outp
   expect(store.proposals).toHaveLength(1);
 });
 
+test('mines the sessions it can prove and says how many it skipped for missing provenance', async () => {
+  const store = new Store();
+  const requests: StartSessionRequest[] = [];
+  const miner = new LearningMiner(
+    paths,
+    files({
+      '/daemon/state/sessions/session-1/turns/turn-001.md': 'Use direnv exec . for every command.',
+      '/daemon/state/sessions/session-1/channel/inbox.jsonl':
+        '{"type":"message","message":"Use direnv exec . for every command."}\n',
+      '/daemon/state/sessions/session-1/events.jsonl': '',
+    }),
+    store,
+    {
+      list: async () => [session(false, 'session-0'), session()],
+      get: async () => undefined,
+    } as SessionDirectorySubsystem,
+    {
+      tail: async () => [{ type: 'chat.user', timestamp: AT, data: { text: 'Use direnv exec . for every command.' } }],
+    } as unknown as SessionTranscriptReader,
+    {
+      start: async (request: StartSessionRequest) => {
+        requests.push(request);
+        return session();
+      },
+    } as unknown as SessionControlSubsystem,
+    () => config,
+    () => AT,
+  );
+
+  const run = await miner.run(true);
+
+  expect(requests).toHaveLength(1);
+  expect(run.minerSessions).toEqual(['session-1']);
+  expect(run.sessionsWithSignal).toBe(1);
+  expect(run.message).toBe('skipped 1 session(s) with missing or unresolved transcript provenance');
+  expect((await store.latestRunManifest())?.message).toBe(run.message);
+});
+
 test('reports missing provenance rather than mining a partial conversation', async () => {
   const store = new Store();
   const miner = new LearningMiner(

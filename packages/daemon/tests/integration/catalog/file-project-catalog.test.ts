@@ -1,5 +1,5 @@
-import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
+import { afterEach, describe, it, spyOn } from 'bun:test';
+import { mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -46,5 +46,56 @@ describe('FileProjectCatalog project-path boundary', () => {
 
     should(registered).match({ name: 'project', path: absolute, source: 'existing-folder' });
     should(await projects.projects()).deepEqual([registered]);
+  });
+});
+
+describe('FileProjectCatalog failure paths', () => {
+  it('surfaces a registry read failure that is not a missing file', async () => {
+    root = await mkdtemp(join(tmpdir(), 'ferretry-registry-'));
+    const registry = join(root, 'projects.json');
+    await mkdir(registry);
+
+    await should(new FileProjectCatalog(registry).projects()).be.rejected();
+  });
+
+  it('refuses to register a path that is not an existing directory', async () => {
+    root = await mkdtemp(join(tmpdir(), 'ferretry-missing-'));
+    const projects = new FileProjectCatalog(join(root, 'projects.json'));
+
+    await should(projects.register({ kind: 'existing-folder', path: join(root, 'absent') })).be.rejectedWith(
+      'project path is not an existing directory',
+    );
+    should(await projects.projects()).deepEqual([]);
+  });
+
+  it('registers a folder without a Git attachment when Git cannot be started', async () => {
+    root = await mkdtemp(join(tmpdir(), 'ferretry-nogit-'));
+    const folder = join(root, 'project');
+    await mkdir(folder);
+    const projects = new FileProjectCatalog(join(root, 'projects.json'));
+    // A host without `git` makes the spawn itself throw, which is not a non-zero exit.
+    const spawn = spyOn(Bun, 'spawn').mockImplementation((() => {
+      throw new Error('Executable not found in $PATH: "git"');
+    }) as unknown as typeof Bun.spawn);
+    try {
+      const registered = await projects.register({ kind: 'existing-folder', path: folder });
+      should(registered.git).be.undefined();
+      should(registered.path).equal(await realpath(folder));
+    } finally {
+      spawn.mockRestore();
+    }
+  });
+
+  it('attaches the repository common directory for a folder that is a Git work tree', async () => {
+    root = await mkdtemp(join(tmpdir(), 'ferretry-git-'));
+    const folder = join(root, 'project');
+    await mkdir(folder);
+    const init = Bun.spawn(['git', 'init', '--quiet', folder], { stdout: 'pipe', stderr: 'pipe' });
+    should(await init.exited).equal(0);
+    const projects = new FileProjectCatalog(join(root, 'projects.json'));
+
+    const registered = await projects.register({ kind: 'existing-folder', path: folder });
+
+    should(registered.git).deepEqual({ commonDirectory: join(await realpath(folder), '.git') });
   });
 });
