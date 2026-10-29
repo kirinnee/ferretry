@@ -1006,3 +1006,23 @@
   justify-content: center;
   gap: var(--gap-sm);
 }
+/* The hint under the deck is always two lines tall, so the room the deck measures for its card — and so
+   the card — is the same for a one-line hint as for a long one. */
+.fy-attn-inbox__deck > .fy-attn-inbox__hint {
+  display: -webkit-box;
+  height: calc(2 * 1.35em);
+  overflow: hidden;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.fy-attn-inbox__deck--end {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+/* The peeking cards' 22px under a dealt card (attention-inbox.css, the deck). */
+.fy-attn-inbox__deck--end > .fy-attn-end {
+  margin-bottom: 22px;
+}

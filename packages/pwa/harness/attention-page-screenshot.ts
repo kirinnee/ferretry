@@ -9,6 +9,10 @@
  *   page-phone-list              the phone's list
  *   page-phone-card              a tapped row's card, full screen above the tab bar
  *   page-phone-card-recent       the same with "Last messages" open
+ *   format-{decision,task,info}-{desktop,phone}   the approved card format: premise, context, options,
+ *                                recommendation and terms; a to-do; a one-line note — every phone card the SAME height
+ *   format-skipped-{desktop,phone}  past the last card after skipping: "You skipped N — review them now?"
+ *   format-later-{desktop,phone}    …and after Later: all caught up for now
  *
  *   bun harness/attention-page-screenshot.ts      # writes harness/out/attention-page/<scheme>/*.png
  *
@@ -189,6 +193,69 @@ try {
         } finally {
           await context.close();
         }
+      }
+
+      // The approved card format, on a desktop.
+      {
+        const context = await browser.newContext({ ...desktop(1_440), colorScheme: scheme });
+        try {
+          const page = await open(context, theme, 'format');
+          for (const [id, name] of [
+            ['A21', 'decision'],
+            ['A10', 'task'],
+            ['A22', 'info'],
+          ] as const) {
+            await row(page, id).click();
+            await page.waitForTimeout(150);
+            if ((await selectedId(page)) !== id) fail(`format: ${id} did not select`);
+            await answerBarFits(page, `format ${name} desktop`);
+            await shot(page, scheme, `format-${name}-desktop`);
+          }
+          // Skip all three from the top: the queue ends, it never deals the first again.
+          await row(page, 'A22').click();
+          await page.locator('[data-attention-pane] [data-attention-skip]').click();
+          await page.waitForTimeout(100);
+          for (let skips = 0; skips < 2; skips += 1) {
+            if ((await page.locator('[data-attention-queue-end]').count()) > 0) break;
+            await page.locator('[data-attention-pane] [data-attention-skip]').click();
+            await page.waitForTimeout(100);
+          }
+          await page.locator('[data-attention-queue-end]').waitFor({ state: 'visible' });
+          await shot(page, scheme, 'format-skipped-desktop');
+          await page.locator('[data-attention-later]').click();
+          await page.waitForTimeout(100);
+          await shot(page, scheme, 'format-later-desktop');
+          await page.close();
+        } finally {
+          await context.close();
+        }
+      }
+      // …and on a phone: three very different cards, one height.
+      {
+        const heights: number[] = [];
+        for (const [index, name] of [
+          [0, 'decision'],
+          [1, 'task'],
+          [2, 'info'],
+        ] as const) {
+          const page = await open(phone, theme, `format-card-${index}`);
+          const box = await page.locator('.fy-attn-deck__top .fy-attn-card').boundingBox();
+          if (box === null) fail(`format ${name} phone: no card`);
+          else heights.push(Math.round(box.height));
+          const tabs = await page.locator('[data-app-tab-bar]').boundingBox();
+          await answerBarFits(page, `format ${name} phone`, tabs?.y);
+          await shot(page, scheme, `format-${name}-phone`);
+          if (index === 2) {
+            await page.locator('.fy-attn-deck__top [data-attention-skip]').click();
+            await page.locator('[data-attention-queue-end]').waitFor({ state: 'visible' });
+            await shot(page, scheme, 'format-skipped-phone');
+            await page.locator('[data-attention-later]').click();
+            await page.waitForTimeout(100);
+            await shot(page, scheme, 'format-later-phone');
+          }
+          await page.close();
+        }
+        if (new Set(heights).size !== 1) fail(`phone cards are not one height: ${heights.join(', ')}px`);
       }
 
       let page = await open(phone, theme, 'page');

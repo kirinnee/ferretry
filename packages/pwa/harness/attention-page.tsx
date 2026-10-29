@@ -314,6 +314,47 @@ const RECENT = [
   },
 ] as const;
 
+// THE CARD FORMAT THE OWNER APPROVED: a decision with every section (premise, context, options that say what
+// they do, a recommendation, terms), a to-do, and a one-line note — all dealt at the same height.
+const DECISION = titled('A21', 35, 'Keep the required CI workflow?', {
+  subject: 'Keep CI as the one required workflow, or rename it to build?',
+  why: 'Keep CI as the one required workflow, or rename it to build?',
+  premise: '- 58 repos are moving to the ProtoDurian org\n- The org can require one workflow to pass before a merge',
+  context:
+    '- 55 repos already have a workflow called CI\n- 3 call theirs build\n- The rule goes live for every repo at once',
+  decided: '- Branch protection is on for every repo (you said yes on Monday)',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Keep CI', description: '55 repos fine, 3 need a rename' },
+      { label: 'Rename to build', description: '3 repos fine, 55 need an edit' },
+    ],
+  },
+  answers: [
+    { direction: 'right', does: 'choose', label: 'Keep CI' },
+    { direction: 'left', does: 'choose', label: 'Rename to build' },
+  ],
+  recommendation: { decision: 'Keep CI', why: 'Matches 55 repos already; smallest change' },
+  terms: [
+    { term: 'CI', meaning: 'the automatic tests that run on every change' },
+    { term: 'Required workflow', meaning: 'a check that must pass before anything merges' },
+  ],
+} as Partial<AttentionItem>);
+const SETUP_TASK = {
+  ...ORG_SETUP,
+  premise: '- The org was created yesterday\n- Only an owner can change its settings',
+} as AttentionItem;
+const NOTE = titled('A22', 4, 'Nightly benchmarks are green again', {
+  subject: 'The relay latency benchmark is back under 40 ms after the cache fix.',
+  why: 'The relay latency benchmark is back under 40 ms after the cache fix.',
+  kind: 'info',
+} as Partial<AttentionItem>);
+const FORMAT_CARDS: readonly InboxCard[] = [
+  card(DECISION, MIGRATE, 'Liftoff EC2'),
+  card(SETUP_TASK, MIGRATE, 'Liftoff EC2'),
+  card(NOTE, RELAY, 'laptop', LAPTOP),
+];
+
 // Answers are held for the real undo window, then "sent" nowhere.
 const deferred = new DeferredAttentionActions(async () => undefined);
 
@@ -692,7 +733,11 @@ const view = new URLSearchParams(location.search).get('view') ?? 'inbox-phone';
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  view === 'page' ? (
+  view === 'format' ? (
+    <Inbox cards={FORMAT_CARDS} phone={window.innerWidth < 768} />
+  ) : view.startsWith('format-card-') ? (
+    <Inbox cards={FORMAT_CARDS} initialOpen={(FORMAT_CARDS[Number(view.slice(12))] as InboxCard).key} phone />
+  ) : view === 'page' ? (
     <Inbox cards={PAGE_CARDS} phone={window.innerWidth < 768} />
   ) : view === 'page-recent' ? (
     <Inbox cards={PAGE_CARDS} phone={window.innerWidth < 768} recentOpen />

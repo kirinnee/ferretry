@@ -722,7 +722,11 @@ export function AttentionInboxPage({
         </header>
         <OrphanedFailures inbox={inbox} />
         {atEnd ? (
-          <QueueEnd onReview={review} remaining={visible.length} />
+          // The end sits where the card did, at its height: the deck's peek gap and hint line are kept.
+          <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">
+            <QueueEnd onReview={review} remaining={visible.length} />
+            <p aria-hidden="true" className="fy-attn-inbox__hint" />
+          </div>
         ) : (
           <div className="fy-attn-inbox__deck" data-attention-deck-host="">
             <AttentionSwipeDeck
