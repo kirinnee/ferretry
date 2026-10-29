@@ -3,6 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import should from 'should';
 import {
+  paneActiveWork,
   paneBlockingPrompt,
   paneShowsActiveWork,
   paneShowsPermissionPrompt,
@@ -287,5 +288,57 @@ describe('pane readiness under a harness dialog', () => {
 
     // Assert
     should(actual).be.true();
+  });
+});
+
+describe('pane readiness under the feedback-draft panel', () => {
+  // A REAL Claude Code 2.1.281 frame (80 columns), captured from a session the daemon held at "working"
+  // for three hours: the turn is done (`done 12:09 AM · 5 shells still running`), the panel above the
+  // composer truncates its title with `…`, and the composer holds a dim ghost suggestion.
+  const FIXTURES = join(import.meta.dir, '../../fixtures/composer');
+  const NAME = 'claude-2.1.281-feedback-draft-idle';
+  const frame = readFileSync(join(FIXTURES, `${NAME}.txt`), 'utf8');
+  const [cursorX, cursorY] = readFileSync(join(FIXTURES, `${NAME}.cursor`), 'utf8')
+    .trim()
+    .split('|')
+    .map(Number);
+
+  it('should read the finished turn as idle and ready, not as a spinner', () => {
+    // Act
+    const actual = {
+      working: paneShowsActiveWork(frame),
+      work: paneActiveWork(frame),
+      ready: promptIsReady(frame, cursorY, cursorX),
+    };
+
+    // Assert
+    should(actual).deepEqual({ working: false, work: undefined, ready: true });
+  });
+
+  it('should still read a running turn drawn over the same panel as busy', () => {
+    // Arrange — the same frame mid-turn: the done line is the live spinner and the footer the interrupt hint.
+    const busy = frame
+      .replace(/^✻ Crunched for .*$/mu, '✻ Crunching… (12s · ↓ 1.4k tokens)')
+      .replace('bypass permissions on ·', 'bypass permissions on · esc to interrupt ·');
+    const bare = frame.replace(/^✻ Crunched for .*$/mu, '✽ Tomfoolering…');
+
+    // Act
+    const actual = { status: paneActiveWork(busy), spinner: paneActiveWork(bare) };
+
+    // Assert
+    should(actual).deepEqual({ status: 'status', spinner: 'spinner' });
+  });
+
+  it('should read a spinner only at the left edge, never inside a box', () => {
+    // Act
+    const actual = {
+      boxedPhrase: paneShowsActiveWork('│ ✻ Bug report drafted: a title long enough to clip… │'),
+      boxedMark: paneShowsActiveWork('│ ⏺ Searching… │'),
+      indentedPhrase: paneShowsActiveWork('  ✶ Vibing…'),
+      laterLinePhrase: paneShowsActiveWork('some output\n✢ Effecting…'),
+    };
+
+    // Assert
+    should(actual).deepEqual({ boxedPhrase: false, boxedMark: false, indentedPhrase: true, laterLinePhrase: true });
   });
 });

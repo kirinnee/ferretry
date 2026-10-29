@@ -1,3 +1,11 @@
+## [4.96.1](https://github.com/kirinnee/ferretry/compare/v4.96.0...v4.96.1) (2026-10-29)
+
+### Fixes
+
+* **daemon:** stop an idle feedback-draft panel reading as a running turn ([#838](https://github.com/kirinnee/ferretry/issues/838)) ([bd6fd57](https://github.com/kirinnee/ferretry/commit/bd6fd57ad86289cd6d0d819203da089b62e4dfec))
+* **daemon:** wait for the turn end when a busy pane's queue is unreadable ([#837](https://github.com/kirinnee/ferretry/issues/837)) ([0ad9ae8](https://github.com/kirinnee/ferretry/commit/0ad9ae84164b3f4f64a1d3323bf586e83fdd189c))
+* **release:** list each release's changes in the changelog and GitHub notes ([#828](https://github.com/kirinnee/ferretry/issues/828)) ([24d4926](https://github.com/kirinnee/ferretry/commit/24d4926520ab14213e29144d53cbc78a0459ff98))
+
 ## [4.96.0](https://github.com/kirinnee/ferretry/compare/v4.95.1...v4.96.0) (2026-10-28)
 
 ### Features

@@ -10,7 +10,8 @@
  *   * THE PANE is the present tense. Both harnesses paint a status line while a turn runs (Claude's
  *     spinner and `esc to interrupt`, Codex's `Working (…)`), show an idle prompt when they are done,
  *     and draw a numbered choice list when a tool needs permission. A live frame saying any of these
- *     is the strongest evidence there is.
+ *     is the strongest evidence there is — except a spinner-shaped line with no status line beside it,
+ *     which an idle screen can draw too, and which a transcript that ended the turn overrules.
  *   * THE TRANSCRIPT is the record. Codex writes `task_started` / `task_complete` / `turn_aborted`;
  *     Claude writes `end_turn` on the message that finishes a turn. It survives a daemon restart and
  *     answers when the pane cannot be read — but Claude writes nothing when a turn is interrupted, so
@@ -36,6 +37,12 @@ import type { TranscriptEvent } from '../../transcript/types.ts';
 export interface TurnPaneEvidence {
   /** The harness's own working line: spinner, elapsed clock, token counter or interrupt hint. */
   readonly working: boolean;
+  /**
+   * `working` rests on a spinner-shaped line alone — no interrupt hint, elapsed clock or token counter
+   * anywhere on screen. A running turn draws that status line too, so this is the one pane reading a
+   * transcript that says the turn ENDED may overrule.
+   */
+  readonly spinnerOnly?: boolean | undefined;
   /** An idle prompt the harness would accept a message at. */
   readonly atPrompt: boolean;
   /** A permission (or other choice) prompt nothing moves past until a person answers. */
@@ -132,6 +139,11 @@ export function observeTurn(evidence: TurnEvidence): TurnObservation | undefined
   if (pane?.prompt !== undefined) return { state: 'needs-input', confirmed: true, prompt: pane.prompt };
   if (pane?.request !== undefined) return { state: 'needs-input', confirmed: true, request: pane.request };
   if (pane?.permission === true) return { state: 'needs-input', confirmed: true };
+  // A spinner-shaped line with no live status line beside it is ambiguous, and the transcript's own turn
+  // boundary decides it: a finished turn keeps no spinner, so an end the record proves outranks a shape
+  // on an idle screen. Weak in both directions, it still needs two looks — see `settleTurnState`.
+  if (pane?.working === true && pane.spinnerOnly === true && transcript === 'ended')
+    return { state: 'your-turn', confirmed: false };
   if (pane?.working === true) return { state: 'working', confirmed: true };
   if (pane?.atPrompt === true) return { state: 'your-turn', confirmed: transcript !== 'working' };
   if (transcript === 'working') return { state: 'working', confirmed: true };

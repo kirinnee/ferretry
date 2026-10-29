@@ -1024,6 +1024,47 @@ describe('a message held in a queue the daemon cannot see', () => {
     should(world.notices).be.empty();
   });
 
+  it('waits, with no notice, when the busy pane cannot be read — and is delivered once the turn ends', async () => {
+    // The incident: a queue that runs past the top of a short pane makes the capture unreadable, and the
+    // send used to be settled "unconfirmed" at its first deadline although the queue held it.
+    const world = new World(queuedSend());
+    world.pane = busyPane();
+    world.inPane = undefined;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+
+    for (const ms of [15_000, 30_000, 60_000, 75_000]) await world.checkAt(ms);
+    const waiting = world.only;
+    world.pane = pane();
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 80_000)]);
+    await world.checkAt(81_000);
+
+    should(waiting).match({ fate: 'accepted', attempt: 1 });
+    should(world.retyped).be.empty();
+    should(world.only).match({ fate: 'delivered', attempt: 1 });
+    should(world.events).eql(['control.send_delivered']);
+    should(world.notices).be.empty();
+  });
+
+  it('is unconfirmed, and told so, when the pane is unreadable and no turn is running to wait for', async () => {
+    const world = new World(queuedSend());
+    world.inPane = undefined;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    await world.checkAt(15_000);
+
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'pane_unreadable' });
+    should(world.notices).have.length(1);
+  });
+
+  it('still reports a dialog it cannot type past, even from a busy unreadable pane', async () => {
+    const world = new World(queuedSend());
+    world.pane = pane({ activeWork: true, promptReady: false, blockingPrompt: 'permission' });
+    world.inPane = undefined;
+    world.evidence(new ClaudeObservedInputObserver(), []);
+    await world.checkAt(15_000);
+
+    should(world.only).match({ fate: 'unaccounted', unaccountedReason: 'blocked_by_prompt' });
+  });
+
   it('is typed again once the turn has ended and it is proven absent — into an idle pane', async () => {
     const world = new World(queuedSend());
     world.pane = busyPane();

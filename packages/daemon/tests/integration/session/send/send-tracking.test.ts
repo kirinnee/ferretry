@@ -66,9 +66,10 @@ class FakeHarness implements SendTerminal {
   writesQueueRecords = true;
   /**
    * Draw the queue as Claude Code 2.1.281 does and read it with the daemon's real screen reader,
-   * rather than answering from the list. `clipped` draws it scrolled past the top of the pane.
+   * rather than answering from the list. `clipped` draws it with its first rows scrolled past the top of
+   * the pane and `swallowed` with every row of it scrolled off, leaving only the hint under it.
    */
-  drawsQueue: 'no' | 'whole' | 'clipped' = 'no';
+  drawsQueue: 'no' | 'whole' | 'clipped' | 'swallowed' = 'no';
   /** The pane shows the queue in a rendering the reader does not recognise — the incident. */
   blindToQueue = false;
   /** What the harness is visibly holding in its own queue. */
@@ -136,7 +137,8 @@ class FakeHarness implements SendTerminal {
     const lines = ['⏺ Working on the auth task.', '', entries.join('\n\n'), '  ctrl+x ctrl+s to send now']
       .join('\n')
       .split('\n');
-    const shown = this.drawsQueue === 'clipped' ? lines.slice(3) : lines;
+    const shown =
+      this.drawsQueue === 'clipped' ? lines.slice(3) : this.drawsQueue === 'swallowed' ? lines.slice(-1) : lines;
     return [
       ...shown,
       '',
@@ -770,6 +772,17 @@ describe('a peer message held in Claude Code 2.1.281’s queue', () => {
     return subject;
   }
 
+  /** Typed into the busy pane with nothing proving it held, as the rendering that failed was at send time. */
+  async function unproven(): Promise<Rig> {
+    const subject = await rig('claude');
+    subject.harness.busy = true;
+    subject.harness.writesQueueRecords = false;
+    subject.harness.blindToQueue = true;
+    await subject.service.send({ id: ID, sendId: 'send-1', message: 'take the auth task', senderReference: SENDER });
+    subject.harness.blindToQueue = false;
+    return subject;
+  }
+
   it('is typed ONCE while unrecognised, queued once the pane is read, and delivered at the turn boundary', async () => {
     // Arrange — the rendering the daemon could not read, from the first keystroke on.
     const subject = await rig('claude');
@@ -804,18 +817,45 @@ describe('a peer message held in Claude Code 2.1.281’s queue', () => {
     should(subject.harness.typed).have.length(1);
   });
 
-  it('is unconfirmed — never "not delivered", never retyped — when the queue runs off the pane', async () => {
-    const subject = await midTurn();
+  it('is proven queued by the tail still on screen when the head of a long message scrolled off', async () => {
+    const subject = await unproven();
     subject.harness.drawsQueue = 'clipped';
 
-    const settled = await subject.at(15_000);
-    await subject.at(16_000, SENDER);
+    const queued = await subject.at(15_000);
     subject.harness.finishTurn();
-    const repaired = await subject.at(17_000);
+    const delivered = await subject.at(16_000);
+
+    should(queued).match({ fate: 'queued', queueProof: 'pane', attempt: 1 });
+    should(delivered).match({ fate: 'delivered', attempt: 1 });
+    should(subject.harness.typed).have.length(1);
+  });
+
+  it('waits — no notice, never retyped — when the whole queue ran off the pane, and is delivered at the turn end', async () => {
+    // The incident: the capture cannot show the queue at all, and the send used to be told "unconfirmed
+    // (pane unreadable)" at its first deadline although the harness delivered it a moment later.
+    const subject = await unproven();
+    subject.harness.drawsQueue = 'swallowed';
+
+    const waiting = [];
+    for (const ms of [15_000, 30_000, 75_000, 140_000]) waiting.push(await subject.at(ms));
+    await subject.at(141_000, SENDER);
+    subject.harness.finishTurn();
+    const delivered = await subject.at(142_000);
+
+    for (const look of waiting) should(look).match({ fate: 'accepted', attempt: 1 });
+    should(delivered).match({ fate: 'delivered', attempt: 1 });
+    should(subject.harness.typed).have.length(1);
+    should(subject.sender.typed).be.empty();
+  });
+
+  it('is unconfirmed, and the sender told so, only once no turn is running to wait for', async () => {
+    const subject = await unproven();
+    subject.harness.drawsQueue = 'swallowed';
+    subject.harness.busy = false;
+
+    const settled = await subject.at(15_000);
 
     should(settled).match({ fate: 'unaccounted', unaccountedReason: 'pane_unreadable' });
     should(subject.harness.typed).have.length(1);
-    should(subject.sender.typed[0]).not.match(/did not reach it/u);
-    should(repaired).match({ fate: 'delivered', attempt: 1 });
   });
 });
