@@ -1,3 +1,11 @@
+## [4.105.2](https://github.com/kirinnee/ferretry/compare/v4.105.1...v4.105.2) (2026-10-29)
+
+### Fixes
+
+* **daemon:** page long and live transcripts through an incremental conversation index ([#881](https://github.com/kirinnee/ferretry/issues/881)) ([143ef45](https://github.com/kirinnee/ferretry/commit/143ef45d8248ead1ec0021fc006d350a842cbece))
+* **pwa:** open resolved Attention in a drawer with a header and close ([#882](https://github.com/kirinnee/ferretry/issues/882)) ([e1fc73c](https://github.com/kirinnee/ferretry/commit/e1fc73cf408c5ea443776a652e2cb1596b2991fe))
+* **transcript:** skip subtrees the parser never reads in large records ([#885](https://github.com/kirinnee/ferretry/issues/885)) ([4740e4f](https://github.com/kirinnee/ferretry/commit/4740e4fad9c4d2bb62ad718170792c4ca5170a9a)), closes [#875](https://github.com/kirinnee/ferretry/issues/875)
+
 ## [4.105.1](https://github.com/kirinnee/ferretry/compare/v4.105.0...v4.105.1) (2026-10-29)
 
 ### Fixes
