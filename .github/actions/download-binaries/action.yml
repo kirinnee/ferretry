@@ -1,0 +1,40 @@
+# The one way a job takes the compiled binaries `Compile Binaries` uploaded. `actions/download-artifact`
+# can stop part-way and still exit 0 (actions/download-artifact#454): `Smoke linux-x64-baseline` on `main`
+# found no daemon in `dist/bin` while the other two smoke jobs took the same artifact whole. So the
+# download is held to the manifest compile wrote beside the binaries (scripts/ci/binaries-manifest.sh),
+# and a short one is fetched once more into an empty directory before the job's real step sees it.
+name: Download Binaries
+description: Download the cli-binaries artifact and prove every binary arrived whole, fetching it once more if not.
+inputs:
+  path:
+    description: Where the binaries land.
+    default: dist/bin
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v8
+      with:
+        name: cli-binaries
+        path: ${{ inputs.path }}
+    - id: first
+      continue-on-error: true
+      shell: bash
+      env:
+        BINARIES: ${{ inputs.path }}
+      run: ./scripts/ci/binaries-manifest.sh check "${BINARIES}"
+    # A second download starts from an empty directory, so nothing the short one left is trusted.
+    - if: steps.first.outcome == 'failure'
+      shell: bash
+      env:
+        BINARIES: ${{ inputs.path }}
+      run: echo "::warning::the binaries arrived incomplete; downloading them once more" && rm -rf "${BINARIES}"
+    - if: steps.first.outcome == 'failure'
+      uses: actions/download-artifact@v8
+      with:
+        name: cli-binaries
+        path: ${{ inputs.path }}
+    - if: steps.first.outcome == 'failure'
+      shell: bash
+      env:
+        BINARIES: ${{ inputs.path }}
+      run: ./scripts/ci/binaries-manifest.sh check "${BINARIES}"

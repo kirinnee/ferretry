@@ -158,6 +158,14 @@ Notable details:
 - **SIT runs against the artifact, not a rebuild.** `compile` uploads the binaries and `sit`
   downloads them, which is what makes it a black-box test of the shipped thing.
   `download-artifact` drops the executable bit; the scripts restore it.
+- **A download is held to a manifest.** `actions/download-artifact` can stop part-way and still exit
+  0 (actions/download-artifact#454): its log ends at `Starting download of artifact` with no digest
+  line. That left `Smoke linux-x64-baseline` on `main` with no daemon in `dist/bin` while the other
+  two smoke jobs took the same artifact whole. So `compile` writes `dist/bin/SHA256SUMS`
+  (`scripts/ci/binaries-manifest.sh write`), and `sit` and `smoke` take the binaries only through
+  `.github/actions/download-binaries`, which checks every file against it and, if one is short or
+  missing, downloads once more into an empty directory with a `::warning::`. A second short download
+  fails the step as an incomplete download, never as whatever ran next.
 - **A browser gate asserts geometry, and never stores pixels.** `pwa-screenshot` runs the PWA's
   screenshot harness in `--settings-only` mode in light, and the whole gallery in dark, and fails on
   `assertNoSidewaysScroll` — the one layout defect a capture cannot show, because the capture is
@@ -350,7 +358,8 @@ installer, and the in-repo Homebrew cask. See
 ## Installing Nix
 
 Every job that needs Nix calls `uses: ./.github/actions/install-nix` (with `shell: .#releaser` in
-`CD`), never `cachix/install-nix-action` directly. It is the one bespoke setup action, and it exists
+`CD`), never `cachix/install-nix-action` directly. It is the one bespoke setup action (the other local
+action, `download-binaries`, is described under the `sit` job above), and it exists
 because the network failed whole jobs, including on `main`, where a red CI skips a release:
 
 - **The installer's download.** `cachix/install-nix-action` fetches its installer five times one
