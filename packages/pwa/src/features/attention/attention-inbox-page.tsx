@@ -110,7 +110,7 @@ const renderInboxCard = (
       error={failureFor(inbox.deferredState.failed, card.key)}
       item={card.item}
       key={card.key}
-      {...(onSkip === undefined ? {} : { headerSlot: <SkipButton onSkip={onSkip} /> })}
+      {...(onSkip === undefined ? {} : { onSkip })}
       onAct={act}
       origin={origin}
       swipeHints={swipeHints}
@@ -134,16 +134,6 @@ const renderInboxCard = (
     />
   );
 };
-
-/** Skip: on to the next item without answering this one. Several in a row is fine. */
-function SkipButton({ onSkip }: { readonly onSkip: () => void }) {
-  return (
-    <button className="fy-attn-skip" data-attention-skip="" onClick={onSkip} type="button">
-      Skip
-      <SkipForward aria-hidden="true" size={13} />
-    </button>
-  );
-}
 
 /**
  * Past the last item: the ones the reader skipped are still open. Said once, with the way back to them —
