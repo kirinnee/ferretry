@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { describe, expect, it } from 'bun:test';
 import should from 'should';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
@@ -57,6 +57,11 @@ function wholeBytes(parser: TranscriptParser, bytes: Uint8Array, endOfInput = tr
   return parser.parse({ ...COMMON, bytes, endOfInput }, parser.createInputObserver());
 }
 
+/**
+ * The large parses are compared with Bun's native `toStrictEqual`: `should`'s `deepEqual` walked twenty thousand
+ * events in about 2.7 s, against the parsers' 0.1 s, and on a busy runner that alone crossed the
+ * 5 s test timeout.
+ */
 describe('parseTranscriptInSlices', () => {
   for (const [name, parser, fixture] of [
     ['Claude', new ClaudeTranscriptParser(), claudeFixture],
@@ -72,7 +77,7 @@ describe('parseTranscriptInSlices', () => {
       // Assert
       should(bytes.byteLength).be.above(PARSE_SLICE_BYTES * 4);
       should(sliced.events.length).be.above(0);
-      should(sliced).deepEqual(wholeBytes(parser, bytes));
+      expect(sliced).toStrictEqual(wholeBytes(parser, bytes));
     });
 
     it(`should parse a large ${name} text exactly as one whole parse does, byte offsets included`, async () => {
@@ -84,7 +89,7 @@ describe('parseTranscriptInSlices', () => {
 
       // Assert
       should(sliced.rawRecords).be.undefined();
-      should(sliced).deepEqual(parser.parse({ ...COMMON, text, endOfInput: false }, parser.createInputObserver()));
+      expect(sliced).toStrictEqual(parser.parse({ ...COMMON, text, endOfInput: false }, parser.createInputObserver()));
     });
   }
 
@@ -105,7 +110,7 @@ describe('parseTranscriptInSlices', () => {
     const sliced = await parseTranscriptInSlices(parser, { ...COMMON, bytes: pieces, endOfInput: false }, FROZEN);
 
     // Assert
-    should(sliced).deepEqual(wholeBytes(parser, bytes, false));
+    expect(sliced).toStrictEqual(wholeBytes(parser, bytes, false));
   });
 
   it('should parse no pieces as one whole parse of nothing', async () => {
