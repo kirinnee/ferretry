@@ -328,7 +328,9 @@ describe('fy-render component evidence — Mermaid', () => {
         );
         should(await overflow(page)).equal(0);
         should(diagram?.width ?? 0).be.above(0);
-        should(diagram?.width ?? 0).be.belowOrEqual(viewport.width);
+        // The picture may be wider than the column (it pans in its own box); the BOX never is.
+        const scrollBox = await page.locator('.fy-render-diagram').boundingBox();
+        should(scrollBox?.width ?? 0).be.belowOrEqual(viewport.width);
         // No surface, no border: the figure paints nothing of its own.
         const figure = await page.evaluate(() => {
           const element = document.querySelector('figure.fy-render');
@@ -1074,4 +1076,102 @@ describe('fy-render component evidence — Mermaid in the theme', () => {
         await scene.close();
       }
     }, 120_000);
+});
+
+describe('fy-render component evidence — Mermaid on a phone', () => {
+  /** What the browser really laid out for the diagram: its natural size, shown width, and the scroll box around it. */
+  const laidOut = async (page: Page) =>
+    await page.evaluate(() => {
+      const img = document.querySelector('img[data-fy-render-diagram="true"]') as HTMLImageElement;
+      const box = img.parentElement as HTMLElement;
+      const src = decodeURIComponent(img.getAttribute('src')?.replace('data:image/svg+xml,', '') ?? '');
+      const view = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)"/u.exec(src);
+      const natural = { height: Number(view?.[2] ?? 0), width: Number(view?.[1] ?? 0) };
+      const shown = img.getBoundingClientRect().width;
+      return {
+        bodyPx: Number.parseFloat(getComputedStyle(document.querySelector('figure.fy-render') as Element).fontSize),
+        boxClient: box.clientWidth,
+        boxScroll: box.scrollWidth,
+        natural,
+        scrolls: box.getAttribute('data-fy-render-scrolls') === 'true',
+        shown,
+        textPx: natural.width > 0 ? (shown / natural.width) * 16 : 0,
+      };
+    });
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const viewport of VIEWPORTS) {
+      test(`should draw a left-to-right flowchart readably, ${theme}, at ${viewport.name}`, async () => {
+        // Arrange
+        const scene = await openScene('mermaid-lr', viewport, { theme });
+        const { page, shot } = scene;
+
+        try {
+          // Act
+          await waitForMermaidDiagram(page);
+          await page.waitForTimeout(300);
+          const actual = await laidOut(page);
+          await shot(`mermaid-08-left-to-right-${theme}`, { laidOut: actual, overflow: await overflow(page) });
+
+          // Assert — the page never scrolls sideways, and the text is never under 12px nor over 1.25× the body.
+          should(await overflow(page)).equal(0);
+          should(actual.textPx).be.aboveOrEqual(11.9);
+          should(actual.textPx).be.belowOrEqual(actual.bodyPx * 1.25 + 0.5);
+          if (viewport.width <= 480) {
+            // A phone column: declared top-down before it was compiled, so the picture is taller than wide.
+            should(actual.natural.height).be.above(actual.natural.width);
+            should(actual.shown).be.belowOrEqual(viewport.width);
+          } else {
+            // A desktop column keeps the author's left-to-right. This one is wider than the column even at the
+            // smallest readable size, so it scrolls in its own box (checked below) rather than shrinking to 8px.
+            should(actual.natural.width).be.above(actual.natural.height);
+            should(actual.scrolls).be.true();
+          }
+          if (actual.scrolls) should(actual.boxScroll).be.above(actual.boxClient);
+        } finally {
+          await scene.close();
+        }
+      }, 120_000);
+    }
+  }
+
+  test('should draw the other direction when a phone is turned sideways, and back', async () => {
+    // Arrange
+    const scene = await openScene('mermaid-lr', VIEWPORTS[0], { theme: 'dark' });
+    const { page, shot } = scene;
+    const drawnAs = async (wanted: 'tall' | 'wide'): Promise<void> => {
+      await page.waitForFunction(
+        want => {
+          const img = document.querySelector('img[data-fy-render-diagram="true"]');
+          const src = decodeURIComponent(img?.getAttribute('src')?.replace('data:image/svg+xml,', '') ?? '');
+          const view = /viewBox="\s*[-\d.]+[\s,]+[-\d.]+[\s,]+([\d.]+)[\s,]+([\d.]+)"/u.exec(src);
+          if (view === null) return false;
+          return Number(view[2]) > Number(view[1]) === (want === 'tall');
+        },
+        wanted,
+        { timeout: 40_000 },
+      );
+    };
+
+    try {
+      await waitForMermaidDiagram(page);
+      await drawnAs('tall');
+
+      // Act — rotated to landscape, across the 520px line.
+      await page.setViewportSize({ height: 390, width: 900 });
+      await drawnAs('wide');
+      await page.waitForTimeout(300);
+      await shot('mermaid-09-rotated-landscape', { overflow: await overflow(page) });
+      should(await overflow(page)).equal(0);
+
+      // Act — and back upright.
+      await page.setViewportSize({ height: 844, width: 390 });
+      await drawnAs('tall');
+
+      // Assert — one picture throughout, never an empty frame in between.
+      should(await page.locator('img[data-fy-render-diagram="true"]').count()).equal(1);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
 });

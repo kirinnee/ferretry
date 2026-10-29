@@ -138,6 +138,12 @@ export interface FyRenderSandboxProps {
    */
   readonly palette?: { readonly key: string; readonly variables: MermaidThemeVariables };
   /**
+   * Mermaid only: the text to compile, when it is not the authored payload verbatim (a left-to-right
+   * flowchart declared top-to-bottom for a narrow column). It is the same data through the same gates; a
+   * change of it is a new compile, so the caller keys the frame on it.
+   */
+  readonly diagramSource?: string;
+  /**
    * Mermaid handed back a compiled diagram. The caller owns validating it.
    *
    * `theme` is the direction the SHELL actually compiled with, echoed on the reply
@@ -176,6 +182,7 @@ export function FyRenderSandbox({
   playing,
   theme,
   palette,
+  diagramSource,
   onCompiled,
   onFailed,
   onRendered,
@@ -189,9 +196,9 @@ export function FyRenderSandbox({
    * which for Lottie means restarting the animation every time the transcript
    * repaints.
    */
-  const latest = useRef({ onCompiled, onFailed, onRendered, palette, playing, theme });
+  const latest = useRef({ diagramSource, onCompiled, onFailed, onRendered, palette, playing, theme });
   useEffect(() => {
-    latest.current = { onCompiled, onFailed, onRendered, palette, playing, theme };
+    latest.current = { diagramSource, onCompiled, onFailed, onRendered, palette, playing, theme };
   });
 
   // Lottie play/pause is a command on the live port, never a remount.
@@ -359,7 +366,7 @@ export function FyRenderSandbox({
                 kind: 'render-mermaid',
                 library: text,
                 palette: latest.current.palette?.key ?? `${latest.current.theme}:00000000`,
-                source: block.payload,
+                source: latest.current.diagramSource ?? block.payload,
                 theme: latest.current.theme,
                 themeVariables: latest.current.palette?.variables ?? null,
               }

@@ -1235,3 +1235,150 @@ describe('FyRenderBlock chart', () => {
     should(chartProps(tree).fullscreen).be.true();
   });
 });
+
+describe('FyRenderBlock mermaid on a narrow column', () => {
+  const LR = 'flowchart LR\n  A --> B';
+  const TB = 'flowchart TB\n  A --> B';
+  const lrBlock = (): ParsedBlock => parsed('type: mermaid', 'alt: A flow', '---', LR);
+  const WIDE_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 760 100"><rect width="760" height="100"/></svg>';
+
+  class FakeResize {
+    static readonly live: FakeResize[] = [];
+    constructor(readonly callback: () => void) {
+      FakeResize.live.push(this);
+    }
+    observe(): void {}
+    disconnect(): void {
+      const at = FakeResize.live.indexOf(this);
+      if (at !== -1) FakeResize.live.splice(at, 1);
+    }
+  }
+  const realResize = globalThis.ResizeObserver;
+  let width = 358;
+
+  beforeEach(() => {
+    FakeResize.live.length = 0;
+    width = 358;
+    globalThis.ResizeObserver = FakeResize as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    globalThis.ResizeObserver = realResize;
+  });
+
+  /** A real element whose layout width a test controls, since happy-dom lays nothing out. */
+  const columnHost = (): HTMLElement => {
+    const host = document.createElement('div');
+    Object.defineProperty(host, 'clientWidth', { configurable: true, get: () => width });
+    return host;
+  };
+
+  const resizeTo = (next: number): void => {
+    width = next;
+    run(() => {
+      for (const observer of [...FakeResize.live]) observer.callback();
+    });
+  };
+
+  const mountOn = (block: ParsedBlock): ReactTestRenderer => {
+    const host = columnHost();
+    const tree = mountTree(<FyRenderBlock block={block} />, { createNodeMock: () => host });
+    mounted.push(tree);
+    viewport(true);
+    return tree;
+  };
+
+  const sentSource = (tree: ReactTestRenderer): string =>
+    (tree.root.findByType(FyRenderSandbox).props as { readonly diagramSource?: string }).diagramSource ?? '';
+
+  test('should compile a left-to-right flowchart top-to-bottom on a phone column', () => {
+    // Act
+    const tree = mountOn(lrBlock());
+
+    // Assert
+    should(sentSource(tree)).equal(TB);
+  });
+
+  test('should keep the author source on a desktop column', () => {
+    // Arrange
+    width = 860;
+
+    // Act
+    const tree = mountOn(lrBlock());
+
+    // Assert
+    should(sentSource(tree)).equal(LR);
+  });
+
+  test('should redraw the other way when the column crosses the breakpoint, and keep the old picture up', () => {
+    // Arrange — drawn vertical on a phone.
+    const tree = mountOn(lrBlock());
+    run(() => compile(tree, 'dark'));
+    should(count(tree, 'iframe')).equal(0);
+
+    // Act — rotated to landscape.
+    resizeTo(860);
+
+    // Assert — one off-stage redraw of the authored source, with the old picture still showing.
+    should(count(tree, 'iframe')).equal(1);
+    should(sentSource(tree)).equal(LR);
+    should(count(tree, 'img')).equal(1);
+
+    // Act — and back to portrait once it has arrived.
+    run(() => compile(tree, 'dark'));
+    resizeTo(358);
+
+    // Assert
+    should(sentSource(tree)).equal(TB);
+  });
+
+  test('should not recompile when the column changes but the direction does not', () => {
+    // Arrange
+    const tree = mountOn(lrBlock());
+    run(() => compile(tree, 'dark'));
+
+    // Act — still a phone column, only wider.
+    resizeTo(400);
+
+    // Assert
+    should(count(tree, 'iframe')).equal(0);
+  });
+
+  test('should not recompile a diagram the rewrite does not change', () => {
+    // Arrange — already vertical, drawn on a phone.
+    const tree = mountOn(parsed('type: mermaid', 'alt: A flow', '---', TB));
+    run(() => compile(tree, 'dark'));
+
+    // Act
+    resizeTo(860);
+
+    // Assert
+    should(count(tree, 'iframe')).equal(0);
+  });
+
+  test('should show a diagram that is wider than the column at a readable size, scrolling in its own box', () => {
+    // Arrange
+    const tree = mountOn(lrBlock());
+
+    // Act
+    run(() => compile(tree, 'dark', WIDE_SVG));
+
+    // Assert — 760px at a floor of 14.45px of 16 (a 17px body is not measured here, so 14px: 11.9 → 12px floor).
+    const img = tree.root.findByType('img');
+    const shown = Number.parseFloat(String((img.props.style as { width: string }).width));
+    should(shown / 760).be.aboveOrEqual(12 / 16);
+    should(shown).be.above(358);
+    should(marked(tree, { 'data-fy-render-scrolls': 'true' })).equal(1);
+  });
+
+  test('should never rewrite another kind of diagram', () => {
+    // Arrange
+    const state = 'stateDiagram-v2\n  direction LR\n  [*] --> A';
+
+    // Act
+    const tree = mountOn(parsed('type: mermaid', 'alt: States', '---', state));
+
+    // Assert
+    should(sentSource(tree)).equal(state);
+  });
+});
