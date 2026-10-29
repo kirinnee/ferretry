@@ -13,6 +13,7 @@ import { mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
+  ALWAYS_ON_SECTIONS,
   CredentialStatusService,
   configJsonSchemaFiles,
   FleetIdentityService,
@@ -116,6 +117,7 @@ import {
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/attention/storage-harness-prompt.ts';
+import { armAttentionNudge, StorageAttentionNudgeSessions } from '../src/adapters/attention/storage-attention-nudge.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
@@ -546,6 +548,7 @@ import {
   AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
+  AttentionTurnNudge,
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
@@ -695,6 +698,7 @@ import {
   harnessPreflightSummary,
   harnessQuirks,
   InitialAttachmentError,
+  InstructionRefresh,
   InvalidDeadlineRefused,
   isControlAttachable,
   isQuestionScopedRequestId,
@@ -1104,6 +1108,8 @@ const FALLBACK_TMUX = '/usr/bin/tmux';
 const TERMINAL_REAP_SETTLE_MS = 1_000;
 /** The reaper's slow backstop, for a pane that became reapable without this daemon writing it so. */
 const TERMINAL_REAP_BACKSTOP_MS = 60_000;
+/** How long after a turn ends the Attention check reads its transcript: the last words reach the file late. */
+const ATTENTION_NUDGE_SETTLE_MS = 2_000;
 
 /**
  * The three things the managed-worktree surface cannot decide for itself.
@@ -3002,6 +3008,11 @@ function createSessionSendSubsystem(
    * read this way — only the owner answers the owner's items.
    */
   conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
+  /**
+   * The always-on instructions that changed since the ferret launched, told once with a PERSON's next
+   * message (`InstructionRefresh`, docs/launch-settings.md). A teammate's message never carries them.
+   */
+  instructions: Pick<InstructionRefresh, 'prepare' | 'settle'>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -3032,11 +3043,12 @@ function createSessionSendSubsystem(
             });
       const person = request.senderSessionId === undefined;
       const turn = person ? await conversation.prepare(id, request.message) : { message: request.message, answers: [] };
+      const refreshed = person ? await instructions.prepare(id, turn.message) : { message: turn.message, told: [] };
       const outcome = await service
         .send({
           id,
           sendId: request.sendId,
-          message: messageWithAttachments(turn.message, delivered),
+          message: messageWithAttachments(refreshed.message, delivered),
           ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
           ...(request.now === undefined ? {} : { now: request.now }),
           ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
@@ -3046,6 +3058,7 @@ function createSessionSendSubsystem(
       // Resolved only once the words were accepted: an item must never read as answered by a message the
       // ferret was not given.
       if (turn.answers.length > 0) await conversation.settle(id, turn, request.message);
+      await instructions.settle(id, refreshed);
       return {
         ...(await view(id, 'took the message')),
         disposition: outcome.disposition,
@@ -8786,6 +8799,32 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       storage.subscribeStates((id, state) => void harnessPrompts.stateWritten(id, state));
       void harnessPrompts.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      // The turn-end check (docs/attention.md § The turn-end check): a reply that asks the owner to act,
+      // from a turn that raised no item for it, gets one nudge. Read after the transcript has settled, since
+      // the turn's end can be seen on the pane before its last words reach the file; a listener must never
+      // throw into the journal's append path, and a check that cannot read says nothing.
+      const nudgeSessions = new StorageAttentionNudgeSessions(storage);
+      const attentionNudge = new AttentionTurnNudge(
+        {
+          enabled: async () => (await effectiveAccountModel())?.machine.attentionNudge ?? true,
+          subject: async sessionId => await nudgeSessions.subject(sessionId),
+          tail: async (sessionId, limit) => {
+            const subject = await nudgeSessions.subject(sessionId);
+            return subject === undefined
+              ? []
+              : await sendTranscripts.tail({ sessionId, harness: subject.harness }, limit);
+          },
+          send: async (sessionId, sendId, message) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await sends.send({ id, sendId, message });
+          },
+          record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
+        },
+        CLIENT_NAME,
+      );
+      armAttentionNudge(storage, attentionNudge, ATTENTION_NUDGE_SETTLE_MS, (run, delayMs) => {
+        setTimeout(run, delayMs).unref();
+      });
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
       // read would report `refreshing: false` while the loop was mid-pass.
@@ -9826,6 +9865,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 });
           },
           new AttentionConversation(attention, CLIENT_NAME),
+          new InstructionRefresh({
+            sections: () => ALWAYS_ON_SECTIONS(CLIENT_NAME),
+            recorded: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) return undefined;
+              const state = SessionStateSchema.safeParse(await storage.readState(id));
+              return state.success ? state.data.launchInstructions : undefined;
+            },
+            record: async (sessionId, update) => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) return;
+              await storage.updateState(id, current => {
+                const state = SessionStateSchema.safeParse(current);
+                const next = state.success ? update(state.data.launchInstructions) : undefined;
+                return next === undefined
+                  ? current
+                  : { ...(current as Record<string, unknown>), launchInstructions: next };
+              });
+            },
+          }),
         ),
         sessionAnswer,
         sessionAttachments,
