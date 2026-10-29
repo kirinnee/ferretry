@@ -348,10 +348,14 @@ export const recommendedAttentionOption = (
 /** The most entries an item's history keeps, oldest dropped. */
 export const MAX_ATTENTION_HISTORY = 20;
 
-/** One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44". */
+/**
+ * One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44":
+ * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), or the ferret
+ * updated it (`updated`).
+ */
 export const AttentionHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
-  kind: z.enum(['needs-info', 'updated']),
+  kind: z.enum(['needs-info', 'discuss', 'updated']),
   note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
 });
 export type AttentionHistoryEntry = z.infer<typeof AttentionHistoryEntrySchema>;
@@ -380,11 +384,17 @@ const AttentionItemBaseShape = {
   ...AttentionBriefShape,
   /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
   stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_ATTENTION_STEPS).optional(),
-  /** Set while the owner has asked the raising ferret for more information and it has not yet added any. */
+  /** Set while the owner has asked the raising ferret for more information, or to discuss it, and it has not yet updated it. */
   waitingOn: z.literal('ferret').optional(),
   /** When the owner asked; present exactly while `waitingOn` is. */
   askedAt: InstantSchema.optional(),
-  /** How many times the owner has asked for more information: the request counter. */
+  /**
+   * What the owner is waiting on the ferret FOR, only while `waitingOn` is set: `discussion` when the owner
+   * wants to talk the item through before answering ("in discussion"). Absent reads as `info`, so an item
+   * written before discussions existed reads exactly as it did.
+   */
+  waitingFor: z.enum(['info', 'discussion']).optional(),
+  /** How many times the owner has asked for more information or to discuss it: one request counter for both. */
   infoRequests: PositiveIntegerSchema.optional(),
   /** Bounded, oldest first: when the owner asked for more information and when the ferret added it. */
   history: z.array(AttentionHistoryEntrySchema).min(1).max(MAX_ATTENTION_HISTORY).optional(),
@@ -420,6 +430,9 @@ export const AttentionItemSchema = z
     }
     if ((value.waitingOn === undefined) !== (value.askedAt === undefined)) {
       context.addIssue({ code: 'custom', message: 'waitingOn and askedAt are set together', path: ['askedAt'] });
+    }
+    if (value.waitingFor !== undefined && value.waitingOn === undefined) {
+      context.addIssue({ code: 'custom', message: 'waitingFor is set only while waitingOn is', path: ['waitingFor'] });
     }
     if (value.stepsDone !== undefined) {
       const done = value.stepsDone;
@@ -493,6 +506,11 @@ export type ResolvedAttentionItem = z.infer<typeof ResolvedAttentionItemSchema>;
 export const AttentionRepliesSchema = z.strictObject({
   pending: z.array(AttentionIdSchema).min(1).max(MAX_ATTENTION_RESOLUTIONS),
   dueAt: InstantSchema,
+  /**
+   * Present once `dueAt` has passed while the ferret is still mid-turn: the batch is held until that turn
+   * ends, so answers given meanwhile join it. "Send now" still delivers at once.
+   */
+  heldForTurn: z.literal(true).optional(),
 });
 export type AttentionReplies = z.infer<typeof AttentionRepliesSchema>;
 
@@ -578,6 +596,17 @@ export const AttentionActionRequestSchema = z
     /** The owner asks the raising ferret for more information: the item stays open, marked waiting on the ferret. */
     z.strictObject({
       action: z.literal('needs-info'),
+      id: AttentionIdSchema,
+      note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    }),
+    /**
+     * The owner wants to talk an item through before answering — the premise is wrong, or the card is not
+     * understood. The item stays open, marked in discussion (`waitingFor: 'discussion'`), and the raising
+     * ferret is told `[discuss !A3 «title»] …` to reply in chat. Every card a ferret raised takes it; it is
+     * never one of the card's three answers.
+     */
+    z.strictObject({
+      action: z.literal('discuss'),
       id: AttentionIdSchema,
       note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
     }),
