@@ -123,7 +123,11 @@ const selectedId = async (page: Page): Promise<string | null> =>
 
 /** The card's answer bar is whole on screen, above `floor` (the viewport bottom, or the tab bar's top). */
 const answerBarFits = async (page: Page, label: string, floor?: number): Promise<void> => {
-  const bar = await page.locator('[data-attention-answer]').first().boundingBox();
+  // The card the reader is on — never a peeking card behind it, whose bar is hidden.
+  const bar = await page
+    .locator('.fy-attn-deck__top [data-attention-answer], [data-attention-pane] [data-attention-answer]')
+    .first()
+    .boundingBox();
   if (bar === null) fail(`${label}: no answer bar`);
   const limit = floor ?? page.viewportSize()?.height ?? 0;
   if (bar !== null && bar.y + bar.height > limit + 0.5)

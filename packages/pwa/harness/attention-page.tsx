@@ -335,6 +335,7 @@ const DECISION = titled('A21', 35, 'Keep the required CI workflow?', {
     { direction: 'left', does: 'choose', label: 'Rename to build' },
   ],
   recommendation: { decision: 'Keep CI', why: 'Matches 55 repos already; smallest change' },
+  body: '## Which repos call it build\n\n- diene.ratchet\n- diene.corpus\n- diene.docs\n\nEach is a one-line change to the workflow file name. Renaming the other 55 would touch every open pull request, because GitHub re-runs required checks by name, and every open pull request would show a missing check until it is pushed again.',
   terms: [
     { term: 'CI', meaning: 'the automatic tests that run on every change' },
     { term: 'Required workflow', meaning: 'a check that must pass before anything merges' },
