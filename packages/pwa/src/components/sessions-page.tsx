@@ -20,6 +20,7 @@ import { AttentionNeedsYou } from '../features/attention/attention-inbox-page.ts
 import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
 import { useAccountPickerSlice, useMachineRosters } from '../hooks/use-account-picker.ts';
 import { useAttentionInbox } from '../hooks/use-attention-inbox.ts';
+import { DiskPressureNote } from './disk-pressure-note.tsx';
 import { useConnectionHealth } from '../hooks/use-connection-health.ts';
 import { useDensity } from '../hooks/use-density.ts';
 import { useGroupNeedsYou } from '../hooks/use-group-needs-you.ts';
@@ -44,6 +45,7 @@ import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { filterSessions, projectKeyFor } from '../lib/fleet-grouping.ts';
 import type { DaemonFleetStore } from '../lib/fleet-store.ts';
 import { machineOutage } from '../lib/machine-outage.ts';
+import { useDiskPressure } from '../lib/use-disk-pressure.ts';
 import type { DaemonProjectsStore } from '../lib/projects-store.ts';
 import type { DaemonUsageStore } from '../lib/usage-store.ts';
 import type { NewSessionMachine } from '../shell/new-session-menu.tsx';
@@ -192,7 +194,11 @@ function DashboardContent({
   });
 
   const name = machineName ?? 'This machine';
-  const outage = useMemo(() => machineOutage(name, healthState, view.slice), [name, healthState, view.slice]);
+  const disk = useDiskPressure(connection);
+  const outage = useMemo(
+    () => machineOutage(name, healthState, view.slice, disk === undefined ? {} : { disk }),
+    [name, healthState, view.slice, disk],
+  );
   const retryMachine = useCallback(
     (daemonId: DaemonId) => {
       health.retryNow(daemonId);
@@ -236,15 +242,26 @@ function DashboardContent({
     onFocusMachine: (daemonId: DaemonId, path: string) => onNavigate?.(projectScopePath(daemonId, path)),
   } as const;
 
-  return density === 'full' ? (
-    <FullDensityDashboard
-      {...dashboard}
-      {...(accountPicker === undefined ? {} : { accountPicker })}
-      machineConnections={allMachines === undefined ? NO_MACHINES : (machineConnections ?? NO_MACHINES)}
-      usageStore={usage}
-    />
+  const page =
+    density === 'full' ? (
+      <FullDensityDashboard
+        {...dashboard}
+        {...(accountPicker === undefined ? {} : { accountPicker })}
+        machineConnections={allMachines === undefined ? NO_MACHINES : (machineConnections ?? NO_MACHINES)}
+        usageStore={usage}
+      />
+    ) : (
+      <SessionDashboard {...dashboard} usage={null} />
+    );
+
+  // A disk-slow machine that still answers has no outage to carry the sentence, so it gets its own line.
+  return disk !== undefined && outage === null ? (
+    <>
+      <DiskPressureNote io={disk} />
+      {page}
+    </>
   ) : (
-    <SessionDashboard {...dashboard} usage={null} />
+    page
   );
 }
 

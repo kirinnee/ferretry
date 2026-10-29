@@ -1,4 +1,6 @@
+import { classifyStallCause, describeDiskSaturation, type IoPressureView, ioPressureView } from '@ferretry/protocol';
 import type { MillisecondClockPort } from './boot.ts';
+import { type IoPressurePort, NO_IO_PRESSURE } from './io-pressure.ts';
 
 /**
  * WHETHER THIS PROCESS IS ANSWERING, AND IF NOT, WHAT IT IS DOING INSTEAD.
@@ -331,6 +333,10 @@ export interface LoopStall {
   readonly innermost: readonly string[];
   /** Where the sampled stack spent the stall, hottest first; empty without a sampler. */
   readonly stacks: readonly StallStack[];
+  /** `disk` when the disk was saturated as the stall was recorded: the loop was slow on IO, not wedged. */
+  readonly cause?: 'disk';
+  /** The disk's pressure as the stall was recorded, where the host reports it. */
+  readonly io?: IoPressureView;
 }
 
 export interface EventLoopView {
@@ -343,6 +349,8 @@ export interface EventLoopView {
   readonly lastStall?: LoopStall;
   /** The longest stall since this process started, with what ran during it. */
   readonly worstStall?: LoopStall;
+  /** The disk's pressure now, where the host reports it. */
+  readonly io?: IoPressureView;
 }
 
 export interface EventLoopLagPolicy {
@@ -384,6 +392,7 @@ export class EventLoopLagMeter {
     private readonly policy: EventLoopLagPolicy,
     private readonly onStall: (stall: LoopStall) => void,
     private readonly sampler: StackSamplerPort = NO_STACK_SAMPLER,
+    private readonly ioPressure: IoPressurePort = NO_IO_PRESSURE,
   ) {
     this.#lastTickMs = clock.now();
   }
@@ -404,6 +413,8 @@ export class EventLoopLagMeter {
       return;
     }
     const samples = this.sampler.drain();
+    const pressure = this.ioPressure.current();
+    const cause = classifyStallCause(pressure);
     this.#stalls += 1;
     const stall: LoopStall = {
       atMs: now,
@@ -411,6 +422,8 @@ export class EventLoopLagMeter {
       during: this.activities.overlapping(previous, now),
       innermost: this.activities.innermost(previous, now),
       stacks: summariseStacks(samples),
+      ...(cause === undefined ? {} : { cause }),
+      ...(pressure === undefined ? {} : { io: ioPressureView(pressure) }),
     };
     this.#lastStall = stall;
     if (this.#worstStall === undefined || stall.durationMs > this.#worstStall.durationMs) this.#worstStall = stall;
@@ -430,12 +443,14 @@ export class EventLoopLagMeter {
   }
 
   view(): EventLoopView {
+    const pressure = this.ioPressure.current();
     return {
       lagMs: this.#lagMs,
       maxLagMs: this.#maxLagMs,
       stalls: this.#stalls,
       ...(this.#lastStall === undefined ? {} : { lastStall: this.#lastStall }),
       ...(this.#worstStall === undefined ? {} : { worstStall: this.#worstStall }),
+      ...(pressure === undefined ? {} : { io: ioPressureView(pressure) }),
     };
   }
 }
@@ -446,7 +461,8 @@ export function describeLoopStall(stall: LoopStall): string {
     stall.innermost.length === 0 ? 'no named work was in flight' : `during ${stall.innermost.join(', ')}`;
   const hottest = stall.stacks[0];
   const where = hottest === undefined ? '' : ` — ${String(Math.round(hottest.share * 100))}% in ${hottest.stack}`;
-  return `event loop stalled for ${(stall.durationMs / 1_000).toFixed(1)}s — ${suspects}${where}`;
+  const disk = stall.cause === undefined || stall.io === undefined ? '' : ` — ${describeDiskSaturation(stall.io)}`;
+  return `event loop stalled for ${(stall.durationMs / 1_000).toFixed(1)}s — ${suspects}${where}${disk}`;
 }
 
 /**

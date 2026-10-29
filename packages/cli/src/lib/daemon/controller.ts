@@ -17,6 +17,7 @@ import type {
   IDaemonPrompt,
   IDaemonRestartMarkerPort,
   IDaemonSupervisor,
+  IIoPressurePort,
   INixGcRootPort,
   IResetInventoryPort,
   IResetTreePort,
@@ -141,6 +142,8 @@ export interface DaemonControllerDeps {
   /** The always-available fallback: the daemon as a detached child. */
   readonly direct: IDaemonSupervisor;
   readonly health: IDaemonHealthPort;
+  /** This host's disk pressure, read when the daemon answered nothing; absent where it cannot be read. */
+  readonly ioPressure?: IIoPressurePort;
   readonly logs: IDaemonLogPort;
   /** Holds a Nix-store daemon against garbage collection; a no-op for any other installation. */
   readonly nix: INixGcRootPort;
@@ -611,8 +614,9 @@ export class DaemonController {
     const owner = await this.#owner();
     const health = await this.deps.health.probe();
     const liveness = await this.deps.health.liveness?.();
+    const localIo = health === undefined ? await this.deps.ioPressure?.read() : undefined;
     const supervisor = await owner.inspect(this.#handleFor(health) ?? this.#handleForLiveness(liveness));
-    const view = decideDaemonStatus(this.#name, supervisor, health, liveness);
+    const view = decideDaemonStatus(this.#name, supervisor, health, liveness, localIo);
     const located = this.#locateDaemon();
     const update = await this.deps.updateStatus?.read('reason' in located ? undefined : located, health !== undefined);
     return { view, located, update, serviceManager: this.deps.service !== undefined };

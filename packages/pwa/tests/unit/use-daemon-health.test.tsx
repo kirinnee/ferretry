@@ -20,8 +20,8 @@ afterEach(async () => {
   latest = null;
 });
 
-function Probe({ daemon }: { readonly daemon: typeof alpha | undefined }) {
-  latest = useDaemonHealth(daemon);
+function Probe({ daemon, refreshMs }: { readonly daemon: typeof alpha | undefined; readonly refreshMs?: number }) {
+  latest = useDaemonHealth(daemon, refreshMs);
   return <span data-read={latest.kind} />;
 }
 
@@ -65,6 +65,21 @@ describe('useDaemonHealth', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     await settleUntil(() => machine.paths.length === 2, 'the second read', runAsync);
+  });
+
+  it('reads again on its own period when asked to, and stops when the page goes', async () => {
+    const machine = served(healthOf('4.84.0'));
+    shown = await mount(
+      <DaemonClientProvider client={machine.factory}>
+        <Probe daemon={alpha} refreshMs={20} />
+      </DaemonClientProvider>,
+    );
+    await settleUntil(() => machine.paths.length >= 3, 'the periodic reads', runAsync);
+    await shown.unmount();
+    shown = null;
+    const stopped = machine.paths.length;
+    await new Promise(resolve => setTimeout(resolve, 80));
+    expect(machine.paths.length).toBe(stopped);
   });
 
   it('reads the features a newer machine lists', async () => {

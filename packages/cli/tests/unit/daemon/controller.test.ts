@@ -2465,3 +2465,33 @@ describe('daemon lifecycle progress', () => {
     should(stopping.steps).deepEqual(['Stopping fyd']);
   });
 });
+
+describe('daemon status — disk saturation', () => {
+  const busyDisk = {
+    some: { avg10: 52, avg60: 51, avg300: 51 },
+    full: { avg10: 46, avg60: 45, avg300: 44 },
+  };
+
+  it('should read this host’s disk pressure only when the daemon answered nothing', async () => {
+    // Arrange
+    let reads = 0;
+    const ioPressure = {
+      read: async () => {
+        reads += 1;
+        return busyDisk;
+      },
+    };
+    const silent = harness({ probes: [undefined], overrides: { ioPressure } });
+    const serving = harness({ probes: [health()], overrides: { ioPressure } });
+
+    // Act
+    await silent.controller.status({});
+    const readsWhenSilent = reads;
+    await serving.controller.status({});
+
+    // Assert
+    should(silent.out.text).containEql('disk is saturated (io pressure 46% full) — the daemon is slow, not dead');
+    should(readsWhenSilent).equal(1);
+    should(reads).equal(1);
+  });
+});

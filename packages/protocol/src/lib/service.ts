@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
+import { IoPressureViewSchema } from './io-pressure.ts';
 import { SessionWorkerPoolSchema } from './performance.ts';
 import { AccountAvailabilitySchema, AccountUnavailableReasonSchema } from './session.ts';
 
@@ -33,6 +34,8 @@ export const HealthViewSchema = z.object({
    * enum, so a feature a newer daemon adds does not fail an older app.
    */
   features: z.array(z.string()).optional(),
+  /** The disk's pressure now, where the host reports it (Linux PSI). Absent from an older daemon and from a host without PSI. */
+  io: IoPressureViewSchema.optional(),
   time: InstantSchema,
 });
 export type HealthView = z.infer<typeof HealthViewSchema>;
@@ -57,6 +60,10 @@ const LoopStallViewSchema = z.object({
   during: z.array(z.string()),
   innermost: z.array(z.string()).optional(),
   stacks: z.array(z.object({ stack: z.string(), share: z.number().finite().min(0).max(1) })).optional(),
+  /** Set when the disk was saturated while the loop was stalled, so the stall reads as slow rather than dead. */
+  cause: z.literal('disk').optional(),
+  /** The disk's pressure as the stall was recorded. */
+  io: IoPressureViewSchema.optional(),
 });
 
 export const LivenessViewSchema = z.object({
@@ -80,6 +87,8 @@ export const LivenessViewSchema = z.object({
       stalls: NonNegativeIntegerSchema,
       lastStall: LoopStallViewSchema.optional(),
       worstStall: LoopStallViewSchema.optional(),
+      /** The disk's pressure now, where the host reports it. */
+      io: IoPressureViewSchema.optional(),
     })
     .optional(),
 });
