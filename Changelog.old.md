@@ -1,3 +1,9 @@
+## [4.101.1](https://github.com/kirinnee/ferretry/compare/v4.101.0...v4.101.1) (2026-10-29)
+
+### Fixes
+
+* **pwa:** say a lone attention question once, and fade the detail into the answer bar ([#861](https://github.com/kirinnee/ferretry/issues/861)) ([dff62dd](https://github.com/kirinnee/ferretry/commit/dff62dda6b608368f4f6d4bc5752a38c38356e50))
+
 ## [4.101.0](https://github.com/kirinnee/ferretry/compare/v4.100.0...v4.101.0) (2026-10-29)
 
 ### Features
