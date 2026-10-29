@@ -1,3 +1,15 @@
+## [4.102.0](https://github.com/kirinnee/ferretry/compare/v4.101.3...v4.102.0) (2026-10-29)
+
+### Features
+
+* **daemon:** say the disk is saturated when it stalls the event loop ([#866](https://github.com/kirinnee/ferretry/issues/866)) ([f892976](https://github.com/kirinnee/ferretry/commit/f892976e64ab4ce77b2f235ee8a3d0fb5445162d))
+* **pwa:** fold the pinned Attention card to one line ([#864](https://github.com/kirinnee/ferretry/issues/864)) ([f159622](https://github.com/kirinnee/ferretry/commit/f159622dd3fcd95be6d5f12312110d281e1683dd))
+
+### Fixes
+
+* **daemon:** stop transcript reads holding the event loop under memory pressure ([#869](https://github.com/kirinnee/ferretry/issues/869)) ([c0ef697](https://github.com/kirinnee/ferretry/commit/c0ef69778f1197da6b8a7ea8fc1345188e389383))
+* **pwa:** give the pinned Attention card the deck's answer bar ([#867](https://github.com/kirinnee/ferretry/issues/867)) ([d83e0c7](https://github.com/kirinnee/ferretry/commit/d83e0c79892087d0d92e81131c6fe0bc5756a670))
+
 ## [4.101.3](https://github.com/kirinnee/ferretry/compare/v4.101.2...v4.101.3) (2026-10-29)
 
 ### Fixes

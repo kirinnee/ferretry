@@ -1,3 +1,10 @@
+## [4.101.3](https://github.com/kirinnee/ferretry/compare/v4.101.2...v4.101.3) (2026-10-29)
+
+### Fixes
+
+* **daemon:** keep session index writes off the event loop ([#868](https://github.com/kirinnee/ferretry/issues/868)) ([2664d71](https://github.com/kirinnee/ferretry/commit/2664d71b19ac25f1cd13d829a3d5c2aae31e18dd))
+* **pwa:** fit the Sessions Needs-you card to the phone screen ([#865](https://github.com/kirinnee/ferretry/issues/865)) ([a7f93d8](https://github.com/kirinnee/ferretry/commit/a7f93d8e09c0cb529e1b81684d63de6463d27fce))
+
 ## [4.101.2](https://github.com/kirinnee/ferretry/compare/v4.101.1...v4.101.2) (2026-10-29)
 
 ### Fixes
