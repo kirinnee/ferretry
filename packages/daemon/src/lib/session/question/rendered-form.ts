@@ -41,7 +41,7 @@ export type RenderedQuestion = PendingQuestion['questions'][number];
 type FreeFormEntry = 'inline' | 'notes' | 'page';
 
 /** The label a free-form answer is driven as, whatever the harness calls its row. */
-export const FREE_FORM_LABEL = 'Other';
+const FREE_FORM_LABEL = 'Other';
 
 export interface BoundQuestionForm {
   /** Every navigable row, in Up/Down order; the free-form row is named {@link FREE_FORM_LABEL}. */
