@@ -1,3 +1,11 @@
+## [4.105.3](https://github.com/kirinnee/ferretry/compare/v4.105.2...v4.105.3) (2026-10-29)
+
+### Fixes
+
+* **daemon:** parse the built-in catalogs when the build is made ([#883](https://github.com/kirinnee/ferretry/issues/883)) ([26e5c3a](https://github.com/kirinnee/ferretry/commit/26e5c3afb3dce95db67e4122c2da71b37015d527))
+* **pwa:** stop one photo upload from failing every upload on the connection ([#884](https://github.com/kirinnee/ferretry/issues/884)) ([34ead3e](https://github.com/kirinnee/ferretry/commit/34ead3e442b4d2e7b90f919db452b5e096360703))
+* **relay:** let a daemon reclaim its rendezvous at once after a drop ([#886](https://github.com/kirinnee/ferretry/issues/886)) ([c9b8a1b](https://github.com/kirinnee/ferretry/commit/c9b8a1bb20f64aa5e743740e8307ddbedd13e642))
+
 ## [4.105.2](https://github.com/kirinnee/ferretry/compare/v4.105.1...v4.105.2) (2026-10-29)
 
 ### Fixes
