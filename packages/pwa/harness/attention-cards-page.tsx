@@ -38,8 +38,8 @@ const item = (id: string, minutes: number, patch: Partial<AttentionItem>): Atten
 const FENCE = '```';
 
 const TASK = item('A1', 14, {
-  title: 'Rotate the relay key',
-  subject: 'Rotate the relay key',
+  title: 'Relay key rotation',
+  subject: 'Rotate the relay key before Friday’s release, using the three steps below.',
   why: 'The old key was pasted into a chat; rotate it before Friday’s release.',
   body: 'It takes about five minutes and you need shell access to **studio**. Sessions keep running; only the relay restarts at the end.',
   steps: [
@@ -57,8 +57,8 @@ const TASK = item('A1', 14, {
 } as Partial<AttentionItem>);
 
 const CHOICE = item('A2', 9, {
-  title: 'Which database for the board?',
-  subject: 'Which database for the board?',
+  title: 'Database for the board',
+  subject: 'Which database should keep the board’s finished items across restarts?',
   why: 'The board forgets every finished item when the app restarts.',
   context: 'Two stores fix it. SQLite is one file and needs nothing installed; Postgres is a server to run and patch.',
   recommendation: { decision: 'SQLite', why: 'The smallest change that survives a restart.' },
@@ -87,15 +87,15 @@ const CHOICE = item('A2', 9, {
 } as Partial<AttentionItem>);
 
 const YESNO = item('A3', 5, {
-  title: 'Restart the staging relay?',
-  subject: 'Restart the staging relay?',
+  title: 'Staging relay restart',
+  subject: 'May I restart the staging relay now so it picks up the new address list?',
   why: 'It is serving an old address list. A restart drops live sessions for about 10 seconds.',
   kind: 'yesno',
 } as Partial<AttentionItem>);
 
 const PERMISSION = item('A4', 3, {
-  title: 'Delete the old build cache?',
-  subject: 'Delete the old build cache?',
+  title: 'Old build cache',
+  subject: 'May I delete the 4 GB build cache nothing has read for three weeks?',
   why: 'It is 4 GB in the project’s build folder and nothing has read it for three weeks.',
   ask: { kind: 'permission' },
   answers: [
@@ -111,8 +111,8 @@ const PERMISSION = item('A4', 3, {
 } as Partial<AttentionItem>);
 
 const REVIEW = item('A5', 22, {
-  title: 'Review the new retry rule',
-  subject: 'Review the new retry rule',
+  title: 'Upload retry rule',
+  subject: 'Does the new upload retry rule look right to you?',
   why: 'Failed uploads now retry three times, a minute apart, instead of failing at once.',
   body: `The change is small:\n\n- Retries only on network errors, never on a refusal\n- Gives up after three tries and says so\n\n${FENCE}ts\nconst RETRIES = 3;\nconst WAIT_MS = 60_000;\n${FENCE}`,
   links: [{ label: 'The change', target: 'https://example.test/changes/retry-rule' }],
@@ -120,16 +120,16 @@ const REVIEW = item('A5', 22, {
 } as Partial<AttentionItem>);
 
 const INFO = item('A6', 40, {
-  title: 'The nightly benchmarks passed',
-  subject: 'The nightly benchmarks passed',
+  title: 'Nightly benchmarks',
+  subject: 'All 24 nightly benchmarks passed inside their time budget.',
   why: 'All 24 ran inside budget; the slowest finished in 41 seconds of a 60-second limit.',
   context: 'Nothing is needed from you. This is here so you know the release is not waiting on speed.',
   kind: 'info',
 } as Partial<AttentionItem>);
 
 const REPLY = item('A7', 12, {
-  title: 'What should the invite email say?',
-  subject: 'What should the invite email say?',
+  title: 'Team invite email',
+  subject: 'What should the first line of the team invite email say?',
   why: 'I wrote a first line, but you know your team better than I do.',
   context: 'Draft: “You’ve been added to the studio machine. Open the link to pair your phone.”',
   ask: { kind: 'open-question' },

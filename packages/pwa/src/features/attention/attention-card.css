@@ -104,6 +104,18 @@
   line-height: var(--leading-base);
   overflow-wrap: anywhere;
 }
+/*
+ * Markdown on a card speaks at the card's size: the chat's own prose scale would draw the why and the
+ * detail larger than the ask they explain, and in the chat's colour rather than the card's.
+ */
+.fy-attn-card .md {
+  font-size: var(--text-base);
+  line-height: var(--leading-base);
+}
+.fy-attn-card__why .md,
+.fy-attn-card__context .md {
+  color: inherit;
+}
 .fy-attn-card__context {
   border-left: var(--divider-width, 2px) solid var(--border);
   padding-left: var(--gap-sm);
