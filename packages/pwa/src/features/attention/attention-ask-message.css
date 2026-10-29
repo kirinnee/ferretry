@@ -1,0 +1,67 @@
+/* An ask in the ferret's conversation (attention-ask-message.tsx): a message with a small label, the question,
+   and option chips — compact, never a card. Colours are role tokens only, so both themes read the same. */
+.fy-ask {
+  display: flex;
+  min-width: 0;
+  max-width: 42rem;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-xs) 0;
+}
+.fy-ask__label {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+}
+.fy-ask__question {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+  overflow-wrap: anywhere;
+}
+.fy-ask__question > :first-child {
+  margin-top: 0;
+}
+.fy-ask__question > :last-child {
+  margin-bottom: 0;
+}
+.fy-ask__chips {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  border: 0;
+  margin: 0;
+  padding: 0;
+}
+.fy-ask__chip {
+  min-height: 32px;
+  gap: 6px;
+  border-radius: var(--radius-badge);
+}
+.fy-ask__chip[data-recommended] {
+  border-color: var(--accent);
+}
+.fy-ask__result,
+.fy-ask__note {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.fy-ask__result {
+  color: var(--fg);
+}
+.fy-ask__row {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+.fy-ask__link {
+  min-height: 32px;
+  gap: 4px;
+  color: var(--muted);
+}
+.fy-ask[data-replying] .fy-ask__link[data-attention-ask-reply] {
+  color: var(--accent);
+}
