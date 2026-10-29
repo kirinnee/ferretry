@@ -115,7 +115,21 @@ export interface InlineTranscriptImage {
   readonly alt: string;
 }
 
-export type TranscriptImage = StoredTranscriptAttachment | InlineTranscriptImage;
+/**
+ * An image the session's own transcript holds — a pasted screenshot, a tool's screenshot, a generated
+ * picture — named by the handle its log line carries, never by a stored attachment id.
+ */
+export interface TranscriptRecordImage {
+  readonly kind: 'transcript';
+  readonly sessionId: string;
+  /** The handle as the log spells it: `4096.3145728.0`. */
+  readonly handle: string;
+  /** What the transcript declared: a hint for the placeholder, never proof. */
+  readonly mediaType?: string;
+  readonly alt: string;
+}
+
+export type TranscriptImage = StoredTranscriptAttachment | InlineTranscriptImage | TranscriptRecordImage;
 
 const MIME_ALIASES: Readonly<Record<string, AttachmentMime>> = {
   'image/jpg': 'image/jpeg',
