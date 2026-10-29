@@ -85,6 +85,7 @@
         "harness/live-activity-screenshot.tsx",
         "harness/compaction-screenshot.tsx",
         "harness/handoff-screenshot.tsx",
+        "harness/chat-images-screenshot.tsx",
         "harness/migrate-notice-screenshot.tsx",
         "harness/pack-cards-screenshot.tsx",
         "harness/theme-gallery-screenshot.tsx",

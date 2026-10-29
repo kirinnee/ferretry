@@ -70,6 +70,7 @@ describe('FyApiClient construction and generic requests', () => {
       'stream',
       'submitSend',
       'suggestNames',
+      'transcriptImage',
       'updateCgroupConfig',
       'updateDaemonUpdateSettings',
       'updatePwaConfig',

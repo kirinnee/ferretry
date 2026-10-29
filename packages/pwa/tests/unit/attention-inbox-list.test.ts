@@ -9,6 +9,8 @@ import {
   inboxRowTitle,
   NO_FILTER,
   nextSelection,
+  QUEUE_END,
+  skipSelection,
   stepSelection,
 } from '../../src/lib/attention-inbox-list.ts';
 import type { InboxResolved } from '../../src/lib/attention-inbox.ts';
@@ -114,12 +116,22 @@ describe('the selection', () => {
     expect(nextSelection(['a', 'b', 'c'], 'b', ['a', 'b', 'c'])).toBe('b');
   });
 
-  it('moves to the item AFTER one that left, then the one before, then the top', () => {
+  it('moves FORWARD to the item after one that left, and past the last one to the end — never back to the top', () => {
     expect(nextSelection(['a', 'b', 'c'], 'b', ['a', 'c'])).toBe('c');
-    expect(nextSelection(['a', 'b', 'c'], 'c', ['a', 'b'])).toBe('b');
+    // Skipped a and b, answered c: the queue ends; it does not deal a again.
+    expect(nextSelection(['a', 'b', 'c'], 'c', ['a', 'b'])).toBe(QUEUE_END);
+    expect(nextSelection(['a', 'b'], QUEUE_END, ['a', 'b'])).toBe(QUEUE_END);
     expect(nextSelection(['a', 'b'], 'z', ['a', 'b'])).toBe('a');
     expect(nextSelection([], null, ['x'])).toBe('x');
     expect(nextSelection(['a'], 'a', [])).toBeNull();
+    expect(nextSelection(['a'], QUEUE_END, [])).toBeNull();
+  });
+
+  it('skips forward one at a time, several in a row, to the end', () => {
+    expect(skipSelection(['a', 'b', 'c'], 'a')).toBe('b');
+    expect(skipSelection(['a', 'b', 'c'], 'c')).toBe(QUEUE_END);
+    expect(skipSelection(['a', 'b'], null)).toBe('a');
+    expect(skipSelection([], null)).toBe(QUEUE_END);
   });
 
   it('steps one row up or down, clamped at both ends', () => {

@@ -167,7 +167,7 @@ describe('attention routes', () => {
     const hard = { ...raise, subject: 'Unblock ABC-123 via https://example.com', context: ['the OCI login'] };
 
     // Act
-    const clean = await dispatch(post(raise, agentIn('s1')));
+    const clean = await dispatch(post({ ...raise, premise: ['two base branches exist'] }, agentIn('s1')));
     const warned = await dispatch(post(hard, agentIn('s1')));
     const id = (jsonBody(warned).items as readonly { id: string }[])[1]?.id;
     const fixed = await dispatch(
@@ -183,6 +183,19 @@ describe('attention routes', () => {
       subject: 'Unblock the release',
       context: '- the cloud login',
     });
+  });
+
+  it('should warn, never refuse, a decision raised with no premise and no context', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const response = await dispatch(post(raise, agentIn('s1')));
+
+    // Assert
+    should(response.status).equal(200);
+    should((jsonBody(response).warnings as readonly string[]).join('\n')).match(/cannot tell what is going on/u);
+    should(jsonBody(response).items as readonly unknown[]).have.length(1);
   });
 
   it('should report an edit of an unknown item as not found', async () => {

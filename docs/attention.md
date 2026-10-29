@@ -164,9 +164,11 @@ before the structure existed still reads.
 | Part             | Field                                               | What it holds                                                                                                                                                                   |
 | ---------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Title / ask      | `title`, `subject`                                  | See "The card": what it is about, and the one question or action. Each drawn once.                                                                                              |
-| Context          | `context`                                           | What is happening and why it matters, in a few sentences. Markdown.                                                                                                             |
+| Premise          | `premise`                                           | The SITUATION: what is going on, in point form, so a cold reader starts here. Optional; a string, or a list drawn as bullets.                                                   |
+| Context          | `context`                                           | WHY IT MATTERS NOW, and the supporting facts — not the situation. Point form, Markdown.                                                                                         |
 | Terms            | `terms[]` `{term, meaning}`                         | Every codename or term of art the item uses, spelled out. At most 12.                                                                                                           |
 | Questions        | `questions[]`                                       | One per decision: `question`, optional `options`, `recommended` and `why`. ≤ 6.                                                                                                 |
+| Already decided  | `decided`                                           | Earlier answers that bear on this item, in point form, so the owner need not remember them. Same shape as `premise`.                                                            |
 | Recommendation   | `recommendation`                                    | The overall suggested decision `{decision, why?}`.                                                                                                                              |
 | Impact / urgency | `impact`, `urgency`                                 | What happens if nobody answers, and by when, in words.                                                                                                                          |
 | Links            | `links[]` `{label?, target}`                        | PRs, files and references (`#F12`, `@file`, a URL). At most 10.                                                                                                                 |
@@ -197,21 +199,38 @@ before the structure existed still reads.
   header. The history is one step away: the header's Actions menu has an "N resolved" entry (only when
   there is any), and the inbox has a Resolved filter that reads the boards of the 30 most recently active
   conversations.
-- **Raising one.** It can be raised from flags (`--context`, `--term "X=meaning"`, `--question`,
+- **Raising one.** It can be raised from flags (`--premise`, `--context`, `--decided`, `--term "X=meaning"`, `--question`,
   `--option`, `--recommend`, `--recommend-why`, `--impact`, `--urgency`, `--link`) or from a JSON body
   (`--json-file <path>`, `-` for stdin), where a flag wins over the same field. `fy attention add --help`
   prints the JSON shape. Every length is checked before anything is sent, and a refusal names the field.
+
+### The order a card reads in
+
+Premise, Context, the question, Already decided, Options, Recommendation and why, Terms, Steps, More
+detail (the body). A section that an item does not carry is skipped; the order never changes.
+
+**Premise and context are different things.** The premise is the situation — "the work login expires
+every day". The context is why it matters now and the facts that back it — "a 30-minute keepalive stops
+the daily logout". Neither is a hard rule. A short item may need only one, and a card that says
+everything in its question needs neither.
+
+**The hard rule is isolation.** Could the owner answer this with nothing else open — no chat, no PR, no
+terminal? If not, the card is wrong, whatever fields it fills. Premise and context are the way a card
+gets there. They are written in point form, one idea per bullet, for a reader with a short attention
+span: scannable first, detail after. When a picture beats words, put a chart or diagram in `--body` as an
+`fy-render` fence.
 
 ### Writing rules
 
 An item must stand alone, be easy to scan and be short. The fixed-layer Attention section teaches every
 ferret the same rules, with a good and a bad example:
 
-- **Self-contained.** The reader has not followed the conversation. No ticket or PR ids, codenames,
+- **Self-contained (the hard rule).** The reader has not followed the conversation, and the test is
+  "could the owner answer this with nothing else open?". No ticket or PR ids, codenames,
   file paths or unexplained capitals. A needed term goes in `terms` with its meaning.
 - **A title and an ask.** The title says what the item is about in a few plain words, under 40
   characters, with no ids. The ask is one plain sentence under 120 characters, answer first.
-- **Point form.** One idea per bullet. `context` and `impact` take a list (`-c` repeated, or a JSON array) and are stored as
+- **Point form.** One idea per bullet. `premise`, `context`, `decided` and `impact` take a list (`--premise`, `-c`, `--decided` repeated, or a JSON array) and are stored as
   `- point` lines; the app draws them as a bullet list, collapsed as before.
 - **Instructions in the item.** When the owner must DO something, give every step with `--step "<markdown>"`
   (repeat, in order; or `steps` in the JSON body), or one `--body-file <path|->` document: exact commands,
@@ -228,11 +247,13 @@ and the CLI prints them under the confirmation with the fix to run. It flags a m
 over 40 characters, an ask over 120, words that point at an earlier message ("as above", "as discussed",
 "the previous PR"), ticket-like ids (`ABC-123`, `#1234`) unless followed by what they are in brackets
 (`#812 (the push worker fix)`), URLs, file paths, ALL-CAPS words not defined in `terms`, and choice
-options that name nothing ("A", "Option 2") with no description
+options that name nothing ("A", "Option 2") with no description. A decision card (a permission, a choice,
+a question or an open question) with NO premise and NO context draws the strongest warning — "a reader
+opening this cold cannot tell what is going on" — but is never refused
 (`packages/daemon/src/lib/attention/writing-lint.ts`). The CLI itself refuses a raise with no title or
 with more than three options.
 
-**`fy attention edit <id>`** rewords an open item the ferret raised: summary, context, terms, the
+**`fy attention edit <id>`** rewords an open item the ferret raised: summary, premise, context, decided, terms, the
 questions' words (same count and options, in order), title, recommendation, impact, urgency, links, steps and body. It
 never changes the ask, who raised it or the question options, and it does not push again — except an
 edit that answers an open Need more info request, which pushes once (see "The loop").

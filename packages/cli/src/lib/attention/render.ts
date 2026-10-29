@@ -73,8 +73,14 @@ function itemLines(item: AttentionItem): string[] {
   ];
   if (titled) lines.push(`${INDENT}ask: ${compact(item.subject)}`);
   lines.push(`${INDENT}${answersLine(item)}`);
+  if (item.premise !== undefined && item.premise.trim() !== '') {
+    lines.push(`${INDENT}premise: ${compact(item.premise)}`);
+  }
   if (item.context !== null && item.context !== undefined && item.context.trim() !== '') {
     lines.push(`${INDENT}context: ${compact(item.context)}`);
+  }
+  if (item.decided !== undefined && item.decided.trim() !== '') {
+    lines.push(`${INDENT}decided: ${compact(item.decided)}`);
   }
   lines.push(...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);

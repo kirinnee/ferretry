@@ -1,4 +1,4 @@
-import type { HandoffPointer, SessionStatus } from '@ferretry/protocol';
+import type { HandoffPointer, SessionStatus, TranscriptImageMarker } from '@ferretry/protocol';
 import type { LedgerBlockPlacement } from './ledger-placement.ts';
 import type { PackCall } from './pack-calls.ts';
 import type { SentMessage } from './peer-delivery.ts';
@@ -67,6 +67,9 @@ export interface TranscriptEntry {
   /** The harness event a `system` row stands for: a background task finishing, an interrupt, a reminder.
    *  It arrived as a user record, but nobody typed it, so it is never the reader's own message. */
   readonly event?: SystemBlockInfo;
+  /** The images this row shows — a pasted screenshot or a generated picture the log named by marker. A row
+   *  with images and no `text` is the picture alone. */
+  readonly images?: readonly TranscriptImageMarker[];
   /** A failure the reader must see. A notice without it is daemon bookkeeping and is never shown. */
   readonly alert?: boolean;
 }

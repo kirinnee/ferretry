@@ -1,8 +1,13 @@
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter, queryValue } from '../../api/http.ts';
-import { conditional, jsonResponse, textResponse } from '../../api/responses.ts';
+import { conditional, jsonResponse, namesTag, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { OperatorReadError, type OperatorReadFailure, type OperatorReadService } from '../../session/reads/index.ts';
+import {
+  TranscriptImageError,
+  type TranscriptImageFailure,
+  type TranscriptImageReader,
+} from '../../session/transcript/image-reader.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
 
 /**
@@ -191,23 +196,72 @@ async function messages(
   }
 }
 
+/** The HTTP status and code each refusal of the image read answers with; the code is the reader's own. */
+const IMAGE_REFUSALS: Readonly<Record<TranscriptImageFailure, number>> = {
+  invalid_image_handle: 400,
+  // 409 as for `logs`: the session is real and what is absent is its transcript, which may appear.
+  no_transcript: 409,
+  transcript_unreadable: 409,
+  image_not_found: 404,
+  unsupported_image: 415,
+};
+
+/** One year, immutable: the handle names bytes of an append-only file, so the answer never changes. */
+const IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
+
 /**
- * The `operator` minimum on all four: a pane capture is the agent's whole screen, a transcript is
+ * One image of the session's transcript, named by a handle the log carried as a marker.
+ *
+ * THE HANDLE IS PROVED, NEVER TRUSTED (see `TranscriptImageReader`). It reads the same transcript at
+ * the same minimum as `logs`, so it widens nothing: whoever may read the text may read the picture.
+ *
+ * CACHEABLE, unlike `logs`: a handle names bytes of an append-only file, so `private` and `immutable`
+ * hold and the browser keeps what it painted. A rewritten file is not served stale — the reader proves
+ * the handle again under the file's new fingerprint. The tag is the session, the handle and the size, so
+ * a `304` still costs a `stat` and a memory lookup, never a read of the image.
+ */
+async function transcriptImage(
+  images: TranscriptImageReader,
+  sessions: SessionDirectorySubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
+  const id = sessionId(context);
+  await requireSession(sessions, id);
+  const handle = decodeParameter(context.params.get('handle') ?? '');
+  try {
+    const found = await images.lookup(id, handle ?? '');
+    const headers = { 'cache-control': IMAGE_CACHE_CONTROL, etag: found.etag };
+    const ifNoneMatch = context.request.headers.get('if-none-match');
+    if (ifNoneMatch !== undefined && namesTag(ifNoneMatch, found.etag))
+      return textResponse('', 304, 'application/json', headers);
+    return jsonResponse(await found.download(), 200, headers);
+  } catch (error) {
+    if (error instanceof TranscriptImageError)
+      throw new ApiError(IMAGE_REFUSALS[error.failure], error.message, error.failure);
+    throw error;
+  }
+}
+
+/**
+ * The `operator` minimum on all five: a pane capture is the agent's whole screen, a transcript is
  * everything it has said, an addressable page is that transcript row by row, and the journal carries
  * the session's configuration in its lifecycle events. None of it is warden-readable until a unit
  * decides deliberately that it should be.
  *
- * `noStore` on all four for the reason the session view is: these are live state, and a cached answer
+ * `noStore` on the first four for the reason the session view is: these are live state, and a cached answer
  * shows a session that has already moved on. It matters most for the snapshot, whose entire value is
  * that it is the screen as of now — and for `messages`, whose rows carry evidence that is only true of
  * the conversation as it read at the moment it was served.
  *
- * All four are one-segment patterns under `/v1/sessions/:sessionId` ending in a literal no other route
- * uses, so none can shadow or be shadowed by the surfaces already mounted.
+ * The transcript image route is the exception to `noStore`: a handle names a record that is only ever
+ * appended after, so its answer is immutable and caches for a year. Every pattern is under
+ * `/v1/sessions/:sessionId` and ends in a literal no other route uses, so none can shadow or be shadowed
+ * by the surfaces already mounted.
  */
 export function sessionReadRoutes(
   reads: OperatorReadService,
   sessions: SessionDirectorySubsystem,
+  images: TranscriptImageReader,
 ): readonly ApiRoute[] {
   return [
     {
@@ -237,6 +291,13 @@ export function sessionReadRoutes(
       minimum: 'operator',
       noStore: true,
       handle: async context => await messages(reads, sessions, context),
+    },
+    // The same minimum and no capability as `logs`, and no `noStore`: see {@link transcriptImage}.
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/transcript-images/:handle',
+      minimum: 'operator',
+      handle: async context => await transcriptImage(images, sessions, context),
     },
   ];
 }

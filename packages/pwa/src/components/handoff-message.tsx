@@ -79,6 +79,11 @@ export function HandoffSourceProvider({
   return <HandoffContext.Provider value={reader}>{children}</HandoffContext.Provider>;
 }
 
+/** The daemon and session this part of the page reads from, or null outside a session workspace. */
+export function useHandoffSource(): HandoffSource | null {
+  return useContext(HandoffContext)?.source ?? null;
+}
+
 export type HandoffReading =
   | { readonly state: 'reading' }
   | { readonly state: 'read'; readonly handoff: SessionHandoff }

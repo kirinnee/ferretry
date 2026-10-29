@@ -930,3 +930,69 @@
     display: none;
   }
 }
+
+/* ---- Forward only: the end of the queue ------------------------------------------------------------ */
+/* "You skipped N": a card-sized frame of its own, so reaching the end never changes the page's shape. */
+.fy-attn-end {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--gap-sm);
+  border: var(--stroke-panel) solid var(--border);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-panel);
+  padding: var(--gap-lg, 24px) var(--gap-md);
+  text-align: center;
+}
+.fy-attn-end__title {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+}
+.fy-attn-end__text {
+  margin: 0;
+  max-width: 32ch;
+  color: var(--muted);
+}
+
+/* EVERY CARD THE SAME SIZE. The phone's card view is the whole screen above the tab bar; the deck gives
+   its top card all of the room it measured (not "up to" it), so moving from a long to-do to a one-line
+   note never resizes the deck — the detail scrolls inside, the answer bar stays where it was. */
+.fy-attn-inbox[data-attention-inbox='card'] {
+  min-height: 100%;
+  padding-bottom: calc(12px + var(--safe-bottom, 0px));
+}
+.fy-attn-inbox__deck .fy-attn-deck__top .fy-attn-card {
+  height: var(--deck-room, max(20rem, calc(100dvh - 19rem)));
+}
+.fy-attn-end__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--gap-sm);
+}
+/* The hint under the deck is always two lines tall, so the room the deck measures for its card — and so
+   the card — is the same for a one-line hint as for a long one. */
+.fy-attn-inbox__deck > .fy-attn-inbox__hint {
+  display: -webkit-box;
+  height: calc(2 * 1.35em);
+  overflow: hidden;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.fy-attn-inbox__deck--end {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+}
+/* The peeking cards' 22px under a dealt card (attention-inbox.css, the deck). */
+.fy-attn-inbox__deck--end > .fy-attn-end {
+  margin-bottom: 22px;
+}

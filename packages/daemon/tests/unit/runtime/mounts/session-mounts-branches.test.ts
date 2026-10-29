@@ -25,6 +25,7 @@ import { type SessionSendSubsystem, sessionSendRoutes } from '../../../../src/li
 import { sessionRoutes } from '../../../../src/lib/runtime/mounts/sessions.ts';
 import type { OperatorReadService } from '../../../../src/lib/session/reads/service.ts';
 import { request } from '../../api/support.ts';
+import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { CREDENTIALS, FakeSessionControl, GRANTED, human, sessionDirectory, sessionView } from './support.ts';
 
 /** Refusal branches of the session mounts that only a hostile or broken caller reaches. */
@@ -181,11 +182,14 @@ describe('the session snapshot read', () => {
     const reads = new Proxy({}, { get: () => () => Promise.reject(new Error('no read may happen')) });
 
     // Act
-    const response = await dispatch(sessionReadRoutes(reads as OperatorReadService, sessionDirectory()), {
-      path: '/v1/sessions/s1/snapshot',
-      query: [['live', 'maybe']],
-      headers: human,
-    });
+    const response = await dispatch(
+      sessionReadRoutes(reads as OperatorReadService, sessionDirectory(), new MemoryTranscript([]).reader()),
+      {
+        path: '/v1/sessions/s1/snapshot',
+        query: [['live', 'maybe']],
+        headers: human,
+      },
+    );
 
     // Assert
     should(response.status).equal(400);

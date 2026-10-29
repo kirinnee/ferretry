@@ -298,6 +298,8 @@ export const inboxOptions = (item: Parameters<typeof answerActions>[0]): readonl
 
 /** Whether an item carries any of the structured brief; an old item carries none. */
 export const hasAttentionBrief = (item: AttentionBrief): boolean =>
+  item.premise !== undefined ||
+  item.decided !== undefined ||
   item.terms !== undefined ||
   item.questions !== undefined ||
   item.recommendation !== undefined ||

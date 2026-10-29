@@ -1022,3 +1022,85 @@ describe('startSessionWorkspaceRefresh · nudges and the relaxed poll', () => {
     subject.stop();
   });
 });
+
+describe('transcriptEntriesFromLog: images', () => {
+  const shot = '[fy-image 4096.3145728.0 image/png]';
+  const other = '[fy-image 9000.2048.1 image/jpeg]';
+
+  test('a user attachment with a marker becomes a visible user row that carries the image', () => {
+    const entries = transcriptEntriesFromLog(`[10:00:00] user/attachment: image ${shot}`, NOW);
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({ kind: 'user', text: '', at: Date.UTC(2026, 9, 18, 10, 0, 0) });
+    expect(entries[0]?.images).toEqual([
+      { handle: { recordOffset: 4096, recordLength: 3_145_728, ordinal: 0 }, mediaType: 'image/png' },
+    ]);
+  });
+
+  test('a ferret attachment with a marker becomes an assistant row', () => {
+    const entries = transcriptEntriesFromLog(`assistant/attachment: image ${shot}`);
+    expect(entries.map(entry => [entry.kind, entry.images?.length])).toEqual([['assistant', 1]]);
+    expect(entries[0]).not.toHaveProperty('at');
+  });
+
+  test('an attachment line without a marker stays hidden, as an older daemon wrote it', () => {
+    expect(transcriptEntriesFromLog('user/attachment: image\nassistant/attachment: image')).toEqual([]);
+  });
+
+  test('a malformed marker leaves the attachment hidden', () => {
+    expect(transcriptEntriesFromLog('user/attachment: image [fy-image nope image/png]')).toEqual([]);
+  });
+
+  test('an attachment from another role stays hidden even with a marker', () => {
+    expect(transcriptEntriesFromLog(`tool/attachment: image ${shot}`)).toEqual([]);
+  });
+
+  test('an image row follows a finished tool run and sits between its neighbours in order', () => {
+    const entries = transcriptEntriesFromLog(
+      [
+        'user/message: look',
+        'assistant/tool-call: Read({})',
+        'tool/tool-result: read',
+        `user/attachment: image ${shot}`,
+        'assistant/message: seen',
+      ].join('\n'),
+    );
+    expect(entries.map(entry => entry.kind)).toEqual(['user', 'tool', 'user', 'assistant']);
+    expect(entries[2]?.images).toHaveLength(1);
+  });
+
+  test('a tool result splits its marker lines into images and keeps the text', () => {
+    const entries = transcriptEntriesFromLog(
+      ['assistant/tool-call: browser_screenshot({})', 'tool/tool-result: captured', `    ${shot}`, `    ${other}`].join(
+        '\n',
+      ),
+    );
+    const result = entries[0]?.tools?.[0]?.result;
+    expect(result?.text).toBe('captured');
+    expect(result?.images?.map(image => image.mediaType)).toEqual(['image/png', 'image/jpeg']);
+  });
+
+  test('an image-only tool result has empty text and its image', () => {
+    const entries = transcriptEntriesFromLog(
+      ['assistant/tool-call: browser_screenshot({})', `tool/tool-result: ${shot}`].join('\n'),
+    );
+    const result = entries[0]?.tools?.[0]?.result;
+    expect(result?.text).toBe('');
+    expect(result?.images).toHaveLength(1);
+  });
+
+  test('a failed result keeps its error tone and its images', () => {
+    const entries = transcriptEntriesFromLog(
+      ['assistant/tool-call: Read({})', `tool/tool-result: error timed out ${shot}`].join('\n'),
+    );
+    expect(entries[0]?.tools?.[0]?.result).toMatchObject({ text: 'timed out', isError: true });
+    expect(entries[0]?.tools?.[0]?.result?.images).toHaveLength(1);
+  });
+
+  test('a tool result with a malformed marker keeps it as text and carries no images', () => {
+    const entries = transcriptEntriesFromLog(
+      ['assistant/tool-call: Read({})', 'tool/tool-result: see [fy-image bad image/png]'].join('\n'),
+    );
+    const result = entries[0]?.tools?.[0]?.result;
+    expect(result).toEqual({ text: 'see [fy-image bad image/png]' });
+  });
+});

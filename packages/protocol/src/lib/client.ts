@@ -40,6 +40,7 @@ import type {
 import type { ForkSessionOutcome, ForkSessionRequest } from './session-fork.ts';
 import type { SessionLiveActivity, SessionTranscriptMoved } from './session-live.ts';
 import type { SessionTranscriptPage } from './session-transcript.ts';
+import type { TranscriptImageDownload } from './transcript-images.ts';
 import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from './skills-inventory.ts';
 import type { SessionHandoff } from './turn-handoff.ts';
 import type { VersionSkew } from './version-skew.ts';
@@ -239,6 +240,12 @@ export interface IFyApiClient {
    * the default page size, so an omitted `limit` stays absent rather than gaining a client-side default.
    */
   messages(id: string, cursor?: string, limit?: number, signal?: AbortSignal): Promise<SessionTranscriptPage>;
+  /**
+   * One image of a session's transcript, by the handle of a `[fy-image <handle> <type>]` marker in its logs.
+   * The daemon proves the handle and the bytes, so a refusal (`image_not_found`, `unsupported_image`, ...) is an
+   * error with its code, never a guess; the answer is immutable, so a caller may hold it for good.
+   */
+  transcriptImage(id: string, handle: string): Promise<TranscriptImageDownload>;
   /** What the person sent in one hand-off (`turn-008`, `queued-<send id>`): the message behind the pointer a transcript records. */
   handoff(id: string, name: string): Promise<SessionHandoff>;
   events(id: string, after?: number, limit?: number, signal?: AbortSignal): Promise<FyEvent[]>;
