@@ -94,11 +94,11 @@ describe('the relay carrier decision', () => {
     });
   });
 
-  it('should ask a rendezvous for the claim probe in the query, leaving the route untouched', () => {
+  it('should ask a rendezvous for its features in the query, leaving the route untouched', () => {
     const route = 'wss://relay.example/hosted/v1/rendezvous/fy_daemon_x/daemon';
     const dialled = new URL(relayDialUrl(route));
     should(`${dialled.origin}${dialled.pathname}`).equal(route);
-    should(dialled.search).equal('?features=claim-probe');
+    should(dialled.searchParams.get('features')).equal('claim-probe,claim-handover');
   });
 
   it('should read silence as death rather than waiting for a close that never comes', () => {

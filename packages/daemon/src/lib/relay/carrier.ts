@@ -31,14 +31,14 @@ export const RELAY_SILENCE_LIMIT_MS = HEARTBEAT_GRACE_SECONDS * 1_000;
 export const RELAY_KEEPALIVE_MS = 20_000;
 
 /**
- * The address actually dialled: the rendezvous route, asking for `claim-probe` (§5).
+ * The address actually dialled: the rendezvous route, asking for `claim-probe` and `claim-handover` (§5).
  *
  * In the query, not the path, because a rendezvous that does not speak it must not notice it was asked:
  * an older one ignores the query and answers a plain `claimed`, and this daemon then never probes.
  */
 export const relayDialUrl = (socketUrl: string): string => {
   const url = new URL(socketUrl);
-  url.searchParams.set(RELAY_FEATURES_PARAM, 'claim-probe');
+  url.searchParams.set(RELAY_FEATURES_PARAM, 'claim-probe,claim-handover');
   return url.toString();
 };
 

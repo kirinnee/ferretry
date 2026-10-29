@@ -10,6 +10,7 @@ import {
   encodeControlMessage,
   encodeCreditPayload,
   FRAME_KINDS,
+  handoverTokensMatch,
   HEARTBEAT_GRACE_SECONDS,
   initialRendezvousState,
   isClaimProbe,
@@ -1004,5 +1005,192 @@ describe('rendezvous: reconciling the stored state with the attached sockets', (
       at: 5_001,
     });
     should(closures(odd.effects)).match([{ socketId: 'daemon', code: RELAY_CLOSE_CODES.protocolError }]);
+  });
+});
+
+describe('rendezvous: handing the claim over to the same daemon', () => {
+  const tokenOne = 'T'.repeat(43);
+  const tokenTwo = 'U'.repeat(43);
+  const features = ['claim-probe', 'claim-handover'] as const;
+
+  /** A daemon that asked for the handover is challenged, claims (naming `replaces` if it has one) and is judged. */
+  function claim(
+    state: RendezvousState,
+    socketId: string,
+    options: { readonly handover?: string; readonly replaces?: string; readonly asks?: boolean; readonly at?: number },
+  ) {
+    const at = options.at ?? 3_000;
+    const arrived = reduceRendezvous(state, {
+      kind: 'daemon-arrived',
+      socketId,
+      challenge: new Uint8Array(32).fill(7),
+      host,
+      ...(options.asks === false ? {} : { features: [...features] }),
+      ...(options.handover === undefined ? {} : { handover: options.handover }),
+      at,
+    });
+    const claiming = reduceRendezvous(arrived.state, {
+      kind: 'frame',
+      socketId,
+      frame: control(RENDEZVOUS_SESSION_ID, {
+        t: 'claim',
+        protocol: RELAY_PROTOCOL_ID,
+        publicKey,
+        signature,
+        ...(options.replaces === undefined ? {} : { replaces: options.replaces }),
+      }),
+      at,
+    });
+    return {
+      arrived,
+      claiming,
+      settled: reduceRendezvous(claiming.state, { kind: 'claim-verdict', socketId, verdict: goodVerdict, at }),
+    };
+  }
+
+  const holding = (): RendezvousState =>
+    claim(initialRendezvousState(daemonId), 'old', { handover: tokenOne }).settled.state;
+
+  it('should issue the token in claimed, store it in the slot, and never to a daemon that did not ask', () => {
+    const first = claim(initialRendezvousState(daemonId), 'old', { handover: tokenOne });
+    should(messagesTo(first.settled.effects, 'old')).match([{ t: 'claimed', handover: tokenOne }]);
+    should(first.settled.state.daemon?.handover).equal(tokenOne);
+
+    const plain = claim(initialRendezvousState(daemonId), 'old', { asks: false, handover: tokenOne });
+    const said = messagesTo(plain.settled.effects, 'old')[0];
+    should(said).not.have.property('handover');
+    should(plain.settled.state.daemon).not.have.property('handover');
+    should(plain.arrived.state.pending[0]).not.have.property('handover');
+  });
+
+  it('should let a verified claim naming the incumbent token supersede it, with a new token', () => {
+    const step = claim(holding(), 'new', { handover: tokenTwo, replaces: tokenOne });
+    should(closures(step.settled.effects)).deepEqual([
+      { socketId: 'old', code: RELAY_CLOSE_CODES.claimLost, reason: 'replaced by a fresh claim from the same daemon' },
+    ]);
+    should(step.settled.state.daemon?.socketId).equal('new');
+    should(step.settled.state.daemon?.handover).equal(tokenTwo);
+    should(messagesTo(step.settled.effects, 'new')).match([{ t: 'claimed', handover: tokenTwo }]);
+    // The superseded socket's token is spent: it is no longer anybody's.
+    const again = claim(step.settled.state, 'third', { handover: 'V'.repeat(43), replaces: tokenOne });
+    should(closures(again.settled.effects)[0]?.code).equal(RELAY_CLOSE_CODES.rendezvousClaimed);
+    should(again.settled.state.daemon?.socketId).equal('new');
+  });
+
+  it('should end the superseded socket sessions as a departure does, and carry none over', () => {
+    const phone = reduceRendezvous(holding(), {
+      kind: 'client-arrived',
+      socketId: 'phone',
+      sessionId: sessionId(1),
+      at: 2_000,
+    });
+    const step = claim(phone.state, 'new', { handover: tokenTwo, replaces: tokenOne });
+    should(messagesTo(step.settled.effects, 'phone')).match([{ t: 'closed', code: RELAY_CLOSE_CODES.daemonAbsent }]);
+    should(closures(step.settled.effects).map(closure => closure.socketId)).deepEqual(['phone', 'old']);
+    should(step.settled.state.sessions).deepEqual([]);
+
+    // The old socket's own close, delivered late, must not take the new holder down with it.
+    const late = reduceRendezvous(step.settled.state, { kind: 'socket-closed', socketId: 'old', at: 3_100 });
+    should(late.state.daemon?.socketId).equal('new');
+  });
+
+  it('should keep 4409 for a claim with no token, a wrong token, or a token for a holder that has none', () => {
+    for (const replaces of [undefined, tokenTwo, 'X'.repeat(43)]) {
+      const step = claim(holding(), 'other', {
+        handover: tokenTwo,
+        ...(replaces === undefined ? {} : { replaces }),
+      });
+      should(closures(step.settled.effects)).match([{ socketId: 'other', code: RELAY_CLOSE_CODES.rendezvousClaimed }]);
+      should(step.settled.state.daemon?.socketId).equal('old');
+      should(step.settled.state.daemon?.handover).equal(tokenOne);
+    }
+    // A holder that never negotiated the feature has no token to be replaced with.
+    const plainHolder = claim(initialRendezvousState(daemonId), 'old', { asks: false }).settled.state;
+    const step = claim(plainHolder, 'new', { handover: tokenTwo, replaces: tokenOne });
+    should(closures(step.settled.effects)[0]?.code).equal(RELAY_CLOSE_CODES.rendezvousClaimed);
+  });
+
+  it('should refuse a claim that does not verify, even with the right token, and keep the holder', () => {
+    const state = holding();
+    const step = claim(state, 'new', { handover: tokenTwo, replaces: tokenOne });
+    const refused = reduceRendezvous(step.claiming.state, {
+      kind: 'claim-verdict',
+      socketId: 'new',
+      verdict: { ok: false, reason: 'bad signature' },
+      at: 3_000,
+    });
+    should(closures(refused.effects)[0]?.code).equal(RELAY_CLOSE_CODES.claimRejected);
+    should(refused.state.daemon?.socketId).equal('old');
+  });
+
+  it('should not honour replaces from a socket that did not ask for the feature', () => {
+    const arrived = reduceRendezvous(holding(), {
+      kind: 'daemon-arrived',
+      socketId: 'plain',
+      challenge: new Uint8Array(32),
+      host,
+      at: 3_000,
+    });
+    // Without the feature a second socket never even reaches a claim while somebody holds the slot.
+    should(closures(arrived.effects)[0]?.code).equal(RELAY_CLOSE_CODES.rendezvousClaimed);
+
+    const free = reduceRendezvous(initialRendezvousState(daemonId), {
+      kind: 'daemon-arrived',
+      socketId: 'plain',
+      challenge: new Uint8Array(32),
+      host,
+      at: 3_000,
+    });
+    const step = reduceRendezvous(free.state, {
+      kind: 'frame',
+      socketId: 'plain',
+      frame: control(RENDEZVOUS_SESSION_ID, {
+        t: 'claim',
+        protocol: RELAY_PROTOCOL_ID,
+        publicKey,
+        signature,
+        replaces: tokenOne,
+      }),
+      at: 3_001,
+    });
+    should(closures(step.effects)).match([{ socketId: 'plain', code: RELAY_CLOSE_CODES.protocolError }]);
+    should(step.effects.some(effect => effect.kind === 'verify-claim')).be.false();
+  });
+
+  it('should keep the incumbent-wins refusal at arrival for a daemon that did not ask for the feature', () => {
+    const second = reduceRendezvous(holding(), {
+      kind: 'daemon-arrived',
+      socketId: 'other',
+      challenge: new Uint8Array(32),
+      host,
+      features: ['claim-probe'],
+      at: 3_000,
+    });
+    should(closures(second.effects)[0]?.code).equal(RELAY_CLOSE_CODES.rendezvousClaimed);
+  });
+
+  it('should compare tokens of different lengths without throwing, and treat them as different', () => {
+    should(handoverTokensMatch(tokenOne, tokenOne)).be.true();
+    should(handoverTokensMatch(tokenOne, tokenTwo)).be.false();
+    should(handoverTokensMatch(tokenOne, tokenOne.slice(1))).be.false();
+    should(handoverTokensMatch('', tokenOne)).be.false();
+  });
+
+  it('should keep the token through the restore path, so a restored holder can still be superseded', () => {
+    const forgotten: RendezvousState = { ...holding(), daemon: null };
+    const step = reconcileRendezvous(
+      forgotten,
+      [{ socketId: 'old', claim: { features: [...features], handover: tokenOne } }],
+      5_000,
+    );
+    should(step?.state.daemon).deepEqual({
+      socketId: 'old',
+      since: 5_000,
+      restored: true,
+      features: [...features],
+      handover: tokenOne,
+    });
+    const superseded = claim(step?.state ?? forgotten, 'new', { handover: tokenTwo, replaces: tokenOne });
+    should(superseded.settled.state.daemon?.socketId).equal('new');
   });
 });

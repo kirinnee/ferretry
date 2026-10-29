@@ -73,8 +73,13 @@ function bytesOf(frame: RelayFrame): ArrayBuffer {
 }
 
 /** Bring a real daemon all the way through the claim, exactly as a daemon would. */
-async function claimRendezvous(harness: ReturnType<typeof makeObject>, reservationId?: string, query = '') {
-  const identity = await newDaemonIdentity();
+async function claimRendezvous(
+  harness: ReturnType<typeof makeObject>,
+  reservationId?: string,
+  query = '',
+  again?: { readonly identity: Awaited<ReturnType<typeof newDaemonIdentity>>; readonly replaces?: string },
+) {
+  const identity = again?.identity ?? (await newDaemonIdentity());
   const before = harness.objectState.sockets.length;
   await harness.object.fetch(socketRequest(identity.daemonId, 'daemon', reservationId, query));
   const daemonSocket = harness.objectState.sockets[before];
@@ -95,7 +100,12 @@ async function claimRendezvous(harness: ReturnType<typeof makeObject>, reservati
       kind: FRAME_KINDS.control,
       sessionId: RENDEZVOUS_SESSION_ID,
       sequence: 0,
-      payload: encodeControlMessage({ t: 'claim', protocol: RELAY_PROTOCOL_ID, ...claim }),
+      payload: encodeControlMessage({
+        t: 'claim',
+        protocol: RELAY_PROTOCOL_ID,
+        ...claim,
+        ...(again?.replaces === undefined ? {} : { replaces: again.replaces }),
+      }),
     }),
   );
   return { identity, daemonSocket };
@@ -943,6 +953,7 @@ describe('session identifiers', () => {
 
 describe('rendezvous durable object: a claim the stored state lost', () => {
   const probing = '?features=claim-probe';
+  const handing = '?features=claim-probe,claim-handover';
   const probe = bytesOf({
     kind: FRAME_KINDS.control,
     sessionId: RENDEZVOUS_SESSION_ID,
@@ -971,6 +982,76 @@ describe('rendezvous durable object: a claim the stored state lost', () => {
     const { daemonSocket: older } = await claimRendezvous(plain);
     should(controlOf(older.drain()[0])).not.have.property('features');
     should(older.deserializeAttachment()).match({ claim: {} });
+  });
+
+  it('should mint a handover token for a daemon that asked, mark it on its socket, and mint none otherwise', async () => {
+    const harness = makeObject();
+    const { daemonSocket } = await claimRendezvous(harness, undefined, handing);
+    const claimed = controlOf(daemonSocket.drain()[0]);
+    should(claimed).match({ t: 'claimed', features: ['claim-probe', 'claim-handover'] });
+    const token = (claimed as { handover?: string } | null)?.handover;
+    should(token).be.a.String();
+    should(token).match(/^[A-Za-z0-9_-]{43}$/u);
+    should(daemonSocket.deserializeAttachment()).match({ claim: { handover: token } });
+    should(harness.objectState.storage.values.get('rendezvous')).match({ daemon: { handover: token } });
+
+    const plain = makeObject();
+    const { daemonSocket: older } = await claimRendezvous(plain, undefined, probing);
+    should(controlOf(older.drain()[0])).not.have.property('handover');
+    should((older.deserializeAttachment() as { claim: object }).claim).not.have.property('handover');
+  });
+
+  it('should let the same daemon reclaim at once with the token, closing the old socket 4410', async () => {
+    const harness = makeObject();
+    const first = await claimRendezvous(harness, undefined, handing);
+    const token = (controlOf(first.daemonSocket.drain()[0]) as { handover: string }).handover;
+
+    const second = await claimRendezvous(harness, undefined, handing, { identity: first.identity, replaces: token });
+    should(first.daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.claimLost);
+    should(first.daemonSocket.deserializeAttachment()).not.have.property('claim');
+    const claimed = controlOf(second.daemonSocket.drain().at(-1)) as { t: string; handover: string };
+    should(claimed.t).equal('claimed');
+    should(claimed.handover).not.equal(token);
+    should(second.daemonSocket.closed).be.null();
+    should(second.daemonSocket.deserializeAttachment()).match({ claim: { handover: claimed.handover } });
+  });
+
+  it('should refuse a claim with no token or a wrong one with 4409 and leave the holder alone', async () => {
+    const harness = makeObject();
+    const first = await claimRendezvous(harness, undefined, handing);
+    first.daemonSocket.drain();
+
+    for (const replaces of [undefined, 'Z'.repeat(43)]) {
+      const rival = await claimRendezvous(harness, undefined, handing, {
+        identity: first.identity,
+        ...(replaces === undefined ? {} : { replaces }),
+      });
+      should(rival.daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.rendezvousClaimed);
+    }
+    should(first.daemonSocket.closed).be.null();
+    should(first.daemonSocket.deserializeAttachment()).match({ claim: {} });
+  });
+
+  it('should keep the token across a forgotten claim, so the restored holder can still be superseded', async () => {
+    const harness = makeObject();
+    const first = await claimRendezvous(harness, undefined, handing);
+    const token = (controlOf(first.daemonSocket.drain()[0]) as { handover: string }).handover;
+    forgetTheClaim(harness);
+    const warn = console.warn;
+    console.warn = () => undefined;
+    try {
+      await joinClient(evict(harness), first.identity.daemonId);
+    } finally {
+      console.warn = warn;
+    }
+    should(harness.objectState.storage.values.get('rendezvous')).match({ daemon: { restored: true, handover: token } });
+
+    const second = await claimRendezvous(evict(harness), undefined, handing, {
+      identity: first.identity,
+      replaces: token,
+    });
+    should(first.daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.claimLost);
+    should(controlOf(second.daemonSocket.drain().at(-1))).match({ t: 'claimed' });
   });
 
   it('should keep serving across an eviction, because the claim is stored rather than remembered', async () => {
