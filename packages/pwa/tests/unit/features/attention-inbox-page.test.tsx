@@ -575,6 +575,28 @@ describe('AttentionInboxPage list and card', () => {
     await mounted.unmount();
   });
 
+  it('folds its "In discussion" group away with its header, and brings the rows back', async () => {
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        ask: choices('Yes', 'No'),
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing, twoWay]));
+    const talking = must(mounted.container.querySelector('[data-attention-discussion-list]'), 'the discussion group');
+    const toggle = must(talking.querySelector<HTMLButtonElement>('[data-attention-group-toggle]'), 'the group header');
+    await interact(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(talking.querySelector('[data-attention-row]')).toBeNull();
+    expect(talking.querySelector('[data-attention-group-count]')?.textContent).toBe('1');
+    await interact(() => toggle.click());
+    expect(talking.querySelector('[data-attention-row-title]')?.textContent).toBe('Premise check');
+    await mounted.unmount();
+  });
+
   it('is not "nothing waiting" while a discussion is open, and on a phone opens its conversation', async () => {
     const navigated: string[] = [];
     const discussing = inboxCard(
