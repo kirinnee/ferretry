@@ -5,13 +5,13 @@ import { ChatProse } from '../../../src/components/chat-prose.tsx';
 import { ReferenceSurfaceProvider } from '../../../src/components/reference-surface.tsx';
 import { attentionKindMeta } from '../../../src/features/attention/attention-board.tsx';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
+import { AttentionDetail } from '../../../src/features/attention/attention-detail.tsx';
 import type { ClipboardWriter } from '../../../src/features/onboarding/copy-button.tsx';
 import {
   DONE_ACTION,
   historyLine,
   type InboxAction,
   NEEDS_INFO_ACTION,
-  replyAction,
   swipeMap,
   tickedSteps,
   updatedSinceAsked,
@@ -24,8 +24,6 @@ afterEach(async () => {
   await view?.unmount();
   view = null;
 });
-
-const nativeTextarea = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
 
 const SQUARE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
 
@@ -65,7 +63,7 @@ describe('attention card Markdown and hypermedia', () => {
         `Look at this:\n\n\`\`\`fy-render\ntype: svg\nalt: A square\n---\n${SQUARE_SVG}\n\`\`\``,
       ],
     });
-    view = await mount(<AttentionCard item={item} onAct={() => {}} renderProse={chatProse()} />);
+    view = await mount(<AttentionDetail layout="panel" item={item} renderProse={chatProse()} />);
     const body = must(view.container.querySelector('[data-attention-body]'), 'body');
     expect(body.querySelector('h2')?.textContent).toBe('Why');
     expect(body.querySelectorAll('li')).toHaveLength(2);
@@ -79,7 +77,7 @@ describe('attention card Markdown and hypermedia', () => {
       <ReferenceSurfaceProvider
         surface={{ attentionReferenceResolver: id => id === 'A3', onAttentionOpen: () => undefined }}
       >
-        <AttentionCard item={item} onAct={() => {}} renderProse={chatProse()} />
+        <AttentionDetail layout="panel" item={item} renderProse={chatProse()} />
       </ReferenceSurfaceProvider>,
     );
     const links = [...view.container.querySelectorAll('[data-fy-reference]')];
@@ -91,9 +89,9 @@ describe('attention card Markdown and hypermedia', () => {
     const written: string[] = [];
     const item = todo({ steps: ['Run `echo one` then:\n\n```sh\necho two\n```'] });
     view = await mount(
-      <AttentionCard
+      <AttentionDetail
+        layout="panel"
         item={item}
-        onAct={() => {}}
         renderProse={chatProse(async text => {
           written.push(text);
         })}
@@ -109,7 +107,7 @@ describe('attention card Markdown and hypermedia', () => {
 
   test('previews a long body behind Show more, and says how to get the rest', async () => {
     const item = todo({ body: Array.from({ length: 40 }, (_, line) => `line ${line}`).join('\n\n') });
-    view = await mount(<AttentionCard item={item} onAct={() => {}} renderProse={chatProse()} />);
+    view = await mount(<AttentionDetail layout="panel" item={item} renderProse={chatProse()} />);
     const body = must(view.container.querySelector('[data-attention-body]'), 'body');
     const toggle = must(body.querySelector<HTMLButtonElement>('[data-attention-body-toggle]'), 'toggle');
     expect(body.hasAttribute('data-folded')).toBe(true);
@@ -120,7 +118,7 @@ describe('attention card Markdown and hypermedia', () => {
   });
 
   test('does not fold a short body', async () => {
-    view = await mount(<AttentionCard item={todo({ body: 'short' })} onAct={() => {}} renderProse={chatProse()} />);
+    view = await mount(<AttentionDetail layout="panel" item={todo({ body: 'short' })} renderProse={chatProse()} />);
     expect(view.container.querySelector('[data-attention-body-toggle]')).toBeNull();
   });
 });
@@ -132,9 +130,9 @@ describe('attention checklist', () => {
     const calls: Array<[number, boolean]> = [];
     const pending = deferred();
     view = await mount(
-      <AttentionCard
+      <AttentionDetail
+        layout="panel"
         item={todo({ steps })}
-        onAct={() => {}}
         onProgress={(step, done) => {
           calls.push([step, done]);
           return pending.promise;
@@ -151,9 +149,9 @@ describe('attention checklist', () => {
   test('unticks a step the machine already has ticked', async () => {
     const calls: Array<[number, boolean]> = [];
     view = await mount(
-      <AttentionCard
+      <AttentionDetail
+        layout="panel"
         item={todo({ steps, stepsDone: [0, 2] })}
-        onAct={() => {}}
         onProgress={async (step, done) => {
           calls.push([step, done]);
         }}
@@ -166,9 +164,9 @@ describe('attention checklist', () => {
 
   test('rolls a refused tick back and says why on the step', async () => {
     view = await mount(
-      <AttentionCard
+      <AttentionDetail
+        layout="panel"
         item={todo({ steps })}
-        onAct={() => {}}
         onProgress={async () => {
           throw new Error('the machine is read-only');
         }}
@@ -182,7 +180,7 @@ describe('attention checklist', () => {
   });
 
   test('is read-only without a progress handler', async () => {
-    view = await mount(<AttentionCard item={todo({ steps })} onAct={() => {}} />);
+    view = await mount(<AttentionDetail layout="panel" item={todo({ steps })} />);
     expect(tick(view.container, 0).hasAttribute('disabled')).toBe(true);
   });
 
@@ -207,22 +205,14 @@ describe('a to-do item', () => {
     expect(acts).toEqual([DONE_ACTION]);
   });
 
-  test('Need more info takes an optional note', async () => {
+  test('Need more info sends the bare action; the host adds the composer text', async () => {
     const acts: InboxAction[] = [];
     view = await mount(<AttentionCard item={todo()} onAct={action => acts.push(action)} />);
-    const root = view.container;
-    const ask = (): HTMLButtonElement =>
-      must(root.querySelector<HTMLButtonElement>('[data-attention-answer="left"]'), 'ask');
-    await interact(() => ask().click());
+    await interact(() =>
+      must(view?.container.querySelector<HTMLButtonElement>('[data-attention-answer="left"]'), 'ask').click(),
+    );
     expect(acts).toEqual([NEEDS_INFO_ACTION]);
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply').click());
-    const box = must(root.querySelector<HTMLTextAreaElement>('textarea[data-attention-reply]'), 'box');
-    await interact(() => {
-      nativeTextarea?.call(box, 'which environment?');
-      box.dispatchEvent(new Event('input', { bubbles: true }));
-    });
-    await interact(() => ask().click());
-    expect(acts[1]).toEqual({ ...NEEDS_INFO_ACTION, note: 'which environment?' });
+    expect(view.container.querySelector('textarea')).toBeNull();
   });
 
   test('a waiting item says who it waits on and offers no Done', async () => {
@@ -270,23 +260,20 @@ describe('a to-do item', () => {
     expect(view.container.querySelector('[data-attention-history]')?.textContent).toMatch(
       /^You asked for more info .+ · updated .+$/u,
     );
-    expect(view.container.querySelector('[data-attention-updated]')?.textContent).toContain('added the rollback step');
+    expect(view.container.querySelector('[data-attention-resurfaced]')?.textContent).toContain(
+      'added the rollback step',
+    );
   });
 });
 
 describe('to-do helpers', () => {
   test('swipe: Done right and Need more info left; a waiting item and a text-only ask swipe nowhere', () => {
-    const DISCUSS = { kind: 'discuss', label: 'Discuss' } as const;
-    expect(swipeMap(todo())).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION, down: DISCUSS });
-    expect(swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z' }))).toEqual({ down: DISCUSS });
-    expect(swipeMap(attentionItem('A1', { ask: { kind: 'open-question' } }))).toEqual({ down: DISCUSS });
+    expect(swipeMap(todo())).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
+    expect(swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z' }))).toEqual({});
+    expect(swipeMap(attentionItem('A1', { ask: { kind: 'open-question' } }))).toEqual({});
     expect(
       swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z', waitingFor: 'discussion' })),
     ).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
-  });
-
-  test('a to-do takes no typed reply', () => {
-    expect(replyAction(todo(), 'hello')).toBeNull();
   });
 
   test('history reads in the given time zone', () => {
@@ -332,7 +319,6 @@ describe('a pinned to-do keeps its header and actions in view', () => {
     const item = todo({ body: 'Long body', steps: ['one', 'two'] });
     view = await mount(<AttentionCard item={item} onAct={() => {}} pinned renderProse={chatProse()} />);
     const scroll = must(view.container.querySelector('[data-attention-scroll]'), 'scroll region');
-    expect(scroll.querySelector('[data-attention-steps-count]')).not.toBeNull();
     expect(scroll.querySelector('header')).toBeNull();
     expect(scroll.contains(done(view.container))).toBe(false);
     expect(view.container.querySelector('header')?.textContent).toContain('Task');

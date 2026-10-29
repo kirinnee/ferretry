@@ -13,8 +13,8 @@
  * NOTHING. Approving a permission by accident is not recoverable.
  */
 
-import type { AttentionAsk, AttentionResponse } from '@ferretry/protocol';
 import { describe, expect, it } from 'bun:test';
+import type { AttentionAsk, AttentionResponse } from '@ferretry/protocol';
 
 import {
   AttentionAnswerControls,

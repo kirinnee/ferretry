@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ResolvedAttentionItem } from '@ferretry/protocol';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
+import { AttentionDetail } from '../../../src/features/attention/attention-detail.tsx';
 import {
   AttentionInboxPage,
   type AttentionInboxPageProps,
@@ -421,28 +422,6 @@ describe('AttentionInboxPage list and card', () => {
     await none.unmount();
   });
 
-  it('ticks a to-do step through the host', async () => {
-    const ticks: [string, number, boolean][] = [];
-    const todo = inboxCard(
-      attentionItem('A5', { subject: 'Do the steps', steps: ['one', 'two'], ask: { kind: 'task' } }),
-    );
-    const mounted = await mount(
-      page(fakeInbox(), [todo], {
-        onProgress: async (card, step, done) => {
-          ticks.push([card.item.id, step, done]);
-        },
-      }),
-    );
-    const box = must(
-      mounted.container.querySelector<HTMLInputElement>('[data-attention-pane] input[type="checkbox"]'),
-      'the first step',
-    );
-    await interact(() => box.click());
-    await flush();
-    expect(ticks).toEqual([['A5', 0, true]]);
-    await mounted.unmount();
-  });
-
   it('on a phone lists the items, opens a tapped one full screen as the whole card, and goes back', async () => {
     const navigated: string[] = [];
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true }, navigated));
@@ -691,24 +670,12 @@ describe('AttentionNeedsYou', () => {
     await mounted.unmount();
   });
 
-  it('keeps the answer bar outside the scrolling detail, and opens the reply box three lines tall', async () => {
-    const long = inboxCard(
-      attentionItem('A5', {
-        subject: 'Point the sync at the new org',
-        steps: ['one', 'two', 'three', 'four', 'five'],
-      }),
-    );
+  it('keeps the answer bar on the card, with no reply box of its own', async () => {
+    const long = inboxCard(attentionItem('A5', { subject: 'Point the sync at the new org' }));
     const mounted = await mount(needsYou(fakeInbox(), [long]));
     const card = must(mounted.container.querySelector<HTMLElement>('[data-attention-card="A5"]'), 'the card');
-    const scroll = must(card.querySelector<HTMLElement>('[data-attention-scroll]'), 'the detail scroller');
-    expect(scroll.parentElement).toBe(card);
-    expect(scroll.textContent).toContain('five');
-    const bar = must(card.querySelector<HTMLElement>('[data-attention-answer="right"]'), 'the answer bar');
-    expect(scroll.contains(bar)).toBe(false);
-    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'Reply').click());
-    expect(
-      must(card.querySelector<HTMLTextAreaElement>('[data-attention-reply]'), 'the reply box').getAttribute('rows'),
-    ).toBe('3');
+    expect(card.querySelector('[data-attention-answer="right"]')).not.toBeNull();
+    expect(card.querySelector('textarea, [data-attention-reply-toggle]')).toBeNull();
     await mounted.unmount();
   });
 
@@ -756,10 +723,10 @@ describe('AttentionCard swipe hints', () => {
   });
 });
 
-describe('AttentionCard context', () => {
+describe('AttentionDetail context and steps', () => {
   it('draws the context open and whole, however long, and nothing for a blank one', async () => {
     const short = await mount(
-      <AttentionCard item={attentionItem('A7', { context: 'Halfway through.' })} onAct={() => {}} />,
+      <AttentionDetail item={attentionItem('A7', { context: 'Halfway through.' })} layout="panel" />,
     );
     const shortContext = must(short.container.querySelector('[data-attention-section="context"]'), 'the context');
     expect(shortContext.textContent).toContain('Halfway through.');
@@ -767,7 +734,7 @@ describe('AttentionCard context', () => {
     await short.unmount();
 
     const long = await mount(
-      <AttentionCard item={attentionItem('A6', { context: 'word '.repeat(80) })} onAct={() => {}} />,
+      <AttentionDetail item={attentionItem('A6', { context: 'word '.repeat(80) })} layout="panel" />,
     );
     const longContext = must(
       long.container.querySelector('[data-attention-section="context"] .fy-attn-sec__body'),
@@ -778,10 +745,28 @@ describe('AttentionCard context', () => {
     await long.unmount();
 
     const blank = await mount(
-      <AttentionCard item={attentionItem('A5', { context: '   ', subject: 'Same', why: 'Same' })} onAct={() => {}} />,
+      <AttentionDetail item={attentionItem('A5', { context: '   ', subject: 'Same', why: 'Same' })} layout="panel" />,
     );
     expect(blank.container.querySelector('[data-attention-section="context"]')).toBeNull();
     await blank.unmount();
+  });
+
+  it('ticks a to-do step through the host', async () => {
+    const ticks: [number, boolean][] = [];
+    const mounted = await mount(
+      <AttentionDetail
+        item={attentionItem('A5', { steps: ['one', 'two'], ask: { kind: 'task' } })}
+        layout="panel"
+        onProgress={async (step, done) => {
+          ticks.push([step, done]);
+        }}
+      />,
+    );
+    const box = must(mounted.container.querySelector<HTMLInputElement>('input[type="checkbox"]'), 'the first step');
+    await interact(() => box.click());
+    await flush();
+    expect(ticks).toEqual([[0, true]]);
+    await mounted.unmount();
   });
 });
 

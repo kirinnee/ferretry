@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AttentionBriefSections } from '../../../src/features/attention/attention-brief.tsx';
+import { AttentionBriefSections, cardLede } from '../../../src/features/attention/attention-brief.tsx';
 import { attentionItem, choices } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -89,7 +89,7 @@ describe('the described options', () => {
     expect(rowOf(container, 'Postgres')?.querySelector('[data-attention-recommended]')).toBeNull();
   });
 
-  test('leave the option unbadged when the recommendation section already says which one', async () => {
+  test('the open layout draws no recommendation section, so the option carries the mark', async () => {
     view = await mount(
       <AttentionBriefSections
         collapsible={false}
@@ -98,8 +98,8 @@ describe('the described options', () => {
       />,
     );
     const container = must(view.container, 'view');
-    expect(rowOf(container, 'SQLite')?.querySelector('[data-attention-recommended]')).toBeNull();
-    expect(recommendationOf(container)?.querySelector('[data-attention-recommended]')).not.toBeNull();
+    expect(recommendationOf(container)).toBeNull();
+    expect(rowOf(container, 'SQLite')?.querySelector('[data-attention-recommended]')).not.toBeNull();
   });
 });
 
@@ -180,5 +180,24 @@ describe('the question picker', () => {
       [0, 'SQLite'],
       [0, ''],
     ]);
+  });
+});
+
+describe('cardLede', () => {
+  test('a stated why leads and the context stays whole', () => {
+    expect(cardLede({ context: '- one\n- two' }, 'Because.')).toEqual({ line: 'Because.', context: '- one\n- two' });
+  });
+
+  test('without a why, the first bullet leads and the rest remain', () => {
+    expect(cardLede({ context: '- one\n- two\n- three' }, null)).toEqual({ line: 'one', context: '- two\n- three' });
+    expect(cardLede({ context: '- only' }, null)).toEqual({ line: 'only', context: null });
+  });
+
+  test('without a why, the first paragraph leads and the rest remain', () => {
+    expect(cardLede({ context: 'First.\n\nSecond.' }, null)).toEqual({ line: 'First.', context: 'Second.' });
+  });
+
+  test('nothing to say gives no line', () => {
+    expect(cardLede({}, null)).toEqual({ line: null, context: null });
   });
 });

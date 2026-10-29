@@ -36,7 +36,6 @@ import {
   attentionCardKind,
   attentionInDiscussion,
   DEFAULT_ANSWER_LABELS,
-  DISCUSS_LABEL,
   GOT_IT_LABEL,
   unswipedChoices,
 } from '@ferretry/protocol';
@@ -61,8 +60,8 @@ export type AnswerSource = AttentionCardSource &
 /** The three ways a card can be swiped, which are also the three arrows of its answer bar. */
 export type AnswerDirection = AttentionDirection;
 
-/** The four ways a card can be swiped: its three answers' directions, and DOWN, which is always Discuss. */
-export type SwipeDirection = AnswerDirection | 'down';
+/** The ways a card can be swiped: its three answers' directions. */
+export type SwipeDirection = AnswerDirection;
 
 const withNote = (note: string | undefined): { readonly note?: string } => (note === undefined ? {} : { note });
 
@@ -146,12 +145,6 @@ export const undeliveredAction = (reply: AttentionUndeliveredReply): InboxAction
 export const canDiscussNow = (item: AnswerSource): boolean =>
   item.raisedBy !== undefined && attentionCanDiscuss({ raisedBy: item.raisedBy }) && !attentionInDiscussion(item);
 
-/** The fixed Discuss answer: never one of the card's three, carrying the reply as its note. */
-export const discussAction = (reply: string): InboxAction => {
-  const note = reply.trim();
-  return { kind: 'discuss', label: DISCUSS_LABEL, ...(note === '' ? {} : { note }) };
-};
-
 /** An old choice's option past the third, as an action: a button only, never a swipe. */
 export const optionAction = (option: AttentionAskOption, reply: string): InboxAction =>
   answerAction({ direction: 'left', does: 'choose', label: option.label }, reply) as InboxAction;
@@ -171,14 +164,13 @@ export const cardAnswers = (item: AnswerSource): readonly AttentionCardAnswer[] 
 export interface SwipeTarget {
   readonly label: string;
   readonly description?: string;
-  /** The card's own answer; absent on DOWN, the fixed Discuss. */
   readonly answer?: AttentionCardAnswer;
   readonly action: InboxAction | null;
 }
 
 export type SwipeTargets = Readonly<Partial<Record<SwipeDirection, SwipeTarget>>>;
 
-/** Each direction the card answers, with what it would send carrying `reply`; DOWN is Discuss where it applies. */
+/** Each direction the card answers, with what it would send carrying `reply`. */
 export const swipeTargets = (item: AnswerSource, reply = ''): SwipeTargets => ({
   ...Object.fromEntries(
     cardAnswers(item).map(answer => [
@@ -191,7 +183,6 @@ export const swipeTargets = (item: AnswerSource, reply = ''): SwipeTargets => ({
       } satisfies SwipeTarget,
     ]),
   ),
-  ...(canDiscussNow(item) ? { down: { label: DISCUSS_LABEL, action: discussAction(reply) } } : {}),
 });
 
 /** The answers in the order a button list takes them: the recommended (right) first, then up, then left. */
@@ -224,8 +215,8 @@ const KIND_WORDS: Readonly<Record<AttentionKind, string>> = {
 export const kindWord = (item: Pick<AnswerSource, 'kind' | 'ask'>): string => KIND_WORDS[attentionCardKind(item)];
 
 /**
- * Whether the card is a text-only ask: it has no answers to give, the reply box IS the answer, and
- * Send sends it. A reply card the ferret gave answers to is an ordinary card with an optional box.
+ * Whether the card is a text-only ask: it has no answers to give, so the owner answers in the
+ * message box below. A reply card the ferret gave answers to is an ordinary card.
  */
 export const isTextOnlyAsk = (item: AnswerSource): boolean =>
   item.ask?.kind === 'open-question' && cardAnswers(item).length === 0;

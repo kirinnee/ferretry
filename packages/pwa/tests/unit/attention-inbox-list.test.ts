@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionTranscriptMessage, SessionTranscriptPage } from '@ferretry/protocol';
+import type { InboxResolved } from '../../src/lib/attention-inbox.ts';
 import {
   filterInboxCards,
   filterInboxResolved,
@@ -13,7 +14,6 @@ import {
   skipSelection,
   stepSelection,
 } from '../../src/lib/attention-inbox-list.ts';
-import type { InboxResolved } from '../../src/lib/attention-inbox.ts';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { type MessagesClient, readRecentMessages } from '../../src/lib/recent-messages.ts';
 import { attentionItem, inboxCard } from '../support/attention-inbox.tsx';

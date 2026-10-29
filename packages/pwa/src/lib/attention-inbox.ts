@@ -277,9 +277,6 @@ export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
   label: 'Need more info',
 };
 
-/** A to-do: the owner does something, nothing to choose. Its answers are Done and Need more info. */
-const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
-
 /** The ferret was asked for more information, or to discuss, and has not yet edited the item. */
 export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
 
@@ -442,7 +439,7 @@ export const swipeMap = (item: Parameters<typeof swipeTargets>[0], reply = ''): 
  * answers afresh on every call: the button and the gesture must agree on the SAME option.
  */
 export const directionOfAction = (map: SwipeMap, action: InboxAction): SwipeDirection | null => {
-  for (const direction of ['right', 'left', 'up', 'down'] as const) {
+  for (const direction of ['right', 'left', 'up'] as const) {
     const mapped = map[direction];
     if (mapped !== undefined && mapped.kind === action.kind && mapped.label === action.label) return direction;
   }
@@ -468,9 +465,9 @@ export interface SwipeIntent {
 }
 
 /**
- * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down reads as Discuss,
- * which commits only where the card takes it (the deck hands the browser every drag it must not read: see
- * `attention-swipe-deck.tsx`). A direction with no action never commits.
+ * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down is no
+ * answer (the deck hands the browser every drag it must not read: see `attention-swipe-deck.tsx`). A
+ * direction with no action never commits.
  */
 export const swipeIntent = (
   dx: number,
@@ -482,28 +479,9 @@ export const swipeIntent = (
   const horizontal = Math.abs(dx) >= Math.abs(dy);
   const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
   if (distance < SWIPE_SLOP_PX) return { direction: null, progress: 0, committed: false };
-  const direction: SwipeDirection = horizontal ? (dx > 0 ? 'right' : 'left') : dy < 0 ? 'up' : 'down';
+  const direction: SwipeDirection | null = horizontal ? (dx > 0 ? 'right' : 'left') : dy < 0 ? 'up' : null;
   const progress = Math.min(1, distance / threshold);
-  return { direction, progress, committed: progress >= 1 && map[direction] !== undefined };
-};
-
-/**
- * A reply typed on a card, as the daemon accepts it: an open question takes it as THE answer, a review
- * as the clarification asked for, and every other kind as the note a Done carries — which the daemon
- * hands the ferret as "[answer to !A3 «ask»] <note>". Blank text is no reply.
- */
-export const replyAction = (item: Pick<AttentionItem, 'ask'>, text: string): InboxAction | null => {
-  const answer = text.trim();
-  if (answer === '' || isTask(item)) return null;
-  if (item.ask?.kind === 'open-question')
-    return { kind: 'respond', label: 'Reply', response: { kind: 'open-question', answer } };
-  if (item.ask?.kind === 'answer-review')
-    return {
-      kind: 'respond',
-      label: 'Reply',
-      response: { kind: 'answer-review', verdict: 'clarify', clarification: answer },
-    };
-  return { kind: 'resolve', label: 'Reply', note: answer };
+  return { direction, progress, committed: direction !== null && progress >= 1 && map[direction] !== undefined };
 };
 
 /** The words an undo toast uses for an action it is holding. */
