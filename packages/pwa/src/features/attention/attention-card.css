@@ -14,6 +14,13 @@
   padding: 12px 14px;
   color: var(--fg);
 }
+/* A phone has little width to spare: the card hugs the page edge and keeps a tighter inside. */
+@media (max-width: 767.98px) {
+  .fy-attn-card {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+}
 .fy-attn-card[data-highlighted] {
   outline: var(--stroke-heavy) solid var(--accent);
   outline-offset: 2px;
@@ -286,6 +293,17 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-sec--nested > .fy-attn-sec__body {
   padding-left: 20px;
 }
+@media (max-width: 767.98px) {
+  .fy-attn-sec__body,
+  .fy-attn-sec--nested > .fy-attn-sec__body {
+    padding-left: 8px;
+  }
+  .fy-attn-sec__body .md ul,
+  .fy-attn-sec__body .md ol,
+  .fy-attn-points {
+    padding-left: 1.1em;
+  }
+}
 .fy-attn-prose {
   margin: 0;
   min-width: 0;
@@ -434,13 +452,20 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   min-width: 0;
   flex: 1;
 }
-.fy-attn-reply__box {
+.fy-attn-reply .fy-attn-reply__box {
   width: 100%;
-  min-height: 36px;
-  max-height: 8rem;
+  /* Three lines of room when it opens, growing to six before it scrolls. */
+  min-height: calc(3lh + 2 * var(--pad-row-y));
+  max-height: calc(6lh + 2 * var(--pad-row-y));
   padding-right: 40px;
   resize: none;
   field-sizing: content;
+}
+/* 16px: iOS zooms the page into any smaller field it focuses. */
+@media (max-width: 767.98px) {
+  .fy-attn-reply .fy-attn-reply__box {
+    font-size: max(16px, var(--text-input));
+  }
 }
 .fy-attn-reply__send {
   position: absolute;

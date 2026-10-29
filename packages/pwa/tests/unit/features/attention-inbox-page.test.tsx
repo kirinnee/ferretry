@@ -254,6 +254,27 @@ describe('AttentionNeedsYou', () => {
     await mounted.unmount();
   });
 
+  it('keeps the answer bar outside the scrolling detail, and opens the reply box three lines tall', async () => {
+    const long = inboxCard(
+      attentionItem('A5', {
+        subject: 'Point the sync at the new org',
+        steps: ['one', 'two', 'three', 'four', 'five'],
+      }),
+    );
+    const mounted = await mount(needsYou(fakeInbox(), [long]));
+    const card = must(mounted.container.querySelector<HTMLElement>('[data-attention-card="A5"]'), 'the card');
+    const scroll = must(card.querySelector<HTMLElement>('[data-attention-scroll]'), 'the detail scroller');
+    expect(scroll.parentElement).toBe(card);
+    expect(scroll.textContent).toContain('five');
+    const bar = must(card.querySelector<HTMLElement>('[data-attention-answer="right"]'), 'the answer bar');
+    expect(scroll.contains(bar)).toBe(false);
+    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'Reply').click());
+    expect(
+      must(card.querySelector<HTMLTextAreaElement>('[data-attention-reply]'), 'the reply box').getAttribute('rows'),
+    ).toBe('3');
+    await mounted.unmount();
+  });
+
   it('answers undoably, and the toast outlives the last card it took', async () => {
     const fake = fakeInbox();
     const mounted = await mount(needsYou(fake, [bare]));
