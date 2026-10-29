@@ -593,4 +593,83 @@ exit 7
       /debugging endpoint \(Chrome exited with code 7\): Failed to move to new namespace/u,
     );
   });
+
+  describe('when the OS misreports the Chrome it started', () => {
+    const realSpawn = Bun.spawn;
+    afterEach(() => {
+      Bun.spawn = realSpawn;
+    });
+
+    /** Wraps only the Chrome the launcher starts (never its `--version` probe) so one of its handles misbehaves. */
+    function misbehavingChrome(chrome: string, misbehave: (process: ReturnType<typeof Bun.spawn>) => object): void {
+      Bun.spawn = ((options: { cmd: string[] }) => {
+        const started = (realSpawn as (options: unknown) => ReturnType<typeof Bun.spawn>)(options);
+        if (options.cmd[0] !== chrome || options.cmd.includes('--version')) return started;
+        const overrides = misbehave(started) as Record<PropertyKey, unknown>;
+        return new Proxy(started, {
+          get: (target, property) => {
+            if (property in overrides) return overrides[property];
+            const value = Reflect.get(target, property, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+          },
+        });
+      }) as typeof Bun.spawn;
+    }
+
+    it('should still reap Chrome and free the profile when signalling it throws', async () => {
+      // Arrange: the signal lands, then the call throws — the way a kill racing the child's exit can.
+      const chrome = await fakeChrome();
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      misbehavingChrome(chrome, started => ({
+        kill: (signal?: NodeJS.Signals) => {
+          started.kill(signal);
+          throw new Error('kill raced the exit');
+        },
+      }));
+      let chromePid = 0;
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(chrome),
+        async () => {
+          chromePid = await leasedChromePid(root);
+          throw new Error('the worker refused to connect');
+        },
+      );
+
+      // Act
+      await should(launcher.launch({ width: 800, height: 600 })).be.rejectedWith(/the worker refused to connect/u);
+
+      // Assert: the launch failure is the one reported, and the throwing signal did not keep the lease.
+      should(alive(chromePid)).be.false();
+      should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    });
+
+    it('should launch and close normally when the Chrome stderr pipe breaks', async () => {
+      // Arrange: the diagnostics drain is best effort, so a pipe that errors must not cost the launch.
+      const chrome = await fakeChrome();
+      const root = await mkdtemp(join(tmpdir(), 'ferretry-session-profile-'));
+      roots.push(root);
+      misbehavingChrome(chrome, () => ({
+        stderr: new ReadableStream<Uint8Array>({ start: controller => controller.error(new Error('pipe broke')) }),
+      }));
+      const launcher = new NodeSessionBrowserLauncher(
+        new BrowserProfileStore(root),
+        INJECTED_WORKER,
+        process.execPath,
+        environment(chrome),
+        async () => ({ unexpectedExit: new Promise<number>(() => undefined), close: async () => undefined }) as never,
+      );
+
+      // Act
+      const browser = await launcher.launch({ width: 800, height: 600 });
+      opened.push(browser);
+      await browser.close();
+
+      // Assert
+      should(await new BrowserProfileStore(root).acquire({ sessionId: 'again' })).have.property('sessionId', 'again');
+    });
+  });
 });

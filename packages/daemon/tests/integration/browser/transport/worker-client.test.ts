@@ -1,4 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import type { BrowserScreencastFrame } from '@ferretry/protocol';
@@ -518,5 +520,83 @@ describe('browser worker client — one stream per page', () => {
     await client.closePage('p1');
     await client.navigate('p1', 'emit-frames');
     should(frames).deepEqual([]);
+  });
+});
+
+describe('browser worker client — process handles', () => {
+  const realSpawn = Bun.spawn;
+  const directories: string[] = [];
+  afterEach(async () => {
+    Bun.spawn = realSpawn;
+    await Promise.all(directories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
+  });
+
+  /** Makes every worker the client starts refuse to be signalled, the way a process in a bad state would. */
+  function unsignallableWorkers(): void {
+    Bun.spawn = ((...args: Parameters<typeof Bun.spawn>) => {
+      const child = realSpawn(...args);
+      return new Proxy(child, {
+        get: (target, property) => {
+          if (property === 'kill') {
+            return () => {
+              throw new Error('signal refused');
+            };
+          }
+          const value = Reflect.get(target, property, target);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      });
+    }) as typeof Bun.spawn;
+  }
+
+  it('should run a compiled worker executable directly, handing it the endpoint as its only argument', async () => {
+    // Arrange: an executable standing in for the compiled worker, which takes no runtime in front of it.
+    const directory = await mkdtemp(join(tmpdir(), 'ferretry-worker-executable-'));
+    directories.push(directory);
+    const executable = join(directory, 'worker');
+    await writeFile(executable, `#!/bin/sh\nexec "${process.execPath}" "${WORKER_ENTRY}" "$@"\n`);
+    await chmod(executable, 0o700);
+
+    // Act
+    const client = await connect({ workerExecutable: true, workerEntry: executable, runtime: '/must/not/be/run' });
+
+    // Assert: it reached ready and answers a request, so the executable really was the worker.
+    should(client.pid).be.above(0);
+    should(await client.location('p1')).be.ok();
+  });
+
+  it('should report a worker that cannot be signalled as unterminated, rather than call it closed', async () => {
+    // Arrange: no signal reaches the worker, so it never exits within the shutdown budget.
+    unsignallableWorkers();
+    const client = await connect({ endpoint: 'stubborn-close', shutdownTimeoutMs: 100 });
+    const pid = clientPid(client);
+
+    // Act
+    const failure = await rejection(client.close());
+    Bun.spawn = realSpawn;
+    process.kill(pid, 'SIGKILL');
+
+    // Assert
+    should(failure.code).equal('upstream_failed');
+    should(failure.status).equal(504);
+    should(failure.message).equal('browser worker could not be terminated');
+    should(await settledDead(pid)).be.true();
+  });
+
+  it('should still fail everything in flight when a worker that broke the protocol cannot be signalled', async () => {
+    // Arrange
+    unsignallableWorkers();
+    const client = await connect({ maxProtocolLineChars: 64 });
+    const pid = clientPid(client);
+
+    // Act
+    const failure = await rejection(client.navigate('p1', 'overflows'));
+    Bun.spawn = realSpawn;
+    process.kill(pid, 'SIGKILL');
+
+    // Assert: the violation is what is reported; the failed signal is not.
+    should(failure.message).equal('browser worker emitted an oversized protocol record');
+    should(await client.unexpectedExit).equal(-1);
+    should(await settledDead(pid)).be.true();
   });
 });

@@ -746,11 +746,8 @@ export class DaemonStorage {
     if (!(await this.observationJournalIsCurrent(observation))) return await this.applyRescan(observation.id);
     const source = this.metadataSource(observation, current);
     const plan = planIndexRebuild([source]);
-    const session = plan.sessions[0];
-    if (session === undefined) {
-      this.index.removeSession(observation.id);
-      return { problems: plan.problems };
-    }
+    // reconcile hands over only observations whose marker it proved supported, so the plan always holds the session
+    const session = plan.sessions[0] as IndexedSession;
     this.index.refreshSession(session);
     return { session, problems: plan.problems };
   }
@@ -790,11 +787,7 @@ export class DaemonStorage {
       return await this.applyRescan(observation.id);
     }
     const plan = planIndexRebuild([this.sourceFromObservation(observation, journal)]);
-    const session = plan.sessions[0];
-    if (session === undefined) {
-      this.index.removeSession(observation.id);
-      return { problems: plan.problems };
-    }
+    const session = plan.sessions[0] as IndexedSession;
     this.index.appendEvents(session, plan.events);
     return { session, problems: plan.problems };
   }

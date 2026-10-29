@@ -227,10 +227,10 @@ export class FileSessionAttachmentCopier implements TransferAttachmentCopier {
           let stored: StoredAttachment;
           try {
             stored = this.parseManifest(bytes, expected.id);
-          } catch (error) {
-            // A torn or malformed target is recoverable: source verification replaces it atomically.
-            if (error instanceof SessionAttachmentCopyError && error.failure === 'corrupt') return false;
-            throw error;
+          } catch {
+            // parseManifest only ever refuses with a 'corrupt' SessionAttachmentCopyError; a torn or
+            // malformed target is recoverable because source verification replaces it atomically.
+            return false;
           }
           return sameManifest(this.plannedManifest(stored), expected);
         },

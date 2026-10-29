@@ -98,6 +98,27 @@ class FakeProfile implements BrowserProfilePort {
   }
 }
 
+/** A profile whose marker write fails, the way a full disk or a revoked lease would. */
+class MarkerFailingProfile extends FakeProfile {
+  override async acquire(): Promise<BrowserProfileLease> {
+    const lease = await super.acquire();
+    return {
+      ...lease,
+      markPrimed: async () => {
+        this.calls.push('primed:failed');
+        throw new Error('marker write failed');
+      },
+    };
+  }
+}
+
+/** A profile whose primed check cannot be answered. */
+class UnreadableProfile extends FakeProfile {
+  override async isPrimed(): Promise<boolean> {
+    throw new Error('profile directory unreadable');
+  }
+}
+
 function child(pid: number): BrowserLoginChild {
   return { pid, exited: new Promise(() => undefined), kill: () => undefined };
 }
@@ -247,5 +268,56 @@ describe('BrowserLoginWindowService', () => {
     should(closing).not.have.property('connection');
     closingVnc.release();
     should(onTheWire(await stopping)).deepEqual({ state: 'closed', profilePrimed: false });
+  });
+
+  it('should return to closed and forget the failure when stopped after a failed opening', async () => {
+    // Arrange
+    const events: string[] = [];
+    const subject = new BrowserLoginWindowService({
+      profile: new FakeProfile(),
+      runtime: runtime(events, 'linux', true),
+      password: () => 'abcdefgh',
+    });
+    await should(subject.start()).be.rejectedWith(BrowserControlError);
+    should(onTheWire(await subject.status()).state).equal('error');
+
+    // Act
+    const stopped = onTheWire(await subject.stop());
+
+    // Assert: nothing is running, so there is nothing to tear down a second time.
+    should(stopped).deepEqual({ state: 'closed', profilePrimed: false });
+    should(events.filter(event => event.startsWith('terminate:'))).have.length(2);
+  });
+
+  it('should still tear the window down and then report a failed primed marker', async () => {
+    // Arrange
+    const events: string[] = [];
+    const profile = new MarkerFailingProfile();
+    const subject = new BrowserLoginWindowService({
+      profile,
+      runtime: runtime(events),
+      password: () => 'abcdefgh',
+    });
+    await subject.start();
+
+    // Act
+    const stopping = subject.stop({ primed: true });
+
+    // Assert: the marker error is the one the caller sees, but only after every process and the lease are gone.
+    await should(stopping).be.rejectedWith('marker write failed');
+    should(events.slice(-3)).deepEqual(['terminate:vnc', 'terminate:chrome', 'remove:/run/password']);
+    should(profile.calls.slice(-3)).deepEqual(['primed:failed', 'pid:none', 'release']);
+    should(onTheWire(await subject.status())).deepEqual({ state: 'closed', profilePrimed: false });
+  });
+
+  it('should report an unreadable profile as not primed instead of failing the status', async () => {
+    // Arrange
+    const subject = new BrowserLoginWindowService({ profile: new UnreadableProfile(), runtime: runtime([]) });
+
+    // Act
+    const status = onTheWire(await subject.status());
+
+    // Assert
+    should(status).deepEqual({ state: 'closed', profilePrimed: false });
   });
 });
