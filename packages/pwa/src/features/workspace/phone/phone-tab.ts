@@ -11,7 +11,7 @@
 
 import { DRAWER_MAX, RAIL_MAX } from '../../../hooks/use-layout-mode.ts';
 
-export type PhoneTabKind = 'chat' | 'console' | 'terminal' | 'browser' | 'file';
+export type PhoneTabKind = 'chat' | 'console' | 'processes' | 'terminal' | 'browser' | 'file';
 
 /** Who is driving a tab right now. `null` (or absent) means the human is. */
 export interface PhoneTabDriver {
@@ -33,16 +33,23 @@ export interface PhoneTab {
 
 export const PHONE_CHAT_TAB: PhoneTab = { id: 'chat', kind: 'chat', label: 'Chat' };
 export const PHONE_CONSOLE_TAB: PhoneTab = { id: 'console', kind: 'console', label: 'Console' };
+export const PHONE_PROCESSES_TAB: PhoneTab = { id: 'processes', kind: 'processes', label: 'Processes' };
 
 /**
- * The full chip order: Chat, Console, then the workspace tabs in the order they
+ * The full chip order: Chat, Console, Processes, then the workspace tabs in the order they
  * were given. A workspace tab that reuses a fixed id is dropped rather than
  * shown twice — two chips with one id would select together.
  */
-export const phoneTabOrder = (workspaceTabs: readonly PhoneTab[]): readonly PhoneTab[] => [
+export const phoneTabOrder = (
+  workspaceTabs: readonly PhoneTab[],
+  processes: PhoneTab = PHONE_PROCESSES_TAB,
+): readonly PhoneTab[] => [
   PHONE_CHAT_TAB,
   PHONE_CONSOLE_TAB,
-  ...workspaceTabs.filter(tab => tab.id !== PHONE_CHAT_TAB.id && tab.id !== PHONE_CONSOLE_TAB.id),
+  processes,
+  ...workspaceTabs.filter(
+    tab => tab.id !== PHONE_CHAT_TAB.id && tab.id !== PHONE_CONSOLE_TAB.id && tab.id !== PHONE_PROCESSES_TAB.id,
+  ),
 ];
 
 /** Terminal-like tabs get the key bar: a phone keyboard has no esc, tab, ctrl or arrows. */

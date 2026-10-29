@@ -18,8 +18,8 @@
 import type { BrowserPageSummary, SessionView } from '@ferretry/protocol';
 import { type ReactNode, useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { FileInstanceSurface } from '../../components/file-instance-surface.tsx';
-import type { FilesMarkdownContext } from '../../components/files-views.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
+import type { FilesMarkdownContext } from '../../components/files-views.tsx';
 import {
   SessionTerminalDeck,
   type TerminalDeckDependencies,
@@ -29,35 +29,39 @@ import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx'
 import type { BrowserLoginSnapshot } from '../../lib/browser-login.ts';
 import { displayCallsign } from '../../lib/callsign.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { liveProcessCount } from '../../lib/session-processes.ts';
 import {
   activateWorkspaceTab,
   closeWorkspaceTab,
   focusedWorkspaceTab,
   isAgentTabId,
   visibleTabsInOrder,
+  WORKSPACE_PROCESSES_TAB_ID,
   type WorkspaceLayout,
   type WorkspaceTab,
   workspacePanes,
 } from '../../lib/workspace-layout.ts';
-import { sidePaneInstanceTabId } from '../../shell/side-pane-tab-model.ts';
 import type { WorkspaceRailPreferenceStore } from '../../lib/workspace-rail-preferences.ts';
+import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { sidePaneInstanceTabId } from '../../shell/side-pane-tab-model.ts';
 import { BrowserSurfaceList, browserPageLabel } from '../browser/browser-surface-list.tsx';
 import { remoteBrowserPage } from '../browser/remote-browser-chrome.tsx';
 import { rememberBrowserEngine } from '../browser/unified-browser-model.ts';
-import { UnifiedBrowserSurface, type UnifiedBrowserDependencies } from '../browser/unified-browser-surface.tsx';
+import { type UnifiedBrowserDependencies, UnifiedBrowserSurface } from '../browser/unified-browser-surface.tsx';
 import { browserPageForKey, type SessionBrowser } from '../browser/use-session-browser.ts';
 import { AgentControlMarker } from './agent-control-marker.tsx';
 import { ConsoleSurface, type ConsoleTyper } from './console-surface.tsx';
-import { BottomSheet } from '../../shell/bottom-sheet.tsx';
-import { PhoneWorkspace } from './phone/phone-workspace.tsx';
 import type { PhoneTab, WorkspaceFormFactor } from './phone/phone-tab.ts';
+import { PhoneWorkspace } from './phone/phone-workspace.tsx';
+import { ProcessesSurface } from './processes-surface.tsx';
 import { RailDivider } from './split-divider.tsx';
+import { type AgentSurfaceTabs, NO_AGENT_SURFACE_TABS } from './use-agent-surface-tabs.ts';
+import { processListOf, useSessionProcesses } from './use-session-processes.ts';
 import type { SessionWorkspaceController } from './use-session-workspace.ts';
 import { WORKSPACE_FILES_PICKER_KEY } from './use-session-workspace.ts';
 import type { SurfaceDriving } from './use-surface-driving.ts';
 import type { WorkspaceNewTabKind } from './workspace-tab-strip.tsx';
 import { WorkspaceView } from './workspace-view.tsx';
-import { type AgentSurfaceTabs, NO_AGENT_SURFACE_TABS } from './use-agent-surface-tabs.ts';
 
 /**
  * Info, as the page binds it: whether it is open, the phone sheet's height, and the panel itself. The
@@ -170,6 +174,16 @@ export function SessionWorkspace({
   const tabs = visibleTabsInOrder(layout);
   // The agent's first name (#497 names every agent), for the Console's words and the agent tabs' titles.
   const agentName = displayCallsign(session.config.teammate);
+  // The Processes tab's count must stay true while another tab is on screen, so the list is read here —
+  // quickly while the tab is shown, slowly otherwise.
+  const processesShown =
+    formFactor === 'phone'
+      ? focusedWorkspaceTab(layout) === WORKSPACE_PROCESSES_TAB_ID
+      : isTabShown(layout, WORKSPACE_PROCESSES_TAB_ID);
+  const [openProcessId, setOpenProcessId] = useState<string | null>(null);
+  const processes = useSessionProcesses({ connection, scope, visible: processesShown });
+  const liveProcesses = liveProcessCount(processListOf(processes.state));
+  const processesLabel = liveProcesses > 0 ? `Processes · ${String(liveProcesses)}` : 'Processes';
 
   // A new tab lands in the focused workspace pane — the layout's own rule — and pressing a pane's ＋
   // focuses that pane first, so it lands where it was asked for.
@@ -287,6 +301,22 @@ export function SessionWorkspace({
           {...(readSnapshot === undefined ? {} : { readSnapshot })}
           {...(typeIntoConsole === undefined ? {} : { typeInto: typeIntoConsole })}
           {...(options.interceptInput === undefined ? {} : { interceptInput: options.interceptInput })}
+        />
+      );
+    // Mounted only while on screen, like the Console: an open row follows its output, and a tab nobody
+    // is looking at must not. The open row is the page's, so it is still open when the tab comes back.
+    if (tab.kind === 'processes' && !options.active) return null;
+    if (tab.kind === 'processes')
+      return (
+        <ProcessesSurface
+          compact={formFactor === 'phone'}
+          connection={connection}
+          onOpenChange={setOpenProcessId}
+          onRefresh={processes.refresh}
+          openId={openProcessId}
+          onShowConsole={() => workspace.showAgentTab('console')}
+          scope={scope}
+          state={processes.state}
         />
       );
     if (tab.kind === 'terminal') {
@@ -444,6 +474,7 @@ export function SessionWorkspace({
             return renderBody(tab, { active, interceptInput });
           }}
           tabs={phoneTabs}
+          processesTab={{ id: WORKSPACE_PROCESSES_TAB_ID, kind: 'processes', label: processesLabel }}
           reopen={agentSurfaces.reopenable.map(surface => ({
             key: `reopen-${surface.tabId}`,
             label: `Reopen ${surface.kind === 'terminal' ? 'terminal' : 'page'} ${surface.label}`,
@@ -474,6 +505,7 @@ export function SessionWorkspace({
       onNewTab={kind => newTab(kind)}
       onTabClosed={disposeTab}
       renderTab={tab => renderBody(tab, { active: isTabShown(layout, tab.id) })}
+      tabLabels={new Map([[WORKSPACE_PROCESSES_TAB_ID, processesLabel]])}
       {...(endTerminal === undefined ? {} : { onEndTerminal: endTerminal })}
     />
   );

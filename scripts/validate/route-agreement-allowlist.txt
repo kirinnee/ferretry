@@ -85,9 +85,6 @@ unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
 unreached GET /v1/sessions/:sessionId/attachments/:attachmentId # no client asks for attachment metadata alone; list and content paths are the shipped surface
 unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes TerminalView rows from the list/create responses; no client asks for detail alone
 unreached POST /v1/sessions/:sessionId/terminals/:terminalId # DEFECT: the daemon serves rename as POST while the only client uses PATCH
-unreached GET /v1/sessions/:sessionId/processes # TEMPORARY: the Processes tab client has not landed yet; this line goes stale, and must be deleted, in the change that dials it
-unreached GET /v1/sessions/:sessionId/processes/:processId/output # TEMPORARY: as above
-unreached POST /v1/sessions/:sessionId/processes/:processId/stop # TEMPORARY: as above
 unreached POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
 unreached DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
 
