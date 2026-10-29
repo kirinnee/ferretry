@@ -21,6 +21,7 @@ describe('instructionsReport', () => {
     should(report.sections.map(section => [section.id, section.on])).deepEqual([
       ['hypermedia', true],
       ['pack', false],
+      ['agenda', false],
       ['lessons', false],
     ]);
     should(report.sections[0]?.turnOn).be.undefined();
@@ -28,8 +29,22 @@ describe('instructionsReport', () => {
       'The owner turns it on in Ferretry: open this ferret › Actions › Pack mode. It takes effect when this ferret next restarts (Actions › Restart). Settings › Pack mode, the machine’s switch, must be on too.',
     );
     should(report.sections[2]?.turnOn).startWith(
+      'The owner turns it on in Ferretry: open this ferret › Actions › Agenda mode.',
+    );
+    should(report.sections[3]?.turnOn).startWith(
       'The owner turns it on in Ferretry: open this ferret › Actions › Passive learning.',
     );
+  });
+
+  it('should report Agenda mode on only when FY_AGENDA is exactly 1', () => {
+    // Act
+    const on = instructionsReport({ ...LAUNCHED, FY_AGENDA: '1' });
+    const yes = instructionsReport({ ...LAUNCHED, FY_AGENDA: 'yes' });
+
+    // Assert
+    should(on.sections.find(section => section.id === 'agenda')).match({ label: 'Agenda mode', on: true });
+    should(on.sections.find(section => section.id === 'agenda')).not.have.property('turnOn');
+    should(yes.sections.find(section => section.id === 'agenda')?.on).be.false();
   });
 
   it('should say so outside a ferret, and leave out a mode it does not recognise', () => {
@@ -62,7 +77,8 @@ describe('instructionsReport', () => {
       'Sections ferret session-7 launched with (interactive):',
       '  ✓ Hypermedia: on',
       `  ✗ Pack mode: off. ${instructionsReport(LAUNCHED).sections[1]?.turnOn ?? ''}`,
-      `  ✗ Lessons: off. ${instructionsReport(LAUNCHED).sections[2]?.turnOn ?? ''}`,
+      `  ✗ Agenda mode: off. ${instructionsReport(LAUNCHED).sections[2]?.turnOn ?? ''}`,
+      `  ✗ Lessons: off. ${instructionsReport(LAUNCHED).sections[3]?.turnOn ?? ''}`,
       'These are fixed for this run: a switch changed now is in the system prompt from the next launch.',
     ]);
   });

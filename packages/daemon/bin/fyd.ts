@@ -20,6 +20,7 @@ import {
   FleetTokenRefreshService,
   HARNESS_BINARIES,
   type HarnessKind,
+  AGENDA_ENV,
   HYPERMEDIA_ENV,
   hostCodexCredentialFile,
   hostCodexHome,
@@ -126,7 +127,10 @@ import {
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/attention/storage-harness-prompt.ts';
+import { FileAgendaMigrationMarker } from '../src/adapters/attention/file-agenda-migration-marker.ts';
 import { armAttentionNudge, StorageAttentionNudgeSessions } from '../src/adapters/attention/storage-attention-nudge.ts';
+import { EnvironmentAgendaModes } from '../src/adapters/attention/session-agenda-modes.ts';
+import { armSessionTurnChanges, StorageSessionStops } from '../src/adapters/attention/session-turn-stops.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import {
@@ -562,10 +566,10 @@ import {
   type AttentionActor,
   AttentionChangeFanout,
   AttentionConversation,
-  AttentionMoreInfoPush,
+  AttentionBuzz,
+  migrateToAgendaMode,
+  TurnChanges,
   AttentionResurfacer,
-  AttentionSurfacedPush,
-  GroupedAttentionRaises,
   AttentionBoardUndelivered,
   AttentionReplyBatcher,
   AttentionReplyDelivery,
@@ -896,6 +900,8 @@ import {
   SessionHandoverService,
   SessionHealthService,
   type SessionHealthSettings,
+  SessionAgendaModeService,
+  type SessionAgendaModeSubsystem,
   SessionHypermediaService,
   type SessionHypermediaSubsystem,
   type SessionId,
@@ -3652,6 +3658,9 @@ interface SessionPackHooks {
 }
 
 /** A session status after which no process runs until the session is launched again. */
+/** How often the deadline sweep looks for an item whose `neededBy` came near with nothing else touching its board. */
+const ATTENTION_DEADLINE_SWEEP_MS = 5 * 60_000;
+
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
 /**
@@ -8857,11 +8866,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // Answers held across a restart are delivered, in the background, once the daemon is up.
       void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      const agendaModes = new EnvironmentAgendaModes(sessionEnvironments);
+      const sessionStops = new StorageSessionStops(storage);
       const attentionProjection = new SessionAttentionProjection(
         attentionBoards,
         new StorageSessionAttentionState(storage),
         new KeyedSerialExecutor(),
         () => clock.now(),
+        agendaModes,
+        sessionStops,
+      );
+      // THE PHONE BUZZES ONLY when a ferret stops on the owner, when an item's deadline is near, or for a
+      // notice with `ping` (docs/notifications.md); everything else only moves the Inbox badge.
+      const attentionBuzz = new AttentionBuzz(
+        attentionBoards,
+        sessionStops,
+        notifications,
+        clock,
+        attentionConfig.deadlineWarnHours,
       );
       // Boards that moved before summaries were kept (or while this daemon was down) are caught up once,
       // in the background: a list served before it finishes is only missing an unread mark.
@@ -8892,18 +8914,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // rather than being flattened into "no attention".
           has: async id => (await sessions.get(id)) !== undefined,
         },
-        // A ferret's asks start in discussion: one push for the ones it raises in the same breath.
-        new GroupedAttentionRaises(notifications, new KeyedAttentionReplyTimers()),
+        attentionBuzz,
         new AttentionChangeFanout([
           // The session list's unread signal, kept true to the board.
           attentionProjection,
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
           new AttentionReplyDelivery(attentionReplies, CLIENT_NAME),
-          // The ferret's edit that answers the owner's request for more information: pushed once more.
-          new AttentionMoreInfoPush(notifications),
-          // An ask that left its discussion for the owner's queue: pushed as a card now waiting on them.
-          new AttentionSurfacedPush(notifications),
+          // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
+          attentionBuzz,
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {
@@ -8924,6 +8943,61 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           attentionConfig.resurfaceAfterMinutes,
         ).start();
       }
+      // A ferret that goes idle with an agenda item on the owner is STOPPED on them: pushed once for that stop,
+      // and its summary says so. Learned from the fleet as it stands first, so a daemon that starts announces nobody.
+      const turnChanges = new TurnChanges();
+      armSessionTurnChanges(storage, turnChanges, async sessionId => {
+        await attentionProjection.refresh(sessionId);
+        await attentionBuzz.turnChanged(sessionId);
+      });
+      // An item whose `neededBy` is within `attention.deadlineWarnHours` is pushed once; the sweep finds the ones
+      // whose time came while nothing else touched their board.
+      const sweepDeadlines = asActivity(activities, 'attention-deadlines', async () => {
+        await attentionBuzz.sweep(storage.listSessions().map(session => session.id));
+      });
+      setInterval(sweepDeadlines, ATTENTION_DEADLINE_SWEEP_MS).unref();
+      setTimeout(sweepDeadlines, 30_000).unref();
+      // Agenda mode: the switch (a launch variable, like Pack's) and the one-time migration that turns it on for
+      // every ferret that already had open items — they ARE its agenda.
+      const writeAgendaMode = async (reference: string, enabled: boolean): Promise<void> => {
+        const id = parseSessionId(reference);
+        await sessionMutations.run(`session:${id}`, async () => {
+          await sessionEnvironments.write(id, {
+            ...(await sessionEnvironments.read(id)),
+            [AGENDA_ENV]: enabled ? '1' : '0',
+          });
+        });
+        await attentionProjection.refresh(id);
+      };
+      const agendaModeService = new SessionAgendaModeService({
+        facts: async reference => {
+          const id = tryParseSessionId(reference);
+          const view = id === undefined ? undefined : await sessions.get(id);
+          return view === undefined
+            ? undefined
+            : {
+                enabled: await agendaModes.enabled(id as string),
+                running: !HYPERMEDIA_NOT_RUNNING.has(view.state.status),
+              };
+        },
+        write: writeAgendaMode,
+      });
+      const sessionAgendaMode: SessionAgendaModeSubsystem = {
+        get: async reference => await agendaModeService.get(reference),
+        set: async (reference, enabled) => await agendaModeService.set(reference, enabled),
+      };
+      void migrateToAgendaMode(
+        storage.listSessions().map(session => session.id),
+        {
+          marker: new FileAgendaMigrationMarker(join(paths.home, 'agenda-mode-migration.json')),
+          boards: attentionBoards,
+          modes: {
+            enabled: async sessionId => await agendaModes.enabled(sessionId),
+            enable: async sessionId => await writeAgendaMode(sessionId, true),
+          },
+          now: () => clock.now(),
+        },
+      );
       // A harness parked on its own prompt waits on the owner, so it is an item on the board, raised and
       // cleared from the state documents storage writes — and caught up once at start, in the background.
       const harnessPrompts = new HarnessPromptAttention(
@@ -10026,6 +10100,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionAttachments,
         sessionSignal: createSessionSignalSubsystem(storage, sessions, signals),
         sessionRename: createSessionRenameSubsystem(storage, sessions, nameClaims, clock),
+        sessionAgendaMode,
         sessionHypermedia: createSessionHypermediaSubsystem(
           storage,
           sessions,

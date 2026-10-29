@@ -1,4 +1,4 @@
-import type { AttentionItem, AttentionSnapshot, SessionAttentionSummary } from '@ferretry/protocol';
+import type { SessionAttentionSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import {
   boardReplyMessage,
@@ -22,6 +22,7 @@ import type {
   AttentionService,
 } from './service.ts';
 import { attentionSnapshot, emptyAttentionLedger } from './state-machine.ts';
+import { type AgendaModes, decoratedSummary, type SessionStops } from './stopped.ts';
 
 /** Every observer told, in order, each on its own: one that throws never silences the next. */
 export class AttentionChangeFanout implements AttentionChangeObserver {
@@ -53,6 +54,9 @@ export interface SessionAttentionState {
  * order, but their observers may run out of order, and writing the earlier snapshot last would show an
  * answered item as still open. Re-reading under one lock per session makes the last write the current
  * board, whatever order the notices arrive in.
+ *
+ * The summary also says whether the ferret works in agenda mode and whether it is STOPPED on the owner, so
+ * both are read at the same moment as the board.
  */
 export class SessionAttentionProjection implements AttentionChangeObserver {
   constructor(
@@ -60,10 +64,17 @@ export class SessionAttentionProjection implements AttentionChangeObserver {
     private readonly state: SessionAttentionState,
     private readonly serial: Pick<SerialExecutor, 'run'>,
     private readonly now: () => string,
+    private readonly modes: AgendaModes = { enabled: async () => false },
+    private readonly stops: SessionStops = { current: async () => undefined },
   ) {}
 
   async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
     await this.project(sessionId, change);
+  }
+
+  /** The session's mode or idleness moved with no board change: the summary is brought in line. Total. */
+  async refresh(sessionId: string): Promise<void> {
+    await this.project(sessionId, undefined).catch(() => undefined);
   }
 
   /**
@@ -78,7 +89,14 @@ export class SessionAttentionProjection implements AttentionChangeObserver {
   private async project(sessionId: string, change: AttentionBoardChange | undefined): Promise<void> {
     await this.serial.run(`attention-projection:${sessionId}`, async () => {
       const ledger = (await this.boards.read(sessionId)) ?? emptyAttentionLedger(sessionId, this.now());
-      await this.state.write(sessionId, sessionAttentionSummary(attentionSnapshot(ledger)), change);
+      const snapshot = attentionSnapshot(ledger);
+      const summary = decoratedSummary(
+        sessionAttentionSummary(snapshot),
+        snapshot.items,
+        await this.modes.enabled(sessionId).catch(() => false),
+        await this.stops.current(sessionId).catch(() => undefined),
+      );
+      await this.state.write(sessionId, summary, change);
     });
   }
 }
@@ -137,53 +155,6 @@ export class AttentionBoardUndelivered implements AttentionUndeliveredSink {
     const counter = key.split('~')[1];
     const request = counter === undefined ? undefined : Number(counter);
     await this.attention.undelivered(sessionId, id, reason, request).catch(() => undefined);
-  }
-}
-
-/** Announces that a ferret added the information the owner asked for: the one push an edit ever makes. */
-export interface MoreInfoAnnouncer {
-  /** `discussion`: the wait the edit cleared was the owner's request to talk the item through. */
-  moreInfoAdded(
-    sessionId: string,
-    item: AttentionItem,
-    snapshot: AttentionSnapshot,
-    discussion: boolean,
-  ): Promise<void>;
-}
-
-/**
- * The ONE exception to "an edit never pushes": the raising ferret's edit that answers an open request for
- * more information or to discuss the item (`info-added`) pushes once more. The state machine clears the
- * request in the same commit, so a retried edit is no change and pushes nothing, and the announcer keys the
- * push on the item and its request counter. The cleared wait is read from the history: the edit appends
- * `updated` after the entry that opened the wait, so that entry is the one before the last.
- */
-export class AttentionMoreInfoPush implements AttentionChangeObserver {
-  constructor(private readonly announcer: MoreInfoAnnouncer) {}
-
-  async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
-    if (change.change !== 'info-added' || change.item === undefined) return;
-    const history = change.item.history ?? [];
-    await this.announcer.moreInfoAdded(sessionId, change.item, change.snapshot, history.at(-2)?.kind === 'discuss');
-  }
-}
-
-/** Announces that an ask left its discussion for the owner's queue. */
-export interface SurfacedAnnouncer {
-  surfaced(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
-}
-
-/**
- * The owner is pushed for an ask that reached their queue: the card now waits on them, and until now they
- * only had a chat message (or a grouped push) about it. Once per item, whoever surfaced it — the ferret, the
- * owner, or the resurface timer.
- */
-export class AttentionSurfacedPush implements AttentionChangeObserver {
-  constructor(private readonly announcer: SurfacedAnnouncer) {}
-
-  async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
-    if (change.change !== 'surfaced' || change.item === undefined) return;
-    await this.announcer.surfaced(sessionId, change.item, change.snapshot);
   }
 }
 

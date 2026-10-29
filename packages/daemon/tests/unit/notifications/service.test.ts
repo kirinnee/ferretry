@@ -139,37 +139,122 @@ const snapshot = AttentionSnapshotSchema.parse({
   parseErrors: 0,
   updatedAt: AT,
 });
+const second = AttentionItemSchema.parse({ ...item, id: 'A2', subject: 'Choose a region' });
+const twoWaiting = AttentionSnapshotSchema.parse({ ...snapshot, items: [item, second], count: 2 });
+const notice = AttentionItemSchema.parse({ ...item, id: 'A3', notice: true, subject: 'Build is green' });
+const pinging = AttentionItemSchema.parse({ ...notice, id: 'A4', ping: true });
+const due = AttentionItemSchema.parse({ ...item, neededBy: '2026-08-06T12:00:00.000Z' });
 
-describe('NotificationService attention presentation', () => {
-  it('should deliver different item ids, and replay the same item id', async () => {
+const requested = (world: ReturnType<typeof fixture>) =>
+  world.ledger.records.filter(record => record.phase === 'requested');
+
+describe('NotificationService stop push', () => {
+  it('should push ONE "<ferret> is stopped · N need you" for a stop, whatever the items, and none for the same stop again', async () => {
     // Arrange
     const world = fixture();
-    const second = AttentionItemSchema.parse({ ...item, id: 'A2', subject: 'Choose a region' });
-    const secondSnapshot = AttentionSnapshotSchema.parse({
-      ...snapshot,
-      items: [item, second],
-      count: 2,
-    });
 
     // Act
-    await world.service.attentionRaised(SESSION, item, snapshot);
-    await world.service.raised(SESSION, second, secondSnapshot);
-    await world.service.attentionRaised(SESSION, item, snapshot);
+    await world.service.stopped(SESSION, AT, twoWaiting);
+    await world.service.stopped(SESSION, AT, twoWaiting);
+    await world.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(world.push.dispatches[0]?.payload).containDeep({
+      title: 'Release agent is stopped · 2 need you',
+      url: `/session/${SESSION}?attention=A1`,
+    });
+    should(requested(world)[0]).containDeep({ key: `attention:${SESSION}:stopped:${AT}`, stoppedAt: AT });
+  });
+
+  it('should push again for the next stop of the same ferret', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.stopped(SESSION, AT, snapshot);
+    await world.service.stopped(SESSION, '2026-08-06T11:00:00.000Z', snapshot);
 
     // Assert
     should(world.push.calls).equal(2);
-    should(world.ledger.records.filter(record => record.phase === 'requested').map(record => record.key)).deepEqual([
-      `attention:${SESSION}:A1`,
-      `attention:${SESSION}:A2`,
-    ]);
-    should(world.ledger.records[0]).containDeep({
-      origin: 'attention',
-      attentionId: 'A1',
-      attribution: `attention:agent:${SESSION}`,
-      sent: { title: 'Choose a release window', body: item.subject, interactive: true },
-    });
   });
 
+  it('should push nothing when no item waits on the owner', async () => {
+    // Arrange
+    const world = fixture();
+    const ferretTurn = AttentionItemSchema.parse({ ...item, waitingOn: 'ferret', askedAt: AT });
+    const waiting = AttentionSnapshotSchema.parse({ ...snapshot, items: [ferretTurn, notice], count: 2 });
+
+    // Act
+    await world.service.stopped(SESSION, AT, waiting);
+
+    // Assert
+    should(world.push.calls).equal(0);
+  });
+});
+
+describe('NotificationService deadline push', () => {
+  it('should push once per item, however often the deadline is seen', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.deadline(SESSION, due, snapshot);
+    await world.service.deadline(SESSION, due, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(world.push.dispatches[0]?.payload.body).startWith('Needed in about 2 h');
+    should(requested(world)[0]).containDeep({ key: `attention:${SESSION}:A1:deadline`, deadline: true });
+  });
+
+  it('should keep its own key apart from a stop of the same item', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.stopped(SESSION, AT, snapshot);
+    await world.service.deadline(SESSION, due, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(2);
+  });
+});
+
+describe('NotificationService ping push', () => {
+  it('should push a notice that asked to, once, and nothing for one that did not', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.raised(SESSION, notice, snapshot);
+    await world.service.raised(SESSION, pinging, snapshot);
+    await world.service.raised(SESSION, pinging, snapshot);
+    await world.service.raised(SESSION, item, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(requested(world).map(record => record.key)).deepEqual([`attention:${SESSION}:A4:ping`]);
+    should(world.push.dispatches[0]?.payload.body).equal('Build is green');
+  });
+
+  it('should survive a restart: a new service on the same ledger pushes nothing again', async () => {
+    // Arrange
+    const first = fixture();
+    await first.service.raised(SESSION, pinging, snapshot);
+    await first.service.stopped(SESSION, AT, snapshot);
+    const restarted = fixture({ ledger: first.ledger });
+
+    // Act
+    await restarted.service.raised(SESSION, pinging, snapshot);
+    await restarted.service.stopped(SESSION, AT, snapshot);
+
+    // Assert
+    should(restarted.push.calls).equal(0);
+  });
+});
+
+describe('NotificationService containment', () => {
   it('should contain missing sessions, unreadable ledgers, push failures, and both append failures', async () => {
     // Arrange
     const missing = fixture();
@@ -188,7 +273,7 @@ describe('NotificationService attention presentation', () => {
 
     // Act + Assert
     for (const world of [missing, unreadable, requestedFailure, pushFailure, outcomeFailure]) {
-      await should(world.service.attentionRaised(SESSION, item, snapshot)).be.fulfilled();
+      await should(world.service.stopped(SESSION, AT, snapshot)).be.fulfilled();
     }
     should(missing.push.calls).equal(0);
     should(unreadable.push.calls).equal(0);
@@ -199,7 +284,7 @@ describe('NotificationService attention presentation', () => {
 });
 
 describe('NotificationService delivered count', () => {
-  it('should report the devices the raise reached, and zero for an unpushed item, an error or an unreadable ledger', async () => {
+  it('should report the devices a ping reached, and zero for an unpushed notice, an error or an unreadable ledger', async () => {
     // Arrange
     const world = fixture();
     world.push.result = { delivered: 2, failed: 1 };
@@ -208,18 +293,18 @@ describe('NotificationService delivered count', () => {
       throw new Error('push failed');
     };
     const unreadable = fixture();
-    await unreadable.service.attentionRaised(SESSION, item, snapshot);
+    await unreadable.service.raised(SESSION, pinging, snapshot);
     unreadable.ledger.failFind = true;
 
     // Act
-    await world.service.attentionRaised(SESSION, item, snapshot);
-    await failing.service.attentionRaised(SESSION, item, snapshot);
+    await world.service.raised(SESSION, pinging, snapshot);
+    await failing.service.raised(SESSION, pinging, snapshot);
 
     // Assert
-    should(await world.service.attentionDelivered(SESSION, 'A1')).equal(2);
+    should(await world.service.attentionDelivered(SESSION, 'A4')).equal(2);
     should(await world.service.attentionDelivered(SESSION, 'A9')).equal(0);
-    should(await failing.service.attentionDelivered(SESSION, 'A1')).equal(0);
-    should(await unreadable.service.attentionDelivered(SESSION, 'A1')).equal(0);
+    should(await failing.service.attentionDelivered(SESSION, 'A4')).equal(0);
+    should(await unreadable.service.attentionDelivered(SESSION, 'A4')).equal(0);
   });
 });
 
@@ -230,112 +315,8 @@ describe('NotificationService enrolled devices', () => {
     const nobody = new Push();
     nobody.enrolled = 0;
 
-    // Act + Assert — zero is what `fy attention add` warns about: the ask reached no device.
+    // Act + Assert
     should(await world.service.enrolledDevices()).equal(2);
     should(await fixture({ push: nobody }).service.enrolledDevices()).equal(0);
-  });
-});
-
-describe('NotificationService more-info push', () => {
-  it('should push once per request of an item, apart from the first announcement, and never for an unasked item', async () => {
-    // Arrange
-    const world = fixture();
-    const asked = (request: number) =>
-      AttentionItemSchema.parse({ ...item, waitingOn: 'ferret', askedAt: item.waitingSince, infoRequests: request });
-
-    // Act
-    await world.service.attentionRaised(SESSION, item, snapshot);
-    await world.service.moreInfoAdded(SESSION, item, snapshot);
-    await world.service.moreInfoAdded(SESSION, asked(1), snapshot);
-    await world.service.moreInfoAdded(SESSION, asked(1), snapshot);
-    await world.service.moreInfoAdded(SESSION, asked(2), snapshot);
-
-    // Assert
-    should(world.push.calls).equal(3);
-    should(world.ledger.records.filter(record => record.phase === 'requested').map(record => record.key)).deepEqual([
-      `attention:${SESSION}:A1`,
-      `attention:${SESSION}:A1:info-1`,
-      `attention:${SESSION}:A1:info-2`,
-    ]);
-    should(world.ledger.records.filter(record => record.phase === 'requested')[1]).containDeep({
-      infoRequest: 1,
-      sent: { title: 'Choose a release window', body: 'Updated: Choose a release window' },
-    });
-  });
-
-  it('should word the push for a discussion that ended, and keep the one-per-request key', async () => {
-    // Arrange
-    const world = fixture();
-    const discussed = AttentionItemSchema.parse({
-      ...item,
-      waitingOn: 'ferret',
-      askedAt: item.waitingSince,
-      waitingFor: 'discussion',
-      infoRequests: 1,
-    });
-
-    // Act
-    await world.service.moreInfoAdded(SESSION, discussed, snapshot, true);
-    await world.service.moreInfoAdded(SESSION, discussed, snapshot, true);
-
-    // Assert
-    should(world.push.calls).equal(1);
-    should(world.ledger.records.filter(record => record.phase === 'requested')[0]).containDeep({
-      key: `attention:${SESSION}:A1:info-1`,
-      sent: { body: 'Updated after your discussion: Choose a release window' },
-    });
-  });
-});
-
-describe('NotificationService grouped and surfaced pushes', () => {
-  const second = AttentionItemSchema.parse({ ...item, id: 'A2', subject: 'Pick a region' });
-  const third = AttentionItemSchema.parse({ ...item, id: 'A3', subject: 'Approve the rollback' });
-
-  it('should push ONE "<ferret> needs 3 things" for a burst, and none for the same burst again', async () => {
-    // Arrange
-    const world = fixture();
-
-    // Act
-    await world.service.groupRaised(SESSION, [item, second, third], snapshot);
-    await world.service.groupRaised(SESSION, [item, second, third], snapshot);
-
-    // Assert
-    should(world.push.calls).equal(1);
-    should(world.push.dispatches[0]?.payload).containDeep({
-      title: 'Release agent needs 3 things',
-      body: 'Choose a release window · Pick a region · Approve the rollback',
-      url: `/session/${SESSION}?attention=A1`,
-    });
-  });
-
-  it('should announce a group of one as the item itself', async () => {
-    // Arrange
-    const world = fixture();
-
-    // Act
-    await world.service.groupRaised(SESSION, [item], snapshot);
-
-    // Assert
-    should(world.push.calls).equal(1);
-    should(world.push.dispatches[0]?.payload.title).equal('Choose a release window');
-    should(world.ledger.appends[0]).containDeep({ key: `attention:${SESSION}:A1` });
-  });
-
-  it('should push a surfaced card once, apart from its raise, and keep its own ledger key', async () => {
-    // Arrange
-    const world = fixture();
-
-    // Act
-    await world.service.attentionRaised(SESSION, item, snapshot);
-    await world.service.surfaced(SESSION, item, snapshot);
-    await world.service.surfaced(SESSION, item, snapshot);
-
-    // Assert
-    should(world.push.calls).equal(2);
-    should(world.ledger.records.filter(record => record.phase === 'requested').map(record => record.key)).deepEqual([
-      `attention:${SESSION}:A1`,
-      `attention:${SESSION}:A1:surfaced`,
-    ]);
-    should(world.push.dispatches[1]?.payload.eventKey).equal('attention-surfaced:A1');
   });
 });

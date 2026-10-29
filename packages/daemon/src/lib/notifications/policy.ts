@@ -13,40 +13,49 @@ import { DEVICE_PAIRED_TITLE } from '../audit/policy.ts';
 
 export type SessionNotificationPayload = Extract<PushNotificationPayload, { readonly sessionId: string }>;
 
-/** The daemon-wide identity of one logical notification: the board item it announces, and which request of the owner's. */
+/**
+ * The daemon-wide identity of one logical push. Exactly one of the three buzz reasons names it
+ * (docs/notifications.md § When the phone buzzes); the `infoRequest` and `surfaced` forms are the retired
+ * pushes of an earlier model, kept only so a ledger written under them still reads.
+ */
 export interface NotificationIdentity {
   readonly sessionId: string;
+  /** The item the push opens: the notice, the item past its deadline, or the stop's first item. */
   readonly attentionId: string;
-  /** The owner's request for more information this push answers; absent for the item's own raise. */
+  /** A notice's own push: it asked the phone to buzz (`fy notify --ping`). */
+  readonly ping?: boolean;
+  /** The one push an item makes when its `neededBy` comes within the warning window. */
+  readonly deadline?: boolean;
+  /** The one push a stop makes, named by the instant the ferret's turn boundary was recorded. */
+  readonly stoppedAt?: string;
+  /** @deprecated retired; ledgers written before the buzz policy carry it. */
   readonly infoRequest?: number;
-  /** The push that announces the item's move onto the owner's queue, apart from the one its raise made. */
+  /** @deprecated retired; ledgers written before the buzz policy carry it. */
   readonly surfaced?: boolean;
 }
 
 export function notificationKey(identity: NotificationIdentity): string {
-  return `attention:${identity.sessionId}:${identity.attentionId}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}${identity.surfaced === true ? ':surfaced' : ''}`;
+  // A stop is about the ferret, not about one of its items: the item that triggers it may change within
+  // the stop, and the key must not.
+  if (identity.stoppedAt !== undefined) return `attention:${identity.sessionId}:stopped:${identity.stoppedAt}`;
+  const base = `attention:${identity.sessionId}:${identity.attentionId}`;
+  if (identity.ping === true) return `${base}:ping`;
+  if (identity.deadline === true) return `${base}:deadline`;
+  return `${base}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}${identity.surfaced === true ? ':surfaced' : ''}`;
 }
 
 /**
- * Composes the automatic presentation of one newly created board item: THE ONE PUSH A FERRET'S ASK
- * MAKES, and the only push a ferret can make (docs/attention.md). Waiting and finishing push nothing.
- *
- * A LOCK SCREEN GETS THE CARD'S TITLE AND ITS ASK, NOTHING ELSE. The title is the item's own
- * (`attentionTitle` — an item from before titles reads as the start of its ask) and is the heading the
- * owner reads first; the body is the ask alone, trimmed to `ATTENTION_PUSH_BODY_LENGTH` at a word
- * boundary — never the context, the options or any jargon, which the item itself carries.
- *
- * A tap opens the conversation at the item: the path is relative to the machine's own pages, which the
- * browser's per-machine worker places under that machine.
+ * THE PUSH A NOTICE MAKES WHEN IT ASKED FOR ONE (`fy notify --ping`). A lock screen gets the notice's title
+ * and its summary, nothing else; a tap opens the ferret's chat at the notice.
  */
-export function attentionNotificationPayload(
+export function pingNotificationPayload(
   sessionId: string,
   item: AttentionItem,
   snapshot: AttentionSnapshot,
 ): SessionNotificationPayload {
   return PushNotificationPayloadSchema.parse({
     version: 1,
-    eventKey: `attention-raised:${item.id}`,
+    eventKey: `notice-ping:${item.id}`,
     sessionId,
     kind: 'attention',
     title: attentionNotificationTitle(attentionTitle(item)),
@@ -58,73 +67,66 @@ export function attentionNotificationPayload(
 }
 
 /**
- * What a push says when a ferret's ask left its discussion for the owner's queue: the card's title and ask, as the
- * raise would have said them, under its own event so the owner's device shows it as a new card.
+ * What the one push says when an item's `neededBy` has come within the warning window: the card's title,
+ * and the time left (or that it passed) ahead of its ask.
  */
-export function surfacedNotificationPayload(
+export function deadlineNotificationPayload(
   sessionId: string,
   item: AttentionItem,
   snapshot: AttentionSnapshot,
+  now: string,
 ): SessionNotificationPayload {
   return PushNotificationPayloadSchema.parse({
     version: 1,
-    eventKey: `attention-surfaced:${item.id}`,
+    eventKey: `attention-deadline:${item.id}`,
     sessionId,
     kind: 'attention',
     title: attentionNotificationTitle(attentionTitle(item)),
-    body: clipAtWord(oneLine(item.subject), ATTENTION_PUSH_BODY_LENGTH),
+    body: clipAtWord(`${timeLeftPhrase(item.neededBy, now)}: ${oneLine(item.subject)}`, ATTENTION_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, item.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
 }
 
+/** The longest ferret name a stop's title carries whole; the count after it must survive a lock screen. */
+const STOPPED_NAME_LENGTH = 24;
+
 /**
- * What ONE push says for several asks a ferret raised in the same breath: "<ferret> needs 3 things:
- * <title> · <title> · <title>". The title carries the count, the body the card titles, and a tap opens the first.
+ * What the ONE push a stop makes says: "<ferret> is stopped · 3 need you". The count is in the title, never
+ * clipped away by a long ferret name; the body is the title of the item the owner most likely wants first
+ * (the one blocking now, else the oldest), and a tap opens the ferret's chat at it.
  */
-export function groupedAttentionNotificationPayload(
+export function stoppedNotificationPayload(
   sessionId: string,
   ferret: string,
-  items: readonly [AttentionItem, ...AttentionItem[]],
+  waiting: readonly [AttentionItem, ...AttentionItem[]],
   snapshot: AttentionSnapshot,
 ): SessionNotificationPayload {
-  const [first] = items;
+  const first = waiting.find(item => item.blockingNow === true) ?? waiting[0];
+  const count = waiting.length;
+  const name = attentionNotificationTitle(clipAtWord(oneLine(ferret), STOPPED_NAME_LENGTH));
   return PushNotificationPayloadSchema.parse({
     version: 1,
-    eventKey: `attention-group:${first.id}`,
+    eventKey: `attention-stopped:${sessionId}`,
     sessionId,
     kind: 'attention',
-    title: attentionNotificationTitle(`${oneLine(ferret)} needs ${items.length} things`),
-    body: clipAtWord(items.map(item => oneLine(attentionTitle(item))).join(' · '), ATTENTION_PUSH_BODY_LENGTH),
+    title: `${name} is stopped · ${count === 1 ? '1 needs you' : `${count} need you`}`,
+    body: clipAtWord(oneLine(attentionTitle(first)), ATTENTION_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, first.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
 }
 
-/** What a push says when the ferret added the information the owner asked for: same title and page as the raise. */
-export function moreInfoNotificationPayload(
-  sessionId: string,
-  item: AttentionItem,
-  snapshot: AttentionSnapshot,
-  request: number,
-  discussion = false,
-): SessionNotificationPayload {
-  return PushNotificationPayloadSchema.parse({
-    version: 1,
-    eventKey: `attention-info:${item.id}:${request}`,
-    sessionId,
-    kind: 'attention',
-    title: attentionNotificationTitle(attentionTitle(item)),
-    body: clipAtWord(
-      `${discussion ? 'Updated after your discussion' : 'Updated'}: ${oneLine(item.subject)}`,
-      ATTENTION_PUSH_BODY_LENGTH,
-    ),
-    tag: `attention-${sessionId}`,
-    url: attentionNotificationPath(sessionId, item.id),
-    count: snapshot.count,
-  }) as SessionNotificationPayload;
+/** "Needed in about 2 h" / "Needed in 25 min" / "Overdue", from the instants alone. */
+export function timeLeftPhrase(neededBy: string | undefined, now: string): string {
+  if (neededBy === undefined) return 'Needed soon';
+  const minutes = Math.round((Date.parse(neededBy) - Date.parse(now)) / 60_000);
+  if (Number.isNaN(minutes) || minutes <= 0) return 'Overdue';
+  if (minutes < 60) return `Needed in ${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  return `Needed in about ${hours} h`;
 }
 
 function oneLine(text: string): string {

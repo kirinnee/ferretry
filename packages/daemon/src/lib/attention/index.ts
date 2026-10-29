@@ -1,3 +1,4 @@
+export * from './agenda-migration.ts';
 export * from './conversation.ts';
 export * from './harness-prompt.ts';
 export * from './observers.ts';
@@ -5,6 +6,7 @@ export * from './owner-asks.ts';
 export * from './reply-batch.ts';
 export * from './resurfacer.ts';
 export * from './service.ts';
+export * from './stopped.ts';
 export * from './state-machine.ts';
 export * from './turn-nudge.ts';
 export * from './writing-lint.ts';
