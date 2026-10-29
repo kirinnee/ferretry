@@ -69,19 +69,18 @@ const attachmentImages = (record: LogRecord): ReturnType<typeof splitTranscriptI
 const showsImages = (record: LogRecord): boolean => attachmentImages(record).length > 0;
 
 /** A picture a person or a ferret shared, as a row of its own: the log wrote it as its own record. */
-const imageEntryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => ({
-  id: `log:${index}:${fieldHash(`${record.clock ?? ''}|${record.role}|${record.kind}|${record.lines.join('\n')}`)}`,
+const imageEntryFor = (record: LogRecord, id: string, at: number | undefined): TranscriptEntry => ({
+  id,
   kind: record.role === 'user' ? 'user' : 'assistant',
   text: '',
   images: attachmentImages(record),
   ...(at === undefined ? {} : { at }),
 });
 
-const entryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => {
+const entryFor = (record: LogRecord, id: string, at: number | undefined): TranscriptEntry => {
   const text = record.lines.join('\n');
-  const signature = `${record.clock ?? ''}|${record.role}|${record.kind}|${text}`;
   return {
-    id: `log:${index}:${fieldHash(signature)}`,
+    id,
     kind: recordKind(record),
     text: text || title(record.kind),
     label: recordLabel(record),
@@ -97,8 +96,8 @@ const entryFor = (record: LogRecord, index: number, at: number | undefined): Tra
  * decides. A peer or notice row is not labelled "You": who sent it is the row's own chrome, so it
  * carries no label, only the record's instant.
  */
-const userEntryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => {
-  const entry = entryFor(record, index, at);
+const userEntryFor = (record: LogRecord, id: string, at: number | undefined): TranscriptEntry => {
+  const entry = entryFor(record, id, at);
   const message = readUserMessage(entry.text);
   const instant = at === undefined ? {} : { at };
   if (message.kind === 'human') {
@@ -173,7 +172,6 @@ const recordInstants = (records: readonly LogRecord[], now: number): readonly (n
 };
 
 interface ToolRun {
-  readonly index: number;
   readonly calls: {
     key: string;
     use: ToolUseData;
@@ -191,7 +189,8 @@ interface ToolRun {
  * read as a tool that never ran.
  */
 const toolEntry = (run: ToolRun): TranscriptEntry => ({
-  id: `log:${run.index}:${fieldHash(run.calls.map(call => call.key).join('|'))}`,
+  // Named by the call that OPENED the run, so a run that grows is still the row the reader opened.
+  id: `tools:${run.calls[0]?.key ?? ''}`,
   kind: 'tool',
   text: run.calls.length === 1 ? 'ran a tool' : `ran ${run.calls.length} tools`,
   tools: run.calls,
@@ -205,8 +204,29 @@ const commandEntry = (id: string, command: SlashCommand): TranscriptEntry => ({
   command,
 });
 
+/**
+ * A ROW'S NAME IS WHAT IT SAYS, NEVER WHERE IT SITS.
+ *
+ * The daemon answers with the newest events of a session, not all of them (`DEFAULT_LOG_TAIL`), so in
+ * any session long enough to matter each new event pushes the oldest one out and every record moves
+ * up one place. A name built from that place renamed every row on every read, and React rebuilt the
+ * whole transcript: an interactive page lost its state, an open tool group closed, a menu went with
+ * its row. So a record is named by its own content — clock, speaker, kind and text — and the rare
+ * exact repeat inside one window by how many came before it.
+ */
+const recordIds = (): ((signature: string) => string) => {
+  const seen = new Map<string, number>();
+  return signature => {
+    const base = `log:${fieldHash(signature)}`;
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count === 0 ? base : `${base}#${count}`;
+  };
+};
+
 const projectRecords = (records: readonly LogRecord[], now: number): readonly TranscriptEntry[] => {
   const instants = recordInstants(records, now);
+  const idFor = recordIds();
   const entries: TranscriptEntry[] = [];
   let run: ToolRun | null = null;
   const flush = (): void => {
@@ -217,8 +237,8 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     if (isHiddenRecord(record)) return;
     const text = record.lines.join('\n');
     if (isToolRecord(record)) {
-      run ??= { index, calls: [] };
-      const key = `log:${index}:${fieldHash(`${record.kind}|${text}`)}`;
+      run ??= { calls: [] };
+      const key = idFor(`${record.clock ?? ''}|${record.kind}|${text}`);
       if (record.kind === 'tool-call') {
         const at = instants[index];
         run.calls.push({ key, use: toolUse(text), ...(at === undefined ? {} : { ts: new Date(at).toISOString() }) });
@@ -232,7 +252,9 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     }
     if (showsImages(record)) {
       flush();
-      entries.push(imageEntryFor(record, index, instants[index]));
+      entries.push(
+        imageEntryFor(record, idFor(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`), instants[index]),
+      );
       return;
     }
     const command = recordKind(record) === 'user' ? parseSlashCommandText(text) : null;
@@ -240,7 +262,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
     // outright — and, like bookkeeping, it does not end a tool run.
     if (command?.kind === 'caveat') return;
     flush();
-    const id = `log:${index}:${fieldHash(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`)}`;
+    const id = idFor(`${record.clock ?? ''}|${record.role}|${record.kind}|${text}`);
     if (command?.kind === 'command') {
       entries.push(commandEntry(id, command.command));
       return;
@@ -257,7 +279,7 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       return;
     }
     const at = instants[index];
-    entries.push(recordKind(record) === 'user' ? userEntryFor(record, index, at) : entryFor(record, index, at));
+    entries.push(recordKind(record) === 'user' ? userEntryFor(record, id, at) : entryFor(record, id, at));
   });
   flush();
   return entries;
