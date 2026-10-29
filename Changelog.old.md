@@ -1,3 +1,14 @@
+## [4.103.0](https://github.com/kirinnee/ferretry/compare/v4.102.0...v4.103.0) (2026-10-29)
+
+### Features
+
+* **attention:** Discuss on every card, and batch what the ferret hears instead of footering every message ([#871](https://github.com/kirinnee/ferretry/issues/871)) ([01f1782](https://github.com/kirinnee/ferretry/commit/01f1782e1a33d92acd6ef5dbaa92ec6b417ce260))
+
+### Fixes
+
+* **daemon:** keep analytics index writes off the event loop ([#872](https://github.com/kirinnee/ferretry/issues/872)) ([3b5e41f](https://github.com/kirinnee/ferretry/commit/3b5e41f5ca44276083fb50ae3dac8143a66ef840))
+* **transcript:** count record bytes without copying them ([#873](https://github.com/kirinnee/ferretry/issues/873)) ([d7ec75e](https://github.com/kirinnee/ferretry/commit/d7ec75e8e90b452ace435da7e9c2ea69c9332dfb)), closes [#870](https://github.com/kirinnee/ferretry/issues/870)
+
 ## [4.102.0](https://github.com/kirinnee/ferretry/compare/v4.101.3...v4.102.0) (2026-10-29)
 
 ### Features
