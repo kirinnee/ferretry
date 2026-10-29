@@ -154,6 +154,25 @@ describe('a sweep raises the owner’s card', () => {
   });
 });
 
+describe('a sweep counts the owner being asked', () => {
+  it('should count a notification once per episode, as asked by whoever handed it on', async () => {
+    // Arrange
+    const subject = harness({
+      config: jevOnly(),
+      fleet: [triageable('s1')],
+      guard: [{ ...JEV_INVESTIGATE, confidence: 0.42 }],
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+    await subject.service.run({ force: false });
+
+    // Assert
+    const today = subject.state().daily?.at(-1);
+    should(today?.asked).match({ auto: 0, jev: 1, llm: 0 });
+  });
+});
+
 describe('the items escalations wrote before notifications', () => {
   it('should resolve an old Warden item with a note on the first sweep, and notify instead', async () => {
     // Arrange

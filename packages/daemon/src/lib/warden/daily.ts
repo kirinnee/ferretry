@@ -22,6 +22,7 @@ import {
   wardenActionOutcome,
   type WardenOutcome,
 } from '@ferretry/protocol';
+import type { WardenEscalationReasonKind } from './escalation.ts';
 import type { WardenRuntimeState } from './state.ts';
 import { instantMs } from './time.ts';
 import { triageDayFor, utcDay, type WardenTriageDay } from './triage.ts';
@@ -83,6 +84,26 @@ export function recordWardenOutcome(state: WardenRuntimeState, action: WardenAct
  * Count one flag handed to the owner that no held action records — an escalation, a `NEEDS_HUMAN`
  * verdict. `actor` is who decided it should go to them.
  */
+/**
+ * Who decided a notification should go to the owner, by why it was raised — or `undefined` for a held
+ * action, which was already counted as asked when the hold was recorded and must not count twice.
+ * An investigation's verdict is the LLM's; Jev's hand-on is Jev's; a failed investigation or a flag no
+ * layer could look at goes to the owner by rule.
+ */
+export function wardenAskActor(reason: WardenEscalationReasonKind): WardenActor | undefined {
+  switch (reason) {
+    case 'needs_human':
+      return 'llm';
+    case 'jev':
+      return 'jev';
+    case 'investigation_failed':
+    case 'untriaged':
+      return 'auto';
+    case 'held':
+      return undefined;
+  }
+}
+
 export function recordWardenAsk(state: WardenRuntimeState, at: string, actor: WardenActor): WardenRuntimeState {
   const ms = instantMs(at);
   if (ms === undefined) return state;

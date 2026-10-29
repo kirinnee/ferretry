@@ -8,6 +8,7 @@ import {
   parseWardenRuntimeState,
   recordWardenAsk,
   recordWardenOutcome,
+  wardenAskActor,
   WARDEN_DAILY_KEEP_DAYS,
   wardenHistory,
   withDailyRollup,
@@ -317,5 +318,16 @@ describe('reading the daily history back', () => {
     // Assert
     should(actual.daily).be.undefined();
     should(actual.lastSweepAt).equal('2026-07-31T12:00:00.000Z');
+  });
+});
+
+describe('who asked the owner', () => {
+  it('should credit a verdict to the LLM, a hand-on to Jev, the rest to rules, and never count a hold twice', () => {
+    // Act + Assert
+    should(wardenAskActor('needs_human')).equal('llm');
+    should(wardenAskActor('jev')).equal('jev');
+    should(wardenAskActor('investigation_failed')).equal('auto');
+    should(wardenAskActor('untriaged')).equal('auto');
+    should(wardenAskActor('held')).be.undefined();
   });
 });

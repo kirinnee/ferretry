@@ -143,7 +143,7 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
-import { recordWardenOutcome, wardenHistory, withDailyRollup } from './daily.ts';
+import { recordWardenAsk, recordWardenOutcome, wardenAskActor, wardenHistory, withDailyRollup } from './daily.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
 import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
@@ -2262,9 +2262,15 @@ export class WardenSweepService {
     const notified: Record<string, string> = Object.fromEntries(
       Object.entries(sweep.state.notified ?? {}).filter(([key]) => standing.has(key)),
     );
+    let state = sweep.state;
     for (const request of plan.raise) {
       const write = await this.ports.attention.raise(request.sessionId, request);
-      if (write !== 'rejected') notified[request.subjectKey] ??= sweep.at;
+      if (write !== 'rejected' && notified[request.subjectKey] === undefined) {
+        notified[request.subjectKey] = sweep.at;
+        // Counted once per episode, when the owner is first told — the day's "Asked you".
+        const actor = wardenAskActor(request.reason);
+        if (actor !== undefined) state = recordWardenAsk(state, sweep.at, actor);
+      }
       if (write === 'rejected') {
         this.ports.journal.record('fleet.warden_escalation_failed', {
           sessionId: request.sessionId,
@@ -2286,8 +2292,8 @@ export class WardenSweepService {
         change: write,
       });
     }
-    if (JSON.stringify(notified) !== JSON.stringify(sweep.state.notified ?? {}))
-      await this.ports.state.write({ ...sweep.state, notified });
+    if (state !== sweep.state || JSON.stringify(notified) !== JSON.stringify(sweep.state.notified ?? {}))
+      await this.ports.state.write({ ...state, notified });
   }
 
   // ─── accounts ───────────────────────────────────────────────────────────────
