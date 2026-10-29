@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import type { AttentionRevision } from '@ferretry/protocol';
-import { AttentionAskMessage } from '../../../src/features/attention/attention-ask-message.tsx';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import { AttentionDetail } from '../../../src/features/attention/attention-detail.tsx';
 import { AttentionUpdated } from '../../../src/features/attention/attention-updated.tsx';
@@ -105,23 +104,16 @@ describe('the detail as a living summary', () => {
   });
 });
 
-describe('the card and the ask message', () => {
-  it('say "N decided · M still open" and Updated, and mark a changed why line', async () => {
+describe('the card', () => {
+  it('says "N decided · M still open" and Updated, and marks a changed why line', async () => {
     const card = await mount(<AttentionCard item={living} onAct={() => undefined} />);
     expect(at(card, '[data-attention-summary]', 'summary').textContent).toBe('2 decided · 1 still open');
     expect(at(card, '[data-attention-updated]', 'Updated').textContent).toContain('Updated');
     expect(at(card, '[data-attention-why]', 'why').getAttribute('data-attention-changed')).toBe('changed');
     await card.unmount();
-
-    const message = await mount(
-      <AttentionAskMessage item={living} onAct={() => undefined} onReplyTo={() => undefined} replying={false} />,
-    );
-    expect(at(message, '[data-attention-summary]', 'summary').textContent).toBe('2 decided · 1 still open');
-    expect(message.container.querySelector('[data-attention-updated]')).not.toBeNull();
-    await message.unmount();
   });
 
-  it('draw neither for an item with no lists and no edits', async () => {
+  it('draws neither for an item with no lists and no edits', async () => {
     const plain = attentionItem('A5', { ask: choices('Yes', 'No') });
     const card = await mount(<AttentionCard item={plain} onAct={() => undefined} />);
     expect(card.container.querySelector('[data-attention-living]')).toBeNull();

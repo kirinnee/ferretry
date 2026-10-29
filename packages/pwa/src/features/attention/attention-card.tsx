@@ -21,35 +21,17 @@
  */
 
 import type { AttentionItem, AttentionRevisableField } from '@ferretry/protocol';
-import {
-  attentionCardKind,
-  attentionTitle,
-  hasOwnTitle,
-  recommendedAttentionOption,
-  singleAttentionQuestion,
-  unswipedChoices,
-} from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
+import { answerAction, CLEAR_ACTION, kindWord, optionAction } from '../../lib/attention-answers.ts';
+import { cardModel } from '../../lib/attention-card-model.ts';
 import {
-  answerAction,
-  cardAnswers,
-  isTextOnlyAsk,
-  kindWord,
-  needsReplyText,
-  optionAction,
-} from '../../lib/attention-answers.ts';
-import {
-  answersPerQuestion,
   DISMISS_ACTION,
   historyLine,
   type InboxAction,
-  isWaitingOnFerret,
   questionAnswersAction,
   updatedSinceAsked,
-  visibleWhy,
-  waitingSentence,
 } from '../../lib/attention-inbox.ts';
 import { decidedSummary, type RevisionHighlight, revisionHighlight } from '../../lib/attention-revisions.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -58,6 +40,7 @@ import { attentionAge, attentionKindMeta } from './attention-board.tsx';
 import { AttentionBriefSections, cardLede } from './attention-brief.tsx';
 import { AttentionDelivery } from './attention-delivery.tsx';
 import { attentionHasDetail } from './attention-detail.tsx';
+import { AttentionBody } from './attention-steps.tsx';
 import { AttentionDecidedSummary, AttentionUpdated } from './attention-updated.tsx';
 
 /** Where the card came from, in the inbox. Inside its own conversation there is nothing to say. */
@@ -112,9 +95,6 @@ export interface AttentionCardProps {
   readonly onOpenDetail?: () => void;
 }
 
-/** The longest ask that is still drawn as the card's heading. */
-const QUESTION_HEADING_MAX = 160;
-
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
 
 export function AttentionCard({
@@ -139,56 +119,15 @@ export function AttentionCard({
   const [picks, setPicks] = useState<readonly string[]>([]);
   const kind = attentionKindMeta(item);
   const KindIcon = kind.icon;
-  const allAnswers = cardAnswers(item);
-  // A review's "Needs changes" IS the owner's words: it is the message box, not a button.
-  const answers = allAnswers.filter(answer => !needsReplyText(answer));
-  const asksForWords = answers.length < allAnswers.length;
-  const extras = unswipedChoices(item);
-  const perQuestion = answersPerQuestion(item);
-  const textOnly = isTextOnlyAsk(item);
-  const why = visibleWhy(item);
+  const model = cardModel(item);
+  const { answers, extras, perQuestion, heading, showAsk, asking, recommendation, recommended } = model;
   const history = historyLine(item.history);
   const updated = updatedSinceAsked(item);
   const questions = item.questions ?? [];
   const sendable =
     perQuestion && picks.some(pick => pick.trim() !== '') ? questionAnswersAction(questions, picks) : null;
-  // An item from before titles is headed by its whole ask, said once: a title cut from the ask would only
-  // repeat its first words above it. (A push still cuts one, to fit a lock screen: `attentionTitle`.)
-  const title = hasOwnTitle(item) ? attentionTitle(item) : item.subject.trim();
-  const subject = item.subject.trim();
-  // THE HEADING IS THE QUESTION. A card that asks is headed by its ask when it is short enough to read as a
-  // heading; a longer one is headed by the title and the ask is the first line of the body. A note or a
-  // to-do keeps its title, and its ask under "What happened" / "To do".
-  const asking = !['info', 'task'].includes(attentionCardKind(item));
-  const asksInHeading = asking && subject !== '' && subject.length <= QUESTION_HEADING_MAX;
-  const heading = asksInHeading ? subject : title;
-  const showAsk = !asksInHeading && subject !== title;
-  const lede = cardLede(item, why);
+  const lede = cardLede(item, model.why);
   const highlight = revisionHighlight(item);
-  // `fy attention add --recommend` puts a lone question's pick ON the question: the card says it in its
-  // Recommendation all the same, so it never depends on where the ferret wrote it.
-  const lone = singleAttentionQuestion(item);
-  const recommendation =
-    item.recommendation ??
-    (lone?.recommended === undefined
-      ? undefined
-      : { decision: lone.recommended, ...(lone.why === undefined ? {} : { why: lone.why }) });
-  const recommended = recommendedAttentionOption(item);
-  const offered = [...answers.map(answer => answer.label), ...extras.map(option => option.label)];
-  const recommendationLine =
-    recommendation === undefined
-      ? undefined
-      : recommended !== undefined && offered.some(label => label.trim().toLowerCase() === recommended.toLowerCase())
-        ? recommendation.why
-        : `Recommended: ${recommendation.decision}${recommendation.why === undefined ? '' : ` — ${recommendation.why}`}`;
-  const hasDismissAnswer = answers.some(answer => answer.does === 'dismiss');
-  const composerHint = perQuestion
-    ? undefined
-    : textOnly
-      ? 'Reply in the message box below.'
-      : asksForWords
-        ? 'To ask for changes, reply in the message box below.'
-        : undefined;
   const give = (action: InboxAction): void => {
     if (busy) return;
     onAct(action);
@@ -224,7 +163,7 @@ export function AttentionCard({
       id={id}
     >
       <header className="fy-attn-card__meta">
-        <span className="kt-attn-chip kt-label inline-flex shrink-0 items-center gap-1 px-badge-x py-0.5">
+        <span className="fy-attn-kind">
           <KindIcon size={11} aria-hidden="true" />
           <span data-attention-kind="">{kindWord(item)}</span>
         </span>
@@ -271,11 +210,12 @@ export function AttentionCard({
       <div className="fy-attn-card__scroll" data-attention-scroll="">
         {updated === null ? null : (
           <p className="fy-attn-card__updated m-0" data-attention-resurfaced="">
-            <span className="kt-attn-chip kt-label px-badge-x py-0.5">New</span>
+            <span className="fy-attn-kind">New</span>
             Needs you again — the ferret updated this
             {updated.note === undefined ? '.' : `: ${updated.note}`}
           </p>
         )}
+        {model.notice && item.body?.trim() ? <AttentionBody renderProse={renderProse} text={item.body} /> : null}
         {showAsk || picker !== undefined ? (
           <AttentionBriefSections
             askShown
@@ -305,7 +245,7 @@ export function AttentionCard({
         answers={answers}
         arrows={!flat && (swipeHints || pinned)}
         busy={busy}
-        dismissInMenu={!hasDismissAnswer}
+        dismissInMenu={model.dismissInMenu && !model.notice}
         extraOptions={extras}
         onAnswer={answer => {
           const action = answerAction(answer, '');
@@ -313,13 +253,16 @@ export function AttentionCard({
         }}
         onDismiss={() => give(DISMISS_ACTION)}
         onOption={option => give(optionAction(option, ''))}
-        recommendationLine={recommendationLine}
+        recommendationLine={model.recommendationLine}
         recommended={recommended}
         swipeHints={swipeHints && !flat}
-        {...(composerHint === undefined ? {} : { composerHint })}
+        {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
+        {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
         {...(onSkip === undefined ? {} : { onSkip })}
-        {...(onOpenDetail !== undefined && attentionHasDetail(item) ? { onOpenDetail } : {})}
-        {...(isWaitingOnFerret(item) ? { waiting: waitingSentence(item, origin?.ferret) } : {})}
+        {...(onOpenDetail !== undefined && !model.notice && attentionHasDetail(item) ? { onOpenDetail } : {})}
+        {...(item.waitingOn === 'ferret' && !model.notice
+          ? { waiting: `With ${origin?.ferret ?? 'the ferret'} — it will update this.` }
+          : {})}
         {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}
       />
       {origin === undefined || pinned ? null : (

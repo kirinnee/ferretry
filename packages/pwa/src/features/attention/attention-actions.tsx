@@ -1,5 +1,5 @@
 /**
- * THE ANSWER BAR OF ONE ATTENTION CARD, pinned under its question. Answering is replying, so there is no
+ * THE ANSWER BAR OF ONE ITEM CARD, pinned under its question. Answering is replying, so there is no
  * text box here: the owner types in the ferret's normal message box, and a picked option carries that text.
  *
  *  1. The card's own answers as buttons (three at most; an old choice's options past the third plain, with
@@ -214,6 +214,10 @@ export interface AttentionActionsProps {
   readonly dismissInMenu: boolean;
   /** Dismisses as not needed; the host attaches the message box's text as the reason. */
   readonly onDismiss: () => void;
+  /** A plain notification: the one action is "Clear". */
+  readonly clear?: () => void;
+  /** Quiet extras at the end of the second row (the full card's "Add to reply"). */
+  readonly secondaryExtra?: ReactNode;
   /** Several questions: one "Send answers" button replaces the answers. */
   readonly sendAnswers?: { readonly ready: boolean; readonly onSend: () => void };
 }
@@ -234,6 +238,8 @@ export function AttentionActions({
   onOption,
   dismissInMenu,
   onDismiss,
+  clear,
+  secondaryExtra,
   sendAnswers,
 }: AttentionActionsProps) {
   const hintId = useId();
@@ -241,10 +247,11 @@ export function AttentionActions({
   const skip = onSkip === undefined ? null : <SkipButton busy={busy} onSkip={onSkip} />;
   const details = onOpenDetail === undefined ? null : <DetailsButton onOpen={onOpenDetail} />;
   const secondary =
-    skip === null && details === null && menu === null ? null : (
+    skip === null && details === null && menu === null && secondaryExtra === undefined ? null : (
       <div className="fy-attn-actions__row fy-attn-actions__row--secondary">
         {skip}
         {details}
+        {secondaryExtra}
         {menu}
       </div>
     );
@@ -287,6 +294,21 @@ export function AttentionActions({
   return (
     <div className="fy-attn-actions" data-attention-actions="">
       {waitingLine}
+      {clear === undefined ? null : (
+        <div className="fy-attn-actions__row">
+          <button
+            className="kt-btn fy-attn-actions__send-answers"
+            data-attention-clear=""
+            data-variant="primary"
+            disabled={busy}
+            onClick={clear}
+            type="button"
+          >
+            <Check aria-hidden="true" size={14} />
+            Clear
+          </button>
+        </div>
+      )}
       {hasAnswerButtons ? (
         <fieldset aria-label="Answers" className="fy-attn-answers" data-count={answers.length}>
           {answers.map(answer => (

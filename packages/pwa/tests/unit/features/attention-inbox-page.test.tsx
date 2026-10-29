@@ -613,7 +613,7 @@ describe('AttentionInboxPage list and card', () => {
       sessionView('sess-4', { config: { teammate: 'ottilie', name: undefined } }),
     );
     const mounted = await mount(page(fakeInbox(), [waiting], { phone: true, initialOpen: waiting.key }));
-    expect(mounted.container.querySelector('[data-attention-waiting]')?.textContent).toContain('Waiting on');
+    expect(mounted.container.querySelector('[data-attention-waiting]')?.textContent).toContain('With Ottilie');
     await mounted.unmount();
   });
 
