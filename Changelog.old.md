@@ -1,3 +1,10 @@
+## [4.99.1](https://github.com/kirinnee/ferretry/compare/v4.99.0...v4.99.1) (2026-10-29)
+
+### Fixes
+
+* **fleet:** trim the Mermaid hint so the whole prompt fits its 7.1 KB cap ([#858](https://github.com/kirinnee/ferretry/issues/858)) ([7fc0f3e](https://github.com/kirinnee/ferretry/commit/7fc0f3e946c068e68afd4e9a3520c22595c9b6bb)), closes [#845](https://github.com/kirinnee/ferretry/issues/845) [#853](https://github.com/kirinnee/ferretry/issues/853)
+* **pwa:** let the gallery's theme flips land before the next click ([#856](https://github.com/kirinnee/ferretry/issues/856)) ([93e5344](https://github.com/kirinnee/ferretry/commit/93e534489312366e27de6fbb88c2071491a4777e))
+
 ## [4.99.0](https://github.com/kirinnee/ferretry/compare/v4.98.0...v4.99.0) (2026-10-29)
 
 ### Features
