@@ -264,3 +264,7 @@
   color: var(--fg);
   font-size: var(--text-sm);
 }
+.fy-attn-panel__end-actions {
+  display: inline-flex;
+  gap: var(--gap-xs);
+}

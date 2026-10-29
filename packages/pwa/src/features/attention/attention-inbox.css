@@ -1000,3 +1000,9 @@
 .fy-attn-inbox__deck .fy-attn-deck__top .fy-attn-card {
   height: var(--deck-room, max(20rem, calc(100dvh - 19rem)));
 }
+.fy-attn-end__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: var(--gap-sm);
+}

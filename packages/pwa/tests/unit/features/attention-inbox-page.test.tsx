@@ -226,7 +226,7 @@ describe('AttentionInboxPage list and card', () => {
     await interact(() => skip().click());
     expect(paneItem(mounted)).toBeUndefined();
     const end = must(mounted.container.querySelector('[data-attention-queue-end]'), 'the end of the queue');
-    expect(end.textContent).toContain('You skipped 3 items');
+    expect(end.textContent).toContain('You skipped 3 — review them now?');
     expect(mounted.container.querySelector('[data-attention-row][aria-current]')).toBeNull();
     await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click());
     expect(paneItem(mounted)).toBe('A3');
@@ -246,7 +246,16 @@ describe('AttentionInboxPage list and card', () => {
     );
     await interact(() => done.click());
     expect(paneItem(mounted)).toBeUndefined();
-    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain('You skipped 2 items');
+    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain(
+      'You skipped 2 — review them now?',
+    );
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-later]'), 'Later').click(),
+    );
+    const later = must(mounted.container.querySelector('[data-attention-queue-end="later"]'), 'caught up');
+    expect(later.textContent).toContain('All caught up for now');
+    expect(later.textContent).toContain('2 are still open');
+    expect(rowTitles(mounted)).toHaveLength(2);
     await mounted.unmount();
   });
 
@@ -399,7 +408,9 @@ describe('AttentionInboxPage list and card', () => {
     expect(top()?.getAttribute('data-attention-card')).toBe('A1');
     await interact(() => skip().click());
     expect(top()).toBeNull();
-    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain('You skipped 3 items');
+    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain(
+      'You skipped 3 — review them now?',
+    );
     await interact(() =>
       must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click(),
     );

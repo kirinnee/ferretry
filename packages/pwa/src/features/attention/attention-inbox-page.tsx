@@ -147,22 +147,38 @@ function SkipButton({ onSkip }: { readonly onSkip: () => void }) {
 
 /**
  * Past the last item: the ones the reader skipped are still open. Said once, with the way back to them —
- * never a silent jump to the top of the list.
+ * never a silent jump to the top of the list. "Later" leaves them where they are: the reader is caught up
+ * for now, and the skipped cards wait in the inbox.
  */
 function QueueEnd({ remaining, onReview }: { readonly remaining: number; readonly onReview: () => void }) {
+  const [later, setLater] = useState(false);
+  if (later)
+    return (
+      <div className="fy-attn-end" data-attention-queue-end="later">
+        <span aria-hidden="true" className="fy-attn-inbox__empty-mark">
+          <CheckCheck size={24} />
+        </span>
+        <h2 className="fy-attn-end__title">All caught up for now</h2>
+        <p className="fy-attn-end__text">
+          Skipped cards wait in the inbox — {remaining} {remaining === 1 ? 'is' : 'are'} still open.
+        </p>
+      </div>
+    );
   return (
     <div className="fy-attn-end" data-attention-queue-end="">
       <span aria-hidden="true" className="fy-attn-inbox__empty-mark">
         <SkipForward size={24} />
       </span>
-      <h2 className="fy-attn-end__title">
-        You skipped {remaining} {remaining === 1 ? 'item' : 'items'}
-      </h2>
-      <p className="fy-attn-end__text">They are still waiting. Review them now, or come back later.</p>
-      <button className="kt-btn" data-attention-review="" data-variant="primary" onClick={onReview} type="button">
-        Review them
-        <ArrowRight aria-hidden="true" size={14} />
-      </button>
+      <h2 className="fy-attn-end__title">You skipped {remaining} — review them now?</h2>
+      <div className="fy-attn-end__actions">
+        <button className="kt-btn" data-attention-review="" data-variant="primary" onClick={onReview} type="button">
+          Review skipped
+          <ArrowRight aria-hidden="true" size={14} />
+        </button>
+        <button className="kt-btn" data-attention-later="" onClick={() => setLater(true)} type="button">
+          Later
+        </button>
+      </div>
     </div>
   );
 }

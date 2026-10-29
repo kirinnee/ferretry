@@ -235,10 +235,13 @@ describe('AttentionPanel', () => {
     await view.render(panel({ snapshot: board([item('A1'), item('A2')]), selectedId: 'A3', onSelect }));
     expect(c.querySelector('[data-attention-card]')).toBeNull();
     const end = must(c.querySelector('[data-attention-queue-end]'), 'the end of the queue');
-    expect(end.textContent).toContain('You skipped 2 items — review them?');
+    expect(end.textContent).toContain('You skipped 2 — review them now?');
     expect(picked).toEqual([]);
     await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click());
     expect(picked).toEqual(['A1']);
+    // The page has not moved yet: Later leaves the skipped items where they are.
+    await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-later]'), 'Later').click());
+    expect(c.querySelector('[data-attention-queue-end="later"]')?.textContent).toContain('All caught up for now');
   });
 
   test('a single item has no pager', async () => {

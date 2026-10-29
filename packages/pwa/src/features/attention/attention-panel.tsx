@@ -176,6 +176,11 @@ export function AttentionPanel({
   useEffect(() => {
     if (settled) lastIds.current = openKey === '' ? [] : openKey.split('\u0001');
   }, [openKey, settled]);
+  // "Later" on the end of the queue: caught up for now, the skipped items left where they are.
+  const [later, setLater] = useState(false);
+  useEffect(() => {
+    if (!atEnd) setLater(false);
+  }, [atEnd]);
   const shownId = selected?.id ?? null;
   useEffect(() => {
     if (selectedId !== null && shownId !== null && shownId !== selectedId) onSelect(shownId);
@@ -293,24 +298,36 @@ export function AttentionPanel({
             <CircleAlert aria-hidden="true" size={14} />
             Attention cannot be read right now. Reconnect before assuming nothing needs you.
           </p>
+        ) : atEnd && later ? (
+          <p className="fy-attn-panel__end" data-attention-queue-end="later">
+            All caught up for now — skipped cards wait in the inbox.
+          </p>
         ) : atEnd ? (
           <div className="fy-attn-panel__end" data-attention-queue-end="">
-            <span>
-              You skipped {items.length} {items.length === 1 ? 'item' : 'items'} — review them?
+            <span>You skipped {items.length} — review them now?</span>
+            <span className="fy-attn-panel__end-actions">
+              <button
+                className="kt-btn kt-btn--sm"
+                data-attention-review=""
+                data-variant="primary"
+                onClick={() => {
+                  const first = items[0];
+                  if (first !== undefined) onSelect(first.id);
+                }}
+                type="button"
+              >
+                Review skipped
+                <ArrowRight aria-hidden="true" size={13} />
+              </button>
+              <button
+                className="kt-btn kt-btn--sm"
+                data-attention-later=""
+                onClick={() => setLater(true)}
+                type="button"
+              >
+                Later
+              </button>
             </span>
-            <button
-              className="kt-btn kt-btn--sm"
-              data-attention-review=""
-              data-variant="primary"
-              onClick={() => {
-                const first = items[0];
-                if (first !== undefined) onSelect(first.id);
-              }}
-              type="button"
-            >
-              Review them
-              <ArrowRight aria-hidden="true" size={13} />
-            </button>
           </div>
         ) : selected === undefined ? null : folded ? (
           <>
