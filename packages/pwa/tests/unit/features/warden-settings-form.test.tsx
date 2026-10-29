@@ -5,7 +5,11 @@ import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 
 import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { WardenSettingsForm, wardenPrivacyNote } from '../../../src/features/warden/warden-settings-form.tsx';
-import { type JevKeyStatus, wardenFormErrors } from '../../../src/features/warden/warden-settings-model.ts';
+import {
+  type JevKeyStatus,
+  wardenConfigPatchFrom,
+  wardenFormErrors,
+} from '../../../src/features/warden/warden-settings-model.ts';
 import { render, run } from '../../support/react.ts';
 import { wardenConfig } from '../../support/warden.ts';
 
@@ -179,7 +183,7 @@ describe('WardenSettingsForm', () => {
 
     // Act
     run(() => toggle('Jev on').props.onClick());
-    const slider = renderer.root.find(node => node.type === 'input' && node.props.type === 'range');
+    const slider = control(renderer, 'Leaves a flag alone only when at least this sure it is healthy', 'input');
     run(() => slider.props.onChange({ target: { value: '0.9' } }));
 
     // Assert
@@ -356,6 +360,109 @@ describe('WardenSettingsForm', () => {
     expect(value.mayActAlone.stop).toBe(true);
     expect(text(renderer)).not.toContain('stopping always asks you first');
     expect(text(renderer)).toContain('Every 10 min the rules flag anomalies');
+    run(() => renderer.unmount());
+  });
+});
+
+/** The slider row for one act of Jev's, and its pieces. */
+const jevRow = (renderer: ReactTestRenderer, act: string) => {
+  const row = renderer.root.findByProps({ 'data-warden-jev-act': act });
+  return {
+    slider: row.find(node => node.type === 'input' && node.props.type === 'range'),
+    shown: row.find(node => node.type === 'output'),
+    text: flat(row),
+  };
+};
+
+describe('What Jev may do alone', () => {
+  it('should show one slider per act, from 80% to 100%, only while the Jev layer is on', () => {
+    // Arrange
+    const on = render(<Harness initial={wardenConfig(BOTH)} changes={[]} />);
+    const off = render(<Harness initial={wardenConfig(LLM)} changes={[]} />);
+
+    // Act
+    const rows = ['nudge', 'resume', 'restart', 'stop'].map(act => jevRow(on, act));
+
+    // Assert
+    expect(text(on)).toContain('What Jev may do alone');
+    expect(text(on)).toContain('Otherwise the flag goes to an investigation, or to you.');
+    expect(rows.map(row => flat(row.shown))).toEqual(['90%', '93%', '95%', '98%']);
+    for (const { slider } of rows) {
+      expect(slider.props.min).toBe(0.8);
+      expect(slider.props.max).toBe(1);
+      expect(slider.props.step).toBe(0.01);
+    }
+    expect(rows[0]?.slider.props['aria-valuetext']).toBe('90% sure');
+    expect(text(off)).not.toContain('What Jev may do alone');
+    expect(off.root.findAll(node => node.props?.['data-warden-jev-act'] !== undefined)).toHaveLength(0);
+    run(() => on.unmount());
+    run(() => off.unmount());
+  });
+
+  it('should say Never at 100% and send only the act that changed', () => {
+    // Arrange
+    const changes: WardenConfig[] = [];
+    const renderer = render(<Harness initial={wardenConfig(BOTH)} changes={changes} />);
+
+    // Act
+    run(() => jevRow(renderer, 'stop').slider.props.onChange({ target: { value: '1' } }));
+
+    // Assert
+    const stop = jevRow(renderer, 'stop');
+    expect(last(changes).jevActs).toEqual({ nudge: 0.9, resume: 0.93, restart: 0.95, stop: 1 });
+    expect(wardenConfigPatchFrom(wardenConfig(BOTH), last(changes))).toEqual({
+      jevActs: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 1 },
+    });
+    expect(flat(stop.shown)).toBe('Never');
+    expect(stop.slider.props['aria-valuetext']).toBe('Never alone');
+    expect(flat(jevRow(renderer, 'nudge').shown)).toBe('90%');
+    run(() => renderer.unmount());
+  });
+
+  it('should disable an act whose may-act-alone switch is off, and say so', () => {
+    // Arrange
+    const base = wardenConfig(BOTH);
+    const renderer = render(
+      <Harness initial={{ ...base, mayActAlone: { ...base.mayActAlone, restart: false, stop: false } }} changes={[]} />,
+    );
+
+    // Act
+    const restart = jevRow(renderer, 'restart');
+    const nudge = jevRow(renderer, 'nudge');
+
+    // Assert
+    expect(restart.slider.props.disabled).toBe(true);
+    expect(restart.text).toContain('Off — the Warden may not restart alone');
+    expect(jevRow(renderer, 'stop').text).toContain('Off — the Warden may not stop a ferret alone');
+    expect(nudge.slider.props.disabled).toBe(false);
+    expect(nudge.text).not.toContain('Off — the Warden may not');
+    run(() => renderer.unmount());
+  });
+
+  it('should keep the may-act-alone switches within reach while only Jev is on, and re-enable the row from them', () => {
+    // Arrange
+    const base = wardenConfig({ layers: { jev: true, llm: false } });
+    const renderer = render(
+      <Harness initial={{ ...base, mayActAlone: { ...base.mayActAlone, nudge: false } }} changes={[]} />,
+    );
+    expect(jevRow(renderer, 'nudge').slider.props.disabled).toBe(true);
+
+    // Act
+    run(() => option(renderer, 'Sends a short').props.onChange({ target: { checked: true } }));
+
+    // Assert
+    expect(text(renderer)).toContain('May act alone');
+    expect(jevRow(renderer, 'nudge').slider.props.disabled).toBe(false);
+    run(() => renderer.unmount());
+  });
+
+  it('should name the bar for leaving a flag alone as its own row', () => {
+    // Arrange / Act
+    const renderer = render(<Harness initial={wardenConfig(BOTH)} changes={[]} />);
+
+    // Assert
+    expect(text(renderer)).toContain('Leaves a flag alone only when at least this sure it is healthy');
+    expect(text(renderer)).not.toContain('It never acts on a ferret');
     run(() => renderer.unmount());
   });
 });
