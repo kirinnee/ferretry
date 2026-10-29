@@ -56,6 +56,7 @@ import type { GrantClientFactory } from './grants-settings.tsx';
 import { useMachineUpdates } from './machine-updates.ts';
 import { MarkdownComposerSettings } from './markdown-composer-settings.tsx';
 import { MessageMarksLegend } from './message-marks-legend.tsx';
+import { Toggle } from './notification-settings.tsx';
 import type { PasskeyClientFactory } from './security-settings.tsx';
 import {
   isSettingId,
@@ -487,6 +488,14 @@ export function SettingsPage({
         <SessionsListSetting
           scope={device.sessionsList}
           onChange={sessionsList => controls.setDeviceControls({ sessionsList })}
+        />
+      ),
+      'group-needs-you': (
+        <Toggle
+          checked={device.groupNeedsYou}
+          onChange={groupNeedsYou => controls.setDeviceControls({ groupNeedsYou })}
+          label="Group Needs you at the top"
+          description="Off keeps those sessions in their project group, with just the Attention badge."
         />
       ),
       'message-marks': <MessageMarksLegend />,

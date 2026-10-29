@@ -13,6 +13,7 @@ import { mkdir, realpath, rm, stat } from 'node:fs/promises';
 import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
+  ALWAYS_ON_SECTIONS,
   CredentialStatusService,
   configJsonSchemaFiles,
   FleetIdentityService,
@@ -116,6 +117,7 @@ import {
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/attention/storage-harness-prompt.ts';
+import { armAttentionNudge, StorageAttentionNudgeSessions } from '../src/adapters/attention/storage-attention-nudge.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
@@ -426,6 +428,7 @@ import {
   TerminalServiceError,
   TerminalStreamBridge,
   type TerminalStreamScheduler,
+  systemLoginShell,
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
 import {
@@ -545,6 +548,7 @@ import {
   AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
+  AttentionTurnNudge,
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
@@ -595,6 +599,7 @@ import {
   childGrantRequester,
   chooseRelayCarrierSources,
   claimStartName,
+  classifyPaneProcesses,
   codexModelProvider,
   combinedMcpOAuthServers,
   combinedReferences,
@@ -693,6 +698,7 @@ import {
   harnessPreflightSummary,
   harnessQuirks,
   InitialAttachmentError,
+  InstructionRefresh,
   InvalidDeadlineRefused,
   isControlAttachable,
   isQuestionScopedRequestId,
@@ -1102,6 +1108,8 @@ const FALLBACK_TMUX = '/usr/bin/tmux';
 const TERMINAL_REAP_SETTLE_MS = 1_000;
 /** The reaper's slow backstop, for a pane that became reapable without this daemon writing it so. */
 const TERMINAL_REAP_BACKSTOP_MS = 60_000;
+/** How long after a turn ends the Attention check reads its transcript: the last words reach the file late. */
+const ATTENTION_NUDGE_SETTLE_MS = 2_000;
 
 /**
  * The three things the managed-worktree surface cannot decide for itself.
@@ -3000,6 +3008,11 @@ function createSessionSendSubsystem(
    * read this way — only the owner answers the owner's items.
    */
   conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
+  /**
+   * The always-on instructions that changed since the ferret launched, told once with a PERSON's next
+   * message (`InstructionRefresh`, docs/launch-settings.md). A teammate's message never carries them.
+   */
+  instructions: Pick<InstructionRefresh, 'prepare' | 'settle'>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -3030,11 +3043,12 @@ function createSessionSendSubsystem(
             });
       const person = request.senderSessionId === undefined;
       const turn = person ? await conversation.prepare(id, request.message) : { message: request.message, answers: [] };
+      const refreshed = person ? await instructions.prepare(id, turn.message) : { message: turn.message, told: [] };
       const outcome = await service
         .send({
           id,
           sendId: request.sendId,
-          message: messageWithAttachments(turn.message, delivered),
+          message: messageWithAttachments(refreshed.message, delivered),
           ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
           ...(request.now === undefined ? {} : { now: request.now }),
           ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
@@ -3044,6 +3058,7 @@ function createSessionSendSubsystem(
       // Resolved only once the words were accepted: an item must never read as answered by a message the
       // ferret was not given.
       if (turn.answers.length > 0) await conversation.settle(id, turn, request.message);
+      await instructions.settle(id, refreshed);
       return {
         ...(await view(id, 'took the message')),
         disposition: outcome.disposition,
@@ -3864,6 +3879,8 @@ interface WardenParts {
    * the session observer takes it (`InlineObserverHost.liveness`). The fold and the reflex stay here.
    */
   readonly livenessSample: (target: LivenessTarget) => Promise<LivenessSample>;
+  /** Close the browsers a ferret launched that still run under its pane, read afresh; how many closed. */
+  readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
 }
 
 /**
@@ -3901,6 +3918,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             turn: view.state.turn,
             mode: view.config.mode,
             waiting: view.state.waiting !== undefined,
+            ...(view.state.turnState === undefined ? {} : { turnState: view.state.turnState }),
             nudgeAfterSeconds: view.config.nudgeAfterSeconds,
             killAfterSeconds: view.config.killAfterSeconds,
             tmuxSession: sessionTmuxName(parseSessionId(view.config.id), defaultSessionLifecycleSettings),
@@ -3956,6 +3974,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         failover: async (sessionId, agent) => {
           await parts.migrate.migrate(sessionId, { agent, allowContextDowngrade: false, forceInflight: false });
         },
+        closeLeftoverBrowsers: async sessionId => await parts.closeLeftoverBrowsers(sessionId),
       },
       costs: {
         costUsd: async wardenSessionId => {
@@ -4254,6 +4273,9 @@ async function wardenFleetSession(
     // Watched when the liveness monitor has looked at it recently — see `WardenLivenessMonitor.watching`.
     hasLiveMonitor: liveness.watching(view.config.id),
     ...(liveness.frozenAt(view.config.id) === undefined ? {} : { frozenAt: liveness.frozenAt(view.config.id) }),
+    ...(liveness.leftoverBrowserSince(view.config.id) === undefined
+      ? {}
+      : { leftoverBrowserSince: liveness.leftoverBrowserSince(view.config.id) }),
     hasDoneMarker: doneMarkerCertifiesTurn(marker, view.state.turn),
   };
 }
@@ -7974,7 +7996,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     api: new BunApiServer(),
     // The daemon's OWN private socket, never the host's default: a terminal must not land on a tmux
     // server something else on this machine already runs.
-    terminalRuntime: new TmuxTerminalRuntime(tmux, () => Date.now()),
+    terminalRuntime: new TmuxTerminalRuntime(
+      tmux,
+      () => Date.now(),
+      // The owner's own shell, resolved once and read from the document at that moment (not captured).
+      systemLoginShell(async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.terminals.shell),
+    ),
     agentBrowserDisplay,
     browserLauncher: new NodeSessionBrowserLauncher(
       new BrowserProfileStore(paths.home),
@@ -8772,6 +8799,32 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       storage.subscribeStates((id, state) => void harnessPrompts.stateWritten(id, state));
       void harnessPrompts.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      // The turn-end check (docs/attention.md § The turn-end check): a reply that asks the owner to act,
+      // from a turn that raised no item for it, gets one nudge. Read after the transcript has settled, since
+      // the turn's end can be seen on the pane before its last words reach the file; a listener must never
+      // throw into the journal's append path, and a check that cannot read says nothing.
+      const nudgeSessions = new StorageAttentionNudgeSessions(storage);
+      const attentionNudge = new AttentionTurnNudge(
+        {
+          enabled: async () => (await effectiveAccountModel())?.machine.attentionNudge ?? true,
+          subject: async sessionId => await nudgeSessions.subject(sessionId),
+          tail: async (sessionId, limit) => {
+            const subject = await nudgeSessions.subject(sessionId);
+            return subject === undefined
+              ? []
+              : await sendTranscripts.tail({ sessionId, harness: subject.harness }, limit);
+          },
+          send: async (sessionId, sendId, message) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await sends.send({ id, sendId, message });
+          },
+          record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
+        },
+        CLIENT_NAME,
+      );
+      armAttentionNudge(storage, attentionNudge, ATTENTION_NUDGE_SETTLE_MS, (run, delayMs) => {
+        setTimeout(run, delayMs).unref();
+      });
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
       // read would report `refreshing: false` while the loop was mid-pass.
@@ -9812,6 +9865,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 });
           },
           new AttentionConversation(attention, CLIENT_NAME),
+          new InstructionRefresh({
+            sections: () => ALWAYS_ON_SECTIONS(CLIENT_NAME),
+            recorded: async sessionId => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) return undefined;
+              const state = SessionStateSchema.safeParse(await storage.readState(id));
+              return state.success ? state.data.launchInstructions : undefined;
+            },
+            record: async (sessionId, update) => {
+              const id = tryParseSessionId(sessionId);
+              if (id === undefined) return;
+              await storage.updateState(id, current => {
+                const state = SessionStateSchema.safeParse(current);
+                const next = state.success ? update(state.data.launchInstructions) : undefined;
+                return next === undefined
+                  ? current
+                  : { ...(current as Record<string, unknown>), launchInstructions: next };
+              });
+            },
+          }),
         ),
         sessionAnswer,
         sessionAttachments,
@@ -10033,6 +10106,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),
           livenessSample: async target => await sessionObserver.liveness(target),
+          // The pane's tree is read AGAIN here, at the moment of closing, and only the top-level browsers
+          // the classifier finds under THIS pane are signalled: a sweep's older look can never close
+          // anything else, and the ferret itself is never touched.
+          closeLeftoverBrowsers: async sessionId => {
+            const observed = await paneProcesses.collect(
+              sessionTmuxName(parseSessionId(sessionId), defaultSessionLifecycleSettings),
+            );
+            if (observed.kind !== 'observed') throw new Error(observed.reason);
+            const view = classifyPaneProcesses(observed.processes);
+            // A command started since the sweep looked (a new turn) may be using that browser: leave it.
+            if (view.toolCommands.length > 0) return 0;
+            let closed = 0;
+            for (const browser of view.leftoverBrowsers) {
+              try {
+                process.kill(browser.pid, 'SIGTERM');
+                closed += 1;
+              } catch (error) {
+                // Gone between the look and the signal is already closed; anything else is a real refusal.
+                if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error;
+              }
+            }
+            return closed;
+          },
         }),
         sessionReads: operatorReads,
         sessionAttach,

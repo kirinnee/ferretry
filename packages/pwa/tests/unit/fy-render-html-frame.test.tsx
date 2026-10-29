@@ -9,7 +9,7 @@
  * bounds what the page may say, and that the wall-clock watchdog fires even
  * when the page says everything is fine.
  */
-import { afterEach, describe, test } from 'bun:test';
+import { afterEach, beforeEach, describe, test } from 'bun:test';
 import type { ReactElement } from 'react';
 import type { ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
@@ -18,6 +18,7 @@ import type { FyRenderSandboxFailure } from '../../src/components/fy-render-sand
 import { FY_RENDER_SANDBOX_LIMITS, type FyRenderBlock as ParsedBlock, parseFyRender } from '../../src/lib/fy-render.ts';
 // Registers happy-dom, which is what gives this file a `window` to dispatch on.
 import '../support/dom.ts';
+import { installManualClock, type ManualClock } from '../support/manual-clock.ts';
 import { render as mountTree, run, runAsync } from '../support/react.ts';
 
 const parsed = (...lines: readonly string[]): ParsedBlock => {
@@ -121,7 +122,7 @@ const LIGHT_PAINT: FyRenderHtmlPaint = {
 };
 
 const mounted: ReactTestRenderer[] = [];
-afterEach(() => {
+const unmountAll = (): void => {
   while (mounted.length > 0) {
     const tree = mounted.pop();
     try {
@@ -130,7 +131,8 @@ afterEach(() => {
       // Already unmounted by the test itself, which is the ordinary path.
     }
   }
-});
+};
+afterEach(unmountAll);
 
 const frameElement = (
   calls: ReturnType<typeof recorder>,
@@ -494,25 +496,77 @@ describe('FyRenderHtmlFrame watchdogs', () => {
 describe('FyRenderHtmlFrame stall guard', () => {
   const STALLING = { hardMs: 60_000, readyMs: 60_000, stallMs: 40 } as const;
   const realVisibility = Object.getOwnPropertyDescriptor(document, 'visibilityState');
+  /**
+   * ON A CLOCK THE TEST MOVES. The guard judges wall-clock gaps, so a suite that sleeps for real bets
+   * its verdict on the runner: a CI box short of CPU stretched one 15ms sleep between beats past the
+   * 40ms window, and the guard — correctly — read that gap as a hang. The manual clock holds the
+   * frame's timers and `Date.now`; the port is still Bun's own, so each message is waited for, on real
+   * turns, until the frame has heard it.
+   */
+  let clock: ManualClock | undefined;
+  beforeEach(() => {
+    clock = installManualClock();
+  });
   afterEach(() => {
+    // Unmounted while the clock is still installed, so the frame clears the timers it actually holds.
+    unmountAll();
+    clock?.restore();
+    clock = undefined;
     if (realVisibility === undefined) delete (document as { visibilityState?: string }).visibilityState;
     else Object.defineProperty(document, 'visibilityState', realVisibility);
   });
   const hide = (hidden: boolean): void => {
     Object.defineProperty(document, 'visibilityState', { configurable: true, value: hidden ? 'hidden' : 'visible' });
   };
+  const advance = (milliseconds: number): void => {
+    const installed = clock;
+    if (installed === undefined) throw new Error('the stall guard moves a manual clock, and none is installed');
+    run(() => installed.advance(milliseconds));
+  };
+
+  /**
+   * Real turns until the frame has acted on what the page said. A native port delivers on a turn of
+   * the event loop, never on a timer, so the ceiling counts turns rather than time: a loaded runner
+   * makes each turn slower, not more of them necessary.
+   */
+  const heard = async (ready: () => boolean, what: string): Promise<void> => {
+    for (let turn = 0; !ready(); turn += 1) {
+      if (turn === 100) throw new Error(`waited ${turn} turns for the frame to hear ${what}, which it never did`);
+      await runAsync(() => new Promise<void>(resolve => setImmediate(resolve)));
+    }
+  };
+
+  /** A page that has handshaken and drawn, with the guard armed at this clock's zero. */
+  const drawnPage = async () => {
+    const calls = recorder();
+    const heights: number[] = [];
+    const node = frameMock();
+    mountFrame(frameElement(calls, { deadlines: STALLING, onHeight: height => heights.push(height) }), node);
+    const { port } = handshake(node);
+    run(() => port.postMessage({ height: 10, kind: 'rendered', width: 10 }));
+    await heard(() => calls.events.rendered === 1, 'rendered');
+    /**
+     * A beat leaves nothing to observe, so a height follows it on the same port: a port is ordered, so
+     * once the frame has reported that height it has read the beat before it.
+     */
+    const beat = async (): Promise<void> => {
+      const marker = heights.length + 1;
+      run(() => {
+        port.postMessage({ kind: 'beat' });
+        port.postMessage({ height: marker, kind: 'height' });
+      });
+      await heard(() => heights.includes(marker), `beat ${String(marker)}`);
+    };
+    return { beat, calls };
+  };
 
   test('should stop a drawn page whose heartbeat stops, as unresponsive', async () => {
     // Arrange
     hide(false);
-    const calls = recorder();
-    const node = frameMock();
-    mountFrame(frameElement(calls, { deadlines: STALLING }), node);
-    const { port } = handshake(node);
+    const { calls } = await drawnPage();
 
     // Act — the page draws, then never beats.
-    run(() => port.postMessage({ height: 10, kind: 'rendered', width: 10 }));
-    await settle(150);
+    advance(150);
 
     // Assert
     should(calls.events.failures.map(failure => failure.kind)).eql(['unresponsive']);
@@ -521,16 +575,12 @@ describe('FyRenderHtmlFrame stall guard', () => {
   test('should keep a page that keeps beating', async () => {
     // Arrange
     hide(false);
-    const calls = recorder();
-    const node = frameMock();
-    mountFrame(frameElement(calls, { deadlines: STALLING }), node);
-    const { port } = handshake(node);
-    run(() => port.postMessage({ height: 10, kind: 'rendered', width: 10 }));
+    const { beat, calls } = await drawnPage();
 
-    // Act — a beat well inside every stall window.
-    for (let beat = 0; beat < 8; beat += 1) {
-      run(() => port.postMessage({ kind: 'beat' }));
-      await settle(15);
+    // Act — a beat well inside every stall window, across three of the guard's checks.
+    for (let beats = 0; beats < 8; beats += 1) {
+      await beat();
+      advance(15);
     }
 
     // Assert
@@ -540,23 +590,20 @@ describe('FyRenderHtmlFrame stall guard', () => {
   test('should not read a hidden tab as a hang, and should restart the clock when it is shown again', async () => {
     // Arrange
     hide(true);
-    const calls = recorder();
-    const node = frameMock();
-    mountFrame(frameElement(calls, { deadlines: STALLING }), node);
-    const { port } = handshake(node);
-    run(() => port.postMessage({ height: 10, kind: 'rendered', width: 10 }));
+    const { calls } = await drawnPage();
 
-    // Act — hidden for longer than the window, then shown.
-    await settle(120);
+    // Act — hidden for longer than the window, then shown, then one whole window to the next check,
+    // which reads a hang unless showing the tab restarted the clock.
+    advance(120);
     hide(false);
     run(() => document.dispatchEvent(new Event('visibilitychange')));
-    await settle(10);
+    advance(STALLING.stallMs);
 
     // Assert — nothing while hidden, and the clock restarted on return.
     should(calls.events.failures).eql([]);
   });
 
-  test('should not arm the guard before the page has drawn', async () => {
+  test('should not arm the guard before the page has drawn', () => {
     // Arrange
     hide(false);
     const calls = recorder();
@@ -565,7 +612,7 @@ describe('FyRenderHtmlFrame stall guard', () => {
     handshake(node);
 
     // Act
-    await settle(120);
+    advance(120);
 
     // Assert
     should(calls.events.failures).eql([]);

@@ -18,14 +18,16 @@
 
 import {
   WARDEN_GUARD_THRESHOLD_RANGE,
+  WARDEN_JEV_ACT_THRESHOLD_RANGE,
   WARDEN_SWEEP_INTERVALS,
   type WardenAccount,
   type WardenConfig,
   type WardenEventTrigger,
   type WardenFailoverPolicy,
+  type WardenJevAct,
+  type WardenLayers,
   type WardenLogin,
   type WardenMayActAlone,
-  type WardenLayers,
 } from '@ferretry/protocol';
 import { ArrowDown, ArrowUp, ExternalLink } from 'lucide-react';
 import { type ReactNode, useId } from 'react';
@@ -80,7 +82,23 @@ const ACT_ALONE: readonly { readonly id: keyof WardenMayActAlone; readonly label
     },
     { id: 'failover', label: 'Fail over', detail: 'Moves to the next login in the failover order when quota is out.' },
     { id: 'stop', label: 'Stop a ferret', detail: 'Off by default: a KILL verdict asks you first.' },
+    {
+      id: 'closeLeftovers',
+      label: 'Close leftover browsers',
+      detail: 'Closes a browser a finished ferret left running — by rule, no AI. The ferret is not touched.',
+    },
   ];
+
+/** The acts Jev may do alone, in the order the rows run: gentlest first. Each is also one of the may-act-alone switches. */
+const JEV_ACTS: readonly { readonly id: WardenJevAct; readonly label: string }[] = [
+  { id: 'nudge', label: 'Nudge' },
+  { id: 'resume', label: 'Resume or revive' },
+  { id: 'restart', label: 'Restart' },
+  { id: 'stop', label: 'Stop a ferret' },
+];
+
+/** What the slider says for a bar: the percent, or “Never” at the top, where Jev never does the act alone. */
+export const jevActBarLabel = (bar: number): string => (bar >= 1 ? 'Never' : `${Math.round(bar * 100)}%`);
 
 /** The privacy sentence for the layers that are on: what leaves this machine, and to whom. */
 export const wardenPrivacyNote = (layers: WardenLayers, login: string): string => {
@@ -388,7 +406,7 @@ export function WardenSettingsForm({
           />
           <LayerRow
             title="Jev"
-            detail="A fast typed decision model looks at each flag first and clears the ones it is sure are healthy. It never acts on a ferret."
+            detail="A fast typed decision model looks at each flag first. It clears the ones it is sure are healthy and, when it is very sure, does the simple fix itself."
             badges={value.layers.jev ? <Badge tone={keyPill.tone}>{keyPill.label}</Badge> : undefined}
             on={value.layers.jev}
             onToggle={jev => set({ layers: { ...value.layers, jev } })}
@@ -431,7 +449,7 @@ export function WardenSettingsForm({
               </div>
             )}
             <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
-              Clears a flag only when at least this sure it is healthy
+              Leaves a flag alone only when at least this sure it is healthy
               <span className="flex items-center gap-sm">
                 <input
                   type="range"
@@ -449,6 +467,48 @@ export function WardenSettingsForm({
                 Lower: more cleared and cheaper. Higher: more passed on and safer.
               </span>
             </label>
+            <fieldset className="m-0 flex min-w-0 flex-col gap-2 border-0 p-0" data-warden-jev-acts="">
+              <legend className="mb-1 text-cell font-medium text-fg">What Jev may do alone</legend>
+              <p className="m-0 text-meta leading-base text-muted">
+                Jev acts only when it is at least this sure and the matching “may act alone” switch is on. Otherwise the
+                flag goes to an investigation, or to you.
+              </p>
+              {JEV_ACTS.map(act => {
+                const allowed = value.mayActAlone[act.id];
+                const bar = value.jevActs[act.id];
+                return (
+                  <label
+                    key={act.id}
+                    className={cn(
+                      'flex min-w-0 flex-col gap-1 text-cell font-medium text-fg',
+                      !allowed && 'opacity-60',
+                    )}
+                    data-warden-jev-act={act.id}
+                  >
+                    {act.label}
+                    <span className="flex items-center gap-sm">
+                      <input
+                        type="range"
+                        min={WARDEN_JEV_ACT_THRESHOLD_RANGE.min}
+                        max={WARDEN_JEV_ACT_THRESHOLD_RANGE.max}
+                        step={0.01}
+                        disabled={!allowed}
+                        aria-valuetext={bar >= 1 ? 'Never alone' : `${jevActBarLabel(bar)} sure`}
+                        className="min-h-[44px] min-w-0 flex-1 accent-[var(--accent)]"
+                        value={bar}
+                        onChange={event => set({ jevActs: { ...value.jevActs, [act.id]: Number(event.target.value) } })}
+                      />
+                      <output className="mono w-14 text-right text-ui">{jevActBarLabel(bar)}</output>
+                    </span>
+                    {!allowed && (
+                      <span className="text-meta font-normal leading-base text-muted">
+                        Off — the Warden may not {act.label.toLowerCase()} alone
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </fieldset>
             <NumberField
               label="Jev cap ($/day)"
               value={value.caps.jevUsdPerDay}
@@ -514,8 +574,7 @@ export function WardenSettingsForm({
           <Card title="Investigation (the assigned warden)">
             <p className="m-0 text-meta leading-base text-muted">
               A read-only LLM ferret that reads the transcript, pane, diffs and CI, then writes a report with a verdict:
-              leave · nudge · resume · stop · needs you. Only this verdict ever acts. Every verdict records who ran it
-              and with which model.
+              leave · nudge · resume · stop · needs you. Every verdict records who ran it and with which model.
             </p>
             <div className="grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
               <label className="flex min-w-0 flex-col gap-1 text-cell font-medium text-fg">
@@ -669,8 +728,8 @@ export function WardenSettingsForm({
           </fieldset>
         </Card>
 
-        {llm && (
-          <Card title="May act alone on a verdict">
+        {(llm || value.layers.jev) && (
+          <Card title="May act alone">
             {ACT_ALONE.map(action => (
               <Check
                 key={action.id}

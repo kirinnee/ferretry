@@ -1,10 +1,12 @@
 /**
- * What an investigation's verdict DOES — the one place a Warden decision turns into an act on a ferret.
+ * What a Warden decision DOES — the one place one turns into an act on a ferret.
  *
  * THE RULES, ALL ENFORCED HERE:
  *
- * - Only an assigned warden's verdict acts. Jev never reaches this module: its only effect is a
- *   blessing, which acts on nothing.
+ * - Two deciders act, through the same remedies and the same permissions: an assigned warden's verdict,
+ *   and Jev as first responder when it is sure enough (`triage.ts` decides that; it reaches this module
+ *   only as a {@link WardenVerdictAct} it already judged). Both are listed under Recent actions as who
+ *   they are.
  * - Only the explicit `Verdict:` marker acts. The prose heuristics that index a report for reading
  *   carry no authority: a report that drifted off the template is shown, never executed.
  * - Each act is filtered by what the owner let the Warden do alone. An act that is not allowed is not
@@ -25,14 +27,19 @@ export interface WardenRemedyPort {
   restart(sessionId: string): Promise<void>;
   stop(sessionId: string, reason: string): Promise<void>;
   failover(sessionId: string, agent: string): Promise<void>;
+  /**
+   * Close the browsers a ferret launched that still run under its pane — the ferret itself untouched.
+   * The process tree is read again at the moment of closing; answers how many were closed.
+   */
+  closeLeftoverBrowsers(sessionId: string): Promise<number>;
 }
 
 /** The act a verdict asks for, before the owner's permissions are applied. */
 export type WardenVerdictAct =
-  | { readonly action: Exclude<WardenActionKind, 'bless' | 'failover'>; readonly reason: string }
+  | { readonly action: Exclude<WardenActionKind, 'bless' | 'failover' | 'close_leftover'>; readonly reason: string }
   | { readonly action: 'failover'; readonly reason: string; readonly agent: string };
 
-const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless'>, string>> = {
+const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless' | 'close_leftover'>, string>> = {
   nudge: 'it looks wedged but recoverable',
   resume: 'its turn died but the work should continue',
   restart: 'its process is dead or frozen',
@@ -95,6 +102,43 @@ const ASKS: Readonly<Record<WardenVerdictAct['action'], string>> = {
   stop: 'The Warden recommends stopping it',
   failover: 'The Warden recommends moving it to another login',
 };
+
+/** The message a Jev nudge types into the ferret: the specific message Jev chose, in the Warden's voice. */
+export function jevNudgeMessage(message: string): string {
+  return `The Warden checked on you: ${message.trim()}`;
+}
+
+const JEV_DID: Readonly<Record<Exclude<WardenVerdictAct['action'], 'failover'>, string>> = {
+  nudge: 'Jev nudged it',
+  resume: 'Jev resumed it',
+  restart: 'Jev restarted it with its conversation intact',
+  stop: 'Jev stopped it',
+};
+
+const JEV_ASKS: Readonly<Record<WardenVerdictAct['action'], string>> = {
+  nudge: 'Jev recommends a nudge',
+  resume: 'Jev recommends resuming it',
+  restart: 'Jev recommends restarting it with its conversation intact',
+  stop: 'Jev recommends stopping it',
+  failover: 'Jev recommends moving it to another login',
+};
+
+const sure = (confidence: number): string => `${Math.round(confidence * 100)}% sure`;
+
+/** One plain sentence for the actions list about Jev's own act: what, how sure, and why. */
+export function jevActDetail(
+  action: WardenVerdictAct['action'],
+  reason: string,
+  confidence: number,
+  outcome: 'done' | 'held' | 'failed',
+  error?: string,
+): string {
+  const why = reason.trim().replace(/\.$/u, '');
+  if (outcome === 'held') return `${JEV_ASKS[action]} (${sure(confidence)}): ${why}. It waits for you.`;
+  const did = action === 'failover' ? 'Jev moved it to another login' : JEV_DID[action];
+  if (outcome === 'done') return `${did} (${sure(confidence)}): ${why}.`;
+  return `${did} — it did not take: ${error ?? 'the daemon refused it'}. The flag goes on to be looked at.`;
+}
 
 /** One plain sentence for the actions list: what happened, and why. */
 export function wardenActDetail(act: WardenVerdictAct, outcome: 'done' | 'held' | 'failed', error?: string): string {

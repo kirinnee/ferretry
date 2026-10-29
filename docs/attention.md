@@ -31,6 +31,10 @@ This document is the contract for that loop. The board's own rules are in
   and the state machine clears the mark in the same commit, so a retried edit is no change and pushes
   nothing. `history` keeps the last 20 `{at, kind: 'needs-info'|'updated', note?}` entries, oldest dropped,
   so the app can say "You asked for more info 10:42 · updated 10:44". Closing the item drops the mark.
+- **Raising takes the explicit `add` verb.** `fy attention` has no default command: a first word that is
+  not a verb (`fy attention show A6`, a typo, a bare sentence) is refused with "unknown command" and the
+  verbs on offer, and exits non-zero. A raise pushes to the owner's phone, so a mistyped read must never
+  become one. `fy attention show <id>` prints one item, open or resolved, read-only.
 - **Who raised it is decided by the pane, not the words.** `fy attention` sends the client header and,
   inside a ferret, that ferret's `FY_SESSION_ID` as `x-ferretry-session-id`. The daemon attributes the
   call to `peer:<session>`, so the item is `raisedBy: agent` with `raisedBySession` set, and the push
@@ -119,7 +123,8 @@ before the structure existed still reads.
   anything else), and is the suggested answer in words when it has none.
 - **A to-do is a `task` ask.** Steps with no question make one (`--task` forces it). Every action the
   human must take — a reply's "Next steps: You: …" included — is its OWN item with full `--step`s; the
-  fixed-layer prompt says so, and never to leave an ask only in prose. On `[needs more info !A3 …]` the
+  fixed-layer prompt says so, and never to leave an ask only in prose. [The turn-end check](#the-turn-end-check)
+  reminds a ferret that did. On `[needs more info !A3 …]` the
   ferret expands that SAME item with `fy attention edit`, or says in the item why it cannot, and resolves
   its own item when it is no longer needed.
 - **The ask follows the questions.** `fy attention add` makes exactly one question with options a
@@ -162,6 +167,68 @@ characters, ticket-like ids (`ABC-123`, `#1234`), URLs, file paths, and ALL-CAPS
 questions' words (same count and options, in order), recommendation, impact, urgency, links, steps and body. It
 never changes the ask, who raised it or the question options, and it does not push again — except an
 edit that answers an open Need more info request, which pushes once (see "The loop").
+
+### How the app shows steps and to-dos
+
+- `context`, `body` and every step render as full Markdown through the chat's own renderer (`ChatProse`),
+  so fy-render blocks and the proof-before-link reference gate behave exactly as in chat. There is no
+  second renderer. Code spans and fences in an item get a Copy button.
+- `steps` are a checklist. A tick sends `{action:'progress', id, step, done}`; it shows at once and rolls
+  back with a message if the board refuses. When every step is ticked, Done is the primary action.
+- A `task` item has no reply box: Done and Need more info (optional note). On a phone, swipe right is Done
+  and swipe left is Need more info, on the deck and on rows. An item with `waitingOn:'ferret'` shows
+  "Waiting on <ferret>" with no Done until the ferret edits it. Both actions ride the batched-delivery
+  countdown. The history line ("You asked for more info 10:42 · updated 10:44") is local time.
+
+## The turn-end check
+
+The prompt tells every ferret that each thing the owner must do is its own item. A prompt rule alone is not
+reliable: a ferret ends a reply with "Next steps: You: …" and raises nothing, and the owner, who reads the
+board rather than every reply, never learns there was something to do. So the daemon checks
+(`packages/daemon/src/lib/attention/turn-nudge.ts`, wired by
+`packages/daemon/src/adapters/attention/storage-attention-nudge.ts`):
+
+1. **When.** On every `turn.state` → `your-turn` the journal records, 2 seconds later, so the reply's last
+   words have reached the transcript.
+2. **What it reads.** The last turn in the transcript tail (400 events): from the last user-channel message
+   to the end. The **reply** is the assistant text after the turn's last tool call.
+3. **Does the reply ask the owner to act?** `ownerAsks` (`owner-asks.ts`) reads structure only, never
+   tone:
+   - a heading or label addressed to the owner ("Waiting on you", "What I need from you", "Action
+     needed", …): every item under it;
+   - a mixed heading ("Next steps", "To do", "Follow-ups", …): only items labelled for the owner
+     (`You:`, `**You:**`, `Owner:`, `You —`, a bare `You:` line over a nested list);
+   - a `You:` line anywhere, and the inline form `Next steps: You: …`;
+   - a table with a `Who`/`Owner` column whose cell is `You`, or any table under an owner heading.
+
+   Code blocks are skipped. "Next steps: none", items labelled `Me:`/`I'll`, and items that already name
+   an item (`!A3`) are not asks. Prose is never an ask on its own. At most 8 asks, each at most 160
+   characters.
+
+4. **Did the turn raise them?** The turn's own tool calls are the evidence: a command running
+   `attention add` or `attention edit`, a Ferretry `*_ask_owner` tool (or `askOwner` on an open), or the
+   harness's question tool. When the turn raised at least as many as it asked, nothing is sent.
+5. **The nudge.** Otherwise the ferret gets one message:
+   `[attention check] Your last reply asked the owner to: - … Raise each as its own Attention item — … —
+or, if an open item already covers it or it needs no owner, say why not in one line.`
+   An interactive ferret is also offered its question tool. The nudge is journalled as
+   `attention.nudged` with its asks.
+
+- **Once per reply, never a loop.** The send id is `attention-nudge-<session>-<reply>`, derived from the
+  reply's message id (or its words), and the send ledger keeps one message per id. So a turn end seen twice,
+  or replayed after a restart, is one message. A turn that the nudge started is never checked, because its
+  opener begins with `[attention check]`. One check per session runs at a time.
+- **Only replies the owner reads.** A sub-ferret (a session with a `parent`) is never checked. Its
+  reply goes to the ferret that started it, and that ferret raises what the owner must do (Pack mode).
+  Messages a sub-ferret sends its lead are therefore never nudged.
+- **Mode.** Interactive and auto ferrets are both checked. The owner of an interactive ferret may be at
+  the keyboard, so the nudge accepts "the owner is here" as a reason not to raise.
+- **The switch.** `machine.yaml` `attentionNudge` (default `true`; [config-files.md](config-files.md)).
+  It is read at every turn end, so turning it off takes effect at once. It is neither a loosening nor a
+  tightening, because it changes what a ferret is reminded of, never what it may do or spend.
+- **What it cannot see.** An ask written as prose ("could you approve it?") is not detected, by design. A
+  false nudge costs the owner's agents a turn. An item raised a turn earlier and repeated in a later reply
+  is not matched to it. That nudge costs one line ("already !A3").
 
 ## The unread signal
 

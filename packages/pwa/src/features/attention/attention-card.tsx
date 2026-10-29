@@ -19,17 +19,23 @@ import { type ReactNode, useId, useState } from 'react';
 import {
   answersPerQuestion,
   hasAttentionBrief,
+  historyLine,
   type InboxAction,
   inboxOptions,
+  isTask,
+  isWaitingOnFerret,
   questionAnswersAction,
   replyAction,
+  stepsProgress,
   swipeMap,
+  updatedSinceAsked,
   visibleWhy,
 } from '../../lib/attention-inbox.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
 import { attentionAge, attentionKindMeta, attentionReference, collapsesByDefault } from './attention-board.tsx';
 import { AttentionBriefSections, PointForm } from './attention-brief.tsx';
+import { AttentionBody, AttentionSteps } from './attention-steps.tsx';
 
 /** Where the card came from, in the inbox. Inside its own conversation there is nothing to say. */
 export interface AttentionCardOrigin {
@@ -58,6 +64,10 @@ export interface AttentionCardProps {
   /** How the ask's context is drawn — the conversation renders references; the inbox, prose. */
   readonly renderProse?: (text: string) => ReactNode;
   readonly onAct: (action: InboxAction) => void;
+  /** Ticks or unticks one step on the machine; a rejection rolls the tick back. Absent: the steps are read-only. */
+  readonly onProgress?: (step: number, done: boolean) => Promise<void>;
+  /** Pinned above the composer: no origin link, the brief folded behind "Details", the reply left to the composer. */
+  readonly pinned?: boolean;
   /** Extra DOM id for scroll targets. */
   readonly id?: string;
 }
@@ -74,9 +84,12 @@ export function AttentionCard({
   now = Date.now(),
   renderProse = plainProse,
   onAct,
+  onProgress,
   id,
+  pinned = false,
 }: AttentionCardProps) {
   const replyId = useId();
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [reply, setReply] = useState('');
   const [answers, setAnswers] = useState<readonly string[]>([]);
   const [contextOpen, setContextOpen] = useState(false);
@@ -90,9 +103,17 @@ export function AttentionCard({
   const longContext = context !== null && collapsesByDefault(context);
   const why = visibleWhy(item);
   const replyable = replyAction(item, reply);
+  const task = isTask(item);
+  const progress = stepsProgress(item);
+  const history = historyLine(item.history);
+  const updated = updatedSinceAsked(item);
+  const body = item.body?.trim() ? item.body : null;
   const answer = item.ask?.kind === 'open-question';
   const questions = item.questions ?? [];
   const sendable = perQuestion ? questionAnswersAction(questions, answers) : null;
+  const taskState = task
+    ? { waiting: isWaitingOnFerret(item), ferret: origin?.ferret ?? 'the ferret', complete: progress.complete }
+    : undefined;
   const sendReply = (): void => {
     if (replyable === null || busy) return;
     onAct(replyable);
@@ -113,6 +134,7 @@ export function AttentionCard({
       data-attention-card={item.id}
       data-highlighted={highlighted || undefined}
       data-kind={kind.tone}
+      data-pinned={pinned || undefined}
       id={id}
     >
       <header className="fy-attn-card__meta">
@@ -122,9 +144,13 @@ export function AttentionCard({
         </span>
         <span className="mono text-meta text-faint">{attentionReference(item.id)}</span>
         {highlighted ? <span className="fy-attn-card__pointer">linked</span> : null}
-        <span className="ml-auto text-meta text-faint">{attentionAge(item.waitingSince, now)}</span>
+        <span className="ml-auto shrink-0 whitespace-nowrap text-meta text-faint">
+          {pinned
+            ? attentionAge(item.waitingSince, now).replace(/^waiting /, '')
+            : attentionAge(item.waitingSince, now)}
+        </span>
       </header>
-      {origin === undefined ? null : (
+      {origin === undefined || pinned ? null : (
         <RouteLink
           className="fy-attn-card__origin"
           data-attention-origin=""
@@ -145,40 +171,75 @@ export function AttentionCard({
         {item.subject}
       </h3>
       {why === null ? null : <div className="fy-attn-card__why">{renderProse(why)}</div>}
-      {rich ? (
-        <AttentionBriefSections
-          item={item}
-          picker={
-            perQuestion
-              ? {
-                  answers,
-                  disabled: busy,
-                  onAnswer: (index, text) =>
-                    setAnswers(current => {
-                      const next = questions.map((_, at) => current[at] ?? '');
-                      next[index] = text;
-                      return next;
-                    }),
-                }
-              : undefined
-          }
-          renderProse={renderProse}
-        />
-      ) : context === null ? null : (
-        <div className="fy-attn-card__context" data-open={!longContext || contextOpen || undefined}>
-          {renderProse(context)}
-          {longContext ? (
-            <button
-              aria-expanded={contextOpen}
-              className="fy-attn-card__more"
-              onClick={() => setContextOpen(open => !open)}
-              type="button"
-            >
-              {contextOpen ? 'Show less' : 'Show more'}
-            </button>
-          ) : null}
-        </div>
-      )}
+      <div className="fy-attn-card__scroll" data-attention-scroll="">
+        {pinned && !perQuestion && (rich || context !== null) ? (
+          <button
+            aria-expanded={detailsOpen}
+            className="fy-attn-card__details"
+            data-attention-details=""
+            onClick={() => setDetailsOpen(open => !open)}
+            type="button"
+          >
+            {detailsOpen ? 'Hide details' : 'Details'}
+          </button>
+        ) : null}
+        {pinned && !detailsOpen && !perQuestion ? null : rich ? (
+          <AttentionBriefSections
+            item={item}
+            picker={
+              perQuestion
+                ? {
+                    answers,
+                    disabled: busy,
+                    onAnswer: (index, text) =>
+                      setAnswers(current => {
+                        const next = questions.map((_, at) => current[at] ?? '');
+                        next[index] = text;
+                        return next;
+                      }),
+                  }
+                : undefined
+            }
+            renderProse={renderProse}
+          />
+        ) : context === null ? null : (
+          <div className="fy-attn-card__context" data-open={!longContext || contextOpen || undefined}>
+            {renderProse(context)}
+            {longContext ? (
+              <button
+                aria-expanded={contextOpen}
+                className="fy-attn-card__more"
+                onClick={() => setContextOpen(open => !open)}
+                type="button"
+              >
+                {contextOpen ? 'Show less' : 'Show more'}
+              </button>
+            ) : null}
+          </div>
+        )}
+        {updated === null ? null : (
+          <p className="fy-attn-card__updated m-0" data-attention-updated="">
+            <span className="kt-attn-chip kt-label px-badge-x py-0.5">New</span>
+            Needs you again — the ferret updated this
+            {updated.note === undefined ? '.' : `: ${updated.note}`}
+          </p>
+        )}
+        {body === null ? null : <AttentionBody renderProse={renderProse} text={body} />}
+        {item.steps === undefined ? null : (
+          <AttentionSteps
+            disabled={busy}
+            done={item.stepsDone ?? []}
+            renderProse={renderProse}
+            steps={item.steps}
+            {...(onProgress === undefined ? {} : { onProgress })}
+          />
+        )}
+        {history === null ? null : (
+          <p className="fy-attn-card__history m-0 text-meta text-faint" data-attention-history="">
+            {history}
+          </p>
+        )}
+      </div>
       {error === null ? null : (
         <p className="m-0 text-meta text-err" role="alert">
           Not sent: {error}
@@ -197,9 +258,11 @@ export function AttentionCard({
         replyLabel={answer ? 'Your answer' : `Reply to ${attentionReference(item.id)}`}
         replyable={replyable}
         swipeHints={swipeHints}
+        showReply={!pinned}
+        {...(taskState === undefined ? {} : { task: taskState })}
         {...(perQuestion ? { sendAnswers: { action: sendable, onSend: sendAnswers } } : {})}
       />
-      {origin === undefined ? null : (
+      {origin === undefined || pinned ? null : (
         <RouteLink
           className="fy-attn-card__open"
           data-attention-open=""

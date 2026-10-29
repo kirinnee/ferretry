@@ -27,14 +27,16 @@ import {
   WardenGuardFailureCodeSchema,
   type WardenInvestigationOrigin,
   WardenInvestigationOriginSchema,
+  WardenJevActsSchema,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
+import type { BackoffStore, InvestigationBackoff } from './backoff.ts';
 import type { Blessing, BlessingStore, ClearStreak, ClearStreakStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
-import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
+import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
 
 const Instant = z.string().min(1);
 
@@ -69,7 +71,9 @@ const LedgerSchema = z.object({
   lastTokenAdvanceAt: Instant.optional(),
   lastSubprocessAt: Instant.optional(),
   lastPaneChangeAt: Instant.optional(),
+  lastMeaningfulPaneAt: Instant.optional(),
   subprocessSince: Instant.optional(),
+  subprocessKey: z.string().min(1).optional(),
 });
 
 const AnomalySchema = z.object({
@@ -86,7 +90,16 @@ const AnomalySchema = z.object({
   idleMinutes: z.number().finite().min(0).optional(),
   assignedWarden: z.boolean().optional(),
   ledger: LedgerSchema.optional(),
+  subject: z.string().min(1).optional(),
 }) satisfies z.ZodType<unknown, WardenAnomaly>;
+
+const BackoffSchema = z.object({
+  subject: z.string().min(1),
+  count: z.number().int().min(1),
+  lastAt: Instant,
+  cleared: z.literal(true).optional(),
+  jevActed: z.object({ action: WardenJevActsSchema.keyof(), at: Instant }).optional(),
+}) satisfies z.ZodType<unknown, InvestigationBackoff>;
 
 const BlessingSchema = z.object({
   sessionId: z.string().min(1),
@@ -123,6 +136,8 @@ export interface WardenAssignmentRecord {
    *  verdict. */
   readonly kinds: readonly WardenAnomalyKind[];
   readonly reportPath: string;
+  /** The subject of the anomaly it was sent about, so its verdict is remembered against that subject. */
+  readonly subject?: string;
 }
 
 const AssignmentSchema = z.object({
@@ -131,6 +146,7 @@ const AssignmentSchema = z.object({
   capability: z.string().min(1),
   kinds: z.array(AnomalyKindSchema),
   reportPath: z.string().min(1),
+  subject: z.string().min(1).optional(),
 }) satisfies z.ZodType<unknown, WardenAssignmentRecord>;
 
 const StrikeSchema = z.object({ count: z.number().int().min(0), lastAt: Instant, lastReason: z.string() });
@@ -155,6 +171,7 @@ const TriageDaySchema = z.object({
   flags: z.number().int().min(0),
   jevDecisions: z.number().int().min(0),
   jevSkips: z.number().int().min(0),
+  jevActions: z.number().int().min(0).optional(),
   jevUsd: z.number().finite().min(0),
 }) satisfies z.ZodType<unknown, WardenTriageDay>;
 
@@ -253,6 +270,11 @@ export interface WardenRuntimeState {
   readonly assignments?: Readonly<Record<string, WardenAssignmentRecord>>;
   /** When each target's assigned warden finished, starting its cooldown. */
   readonly assignedCooldowns?: Readonly<Record<string, string>>;
+  /**
+   * The looks already paid for, per (ferret, kind) and the subject they were about, so the next one
+   * waits longer (`backoff.ts`). Added after the first release of this document: absent reads as none.
+   */
+  readonly backoff?: BackoffStore;
   /** Still-suspect targets no slot was free for. Persisted so a deferred
    *  investigation is never silently lost. */
   readonly assignedQueue?: readonly WardenAnomaly[];
@@ -282,6 +304,7 @@ const RuntimeStateSchema = z.object({
   passedOn: z.array(z.string().min(1)).optional(),
   assignments: z.record(z.string(), AssignmentSchema).optional(),
   assignedCooldowns: z.record(z.string(), Instant).optional(),
+  backoff: z.record(z.string(), BackoffSchema).optional(),
   assignedQueue: z.array(AnomalySchema).optional(),
   failover: FailoverStateSchema.optional(),
   triageDay: TriageDaySchema.optional(),

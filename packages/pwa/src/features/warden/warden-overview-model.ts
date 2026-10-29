@@ -8,8 +8,8 @@
  *
  * THREE RULES CARRY THE PAGE.
  *
- *   1. JEV ONLY GUARDS. Its whole answer is skip or investigate, so the copy never credits it with an
- *      action: only an investigation's verdict nudges, resumes, fails over or stops.
+ *   1. JEV IS CREDITED ONLY WHAT IT RECORDED. A Jev action carries `by: 'jev'` and its confidence, so the
+ *      copy says "Jev" exactly there; an investigation's verdict and a rule never read as Jev's.
  *   2. NO ALL-CLEAR OVER A BAD READ. The "who needs you" feed has four outcomes and they never collapse:
  *      an unreadable board is `degraded`, a daemon that never swept is `no-sweep`, and a failed refresh
  *      keeps the last answer but marks it stale. Only `clean-sweep` may say nobody needs you.
@@ -27,8 +27,8 @@ import type {
   WardenFailoverAccountView,
   WardenInvestigation,
   WardenJudgement,
-  WardenStatusView,
   WardenLayers,
+  WardenStatusView,
   WardenVerdictKind,
 } from '@ferretry/protocol';
 import { wardenAccountLabel, wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
@@ -55,6 +55,7 @@ const ACTION_DONE: Readonly<Record<WardenActionKind, WardenChip>> = {
   restart: chip('restarted', 'ok'),
   stop: chip('stopped', 'err'),
   failover: chip('failed over', 'accent'),
+  close_leftover: chip('cleaned up', 'ok'),
 };
 
 const ACTION_VERB: Readonly<Record<WardenActionKind, string>> = {
@@ -64,6 +65,7 @@ const ACTION_VERB: Readonly<Record<WardenActionKind, string>> = {
   restart: 'restart',
   stop: 'stop',
   failover: 'fail over',
+  close_leftover: 'close a leftover browser',
 };
 
 /** `96%`, from Jev's 0–1 confidence. */
@@ -76,7 +78,8 @@ const plural = (count: number, one: string, many = `${one}s`): string => `${coun
 
 /** The chip for one recorded action: what happened, what is waiting on the owner, or what failed. */
 export const actionChip = (action: WardenAction): WardenChip => {
-  if (action.outcome === 'held') return chip(`${ACTION_VERB[action.action]} · asks you`, 'warn');
+  if (action.outcome === 'held')
+    return chip(`${action.by === 'jev' ? 'Jev recommends ' : ''}${ACTION_VERB[action.action]} · asks you`, 'warn');
   if (action.outcome === 'failed') return chip(`${ACTION_VERB[action.action]} failed`, 'err');
   if (action.action === 'bless' && action.by === 'owner') return chip('left alone by you', 'accent');
   if (action.action === 'bless' && action.by === 'jev')
@@ -85,6 +88,15 @@ export const actionChip = (action: WardenAction): WardenChip => {
       'ok',
     );
   return ACTION_DONE[action.action];
+};
+
+/**
+ * Who stands behind an action Jev took or recommended: `Jev · 94% sure`. A bless already says it in its own
+ * chip, and an investigation's or a rule's action has no Jev to name.
+ */
+const jevChip = (action: WardenAction): WardenChip | undefined => {
+  if (action.by !== 'jev' || action.action === 'bless') return undefined;
+  return chip(action.confidence === undefined ? 'Jev' : `Jev · ${percent(action.confidence)} sure`, 'accent');
 };
 
 // ── Time ────────────────────────────────────────────────────────────────────────────────────────
@@ -177,21 +189,22 @@ export const wardenSavingsLine = (status: WardenStatusView): string | undefined 
   const pending = spend.pendingInvestigations > 0 ? ` · ${spend.pendingInvestigations} pending` : '';
   const investigated = `${savings.investigations} investigated (${usd(spend.investigationUsd)})${pending}`;
   const cleared = `${savings.jevSkips} cleared by Jev (${usd(spend.jevUsd)})`;
+  const handled = savings.jevActions === undefined ? '' : ` · Jev handled ${savings.jevActions} itself`;
   if (!layers.jev && !layers.llm) return `Today: ${flags} shown to you · no AI · $0.00`;
   if (!layers.jev) return `Today: ${flags} · ${investigated}`;
-  if (!layers.llm) return `Today: ${flags} · ${cleared} · the rest shown to you`;
+  if (!layers.llm) return `Today: ${flags} · ${cleared}${handled} · the rest shown to you`;
   const saved = savings.savedUsd === undefined ? '' : ` · ~${usd(savings.savedUsd)} saved vs investigating all`;
-  return `Today: ${flags} · ${cleared} · ${investigated}${saved}`;
+  return `Today: ${flags} · ${cleared}${handled} · ${investigated}${saved}`;
 };
 
 export const wardenHowItWorks = (layers: WardenLayers): string => {
   if (!layers.jev && !layers.llm)
     return 'How it works: free rules flag anomalies and show them to you. No AI runs and nothing is spent.';
   const jev = layers.jev
-    ? ` Jev clears a flag it is sure is healthy; anything else ${layers.llm ? 'goes on' : 'is shown to you'}.`
+    ? ` Jev clears a flag it is sure is healthy, and does a simple fix itself when it is very sure; anything else ${layers.llm ? 'goes on' : 'is shown to you'}.`
     : '';
   const llm = layers.llm
-    ? ' A read-only investigation decides leave, nudge, resume, stop or needs you. Only that verdict ever acts, and stopping asks you unless you allowed it.'
+    ? ' A read-only investigation decides leave, nudge, resume, stop or needs you. Stopping asks you unless you allowed it.'
     : ' No investigation runs.';
   return `How it works: free rules flag anomalies.${jev}${llm}`;
 };
@@ -484,8 +497,10 @@ export const actionRows = (status: WardenStatusView): readonly WardenRow[] =>
     key: `action:${entry.at}:${entry.sessionId}:${index}`,
     sessionId: entry.sessionId,
     reason: entry.detail,
+    ...optional('detail', entry.reason === undefined ? undefined : `Jev’s reason: ${entry.reason}`),
     chips: dedupeChips([
       actionChip(entry),
+      jevChip(entry),
       entry.anomalyKind === undefined ? undefined : ANOMALY_CHIPS[entry.anomalyKind],
       entry.action === 'failover' && entry.agent !== undefined ? chip(`→ ${entry.agent}`, 'pend') : undefined,
     ]),

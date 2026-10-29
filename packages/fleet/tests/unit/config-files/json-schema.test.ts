@@ -24,6 +24,7 @@ describe('configJsonSchema', () => {
       'advanced',
       'agentControl',
       'agentPermissions',
+      'attentionNudge',
       'autoResume',
       'browserMode',
       'conversations',

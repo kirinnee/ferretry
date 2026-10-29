@@ -18,6 +18,8 @@ const STUDIO = 'studio' as DaemonId;
 const LAPTOP = 'laptop' as DaemonId;
 const at = (minutes: number): string => new Date(Date.UTC(2026, 9, 18, 12, minutes)).toISOString();
 
+const open = (minutes: number) => ({ open: 1, first: 'A1', ask: 'Ask?', latestAt: at(minutes) });
+
 const slice = (sessions: DaemonFleetSlice['sessions'], patch: Partial<DaemonFleetSlice> = {}): DaemonFleetSlice => ({
   sessions,
   byId: new Map(),
@@ -41,15 +43,15 @@ const machine = (
 
 const question = sessionView('q', {
   config: { cwd: '/work/ferretry' },
-  state: { status: 'awaiting_question', turnStateAt: at(5) },
+  state: { status: 'awaiting_question', turnStateAt: at(5), attention: open(5) },
 });
 const human = sessionView('h', {
   config: { cwd: '/work/ferretry' },
-  state: { needsHuman: 'stuck', turnStateAt: at(1) },
+  state: { needsHuman: 'stuck', turnStateAt: at(1), attention: open(1) },
 });
 const you = sessionView('y', {
   config: { cwd: '/work/notes' },
-  state: { status: 'awaiting_user', turnStateAt: at(0) },
+  state: { status: 'awaiting_user', turnStateAt: at(0), attention: open(0) },
 });
 const busy = sessionView('b', { config: { cwd: '/work/ferretry' } });
 
@@ -118,7 +120,7 @@ describe('allMachinesView', () => {
   });
 
   test('ties break by machine order, then by id', () => {
-    const twin = sessionView('a', { state: { status: 'awaiting_user', turnStateAt: at(0) } });
+    const twin = sessionView('a', { state: { status: 'awaiting_user', turnStateAt: at(0), attention: open(0) } });
     const view = allMachinesView([machine(STUDIO, [you, twin]), machine(LAPTOP, [twin])]);
     expect(view.needsYou.map(entry => `${entry.daemonId}:${entry.view.config.id}`)).toEqual([
       'studio:a',
@@ -136,7 +138,10 @@ describe('allMachinesView', () => {
   });
 
   test('a kind other than All shows only the machines it found something on; select narrows first', () => {
-    const person = sessionView('p', { config: { mode: 'interactive' }, state: { status: 'awaiting_user' } });
+    const person = sessionView('p', {
+      config: { mode: 'interactive' },
+      state: { status: 'awaiting_user', attention: open(2) },
+    });
     const machines = [machine(STUDIO, [busy, you]), machine(LAPTOP, [person], 'offline')];
     const agents = allMachinesView(machines, { filter: { mode: 'auto', showStopped: true } });
     expect(agents.machines.map(section => section.daemonId)).toEqual([STUDIO]);
@@ -212,5 +217,15 @@ describe('labels and order', () => {
       'studio',
     ]);
     expect(machineDisplayOrder([...list].reverse())).toEqual(machineDisplayOrder(list));
+  });
+});
+
+describe('needs-you is only open Attention', () => {
+  test('a Your turn session with no Attention item is not pinned, and grouping off pins nothing', () => {
+    const turn = sessionView('t', { state: { status: 'awaiting_user', turnStateAt: at(0) } });
+    expect(allMachinesView([machine(STUDIO, [turn, human])]).needsYou.map(e => e.view.config.id)).toEqual(['h']);
+    const off = allMachinesView([machine(STUDIO, [turn, human])], { groupNeedsYou: false });
+    expect(off.needsYou).toEqual([]);
+    expect(off.machines[0]?.groups.flatMap(group => group.rows.map(row => row.config.id)).sort()).toEqual(['h', 't']);
   });
 });

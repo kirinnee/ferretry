@@ -75,6 +75,28 @@ shows in its own row and here only after the next launch. It holds section names
 prompt text. A ferret last launched before the field existed has none, and the row says "Recorded from the
 next launch".
 
+### Instructions that changed since the launch
+
+A harness reads its appended system prompt once, at launch, and neither Claude Code nor Codex can re-read
+it mid-conversation. So a rule Ferretry tightens would otherwise reach a long-running ferret only when it
+restarted. The three sections every agent gets (the tools, the settings rules and the Attention rule,
+`ALWAYS_ON_SECTIONS` in `@ferretry/fleet`) depend on nothing but the binary's name. Each launch now records
+a fingerprint of each one (`digest`, `instructionDigest`) beside its size.
+
+When the owner next writes to a ferret, the daemon compares those fingerprints with the words every agent
+is told now (`packages/daemon/src/lib/session/launch/instruction-refresh.ts`). For each section that
+changed, it appends the new words to that message once, under `[instructions updated]`, as a replacement
+for the matching part of the system prompt. Once the message is accepted, the launch record marks those
+sections as told, so the next message carries nothing. The Instructions row then shows the new sizes.
+
+- **The owner's message carries it.** The note is never sent as a message of its own, which would start a
+  turn for every ferret on the machine the moment a release landed. A teammate's message never carries it.
+- **A record with no fingerprint** (launched before they were kept) compares sizes. A session with no
+  record at all is told nothing, because nothing says what it has.
+- **The per-ferret sections** (Hypermedia, Pack mode, Learning) still change only at a restart. They depend
+  on switches and on the routing prompt. The Settings row's "Running with older settings — Restart to apply"
+  still covers every change, because the wrapper that carries all the sections is part of its digest.
+
 ## Only new ferrets
 
 | Setting                                                                                                                 | Decided                                |

@@ -31,7 +31,6 @@ import {
   listTallies,
   matchesMode,
   hasAttention,
-  needsYou,
   type SessionsListFilter,
 } from '../shell/sessions-bar-model.ts';
 import type { ConnectionHealthState } from './connection-health.ts';
@@ -142,6 +141,8 @@ export interface AllMachinesOptions {
   readonly select?: (sessions: readonly SessionView[]) => readonly SessionView[];
   /** Most recent first inside each project group: what the sessions bar wants, not the table. */
   readonly sortRows?: boolean;
+  /** Lift sessions with open Attention into the pinned Needs you group. Default on. */
+  readonly groupNeedsYou?: boolean;
 }
 
 const SHOW_EVERYTHING: SessionsListFilter = { mode: 'all', showStopped: true };
@@ -167,7 +168,13 @@ const actionable = (reach: ListReach): boolean => reach === 'online';
  */
 export const allMachinesView = (
   machines: readonly MachineSource[],
-  { filter = SHOW_EVERYTHING, select = everything, keep, sortRows = false }: AllMachinesOptions = {},
+  {
+    filter = SHOW_EVERYTHING,
+    select = everything,
+    keep,
+    sortRows = false,
+    groupNeedsYou = true,
+  }: AllMachinesOptions = {},
 ): AllMachinesView => {
   const pinned: (NeedsYouEntry & { readonly order: number })[] = [];
   const sections: MachineSection[] = [];
@@ -188,8 +195,8 @@ export const allMachinesView = (
     };
     hiddenStopped += tallies.hiddenStopped;
     const shown = pool.filter(view => listedBeforeMode(view, filter, kept) && matchesMode(view, filter.mode));
-    const wantsYou = (view: SessionView): boolean => hasAttention(view) || needsYou(view);
-    const moves = actionable(machine.reach) ? shown.filter(wantsYou) : [];
+    const wantsYou = (view: SessionView): boolean => hasAttention(view);
+    const moves = groupNeedsYou && actionable(machine.reach) ? shown.filter(wantsYou) : [];
     for (const view of moves) pinned.push({ daemonId: machine.daemonId, machineName: machine.name, view, order });
     const stays = moves.length === 0 ? shown : shown.filter(view => !wantsYou(view));
     sections.push({

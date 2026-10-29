@@ -35,10 +35,10 @@ describe('fy-render opt-in', () => {
     // Act
     const files = mentioning('enableFyRender');
 
-    // Assert — `markdown.tsx` DECLARES the prop; `transcript-row.tsx` is the one
-    // surface that PASSES it. Anything else in this list is a new execution
+    // Assert — `markdown.tsx` DECLARES the prop; `chat-prose.tsx` is the one
+    // component that PASSES it (the transcript and the attention cards both render through it). Anything else in this list is a new execution
     // surface and needs the threat model re-read, not a test update.
-    should(files).eql(['src/components/markdown.tsx', 'src/components/transcript-row.tsx']);
+    should(files).eql(['src/components/chat-prose.tsx', 'src/components/markdown.tsx']);
   });
 
   test('should default the capability off where it is declared', () => {
@@ -89,9 +89,11 @@ describe('fy-render opt-in', () => {
     // The honest form is against the rendered tree, in
     // `fy-render-sandbox.test.tsx`.
     // `fy-render-html-frame.tsx` is on it for a type reason only: it imports `FyRenderSandboxFailure` so
-    // both frames report failures in one vocabulary. It mounts no sandbox frame.
+    // both frames report failures in one vocabulary. It mounts no sandbox frame. `fy-render-chart.tsx` is on it for
+    // the same reason: a chart reports `render` and `library` in that vocabulary, and draws in the page.
     should(files).eql([
       'src/components/fy-render-block.tsx',
+      'src/components/fy-render-chart.tsx',
       'src/components/fy-render-html-frame.tsx',
       'src/components/fy-render-sandbox.tsx',
       'src/lib/fy-render.ts',

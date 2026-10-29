@@ -1,0 +1,24 @@
+  - Me: report the "Working" root cause, check the "What's new" screenshots, and
+    merge.
+  - You: item 1 first. Then send "yes to all recommendations" in chat if you
+    agree with the CI decisions.
+
+✻ Crunched for 22s · done 12:09 AM · 5 shells still running
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ ✻ Bug report drafted: fy send reports "pane unreadable / could not be confi… │
+│ │ - What happened: Three fy send messages to busy sub-ferrets were reported  │
+│ │ as "could not be confirmed (pane unreadable) — it may still have landed".  │
+│ │ Each t…                                                                    │
+│ 1 to review · 2 to send · 0 to dismiss · +1 more queued                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+
+
+────────────────────────────────────────────────────────────── [Hadi] Ferretry ─
+❯ yes to all recommendations
+────────────────────────────────────────────────────────────────────────────────
+  👤 kirinnee97 │ 🤖 Opus 5.5 │ 📂 ferretry                                /rc
+  📊 36% (357k/1M) │ 💰 $5.46
+  ⏳ 5h 1% │ 📅 wk 16%
+  ⏵⏵ bypass permissions on · 5 shells · ← for agents · 2 feedback drafts
+

@@ -40,6 +40,32 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  # Which of the optional macOS jobs have anything to prove (scripts/ci/macos-relevance.sh says why a
+  # job and not a `paths` filter, and what is deliberately generous). `main` and manual dispatch
+  # decide `true` for all of them. A job it leaves out is SKIPPED, which counts as passed.
+  changes:
+    name: macOS Relevance
+    permissions:
+      contents: read
+      pull-requests: read
+    # GitHub, not Namespace: a few seconds of bash with no nix shell (docs/standards/ci-cd, "Runners").
+    runs-on: ubuntu-latest
+    outputs:
+      containment: ${{ steps.decide.outputs.containment }}
+      safari: ${{ steps.decide.outputs.safari }}
+      harness_os: ${{ steps.decide.outputs.harness_os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - id: decide
+        name: Decide which macOS jobs have anything to prove
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/macos-relevance.sh
+
   precommit:
     name: Pre-Commit (${{ matrix.part }})
     permissions:
@@ -72,7 +98,7 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       - name: Run pre-commit (${{ matrix.part }})
         env:
           PART: ${{ matrix.part }}
@@ -102,7 +128,7 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       # This is the documented `nix shell github:kirinnee/ferretry` package graph. It used to copy
       # Bun's workspace links by hand, so fyd gained @ferretry/relay while this build stayed stale;
       # every other job installed the real workspace and remained green. Build the actual bundle.
@@ -176,7 +202,7 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       # `packages/pwa/harness/screenshot.ts` could always prove the Settings surfaces do not scroll
       # sideways at 390px, and until now nothing ran it — so a change could reintroduce the exact
       # clipping that shipped once already and every gate here would stay green. The script's header
@@ -226,7 +252,7 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       - name: Run the ${{ matrix.group }} unit tests
         env:
           TEST_GROUP: ${{ matrix.group }}
@@ -288,7 +314,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       - name: Run the ${{ matrix.group }} integration tests
         env:
           TEST_GROUP: ${{ matrix.group }}
@@ -333,6 +359,8 @@ jobs:
 
   darwin-confinement:
     name: Containment (macOS)
+    needs: changes
+    if: needs.changes.outputs.containment == 'true'
     permissions:
       contents: read
     # `macos-15`: GitHub retires `macos-14` on 2026-11-02, and its October brownout windows fail jobs
@@ -342,7 +370,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       # The pane-identity tests drive a real tmux, which no macOS runner image ships.
       - name: Install tmux
         run: command -v tmux >/dev/null 2>&1 || brew install tmux
@@ -353,6 +381,8 @@ jobs:
 
   safari-sandbox-shell:
     name: Sandbox Shell (Safari)
+    needs: changes
+    if: needs.changes.outputs.safari == 'true'
     permissions:
       contents: read
     # `macos-15`, NOT `macos-14`. macOS 14 entered deprecation on 2026-07-06 with October brownout
@@ -364,7 +394,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       # safaridriver has no headless mode and Safari hosts exactly one WebDriver session at a time, so
       # this runs HEADED in the runner's autologin GUI session and strictly sequentially. The image
       # already ran `sudo safaridriver --enable` and wrote AllowRemoteAutomation at build time;
@@ -393,6 +423,7 @@ jobs:
 
   harness-contract:
     name: Harness Contract (${{ matrix.os }})
+    needs: changes
     permissions:
       contents: read
     # The account model shares one login across many runtimes through mechanisms Claude Code and
@@ -406,16 +437,21 @@ jobs:
     # so this is the only place it is measured (gap G1). Release runs only after a green CI, which
     # is what makes this a release gate. FY_CONTRACT_KEYCHAIN lets that job write throwaway items
     # into the runner's login keychain; the suite refuses to anywhere `CI` is not `true`.
+    #
+    # The Linux leg always runs. The `macos-15` leg is in the matrix only when the pull request touches
+    # what this measures (scripts/ci/macos-relevance.sh); `main` always has it, and the nightly
+    # `Harness Contract (latest)` covers upstream drift in between. The matrix is data rather than an
+    # `if:` because a job-level `if:` cannot read `matrix`.
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-15]
+        os: ${{ fromJSON(needs.changes.outputs.harness_os) }}
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       - name: Measure the pinned harnesses
         env:
           FY_CONTRACT_KEYCHAIN: ${{ startsWith(matrix.os, 'macos') && '1' || '' }}
@@ -450,9 +486,12 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       - name: Cross-compile standalone binaries
         run: nix develop .#ci -c ./scripts/release/compile.sh
+      # The manifest every consumer holds its download to (.github/actions/download-binaries).
+      - name: List the binaries
+        run: ./scripts/ci/binaries-manifest.sh write dist/bin
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
@@ -470,12 +509,9 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       - name: Download compiled binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: cli-binaries
-          path: dist/bin
+        uses: ./.github/actions/download-binaries
       - name: Run SIT
         run: nix develop .#ci -c ./scripts/ci/test.sh sit
 
@@ -500,10 +536,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download compiled binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: cli-binaries
-          path: dist/bin
+        uses: ./.github/actions/download-binaries
       # The smoke starts a real session, and a session lives in a tmux pane. Not every runner
       # image ships tmux (macOS never does), so install it where it is missing.
       - name: Install tmux

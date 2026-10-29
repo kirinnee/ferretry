@@ -3,6 +3,7 @@ import type { ElementType, ReactElement } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import should from 'should';
 import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
+import { FyRenderChart } from '../../src/components/fy-render-chart.tsx';
 import { FyRenderFragment } from '../../src/components/fy-render-fragment.tsx';
 import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from '../../src/components/fy-render-html-frame.tsx';
 import { FyRenderMap } from '../../src/components/fy-render-map.tsx';
@@ -150,10 +151,15 @@ const sandboxProps = (tree: ReactTestRenderer) =>
   tree.root.findByType(FyRenderSandbox).props as {
     readonly playing: boolean;
     readonly theme: 'dark' | 'light';
-    readonly onCompiled: (svg: string, theme: 'dark' | 'light') => void;
+    readonly palette?: { readonly key: string };
+    readonly onCompiled: (svg: string, theme: 'dark' | 'light', palette: string) => void;
     readonly onFailed: (failure: FyRenderSandboxFailure) => void;
     readonly onRendered: () => void;
   };
+
+/** The shell's reply: a diagram, the mode it was drawn in and the palette key the frame was SENT, echoed. */
+const compile = (tree: ReactTestRenderer, mode: 'dark' | 'light', svg = MERMAID_SVG): void =>
+  sandboxProps(tree).onCompiled(svg, mode, sandboxProps(tree).palette?.key ?? '');
 
 const htmlProps = (tree: ReactTestRenderer) =>
   tree.root.findByType(FyRenderHtmlFrame).props as {
@@ -311,7 +317,7 @@ describe('FyRenderBlock execution surface', () => {
     should(count(tree, 'img')).equal(0);
 
     // Act — the frame hands back a diagram.
-    run(() => sandboxProps(tree).onCompiled(MERMAID_SVG, 'dark'));
+    run(() => compile(tree, 'dark'));
 
     // Assert — the frame is gone and the picture is an <img> of the admitted SVG.
     should(count(tree, 'iframe')).equal(0);
@@ -509,7 +515,7 @@ describe('FyRenderBlock near the viewport', () => {
     // Arrange — a diagram drawn dark, on screen.
     const tree = renderObserved(<FyRenderBlock block={mermaidBlock()} />);
     viewport(true);
-    run(() => sandboxProps(tree).onCompiled(MERMAID_SVG, 'dark'));
+    run(() => compile(tree, 'dark'));
     should(count(tree, 'iframe')).equal(0);
 
     // Act — the theme turns light while the block is scrolled away.
@@ -523,23 +529,27 @@ describe('FyRenderBlock near the viewport', () => {
     // Act — it comes back into view.
     viewport(true);
 
-    // Assert — one off-stage redraw, told the new mode, with the old picture still up.
+    // Assert — one off-stage redraw, told the new mode and palette, with the old picture still up.
     should(count(tree, 'iframe')).equal(1);
     should(sandboxProps(tree).theme).equal('light');
+    should(sandboxProps(tree).palette?.key ?? '').startWith('light:');
     should(count(tree, 'img')).equal(1);
 
     // Act — the light diagram arrives.
-    run(() => sandboxProps(tree).onCompiled(MERMAID_SVG, 'light'));
+    run(() => compile(tree, 'light'));
 
     // Assert
     should(count(tree, 'iframe')).equal(0);
     should(count(tree, 'img')).equal(1);
   });
 
-  test('should not redraw when the theme name changes but its mode does not', async () => {
-    // Arrange
+  test('should not redraw when the theme name changes but its palette does not', async () => {
+    // Arrange — the cache key is the mode AND the resolved palette (`paletteKey`). This DOM resolves no
+    // token, so two dark theme names paint the same palette here and must not cost a recompile; two that
+    // really differ are a different key, which `fy-render-palette.test.ts` proves.
+
     const tree = render(<FyRenderBlock block={mermaidBlock()} />);
-    run(() => sandboxProps(tree).onCompiled(MERMAID_SVG, 'dark'));
+    run(() => compile(tree, 'dark'));
 
     // Act
     run(() => document.documentElement.setAttribute('data-theme', 'midnight-dark'));
@@ -660,9 +670,7 @@ describe('FyRenderBlock fallback', () => {
     const tree = render(<FyRenderBlock block={mermaidBlock()} />);
 
     // Act — the compiled diagram fails re-admission.
-    run(() =>
-      sandboxProps(tree).onCompiled('<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script></svg>', 'dark'),
-    );
+    run(() => compile(tree, 'dark', '<svg xmlns="http://www.w3.org/2000/svg"><script>x()</script></svg>'));
 
     // Assert
     should(attribute(tree, 'data-fy-render-failure')).equal('render');
@@ -1128,5 +1136,249 @@ describe('FyRenderBlock map', () => {
 
     // Assert
     should(mapProps(tree).fullscreen).be.true();
+  });
+});
+
+describe('FyRenderBlock chart', () => {
+  const chartBlock = (): ParsedBlock =>
+    parsed('type: chart', 'alt: Spend per day', '---', 'kind: bar\nseries: [{name: A, data: [1, 2]}]');
+  const neverLoads = (): Promise<never> => new Promise(() => {});
+  const chartProps = (tree: ReactTestRenderer) =>
+    tree.root.findByType(FyRenderChart).props as {
+      readonly alt: string;
+      readonly payload: string;
+      readonly fullscreen: boolean;
+      readonly visible: boolean;
+      readonly theme: { readonly mode: 'dark' | 'light' };
+      readonly onFailed: (failure: FyRenderSandboxFailure) => void;
+    };
+
+  test('should draw a chart in this document, in the resolved theme, with no frame and no executing sink', () => {
+    // Act
+    const tree = render(<FyRenderBlock block={chartBlock()} loadChart={neverLoads} />);
+
+    // Assert — a chart is data: the component mounts in the page's own mode, and nothing that runs an
+    // author's bytes does.
+    should(count(tree, FyRenderChart)).equal(1);
+    should(chartProps(tree).alt).equal('Spend per day');
+    should(chartProps(tree).payload).equal('kind: bar\nseries: [{name: A, data: [1, 2]}]');
+    should(chartProps(tree).theme.mode).equal('dark');
+    for (const forbidden of ['iframe', 'script', 'object', 'embed'] as const) should(count(tree, forbidden)).equal(0);
+    should(tools(tree)).eql(['chart source', 'Fullscreen']);
+  });
+
+  test('should hold a quiet plane and mount no chart until the block is near', () => {
+    // Arrange
+    const tree = renderObserved(<FyRenderBlock block={chartBlock()} loadChart={neverLoads} />);
+
+    // Assert
+    should(count(tree, FyRenderChart)).equal(0);
+    should(marked(tree, { className: 'fy-render-placeholder' })).equal(1);
+
+    // Act
+    viewport(true);
+
+    // Assert
+    should(count(tree, FyRenderChart)).equal(1);
+    should(chartProps(tree).visible).be.true();
+  });
+
+  test('should hand a chart its new theme when the reader switches', async () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={chartBlock()} loadChart={neverLoads} />);
+
+    // Act
+    run(() => document.documentElement.setAttribute('data-theme', 'studio-light'));
+    await wait();
+
+    // Assert — the chart decides whether it is on screen to repaint; the block only keeps it current.
+    should(chartProps(tree).theme.mode).equal('light');
+  });
+
+  test('should fall back to the code block, quietly, for a description the reader refuses', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={chartBlock()} loadChart={neverLoads} />);
+
+    // Act
+    run(() => chartProps(tree).onFailed({ detail: 'color: Unrecognized key', kind: 'render' }));
+
+    // Assert — the ordinary fence, the reason as a title, and no retry: the same bytes fail the same way.
+    should(count(tree, FyRenderChart)).equal(0);
+    should(marked(tree, { 'data-fy-render-failure': 'render' })).equal(1);
+    should(count(tree, 'pre')).equal(1);
+    should(
+      tree.root.findAllByType('button').some(button => button.props.className === 'fy-render-quiet-action'),
+    ).be.false();
+  });
+
+  test('should offer to try again when the chart library did not load', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={chartBlock()} loadChart={neverLoads} />);
+
+    // Act
+    run(() => chartProps(tree).onFailed({ detail: null, kind: 'library' }));
+    run(() => quietAction(tree).props.onClick());
+
+    // Assert
+    should(count(tree, FyRenderChart)).equal(1);
+  });
+
+  test('should give the chart the whole plane in fullscreen', () => {
+    // Arrange
+    const tree = render(<FyRenderBlock block={chartBlock()} loadChart={neverLoads} />);
+    should(chartProps(tree).fullscreen).be.false();
+
+    // Act
+    run(() => tool(tree, 'Fullscreen').props.onClick());
+
+    // Assert
+    should(chartProps(tree).fullscreen).be.true();
+  });
+});
+
+describe('FyRenderBlock mermaid on a narrow column', () => {
+  const LR = 'flowchart LR\n  A --> B';
+  const TB = 'flowchart TB\n  A --> B';
+  const lrBlock = (): ParsedBlock => parsed('type: mermaid', 'alt: A flow', '---', LR);
+  const WIDE_SVG =
+    '<svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 760 100"><rect width="760" height="100"/></svg>';
+
+  class FakeResize {
+    static readonly live: FakeResize[] = [];
+    constructor(readonly callback: () => void) {
+      FakeResize.live.push(this);
+    }
+    observe(): void {}
+    disconnect(): void {
+      const at = FakeResize.live.indexOf(this);
+      if (at !== -1) FakeResize.live.splice(at, 1);
+    }
+  }
+  const realResize = globalThis.ResizeObserver;
+  let width = 358;
+
+  beforeEach(() => {
+    FakeResize.live.length = 0;
+    width = 358;
+    globalThis.ResizeObserver = FakeResize as unknown as typeof ResizeObserver;
+  });
+  afterEach(() => {
+    globalThis.ResizeObserver = realResize;
+  });
+
+  /** A real element whose layout width a test controls, since happy-dom lays nothing out. */
+  const columnHost = (): HTMLElement => {
+    const host = document.createElement('div');
+    Object.defineProperty(host, 'clientWidth', { configurable: true, get: () => width });
+    return host;
+  };
+
+  const resizeTo = (next: number): void => {
+    width = next;
+    run(() => {
+      for (const observer of [...FakeResize.live]) observer.callback();
+    });
+  };
+
+  const mountOn = (block: ParsedBlock): ReactTestRenderer => {
+    const host = columnHost();
+    const tree = mountTree(<FyRenderBlock block={block} />, { createNodeMock: () => host });
+    mounted.push(tree);
+    viewport(true);
+    return tree;
+  };
+
+  const sentSource = (tree: ReactTestRenderer): string =>
+    (tree.root.findByType(FyRenderSandbox).props as { readonly diagramSource?: string }).diagramSource ?? '';
+
+  test('should compile a left-to-right flowchart top-to-bottom on a phone column', () => {
+    // Act
+    const tree = mountOn(lrBlock());
+
+    // Assert
+    should(sentSource(tree)).equal(TB);
+  });
+
+  test('should keep the author source on a desktop column', () => {
+    // Arrange
+    width = 860;
+
+    // Act
+    const tree = mountOn(lrBlock());
+
+    // Assert
+    should(sentSource(tree)).equal(LR);
+  });
+
+  test('should redraw the other way when the column crosses the breakpoint, and keep the old picture up', () => {
+    // Arrange — drawn vertical on a phone.
+    const tree = mountOn(lrBlock());
+    run(() => compile(tree, 'dark'));
+    should(count(tree, 'iframe')).equal(0);
+
+    // Act — rotated to landscape.
+    resizeTo(860);
+
+    // Assert — one off-stage redraw of the authored source, with the old picture still showing.
+    should(count(tree, 'iframe')).equal(1);
+    should(sentSource(tree)).equal(LR);
+    should(count(tree, 'img')).equal(1);
+
+    // Act — and back to portrait once it has arrived.
+    run(() => compile(tree, 'dark'));
+    resizeTo(358);
+
+    // Assert
+    should(sentSource(tree)).equal(TB);
+  });
+
+  test('should not recompile when the column changes but the direction does not', () => {
+    // Arrange
+    const tree = mountOn(lrBlock());
+    run(() => compile(tree, 'dark'));
+
+    // Act — still a phone column, only wider.
+    resizeTo(400);
+
+    // Assert
+    should(count(tree, 'iframe')).equal(0);
+  });
+
+  test('should not recompile a diagram the rewrite does not change', () => {
+    // Arrange — already vertical, drawn on a phone.
+    const tree = mountOn(parsed('type: mermaid', 'alt: A flow', '---', TB));
+    run(() => compile(tree, 'dark'));
+
+    // Act
+    resizeTo(860);
+
+    // Assert
+    should(count(tree, 'iframe')).equal(0);
+  });
+
+  test('should show a diagram that is wider than the column at a readable size, scrolling in its own box', () => {
+    // Arrange
+    const tree = mountOn(lrBlock());
+
+    // Act
+    run(() => compile(tree, 'dark', WIDE_SVG));
+
+    // Assert — 760px at a floor of 14.45px of 16 (a 17px body is not measured here, so 14px: 11.9 → 12px floor).
+    const img = tree.root.findByType('img');
+    const shown = Number.parseFloat(String((img.props.style as { width: string }).width));
+    should(shown / 760).be.aboveOrEqual(12 / 16);
+    should(shown).be.above(358);
+    should(marked(tree, { 'data-fy-render-scrolls': 'true' })).equal(1);
+  });
+
+  test('should never rewrite another kind of diagram', () => {
+    // Arrange
+    const state = 'stateDiagram-v2\n  direction LR\n  [*] --> A';
+
+    // Act
+    const tree = mountOn(parsed('type: mermaid', 'alt: States', '---', state));
+
+    // Assert
+    should(sentSource(tree)).equal(state);
   });
 });

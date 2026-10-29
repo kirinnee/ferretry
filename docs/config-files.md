@@ -9,24 +9,25 @@ wire).
 
 ## Layout
 
-| File                            | Holds                                                                                                                                                                                                                                                                                                              |
-| ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `machine.yaml`                  | Agent permissions, the default runtime, what agents may control, Browser mode ([browser-mode.md](browser-mode.md)), Auto-resume after restart (`autoResume`, on by default: ferrets that were running when the host went down are resumed when the daemon boots), conversations (Keep in sync), the advanced block |
-| `logins/<id>.yaml`              | one login (a credential): `harness`, `store`, `label`, `env`                                                                                                                                                                                                                                                       |
-| `components/<kind>/<name>.yaml` | one component; `<kind>` is `instructions`, `mcp`, `skills`, `settings`, `hooks` or `modelSets`                                                                                                                                                                                                                     |
-| `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                                                                                                                                                                                                                      |
-| `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                                                                                                                                                                                                                      |
-| `warden.yaml`                   | the Warden: on, its layers (rules always; Jev and LLM opt-in) and their caps — see [The Warden](#the-warden)                                                                                                                                                                                                       |
-| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                                                                                                                                         |
-| `pack.yaml`                     | Pack mode: on/off, who picks a sub-ferret's model (`agent` or `jev`), the sub-ferret `limits`, the start `probe`, Jev's cap ([pack-mode.md](pack-mode.md))                                                                                                                                                         |
-| `models-guide.yaml`             | the routing prompt: `prompt`, plain words naming which model runs which kind of sub-task (at most 1,200 characters), read by the asking ferret and by Jev alike; absent means the one built from the catalogs ([pack-mode.md](pack-mode.md#the-routing-prompt))                                                    |
-| `voice.yaml`                    | who cleans up dictated text (provider, style, your own prompts, conversation context), and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device                                                      |
-| `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                                                                                                                                  |
+| File                            | Holds                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `machine.yaml`                  | Agent permissions, the default runtime, what agents may control, Browser mode ([browser-mode.md](browser-mode.md)), Auto-resume after restart (`autoResume`, on by default: ferrets that were running when the host went down are resumed when the daemon boots), the Attention check (`attentionNudge`, on by default: [attention.md](attention.md#the-turn-end-check)), conversations (Keep in sync), the advanced block |
+| `logins/<id>.yaml`              | one login (a credential): `harness`, `store`, `label`, `env`                                                                                                                                                                                                                                                                                                                                                               |
+| `components/<kind>/<name>.yaml` | one component; `<kind>` is `instructions`, `mcp`, `skills`, `settings`, `hooks` or `modelSets`                                                                                                                                                                                                                                                                                                                             |
+| `profiles/<name>.yaml`          | `contents:` — components and other profiles, in order; a later entry overrides an earlier one                                                                                                                                                                                                                                                                                                                              |
+| `runtimes/<name>.yaml`          | one runtime: `credential`, `profile`, `agent`                                                                                                                                                                                                                                                                                                                                                                              |
+| `warden.yaml`                   | the Warden: on, its layers (rules always; Jev and LLM opt-in) and their caps — see [The Warden](#the-warden)                                                                                                                                                                                                                                                                                                               |
+| `learning.yaml`                 | lessons: `passiveDefault` for new ferrets, and the scan miner ([learning.md](learning.md))                                                                                                                                                                                                                                                                                                                                 |
+| `pack.yaml`                     | Pack mode: on/off, who picks a sub-ferret's model (`agent` or `jev`), the sub-ferret `limits`, the start `probe`, Jev's cap ([pack-mode.md](pack-mode.md))                                                                                                                                                                                                                                                                 |
+| `models-guide.yaml`             | the routing prompt: `prompt`, plain words naming which model runs which kind of sub-task (at most 1,200 characters), read by the asking ferret and by Jev alike; absent means the one built from the catalogs ([pack-mode.md](pack-mode.md#the-routing-prompt))                                                                                                                                                            |
+| `voice.yaml`                    | who cleans up dictated text (provider, style, your own prompts, conversation context), and `defaultEngine` — the speech engine (`parakeet` or `browser`) a device uses until it picks its own ([voice.md](voice.md)); transcription always runs on the device                                                                                                                                                              |
+| `presets/<id>.yaml`             | a provider preset of this machine's own, or one replacing a built-in ([provider-presets.md](provider-presets.md))                                                                                                                                                                                                                                                                                                          |
 
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
 (`fy config schema <kind>` prints one). `config/daemon.json` and `config/routing.json` live in the same
-directory and are not configuration files in this sense: they are the daemon's own documents.
+directory and are not configuration files in this sense: they are the daemon's own documents. The shell
+terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 
 `fy config path`, `check`, `schema` and `guide` need no daemon. `status`, `show`, `write` and `confirm` ask it:
 `fy config write <file> [--if-match <etag>]` reads the text from stdin and is refused whole unless it checks.
@@ -120,7 +121,7 @@ else's is written and held. An agent never confirms.
 | Layer             | Key          | What it does to a flag                                                                   | Spends         |
 | ----------------- | ------------ | ---------------------------------------------------------------------------------------- | -------------- |
 | Rules             | — (always)   | deterministic checks raise it; shown to you in Insights › Warden › Needs you             | nothing        |
-| Jev               | `layers.jev` | Jev looks first: a confident `skip` clears it; anything else is passed on                | Jev            |
+| Jev               | `layers.jev` | Jev answers first: leaves it, acts on it alone when sure enough, or hands it on          | Jev            |
 | LLM investigation | `layers.llm` | a read-only investigation (an assigned warden), rotated across `accounts`, as kteam does | investigations |
 
 The rules always run while `enabled` is on. Jev and the LLM investigation are switched on independently, and
@@ -133,10 +134,39 @@ waiting for you is not paid for every sweep.
 layers off, `llm` is `layers.llm` alone, and `jev` is both on (Jev in front of an investigation). An explicit
 `layers:` wins over it field by field, and the next write leaves `triage` out.
 
-**Jev is only a guard.** Its whole answer is `skip` or `investigate`. A skip below `guard.threshold`
-(0.70–0.95, default 0.85) counts as investigate, and so does every failure — no key, a timeout, a refusal, an
-answer it cannot read — so an unsure or broken guard costs money or your attention and never hides a stuck
-ferret. Jev never acts on a ferret. Without a Jev key every flag is passed on.
+**Jev is the first responder.** Its answer is **leave**, one act — **nudge**, **resume**, **restart**,
+**failover**, **stop** — or **unsure**, with the reason it chose (Jev only picks among fixed options, so the
+reason is the option's own description). It is offered only the acts that fit the flag: a stuck or frozen
+ferret may be nudged, restarted or stopped, one whose quota came back resumed; a question waiting for you, a
+finished ferret or a fault of the daemon is never acted on. A nudge's words are one of a fixed set of
+specific messages ("a command you started has run a long time with no output…") that Jev picks as surely as
+the nudge itself — no message, no nudge. What happens next:
+
+| Jev says, and how sure                                 | What happens                                                              |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| leave, at or above `guard.threshold` (0.70–0.95, 0.85) | the flag is cleared, exactly like an investigation's LEAVE                |
+| an act, at or above its `jevActs` bar, allowed alone   | **done at once**, through the same remedies as an investigation           |
+| an act it is sure of but you keep for yourself         | handed on; shown to you as _Jev recommends …_ if no investigation follows |
+| failover                                               | handed on — Jev cannot name the login to move to                          |
+| unsure, below the bar, or any failure                  | handed on                                                                 |
+
+**Handed on** means an investigation while `layers.llm` is on and under its cap, and otherwise **Needs you**.
+Every failure hands on — no key, a timeout, a refusal, an answer it cannot read, the Jev cap, a provider
+back-off, an act that did not take — so an unsure or broken Jev costs money or your attention and never acts on
+noise or hides a stuck ferret. An investigation that fails leaves the flag standing in Needs you. Without a Jev
+key every flag is handed on.
+
+**How sure Jev must be to act alone** is `jevActs`, one bar per act, from 0.80 to 1 — riskier acts higher by
+default: `nudge` 0.90, `resume` 0.93, `restart` 0.95, `stop` 0.98. **`1` means Jev never does that act
+alone.** A bar is only half the permission: the matching `mayActAlone` must be on too, and `stop` is off by
+default, so out of the box a confident stop is a recommendation, not an act. Lowering a bar lets Jev act on
+less certainty, so an edit that lowers one is held until you confirm it, like any loosening.
+
+**One try per situation.** Jev acts on a flag's **subject** (see below — this episode, or this stuck command)
+once. The act is given the first rung of the backoff (`assignedCooldownMinutes`, at least 10 minutes) to land,
+and meanwhile the flag is not shown to you or looked at. If the same subject is still flagged after that, Jev is
+not asked again: it goes to an investigation, or to you. A new subject is a new situation, and Jev may act on
+it.
 
 **What leaves the machine.** With Jev on, a short summary of the flagged ferret — the anomaly, the sweep's
 one sentence, its recent transcript lines and the tail of its screen — is sent to TypeSafe AI (Jev). Every
@@ -145,13 +175,16 @@ cannot be redacted is never sent (that flag is passed on instead). The Jev key i
 through the outbound holder ([docs/secrets.md](secrets.md)); `guard.endpoint` cannot move it to another host.
 Investigations run on your own login and read the transcript, pane, diffs and CI. The rules send nothing.
 
-**Only an investigation acts.** Its explicit `Verdict:` line is what acts — never prose — and only as far as
-`mayActAlone` allows: `nudge`, `resume`, `restart` and `failover` default on, **`stop` defaults off**.
+**What may act on a ferret: an investigation, and Jev when it is sure enough.** An investigation's explicit
+`Verdict:` line is what acts — never prose — and, like Jev, only as far as `mayActAlone` allows: `nudge`,
+`resume`, `restart` and `failover` default on, **`stop` defaults off**.
+(The one rule that acts without an investigation, `closeLeftovers`, closes a leftover browser and never
+touches the ferret — see below.)
 `restart` relaunches a dead or frozen process with its conversation intact — the resume path, replacing a
 pane that still looks alive — when the report recommends `RESTART`; a file that names `resume` but not
 `restart` gives `restart` the same answer. An act it may not
-do alone is held and listed under Needs you for you to decide. Every act and every Jev skip is listed under
-Recent actions with who decided it.
+do alone is held and listed under Needs you for you to decide. Every act, every hold and every Jev leave is
+listed under Recent actions and in the journal with who decided it — Jev's with how sure it was and why.
 
 **Which login investigates.** `accounts` is the order of logins, head first, and `failover.policy` says how
 they share the work: `fallback` uses the first and moves on only when it is unhealthy, `round_robin` takes
@@ -172,14 +205,26 @@ Jev cap hit, flags go straight to an investigation; with the investigation cap h
 can and the rest wait for you — and the Warden page says so. Jev is priced at
 `guard.usdPerMillionInputTokens` (published prices disagree, so it is a setting). An investigation is
 priced from its own transcript once analytics has read it; until then it counts at the average priced
-investigation, for the cap only. The status's savings line — skips × that average, minus Jev's own cost —
-appears only once an investigation has been priced.
+investigation, for the cap only. The status's savings line — (Jev's leaves + the acts it did alone) × that
+average, minus Jev's own cost — appears only once an investigation has been priced. The caps are unchanged by
+Jev acting: an act costs the one Jev answer it came from.
 
-**A cleared flag stays quiet, longer each time.** When Jev or an investigation clears a flag, that kind of
-anomaly on that ferret is left alone for `blessMinutes` (default 15). Each consecutive re-clear of the same
-kind on the same ferret doubles it — 15, 30, 60, 120 — up to **4 hours**. The run starts again when the
-ferret changes status (which also ends the quiet at once), or when the flag stops being raised. A different
-kind of trouble on the same ferret is never covered.
+**A cleared flag stays quiet until its situation changes.** Every flag on a ferret carries a **subject** —
+which episode of trouble it is: its turn and the moment the episode began (the transcript last grew, the
+ferret froze, it went idle), and for a stuck command that process itself, across turns. When Jev or an
+investigation clears a flag, that kind of flag on that ferret is left alone **until its subject changes** —
+the ferret moves and stalls again, a different command is the stuck one — for 24 hours at most, however its
+status flickers meanwhile; a different kind of trouble on the same ferret
+is never covered. The `blessMinutes` blessing (default 15, doubling per re-clear up to 4 hours) still
+records the clear for the Warden page and _Leave it longer_, and still ends at once when the ferret changes
+status — but it is no longer what keeps a cleared ferret from being looked at again.
+
+**Each look at the same situation waits longer.** An investigation that did not clear its flag (a nudge, a
+recommendation it held for you, a report it could not finish) is not repeated on a timer either: the next
+automatic look at the same subject waits `assignedCooldownMinutes` (default 30), then four times that, then
+sixteen, then a day — **30 min → 2 h → 8 h → 24 h**. A new subject starts again at once, so a new situation
+is never hidden behind an old answer; the owner's own _Investigate_ and a forced run are never held. The
+looks are remembered in `warden/state.json` (`backoff`), so a restart does not re-investigate the fleet.
 
 **Leave it longer.** On a flagged or cleared ferret, Insights › Warden offers _Leave it longer_: an hour,
 four, or until its status changes (at most a week). It covers the kinds flagged or cleared there now, never
@@ -188,16 +233,45 @@ no streak. It is `POST /v1/warden/leave {sessionId, duration}` — `warden.confi
 Warden's supervision of that ferret off for a while ([grants.md](grants.md)).
 
 **The liveness check.** Every 30 s the Warden looks at each working ferret — a digest of its screen and
-of its transcript tail, the work counters its harness paints, and whether its pane has a live subprocess —
-and keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and
-long-command rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been
-able to see for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
+of its transcript tail, the work counters its harness paints, and which processes run under its pane — and
+keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and stuck-command
+rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been able to see
+for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
 `nudgeAfterSeconds` (default 300) is nudged once — only while `mayActAlone.nudge` is on — and one with no
 transcript, counter or subprocess sign for its `killAfterSeconds` (default 900; read as "frozen", since the
 Warden never kills) after that is flagged **frozen**: a restart candidate that goes through the layers like
 any other flag. A ferret parked with `signal waiting`, an interactive ferret, or a tick that ran late on a
 starved host is never nudged or flagged. The ledger is kept in memory: a restarted daemon starts every
 clock again rather than judging silence it did not see.
+
+**What counts as a running command.** Only a **tool command**: what the harness runs for the agent through
+a shell (`zsh -c …`, `bash -c …`), and everything under it. The harness's own **helpers** — `fy mcp serve`,
+an MCP or language server, Codex's app server, and anything they start (a Chrome an MCP server drives) — are
+not, however long they live; nor is a server the agent left **listening** on a port (a dev or board server),
+nor a **browser**. Only processes under the ferret's own pane are ever looked at, so another session's
+process or the daemon's own tmux reader can never be blamed on it. A different command running is a new
+episode, so one short command after another never reads as one long one.
+
+**Waiting on you is never investigated.** While a ferret's turn is over (`your-turn`) with no command of
+its own still running, or it is parked on a question or permission prompt (`needs-input`), no long-think or
+stuck-command flag is raised — and it is never nudged — because the next move is yours; a question nobody
+answers is `unattended_question`, which Needs you owns. Detection resumes by itself once it works again. A
+turn that ended while a command it started still runs is **not** waiting on you: it is waiting on that
+command, and a command that can never finish is exactly what the stuck rule is for.
+
+**Stuck mid-turn.** `sus_subprocess` is raised when a tool command has run for `susSubprocessSeconds`
+(default **600**, 10 min) **and nothing moved for that long**: no transcript growth, no token advance, and no
+screen change once the harness's own spinner, elapsed clocks and status line are masked out. The old rule
+fired on any child process alive for 15 min, so it needed the slack; requiring every progress signal to be
+flat is what makes the shorter time safe — a build that prints, a watch loop that refreshes, a ferret
+writing about what it is doing all count as moving. Climbing tokens still exempt a long think.
+
+**Leftover browsers are closed by rule.** A ferret whose turn is over (or whose done marker is written),
+with no command of its own running, whose pane has had a browser it launched for 10 minutes since the turn
+ended, gets that browser closed — the browser only, never the ferret, and the pane's processes are read again at the moment
+of closing. No Jev, no investigation, nothing spent. It is `mayActAlone.closeLeftovers` (default **on**);
+with it off the Warden lists the recommendation once under Recent actions instead. Every close is listed
+there too, and journalled as `fleet.warden_leftover_closed`.
 
 **When it sweeps.** Every `intervalMinutes` (1, 2, 5, 10 or 15; default 2), and also soon after a turn ends,
 a question is waiting or a pane dies (`events.turnEnd`, `events.question`, `events.paneDied`), at most one
@@ -208,6 +282,7 @@ extra sweep a minute.
 enabled: true
 layers: { jev: true, llm: true }
 guard: { threshold: 0.85 }
+jevActs: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 }
 caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2 }
 mayActAlone: { stop: false }
 investigation: { effort: low }

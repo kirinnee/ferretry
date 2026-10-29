@@ -375,6 +375,8 @@ interface ShellOptions {
   readonly journalSequence?: number;
   /** Sessions the stub daemon answers `list` with. */
   readonly sessions?: readonly string[];
+  /** Open Attention the stub daemon's `list` reports on every listed session. */
+  readonly listedAttention?: { open: number; first: string; ask: string; latestAt: string };
   /** The kind the Sessions bar was left on: 'all' unless a test says otherwise, null for a device that never chose. */
   readonly sessionsMode?: 'all' | 'auto' | 'interactive' | null;
   /** Makes `get` reject, which is the session route's failure path. */
@@ -584,7 +586,12 @@ const appStore = async (
         },
         list: async () =>
           (options.sessions ?? []).map(id =>
-            sessionView(id, { state: { status: options.sessionStatus?.() ?? 'running' } }),
+            sessionView(id, {
+              state: {
+                status: options.sessionStatus?.() ?? 'running',
+                ...(options.listedAttention === undefined ? {} : { attention: options.listedAttention }),
+              },
+            }),
           ),
         logs: async (sessionId: string) => {
           transcriptReads.push(`${connection.daemonId}:${sessionId}`);
@@ -857,14 +864,37 @@ const NOT_SET_UP = {
   '/v1/fleet/runtimes': { format: 'version-2', runtimes: [] },
 };
 
-/** Where a pairing lands is decided by one read of the machine, so it arrives a few turns later. */
-const landed = async (): Promise<void> => {
-  for (let turn = 0; turn < 20; turn += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+/**
+ * Waits for the root to land on `path`. Where a pairing lands is decided by one read of the machine,
+ * over a session that has to be opened first, so it arrives some unknowable number of turns later.
+ */
+const landed = async (path: string): Promise<void> => {
+  await settleUntil(
+    () => window.location.pathname === path,
+    () => `the root to land on ${path} (it is on ${window.location.pathname})`,
+    interact,
+  );
 };
 
 /** Which screen of the setup guide is on the glass, if it is on the glass at all. */
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
   container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
+
+/**
+ * Waits for a confirmed pairing to finish on the guide's last stage.
+ *
+ * NOT `settle()`. Redeeming the code is an exchange over a real session — a handshake whose
+ * WebCrypto settles off the JavaScript thread — so a fixed count of timer turns is a different
+ * budget on every machine. Measured: 2 to 12 turns on an idle machine and up to 20 under CPU load,
+ * against `settle()`'s 12, which is how "takes a scanned pairing link" read `scan` on CI.
+ */
+const pairedInGuide = async (container: HTMLElement): Promise<void> => {
+  await settleUntil(
+    () => stepOfSetup(container) === 'done',
+    () => `the pairing to finish on the guide's done stage (it is on ${stepOfSetup(container)})`,
+    interact,
+  );
+};
 
 /** Answers WHO INSTALLS IT the way a reader does. */
 const chooseDoer = async (container: HTMLElement, doer: string): Promise<void> => {
@@ -1396,7 +1426,7 @@ describe('AppShell', () => {
         'the confirmation control',
       ).click(),
     );
-    await settle();
+    await pairedInGuide(view.container);
 
     // Finishes in the guide, keeps the daemon this browser already had, and
     // leaves only when the reader says so.
@@ -1411,7 +1441,7 @@ describe('AppShell', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
@@ -1442,11 +1472,11 @@ describe('AppShell', () => {
         'the confirmation control',
       ).click(),
     );
-    await settle();
+    await pairedInGuide(view.container);
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
     await settle();
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
 
@@ -2232,8 +2262,8 @@ describe('AppShell', () => {
         const scope = daemonSessionScope(alpha, 'shared');
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
-        // Nothing waiting: no "Needs you" strip, and the board stays one ⋯ row away.
-        expect(view.container.querySelector('button[data-attention-strip]')).toBeNull();
+        // Nothing waiting: no pinned "Needs you" block.
+        expect(view.container.querySelector('[data-attention-card]')).toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
 
@@ -2244,13 +2274,13 @@ describe('AppShell', () => {
         expect(attentionReads).toBeGreaterThan(initialAttentionReads);
         expect(store.attention.store.count(scope)).toBe(1);
 
-        // ONE indicator: the slim strip under the tabs, never a second chip in the header.
-        const strip = must(
-          view.container.querySelector<HTMLButtonElement>('button[data-attention-strip]'),
-          'the refreshed "Needs you" strip',
+        // The item is pinned above the composer, never a second chip in the header.
+        const pinned = must(
+          view.container.querySelector<HTMLElement>('[data-attention-panel] [data-attention-card]'),
+          'the refreshed pinned "Needs you" item',
         );
-        expect(strip.getAttribute('data-attention-strip')).toBe('1');
-        expect(strip.textContent).toContain('Needs you');
+        expect(pinned.getAttribute('data-pinned')).toBe('true');
+        expect(view.container.querySelector('section[aria-label="Needs you"][data-attention-panel]')).not.toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')?.textContent).toBe('!A3');
       } finally {
@@ -2259,6 +2289,22 @@ describe('AppShell', () => {
     } finally {
       restoreClearInterval();
       restoreInterval();
+    }
+  });
+
+  it('mounts the selected Needs-you item as a real chat beside the inbox', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/attention`, [alpha.daemonId], {
+      sessions: ['shared'],
+      listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => attentionSnapshot(sessionId, [externalAttentionItem]),
+    });
+    try {
+      for (let turn = 0; turn < 6; turn += 1) await settle();
+      const chat = must(view.container.querySelector<HTMLElement>('[data-attention-chat]'), 'the conversation pane');
+      expect(chat.textContent).not.toBe('');
+    } finally {
+      await view.unmount();
     }
   });
 
@@ -3666,7 +3712,7 @@ describe('the connection picker slot', () => {
       'the confirmation control',
     );
     await interact(() => confirm.click());
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
 
     // The root must land on the daemon the exchange returned, not on whichever
     // pairing happened to be selected before.
@@ -3700,7 +3746,7 @@ describe('the connection picker slot', () => {
       'the confirmation control',
     );
     await interact(() => confirm.click());
-    await settle();
+    await pairedInGuide(view.container);
 
     expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID]);
     // Setup finishes on its own last stage rather than teleporting the reader
@@ -3713,7 +3759,7 @@ describe('the connection picker slot', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
@@ -3741,7 +3787,7 @@ describe('the connection picker slot', () => {
         'the confirmation control',
       ).click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}/setup`);
 
     // The first run is a full screen of its own now, outside Settings.
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/setup`);
@@ -3756,11 +3802,11 @@ describe('the connection picker slot', () => {
         'the confirmation control',
       ).click(),
     );
-    await settle();
+    await pairedInGuide(view.container);
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}/setup`);
     // The first run is a full screen of its own now, outside Settings.
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/setup`);
     await view.unmount();
@@ -3995,11 +4041,15 @@ describe('the notifications settings card', () => {
     const { store, view, card } = await open();
 
     expect(store.notificationFilter.get().machines[beta.daemonId]).toBeUndefined();
-    const machineSwitch = must(
-      switches(card).find(toggle => toggle.textContent?.includes('beta.example.test')),
-      'the per-machine switch for beta',
+    const betaRow = must(
+      card.querySelector<HTMLElement>(`[data-machine-notification="${beta.daemonId}"]`),
+      'the per-machine row for beta',
     );
-    expect(machineSwitch.getAttribute('aria-checked')).toBe('true');
+    const machineSwitch = must(
+      [...betaRow.querySelectorAll<HTMLElement>('[data-machine-mute]')][0],
+      'the per-machine mute switch for beta',
+    );
+    expect(machineSwitch.getAttribute('aria-pressed')).toBe('false');
 
     await interact(() => machineSwitch.click());
 

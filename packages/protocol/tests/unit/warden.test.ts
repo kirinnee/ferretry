@@ -79,6 +79,7 @@ const wardenCases: SchemaCase[] = [
   { name: 'guard', schema: warden.WardenGuardConfigSchema, value: wardenConfig.guard },
   { name: 'caps', schema: warden.WardenCapsSchema, value: wardenConfig.caps },
   { name: 'may act alone', schema: warden.WardenMayActAloneSchema, value: wardenConfig.mayActAlone },
+  { name: 'jev acts', schema: warden.WardenJevActsSchema, value: wardenConfig.jevActs },
   { name: 'events', schema: warden.WardenEventTriggersSchema, value: wardenConfig.events },
   { name: 'effort', schema: warden.WardenEffortSchema, value: 'medium' },
   { name: 'investigation', schema: warden.WardenInvestigationConfigSchema, value: wardenConfig.investigation },
@@ -262,7 +263,14 @@ describe('mergeWardenConfig', () => {
 
     // Assert
     should(actual.layers).deepEqual({ jev: true, llm: false });
-    should(actual.mayActAlone).deepEqual({ nudge: true, resume: true, restart: true, failover: true, stop: true });
+    should(actual.mayActAlone).deepEqual({
+      nudge: true,
+      resume: true,
+      restart: true,
+      failover: true,
+      stop: true,
+      closeLeftovers: true,
+    });
     should(actual.caps).deepEqual({ jevUsdPerDay: 1, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 });
     should(actual.guard).deepEqual(DEFAULT_WARDEN_CONFIG.guard);
   });
@@ -386,5 +394,72 @@ describe('settings from before restart', () => {
     should(off.mayActAlone).match({ resume: false, restart: false });
     should(stated).deepEqual({ mayActAlone: { resume: false, restart: true } });
     should(absent).deepEqual({ mayActAlone: { nudge: true } });
+  });
+});
+
+describe('settings from before leftover cleanup', () => {
+  it('should give a whole older mayActAlone the default — on — and keep an answer already stated', () => {
+    // Arrange
+    const { mayActAlone, ...rest } = wardenConfig;
+    const { closeLeftovers: _close, ...older } = mayActAlone;
+
+    // Act
+    const migrated = warden.WardenConfigSchema.parse({ ...rest, mayActAlone: older });
+    const stated = warden.migrateLegacyWardenSettings({ mayActAlone: { ...older, closeLeftovers: false } });
+    const partial = warden.migrateLegacyWardenSettings({ mayActAlone: { nudge: true } });
+
+    // Assert
+    should(migrated.mayActAlone.closeLeftovers).be.true();
+    should(stated).match({ mayActAlone: { closeLeftovers: false } });
+    should(partial).deepEqual({ mayActAlone: { nudge: true } });
+  });
+
+  it('should default to the stuck-command time of ten minutes', () => {
+    // Act / Assert
+    should(DEFAULT_WARDEN_CONFIG.susSubprocessSeconds).equal(600);
+    should(DEFAULT_WARDEN_CONFIG.mayActAlone.closeLeftovers).be.true();
+  });
+});
+
+describe('settings from before Jev could act', () => {
+  it('should give a whole older document the default bars and keep bars already stated', () => {
+    // Arrange
+    const { jevActs: _acts, ...older } = wardenConfig;
+
+    // Act
+    const migrated = warden.WardenConfigSchema.parse(older);
+    const stated = warden.WardenConfigSchema.parse({
+      ...older,
+      jevActs: { ...warden.DEFAULT_WARDEN_JEV_ACTS, stop: 1 },
+    });
+    const partial = warden.migrateLegacyWardenSettings({ guard: { threshold: 0.9 } });
+
+    // Assert
+    should(migrated.jevActs).deepEqual(warden.DEFAULT_WARDEN_JEV_ACTS);
+    should(stated.jevActs.stop).equal(1);
+    should(partial).deepEqual({ guard: { threshold: 0.9 } });
+  });
+
+  it('should ask more of riskier acts by default, and never less than the leave bar', () => {
+    // Arrange
+    const acts = DEFAULT_WARDEN_CONFIG.jevActs;
+
+    // Assert
+    should(acts.nudge).be.above(DEFAULT_WARDEN_CONFIG.guard.threshold);
+    should(acts.resume).be.above(acts.nudge);
+    should(acts.restart).be.above(acts.resume);
+    should(acts.stop).be.above(acts.restart);
+  });
+
+  it('should refuse a bar under the floor and a patch naming an act Jev cannot do alone', () => {
+    // Act
+    const low = warden.WardenJevActsSchema.safeParse({ ...warden.DEFAULT_WARDEN_JEV_ACTS, nudge: 0.79 });
+    const failover = warden.WardenConfigPatchSchema.safeParse({ jevActs: { failover: 0.9 } });
+    const merged = warden.mergeWardenConfig(DEFAULT_WARDEN_CONFIG, { jevActs: { stop: 1 } });
+
+    // Assert
+    should(low.success).be.false();
+    should(failover.success).be.false();
+    should(merged.jevActs).deepEqual({ ...warden.DEFAULT_WARDEN_JEV_ACTS, stop: 1 });
   });
 });

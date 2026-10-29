@@ -318,6 +318,7 @@ import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
+import { isWhatsNewPage, WhatsNewHarness } from './whats-new.tsx';
 import { harnessPerformanceClient, harnessRecorder } from './performance-fixture.ts';
 import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
@@ -1395,16 +1396,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         recognitionSupport: HARNESS_RECOGNITION_AVAILABLE,
         voice: HARNESS_PARAKEET_ABSENT,
       }}
-      notifications={
-        <NotificationSettingsView
-          permission="granted"
-          enabled
-          delivery="active"
-          devices={[]}
-          onEnabled={() => {}}
-          onRevokeDevice={() => {}}
-        />
-      }
+      notifications={<NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />}
       probeDaemon={harnessSettingsProbe}
       carrier={activeCarrier.carrier}
       relayAdvertised={activeCarrier.relayAdvertised}
@@ -3980,12 +3972,14 @@ const PALETTE_SETTINGS: PaletteSettingsSource = (daemon, query) => settingsPalet
  * strip and captures the panel, which proves the journey rather than just the render.
  */
 function AttentionPanelHarness() {
-  const [expanded, setExpanded] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
   const client = useMemo(
     () => ({
       respond: async () => undefined,
       resolve: async () => undefined,
       dismiss: async () => undefined,
+      needsInfo: async () => undefined,
+      progress: async () => undefined,
     }),
     [],
   );
@@ -3994,11 +3988,11 @@ function AttentionPanelHarness() {
       <AttentionPanel
         client={client}
         connection={daemon}
-        expanded={expanded}
         id="harness-attention-panel"
         now={HARNESS_NOW}
-        onExpandedChange={setExpanded}
+        onSelect={setSelected}
         scope={scope}
+        selectedId={selected}
         snapshot={ATTENTION}
         status="ready"
       />
@@ -6732,14 +6726,7 @@ function Shell() {
             <Label>Notifications</Label>
           </PanelHeader>
           <PanelBody>
-            <NotificationSettingsView
-              permission="granted"
-              enabled
-              delivery="active"
-              devices={[]}
-              onEnabled={() => {}}
-              onRevokeDevice={() => {}}
-            />
+            <NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />
           </PanelBody>
         </Card>
       ),
@@ -8826,6 +8813,7 @@ if (host) {
   const mcpFrame = mcpSignInFrame(window.location.search);
   const contextTools = contextToolsFrame(window.location.search);
   const pairFromMenu = isPairFromMenuPage(window.location.search);
+  const whatsNewPage = isWhatsNewPage(window.location.search);
   const sessionContextMenu = isSessionContextMenuPage(window.location.search);
   // `?viewport-overlay`: Settings › This device › About this device's readout pinned over any frame, as the
   // owner sees it on a phone after "Show over the app".
@@ -8841,6 +8829,8 @@ if (host) {
           <ContextToolsHarness frame={contextTools} />
         ) : sessionContextMenu ? (
           <SessionContextMenuHarness />
+        ) : whatsNewPage ? (
+          <WhatsNewHarness />
         ) : pairFromMenu ? (
           <PairFromMenuHarness />
         ) : appChromeHarness !== null ? (

@@ -88,6 +88,19 @@ const MERMAID = [
   '  F --> G[SVG re-admitted, shown inline]',
 ].join('\n');
 
+/**
+ * THE DIAGRAM AN AGENT WRITES FIRST: a left-to-right flowchart. Six steps with real labels are about
+ * 1,100px wide at Mermaid's own size — far wider than a 390px phone, where it was squeezed to 8–10px text.
+ */
+const MERMAID_LEFT_TO_RIGHT = [
+  'flowchart LR',
+  '  A[Owner sends a message] --> B[Daemon queues the turn]',
+  '  B --> C[Ferret runs the tools]',
+  '  C --> D[Reply streams back]',
+  '  D --> E[Phone renders the block]',
+  '  E --> F[Owner reads the diagram]',
+].join('\n');
+
 /** A jison parse error: the reachable Mermaid failure, and the ugliest wording. */
 const MERMAID_BROKEN = 'graph TD\n  A[Unclosed --> B{{{';
 
@@ -143,12 +156,98 @@ const MAP = [
   '  - {points: [[51.5007, -0.1246], [51.5033, -0.1195], [51.5075, -0.1135], [51.5081, -0.0759]], label: Route, color: blue}',
 ].join('\n');
 
+/** The brief's own example: a stacked bar chart of spend, money on the value axis, one series muted. */
+const CHART_BAR = [
+  'kind: bar',
+  'title: Warden spend',
+  'x: [22 Oct, 23 Oct, 24 Oct, 25 Oct, 26 Oct, 27 Oct, 28 Oct]',
+  'y: { label: USD, format: money }',
+  'stacked: true',
+  'series:',
+  '  - name: Investigations',
+  '    data: [1.8, 2.4, 2.1, 2.9, 2.1, 2.2, 2.0]',
+  '  - name: Reports',
+  '    data: [0.6, 0.5, 0.9, 0.7, 0.8, 0.6, 0.7]',
+  '  - name: First-pass filter',
+  '    data: [0.3, 0.3, 0.31, 0.28, 0.3, 0.3, 0.29]',
+  '    tone: muted',
+].join('\n');
+
+/** A step-through story: an area chart whose frames each override the series and the title. */
+const CHART_FRAMES = [
+  'kind: area',
+  'title: Queue depth',
+  'x: [0s, 10s, 20s, 30s, 40s, 50s, 60s]',
+  'y: { label: Jobs, format: number }',
+  'series:',
+  '  - name: Waiting',
+  '    data: [4, 9, 16, 22, 27, 31, 34]',
+  '  - name: Running',
+  '    data: [2, 4, 4, 4, 4, 4, 4]',
+  '    tone: good',
+  'frames:',
+  '  - label: One worker',
+  '  - label: Four workers',
+  '    title: Queue depth, four workers',
+  '    series:',
+  '      - {name: Waiting, data: [4, 7, 9, 8, 6, 4, 2]}',
+  '      - {name: Running, data: [2, 8, 12, 14, 14, 12, 9], tone: good}',
+  '  - label: Autoscaled',
+  '    title: Queue depth, autoscaled',
+  '    series:',
+  '      - {name: Waiting, data: [4, 5, 4, 2, 1, 0, 0]}',
+  '      - {name: Running, data: [2, 10, 18, 16, 9, 5, 3], tone: good}',
+].join('\n');
+
+/** Share of a whole: one ring, a slice per label, every slice from the palette in order. */
+const CHART_DOUGHNUT = [
+  'kind: doughnut',
+  'title: Where the tokens went',
+  'x: [Planning, Implementation, Review, Chores]',
+  'y: { format: percent }',
+  'series:',
+  '  - name: Share',
+  '    data: [18, 52, 21, 9]',
+].join('\n');
+
+/** An author who tried to paint: refused by the language, so it falls back to its source. */
+const CHART_PAINTED = ['kind: line', 'series:', '  - {name: Red line, data: [1, 2, 3], color: "#ff0000"}'].join('\n');
+
+/**
+ * A diagram whose author tried to repaint it. The theme is the page's: `theme`, `themeVariables` and
+ * `themeCSS` are on the shell's `secure` list, so the directive does not reach them.
+ */
+const MERMAID_THEME_DIRECTIVE = `%%{init: {"theme": "forest", "themeVariables": {"primaryColor": "#ff0000", "lineColor": "#ff0000"}, "themeCSS": ".node rect { fill: #ff0000 }"}}%%\n${MERMAID}`;
+
+/** The same attempt through Mermaid's front matter, the other way a diagram carries its own config. */
+const MERMAID_THEME_FRONTMATTER = [
+  '---',
+  'config:',
+  '  theme: forest',
+  '  themeVariables:',
+  '    primaryColor: "#ff0000"',
+  '    lineColor: "#ff0000"',
+  '---',
+  MERMAID,
+].join('\n');
+
 export const FY_RENDER_VISUAL_CASES: Record<string, string> = {
+  'chart-bar': fence('chart', 'Warden spend per day, by kind of work', CHART_BAR),
+  'chart-doughnut': fence('chart', 'Where the tokens went', CHART_DOUGHNUT),
+  'chart-frames': fence('chart', 'Queue depth as workers are added', CHART_FRAMES),
+  'chart-painted': fence('chart', 'A chart whose author tried to colour it', CHART_PAINTED),
   'fragment-table': fence('html', 'A comparison of rendering options', FRAGMENT_TABLE),
   'fragment-xss': fence('html', 'A fragment carrying every refused construct', FRAGMENT_XSS),
   'init-directive': fence('mermaid', 'A diagram whose author asked for HTML labels', MERMAID_INIT_DIRECTIVE),
   lottie: fence('lottie', 'A blue dot travelling across the frame', LOTTIE),
   map: fence('map', 'A walk from Big Ben to Tower Bridge', MAP),
   mermaid: fence('mermaid', 'How an fy-render block reaches the reader', MERMAID),
+  'mermaid-theme-directive': fence('mermaid', 'A diagram whose author tried to repaint it', MERMAID_THEME_DIRECTIVE),
+  'mermaid-theme-frontmatter': fence(
+    'mermaid',
+    'A diagram whose front matter tried to repaint it',
+    MERMAID_THEME_FRONTMATTER,
+  ),
+  'mermaid-lr': fence('mermaid', 'How a message travels from the owner to the daemon and back', MERMAID_LEFT_TO_RIGHT),
   'mermaid-failure': fence('mermaid', 'A diagram that cannot be drawn', MERMAID_BROKEN),
 };

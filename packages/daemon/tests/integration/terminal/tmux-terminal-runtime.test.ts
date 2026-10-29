@@ -1,10 +1,13 @@
 import { describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { BunTmuxProcess, TmuxTerminalRuntime } from '../../../src/adapters/index.ts';
-import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
+import type { LoginShellPort, TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
+
+/** A fixed shell: these cases are about tmux commands, not about which shell is chosen. */
+const plainShell: LoginShellPort = { shell: async () => '/bin/sh' };
 
 const ok = (stdout = ''): TmuxCommandResult => ({ code: 0, stdout, stderr: '' });
 
@@ -53,7 +56,7 @@ describe('TmuxTerminalRuntime', () => {
       ok(`${line}\nother\t\t\t\t\t\t\t\t\t\n`),
       { code: 1, stdout: '', stderr: 'no server running' },
     ]);
-    const subject = new TmuxTerminalRuntime(fake, () => 9_000);
+    const subject = new TmuxTerminalRuntime(fake, () => 9_000, plainShell);
 
     // Act
     const found = await subject.list();
@@ -95,7 +98,7 @@ describe('TmuxTerminalRuntime', () => {
     const fake = new FakeTmux([
       ok(`${row('0123456789ab', untouchedSeconds)}\n${row('0123456789cd', typedIntoSeconds)}\n`),
     ]);
-    const subject = new TmuxTerminalRuntime(fake, () => createdAtMs + 5_000);
+    const subject = new TmuxTerminalRuntime(fake, () => createdAtMs + 5_000, plainShell);
 
     // Act
     const listed = await subject.list();
@@ -130,7 +133,7 @@ describe('TmuxTerminalRuntime', () => {
         '30',
       ].join('\t');
     const fake = new FakeTmux([ok(`${row('agent:mse7wwti')}\n`), ok(`${row('starfleet:picard')}\n`), ok()]);
-    const subject = new TmuxTerminalRuntime(fake, () => 9_000);
+    const subject = new TmuxTerminalRuntime(fake, () => 9_000, plainShell);
 
     // Act
     const owned = await subject.list();
@@ -158,7 +161,7 @@ describe('TmuxTerminalRuntime', () => {
   it('should open a terminal with no opener when the caller could not be attested', async () => {
     // Arrange
     const fake = new FakeTmux([ok()]);
-    const subject = new TmuxTerminalRuntime(fake, () => 1_000);
+    const subject = new TmuxTerminalRuntime(fake, () => 1_000, plainShell);
 
     // Act
     const created = await subject.create({
@@ -176,7 +179,11 @@ describe('TmuxTerminalRuntime', () => {
 
   it('should refuse an unexpected list failure instead of treating it as no terminal', async () => {
     // Arrange
-    const subject = new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr: 'permission denied' }]));
+    const subject = new TmuxTerminalRuntime(
+      new FakeTmux([{ code: 1, stdout: '', stderr: 'permission denied' }]),
+      Date.now,
+      plainShell,
+    );
 
     // Act + Assert
     await should(subject.list()).be.rejectedWith(/could not list terminal sessions/u);
@@ -185,7 +192,7 @@ describe('TmuxTerminalRuntime', () => {
   it('should create, update, write, redraw, and close a terminal through the injected tmux port', async () => {
     // Arrange
     const fake = new FakeTmux([ok(), ok(), ok(), ok(), ok('history\nhello\n2|1|100|1|1\n'), ok()]);
-    const subject = new TmuxTerminalRuntime(fake, () => 1_000);
+    const subject = new TmuxTerminalRuntime(fake, () => 1_000, plainShell);
 
     // Act
     const created = await subject.create({
@@ -241,7 +248,7 @@ describe('TmuxTerminalRuntime', () => {
   it('should clean up a partial create and surface mutation or capture failures', async () => {
     // Arrange
     const createFake = new FakeTmux([{ code: 1, stdout: '', stderr: 'create denied' }, ok()]);
-    const create = new TmuxTerminalRuntime(createFake);
+    const create = new TmuxTerminalRuntime(createFake, Date.now, plainShell);
     const failed = new TmuxTerminalRuntime(
       new FakeTmux([
         { code: 1, stdout: '', stderr: 'gone' },
@@ -250,6 +257,8 @@ describe('TmuxTerminalRuntime', () => {
         { code: 1, stdout: '', stderr: 'gone' },
         ok(),
       ]),
+      Date.now,
+      plainShell,
     );
 
     // Act + Assert
@@ -273,7 +282,7 @@ describe('TmuxTerminalRuntime', () => {
   it('should name a terminal on its pane, and read it as plain text and by its foreground program', async () => {
     // Arrange
     const fake = new FakeTmux([ok(), ok('$ bun dev\nready\n\n\n'), ok('node\n')]);
-    const subject = new TmuxTerminalRuntime(fake, () => 1_000);
+    const subject = new TmuxTerminalRuntime(fake, () => 1_000, plainShell);
 
     // Act
     const created = await subject.create({
@@ -298,7 +307,7 @@ describe('TmuxTerminalRuntime', () => {
 
   it('should report a terminal that is gone when it is read or asked what is running', async () => {
     const gone = { code: 1, stdout: '', stderr: "can't find pane" };
-    const subject = new TmuxTerminalRuntime(new FakeTmux([gone, gone]));
+    const subject = new TmuxTerminalRuntime(new FakeTmux([gone, gone]), Date.now, plainShell);
     await should(subject.text(terminal, 10)).be.rejectedWith(/terminal no longer exists/u);
     await should(subject.foreground(terminal)).be.rejectedWith(/terminal no longer exists/u);
   });
@@ -310,6 +319,8 @@ describe('TmuxTerminalRuntime', () => {
         { code: 1, stdout: '', stderr: "can't find session" },
         { code: 1, stdout: '', stderr: 'permission denied' },
       ]),
+      Date.now,
+      plainShell,
     );
 
     // Act + Assert
@@ -325,7 +336,7 @@ describe('TmuxTerminalRuntime against the real tmux', () => {
     if (executable === null) throw new Error('tmux is required for terminal integration coverage');
     const home = await mkdtemp(join(tmpdir(), 'fy-term-capture-'));
     const tmux = new BunTmuxProcess(executable, join(home, 'tmux.sock'));
-    const subject = new TmuxTerminalRuntime(tmux);
+    const subject = new TmuxTerminalRuntime(tmux, () => Date.now(), plainShell);
     try {
       const created = await subject.create({
         ownerId: terminal.ownerId,
@@ -375,7 +386,7 @@ describe('TmuxTerminalRuntime with no private server', () => {
 
   it.each(ABSENT)('should list no terminals when tmux says %s', async stderr => {
     // Arrange
-    const subject = new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }]));
+    const subject = new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }]), Date.now, plainShell);
 
     // Act + Assert
     should(await subject.list()).deepEqual([]);
@@ -383,7 +394,7 @@ describe('TmuxTerminalRuntime with no private server', () => {
 
   it.each(ABSENT)('should treat closing a terminal as done when tmux says %s', async stderr => {
     // Act + Assert — the server's absence took the terminal with it.
-    await new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }])).kill(terminal);
+    await new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }]), Date.now, plainShell).kill(terminal);
   });
 
   it('should keep a socket it may not open as an error, never as an empty listing', async () => {
@@ -392,11 +403,11 @@ describe('TmuxTerminalRuntime with no private server', () => {
     const stderr = 'error connecting to /tmp/fy-home/tmux.sock (Permission denied)';
 
     // Act + Assert
-    await should(new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }])).list()).be.rejectedWith(
-      /could not list terminal sessions: error connecting to .*Permission denied/u,
-    );
     await should(
-      new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }])).kill(terminal),
+      new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }]), Date.now, plainShell).list(),
+    ).be.rejectedWith(/could not list terminal sessions: error connecting to .*Permission denied/u);
+    await should(
+      new TmuxTerminalRuntime(new FakeTmux([{ code: 1, stdout: '', stderr }]), Date.now, plainShell).kill(terminal),
     ).be.rejectedWith(/could not close terminal/u);
   });
 
@@ -406,11 +417,99 @@ describe('TmuxTerminalRuntime with no private server', () => {
     if (executable === null) throw new Error('tmux is required for terminal integration coverage');
     const home = await mkdtemp(join(tmpdir(), 'fy-term-absent-'));
     try {
-      const subject = new TmuxTerminalRuntime(new BunTmuxProcess(executable, join(home, 'never-started.sock')));
+      const subject = new TmuxTerminalRuntime(
+        new BunTmuxProcess(executable, join(home, 'never-started.sock')),
+        Date.now,
+        plainShell,
+      );
 
       // Act + Assert
       should(await subject.list()).deepEqual([]);
     } finally {
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('TmuxTerminalRuntime login shell', () => {
+  const input = {
+    ownerId: terminal.ownerId,
+    id: terminal.id,
+    title: terminal.title,
+    cwd: terminal.root,
+    size: { cols: 100, rows: 30 },
+  };
+
+  it('should start the resolved shell as a login shell instead of /bin/sh', async () => {
+    // Arrange
+    const fake = new FakeTmux([ok()]);
+    const subject = new TmuxTerminalRuntime(fake, Date.now, { shell: async () => '/usr/bin/zsh' });
+
+    // Act
+    await subject.create(input);
+
+    // Assert — the program tmux execs is the argv right after the size flags, before the first `;`.
+    const argv = fake.received[0] ?? [];
+    should(argv.slice(argv.indexOf('30') + 1, argv.indexOf(';'))).deepEqual(['/usr/bin/zsh', '-l']);
+    should(argv).not.containEql('/bin/sh');
+  });
+
+  it("should run the resolved shell in the real pane, with -l, in the terminal's directory", async () => {
+    // Arrange — a stand-in shell that records how it was launched, then becomes a plain shell.
+    const executable = Bun.which('tmux');
+    if (executable === null) throw new Error('tmux is required for terminal integration coverage');
+    const home = await mkdtemp(join(tmpdir(), 'fy-term-shell-'));
+    const marker = join(home, 'launched');
+    const stand = join(home, 'owner-shell');
+    await writeFile(stand, `#!/bin/sh\nprintf '%s|%s|%s\\n' "$0" "$*" "$PWD" > '${marker}'\nexec /bin/sh\n`);
+    await chmod(stand, 0o755);
+    const tmux = new BunTmuxProcess(executable, join(home, 'tmux.sock'));
+    const subject = new TmuxTerminalRuntime(tmux, Date.now, { shell: async () => stand });
+    try {
+      // Act
+      await subject.create({ ...input, cwd: home, size: { cols: 60, rows: 8 } });
+      let launched = '';
+      for (let attempt = 0; attempt < 100 && launched === ''; attempt += 1) {
+        launched = await readFile(marker, 'utf8').catch(() => '');
+        if (launched === '') await Bun.sleep(20);
+      }
+
+      // Assert
+      should(launched.trim()).equal(`${stand}|-l|${home}`);
+    } finally {
+      await tmux.execute(['kill-server']).catch(() => undefined);
+      await rm(home, { recursive: true, force: true });
+    }
+  });
+
+  it('should open a real bash as a login shell, and still run a command typed into it', async () => {
+    // Arrange — bash is the shell the owner's rc files are most likely written for; the command is typed
+    // into the pane exactly as `terminal_open` with a `command` does, so it must not depend on the shell.
+    const executable = Bun.which('tmux');
+    const bash = Bun.which('bash');
+    if (executable === null || bash === null) throw new Error('tmux and bash are required for terminal coverage');
+    const home = await mkdtemp(join(tmpdir(), 'fy-term-bash-'));
+    const tmux = new BunTmuxProcess(executable, join(home, 'tmux.sock'));
+    const subject = new TmuxTerminalRuntime(tmux, Date.now, { shell: async () => bash });
+    try {
+      const created = await subject.create({ ...input, cwd: home, size: { cols: 80, rows: 8 } });
+
+      // Act
+      await subject.write(
+        created,
+        new TextEncoder().encode("PS1='$ '; shopt -q login_shell && echo login-yes; echo typed-$((6*7))\r"),
+      );
+      let text = await subject.text(created, 20);
+      for (let attempt = 0; attempt < 100 && !text.includes('typed-42'); attempt += 1) {
+        await Bun.sleep(20);
+        text = await subject.text(created, 20);
+      }
+
+      // Assert
+      should(text).containEql('login-yes');
+      should(text).containEql('typed-42');
+    } finally {
+      await tmux.execute(['kill-server']).catch(() => undefined);
       await rm(home, { recursive: true, force: true });
     }
   });

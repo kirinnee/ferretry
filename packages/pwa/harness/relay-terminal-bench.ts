@@ -551,7 +551,7 @@ const tmuxExecutable = Bun.which('tmux');
 if (tmuxExecutable === null) throw new Error('tmux is not on PATH');
 const tmux = new BunTmuxProcess(tmuxExecutable, tmuxSocket);
 const service = new ManagedTerminalService(
-  new TmuxTerminalRuntime(tmux),
+  new TmuxTerminalRuntime(tmux, () => Date.now(), { shell: async () => '/bin/sh' }),
   { resolve: async reference => (reference === SESSION_ID ? { id: SESSION_ID, cwd: root } : undefined) },
   { now: () => Date.now() },
   { next: () => crypto.randomUUID().replaceAll('-', '').slice(0, 12) },

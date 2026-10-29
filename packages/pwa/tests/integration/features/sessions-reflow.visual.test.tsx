@@ -73,7 +73,12 @@ const sources: readonly MachineSource[] = [
           { agent: LONG_AGENT, model: 'claude-opus-5-5', mode: 'interactive' },
           { status: 'running' },
         ),
-        row('mvgrig6k-77aa1100', LONG_PATH, { agent: 'claude-kirin', model: 'claude-opus-5-5' }),
+        row(
+          'mvgrig6k-77aa1100',
+          LONG_PATH,
+          { agent: 'claude-kirin', model: 'claude-opus-5-5' },
+          { attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: ago(2) } },
+        ),
         row('mvheb7uf-08a09950', LONG_PATH, { agent: 'claude-kirin', model: 'claude-opus-5-5' }, { status: 'running' }),
       ],
       byId: new Map(),

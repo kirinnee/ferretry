@@ -202,6 +202,29 @@ const scrollTo = async (tab: Page, selector: string, top: number): Promise<numbe
   return landed;
 };
 
+/**
+ * The session a reader can see in the list where it sits now — the row nearest the middle, wholly on
+ * screen. A click on a row off screen makes Playwright scroll it into view first, and that scroll is
+ * the reader's last position as far as the memory can tell: whether it is filed before the click
+ * navigates is a race between the next frame and the click, and a test that lost it asked for the
+ * wrong offset back (desktop, offset 1234: `s-20` is 850px below the fold and centred at 2523).
+ */
+const rowOnScreen = async (tab: Page): Promise<string> =>
+  await tab.$eval(SCROLLER, node => {
+    const box = node.getBoundingClientRect();
+    const middle = (box.top + box.bottom) / 2;
+    const [nearest] = [...node.querySelectorAll('a[href*="/session/"]')]
+      .map(row => {
+        const rect = row.getBoundingClientRect();
+        const onScreen = rect.top >= box.top && rect.bottom <= box.bottom;
+        return { href: row.getAttribute('href') ?? '', onScreen, off: Math.abs((rect.top + rect.bottom) / 2 - middle) };
+      })
+      .filter(row => row.onScreen)
+      .sort((a, b) => a.off - b.off);
+    if (nearest === undefined) throw new Error('no session row is wholly on screen in the list');
+    return nearest.href.slice(nearest.href.lastIndexOf('/') + 1);
+  });
+
 /** Waits for a scroller to sit at `top` (±1), and answers where it settled. */
 const settlesAt = async (tab: Page, selector: string, top: number): Promise<number> => {
   await tab
@@ -387,8 +410,8 @@ describe('navigation without reloads, and the session cache, in the real shell',
         const daemon = await boot(tab);
         const listTop = await scrollTo(tab, SCROLLER, 1_234);
 
-        // Act: the list, out to a session and Back, then reloaded.
-        await tab.click(listRow('s-20'));
+        // Act: the list, out to a session on screen and Back, then reloaded.
+        await tab.click(listRow(await rowOnScreen(tab)));
         await tab.waitForSelector('.fy-transcript');
         await tab.goBack();
         await tab.waitForSelector(listRow('s-03'));

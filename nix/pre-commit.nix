@@ -63,7 +63,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Non-trusted action SHA pins";
       entry = validator "scripts/validate/action-pins.sh non-trusted";
-      files = "^(\\.github/workflows/.*\\.ya?ml|config/action-trust\\.json)$";
+      files = "^(\\.github/(workflows|actions)/.*\\.ya?ml|config/action-trust\\.json)$";
       pass_filenames = false;
       language = "system";
     };
@@ -72,7 +72,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Trusted action major pins";
       entry = validator "scripts/validate/action-pins.sh trusted";
-      files = "^(\\.github/workflows/.*\\.ya?ml|config/action-trust\\.json)$";
+      files = "^(\\.github/(workflows|actions)/.*\\.ya?ml|config/action-trust\\.json)$";
       pass_filenames = false;
       language = "system";
     };
@@ -124,6 +124,18 @@ pre-commit-lib.run {
       name = "Composition-root invocation";
       entry = validator "scripts/validate/composition-invocation.sh";
       files = "^(packages/[^/]+/bin/.*\\.ts|packages/[^/]+/src/.*\\.ts|scripts/validate/composition-invocation\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # A pull request runs Containment, Sandbox Shell (Safari) and the macos-15 Harness Contract only when
+    # their inputs change. The lists live in scripts/ci/macos-relevance.sh; this holds them to the
+    # scripts and test files those jobs actually run, and ci.yaml to the decision.
+    a-macos-relevance = {
+      enable = true;
+      name = "macOS job relevance";
+      entry = validator "scripts/validate/macos-relevance.sh";
+      files = "^(scripts/(ci/(macos-relevance|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/workflows/ci\\.yaml|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
       pass_filenames = false;
       language = "system";
     };

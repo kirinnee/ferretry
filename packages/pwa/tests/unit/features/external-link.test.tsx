@@ -437,7 +437,7 @@ describe('ExternalLink — Your computer’s default browser', () => {
     }
   });
 
-  it('opens a normal new tab, silently, when the daemon refuses or cannot be reached', async () => {
+  it('opens a normal new tab when the daemon refuses or cannot be reached', async () => {
     const opener = fakeOpener(false);
     const debug = console.debug;
     const logged: unknown[][] = [];
@@ -463,6 +463,113 @@ describe('ExternalLink — Your computer’s default browser', () => {
       console.debug = debug;
       await view.unmount();
     }
+  });
+
+  describe('says so when it cannot honour the setting', () => {
+    const withNotice = (
+      opener: LinkOpener,
+      computer: ComputerLinkPort | undefined,
+      notify: (message: string) => void,
+      children: ReactNode,
+    ) => (
+      <LinkBehaviourProvider
+        notify={notify}
+        openLinksIn="computer"
+        opener={opener}
+        {...(computer === undefined ? {} : { computer })}
+      >
+        {children}
+      </LinkBehaviourProvider>
+    );
+
+    it('tells the reader why a failed hand-off opened a tab, without the address', async () => {
+      const opener = fakeOpener(false);
+      const told: string[] = [];
+      const debug = console.debug;
+      console.debug = () => {};
+      const view = await mount(
+        withNotice(
+          opener,
+          async () => {
+            throw new Error('forbidden');
+          },
+          message => void told.push(message),
+          <ExternalLink href={`${DOCS}?token=SECRET`}>Docs</ExternalLink>,
+        ),
+      );
+      try {
+        await interact(() => must(view.container.querySelector('a'), 'the link').click());
+        await waitForTabs(opener, 1);
+        expect(told).toHaveLength(1);
+        expect(told[0]).toContain('forbidden');
+        expect(told[0]).not.toContain('SECRET');
+      } finally {
+        console.debug = debug;
+        await view.unmount();
+      }
+    });
+
+    it('tells the reader why it opened here when no local daemon is connected', async () => {
+      const opener = fakeOpener(false);
+      const told: string[] = [];
+      const view = await mount(
+        withNotice(
+          opener,
+          undefined,
+          message => void told.push(message),
+          <ExternalLink href={DOCS}>Docs</ExternalLink>,
+        ),
+      );
+      try {
+        await interact(() => must(view.container.querySelector('a'), 'the link').click());
+        expect(prevented).toEqual([false]);
+        expect(told).toHaveLength(1);
+        expect(told[0]).toContain('directly');
+      } finally {
+        await view.unmount();
+      }
+    });
+
+    it('still tells the reader when the iOS app hands the link to Safari instead', async () => {
+      const opener = fakeOpener(true);
+      const told: string[] = [];
+      const view = await mount(
+        withNotice(
+          opener,
+          undefined,
+          message => void told.push(message),
+          <ExternalLink href={DOCS}>Docs</ExternalLink>,
+        ),
+      );
+      try {
+        await interact(() => must(view.container.querySelector('a'), 'the link').click());
+        expect(opener.handedOff).toEqual([`x-safari-${DOCS}`]);
+        expect(told).toHaveLength(1);
+      } finally {
+        await view.unmount();
+      }
+    });
+
+    it('says nothing when the click was never the setting’s to take', async () => {
+      const opener = fakeOpener(false);
+      const told: string[] = [];
+      const view = await mount(
+        withNotice(
+          opener,
+          undefined,
+          message => void told.push(message),
+          <ExternalLink href={DOCS}>Docs</ExternalLink>,
+        ),
+      );
+      try {
+        await interact(() =>
+          must(view.container.querySelector('a'), 'the link').dispatchEvent(modifiedClick({ metaKey: true })),
+        );
+        expect(told).toEqual([]);
+      } finally {
+        await view.unmount();
+      }
+    });
   });
 
   it('is the browser’s own new tab when no local daemon is connected', async () => {

@@ -8,6 +8,11 @@
  * out: it calls `onDraft` once with the COMPLETE next draft and caret, placed where the caret
  * is at THAT moment (so typing while the box was open is preserved). `discard()` drops it.
  *
+ * `settings.afterDictation === 'insert'` skips the wait: when the cleaned text is ready it goes
+ * through that same `insert` path once, and `onInserted` hands the host the draft before and
+ * after so it can offer Undo. A take that failed to clean up, or came back empty, is still parked
+ * for review with its reason — an automatic insert never swallows a problem.
+ *
  * ENGINES CHOSEN BY THE PERSON (`settings.engine`), none a fallback for
  * another:
  *
@@ -116,6 +121,12 @@ export interface DictationDraftResult {
   readonly text: string;
   /** Where the caret should sit afterwards. */
   readonly caret: number;
+}
+
+/** A take that went in without being reviewed first: the draft as it was, and as it is now. */
+export interface DictationAutoInsertion {
+  readonly before: DictationDraftResult;
+  readonly after: DictationDraftResult;
 }
 
 /**
@@ -264,6 +275,11 @@ export interface UseDictationOptions {
   /** Without a live selection, recognised words append at the end. */
   readonly selectionRef?: { readonly current: SelectionLike | null };
   onDraft(result: DictationDraftResult): void;
+  /**
+   * Called right after `onDraft` when `settings.afterDictation` is `insert` put a take into the draft
+   * without a review, so the host can offer one-step Undo. Never called for a reviewed Insert.
+   */
+  onAutoInserted?(insertion: DictationAutoInsertion): void;
   readonly settings: SttSettings;
   /** Browser recognition and visibility surface; injected by tests/harness. */
   readonly recognition?: BrowserRecognitionProvider;
@@ -492,15 +508,32 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
     setPhase('idle');
   }, [disabled, invalidate, settleLog]);
 
-  const commit = useCallback((transcript: string) => {
+  const commit = useCallback((transcript: string): DictationAutoInsertion | null => {
     const spoken = transcript.trim();
-    if (spoken.length === 0) return;
+    if (spoken.length === 0) return null;
     const current = optionsRef.current;
     const [start, end] = readSelection(current.selectionRef?.current, current.draft);
     const result = insertTranscript(current.draft, start, end, spoken);
     // THE ONLY OUTPUT.
     current.onDraft(result);
+    return { before: { text: current.draft, caret: start }, after: result };
   }, []);
+
+  /** Put the take's text in the draft and settle the log: what Insert does, whoever pressed it. */
+  const commitTake = useCallback(
+    (text: string): DictationAutoInsertion | null => {
+      const monotonic = optionsRef.current.monotonic ?? defaultMonotonic;
+      const began = monotonic();
+      const insertion = commit(text);
+      const insertMs = monotonic() - began;
+      const readyAt = pendingTimelineRef.current?.readyAt ?? began;
+      settleLog('inserted', text, { insertMs, reviewMs: began - readyAt });
+      setReview(null);
+      setPhase('idle');
+      return insertion;
+    },
+    [commit, settleLog],
+  );
 
   /**
    * Recent conversation for the enhancer, or nothing. Never an error. On-device correction mines
@@ -715,6 +748,14 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           ...(debugId === undefined ? {} : { debugId }),
           readyAt: monotonic(),
         };
+        setLive(NO_LIVE_WORDS);
+        // Only a clean, non-empty take goes in unseen; a cleanup failure or an empty result is parked
+        // for review so its reason is read and no words are lost.
+        if (current.settings.afterDictation === 'insert' && enhancementFailure === null && cleaned.length > 0) {
+          const insertion = commitTake(cleaned);
+          if (insertion !== null) optionsRef.current.onAutoInserted?.(insertion);
+          return;
+        }
         setReview({
           id: reviewIdRef.current,
           raw: raw.trim(),
@@ -722,7 +763,6 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
           ...(enhancementFailure === null ? {} : { enhancementError: enhancementFailure }),
           ...(debugId === undefined ? {} : { debugId }),
         });
-        setLive(NO_LIVE_WORDS);
         setPhase('review');
       } catch (failure) {
         if (!isCurrent(token)) return;
@@ -744,7 +784,7 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
         if (isCurrent(token)) controllerRef.current = null;
       }
     },
-    [enhanceTranscript, engine, isCurrent, releaseMeter],
+    [commitTake, enhanceTranscript, engine, isCurrent, releaseMeter],
   );
 
   const start = useCallback(() => {
@@ -890,16 +930,9 @@ export function useDictation(options: UseDictationOptions): DictationHandle {
   const insert = useCallback(
     (text: string) => {
       if (phase !== 'review') return;
-      const monotonic = optionsRef.current.monotonic ?? defaultMonotonic;
-      const began = monotonic();
-      commit(text);
-      const insertMs = monotonic() - began;
-      const readyAt = pendingTimelineRef.current?.readyAt ?? began;
-      settleLog('inserted', text, { insertMs, reviewMs: began - readyAt });
-      setReview(null);
-      setPhase('idle');
+      commitTake(text);
     },
-    [commit, phase, settleLog],
+    [commitTake, phase],
   );
 
   const dismissError = useCallback(() => {

@@ -3,6 +3,7 @@ import should from 'should';
 import { DEFAULT_DICTATION_SHORTCUT } from '../../../src/features/settings/dictation-shortcut.ts';
 import { ON_DEVICE_MODEL_IDS } from '../../../src/lib/stt/model-catalog.ts';
 import {
+  AFTER_DICTATION_OPTIONS,
   DEFAULT_GROQ_ENHANCEMENT_MODEL,
   DEFAULT_STT_SETTINGS,
   ENHANCEMENT_PROVIDERS,
@@ -128,7 +129,73 @@ describe('parseSttSettings', () => {
       shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
       engine: 'parakeet',
       liveWordsOptIn: false,
+      afterDictation: 'review',
     });
+  });
+
+  it('reviews first by default, and offers exactly the two choices with their labels', () => {
+    should(DEFAULT_STT_SETTINGS.afterDictation).equal('review');
+    should(parseSttSettings(null).afterDictation).equal('review');
+    should(AFTER_DICTATION_OPTIONS.map(option => [option.id, option.label])).deepEqual([
+      ['review', 'Review first'],
+      ['insert', 'Insert straight away'],
+    ]);
+  });
+
+  it('reads the insert choice back, and falls back to review for anything else', () => {
+    should(parseSttSettings(stored({ afterDictation: 'insert' })).afterDictation).equal('insert');
+    should(parseSttSettings(stored({ afterDictation: 'review' })).afterDictation).equal('review');
+    for (const bad of ['send', 'INSERT', '', 1, true, null, ['insert']]) {
+      should(parseSttSettings(stored({ afterDictation: bad })).afterDictation).equal('review');
+    }
+  });
+
+  it('migrates a v1 payload: every earlier choice is kept and the new one defaults to review', () => {
+    const settings = parseSttSettings(
+      JSON.stringify({
+        v: 1,
+        enabled: false,
+        enhancement: false,
+        dictionary: ['kteam = kteem'],
+        userContext: 'jargon',
+        enhancementProvider: 'cerebras',
+        enhancementModel: 'gpt-oss-120b',
+        shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
+        engine: 'browser',
+        liveWordsOptIn: true,
+      }),
+    );
+
+    should(settings).deepEqual({
+      v: STT_SETTINGS_VERSION,
+      enabled: false,
+      enhancement: false,
+      dictionary: ['kteam = kteem'],
+      userContext: 'jargon',
+      enhancementProvider: 'cerebras',
+      enhancementModel: 'gpt-oss-120b',
+      shortcut: { code: 'KeyD', key: 'd', modifiers: ['Alt'] },
+      engine: 'browser',
+      liveWordsOptIn: true,
+      afterDictation: 'review',
+    });
+  });
+
+  it('rewrites a v1 payload at the current version on the next save, without losing it', () => {
+    should(STT_SETTINGS_VERSION).equal(2);
+    const storage = new MemoryStorage(JSON.stringify({ v: 1, engine: 'parakeet', dictionary: ['tmux'] }));
+    const store = new SttSettingsStore(storage);
+    should(store.get().engine).equal('parakeet');
+    should(store.get().afterDictation).equal('review');
+
+    store.update({ afterDictation: 'insert' });
+
+    const written = JSON.parse(storage.writes.at(-1) ?? '{}') as Record<string, unknown>;
+    should(written.v).equal(2);
+    should(written.afterDictation).equal('insert');
+    should(written.engine).equal('parakeet');
+    should(written.dictionary).deepEqual(['tmux']);
+    should(new SttSettingsStore(new MemoryStorage(storage.getItem())).get().afterDictation).equal('insert');
   });
 
   it('keeps live words OFF by default, and ignores the old default an earlier build left behind', () => {
@@ -160,6 +227,8 @@ describe('parseSttSettings', () => {
 
   it('resets on a version this build has never seen, rather than half-reading it', () => {
     should(parseSttSettings(JSON.stringify({ v: 4, enabled: false }))).deepEqual(DEFAULT_STT_SETTINGS);
+    should(parseSttSettings(JSON.stringify({ v: 3, afterDictation: 'insert' }))).deepEqual(DEFAULT_STT_SETTINGS);
+    should(parseSttSettings(JSON.stringify({ v: '2', afterDictation: 'insert' }))).deepEqual(DEFAULT_STT_SETTINGS);
     should(parseSttSettings(JSON.stringify({ enabled: false }))).deepEqual(DEFAULT_STT_SETTINGS);
   });
 

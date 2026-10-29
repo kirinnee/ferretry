@@ -38,9 +38,11 @@
  */
 
 import type { AttentionId } from '@ferretry/protocol';
-import { type MouseEvent, memo, type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ComponentProps, type MouseEvent, memo, type ReactNode, useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ExternalLink } from '../features/browser/external-link.tsx';
+import type { ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import { type CodeNode, decoratedCodeNodes } from '../lib/code-span-references.ts';
 import {
   FY_RENDER_FENCE_ATTRIBUTE,
@@ -48,7 +50,6 @@ import {
   parseFyRender,
   remarkFyRenderFences,
 } from '../lib/fy-render.ts';
-import { ExternalLink } from '../features/browser/external-link.tsx';
 import { fenceLanguage, highlightToHtml } from '../lib/highlight.ts';
 import { LOCATION_FENCE_LANGUAGE, parseLocationBlock } from '../lib/location-share.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
@@ -75,6 +76,7 @@ import { remarkTableLabels } from '../lib/remark-table-labels.ts';
 import { trustedHighlight } from '../lib/trusted-types.ts';
 import { FyRenderBlock } from './fy-render-block.tsx';
 import { LocationChip } from './location-chip.tsx';
+import { CopyableFence, CopyableSpan } from './markdown-copy.tsx';
 import { MarkdownTable } from './markdown-table.tsx';
 
 /**
@@ -172,6 +174,17 @@ export function referenceHasTrustedOrigin(
   return revalidateReference(reference, resolvers);
 }
 
+type CodeProps = ComponentProps<'code'> & { readonly node?: unknown };
+
+const fenceText = (node: unknown): string => {
+  const text = (value: unknown): string => {
+    const v = value as { readonly value?: unknown; readonly children?: readonly unknown[] };
+    if (typeof v.value === 'string') return v.value;
+    return (v.children ?? []).map(text).join('');
+  };
+  return text(node).replace(/\n$/u, '');
+};
+
 export interface MarkdownProps {
   readonly text: string;
   readonly className?: string;
@@ -186,6 +199,8 @@ export interface MarkdownProps {
    * Exactly one production call site sets it, and a unit test holds it to one.
    */
   readonly enableFyRender?: boolean;
+  /** Puts a Copy button on every code fence and inline code span, writing through this clipboard. Off by default. */
+  readonly copyable?: ClipboardWriter;
   /**
    * Reads a workspace file for a `fy-render` media block's `src: @path`, as the reader. Only
    * meaningful where `enableFyRender` is set; without it a workspace `src:` shows a card saying the
@@ -223,6 +238,7 @@ export const Markdown = memo(function Markdown({
   text,
   className,
   enableFyRender = false,
+  copyable,
   readWorkspaceMedia,
   agentReferenceResolver,
   taskReferenceResolver,
@@ -386,6 +402,18 @@ export const Markdown = memo(function Markdown({
       );
     });
 
+  const withCopy =
+    (render: (props: CodeProps) => ReactNode) =>
+    (props: CodeProps): ReactNode => {
+      const element = render(props);
+      if (copyable === undefined) return element;
+      return (
+        <CopyableSpan text={String(props.children).replace(/\n$/u, '')} write={copyable}>
+          {element}
+        </CopyableSpan>
+      );
+    };
+
   return (
     <div className={`md min-w-0 max-w-full ${className ?? ''}`}>
       <ReactMarkdown
@@ -422,7 +450,7 @@ export const Markdown = memo(function Markdown({
           // roles here (plus `scope="col"` on headers) preserve the
           // header-to-cell association for a screen reader across that switch; on
           // desktop they are the elements' implicit roles, so they are inert.
-          code: ({ node: _node, className: fenceClassName, children, ...rest }) => {
+          code: withCopy(({ node: _node, className: fenceClassName, children, ...rest }) => {
             const language = fenceLanguage(fenceClassName);
             const source = language ? String(children).replace(/\n$/u, '') : '';
             const html = language ? highlightToHtml(source, language) : null;
@@ -474,7 +502,7 @@ export const Markdown = memo(function Markdown({
                 dangerouslySetInnerHTML={{ __html: trustedHighlight(html) }}
               />
             );
-          },
+          }),
           // THE ONE PLACE AN ILLUSTRATION CAN APPEAR, and it is a replacement
           // rather than an addition: a matched fence renders as the block INSTEAD
           // of the `<pre>`, because `<figure>` inside `<pre>` is not a tree a
@@ -492,7 +520,13 @@ export const Markdown = memo(function Markdown({
             const locationBody = locationFenceBody(node);
             const fix = locationBody === null ? null : parseLocationBlock(locationBody);
             if (fix !== null) return <LocationChip fix={fix} />;
-            return <pre {...rest}>{children}</pre>;
+            const fence = <pre {...rest}>{children}</pre>;
+            if (copyable === undefined) return fence;
+            return (
+              <CopyableFence text={fenceText(node)} write={copyable}>
+                {fence}
+              </CopyableFence>
+            );
           },
           // A phone reads a table as cards or as the real table, its own choice (`markdown-table.tsx`).
           table: ({ node: _node, ...rest }) => <MarkdownTable {...rest} />,

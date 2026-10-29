@@ -177,15 +177,19 @@ export function activityLine(view: SessionView): ActivityLine {
  * The Sessions page's "Needs you": every session with open Attention, newest `latestAt` first, lifted
  * out of its project group (a row is listed once, never in both), and the groups that are left. A group
  * whose every row was lifted is dropped rather than left as an empty heading. The status-based
- * `needsYou()` does not move a row here: it stays the quiet "waiting" word (sessions-bar-model.ts).
+ * Only open Attention moves a row here, and `grouped` (the device setting) false lifts nothing.
  */
-export function pullDashboardNeedsYou(groups: readonly SessionGroup[]): {
+export function pullDashboardNeedsYou(
+  groups: readonly SessionGroup[],
+  grouped = true,
+): {
   readonly needsYou: readonly SessionView[];
   readonly groups: readonly SessionGroup[];
 } {
   const { waiting } = pullNeedsYou(
     groups.flatMap(group => group.rows),
     view => view,
+    grouped,
   );
   if (waiting.length === 0) return { needsYou: [], groups };
   const lifted = new Set(waiting);

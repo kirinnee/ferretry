@@ -17,6 +17,7 @@ import { act } from 'react';
 const registered = globalThis as typeof globalThis & {
   __ferretryDomRegistered?: boolean;
   __ferretryMutationObserverPatched?: boolean;
+  __ferretryNodeInspectPatched?: boolean;
 };
 if (!registered.__ferretryDomRegistered) {
   GlobalRegistrator.register({ url: 'https://pwa.example.test/' });
@@ -74,6 +75,35 @@ if (!registered.__ferretryMutationObserverPatched) {
     }
   };
   registered.__ferretryMutationObserverPatched = true;
+}
+
+/**
+ * A failed `expect(node).toBeNull()` prints the node it received, and Bun's
+ * printer walks every own property: a connected happy-dom node reaches its
+ * parent, the document, the window and React's fibers, so one failed assertion
+ * printed for minutes, held the event loop past every test timeout, and grew
+ * past 2.8 GB until CI's 4 GB runner killed the whole group with no report.
+ * Every node prints as its text and then its markup instead, each capped,
+ * which is also what a reader of the failure wants to see.
+ */
+export const INSPECTED_NODE_LIMIT = 600;
+
+const capped = (shown: string): string =>
+  shown.length > INSPECTED_NODE_LIMIT
+    ? `${shown.slice(0, INSPECTED_NODE_LIMIT)}… (${shown.length - INSPECTED_NODE_LIMIT} more characters)`
+    : shown;
+
+if (!registered.__ferretryNodeInspectPatched) {
+  Object.defineProperty(Node.prototype, Symbol.for('nodejs.util.inspect.custom'), {
+    configurable: true,
+    value(this: Node): string {
+      const text = JSON.stringify(capped(this.textContent ?? ''));
+      return this instanceof Element
+        ? `${this.constructor.name} ${text} ${capped(this.outerHTML)}`
+        : `${this.constructor.name} ${text}`;
+    },
+  });
+  registered.__ferretryNodeInspectPatched = true;
 }
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;

@@ -14,8 +14,8 @@ import {
   type WardenSpawnFacts,
   type WardenSpawnProvenance,
   type WardenSpawnRequest,
-  WardenSweepService,
   type WardenSweepPorts,
+  WardenSweepService,
   type WardenSweepSettings,
   wardenEscalationSourceRef,
 } from '../../../src/lib/warden/index.ts';
@@ -28,15 +28,15 @@ export const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
 /** Jev, sure the ferret is healthy. */
 export const JEV_SKIP: TriageDecision = {
-  verdict: 'skip',
+  verdict: 'leave',
   confidence: 0.96,
   model: 'jev-latest',
   inputTokens: 500,
   latencyMs: 90,
   costUsd: 0.001,
 };
-/** Jev, wanting an investigation. */
-export const JEV_INVESTIGATE: TriageDecision = { ...JEV_SKIP, verdict: 'investigate', confidence: 0.9 };
+/** Jev, unsure: the flag is handed on. */
+export const JEV_INVESTIGATE: TriageDecision = { ...JEV_SKIP, verdict: 'unsure', confidence: 0.9 };
 export const at = (minutes: number): string => new Date(NOW + minutes * 60_000).toISOString();
 
 const settings = (overrides: Partial<WardenSweepSettings> = {}): WardenSweepSettings => ({
@@ -142,6 +142,8 @@ export function harness(
     readonly redact?: (text: string) => string;
     /** Make one remedy throw. */
     readonly remedyFails?: string;
+    /** How many leftover browsers a close finds; one by default. */
+    readonly closeLeftoverBrowsers?: (sessionId: string) => Promise<number>;
     readonly cost?: (wardenId: string) => Promise<number | undefined>;
     readonly feedBoards?: Readonly<Record<string, AttentionBoardInput | undefined>>;
     /** The clock, for the tests that let time pass. Fixed at noon otherwise. */
@@ -194,6 +196,10 @@ export function harness(
       restart: async sessionId => remedy('restart', sessionId, ''),
       stop: async (sessionId, reason) => remedy('stop', sessionId, reason),
       failover: async (sessionId, agent) => remedy('failover', sessionId, agent),
+      closeLeftoverBrowsers: async sessionId => {
+        remedy('close_leftover', sessionId, '');
+        return await (options.closeLeftoverBrowsers?.(sessionId) ?? Promise.resolve(1));
+      },
     },
     costs: { costUsd: async wardenId => await (options.cost?.(wardenId) ?? Promise.resolve(undefined)) },
     feed: {

@@ -70,11 +70,20 @@ names unambiguous:
   their schemas, lifecycles, or features, and none should be inferred from their appearance in
   this list.
 - Within the **warden**: a **flag** is what the free sweep finds; **triage** decides what a flag
-  leads to (`rules`, `llm` or `jev`); the **Jev guard** only ever answers _skip_ or _investigate_;
-  a **blessing** is a skip or a cleared verdict holding one anomaly kind quiet for a while; an
-  **investigation** is the assigned warden whose **verdict** is the only thing that acts, and an act
-  the owner has not allowed is **held**. UI copy may call a session a **ferret**; its id stays a
-  session id.
+  leads to (`rules`, `llm` or `jev`); **Jev** is the **first responder**: it answers _leave_, one
+  **act** (_nudge_, _resume_, _restart_, _failover_, _stop_) or _unsure_, and an act is carried out alone
+  only at or above that act's **bar** (`jevActs`) and when the owner allows it; everything else is
+  **handed on** — to an investigation, or to the owner's _Needs you_ — and Jev gets **one try** per
+  subject;
+  a **blessing** is a leave or a cleared verdict holding one anomaly kind quiet for a while; a flag's
+  **subject** is which episode of trouble it is (its turn and when it began, or for a stuck command
+  that process), and the
+  **backoff** is how long a subject already looked at waits before it is looked at again; an
+  **investigation** is the assigned warden whose **verdict** acts on a ferret through the same remedies
+  Jev's acts use, and an act the owner has not allowed is **held**. A **tool command** is what a harness runs through a
+  shell for the agent; the harness's own **helpers** (`fy mcp serve`, MCP and language servers) never
+  are. A **leftover** is a browser a finished ferret left running, closed by rule. UI copy may call a
+  session a **ferret**; its id stays a session id.
 
 A name that carries no pre-existing baggage removes ambiguity: when a word has exactly one meaning
 in the codebase, misunderstanding disappears.

@@ -81,7 +81,7 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
         with:
           cache: nix
-      - uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
+      - uses: ./.github/actions/install-nix
       # ADVISORY: `continue-on-error` on this STEP, not the job. On a job it still paints the job's check
       # red; on the step the job stays green while the step's own result, the job summary line, a warning
       # annotation and the `E2E Journeys` tally record every failure. Removed when the tier becomes required.

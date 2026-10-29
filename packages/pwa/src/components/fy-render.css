@@ -32,6 +32,28 @@
   object-fit: contain;
 }
 
+/* A COMPILED DIAGRAM IS SHOWN AT A READABLE SIZE, not squeezed to the column. Its width is set inline from
+   its own viewBox (`fy-render-mermaid-layout.ts`), so neither the column's measure nor the picture height
+   ceiling above applies: a tall top-to-bottom diagram scrolls with the page, and one wider than the column
+   pans sideways INSIDE its own box (the page itself never scrolls sideways). The box takes the pan so a
+   swipe along the diagram is not mistaken for a swipe along the transcript. */
+.fy-render-diagram {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+}
+
+.fy-render-diagram > .fy-render-image[data-fy-render-sized='true'] {
+  max-width: none;
+  max-height: none;
+}
+
+.fy-render-diagram:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* A QUIET PLANE where a picture, a player or a first diagram will be, so the
    prose under it does not jump twice. The faintest surface the theme has. */
 .fy-render-placeholder {
@@ -371,6 +393,14 @@
   max-height: 100%;
 }
 
+/* A diagram in fullscreen takes the whole plane and pans in both axes when it is larger than it. `margin: auto`
+   rather than centring, because a flex item centred past its own start edge cannot be scrolled back to. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-diagram {
+  max-height: 100%;
+  margin: auto;
+  overflow: auto;
+}
+
 .fy-render-fullscreen .fy-render-frame {
   max-height: none;
   height: 100%;
@@ -548,6 +578,163 @@
 
 .fy-render[data-fy-render-fullscreen='true'] .fy-render-map-canvas {
   height: 100%;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+/* ---- chart -----------------------------------------------------------------
+   `type: chart` (`fy-render-chart.tsx`): a Chart.js canvas drawn in the page in the theme's own colours,
+   with its title, legend and step controls as page text around it. No surface of its own — it sits in
+   the column like a picture does. */
+.fy-render-chart {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+/* Every rule below is scoped under `.fy-render`: a chart sits in a transcript's `.md` column, whose
+   `.md ul`, `.md li`, `.md p` and `.md table` rules would otherwise outrank a bare class — measured: a
+   legend grew list bullets and the screen-reader table painted over the canvas. */
+
+/* The title, clear of the corner tools that appear over its end on hover. */
+.fy-render .fy-render-chart-title {
+  margin: 0;
+  padding-inline-end: 64px;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+}
+
+/* The plot owns its height; Chart.js fills it (`maintainAspectRatio: false`) at any column width. */
+.fy-render-chart-plot {
+  position: relative;
+  width: 100%;
+  height: min(46dvh, 320px);
+  min-height: 200px;
+}
+
+.fy-render-chart-plot > canvas {
+  display: block;
+  max-width: 100%;
+}
+
+.fy-render-chart-reset {
+  position: absolute;
+  top: 4px;
+  left: 4px;
+}
+
+/* The legend: real toggle buttons, a swatch each. A hidden series keeps its place, struck through. */
+.fy-render .fy-render-chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.fy-render .fy-render-chart-legend > li {
+  margin: 0;
+}
+
+/* The numbers behind the picture, for a screen reader only: clipped to nothing, never `display: none`. */
+.fy-render .fy-render-chart-data {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  border: 0;
+  white-space: nowrap;
+}
+
+.fy-render-chart-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--target-floor);
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--fg-soft);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+
+.fy-render-chart-key[aria-pressed='false'] {
+  color: var(--faint);
+  text-decoration: line-through;
+}
+
+.fy-render-chart-key:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: 2px;
+}
+
+.fy-render-chart-swatch {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: var(--radius-xs);
+  background: var(--muted);
+}
+
+.fy-render-chart-key[aria-pressed='false'] .fy-render-chart-swatch {
+  opacity: 0.35;
+}
+
+/* Step-through: Previous, a slider, Next, and the step's own name. */
+.fy-render-chart-frames {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.fy-render-chart-frames .fy-render-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.fy-render-chart-slider {
+  flex: 1 1 120px;
+  min-width: 0;
+  min-height: var(--target-floor);
+  accent-color: var(--accent);
+}
+
+.fy-render-chart-step {
+  flex: 1 0 100%;
+  color: var(--fg-soft);
+  font-size: var(--text-sm);
+}
+
+.fy-render-chart-count {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+@media (min-width: 640px) {
+  .fy-render-chart-step {
+    flex: 0 1 auto;
+  }
+}
+
+/* Fullscreen: the plot takes the plane. */
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-chart {
+  flex: 1 1 auto;
+  align-self: stretch;
+}
+
+.fy-render[data-fy-render-fullscreen='true'] .fy-render-chart-plot {
+  height: auto;
   min-height: 0;
   flex: 1 1 auto;
 }

@@ -71,6 +71,7 @@ import {
   type FyRenderBlock as ParsedBlock,
   parseFyRenderSandboxMessage,
 } from '../lib/fy-render.ts';
+import type { MermaidThemeVariables } from '../lib/fy-render-palette.ts';
 
 /**
  * The static shell, served from this origin by the Pages deployment.
@@ -132,6 +133,17 @@ export interface FyRenderSandboxProps {
   readonly playing: boolean;
   readonly theme: 'dark' | 'light';
   /**
+   * Mermaid only: the page's palette, resolved from the theme tokens, and the key it is cached under.
+   * Sent as data with the render command; the shell admits only the shapes `fy-render-palette.ts` makes.
+   */
+  readonly palette?: { readonly key: string; readonly variables: MermaidThemeVariables };
+  /**
+   * Mermaid only: the text to compile, when it is not the authored payload verbatim (a left-to-right
+   * flowchart declared top-to-bottom for a narrow column). It is the same data through the same gates; a
+   * change of it is a new compile, so the caller keys the frame on it.
+   */
+  readonly diagramSource?: string;
+  /**
    * Mermaid handed back a compiled diagram. The caller owns validating it.
    *
    * `theme` is the direction the SHELL actually compiled with, echoed on the reply
@@ -140,7 +152,7 @@ export interface FyRenderSandboxProps {
    * recorded as the theme the diagram was drawn for — and the staleness check would
    * then agree with the page forever.
    */
-  readonly onCompiled: (svg: string, theme: FyRenderSandboxTheme) => void;
+  readonly onCompiled: (svg: string, theme: FyRenderSandboxTheme, palette: string) => void;
   /**
    * THE FIRST SUCCESS ACKNOWLEDGEMENT, and it exists so the reader is told.
    *
@@ -169,6 +181,8 @@ export function FyRenderSandbox({
   block,
   playing,
   theme,
+  palette,
+  diagramSource,
   onCompiled,
   onFailed,
   onRendered,
@@ -182,9 +196,9 @@ export function FyRenderSandbox({
    * which for Lottie means restarting the animation every time the transcript
    * repaints.
    */
-  const latest = useRef({ onCompiled, onFailed, onRendered, playing, theme });
+  const latest = useRef({ diagramSource, onCompiled, onFailed, onRendered, palette, playing, theme });
   useEffect(() => {
-    latest.current = { onCompiled, onFailed, onRendered, playing, theme };
+    latest.current = { diagramSource, onCompiled, onFailed, onRendered, palette, playing, theme };
   });
 
   // Lottie play/pause is a command on the live port, never a remount.
@@ -311,7 +325,7 @@ export function FyRenderSandbox({
         // The theme the SHELL compiled with, not whatever the document says now. A
         // reader who switched themes mid-compile would otherwise have the diagram
         // recorded against a theme it was never drawn for.
-        latest.current.onCompiled(message.svg, message.theme);
+        latest.current.onCompiled(message.svg, message.theme, message.palette);
         return;
       }
       if (message.kind === 'rendered') {
@@ -348,7 +362,14 @@ export function FyRenderSandbox({
         if (text === null) return fail('library');
         portRef.current.postMessage(
           block.type === 'mermaid'
-            ? { kind: 'render-mermaid', library: text, source: block.payload, theme: latest.current.theme }
+            ? {
+                kind: 'render-mermaid',
+                library: text,
+                palette: latest.current.palette?.key ?? `${latest.current.theme}:00000000`,
+                source: latest.current.diagramSource ?? block.payload,
+                theme: latest.current.theme,
+                themeVariables: latest.current.palette?.variables ?? null,
+              }
             : { kind: 'render-lottie', library: text, playing: latest.current.playing, source: block.payload },
         );
       });

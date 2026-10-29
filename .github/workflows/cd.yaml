@@ -16,7 +16,9 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
+        with:
+          shell: .#releaser
       - name: Compile, package, and publish all channels
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

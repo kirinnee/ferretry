@@ -73,7 +73,7 @@ every second, and the GitHub times from the last runs before Namespace (p50):
 | `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
-  with `cache: nix` mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell
+  with `cache: nix` mounts a persistent `/nix` BEFORE the [Nix install](#installing-nix), so the dev shell
   is already built when the job starts. The order is load-bearing: installing Nix first would
   populate a fresh store. The tag is the key, so every shape shares the one volume. It holds ~2.5GB
   (dev shell plus install bundle), so `nscloud-cache-size-10gb` replaces the 20GB default and halves
@@ -94,15 +94,56 @@ every second, and the GitHub times from the last runs before Namespace (p50):
   and directories report different `st_dev`, and the shared-history planner refuses a rename it reads
   as cross-device although `rename(2)` succeeds there. The tests write under `/tmp` by design
   (`scripts/test/swept.sh`), so that is a product question about overlay filesystems, not a CI knob.
-- **No path filters beyond E2E's.** Of 120 merged pull requests, two changed only documentation, and
-  `E2E Relevance` already skips those. Skipping a unit or int group for an unrelated change would
-  leave its files out of the per-group 100% ledger, and the jobs a PWA-only change could skip run on
-  GitHub, where they cost nothing.
+- **No path filters beyond E2E's and macOS's.** Of 120 merged pull requests, two changed only
+  documentation, and `E2E Relevance` already skips those. Skipping a unit or int group for an unrelated
+  change would leave its files out of the per-group 100% ledger, and the jobs a PWA-only change could
+  skip run on GitHub, where they cost nothing. The macOS jobs are the exception, for the reason in
+  [macOS jobs on a pull request](#macos-jobs-on-a-pull-request): the slots are scarce, not the money.
 - **Moving a job between pools is its `runs-on`.** A Namespace job's `runs-on` is one expression:
   `ubuntu-latest` off a pull request or under `CI_RUNNER_POOL=github`, its `nscloud-*` labels
   otherwise; a matrix entry with `shape: github` always takes `ubuntu-latest`. Its cache step carries
   `if: runner.environment == 'self-hosted'` (a Namespace runner registers as self-hosted), so the
   same job runs on either pool and nothing else in it depends on the runner vendor.
+
+## macOS jobs on a pull request
+
+macOS runs on GitHub only, is free for a public repository, and **only 5 macOS jobs run at once across
+the whole account**. Every run used 4 of them (Containment, Sandbox Shell (Safari), Harness Contract
+`macos-15`, Smoke `darwin-arm64`), so two overlapping runs queued: the p90 wait was 6 minutes and the
+worst 74. The queue, not the work, held pull requests up, and there is no paid pool to buy out of it
+(Namespace macOS is ten times a Linux unit's price, ~$600 a month at this pace).
+
+So a pull request runs **Smoke on every run** and the other three **only when their inputs change**.
+`main`, a manual dispatch and any doubt run all four: they are the release gates, so a path list that
+missed an input shows up one merge later and never as a release that skipped its proof.
+
+| Job (check name)              | On a pull request, when this changes                                                                                                                                                                                    |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Smoke darwin-arm64`          | always: it runs the shipped binary, and almost every pull request changes the binary                                                                                                                                    |
+| `Containment (macOS)`         | the daemon's file viewer, pinner, git, process inventory, pane identity and file-event code; `fy attach`'s tmux reader; the protocol's process incarnation; their integration tests; `scripts/ci/darwin-confinement.sh` |
+| `Sandbox Shell (Safari)`      | `packages/pwa/harness/fy-render-safari/`, `packages/pwa/scripts/`, `public/_headers`, the `fy-render` library and journey fixture; `scripts/ci/safari-render-proof.sh`                                                  |
+| `Harness Contract (macos-15)` | `packages/fleet/**`, the daemon contract suite and transcript conversion, `VERIFIED_HARNESS_VERSIONS`. The nightly `Harness Contract (latest)` covers upstream drift in between                                         |
+
+All three also run when anything in the **toolchain or the pipeline** changes: `flake.lock`,
+`flake.nix`, `nix/**`, `.github/workflows/**`, `.github/actions/**`, `bun.lock`, a manifest, a bunfig or
+tsconfig, or `setup.sh`. The Linux leg of `Harness Contract` always runs; only its `macos-15` leg is added
+to the matrix.
+
+- **A job, not a `paths` filter** — for the reason `E2E Relevance` gives. `macOS Relevance`
+  (`changes` in `ci.yaml`, `scripts/ci/macos-relevance.sh`) lists the pull request's files through the API
+  and writes one output per job. A job it leaves out is **skipped, and a skipped check counts as
+  passed**, so no stub check and no branch-protection change is needed. It fails open: an unreadable or
+  empty file list runs all three.
+- **The lists are generous on purpose** and held to the scripts, not to memory:
+  `scripts/validate/macos-relevance.sh` (`a-macos-relevance`, and `test.sh`) extracts every test path
+  `darwin-confinement.sh` runs, every file the Safari probe and the contract suite import, and the
+  `VERIFIED_HARNESS_VERSIONS` file, and fails unless each one selects its job. It also fails if a
+  docs-only change selects any job, if `flake.lock` or a workflow does not select all three, or if
+  `ci.yaml` stops gating them (or starts gating Smoke). Adding a path to a job's script therefore
+  fails pre-commit until the list covers it.
+- **Why the Harness matrix is data.** A job-level `if:` cannot read `matrix`, so the `macos-15` leg is
+  in or out through `fromJSON(needs.changes.outputs.harness_os)`; the check keeps its name,
+  `Harness Contract (macos-15)`, when it runs and is absent when it does not.
 
 ## Workflow split
 
@@ -131,6 +172,7 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 | `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                       |
 | `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                      |
 | `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one runner per build target                                 |
+| `changes`        | `./scripts/ci/macos-relevance.sh`                                                | `macOS Relevance`: gates Containment, Safari and the `macos-15` Harness leg   |
 
 Notable details:
 
@@ -160,6 +202,14 @@ Notable details:
 - **SIT runs against the artifact, not a rebuild.** `compile` uploads the binaries and `sit`
   downloads them, which is what makes it a black-box test of the shipped thing.
   `download-artifact` drops the executable bit; the scripts restore it.
+- **A download is held to a manifest.** `actions/download-artifact` can stop part-way and still exit
+  0 (actions/download-artifact#454): its log ends at `Starting download of artifact` with no digest
+  line. That left `Smoke linux-x64-baseline` on `main` with no daemon in `dist/bin` while the other
+  two smoke jobs took the same artifact whole. So `compile` writes `dist/bin/SHA256SUMS`
+  (`scripts/ci/binaries-manifest.sh write`), and `sit` and `smoke` take the binaries only through
+  `.github/actions/download-binaries`, which checks every file against it and, if one is short or
+  missing, downloads once more into an empty directory with a `::warning::`. A second short download
+  fails the step as an incomplete download, never as whatever ran next.
 - **A browser gate asserts geometry, and never stores pixels.** `pwa-screenshot` runs the PWA's
   screenshot harness in `--settings-only` mode in light, and the whole gallery in dark, and fails on
   `assertNoSidewaysScroll` — the one layout defect a capture cannot show, because the capture is
@@ -346,8 +396,33 @@ installer, and the in-repo Homebrew cask. See
   `contents: write` only for `Release` and `CD`.
 - Every checkout sets `persist-credentials: false`, so a compromised build step cannot reuse the
   checkout's credentials to push.
-- Nix comes from `cachix/install-nix-action`; there is no bespoke setup action, and checkout is
-  always its own step.
+- Nix comes from the one local action `.github/actions/install-nix` ([Installing Nix](#installing-nix)),
+  and checkout is always its own step before it.
+
+## Installing Nix
+
+Every job that needs Nix calls `uses: ./.github/actions/install-nix` (with `shell: .#releaser` in
+`CD`), never `cachix/install-nix-action` directly. It is the one bespoke setup action (the other local
+action, `download-binaries`, is described under the `sit` job above), and it exists
+because the network failed whole jobs, including on `main`, where a red CI skips a release:
+
+- **The installer's download.** `cachix/install-nix-action` fetches its installer five times one
+  second apart, which a DNS blip outlasts (`Could not resolve host: releases.nixos.org`). That fails
+  before anything is installed, so the action installs once more after 60 seconds, with a
+  `::warning::`, and never a third time.
+- **A substitute's download.** `download-attempts = 10` and `connect-timeout = 15` go into
+  `/etc/nix/nix.conf` for the daemon that does the downloading. They do not cover the failure that
+  actually recurred: cache.nixos.org breaks a `.nar.zst` mid-file, Nix resumes it from that byte, the
+  CDN answers the range with HTTP 416, and Nix stops with `path … is required, but there is no
+substituter that can build it`. Only a fresh download recovers, so the action's last step runs
+  `scripts/ci/nix-realise.sh <shell>`: `nix print-dev-env` realises the dev shell without running
+  anything, at most three times, 20 then 40 seconds apart, each failure a `::warning::`. The job's
+  real step then enters a shell that is already in the store, so a retry never reruns a test.
+
+A real evaluation or build failure fails every attempt identically and reaches the PR about a minute
+later than it would have; that is the whole cost. The cache volume step stays in each workflow,
+BEFORE this action. `scripts/validate/action-pins.sh` reads `.github/actions/` as well as
+`.github/workflows/`, so the pin inside the action is held to the same rules as any other.
 
 ## Action pins
 

@@ -1,8 +1,8 @@
 # Hypermedia
 
 A ferret explains with more than words when words are not enough: a Mermaid diagram of a flow, an
-SVG drawing, a static HTML fragment, or a video, recording, PDF or picture it made or found,
-rendered inline in the Chat transcript. **Hypermedia** is the per-ferret switch that tells a ferret it
+interactive chart of numbers, an SVG drawing, a static HTML fragment, or a video, recording, PDF or
+picture it made or found, rendered inline in the Chat transcript. **Hypermedia** is the per-ferret switch that tells a ferret it
 may — and should, when an idea is not straightforward — communicate that way.
 
 This page is the contract for the switch and the instruction it injects. The markup itself is
@@ -69,17 +69,18 @@ in every turn's context, so it is kept short; change it there and here together.
 Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.
 Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.
 Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.
-- mermaid: Mermaid source (flowchart, sequenceDiagram, …).
+- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.
 - svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.
 - html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.
 - map: JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.
+- chart: JSON/YAML {kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [2, 3]}]}; kind line|bar|area|pie|doughnut|scatter|radar; format number|percent|money|duration|bytes; stacked; frames: [{label, series}] steps. No colours: tone accent|good|warn|bad|muted|1-8.
 - image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @workspace/path` and `src: https://…` also work.
 Example:
 ```fy-render
 type: mermaid
 alt: How a request reaches the daemon
 ---
-flowchart LR
+flowchart TB
   Phone --> Relay --> Daemon
 ```
 It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.
@@ -89,12 +90,19 @@ It renders inline in the reader's chat. Chat only: never write fy-render into fi
 
 Every form is an `fy-render` fence (grammar: [fy-render.md § The grammar](fy-render.md#the-grammar)).
 A block the grammar refuses renders as an ordinary escaped code fence, so a malformed block never
-breaks the transcript. Nothing decodes, downloads or runs until the reader presses **Render**
-([fy-render.md](fy-render.md#no-browser-decoder-runs-until-the-reader-asks)).
+breaks the transcript. **An illustration never chooses its own colours.** A `chart` series asks for a
+`tone` (`accent`, `good`, `warn`, `bad`, `muted`) or a palette slot `1`–`8`, and a Mermaid diagram is
+painted from the same theme tokens; the reader's theme decides what each looks like, and a theme switch
+repaints them. A `chart` that names a colour is refused, and a Mermaid `%%{init}%%` that sets `theme`,
+`themeVariables` or `themeCSS` is ignored ([fy-render.md § Charts](fy-render.md#charts)).
+
+A block renders by itself once it is near the screen — there is no Render button any more
+([fy-render.md § Inline by default](fy-render.md#inline-by-default--the-owners-decision)).
 
 | `type:`   | Payload / header                                  | Renders as                                                                                       |
 | --------- | ------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| `mermaid` | Mermaid source                                    | a diagram, compiled in the sandbox frame, theme following light/dark                             |
+| `mermaid` | Mermaid source                                    | a diagram, compiled in the sandbox frame, painted in the reader's theme tokens                   |
+| `chart`   | small JSON/YAML in the chart language             | an interactive Chart.js chart in the page, in the theme's colours; the source fence if refused   |
 | `map`     | small JSON/YAML: centre, markers, lines, polygons | an inline interactive map (Leaflet, OpenStreetMap tiles); a coordinates list if it cannot draw   |
 | `svg`     | one `<svg>` document                              | a picture through the measured `<img>` sink — never inline SVG                                   |
 | `html`    | one self-contained fragment                       | no script: sanitized markup in a closed shadow root; with script: a live page in an opaque frame |

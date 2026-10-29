@@ -1,6 +1,6 @@
 import { classifyCommand } from './command-classifier.ts';
-import type { ProcessInfo } from './inflight-report.ts';
 import type { KnownProcess } from './harness-provenance.ts';
+import type { ProcessInfo } from './inflight-report.ts';
 
 export interface ProcRow {
   readonly pid: number;
@@ -65,6 +65,7 @@ export function inventoryProcesses(
   rows: readonly ProcRow[],
   cwdByPid: ReadonlyMap<number, string | undefined>,
   known: ReadonlyMap<number, KnownProcess> = new Map(),
+  listening: ReadonlySet<number> = new Set(),
 ): readonly ProcessInfo[] {
   return rows.map(row => {
     const own = known.get(row.pid);
@@ -75,6 +76,8 @@ export function inventoryProcesses(
       cwd: cwdByPid.get(row.pid),
       verdict: own === undefined ? classifyCommand(row.argv) : 'safe_to_kill',
       ...(own === undefined ? {} : { known: own }),
+      ppid: row.ppid,
+      ...(listening.has(row.pid) ? { listening: true as const } : {}),
     };
   });
 }

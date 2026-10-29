@@ -70,11 +70,20 @@ import {
   isFyRenderMediaBlock,
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
+import {
+  isNarrowColumn,
+  mermaidDisplayWidth,
+  mermaidNaturalSize,
+  verticalizeMermaid,
+} from '../lib/fy-render-mermaid-layout.ts';
+import { mermaidThemeVariables, paletteKey, type ResolvedTheme } from '../lib/fy-render-palette.ts';
+import { FyRenderChart, type FyRenderChartModules } from './fy-render-chart.tsx';
 import { FyRenderFragment } from './fy-render-fragment.tsx';
 import { FyRenderHtmlFrame, type FyRenderHtmlPaint } from './fy-render-html-frame.tsx';
 import { FyRenderMap, type FyRenderMapModules } from './fy-render-map.tsx';
 import { FyRenderMedia } from './fy-render-media.tsx';
 import { FyRenderSandbox, type FyRenderSandboxFailure } from './fy-render-sandbox.tsx';
+import { documentThemeName, readTheme } from './fy-render-theme.ts';
 
 /**
  * How long new bytes must stop changing before they replace what is on screen.
@@ -105,9 +114,18 @@ const prefersReducedMotion = (): boolean => {
   }
 };
 
-/** The app's theme name. Only its dark/light half matters, to Mermaid. */
-const themeName = (): string =>
-  typeof document === 'undefined' ? '' : (document.documentElement.getAttribute('data-theme') ?? '');
+/** The app's theme name: what a theme switch changes, and so what a repaint is keyed on. */
+const themeName = documentThemeName;
+
+/**
+ * A diagram wider than its column pans sideways inside its own box, so that box is a named region and a tab
+ * stop: a keyboard reaches it and a screen reader says what it is.
+ */
+const SCROLLING_DIAGRAM = {
+  'aria-label': 'Diagram, scrolls sideways',
+  role: 'region',
+  tabIndex: 0,
+} as const;
 
 const TRANSPARENT = new Set(['', 'transparent', 'rgba(0, 0, 0, 0)']);
 
@@ -214,10 +232,13 @@ export interface FyRenderBlockProps {
   readonly settleMs?: number;
   /** Where a map's engine comes from; a test passes a fake so no map library loads, the app never passes this. */
   readonly loadMap?: () => Promise<FyRenderMapModules>;
+  /** Where a chart's reader and engine come from; a test passes a fake, the app never passes this. */
+  readonly loadChart?: () => Promise<FyRenderChartModules>;
 }
 
 const humanType: Record<ParsedBlock['type'], string> = {
   audio: 'audio',
+  chart: 'chart',
   html: 'HTML',
   image: 'image',
   lottie: 'Lottie',
@@ -238,6 +259,7 @@ export function FyRenderBlock({
   readWorkspaceMedia,
   settleMs = SETTLE_MS,
   loadMap,
+  loadChart,
 }: FyRenderBlockProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const block = useSettledBlock(arriving, settleMs);
@@ -269,7 +291,11 @@ export function FyRenderBlock({
   const [compiled, setCompiled] = useState<{
     readonly svg: string;
     readonly theme: FyRenderSandboxTheme;
+    /** The palette it was painted in, as the shell echoed it. */
+    readonly palette: string;
     readonly source: string;
+    /** The text that was compiled: the authored payload, or its top-to-bottom form for a narrow column. */
+    readonly drawn: string;
   } | null>(null);
 
   /**
@@ -312,6 +338,70 @@ export function FyRenderBlock({
   }, [near]);
   const mode: FyRenderSandboxTheme = theme.includes('light') ? 'light' : 'dark';
 
+  /**
+   * THE THEME AS DATA, for the two illustrations painted by a library that cannot read CSS: a chart's
+   * canvas and a Mermaid diagram compiled in another document. Read from this block's own element when it
+   * is near and again whenever the theme changes, then resolved to hex literals
+   * (`fy-render-theme.ts`). The KEY is the mode and the palette together, so a switch between two dark
+   * themes is a repaint too.
+   */
+  const themed = presentation === 'chart' || (presentation === 'sandbox' && block.type === 'mermaid');
+  const [resolved, setResolved] = useState<{ readonly theme: ResolvedTheme; readonly key: string } | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `theme` is the repaint trigger; the read is the DOM's
+  useEffect(() => {
+    if (!themed || !near) return;
+    const read = readTheme(hostRef.current);
+    const key = paletteKey(read);
+    setResolved(previous => (previous?.key === key ? previous : { key, theme: read }));
+  }, [themed, near, theme]);
+  const sandboxPalette =
+    resolved === null ? undefined : { key: resolved.key, variables: mermaidThemeVariables(resolved.theme) };
+
+  /**
+   * THE COLUMN A DIAGRAM LIVES IN, measured from this block's own element (content box, so the fullscreen
+   * overlay's padding is not counted) together with the body text size around it. `null` until the first
+   * reading, and a diagram is not compiled before then so its direction is decided once, not twice.
+   *
+   * WHETHER THE COLUMN IS A PHONE'S (`narrow`) is decided only from the inline column. Entering fullscreen
+   * widens the host, and a diagram that flipped direction because the reader enlarged it would be a
+   * surprise; the decision stays what the message showed, and moves again only on resize or rotation.
+   */
+  const mermaidBlock = presentation === 'sandbox' && block.type === 'mermaid';
+  const [column, setColumn] = useState<{ readonly px: number; readonly bodyPx: number } | null>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (!mermaidBlock || !near) return;
+    const element = hostRef.current;
+    const settle = (px: number, bodyPx: number): void => {
+      setColumn(previous => (previous?.px === px && previous.bodyPx === bodyPx ? previous : { bodyPx, px }));
+      if (!fullscreen) setNarrow(isNarrowColumn(px));
+    };
+    /** The content box and the body text size, read now. A node that is not a laid-out element reads as 0. */
+    const read = (): void => {
+      try {
+        if (element === null) {
+          settle(0, 14);
+          return;
+        }
+        const style = getComputedStyle(element);
+        const body = Number.parseFloat(style.fontSize);
+        const inner =
+          element.clientWidth -
+          (Number.parseFloat(style.paddingLeft) || 0) -
+          (Number.parseFloat(style.paddingRight) || 0);
+        settle(Math.max(0, Math.round(inner)), Number.isFinite(body) && body > 0 ? body : 14);
+      } catch {
+        settle(0, 14);
+      }
+    };
+    read();
+    if (element === null || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [mermaidBlock, near, fullscreen]);
+  const diagramSource = mermaidBlock && narrow ? verticalizeMermaid(block.payload) : block.payload;
+
   const [paint, setPaint] = useState<FyRenderHtmlPaint>(() => paintFrom(null, mode));
   // biome-ignore lint/correctness/useExhaustiveDependencies: `theme` is the repaint trigger; the read is the DOM's
   useEffect(() => {
@@ -353,7 +443,7 @@ export function FyRenderBlock({
    */
   const source = block.source;
   const onCompiled = useCallback(
-    (svg: string, drawnFor: FyRenderSandboxTheme): void => {
+    (svg: string, drawnFor: FyRenderSandboxTheme, palette: string): void => {
       const admitted = fyRenderMermaidSvg(svg);
       if (!admitted.ok) {
         fail({ detail: admitted.reason, kind: 'render' });
@@ -361,9 +451,9 @@ export function FyRenderBlock({
       }
       // THE SHELL'S OWN THEME, never the document's: a switch during the compile
       // must not be recorded as the theme this diagram was drawn for.
-      setCompiled({ source, svg: admitted.svg, theme: drawnFor });
+      setCompiled({ drawn: diagramSource, palette, source, svg: admitted.svg, theme: drawnFor });
     },
-    [fail, source],
+    [diagramSource, fail, source],
   );
 
   const noop = useCallback((): void => undefined, []);
@@ -371,14 +461,26 @@ export function FyRenderBlock({
   const live = near && fallback === null && stopped === null;
   const mermaid = presentation === 'sandbox' && block.type === 'mermaid';
   /**
-   * WHEN A DIAGRAM IS DRAWN. Once for its bytes, and again only when the theme it
-   * was drawn for is no longer the page's AND it is on screen: a theme toggle with
+   * WHEN A DIAGRAM IS DRAWN. Once for its bytes, and again only when the palette it
+   * was painted in is no longer the page's AND it is on screen: a theme toggle with
    * ten diagrams in a long transcript redraws the two in view, and the rest when
    * they come back into view — never all of them at once.
    */
   const drawDiagram =
-    live && mermaid && (compiled === null || compiled.source !== source || (compiled.theme !== mode && visible));
+    live &&
+    mermaid &&
+    resolved !== null &&
+    column !== null &&
+    (compiled === null ||
+      compiled.source !== source ||
+      ((compiled.palette !== resolved.key || compiled.drawn !== diagramSource) && visible));
   const diagram = mermaid && fallback === null && compiled !== null;
+  /** The compiled image's size on screen, once its natural size and the column are both known. */
+  const natural = diagram && compiled !== null ? mermaidNaturalSize(compiled.svg) : null;
+  const shown =
+    natural === null || column === null
+      ? null
+      : mermaidDisplayWidth({ bodyPx: column.bodyPx, columnPx: column.px, fullscreen, naturalWidth: natural.width });
   const lottie = live && presentation === 'sandbox' && block.type === 'lottie';
   const fragment = live && presentation === 'fragment';
   /**
@@ -394,6 +496,7 @@ export function FyRenderBlock({
   useEffect(() => setPageReady(false), [source, revision, running]);
   const media = near && presentation === 'media' && isFyRenderMediaBlock(block);
   const map = live && presentation === 'map';
+  const chart = live && presentation === 'chart';
   const picture = live && presentation === 'visual';
   /**
    * A stage with something to enlarge and something to show the source of. Not a
@@ -405,7 +508,7 @@ export function FyRenderBlock({
     stopped === null &&
     !mediaRow &&
     block.type !== 'audio' &&
-    (picture || diagram || lottie || fragment || interactive || media || map);
+    (picture || diagram || lottie || fragment || interactive || media || map || chart);
 
   /**
    * THE LONG PRESS, on touch only. A tap belongs to the content — a video's
@@ -517,6 +620,18 @@ export function FyRenderBlock({
         onListing={setMapListing}
         payload={block.payload}
       />
+    ) : chart && resolved !== null ? (
+      /** Data, not code: a chart description drawn by Chart.js in this document, in the theme — see `fy-render-chart.tsx`. */
+      <FyRenderChart
+        alt={block.alt}
+        fullscreen={fullscreen}
+        key={`chart:${generation.current}:${revision}`}
+        load={loadChart}
+        onFailed={fail}
+        payload={block.payload}
+        theme={resolved.theme}
+        visible={visible || fullscreen}
+      />
     ) : fragment ? (
       /** Static markup, sanitized into a closed shadow root — see `fy-render-fragment.tsx`. Nothing runs. */
       <FyRenderFragment
@@ -571,15 +686,29 @@ export function FyRenderBlock({
     ) : (
       <>
         {diagram ? (
-          <img
-            alt={block.alt}
-            className="fy-render-image"
-            data-fy-render-diagram="true"
-            key={`diagram:${generation.current}`}
-            onError={onDecodeFailure(generation.current)}
-            src={svgDataUrl(compiled?.svg as string)}
-          />
-        ) : near || presentation === 'map' ? (
+          /**
+           * AT A READABLE SIZE, not the column's. The compiled image has no size of its own, so left alone it is
+           * stretched or squeezed to the column and its 16px text goes with it. Its width is set from its
+           * `viewBox` (`fy-render-mermaid-layout.ts`); wider than the column, it pans sideways in this box
+           * rather than shrinking, and the box is a tab stop so a keyboard can pan it too.
+           */
+          <div
+            className="fy-render-diagram"
+            data-fy-render-scrolls={shown?.scrolls ? 'true' : 'false'}
+            {...(shown?.scrolls ? SCROLLING_DIAGRAM : {})}
+          >
+            <img
+              alt={block.alt}
+              className="fy-render-image"
+              data-fy-render-diagram="true"
+              data-fy-render-sized={shown === null ? 'false' : 'true'}
+              key={`diagram:${generation.current}`}
+              onError={onDecodeFailure(generation.current)}
+              src={svgDataUrl(compiled?.svg as string)}
+              style={shown === null ? undefined : { width: `${shown.width}px` }}
+            />
+          </div>
+        ) : near || presentation === 'map' || presentation === 'chart' ? (
           // A diagram's first draw holds a quiet plane rather than nothing, so the
           // prose below does not jump twice. A map holds its plane from the start, for the same reason.
           <div aria-hidden="true" className="fy-render-placeholder" />
@@ -593,12 +722,14 @@ export function FyRenderBlock({
           <div aria-hidden="true" className="fy-render-offstage">
             <FyRenderSandbox
               block={block}
-              key={`frame:${generation.current}:${revision}:${mode}`}
+              key={`frame:${generation.current}:${revision}:${resolved?.key}:${diagramSource === block.payload ? 'authored' : 'vertical'}`}
+              diagramSource={diagramSource}
               onCompiled={onCompiled}
               onFailed={fail}
               onRendered={noop}
+              palette={sandboxPalette}
               playing={false}
-              theme={mode}
+              theme={resolved?.theme.mode ?? mode}
             />
           </div>
         ) : null}

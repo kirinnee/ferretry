@@ -29,7 +29,6 @@ import { useRowContextGesture } from './row-context-gesture.ts';
 import { SessionMenuContext } from './session-menu-context.ts';
 import {
   attentionWords,
-  needsYou,
   rowPreview,
   sessionRowPath,
   sessionsBarDirectory,
@@ -62,7 +61,6 @@ export function SessionsBarRow({
   readonly children?: ReactNode;
 }) {
   const { title: name, ferret } = sessionsBarNames(view);
-  const waiting = needsYou(view);
   const directory = sessionsBarDirectory(view);
   const unread = unreadCount(view);
   const preview = rowPreview(view);
@@ -96,10 +94,6 @@ export function SessionsBarRow({
           </span>
         ) : machine !== undefined ? (
           <MachineChip name={machine} />
-        ) : waiting ? (
-          <span className="fy-sbar__badge" data-sbar-waiting="">
-            waiting
-          </span>
         ) : (
           <SwitchMarks hypermedia={hypermediaOn(view)} learning={learningPassive} pack={packOn(view)} />
         )}

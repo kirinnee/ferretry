@@ -34,6 +34,7 @@
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
  *   bun harness/screenshot.ts --context-tools-only [--light]   # Info › Context › MCP and Skills, and Components' MCP rows
  *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
+ *   bun harness/screenshot.ts --whats-new-only [--light]   # What's new: the release list, then older versions
  *   bun harness/screenshot.ts --session-context-menu-only [--light]   # right-click menu / long-press sheet on a session row
  *   bun harness/screenshot.ts --about-only [--light]   # Settings › Machine › About and its update states
  *   bun harness/screenshot.ts --agent-clis-only [--light]   # Settings › Machine › Agent CLIs, every install method
@@ -133,12 +134,16 @@ const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
 const ATTENTION_ONLY = process.argv.includes('--attention-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
+/** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent actions, nothing else. */
+const WARDEN_ONLY = process.argv.includes('--warden-only');
 /** Signing in to a remote MCP server: the Components tab's Sign-in section, its sheet, and the callback page. */
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
 /** Info › Context's MCP and Skills sub-tabs (every scope, Check, Sign in, Open), and the Components MCP rows. */
 const CONTEXT_TOOLS_ONLY = process.argv.includes('--context-tools-only');
 /** "Pair a phone" from the machine menu: the switcher, the sheet and the minted (fake) QR. */
 const PAIR_FROM_MENU_ONLY = process.argv.includes('--pair-from-menu-only');
+/** "What's new": the in-app release list as a phone sheet and a desktop dialog. */
+const WHATS_NEW_ONLY = process.argv.includes('--whats-new-only');
 /** The sessions bar's row menu: right-click at the pointer on a desktop, a long-press sheet on a phone. */
 const SESSION_CONTEXT_MENU_ONLY = process.argv.includes('--session-context-menu-only');
 /** Settings › Machine › About: an update available, the mid-turn choice, and a deb's manual steps. */
@@ -190,10 +195,12 @@ const WALKS_SETTINGS = !(
   FILES_ONLY ||
   TASK_BOARD_ONLY ||
   PROJECTS_ONLY ||
+  WARDEN_ONLY ||
   PAIRING_FAILURES_ONLY ||
   MCP_SIGN_IN_ONLY ||
   CONTEXT_TOOLS_ONLY ||
   PAIR_FROM_MENU_ONLY ||
+  WHATS_NEW_ONLY ||
   SESSION_CONTEXT_MENU_ONLY ||
   ABOUT_ONLY ||
   AGENT_CLIS_ONLY ||
@@ -548,16 +555,12 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
     await card.locator('[data-pairing-failure="stated"]').waitFor();
     await assertCardFitsWithMargins(card, `${label} at ${viewportName}`);
     for (const theme of ['studio-dark', 'studio-light'] as const) {
-      await page.evaluate(name => {
-        document.documentElement.dataset.theme = name;
-      }, theme);
+      await applyTheme(page, theme);
       const target = join(outDir, `${slug}${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
       await captureElement(page, card, target);
       process.stdout.write(`📸 ${label} ${theme} ${viewportName} -> ${target}\n`);
     }
-    await page.evaluate(() => {
-      document.documentElement.dataset.theme = 'studio-dark';
-    });
+    await applyTheme(page, 'studio-dark');
   }
   // The notice a refused device sees in place of the page: no button to press, the same fit rule.
   const refused = page.getByLabel('Machine no longer accepts this browser', { exact: true });
@@ -567,16 +570,12 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
   );
   if (sideways) throw new Error(`the refused-device notice scrolls sideways at ${viewportName}`);
   for (const theme of ['studio-dark', 'studio-light'] as const) {
-    await page.evaluate(name => {
-      document.documentElement.dataset.theme = name;
-    }, theme);
+    await applyTheme(page, theme);
     const target = join(outDir, `device-refused${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
     await captureElement(page, refused, target);
     process.stdout.write(`📸 device refused ${theme} ${viewportName} -> ${target}\n`);
   }
-  await page.evaluate(() => {
-    document.documentElement.dataset.theme = 'studio-dark';
-  });
+  await applyTheme(page, 'studio-dark');
 };
 
 /**
@@ -856,6 +855,39 @@ const capturePairFromMenu = async (page: Page, viewportName: string): Promise<vo
   const focusedSwitcher = await page.evaluate(() => document.activeElement?.hasAttribute('data-sbar-machine') === true);
   if (!focusedSwitcher)
     fail(`closing the pairing sheet did not return focus to the machine switcher at ${viewportName}`);
+};
+
+/**
+ * "What's new" (`?whats-new`, `harness/whats-new.tsx`): the newest releases with their "New" chips, then
+ * the older ones after "Show older versions". Fails if the chips or the grouping are not what the fixed
+ * changelog says, if a row scrolls sideways, or if the sheet is not a sheet on a phone and a dialog elsewhere.
+ */
+const captureWhatsNew = async (page: Page, viewportName: string): Promise<void> => {
+  const shot = async (name: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`whats-new ${name} scrolls sideways by ${wide}px at ${viewportName}`);
+    const target = join(outDir, `whats-new-${name}-${SCHEME}-${viewportName}.png`);
+    await page.screenshot({ path: target, animations: 'disabled' });
+    process.stdout.write(`📸 whats new ${name} ${SCHEME} ${viewportName} -> ${target}\n`);
+  };
+  await page.goto(`${server.url}?whats-new`);
+  const body = page.locator('[data-whats-new-body]');
+  await body.waitFor({ state: 'visible' });
+  const frame = viewportName === 'mobile' ? 'sheet' : 'dialog';
+  if ((await page.locator(`[data-whats-new="${frame}"]`).count()) !== 1)
+    fail(`what's new is not a ${frame} at ${viewportName}`);
+  const chips = await body.locator('[data-whats-new-new]').count();
+  if (chips !== 2) fail(`expected 2 "New" chips, saw ${chips} at ${viewportName}`);
+  const first = (await body.locator('h3').first().textContent())?.trim();
+  if (first !== '4.93.0') fail(`the newest release is not first: ${first ?? 'none'}`);
+  await shot('top');
+
+  await body.locator('[data-whats-new-older]').scrollIntoViewIfNeeded();
+  await shot('end');
+  await body.locator('[data-whats-new-older]').click();
+  if ((await body.locator('[data-whats-new-release]').count()) <= 12) fail('"Show older versions" showed nothing more');
+  await page.keyboard.press('Escape');
+  await body.waitFor({ state: 'detached' });
 };
 
 /**
@@ -1233,6 +1265,28 @@ const settleTransitions = async (page: Page): Promise<void> => {
     for (const animation of document.getAnimations())
       if (animation.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY) animation.finish();
   });
+};
+
+/**
+ * Put `<html data-theme>` to `theme` (`''` removes it) and let the page LAND there before the next step.
+ *
+ * Every theme flip in this file goes through here, because a flip on its own leaves the page moving.
+ * The contexts emulate reduced motion, and `index.css` answers that by giving every element a 1ms
+ * transition — on every property, since `transition-property` defaults to `all` — so a new theme's
+ * font sizes, line heights and padding are not applied until the transitions run, two frames later.
+ * Two frames of the OLD layout is exactly what Playwright's "stable" check accepts. Measured at
+ * 1440px, the Edit as YAML button at the foot of a profile sat still for two frames after the theme
+ * was put back, then dropped 23px — more than half its height — so a click pressed it at its old
+ * place and released over the row above, the button never saw a click, and the editor it opens was
+ * waited for until the run timed out. Finishing the transitions puts every box where it ends up before
+ * anything is clicked or measured.
+ */
+const applyTheme = async (page: Page, theme: string): Promise<void> => {
+  await page.evaluate(next => {
+    if (next === '') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = next;
+  }, theme);
+  await settleTransitions(page);
 };
 
 /**
@@ -2280,6 +2334,21 @@ try {
             );
             continue;
           }
+          if (WARDEN_ONLY) {
+            // The settings card that carries Jev's per-act bars, then the page whose Recent actions show Jev's own.
+            const settings = page.locator('[data-testid="warden-config-card"]:has([data-warden-jev-act])').first();
+            await settings.waitFor({ state: 'attached' });
+            await settings.scrollIntoViewIfNeeded();
+            const settingsTarget = join(outDir, `warden-settings-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, settings, settingsTarget);
+            process.stdout.write(`📸 Warden settings ${viewport.name} -> ${settingsTarget}\n`);
+            const overview = page.locator('[data-harness="warden-overview"]');
+            await overview.scrollIntoViewIfNeeded();
+            const pageTarget = join(outDir, `warden-page-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, overview, pageTarget);
+            process.stdout.write(`📸 Warden page ${viewport.name} -> ${pageTarget}\n`);
+            continue;
+          }
           if (FILES_ONLY) {
             await captureFiles(page, viewport.name);
             continue;
@@ -2298,6 +2367,10 @@ try {
           }
           if (PAIR_FROM_MENU_ONLY) {
             await capturePairFromMenu(page, viewport.name);
+            continue;
+          }
+          if (WHATS_NEW_ONLY) {
+            await captureWhatsNew(page, viewport.name);
             continue;
           }
           if (SESSION_CONTEXT_MENU_ONLY) {
@@ -3031,17 +3104,13 @@ try {
           const themedShot = async (name: string): Promise<void> => {
             const initial = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
             for (const theme of PROFILE_SCOPE_THEMES) {
-              await page.evaluate(next => {
-                document.documentElement.dataset.theme = next;
-              }, theme);
+              await applyTheme(page, theme);
               const target = join(outDir, `settings-machines-${name}-${theme}-${viewport.name}.png`);
               await settledShot(target);
               process.stdout.write(`📸 Settings Machines ${name} ${theme} ${viewport.name} -> ${target}\n`);
             }
-            await page.evaluate(next => {
-              if (next === '') delete document.documentElement.dataset.theme;
-              else document.documentElement.dataset.theme = next;
-            }, initial);
+            // Settled, not just set: the step after this one clicks, and on the old layout it can miss.
+            await applyTheme(page, initial);
           };
           await openMachine('harness-daemon');
           await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
@@ -3519,9 +3588,7 @@ try {
           // AND IN LIGHT. Pairing is the first screen a new reader ever sees,
           // and half of them are not in dark mode. The rest of this harness page
           // is captured dark only; this one surface is worth both.
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-light';
-          });
+          await applyTheme(page, 'studio-light');
           for (const [label, slug] of [
             ['Daemon pairing', 'pairing'],
             ['Pairing confirmation', 'pairing-confirm'],
@@ -3531,9 +3598,7 @@ try {
             await captureElement(page, page.getByLabel(label, { exact: true }), lightTarget);
             process.stdout.write(`📸 ${label} light ${viewport.name} -> ${lightTarget}\n`);
           }
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-dark';
-          });
+          await applyTheme(page, 'studio-dark');
 
           await capturePairingFailures(page, viewport.name);
           const wardenOverviewTarget = join(outDir, `warden-overview-${viewport.name}.png`);
@@ -3591,9 +3656,7 @@ try {
           // AND THE PASSKEY FRAMES IN LIGHT. The warn tone of a row waiting on a confirmation is the last
           // place to lose contrast, so it has to be legible in both themes rather than designed in dark and
           // inverted — a hairline that vanishes on `surface-2` takes a boundary with it.
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-light';
-          });
+          await applyTheme(page, 'studio-light');
           for (const name of ['grants-step-up-needed', 'grants-step-up-held'] as const) {
             const frame = page.locator(`[data-harness="${name}"]`);
             await frame.scrollIntoViewIfNeeded();
@@ -3601,9 +3664,7 @@ try {
             await captureElement(page, frame, target);
             process.stdout.write(`📸 Capability limits ${name} light ${viewport.name} -> ${target}\n`);
           }
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-dark';
-          });
+          await applyTheme(page, 'studio-dark');
           // Adding a device, in the states somebody actually meets. THE CODE IN THESE FRAMES IS FAKE —
           // see `HARNESS_INVITE`. A committed PNG of a real minted code would be a live credential in
           // the repository, and a QR is a machine-readable label rather than obfuscation.
@@ -4210,6 +4271,15 @@ try {
                 `${after.fieldTop}-${after.fieldBottom}px; portrait gate mounted=${after.gate}\n`,
             );
           }
+        } catch (cause) {
+          // The screen a wait gave up on, which the log alone cannot show: a timed-out wait names the
+          // element it wanted, never what was there instead. Best effort — a crashed page has no frame.
+          const target = join(outDir, `failure-${viewport.name}.png`);
+          await page
+            .screenshot({ path: target, timeout: 5_000 })
+            .then(() => process.stderr.write(`📸 the screen at the failure -> ${target}\n`))
+            .catch(() => undefined);
+          throw cause;
         } finally {
           await page.close();
         }

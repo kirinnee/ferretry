@@ -159,10 +159,9 @@ describe('one session list across two machines, one offline', () => {
       expect(await texts(tab, '[data-machine-reach="offline"] .fy-sbar__machine-reach')).toEqual([
         'offline · last seen 5m',
       ]);
-      // Its waiting session stays home, greyed, with the quiet "waiting" word — nobody can answer a machine
-      // that is not answering, and it filed no Attention item, so it carries no unread pill.
+      // Its waiting session stays home, greyed — nobody can answer a machine that is not answering.
       const laptopRows = await texts(tab, '[data-machine-reach="offline"] [data-sbar-session]');
-      expect(laptopRows.some(row => row.includes('Pim') && row.includes('waiting'))).toBe(true);
+      expect(laptopRows.some(row => row.includes('Pim'))).toBe(true);
       const opacity = await tab.$eval(
         '[data-machine-reach="offline"] .fy-sbar__group',
         node => getComputedStyle(node).opacity,
@@ -176,7 +175,9 @@ describe('one session list across two machines, one offline', () => {
 
       // A laptop row opens the LAPTOP's session.
       await tab.click('[data-machine-reach="offline"] [data-sbar-session="l-pim"]');
-      expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.laptop)}/session/l-pim`);
+      expect((await evidence(tab)).navigations.at(-1)).toBe(
+        `/d/${encodeURIComponent(seen.laptop)}/session/l-pim?attention=A1`,
+      );
 
       // "+ New" asks which machine: this one first and marked; the laptop is not answering, so it is
       // listed but unavailable, saying why — a new session cannot start on a machine nobody can reach.
