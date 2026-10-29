@@ -92,3 +92,27 @@ describe('StorageTurnPorts.sessions', () => {
     should(reads.length).equal(4);
   });
 });
+
+describe('StorageTurnPorts.paneState', () => {
+  it('should find no pane for a session whose configuration is not a document, and capture nothing', async () => {
+    // Arrange — the pane's name lives in the lifecycle half of the configuration; a damaged one names none.
+    const { storage } = await storageWithReadCount();
+    await storage.writeConfig(ID, ['not', 'a', 'configuration']);
+    const ports = new StorageTurnPorts(
+      storage,
+      { tail: async () => ({ kind: 'unresolved' }) },
+      async () => undefined,
+      {
+        activity: async () => Promise.reject(new Error('no pane may be asked about')),
+        visible: async () => Promise.reject(new Error('no pane may be captured')),
+      },
+      { now: () => '2026-10-21T00:00:00.000Z' },
+    );
+
+    // Act
+    const pane = await ports.paneState(ID);
+
+    // Assert
+    should(pane).be.undefined();
+  });
+});

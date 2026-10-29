@@ -485,6 +485,24 @@ describe('storage consistency pass', () => {
     await opened.storage.close();
   });
 
+  it('should not call a terminal session a zombie when its state record can no longer be read', async () => {
+    // Arrange — without the finish stamp there is nothing to compare the journal's last write against.
+    const home = await temporaryHome();
+    const opened = await openStorage(home);
+    const id = parseSessionId('torn-state');
+    await opened.storage.writeState(id, { id: 'torn-state', status: 'stopped', finishedAt: NOW });
+    await opened.storage.append(id, 'session.late_write', { note: 'still working' });
+    await writeFile(createSessionPaths(paths(home), id).state, '{"id": "torn-state"', 'utf8');
+    const pass = new StorageConsistencyPass(opened.storage, new StateFileSystem(paths(home)), paths(home), SETTINGS);
+
+    // Act
+    const actual = await pass.run(true);
+
+    // Assert
+    should(actual.zombies).deepEqual([]);
+    await opened.storage.close();
+  });
+
   it('should not call a finished session with an untouched empty journal a zombie', async () => {
     // Arrange — a session that recorded no events still has a real, zero-length journal, and its
     // creation timestamp must not read as activity outliving the session.

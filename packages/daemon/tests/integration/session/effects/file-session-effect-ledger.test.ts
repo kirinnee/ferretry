@@ -1,5 +1,5 @@
 import { afterEach, describe, it } from 'bun:test';
-import { type FileHandle, mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import { type FileHandle, mkdir, mkdtemp, readdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import should from 'should';
@@ -464,6 +464,39 @@ describe('FileSessionEffectLedger', () => {
     should(admission).equal('unsettled');
     should(synced).containEql(join(sessions, SESSION, 'effects'));
     should(synced).containEql(join(sessions, SESSION));
+  });
+
+  it('should refuse, rather than perform, when the record that won the race has vanished before it is read', async () => {
+    // Arrange: a name that exists for the exclusive create but resolves to nothing when read — a
+    // dangling link stands in for a record unlinked between the lost race and the read.
+    const { subject, sessions } = await ledger('vanished-winner');
+    const file = join(sessions, SESSION, 'effects', `${effectFileName(EFFECT)}.json`);
+    await mkdir(dirname(file), { recursive: true, mode: 0o700 });
+    await symlink(join(dirname(file), 'nowhere.json'), file);
+
+    // Act
+    const error = await refusal(subject.begin(key, FINGERPRINT, BEGUN_AT));
+
+    // Assert: a damaged ledger is refused; a free key would let the act run on a lost race.
+    should(error.message).match(/held the key during a race and then vanished from the ledger/u);
+  });
+
+  it('should propagate a read failure that is not a missing record instead of reading it as unclaimed', async () => {
+    // Arrange: the effects directory is a regular file, so opening any record under it fails with
+    // ENOTDIR — a real failure to look, which is not the same as "never attempted".
+    const { subject, sessions } = await ledger('unreadable-ledger');
+    await mkdir(join(sessions, SESSION), { recursive: true, mode: 0o700 });
+    await writeFile(join(sessions, SESSION, 'effects'), 'not a directory', { encoding: 'utf8', mode: 0o600 });
+
+    // Act
+    const failure = await subject.inspect(key, FINGERPRINT).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceOf(Error);
+    should((failure as NodeJS.ErrnoException).code).equal('ENOTDIR');
   });
 
   it('should persist an already-settled record before reporting the settle as done', async () => {

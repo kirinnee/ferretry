@@ -568,3 +568,37 @@ describe('FileSessionTranscriptMessageTokenCodec fail-closed', () => {
     should(await rejection(stat(keyFile))).not.be.undefined();
   });
 });
+
+describe('FileSessionTranscriptMessageTokenCodec minting and identity', () => {
+  it('refuses to publish a key its random source minted at the wrong width', async () => {
+    // Arrange
+    const { codec, keyFile, scratch } = await harness('token-key-short-mint');
+
+    // Act
+    const failure = await rejection(
+      codec({ random: () => new Uint8Array(SESSION_MESSAGE_TOKEN_KEY_BYTES - 1) }).tag(INPUT),
+    );
+
+    // Assert — nothing was written, not even a scratch file.
+    should(failure).be.instanceof(SessionMessageTokenKeyError);
+    should((failure as Error).message).match(/minted at the wrong width/u);
+    should(await rejection(stat(keyFile))).not.be.undefined();
+    should(await readdir(scratch)).deepEqual([]);
+  });
+
+  it('names a missing path as no identity, and refuses to guess for any other failure to look', async () => {
+    // Arrange — a regular file standing where a directory should be makes the lookup itself fail.
+    const { home } = await harness('token-key-identity');
+    const files = new NodeSessionMessageTokenKeyFileOperations();
+    const regular = join(home, 'regular');
+    await writeFile(regular, 'not a directory');
+
+    // Act
+    const missing = await files.identityOf(join(home, 'absent'));
+    const unlookable = await rejection(files.identityOf(join(regular, 'inside')));
+
+    // Assert
+    should(missing).be.undefined();
+    should((unlookable as NodeJS.ErrnoException).code).equal('ENOTDIR');
+  });
+});

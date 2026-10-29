@@ -149,6 +149,21 @@ describe('spawn provenance storage', () => {
     await storage.close();
   });
 
+  it('should replace a configuration that is not an object rather than merge into it', async () => {
+    // Arrange: a document of the wrong kind has no fields to preserve.
+    const storage = await openTemporaryStorage();
+    const id = parseSessionId('20260806-first-stamp');
+    await storage.writeConfig(id, ['not', 'a', 'configuration']);
+    const store = new StorageSessionProvenanceStore(storage);
+
+    // Act
+    await store.write(id, { provenance: shielded, label: 'fleet-warden' });
+
+    // Assert
+    should(await storage.readConfig(id)).eql({ provenance: shielded, label: 'fleet-warden' });
+    await storage.close();
+  });
+
   it('should answer undefined for a session that carries no stamp', async () => {
     // Arrange: "nobody has decided" and "not a descendant" are different answers.
     const storage = await openTemporaryStorage();

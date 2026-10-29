@@ -1,5 +1,5 @@
-import { constants } from 'node:fs';
-import { lstat, open, readlink } from 'node:fs/promises';
+import { constants, type Stats } from 'node:fs';
+import { type FileHandle, lstat, open, readlink } from 'node:fs/promises';
 import { isAbsolute, join } from 'node:path';
 import type { ConfiguredServersPort } from '../../../lib/migrate/configured-servers.ts';
 import { identifyKnownProcesses } from '../../../lib/migrate/harness-provenance.ts';
@@ -22,14 +22,21 @@ import type {
  * refusal, never a read.
  */
 export class RegularOutputFile implements OutputFilePort {
+  constructor(
+    private readonly calls: {
+      readonly lstat: (path: string) => Promise<Stats>;
+      readonly open: (path: string, flags: number) => Promise<FileHandle>;
+    } = { lstat, open },
+  ) {}
+
   async read(path: string, from: number | undefined, max: number): Promise<OutputFileRead> {
     if (!isAbsolute(path)) return { kind: 'refused', reason: 'Its output path is not absolute.' };
-    const named = await lstat(path).catch(() => undefined);
+    const named = await this.calls.lstat(path).catch(() => undefined);
     if (named === undefined) return { kind: 'gone' };
     if (!named.isFile()) return { kind: 'refused', reason: 'Its output is not a regular file.' };
-    const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(
-      () => undefined,
-    );
+    const handle = await this.calls
+      .open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW)
+      .catch(() => undefined);
     if (handle === undefined) return { kind: 'gone' };
     try {
       const opened = await handle.stat();

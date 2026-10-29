@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -9,6 +9,7 @@ import {
   PsProcessTree,
   processTreeFor,
   SigtermProcessSignal,
+  classifyStreamLink,
 } from '../../../../src/adapters/session/processes/index.ts';
 import type { ProcessDetailRow } from '../../../../src/lib/session/processes/ports.ts';
 
@@ -164,6 +165,49 @@ describe('ProcfsProcessTree', () => {
     // Assert
     should(read.kind).equal('unavailable');
   });
+
+  it('should leave out a process that exited between being listed and being read, and keep the rest', async () => {
+    // Arrange — a procfs under a temp directory: pid 200 is listed but its command line is already gone.
+    const proc = join(directory, 'proc');
+    const statLine = (pid: number, comm: string) =>
+      `${String(pid)} (${comm}) S 100 ${Array.from({ length: 50 }, (_, index) => String(index + 1)).join(' ')}`;
+    await mkdir(join(proc, '100', 'task', '100'), { recursive: true });
+    await writeFile(join(proc, 'stat'), 'btime 1000\n');
+    await writeFile(join(proc, '100', 'task', '100', 'children'), '200 300 ');
+    for (const [pid, comm] of [
+      [200, 'vanished'],
+      [300, 'stayed'],
+    ] as const) {
+      await mkdir(join(proc, String(pid)), { recursive: true });
+      await writeFile(join(proc, String(pid), 'stat'), statLine(pid, comm));
+    }
+    await writeFile(join(proc, '300', 'cmdline'), 'stayed\0--flag\0');
+
+    // Act
+    const read = await new ProcfsProcessTree(proc).tree(100);
+
+    // Assert
+    should(read.kind).equal('read');
+    if (read.kind !== 'read') return;
+    should(read.rows.map(row => [row.pid, row.argv])).deepEqual([[300, 'stayed --flag']]);
+  });
+});
+
+describe('classifyStreamLink', () => {
+  const regular = async () => true;
+  const notRegular = async () => false;
+
+  it('should name an absolute path that is not a regular file, and any other link as it reads', async () => {
+    // Act
+    const device = await classifyStreamLink('/dev/zero', notRegular);
+    const anonymous = await classifyStreamLink('anon_inode:[eventfd]', regular);
+    const file = await classifyStreamLink('/var/log/out.log', regular);
+
+    // Assert
+    should(device).deepEqual({ kind: 'other', description: 'not a regular file' });
+    should(anonymous).deepEqual({ kind: 'other', description: 'anon_inode:[eventfd]' });
+    should(file).deepEqual({ kind: 'file', path: '/var/log/out.log' });
+  });
 });
 
 describe('SigtermProcessSignal', () => {
@@ -182,6 +226,11 @@ describe('SigtermProcessSignal', () => {
     should(sent).be.true();
     should(child.signalCode).equal('SIGTERM');
     should(again).be.false();
+  });
+
+  it('should not swallow a failure that is not "already gone"', async () => {
+    // Act + Assert — a pid that is no pid at all is a defect in the caller, not an exited process.
+    await should(new SigtermProcessSignal().terminate(Number.NaN)).be.rejected();
   });
 });
 
