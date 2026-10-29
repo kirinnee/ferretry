@@ -272,18 +272,12 @@ describe('AttentionPanel', () => {
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });
 
-  test('Details unfolds the context and brief, and folds it again', async () => {
+  test('the context is open from the start: there is no Details fold to open', async () => {
     const rich = item('A3', { context: 'We need storage for the sessions.' });
     view = await mount(panel({ snapshot: board([rich]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
-    expect(card.textContent).not.toContain('We need storage');
-    const details = must(card.querySelector<HTMLButtonElement>('[data-attention-details]'), 'details');
-    expect(details.getAttribute('aria-expanded')).toBe('false');
-    await interact(() => details.click());
-    expect(card.textContent).toContain('We need storage');
-    expect(details.getAttribute('aria-expanded')).toBe('true');
-    await interact(() => details.click());
-    expect(card.textContent).not.toContain('We need storage');
+    expect(card.querySelector('[data-attention-details]')).toBeNull();
+    expect(card.querySelector('[data-attention-section="context"]')?.textContent).toContain('We need storage');
   });
 
   test('the answer chip names the item and reports its toggle', async () => {
@@ -492,7 +486,7 @@ describe('AttentionPanel', () => {
     expect(calls.map(call => call.method)).toEqual(['dismiss']);
   });
 
-  test('Details on a rich item opens its brief, with a lone question said once, under the ask', async () => {
+  test('a rich item draws its brief open, with a lone question said once, under the ask', async () => {
     const rich = item('A3', {
       subject: 'Pick a database',
       why: 'Pick a database',
@@ -504,7 +498,6 @@ describe('AttentionPanel', () => {
     });
     view = await mount(panel({ snapshot: board([rich]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
-    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-details]'), 'details').click());
     expect(card.querySelector('[data-attention-section="context"]')?.textContent).toContain('We need storage.');
     expect(card.querySelector('[data-attention-section="questions"]')).toBeNull();
     expect(card.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite');

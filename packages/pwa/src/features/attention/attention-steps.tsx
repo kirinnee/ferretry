@@ -4,24 +4,18 @@
  * message), the steps as a checklist.
  *
  * A tick is OPTIMISTIC: it shows at once and goes to the machine as the `progress` action, so every
- * device sees it; a refusal rolls it back and says so on the step. A long body is folded behind
- * "Show all" past a height, never clipped without a way to the rest.
+ * device sees it; a refusal rolls it back and says so on the step. A long body shows a short preview with
+ * "Show more", never clipped without a way to the rest.
  */
 
 import { type ReactNode, useId, useState } from 'react';
+import { collapsesByDefault } from './attention-board.tsx';
 
 type Prose = (text: string) => ReactNode;
 
-/** A body longer than this many characters (or lines) starts folded. */
-const BODY_FOLD_CHARS = 700;
-const BODY_FOLD_LINES = 14;
-
-const bodyFoldsByDefault = (text: string): boolean =>
-  text.length > BODY_FOLD_CHARS || text.split('\n').length > BODY_FOLD_LINES;
-
 export function AttentionBody({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {
   const [all, setAll] = useState(false);
-  const folds = bodyFoldsByDefault(text);
+  const folds = collapsesByDefault(text);
   const regionId = useId();
   return (
     <div className="fy-attn-body" data-attention-body="" data-folded={(folds && !all) || undefined} id={regionId}>
@@ -35,7 +29,7 @@ export function AttentionBody({ text, renderProse }: { readonly text: string; re
           onClick={() => setAll(open => !open)}
           type="button"
         >
-          {all ? 'Show less' : 'Show all'}
+          {all ? 'Show less' : 'Show more'}
         </button>
       ) : null}
     </div>

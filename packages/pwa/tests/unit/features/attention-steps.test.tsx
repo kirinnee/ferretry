@@ -107,13 +107,13 @@ describe('attention card Markdown and hypermedia', () => {
     expect(written).toEqual(['echo one', 'echo two']);
   });
 
-  test('folds a long body behind Show all, and says how to get the rest', async () => {
+  test('previews a long body behind Show more, and says how to get the rest', async () => {
     const item = todo({ body: Array.from({ length: 40 }, (_, line) => `line ${line}`).join('\n\n') });
     view = await mount(<AttentionCard item={item} onAct={() => {}} renderProse={chatProse()} />);
     const body = must(view.container.querySelector('[data-attention-body]'), 'body');
     const toggle = must(body.querySelector<HTMLButtonElement>('[data-attention-body-toggle]'), 'toggle');
     expect(body.hasAttribute('data-folded')).toBe(true);
-    expect(toggle.textContent).toBe('Show all');
+    expect(toggle.textContent).toBe('Show more');
     await interact(() => toggle.click());
     expect(body.hasAttribute('data-folded')).toBe(false);
     expect(toggle.textContent).toBe('Show less');

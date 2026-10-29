@@ -36,8 +36,15 @@ describe('the brief sections', () => {
     expect(must(view.container, 'view').querySelector('[data-attention-section="questions"]')).not.toBeNull();
   });
 
-  test('leave the recommendation out where the card draws it under its ask', async () => {
-    view = await mount(<AttentionBriefSections item={item} renderProse={text => text} showRecommendation={false} />);
-    expect(recommendationOf(must(view.container, 'view'))).toBeNull();
+  test('draw a recommendation handed in, in the same section', async () => {
+    view = await mount(
+      <AttentionBriefSections
+        collapsible={false}
+        item={{ ...item, recommendation: undefined }}
+        recommendation={{ decision: 'Postgres' }}
+        renderProse={text => text}
+      />,
+    );
+    expect(recommendationOf(must(view.container, 'view'))?.textContent).toContain('Postgres');
   });
 });
