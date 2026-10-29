@@ -52,6 +52,9 @@ describe('lineage surface model', () => {
     const onlyRunning = toggleLineageStatusFilter(null, 'running');
     expect(onlyRunning).toEqual(new Set(['running']));
     expect(toggleLineageStatusFilter(onlyRunning, 'running')).toBeNull();
+    const both = toggleLineageStatusFilter(onlyRunning, 'failed');
+    expect(both).toEqual(new Set(['running', 'failed']));
+    expect(onlyRunning).toEqual(new Set(['running']));
 
     const counts = statusCounts(surfaceRows(buildLineageSurfaceModel('missing', [])));
     expect(orderedStatuses(counts, new Set(['failed', 'running']))).toEqual(['running', 'failed']);

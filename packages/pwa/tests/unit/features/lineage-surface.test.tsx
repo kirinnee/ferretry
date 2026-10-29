@@ -70,6 +70,39 @@ describe('LineageSurfaceContent', () => {
     expect(JSON.stringify(missing.toJSON())).toContain('not in this daemon’s live fleet snapshot');
   });
 
+  it('says a self-referential parent was ignored rather than showing it as a parent', () => {
+    const cyclic = sessionView('current', { config: { parent: 'current' } });
+    const view = render(<LineageSurfaceContent daemonId={daemon} sessionId="current" sessions={[cyclic]} />);
+    expect(view.root.findByProps({ 'data-lineage-role': 'invalid-parent' }).props.title).toContain(
+      'self-referential or cyclic and was ignored',
+    );
+    expect(view.root.findAllByProps({ 'data-lineage-role': 'parent' })).toHaveLength(0);
+  });
+
+  it('marks a deep level with its number and joins a row to the sibling that follows it', () => {
+    const current = sessionView('current');
+    const first = sessionView('first', { config: { parent: 'current' } });
+    const second = sessionView('second', { config: { parent: 'current' } });
+    const deeper = sessionView('deeper', { config: { parent: 'first' } });
+    const deepest = sessionView('deepest', { config: { parent: 'deeper' } });
+    const view = render(
+      <LineageSurfaceContent
+        daemonId={daemon}
+        sessionId="current"
+        sessions={[current, first, second, deeper, deepest]}
+      />,
+    );
+    const levels = view.root.findAll(
+      node => typeof node.props.title === 'string' && node.props.title.startsWith('Lineage level'),
+    );
+    expect(levels.map(node => node.props.title)).toEqual(['Lineage level 4']);
+    expect(levels[0]?.children.join('')).toBe('›3');
+    const joins = view.root.findAll(
+      node => node.type === 'span' && String(node.props.className).includes('left-4 top-[22px]'),
+    );
+    expect(joins).toHaveLength(1);
+  });
+
   it('offers an explicit reset when no sessions match the selected status', () => {
     const current = sessionView('current', { state: { status: 'running' } });
     const completed = sessionView('completed', { config: { parent: 'current' }, state: { status: 'completed' } });
