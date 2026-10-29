@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import {
   ATTENTION_ASK_TARGET_LENGTH,
+  ATTENTION_PUSH_TITLE_LENGTH,
   AttentionItemSchema,
   type PendingQuestion,
   type StructuredQuestionAnswer,
@@ -125,6 +126,30 @@ describe('harnessWait', () => {
     should(wait?.request.subject.length).be.belowOrEqual(ATTENTION_ASK_TARGET_LENGTH);
     should(wait?.request.subject.endsWith('…')).be.true();
     should(wait?.request.waitingSince).equal('2026-10-28T09:59:00.000Z');
+  });
+
+  it('should give every harness prompt a plain title and the kind its ask means', () => {
+    // Act
+    const pick = harnessWait(running({ pendingQuestion: choice }));
+    const words = harnessWait(running({ pendingQuestion: several }));
+    const permission = harnessWait(
+      running({
+        turnState: 'needs-input',
+        turnStateAt: NOW,
+        permissionRequest: { id: 'perm-1', question: 'Do you want to run this command?' },
+      }),
+    );
+    const stuck = harnessWait(running({ turnState: 'needs-input', turnPrompt: 'Make auto mode your default?' }));
+
+    // Assert
+    should(pick?.request).containDeep({ title: 'Question from the ferret', kind: 'choice' });
+    should(words?.request).containDeep({ title: 'Question from the ferret', kind: 'reply' });
+    should(permission?.request).containDeep({ title: 'Permission for a command', kind: 'info' });
+    should(stuck?.request).containDeep({ title: 'Ferret stuck on a prompt', kind: 'info' });
+    for (const wait of [pick, words, permission, stuck]) {
+      should(wait?.request.title?.length).be.belowOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
+      should(wait?.request.answers).be.undefined();
+    }
   });
 
   it('should ask several questions, or a multi-select, in words with each question kept', () => {

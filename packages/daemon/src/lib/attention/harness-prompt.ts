@@ -6,6 +6,7 @@ import {
   type AttentionQuestion,
   AttentionQuestionSchema,
   type AttentionResponse,
+  kindOfAsk,
   MAX_ATTENTION_ASK_OPTION_DETAIL_LENGTH,
   MAX_ATTENTION_QUESTION_LENGTH,
   MAX_ATTENTION_QUESTIONS,
@@ -117,9 +118,12 @@ export function harnessQuestionRequest(pending: PendingQuestion, failed = false)
   const questions = pending.questions.slice(0, MAX_ATTENTION_QUESTIONS).map(attentionQuestion);
   const several = pending.questions.length > 1;
   const first = pending.questions[0]?.question ?? 'The ferret is waiting on a question';
+  const ask = questionAsk(pending, questions);
   return {
     source: 'question',
     sourceRef: pending.toolUseId,
+    title: failed ? 'Your answer did not arrive' : 'Question from the ferret',
+    kind: kindOfAsk(ask),
     subject: failed ? 'Your answer did not reach the ferret. Answer again.' : clip(first, ATTENTION_ASK_TARGET_LENGTH),
     why: 'The ferret stopped at a question form and cannot go on until it is answered.',
     context: toBullets([
@@ -129,7 +133,7 @@ export function harnessQuestionRequest(pending: PendingQuestion, failed = false)
       'Your answer is typed into the form for you.',
     ]),
     howToResolve: 'Answer here and the form is filled in for you, or answer it in the Console tab.',
-    ask: questionAsk(pending, questions),
+    ask,
     questions,
     ...(pending.askedAt === undefined ? {} : { waitingSince: pending.askedAt }),
   };
@@ -146,6 +150,8 @@ function consolePromptWait(state: HarnessState): HarnessWait {
     request: {
       source: 'question',
       sourceRef,
+      title: permission ? 'Permission for a command' : 'Ferret stuck on a prompt',
+      kind: 'info',
       subject: permission
         ? 'The ferret needs your permission to go on. Answer it in the Console.'
         : 'The ferret is stuck on a prompt only you can answer. Open the Console.',

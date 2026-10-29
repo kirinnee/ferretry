@@ -5,7 +5,6 @@ import {
   renderAttentionHistory,
   renderAttentionList,
   renderAttentionMutation,
-  renderNotification,
 } from '../../../src/lib/attention/render';
 import { agentItem, humanItem, resolvedItem, SESSION, snapshot } from './fixtures';
 
@@ -55,9 +54,9 @@ describe('attention listing', () => {
     const actual = renderAttentionList(snapshot([agentItem('A2', 'pick a cluster')]));
 
     // Assert
-    should(row(actual, 2)).equal('      why: nothing else can proceed');
-    should(row(actual, 3)).equal('      resolve: answer on the board');
-    should(row(actual, 4)).equal('      since 2026-07-31T09:05:00.000Z · raised by agent sol');
+    should(row(actual, 3)).equal('      why: nothing else can proceed');
+    should(row(actual, 4)).equal('      resolve: answer on the board');
+    should(row(actual, 5)).equal('      since 2026-07-31T09:05:00.000Z · raised by agent sol');
   });
 
   it('should not invent a name for an unnamed agent', () => {
@@ -129,10 +128,10 @@ describe('attention listing', () => {
     );
 
     // Assert
-    should(permission).containEql('answer: approve or reject');
-    should(review).containEql('answer: good, or ask to clarify');
+    should(permission).containEql('answers: ← Deny · → Allow');
+    should(review).containEql('answers: ← Needs changes · → Looks good');
     should(open).containEql('answer: write a full answer');
-    should(choice).containEql('answer: pick one of "ship it" | "hold"');
+    should(choice).containEql('answers: ← hold · → ship it');
   });
 
   it('should omit the answer hint for an item with no ask', () => {
@@ -329,22 +328,6 @@ describe('attention confirmations', () => {
   });
 });
 
-describe('notification confirmations', () => {
-  it('should count the devices reached', () => {
-    // Act + Assert
-    should(renderNotification(3)).equal('notification sent to 3 devices');
-    should(renderNotification(1)).equal('notification sent to 1 device');
-  });
-
-  it('should say out loud when the message went nowhere', () => {
-    // Act
-    const actual = renderNotification(0);
-
-    // Assert
-    should(actual).equal('notification sent to 0 devices — no registered device wants this kind');
-  });
-});
-
 describe('writing advice', () => {
   it('should print the daemon warnings under the confirmation, with the fix to run', () => {
     // Arrange
@@ -414,8 +397,76 @@ describe('attention to-do items', () => {
     );
 
     // Assert
-    should(plain).containEql('to do: mark it done, or ask for more information');
+    should(plain).containEql('answers: ← Need more info · → Done');
     should(plain).not.containEql('waiting on the ferret');
     should(waiting).containEql('waiting on the ferret: more information asked 2026-07-31T09:10:00.000Z');
+  });
+});
+
+describe('attention cards', () => {
+  it('should head a titled item by its title, then the ask, then the answers as the swipes point', () => {
+    // Act
+    const actual = renderAttentionList(
+      snapshot([
+        humanItem('A1', 'Ship the release now?', {
+          title: 'Release',
+          kind: 'yesno',
+          ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
+        }),
+      ]),
+    );
+
+    // Assert
+    should(row(actual, 1)).equal('  !A1  [question]  Release');
+    should(row(actual, 2)).equal('      ask: Ship the release now?');
+    should(row(actual, 3)).equal('      answers: ← No · → Yes');
+  });
+
+  it('should lay a permission card with an up answer out left, up, right', () => {
+    // Act
+    const actual = renderAttentionList(
+      snapshot([
+        humanItem('A1', 'Run the migration?', {
+          title: 'Migration',
+          kind: 'permission',
+          ask: { kind: 'permission' },
+          answers: [
+            { direction: 'left', does: 'reject', label: 'Deny' },
+            { direction: 'up', does: 'approve', label: 'Always allow' },
+            { direction: 'right', does: 'approve', label: 'Allow' },
+          ],
+        }),
+      ]),
+    );
+
+    // Assert
+    should(actual).containEql('answers: ← Deny · ↑ Always allow · → Allow');
+  });
+
+  it('should keep an old item headed by its ask and still show derived answers', () => {
+    // Act
+    const actual = renderAttentionList(
+      snapshot([humanItem('A1', 'approve the deploy', { ask: { kind: 'permission' } })]),
+    );
+
+    // Assert
+    should(row(actual, 1)).equal('  !A1  [question]  approve the deploy');
+    should(actual).not.containEql('ask: approve the deploy');
+    should(row(actual, 2)).equal('      answers: ← Deny · → Allow');
+  });
+
+  it('should name an old item’s options past the third so none is hidden', () => {
+    // Act
+    const actual = renderAttentionList(
+      snapshot([
+        humanItem('A1', 'which one', {
+          ask: { kind: 'multiple-choice', options: [{ label: 'a' }, { label: 'b' }, { label: 'c' }, { label: 'd' }] },
+        }),
+      ]),
+    );
+
+    // Assert
+    should(actual).containEql('also "');
+    should(actual).containEql('"d"');
   });
 });

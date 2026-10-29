@@ -54,6 +54,20 @@ describe('answer flags', () => {
   });
 });
 
+describe('yes and no answers', () => {
+  it('should read --yes and --no as the Yes and No choices', () => {
+    // Act + Assert
+    should(parseAnswer({ yes: true })).deepEqual({ kind: 'multiple-choice', choice: 'Yes' });
+    should(parseAnswer({ no: true })).deepEqual({ kind: 'multiple-choice', choice: 'No' });
+  });
+
+  it('should refuse --yes and --no together, or with another answer', () => {
+    // Act + Assert
+    should(() => parseAnswer({ yes: true, no: true })).throw(/exactly one answer/u);
+    should(() => parseAnswer({ no: true, choice: 'a' })).throw(/exactly one answer/u);
+  });
+});
+
 describe('conflicting answers', () => {
   it('should refuse an approval and a rejection together', () => {
     // Act + Assert
