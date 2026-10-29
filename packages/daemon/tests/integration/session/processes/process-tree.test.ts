@@ -1,11 +1,13 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
+  HarnessProcessProvenance,
   ProcfsProcessTree,
   PsProcessTree,
+  processTreeFor,
   SigtermProcessSignal,
 } from '../../../../src/adapters/session/processes/index.ts';
 import type { ProcessDetailRow } from '../../../../src/lib/session/processes/ports.ts';
@@ -221,4 +223,115 @@ describe('PsProcessTree', () => {
     },
     15_000,
   );
+});
+
+describe('the process-tree adapters, the rest of their surface', () => {
+  const ps = Bun.which('ps');
+
+  it.skipIf(!linux)('should find a process holding a listening TCP socket, and none for one without', async () => {
+    // Arrange
+    const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
+    const idle = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+    spawned.push(idle);
+    const tree = new ProcfsProcessTree();
+
+    try {
+      // Act
+      const listening = await tree.listening([process.pid, idle.pid]);
+
+      // Assert
+      should([...(listening ?? [])]).deepEqual([process.pid]);
+    } finally {
+      server.stop(true);
+    }
+  });
+
+  it.skipIf(!linux || ps === null)('should read a start through ps, and none once the process is gone', async () => {
+    // Arrange
+    const child = Bun.spawn(['sleep', '30'], { stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+    spawned.push(child);
+    const tree = new PsProcessTree(ps as string);
+
+    // Act
+    const live = await tree.startOf(child.pid);
+    child.kill('SIGKILL');
+    await child.exited;
+    const gone = await tree.startOf(child.pid);
+
+    // Assert
+    should(live).be.a.Number().and.be.above(0);
+    should(gone).be.undefined();
+  });
+
+  it('should say the table could not be read when ps cannot run', async () => {
+    // Arrange
+    const tree = new PsProcessTree(join(directory, 'no-such-ps'));
+
+    // Act
+    const read = await tree.tree(process.pid);
+
+    // Assert
+    should(read).deepEqual({ kind: 'unavailable', reason: 'The process table could not be read.' });
+  });
+
+  it('should pick procfs on Linux and ps everywhere else', () => {
+    // Act
+    const onLinux = processTreeFor('linux');
+    const onMac = processTreeFor('darwin');
+
+    // Assert
+    should(onLinux).be.instanceOf(ProcfsProcessTree);
+    should(onMac).be.instanceOf(PsProcessTree);
+  });
+});
+
+describe('HarnessProcessProvenance', () => {
+  it.skipIf(!linux)(
+    "should read the project's servers from the directory the pane runs in and recognise the tools server",
+    async () => {
+      // Arrange
+      const pane = Bun.spawn(['sleep', '30'], { cwd: directory, stdin: 'ignore', stdout: 'ignore', stderr: 'ignore' });
+      spawned.push(pane);
+      const asked: string[] = [];
+      const provenance = new HarnessProcessProvenance('fy', {
+        read: async (path: string) => {
+          asked.push(path);
+          return [];
+        },
+      });
+      const rows: readonly ProcessDetailRow[] = [
+        { pid: 9_001, ppid: pane.pid, start: 1, startedAtMs: 0, argv: 'fy mcp serve', state: 'S' },
+        { pid: 9_002, ppid: pane.pid, start: 1, startedAtMs: 0, argv: 'zsh -c bun test', state: 'S' },
+      ];
+
+      // Act
+      const known = await provenance.identify(rows, pane.pid);
+
+      // Assert
+      should(asked).deepEqual([await realpath(directory)]);
+      should(known.has(9_001)).be.true();
+      should(known.has(9_002)).be.false();
+    },
+  );
+
+  it('should ask for no configured servers where there is no procfs to find the pane directory', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const provenance = new HarnessProcessProvenance(
+      'fy',
+      {
+        read: async (path: string) => {
+          asked.push(path);
+          return [];
+        },
+      },
+      undefined,
+    );
+
+    // Act
+    await provenance.identify([], 4_242);
+
+    // Assert
+    should(asked).deepEqual([]);
+  });
 });

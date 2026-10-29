@@ -273,3 +273,39 @@ describe('resultFor', () => {
     should(resultFor(held, 'ninja', 0)).be.undefined();
   });
 });
+
+describe('transcriptEvidence, when a result is not plain text', () => {
+  it('should read the text blocks of a structured result and skip every other block', () => {
+    // Arrange
+    const events = [
+      call('c1', { command: 'bun test' }),
+      result('c1', '', {
+        content: [
+          { type: 'text', text: 'Exit code 2\n' },
+          { type: 'image', source: 'x' },
+          'stray',
+          { type: 'text', text: 'boom' },
+        ],
+        isError: true,
+      }),
+    ];
+
+    // Act
+    const evidence = transcriptEvidence(events);
+
+    // Assert
+    should(evidence.commandResults).have.length(1);
+    should(evidence.commandResults[0]).have.properties({ text: 'Exit code 2\nboom', exit: { code: 2, failed: true } });
+  });
+
+  it('should read a result whose content is neither text nor blocks as empty', () => {
+    // Arrange
+    const events = [call('c1', { command: 'true' }), result('c1', '', { content: { odd: true } })];
+
+    // Act
+    const evidence = transcriptEvidence(events);
+
+    // Assert
+    should(evidence.commandResults[0]).have.properties({ text: '', exit: { code: 0, failed: false } });
+  });
+});
