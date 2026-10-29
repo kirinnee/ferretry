@@ -679,31 +679,31 @@ describe('ATTENTION_INSTRUCTION', () => {
 
     // Assert
     // Why first: the owner reads the board, so an ask left in a reply reaches nobody.
-    should(text).startWith('Attention: the owner reads the board, not your replies.');
-    should(text).containEql('`zz attention add "<summary>"`');
+    should(text).startWith('Attention: the owner reads the board, not your replies');
+    // Every notification is an item, and progress is never one.
+    should(text).containEql('every notification is an Attention item (never progress)');
     // Every human action is its own item, raised before the reply ends — never prose alone.
     should(text).containEql(
-      'Before ending a reply that asks them to decide or DO anything ("Next steps: You: …", "Waiting on you"), raise each ask as its OWN item',
+      'Before ending a reply that asks them to decide or DO anything ("Next steps: You: …"), raise each ask as its OWN item',
     );
     should(text).containEql('prose alone reaches nobody');
-    // Self-contained, in point form: the reader has not followed the conversation.
-    should(text).containEql('They read it cold: short bullets, one idea each');
-    should(text).containEql('no ticket/PR numbers, codenames, paths or unexplained acronyms');
+    // A card: a title that is the push heading, and a one-line ask that is its text.
+    should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
+    should(text).containEql('Title ≤40 chars = push heading; ask, one line ≤120 = its text.');
+    // Isolated: the reader has not followed the conversation.
+    should(text).containEql('Cards stand alone, read cold: no "as above"/"as discussed"');
+    should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
-    should(text).containEql('one plain sentence under 90 chars, answer first');
-    should(text).containEql('`--context` repeats');
-    should(text).containEql('every step in order via `--step "<markdown>"`');
-    should(text).containEql('never a secret value');
-    should(text).containEql('so the item alone is enough');
-    should(text).containEql('`--question` each decision with 2–4 short `--option`s');
-    should(text).containEql('`--recommend <pick> --recommend-why <line>`');
-    // A tiny bad/good example.
-    should(text).containEql('Bad: "Need call on KT-412 re OCI cron"');
-    should(text).containEql('Good: "Keep the work login alive every 30 minutes?"');
-    should(text).containEql('Never for progress or finishing.');
+    // Kinds, at most three directional answers, the recommendation on the right.
+    should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
+    should(text).containEql('A choice: 2–3 `--option`s that say what each does');
+    should(text).containEql('`--recommend <pick> --recommend-why <line>` puts it on the right');
+    should(text).containEql('`--up "<label>"` adds a third answer (task, permission)');
+    should(text).containEql('each step via `--step "<markdown>"`');
+    should(text).containEql('no secrets');
     should(text).containEql('"[answer to !A3 …]"');
     // The need-more-info loop: expand the same item.
-    should(text).containEql('On "[needs more info !A3 …]", add what is missing with `zz attention edit <id>`');
+    should(text).containEql('On "[needs more info !A3 …]", add it with `zz attention edit <id>`');
     should(text).containEql('say in the item why not');
     should(text).containEql('Moot? `zz attention done <id>`');
     should(text).not.containEql('notify');

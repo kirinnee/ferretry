@@ -259,7 +259,7 @@ function unknownVerb(words: readonly string[], verbs: readonly string[]): string
   const [first] = words;
   const offered = verbs.join(', ');
   if (first === undefined) return `attention needs a command. Did you mean: ${offered}`;
-  return `unknown command '${first}'. Did you mean: ${offered} — raise an item with \`attention add "<summary>"\``;
+  return `unknown command '${first}'. Did you mean: ${offered} — raise an item with \`attention add --title "<what>" "<the ask>"\``;
 }
 
 /** commander's repeatable-option reducer: `--option a --option b` collects both. */

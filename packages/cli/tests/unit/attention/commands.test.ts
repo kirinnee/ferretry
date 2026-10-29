@@ -46,7 +46,7 @@ describe('attention command surface', () => {
     const { parsed } = run(['attention', 'approve', 'the', 'deploy']);
 
     // Assert
-    await should(parsed).be.rejectedWith(/attention add "<summary>"/u);
+    await should(parsed).be.rejectedWith(/attention add --title "<what>" "<the ask>"/u);
   });
 
   it('should refuse a bare `attention` rather than raise an empty item', async () => {
