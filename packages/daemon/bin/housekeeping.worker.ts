@@ -20,6 +20,7 @@ import {
   hostHousekeepingPorts,
   runHousekeepingJob,
 } from '../src/adapters/housekeeping/job-runner.ts';
+import { memoryUsage } from '../src/adapters/runtime/memory-usage.ts';
 import { NodeCodexRolloutIndex } from '../src/adapters/session/transcript/node-codex-rollout-index.ts';
 import type {
   HousekeepingRequest,
@@ -65,7 +66,7 @@ self.onmessage = async event => {
     children: counters.children,
     fileReads: counters.fileReads,
     fetches: counters.fetches,
-    heapBytes: process.memoryUsage().heapTotal,
+    heapBytes: memoryUsage().heapTotal,
   });
   post(response);
 };
