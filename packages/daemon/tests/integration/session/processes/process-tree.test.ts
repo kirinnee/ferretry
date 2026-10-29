@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -56,6 +56,25 @@ async function waitForRow(
   throw new Error('the spawned process never appeared in the tree');
 }
 
+/**
+ * The kernel's own state letter for `pid`, read straight from `/proc/<pid>/stat` — the oracle the reader is
+ * checked against, so the test never asks the reader to vouch for itself.
+ */
+async function kernelState(pid: number): Promise<string | undefined> {
+  const stat = await readFile(`/proc/${pid}/stat`, 'utf8').catch(() => undefined);
+  return stat?.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+}
+
+/** Stops `pid` and waits until the kernel shows it stopped: a state that, unlike running or sleeping, holds still. */
+async function stopped(pid: number): Promise<void> {
+  process.kill(pid, 'SIGSTOP');
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if ((await kernelState(pid)) === 'T') return;
+    await Bun.sleep(20);
+  }
+  throw new Error(`process ${pid} never stopped`);
+}
+
 describe('ProcfsProcessTree', () => {
   it.skipIf(!linux)(
     'should list a shell and its child with their state, start, parentage and where output goes',
@@ -73,6 +92,12 @@ describe('ProcfsProcessTree', () => {
       const isSleeper = (rows: readonly ProcessDetailRow[]) =>
         rows.find(row => row.ppid === shell.pid && row.argv === 'sleep 30');
 
+      // A shell that has just forked may still be on a CPU (`R`) or already waiting on its child (`S`) — which one is
+      // the scheduler's choice, not the reader's (a one-CPU runner shows `R` about one time in five). Stopping it
+      // pins the state the kernel reports, so the reader's answer can be checked exactly.
+      await waitForRow(tree, isSleeper);
+      await stopped(shell.pid);
+
       // Act
       const rows = await waitForRow(tree, isSleeper);
       const shellRow = rows.find(row => row.pid === shell.pid);
@@ -84,7 +109,7 @@ describe('ProcfsProcessTree', () => {
       if (shellRow === undefined || sleeper === undefined) return;
       should(shellRow.ppid).equal(process.pid);
       should(shellRow.argv).equal(`sh -c sleep 30 > '${output}'; :`);
-      should(shellRow.state).match(/^S/u);
+      should(shellRow.state).equal('T');
       should(shellRow.stdout).deepEqual({ kind: 'socket' });
       should(shellRow.stderr).deepEqual({ kind: 'null' });
       should(sleeper.stdout).deepEqual({ kind: 'file', path: output });
