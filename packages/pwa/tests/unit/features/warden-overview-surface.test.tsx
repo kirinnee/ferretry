@@ -264,6 +264,44 @@ describe('WardenOverviewSurface', () => {
     }
   });
 
+  it('should open a fleet triage’s report, which is about no one ferret', async () => {
+    // Arrange
+    const { targetSession: _none, ...fleetWide } = wardenInvestigation({
+      id: 'fleet-1',
+      state: 'done',
+      scope: 'fleet',
+      verdict: 'needs_human',
+      reportPath: 'reports/fleet.md',
+      wardenName: 'warden-000023',
+    });
+    const { client } = fake({
+      status: wardenStatus({ lastSweepAt: '2026-07-31T11:59:00.000Z', investigations: [fleetWide] }),
+    });
+    const view = await mount(
+      <WardenOverviewSurface
+        connection={connection('a')}
+        createClient={async () => client}
+        now={() => NOW}
+        pollOptions={POLL}
+      />,
+    );
+    try {
+      await settle();
+
+      // Act
+      await interact(() =>
+        must(view.container.querySelector<HTMLButtonElement>('button[aria-label="Open report"]'), 'report').click(),
+      );
+      await settle();
+
+      // Assert
+      expect(view.container.textContent).toContain('warden-000023 · Fleet triage');
+      expect(view.container.textContent).toContain('Evidence from reports/fleet.md');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('should remount for another daemon and refuse outside the app store without a client', async () => {
     // Arrange
     const { client } = fake({ status: wardenStatus({ anomalies: [wardenAnomaly({ sessionId: 'only-a' })] }) });

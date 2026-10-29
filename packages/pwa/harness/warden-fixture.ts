@@ -236,6 +236,7 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
       costUsd: 0.55,
       agent: 'claude-default',
       model: 'claude-sonnet-5-5',
+      wardenName: 'warden-000023',
     },
   ],
   actions: [
