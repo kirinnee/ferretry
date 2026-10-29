@@ -84,6 +84,15 @@ export interface TranscriptToolResultEvent extends TranscriptEventMetadata {
   };
 }
 
+/**
+ * Where a payload too large to hold sits in the transcript file: the bytes of a base64 string literal,
+ * which are its value, since it holds no escape (`large-strings.ts`).
+ */
+export interface TranscriptBytesRef {
+  readonly byteOffset: number;
+  readonly byteLength: number;
+}
+
 export type TranscriptAttachment =
   | {
       readonly kind: 'image';
@@ -91,6 +100,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
     }
   | {
       readonly kind: 'audio';
@@ -98,6 +109,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
     }
   | {
       readonly kind: 'document';
@@ -105,6 +118,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
       readonly text?: string;
     }
   | {
@@ -113,6 +128,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
     }
   | {
       readonly kind: 'remote-control';

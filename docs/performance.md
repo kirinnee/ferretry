@@ -88,6 +88,9 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
   The analytics index is disposable. Every row is rebuilt from the session's own records and
   transcript, and the next start's sweep writes again each one that is missing, so a crash costs one
   re-ingestion of those sessions and nothing else.
+- **Screenshots in a transcript** are not read into memory. A pasted image is one record of several
+  megabytes, nearly all of it base64. The daemon remembers where those bytes are in the file instead of
+  loading them; nothing it shows today displays them.
 - `fyd --check` lists `session-index` and `analytics-index` with the other workers. If a writer thread
   fails five times in ten minutes, the daemon writes that index on its main thread instead and says so
   once in its log.
