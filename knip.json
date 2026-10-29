@@ -141,6 +141,7 @@
         "tests/integration/fixtures/routing-idea-scene.tsx",
         "tests/integration/fixtures/send-handover-scene.tsx",
         "tests/integration/fixtures/cancelled-rows-scene.tsx",
+        "tests/integration/fixtures/chat-rerender-scene.tsx",
         "tests/integration/fixtures/ledger-actions-scene.tsx",
         "tests/integration/fixtures/open-links-scene.tsx",
         "tests/integration/fixtures/notification-open-scene.tsx",
