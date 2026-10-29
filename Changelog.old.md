@@ -1,3 +1,9 @@
+## [4.97.1](https://github.com/kirinnee/ferretry/compare/v4.97.0...v4.97.1) (2026-10-29)
+
+### Fixes
+
+* **ci:** hold the compiled binaries' download to a manifest ([#842](https://github.com/kirinnee/ferretry/issues/842)) ([06ca66e](https://github.com/kirinnee/ferretry/commit/06ca66e1d52e8c89b6fe2f32ff206ff46a01d913)), closes [actions/download-artifact#454](https://github.com/actions/download-artifact/issues/454)
+
 ## [4.97.0](https://github.com/kirinnee/ferretry/compare/v4.96.1...v4.97.0) (2026-10-29)
 
 ### Features
