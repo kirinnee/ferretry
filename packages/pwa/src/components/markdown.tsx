@@ -34,12 +34,31 @@
  * or Ferretry's side panel. kteam wrapped them in `InAppBrowserLink` for the same
  * surface, with no choice.
  *
+ * THE ELEMENT RENDERERS ARE MODULE CONSTANTS. react-markdown draws each element
+ * with the component named for its tag, and React keeps an element only while its
+ * TYPE is the same function. Renderers written inline were new functions on every
+ * render, so any re-render of a message — a rebuilt reference surface, a resolved
+ * file path — unmounted and remounted every link, table and `fy-render` block in
+ * it: a running interactive page was thrown away and started again, and a table's
+ * open full-screen sheet closed. The renderers below are defined once; what they
+ * need from THIS message reaches them through `MarkdownRenderingContext`.
+ *
  * Ported from kteam's `src/components/Markdown.tsx`.
  */
 
 import type { AttentionId } from '@ferretry/protocol';
-import { type ComponentProps, type MouseEvent, memo, type ReactNode, useEffect, useMemo, useState } from 'react';
-import ReactMarkdown from 'react-markdown';
+import {
+  type ComponentProps,
+  createContext,
+  type MouseEvent,
+  memo,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+} from 'react';
+import ReactMarkdown, { type Components, type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ExternalLink } from '../features/browser/external-link.tsx';
 import type { ClipboardWriter } from '../features/onboarding/copy-button.tsx';
@@ -174,7 +193,8 @@ export function referenceHasTrustedOrigin(
   return revalidateReference(reference, resolvers);
 }
 
-type CodeProps = ComponentProps<'code'> & { readonly node?: unknown };
+/** What react-markdown hands the renderer for one tag: the element's own props and its hast node. */
+type ElementProps<Tag extends 'a' | 'code' | 'pre' | 'table' | 'th'> = ComponentProps<Tag> & ExtraProps;
 
 const fenceText = (node: unknown): string => {
   const text = (value: unknown): string => {
@@ -233,6 +253,192 @@ export interface MarkdownProps {
   /** In-app navigation for a proved agent reference. */
   readonly onNavigate?: (to: string) => void;
 }
+
+/**
+ * WHAT THE ELEMENT RENDERERS READ FROM THE MESSAGE THEY ARE IN: its proofs, its openers and the
+ * capabilities the surface named. A new value each render is fine — a context change re-renders the
+ * renderers in place; only a change of the renderer FUNCTIONS would remount what they drew.
+ */
+interface MarkdownRendering {
+  readonly enableFyRender: boolean;
+  readonly copyable: ClipboardWriter | undefined;
+  readonly readWorkspaceMedia: FyRenderWorkspaceReader | undefined;
+  readonly trustedResolvers: ReferenceResolvers;
+  readonly hasOpener: (target: ResolvedReference) => boolean;
+  readonly destination: (target: ResolvedReference) => string;
+  readonly referenceClick: (
+    target: ResolvedReference,
+    chain?: (event: MouseEvent<HTMLAnchorElement>) => void,
+  ) => (event: MouseEvent<HTMLAnchorElement>) => void;
+}
+
+const MarkdownRenderingContext = createContext<MarkdownRendering | null>(null);
+
+const useMarkdownRendering = (): MarkdownRendering => {
+  const rendering = useContext(MarkdownRenderingContext);
+  if (rendering === null) throw new Error('a Markdown element renderer was drawn outside <Markdown>');
+  return rendering;
+};
+
+/**
+ * Render decorated code back out. Text arrives as strings, so the code's own
+ * bytes reach the DOM through React's own escaping; highlighter tokens keep
+ * their class and their nesting, which is what preserves the theme colours.
+ */
+const renderCodeNodes = (rendering: MarkdownRendering, nodes: readonly CodeNode[], path: string): ReactNode[] =>
+  nodes.map((node, index) => {
+    const key = `${path}.${index}`;
+    if (node.kind === 'text') return node.text;
+    if (node.kind === 'span')
+      return (
+        <span className={node.className} key={key}>
+          {renderCodeNodes(rendering, node.children, key)}
+        </span>
+      );
+    return (
+      <a
+        data-fy-reference={referenceIdentity(node.reference)}
+        href={rendering.destination(node.reference)}
+        key={key}
+        onClick={rendering.referenceClick(node.reference)}
+        title={referenceTitle(node.reference)}
+      >
+        {node.text}
+      </a>
+    );
+  });
+
+function MarkdownLink({ node, href, onClick, children, ...rest }: ElementProps<'a'>) {
+  const { trustedResolvers, hasOpener, destination, referenceClick } = useMarkdownRendering();
+  const parsed = parseReferenceHref(href);
+  if (parsed === null) {
+    return (
+      <ExternalLink href={href} onClick={onClick} {...rest}>
+        {children}
+      </ExternalLink>
+    );
+  }
+  const target = referenceHasTrustedOrigin(node, parsed, trustedResolvers);
+  if (!target || !hasOpener(target)) return <>{children}</>;
+  return (
+    <a
+      data-fy-reference={referenceIdentity(target)}
+      href={destination(target)}
+      onClick={referenceClick(target, onClick)}
+      {...rest}
+    >
+      {children}
+    </a>
+  );
+}
+
+function MarkdownCode({ node: _node, className: fenceClassName, children, ...rest }: ElementProps<'code'>) {
+  const rendering = useMarkdownRendering();
+  const language = fenceLanguage(fenceClassName);
+  const source = language ? String(children ?? '').replace(/\n$/u, '') : '';
+  const html = language ? highlightToHtml(source, language) : null;
+  // REFERENCES INSIDE CODE. The code text is decorated, never
+  // rewritten: `decoratedCodeNodes` answers null unless it can slice
+  // this exact source — and for a highlighted fence, unless the
+  // highlighter's markup reassembles into it byte for byte. Null keeps
+  // the two renderings below exactly as they were.
+  //
+  // Only a literal string is offered for decoration. `String(children)`
+  // is a lossy reading of anything else, and a reference is not worth a
+  // corrupted snippet.
+  const decoratable = typeof children === 'string' ? (language ? source : children) : null;
+  const decorated =
+    decoratable === null
+      ? null
+      : decoratedCodeNodes({
+          code: decoratable,
+          html,
+          resolvers: rendering.trustedResolvers,
+          isOpenable: rendering.hasOpener,
+        });
+  const element =
+    decorated !== null ? (
+      html === null ? (
+        <code className={fenceClassName} {...rest}>
+          {renderCodeNodes(rendering, decorated, 'code')}
+        </code>
+      ) : (
+        <code className={`hljs language-${language}`}>{renderCodeNodes(rendering, decorated, 'code')}</code>
+      )
+    ) : html === null ? (
+      // No language (inline code, bare fence) or an unknown one: hand it
+      // back to react-markdown, which escapes it. Never raw HTML.
+      <code className={fenceClassName} {...rest}>
+        {children}
+      </code>
+    ) : (
+      // Safe on the same contract `code-block.tsx` relies on:
+      // `highlightToHtml` answers with highlight.js markup for a language
+      // IT registered — which escapes the source it tokenizes — or null,
+      // and the branch above covers every input it refused. Fence text is
+      // never forwarded as markup.
+      <code
+        className={`hljs language-${language}`}
+        // biome-ignore lint/security/noDangerouslySetInnerHtml: highlighted output is the registry's own escaped markup, through the fy-highlight Trusted Types policy; every refusal is handled above
+        dangerouslySetInnerHTML={{ __html: trustedHighlight(html) }}
+      />
+    );
+  if (rendering.copyable === undefined) return element;
+  return (
+    <CopyableSpan text={String(children).replace(/\n$/u, '')} write={rendering.copyable}>
+      {element}
+    </CopyableSpan>
+  );
+}
+
+/**
+ * THE ONE PLACE AN ILLUSTRATION CAN APPEAR, and it is a replacement rather than
+ * an addition: a matched fence renders as the block INSTEAD of the `<pre>`,
+ * because `<figure>` inside `<pre>` is not a tree a browser keeps and
+ * `white-space: pre` is not a layout an illustration survives. Everything else —
+ * the opt-in off, a different info string, an unparseable body — falls through to
+ * the ordinary fence below, where `code` still highlights or escapes it exactly as
+ * before. There is no partial state: a bad block is indistinguishable from a plain
+ * fence, which is the same rule an unknown fence language already has.
+ */
+function MarkdownPre({ node, children, ...rest }: ElementProps<'pre'>) {
+  const { enableFyRender, readWorkspaceMedia, copyable } = useMarkdownRendering();
+  const body = enableFyRender ? fyRenderFenceBody(node as MarkdownAstFenceNode | undefined) : null;
+  const parsed = body === null ? null : parseFyRender(body);
+  if (parsed?.ok === true) return <FyRenderBlock block={parsed.block} readWorkspaceMedia={readWorkspaceMedia} />;
+  const locationBody = locationFenceBody(node as MarkdownAstFenceNode | undefined);
+  const fix = locationBody === null ? null : parseLocationBlock(locationBody);
+  if (fix !== null) return <LocationChip fix={fix} />;
+  const fence = <pre {...rest}>{children}</pre>;
+  if (copyable === undefined) return fence;
+  return (
+    <CopyableFence text={fenceText(node)} write={copyable}>
+      {fence}
+    </CopyableFence>
+  );
+}
+
+/**
+ * THE RENDERERS, once for the whole app — see the header for why they must never be rebuilt.
+ *
+ * Tables wrap aggressively to fit the pane and may full-bleed past the prose
+ * measure (`styles/index.css`: `.md table` / `.md-table-scroll`); a phone reads a
+ * table as cards or as the real table, its own choice (`markdown-table.tsx`).
+ *
+ * kteam additionally set the explicit ARIA table roles
+ * (`role="table"`/`rowgroup`/`row`/`cell`/`columnheader`) so the header-to-cell
+ * association survived the phone layout switching cells to `display:block`.
+ * Biome rejects every one of them as a redundant role and its errors are hard
+ * failures, so they are deliberately not carried over. `scope="col"` is not
+ * redundant and is kept: it is the header association a screen reader reads first.
+ */
+const MARKDOWN_COMPONENTS: Components = {
+  a: MarkdownLink,
+  code: MarkdownCode,
+  pre: MarkdownPre,
+  table: ({ node: _node, ...rest }: ElementProps<'table'>) => <MarkdownTable {...rest} />,
+  th: ({ node: _node, ...rest }: ElementProps<'th'>) => <th scope="col" {...rest} />,
+};
 
 export const Markdown = memo(function Markdown({
   text,
@@ -374,188 +580,39 @@ export const Markdown = memo(function Markdown({
       openReference(target, event.currentTarget);
     };
 
-  /**
-   * Render decorated code back out. Text arrives as strings, so the code's own
-   * bytes reach the DOM through React's own escaping; highlighter tokens keep
-   * their class and their nesting, which is what preserves the theme colours.
-   */
-  const renderCodeNodes = (nodes: readonly CodeNode[], path: string): ReactNode[] =>
-    nodes.map((node, index) => {
-      const key = `${path}.${index}`;
-      if (node.kind === 'text') return node.text;
-      if (node.kind === 'span')
-        return (
-          <span className={node.className} key={key}>
-            {renderCodeNodes(node.children, key)}
-          </span>
-        );
-      return (
-        <a
-          data-fy-reference={referenceIdentity(node.reference)}
-          href={destination(node.reference)}
-          key={key}
-          onClick={referenceClick(node.reference)}
-          title={referenceTitle(node.reference)}
-        >
-          {node.text}
-        </a>
-      );
-    });
-
-  const withCopy =
-    (render: (props: CodeProps) => ReactNode) =>
-    (props: CodeProps): ReactNode => {
-      const element = render(props);
-      if (copyable === undefined) return element;
-      return (
-        <CopyableSpan text={String(props.children).replace(/\n$/u, '')} write={copyable}>
-          {element}
-        </CopyableSpan>
-      );
-    };
+  const rendering: MarkdownRendering = {
+    copyable,
+    destination,
+    enableFyRender,
+    hasOpener,
+    readWorkspaceMedia,
+    referenceClick,
+    trustedResolvers,
+  };
 
   return (
     <div className={`md min-w-0 max-w-full ${className ?? ''}`}>
-      <ReactMarkdown
-        components={{
-          a: ({ node, href, onClick, children, ...rest }) => {
-            const parsed = parseReferenceHref(href);
-            if (parsed === null) {
-              return (
-                <ExternalLink href={href} onClick={onClick} {...rest}>
-                  {children}
-                </ExternalLink>
-              );
-            }
-            const target = referenceHasTrustedOrigin(node, parsed, trustedResolvers);
-            if (!target || !hasOpener(target)) return <>{children}</>;
-            return (
-              <a
-                data-fy-reference={referenceIdentity(target)}
-                href={destination(target)}
-                onClick={referenceClick(target, onClick)}
-                {...rest}
-              >
-                {children}
-              </a>
-            );
-          },
-          // Tables wrap aggressively to fit the pane and may full-bleed past the
-          // prose measure (`styles/index.css`: `.md table` / `.md-table-scroll`).
-          // The scroller is the last-resort catch for a table that still cannot
-          // shrink, so a wide table scrolls INSIDE itself and never the page.
-          //
-          // On a phone the layout switches cells to `display:block` stacked
-          // cards, which strips the implicit ARIA table semantics. The explicit
-          // roles here (plus `scope="col"` on headers) preserve the
-          // header-to-cell association for a screen reader across that switch; on
-          // desktop they are the elements' implicit roles, so they are inert.
-          code: withCopy(({ node: _node, className: fenceClassName, children, ...rest }) => {
-            const language = fenceLanguage(fenceClassName);
-            const source = language ? String(children ?? '').replace(/\n$/u, '') : '';
-            const html = language ? highlightToHtml(source, language) : null;
-            // REFERENCES INSIDE CODE. The code text is decorated, never
-            // rewritten: `decoratedCodeNodes` answers null unless it can slice
-            // this exact source — and for a highlighted fence, unless the
-            // highlighter's markup reassembles into it byte for byte. Null keeps
-            // the two renderings below exactly as they were.
-            //
-            // Only a literal string is offered for decoration. `String(children)`
-            // is a lossy reading of anything else, and a reference is not worth a
-            // corrupted snippet.
-            const decoratable = typeof children === 'string' ? (language ? source : children) : null;
-            const decorated =
-              decoratable === null
-                ? null
-                : decoratedCodeNodes({
-                    code: decoratable,
-                    html,
-                    resolvers: trustedResolvers,
-                    isOpenable: hasOpener,
-                  });
-            if (decorated !== null)
-              return html === null ? (
-                <code className={fenceClassName} {...rest}>
-                  {renderCodeNodes(decorated, 'code')}
-                </code>
-              ) : (
-                <code className={`hljs language-${language}`}>{renderCodeNodes(decorated, 'code')}</code>
-              );
-            // No language (inline code, bare fence) or an unknown one: hand it
-            // back to react-markdown, which escapes it. Never raw HTML.
-            if (html === null) {
-              return (
-                <code className={fenceClassName} {...rest}>
-                  {children}
-                </code>
-              );
-            }
-            return (
-              // Safe on the same contract `code-block.tsx` relies on:
-              // `highlightToHtml` answers with highlight.js markup for a language
-              // IT registered — which escapes the source it tokenizes — or null,
-              // and the branch above covers every input it refused. Fence text is
-              // never forwarded as markup.
-              <code
-                className={`hljs language-${language}`}
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: highlighted output is the registry's own escaped markup, through the fy-highlight Trusted Types policy; every refusal is handled above
-                dangerouslySetInnerHTML={{ __html: trustedHighlight(html) }}
-              />
-            );
-          }),
-          // THE ONE PLACE AN ILLUSTRATION CAN APPEAR, and it is a replacement
-          // rather than an addition: a matched fence renders as the block INSTEAD
-          // of the `<pre>`, because `<figure>` inside `<pre>` is not a tree a
-          // browser keeps and `white-space: pre` is not a layout an illustration
-          // survives. Everything else — the opt-in off, a different info string,
-          // an unparseable body — falls through to the ordinary fence below,
-          // where `code` still highlights or escapes it exactly as before. There
-          // is no partial state: a bad block is indistinguishable from a plain
-          // fence, which is the same rule an unknown fence language already has.
-          pre: ({ node, children, ...rest }) => {
-            const body = enableFyRender ? fyRenderFenceBody(node) : null;
-            const parsed = body === null ? null : parseFyRender(body);
-            if (parsed?.ok === true)
-              return <FyRenderBlock block={parsed.block} readWorkspaceMedia={readWorkspaceMedia} />;
-            const locationBody = locationFenceBody(node);
-            const fix = locationBody === null ? null : parseLocationBlock(locationBody);
-            if (fix !== null) return <LocationChip fix={fix} />;
-            const fence = <pre {...rest}>{children}</pre>;
-            if (copyable === undefined) return fence;
-            return (
-              <CopyableFence text={fenceText(node)} write={copyable}>
-                {fence}
-              </CopyableFence>
-            );
-          },
-          // A phone reads a table as cards or as the real table, its own choice (`markdown-table.tsx`).
-          table: ({ node: _node, ...rest }) => <MarkdownTable {...rest} />,
-          // kteam additionally set the explicit ARIA table roles
-          // (`role="table"`/`rowgroup`/`row`/`cell`/`columnheader`) so the
-          // header-to-cell association survived the phone layout switching cells
-          // to `display:block`. Biome rejects every one of them as a redundant
-          // role and its errors are hard failures, so they are deliberately not
-          // carried over. `scope="col"` is not redundant and is kept: it is the
-          // header association a screen reader reads first.
-          th: ({ node: _node, ...rest }) => <th scope="col" {...rest} />,
-        }}
-        // remarkTableLabels stamps each body cell with its column header as
-        // `data-label`, which the mobile stacked-card layout prints. It must run
-        // after remark-gfm has produced the table nodes.
-        // remarkFyRenderFences marks fences whose info string is EXACTLY the
-        // token — the one place mdast still holds the metadata hast drops.
-        // Marking unconditionally rather than behind `enableFyRender` keeps the
-        // mark a statement about the DOCUMENT; whether it is acted on is the
-        // surface's decision, made in `pre` below.
-        remarkPlugins={[
-          remarkGfm,
-          remarkTableLabels,
-          remarkFyRenderFences,
-          [remarkReferences, { resolvers: transformResolvers }],
-        ]}
-      >
-        {text}
-      </ReactMarkdown>
+      <MarkdownRenderingContext.Provider value={rendering}>
+        <ReactMarkdown
+          components={MARKDOWN_COMPONENTS}
+          // remarkTableLabels stamps each body cell with its column header as
+          // `data-label`, which the mobile stacked-card layout prints. It must run
+          // after remark-gfm has produced the table nodes.
+          // remarkFyRenderFences marks fences whose info string is EXACTLY the
+          // token — the one place mdast still holds the metadata hast drops.
+          // Marking unconditionally rather than behind `enableFyRender` keeps the
+          // mark a statement about the DOCUMENT; whether it is acted on is the
+          // surface's decision, made in `MarkdownPre`.
+          remarkPlugins={[
+            remarkGfm,
+            remarkTableLabels,
+            remarkFyRenderFences,
+            [remarkReferences, { resolvers: transformResolvers }],
+          ]}
+        >
+          {text}
+        </ReactMarkdown>
+      </MarkdownRenderingContext.Provider>
     </div>
   );
 });
