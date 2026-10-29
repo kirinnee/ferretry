@@ -507,6 +507,17 @@ describe('attention send-now command', () => {
   });
 });
 
+describe('attention discuss command', () => {
+  it('should send the owner’s request to talk it through, with its note', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'discuss', '!A1', '--note', 'Why this account?'], snapshot([]));
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'discuss', id: 'A1', note: 'Why this account?' });
+  });
+});
+
 describe('attention needs-info command', () => {
   it('should send the owner’s request with its note', async () => {
     // Arrange + Act

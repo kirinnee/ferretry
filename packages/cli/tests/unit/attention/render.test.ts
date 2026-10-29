@@ -403,6 +403,32 @@ describe('attention to-do items', () => {
   });
 });
 
+describe('attention items in discussion', () => {
+  it('should say an item is in discussion, and keep "waiting on the ferret" for a request for information', () => {
+    // Act
+    const discussed = renderAttentionList(
+      snapshot([
+        agentItem('A2', 'log in', {
+          waitingOn: 'ferret',
+          waitingFor: 'discussion',
+          askedAt: '2026-07-31T09:10:00.000Z',
+        }),
+      ]),
+    );
+    const asked = renderAttentionList(
+      snapshot([
+        agentItem('A2', 'log in', { waitingOn: 'ferret', waitingFor: 'info', askedAt: '2026-07-31T09:10:00.000Z' }),
+      ]),
+    );
+
+    // Assert
+    should(discussed).containEql('in discussion: the owner asked to talk this through 2026-07-31T09:10:00.000Z');
+    should(discussed).not.containEql('waiting on the ferret');
+    should(asked).containEql('waiting on the ferret: more information asked');
+    should(asked).not.containEql('in discussion');
+  });
+});
+
 describe('attention cards', () => {
   it('should head a titled item by its title, then the ask, then the answers as the swipes point', () => {
     // Act
