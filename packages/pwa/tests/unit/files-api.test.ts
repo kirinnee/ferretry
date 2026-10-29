@@ -190,13 +190,13 @@ describe('files API', () => {
 
   it('reads its probe from the same record when rendered without a browser', () => {
     resetFsProbes();
-    let seen: string | null = null;
+    const seen: string[] = [];
     const Probe = () => {
-      seen = useFsProbe(daemonA, scopeA).state;
+      seen.push(useFsProbe(daemonA, scopeA).state);
       return null;
     };
     renderToStaticMarkup(createElement(Probe));
-    expect(seen).toBe('probing');
+    expect(seen).toEqual(['probing']);
   });
 
   it('settles on unsupported and keeps the daemon’s own reason for the disclosure', async () => {
