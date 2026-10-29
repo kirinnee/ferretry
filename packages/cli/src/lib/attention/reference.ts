@@ -18,7 +18,7 @@ export function parseAttentionReference(value: string): AttentionId {
   const candidate = value.trim().replace(SIGILS, '');
   const parsed = AttentionIdSchema.safeParse(candidate);
   if (!parsed.success) {
-    throw new Error(`"${value.trim()}" is not an attention reference — they look like !A3 (see \`attention ls\`)`);
+    throw new Error(`"${value.trim()}" is not an agenda reference — they look like !A3 (see \`agenda ls\`)`);
   }
   return parsed.data;
 }

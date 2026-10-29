@@ -273,7 +273,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
       // Assert
       should(added.code).equal(0, added.err);
-      should(added.out).containEql('attention !A5 recorded');
+      should(added.out).containEql('agenda !A5 recorded');
       should(listed.out).containEql('Approve the OCI work-login plan');
       should(listed.out).containEql('Work login plan');
       should(listed.out).containEql('answers: ← Changes · → Defaults');

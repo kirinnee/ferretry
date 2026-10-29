@@ -43,7 +43,7 @@ Every field renders as markdown: short bullets, one idea each, no walls of text;
 (fy-render) draws a chart or diagram when a picture beats words. Never use ticket or PR numbers,
 internal codenames, file paths or unexplained capitals — say it in plain words, or define the term
 with --term. The daemon warns when an item breaks these; fix it with
-\`edit <id>\`. Attention items never expire on a timer. Answering or dismissing on the board already
+\`edit <id>\`. Agenda items never expire on a timer. Answering or dismissing on the board already
 resolves it — but if the blocker clears some OTHER way (the human answers in chat, the work is no
 longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
 whose reason is gone but is still open is a bug, not a safe default.
@@ -78,8 +78,8 @@ refused: split the item, or use --kind reply. --up-why "<line>" describes the --
 Without --kind, steps with no question are a task, --option makes a choice (exactly Yes and No, a yesno),
 one --question with options is a choice, and several questions are answered in words.`;
 
-const DISMISS_POLICY = `Agents may dismiss only attention items they raised themselves.
-A human may dismiss any attention item. Every dismissal remains in the resolution audit.`;
+const DISMISS_POLICY = `Agents may dismiss only agenda items they raised themselves.
+A human may dismiss any agenda item. Every dismissal remains in the resolution audit.`;
 
 /** Add the shared flags every attention verb carries. */
 function scoped(command: Command): Command {
@@ -87,23 +87,44 @@ function scoped(command: Command): Command {
 }
 
 /**
- * Mounts `fy attention …` onto the program.
+ * Mounts `fy agenda …` onto the program, and `fy attention …` as its deprecated spelling: the same
+ * verbs, the same handlers, and one line on stderr saying the name moved.
  *
- * There is NO default verb: raising an item notifies the owner, so it takes the explicit `add`. A first
- * word that is not a verb (`fy attention show A6`, a typo) is refused with the verbs on offer, never
- * read as the summary of a new item.
+ * There is NO default verb: raising an item puts it on the owner's agenda, so it takes the explicit `add`. A
+ * first word that is not a verb (`fy agenda show A6`, a typo) is refused with the verbs on offer, never read
+ * as the summary of a new item.
  */
 export function registerAttentionCommands(program: Command, controller: AttentionController): void {
-  const attention = scoped(
-    program
-      .command('attention')
-      .description('raise, answer and audit the things a human has to decide')
-      .addHelpText('after', `\n${WRITING_GUIDE}`)
-      .argument('[verb...]', 'what to do: one of the commands below')
-      .action((words: string[]) => {
-        throw new Error(unknownVerb(words, verbNames(attention)));
-      }),
+  mountVerbs(
+    scoped(
+      program
+        .command('agenda')
+        .description('your agenda: what the owner has to decide or do, and what it blocks')
+        .addHelpText('after', `\n${WRITING_GUIDE}`),
+    ),
+    'agenda',
+    controller,
+    false,
   );
+  mountVerbs(
+    scoped(
+      program
+        .command('attention', { hidden: true })
+        .description('deprecated: this is now `fy agenda`')
+        .hook('preAction', () => {
+          controller.deprecatedAlias();
+        }),
+    ),
+    'attention',
+    controller,
+    true,
+  );
+}
+
+function mountVerbs(root: Command, name: string, controller: AttentionController, withNotify: boolean): void {
+  const attention = root.argument('[verb...]', 'what to do: one of the commands below').action((words: string[]) => {
+    throw new Error(unknownVerb(name, words, verbNames(attention)));
+  });
 
   const merged = <T extends AttentionCommandOptions>(command: Command): T => ({
     ...(attention.opts() as T),
@@ -143,7 +164,9 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('-l, --link <target>', 'a PR, file or reference worth opening; repeat', collect, [])
       .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
       .option('--body-file <path>', 'a Markdown file of instructions, or - for stdin')
-      .option('--surface', 'raise straight to the owner queue; by default an ask starts in discussion, in the chat')
+      .option('--blocking', 'you are stopped until the owner answers')
+      .option('--will-block <thing>', 'what this will block, in a few words (e.g. "the 14:00 deploy")')
+      .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
       .addHelpText('after', `\n${ASK_KINDS}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
@@ -153,8 +176,10 @@ export function registerAttentionCommands(program: Command, controller: Attentio
   scoped(
     attention
       .command('edit')
-      .description('reword an open item you raised — only the writing, never the ask')
-      .argument('<id>', 'the attention reference, like !A3')
+      .description(
+        'reword an open item you raised — only the writing, never the ask; on your turn it hands the item back to the owner',
+      )
+      .argument('<id>', 'the item reference, like !A3')
       .option('-t, --title <text>', 'the new title: what this is about, aim for 40 characters')
       .option('--summary <line>', 'the new one-line ask')
       .option('--premise <point>', 'replace the premise (the situation); repeat for bullet points', collect, [])
@@ -169,7 +194,13 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--urgency <when>', 'replace by when it matters')
       .option('-l, --link <target>', 'replace the links with these; repeat', collect, [])
       .option('--step <markdown>', 'replace the steps with these, in order; repeat (clears ticks)', collect, [])
-      .option('--body-file <path>', 'replace the body with this Markdown file, or - for stdin'),
+      .option('--body-file <path>', 'replace the body with this Markdown file, or - for stdin')
+      .option('--blocking', 'you are stopped until the owner answers')
+      .option('--not-blocking', 'you are no longer stopped')
+      .option('--will-block <thing>', 'what this will block, in a few words')
+      .option('--clear-will-block', 'drop what this will block')
+      .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
+      .option('--clear-by', 'drop when it is needed'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AttentionEditOptions>(command));
   });
@@ -178,7 +209,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     attention
       .command('step')
       .description('tick a step of an open item, counted from 1 as ls prints them')
-      .argument('<id>', 'the attention reference, like !A3')
+      .argument('<id>', 'the item reference, like !A3')
       .argument('<n>', 'the step number')
       .option('--undo', 'untick the step instead'),
   ).action(async (id: string, number: string, _flags: unknown, command: Command) => {
@@ -189,7 +220,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     attention
       .command('show')
       .description('print one item in full — read-only')
-      .argument('<id>', 'the attention reference, like !A3'),
+      .argument('<id>', 'the item reference, like !A3'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.show(id, merged(command));
   });
@@ -210,7 +241,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     attention
       .command('needs-info')
       .description('ask the ferret that raised an item for more information; the item stays open')
-      .argument('<id>', 'the attention reference, like !A3')
+      .argument('<id>', 'the item reference, like !A3')
       .option('-n, --note <text>', 'what is missing, told to the ferret'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.needsInfo(id, merged<AttentionResolveOptions>(command));
@@ -220,7 +251,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     attention
       .command('discuss')
       .description('ask the ferret that raised an item to talk it through before you answer; the item stays open')
-      .argument('<id>', 'the attention reference, like !A3')
+      .argument('<id>', 'the item reference, like !A3')
       .option('-n, --note <text>', 'what is unclear or wrong, told to the ferret'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.discuss(id, merged<AttentionResolveOptions>(command));
@@ -229,8 +260,8 @@ export function registerAttentionCommands(program: Command, controller: Attentio
   scoped(
     attention
       .command('surface')
-      .description('move an ask you raised from the chat discussion onto the owner queue (and push the owner)')
-      .argument('<id>', 'the attention reference, like !A3')
+      .description('hand an item back to the owner: it is their turn again, with nothing changed (never pings)')
+      .argument('<id>', 'the item reference, like !A3')
       .option('-w, --why <line>', 'one line on why the owner must look now, for example what is still open'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.surface(id, merged<AttentionSurfaceOptions>(command));
@@ -249,7 +280,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .command('done')
       .alias('resolve')
       .description('resolve an item, optionally answering its ask')
-      .argument('<id>', 'the attention reference, like !A3')
+      .argument('<id>', 'the item reference, like !A3')
       .option('-n, --note <text>', 'a note recorded with the resolution')
       .option('--approve', 'answer a permission ask with approval')
       .option('--reject', 'answer a permission ask with a refusal')
@@ -268,40 +299,42 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     attention
       .command('dismiss')
       .description('dismiss an item without answering it — recorded with who dismissed it')
-      .argument('<id>', 'the attention reference, like !A3')
+      .argument('<id>', 'the item reference, like !A3')
       .option('-n, --note <text>', 'a note recorded with the dismissal')
       .addHelpText('after', `\n${DISMISS_POLICY}`),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.dismiss(id, merged<AttentionResolveOptions>(command));
   });
 
+  if (!withNotify) return;
   scoped(
     attention
       .command('notify')
-      .description('tell the human something with nothing to decide: raises an info item they acknowledge')
+      .description('send the owner a plain notification — nothing to decide (the same as `fy notify`)')
       .argument('<message...>', 'what to tell them: one line (the ask); a longer text goes whole into the context')
       .option('-t, --title <title>', 'the card heading (defaults to the start of the message, 40 characters)')
       .option('-k, --kind <kind>', 'refused: progress and finishing never notify the owner')
+      .option('--ping', "buzz the owner's phone for this notice")
       .addHelpText(
         'after',
-        '\nOnly an attention item notifies. Raise one (add) only when the human must decide or do something.',
+        '\nA notice is read, not answered. Put something on the agenda (add) when the owner must decide or do.',
       ),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.notify(words, merged<AttentionNotifyOptions>(command));
   });
 }
 
-/** Every verb `fy attention` answers to, in the order its help lists them, aliases included. */
+/** Every verb `fy agenda` answers to, in the order its help lists them, aliases included. */
 function verbNames(attention: Command): string[] {
   return attention.commands.flatMap(command => [command.name(), ...command.aliases()]);
 }
 
 /** Why a first word that names no verb is refused, and what to type instead. */
-function unknownVerb(words: readonly string[], verbs: readonly string[]): string {
+function unknownVerb(name: string, words: readonly string[], verbs: readonly string[]): string {
   const [first] = words;
   const offered = verbs.join(', ');
-  if (first === undefined) return `attention needs a command. Did you mean: ${offered}`;
-  return `unknown command '${first}'. Did you mean: ${offered} — raise an item with \`attention add --title "<what>" "<the ask>"\``;
+  if (first === undefined) return `${name} needs a command. Did you mean: ${offered}`;
+  return `unknown command '${first}'. Did you mean: ${offered} — raise an item with \`${name} add --title "<what>" "<the ask>"\``;
 }
 
 /** commander's repeatable-option reducer: `--option a --option b` collects both. */

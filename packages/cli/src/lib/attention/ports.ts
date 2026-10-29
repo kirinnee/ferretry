@@ -7,6 +7,8 @@ import type { AttentionActionRequest, AttentionSnapshot, IFyApiClient } from '@f
  */
 export interface IAttentionOutput {
   success(message: string): void;
+  /** A line for stderr: said to whoever runs the command, never mixed into its output. */
+  diagnostic(message: string): void;
 }
 
 /**
@@ -25,7 +27,7 @@ export interface IAttentionGateway {
 /** The only client capability the attention gateway consumes. */
 export type AttentionApiClient = Pick<IFyApiClient, 'request'>;
 
-/** Reads the JSON body `fy attention add --json-file <path>` names; `-` is standard input. */
+/** Reads the JSON body `fy agenda add --json-file <path>` names; `-` is standard input. */
 export interface IAttentionBriefInput {
   read(path: string): Promise<string>;
 }

@@ -122,7 +122,7 @@ describe('attention controller add', () => {
           kind: 'reply',
           why: 'pick a cluster',
           context: null,
-          howToResolve: 'Answer this item on the attention board (it records who answered).',
+          howToResolve: 'Answer this item on the agenda (it records who answered).',
           ask: { kind: 'open-question' },
         },
       },
@@ -168,7 +168,7 @@ describe('attention controller add', () => {
     await controller.add(['same', 'subject'], { title: 'Pick a cluster' });
 
     // Assert
-    should(out.messages[0]).startWith('attention !A2 recorded');
+    should(out.messages[0]).startWith('agenda !A2 recorded');
   });
 
   it('should read the board before writing so the new id can be identified', async () => {
@@ -193,7 +193,7 @@ describe('attention controller add', () => {
     await controller.add(['ours'], { title: 'Pick a cluster' });
 
     // Assert
-    should(out.messages[0]).startWith('attention recorded — 2 unresolved items');
+    should(out.messages[0]).startWith('agenda item recorded — 2 unresolved items');
   });
 
   it('should raise the brief a --json-file body describes', async () => {
@@ -375,8 +375,8 @@ describe('attention controller resolve and dismiss', () => {
     const { controller, gateway } = build(SESSION);
 
     // Act + Assert
-    await should(controller.resolve('nope', {})).be.rejectedWith(/is not an attention reference/u);
-    await should(controller.dismiss('nope', {})).be.rejectedWith(/is not an attention reference/u);
+    await should(controller.resolve('nope', {})).be.rejectedWith(/is not an agenda reference/u);
+    await should(controller.dismiss('nope', {})).be.rejectedWith(/is not an agenda reference/u);
     should(gateway.applied).be.empty();
   });
 
@@ -404,7 +404,7 @@ describe('attention controller resolve and dismiss', () => {
 describe('attention controller notify', () => {
   const raised = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2', 'the build is green')]);
 
-  it('should raise an info item instead of pushing a bare notification', async () => {
+  it('should raise a notice instead of an ask', async () => {
     // Arrange
     const { controller, gateway, out } = build(SESSION, raised);
 
@@ -418,10 +418,12 @@ describe('attention controller notify', () => {
       kind: 'info',
       title: 'CI',
       subject: 'the build is green',
-      answers: [{ direction: 'right', does: 'done', label: 'Got it' }],
+      notice: true,
     });
     should(gateway.applied[0]?.request).not.have.property('ask');
-    should(out.messages[0]).startWith('info !A2 raised — 2 unresolved items');
+    should(gateway.applied[0]?.request).not.have.property('answers');
+    should(gateway.applied[0]?.request).not.have.property('ping');
+    should(out.messages[0]).startWith('notice !A2 sent — 2 unresolved items');
   });
 
   it('should title the item with the start of the text, clipped at a word to 40, when no title is given', async () => {
@@ -466,7 +468,7 @@ describe('attention controller notify', () => {
     // Arrange
     const { controller, gateway } = build(SESSION);
     const advice =
-      'progress and finishing never notify the owner — raise an item (fy attention add) only when they must decide or do something';
+      'progress and finishing never notify the owner — raise an item (fy agenda add) only when they must decide or do something';
 
     // Act + Assert
     await should(controller.notify(['all done'], { kind: 'completed' })).be.rejectedWith(advice);
