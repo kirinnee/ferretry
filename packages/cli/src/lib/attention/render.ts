@@ -1,5 +1,4 @@
 import {
-  type AttentionAsk,
   type AttentionDirection,
   type AttentionId,
   type AttentionItem,
@@ -33,32 +32,16 @@ function actor(by: 'human' | 'agent' | 'daemon', name: string | null): string {
   return name === null ? 'agent' : `agent ${name}`;
 }
 
-/** What the human has to do to clear the item. */
-function askLine(ask: AttentionAsk | undefined): string | undefined {
-  if (ask === undefined) return undefined;
-  switch (ask.kind) {
-    case 'permission':
-      return 'answer: approve or reject';
-    case 'multiple-choice':
-      return `answer: pick one of ${ask.options.map(option => `"${compact(option.label, OPTION_WIDTH)}"`).join(' | ')}`;
-    case 'answer-review':
-      return 'answer: good, or ask to clarify';
-    case 'open-question':
-      return 'answer: write a full answer';
-    case 'task':
-      return 'to do: mark it done, or ask for more information';
-  }
-}
-
 const ARROWS: Readonly<Record<AttentionDirection, string>> = { left: '←', up: '↑', right: '→' };
 
 /**
  * The answers a card gives, laid out as the swipes point — `← No · → Yes`. An old item's options past the
  * third have no swipe; they are named after the arrows so nothing the owner could pick is hidden.
  */
-function answersLine(item: AttentionItem): string | undefined {
+function answersLine(item: AttentionItem): string {
   const answers = attentionCardAnswers(item);
-  if (answers.length === 0) return undefined;
+  // Only a card asked in words has no answers to swipe.
+  if (answers.length === 0) return 'answer: write a full answer';
   const swipes = answers.map(answer => `${ARROWS[answer.direction]} ${compact(answer.label, OPTION_WIDTH)}`);
   const rest = unswipedChoices(item).map(option => `"${compact(option.label, OPTION_WIDTH)}"`);
   return `answers: ${swipes.join(' · ')}${rest.length === 0 ? '' : ` · also ${rest.join(' | ')}`}`;
@@ -88,8 +71,7 @@ function itemLines(item: AttentionItem): string[] {
     `  ${attentionReference(item.id)}  [${item.source}]  ${compact(titled ? (item.title ?? '') : item.subject)}`,
   ];
   if (titled) lines.push(`${INDENT}ask: ${compact(item.subject)}`);
-  const ask = answersLine(item) ?? askLine(item.ask);
-  if (ask !== undefined) lines.push(`${INDENT}${ask}`);
+  lines.push(`${INDENT}${answersLine(item)}`);
   if (item.context !== null && item.context !== undefined && item.context.trim() !== '') {
     lines.push(`${INDENT}context: ${compact(item.context)}`);
   }

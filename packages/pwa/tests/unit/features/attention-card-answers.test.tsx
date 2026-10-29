@@ -125,6 +125,26 @@ describe('the answer bar', () => {
     expect(acts).toEqual([{ kind: 'respond', label: 'Five', response: { kind: 'multiple-choice', choice: 'Five' } }]);
   });
 
+  test('gives an extra option’s description to assistive tech', async () => {
+    const { root } = await card(
+      attentionItem('A1', {
+        ask: {
+          kind: 'multiple-choice',
+          options: [
+            { label: 'One' },
+            { label: 'Two' },
+            { label: 'Three' },
+            { label: 'Four', description: 'Keep the old flow for a week' },
+          ],
+        },
+      }),
+    );
+    const extra = must(root.querySelector<HTMLButtonElement>('.fy-attn-extra'), 'the extra option');
+    const described = extra.getAttribute('aria-describedby') ?? '';
+    expect(described).not.toBe('');
+    expect(root.querySelector(`[id="${described}"]`)?.textContent).toBe('Keep the old flow for a week');
+  });
+
   test('sends each answer as the action it means', async () => {
     const { acts, root } = await card(permission);
     await interact(() => answer(root, 'right').click());
@@ -250,6 +270,16 @@ describe('the optional reply', () => {
         response: { kind: 'answer-review', verdict: 'clarify', clarification: 'rename the flag' },
       },
     ]);
+  });
+
+  test('"Needs changes" with the box already open and empty focuses it again', async () => {
+    const { acts, root } = await card(review);
+    const field = await openReply(root);
+    must(root.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'the Reply toggle').focus();
+    expect(document.activeElement).not.toBe(field);
+    await interact(() => answer(root, 'left').click());
+    expect(acts).toEqual([]);
+    expect(document.activeElement).toBe(field);
   });
 
   test('a card that is only a question has the box open with a Send button, and sends the text as the answer', async () => {

@@ -372,6 +372,14 @@ describe('attention brief card kinds and answers', () => {
     should(answersOf({ kind: 'yesno' })).deepEqual(['left:choose:No', 'right:choose:Yes']);
   });
 
+  it('should refuse a yesno whose question brings options of its own', () => {
+    // Arrange
+    const file: BriefFile = { questions: [{ question: 'Ship it?', options: ['Ship', 'Hold'] }] };
+
+    // Act + Assert
+    should(() => add(['Ship it?'], { kind: 'yesno' }, file)).throw(/--kind yesno brings its own Yes and No/u);
+  });
+
   it('should compose a permission: Deny on the left, Allow on the right', () => {
     // Act + Assert
     should(add(['Run it?'], { kind: 'permission' }).kind).equal('permission');

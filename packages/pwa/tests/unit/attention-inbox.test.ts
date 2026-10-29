@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { AttentionItem, AttentionSnapshot, SessionAttentionSummary } from '@ferretry/protocol';
+import type {
+  AttentionItem,
+  AttentionSnapshot,
+  ResolvedAttentionItem,
+  SessionAttentionSummary,
+} from '@ferretry/protocol';
 import {
   actionSentence,
   attentionConversationPath,
@@ -15,9 +20,12 @@ import {
   type InboxCard,
   inboxCardKey,
   inboxCards,
+  inboxResolved,
   inboxOptions,
   NEEDS_INFO_ACTION,
+  RESOLVED_READ_LIMIT,
   replyAction,
+  sessionsToReadForResolved,
   SWIPE_SLOP_PX,
   swipeIntent,
   swipeMap,
@@ -366,5 +374,78 @@ describe('the undo window', () => {
     deferred.schedule(card('A1'), DONE_ACTION);
     expect(deferred.getSnapshot().failed).toEqual([]);
     deferred.clearFailure(card('A1').key);
+  });
+});
+
+const resolvedRecord = (id: string, minutes: number): ResolvedAttentionItem =>
+  ({
+    ...item(id, 0),
+    resolvedAt: at(minutes),
+    resolvedBy: 'human',
+    disposition: 'done',
+  }) as unknown as ResolvedAttentionItem;
+
+const withResolved = (sessionId: string, records: readonly ResolvedAttentionItem[]): AttentionSnapshot => ({
+  ...board(sessionId, []),
+  resolved: [...records],
+});
+
+describe('inboxResolved', () => {
+  test('gathers every held board’s resolved records newest first, skipping boards not read', () => {
+    const boards = new Map<string, AttentionSnapshot>([
+      ['studio/a', withResolved('a', [resolvedRecord('A1', 5), resolvedRecord('A2', 9)])],
+      ['laptop/b', withResolved('b', [resolvedRecord('A1', 7)])],
+    ]);
+    const rows = inboxResolved(
+      [
+        { daemonId: STUDIO, name: 'Studio', sessions: [waiting('a'), waiting('unread')] },
+        { daemonId: LAPTOP, name: 'Laptop', sessions: [waiting('b')] },
+        { daemonId: 'idle' as DaemonId, name: 'Idle', sessions: null },
+      ],
+      (daemonId, sessionId) => boards.get(`${daemonId}/${sessionId}`),
+    );
+    expect(rows.map(row => [row.machineName, row.view.config.id, row.record.id])).toEqual([
+      ['Studio', 'a', 'A2'],
+      ['Laptop', 'b', 'A1'],
+      ['Studio', 'a', 'A1'],
+    ]);
+  });
+
+  test('breaks a tie on the key so the order is stable', () => {
+    const boards = new Map<string, AttentionSnapshot>([
+      ['studio/a', withResolved('a', [resolvedRecord('A1', 5)])],
+      ['studio/b', withResolved('b', [resolvedRecord('A1', 5)])],
+    ]);
+    const rows = inboxResolved(
+      [{ daemonId: STUDIO, name: 'Studio', sessions: [waiting('b'), waiting('a')] }],
+      (daemonId, sessionId) => boards.get(`${daemonId}/${sessionId}`),
+    );
+    expect(rows.map(row => row.view.config.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('sessionsToReadForResolved', () => {
+  const active = (id: string, minutes: number) => sessionView(id, { state: { lastActivityAt: at(minutes) } });
+
+  test('reads the most recent conversations whose board is not held, at most the limit', () => {
+    const sessions = Array.from({ length: RESOLVED_READ_LIMIT + 5 }, (_, index) => active(`s${index}`, index));
+    const wanted = sessionsToReadForResolved([{ daemonId: STUDIO, name: 'Studio', sessions }], () => false);
+    expect(wanted).toHaveLength(RESOLVED_READ_LIMIT);
+    expect(wanted[0]).toEqual({ daemonId: STUDIO, sessionId: `s${RESOLVED_READ_LIMIT + 4}` });
+    expect(wanted.some(entry => entry.sessionId === 's0')).toBe(false);
+  });
+
+  test('skips boards already held, which still count toward the limit, and tolerates a machine with no list', () => {
+    const wanted = sessionsToReadForResolved(
+      [
+        { daemonId: STUDIO, name: 'Studio', sessions: [active('new', 9), active('held', 8), sessionView('quiet')] },
+        { daemonId: LAPTOP, name: 'Laptop', sessions: null },
+      ],
+      (_daemonId, sessionId) => sessionId === 'held',
+    );
+    expect(wanted).toEqual([
+      { daemonId: STUDIO, sessionId: 'new' },
+      { daemonId: STUDIO, sessionId: 'quiet' },
+    ]);
   });
 });

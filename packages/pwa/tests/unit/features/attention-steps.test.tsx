@@ -12,7 +12,6 @@ import {
   type InboxAction,
   NEEDS_INFO_ACTION,
   replyAction,
-  stepsProgress,
   swipeMap,
   tickedSteps,
   updatedSinceAsked,
@@ -283,9 +282,7 @@ describe('to-do helpers', () => {
     expect(updatedSinceAsked({ history: [updated], waitingOn: 'ferret' })).toBeNull();
   });
 
-  test('step progress counts ticks and layers pending ones', () => {
-    expect(stepsProgress({ steps: ['a', 'b'], stepsDone: [0, 1] })).toEqual({ done: 2, total: 2, complete: true });
-    expect(stepsProgress({})).toEqual({ done: 0, total: 0, complete: false });
+  test('ticked steps layer the pending ticks over the stored ones', () => {
     expect([
       ...tickedSteps(
         { steps: ['a', 'b'], stepsDone: [0] },

@@ -120,11 +120,17 @@ export function InboxHarness({
   fake,
   cards,
   reading = false,
+  resolved = [],
+  resolvedReading = false,
+  loadResolved = () => undefined,
   render,
 }: {
   readonly fake: FakeInbox;
   readonly cards: readonly InboxCard[];
   readonly reading?: boolean;
+  readonly resolved?: AttentionInbox['resolved'];
+  readonly resolvedReading?: boolean;
+  readonly loadResolved?: () => void;
   readonly render: (inbox: AttentionInbox) => ReactElement;
 }) {
   const state = useSyncExternalStore(fake.deferred.subscribe, fake.deferred.getSnapshot);
@@ -134,6 +140,9 @@ export function InboxHarness({
     total: cards.length,
     cards: cards.filter(card => !hidden.has(card.key)),
     reading,
+    resolved,
+    resolvedReading,
+    loadResolved,
     deferred: fake.deferred,
     deferredState: state,
     connectionFor: () => undefined,

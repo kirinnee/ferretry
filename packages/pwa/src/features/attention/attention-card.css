@@ -625,8 +625,7 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   color: var(--accent);
   font-size: var(--text-sm);
 }
-.fy-attn-actions__waiting,
-.fy-attn-swiperow__waiting {
+.fy-attn-actions__waiting {
   display: inline-flex;
   align-items: center;
   gap: var(--gap-xs);

@@ -170,6 +170,16 @@ describe('attention card', () => {
       should(layout(attentionCardAnswers(raised))).eql(['left:No', 'right:Yes']);
     });
 
+    it('refuses a stored item whose answers do not fit its ask, naming the answer', () => {
+      const parsed = AttentionItemSchema.safeParse({
+        ...item,
+        ask: { kind: 'task' },
+        answers: [{ direction: 'right', does: 'approve', label: 'Allow' }],
+      });
+      should(parsed.success).be.false();
+      should(parsed.error?.issues[0]?.path).eql(['answers', '0', 'does']);
+    });
+
     it('refuses two answers in one direction', () => {
       const problems = attentionAnswerProblems(
         [

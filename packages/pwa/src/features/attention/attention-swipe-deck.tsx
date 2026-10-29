@@ -221,13 +221,11 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
   /** A swipe or arrow toward `direction`: its answer goes, or — a "Needs changes" with no text — the box opens. */
   const give = (card: InboxCard, direction: SwipeDirection, from: Drag): void => {
     const target = targets[direction];
-    if (target === undefined) {
+    // Both callers give only a direction the card takes (a committed swipe, a mapped arrow); the guard
+    // keeps a future caller from sending nothing. A "Needs changes" with no words opens the box instead.
+    if (target === undefined || target.action === null) {
       setDrag(null);
-      return;
-    }
-    if (target.action === null) {
-      setDrag(null);
-      setFocusTick(tick => tick + 1);
+      if (target !== undefined) setFocusTick(tick => tick + 1);
       return;
     }
     answer(card, target.action, from);

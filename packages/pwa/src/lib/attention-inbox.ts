@@ -23,6 +23,7 @@ import {
   type AttentionQuestion,
   type AttentionSnapshot,
   MAX_ATTENTION_DETAIL_LENGTH,
+  type ResolvedAttentionItem,
   type SessionAttentionSummary,
   type SessionView,
 } from '@ferretry/protocol';
@@ -158,6 +159,65 @@ export const inboxCards = (
 
 export type { InboxAction };
 
+/** One resolved item in the inbox's Resolved filter: the record, its conversation and its machine. */
+export interface InboxResolved {
+  readonly key: string;
+  readonly daemonId: DaemonId;
+  readonly machineName: string;
+  readonly view: SessionView;
+  readonly record: ResolvedAttentionItem;
+}
+
+/**
+ * The resolved records of every listed conversation whose board has been read, newest resolution first.
+ * A conversation whose board has not been read contributes nothing, never "nothing resolved".
+ */
+export const inboxResolved = (
+  sources: readonly AttentionInboxSource[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
+): readonly InboxResolved[] => {
+  const rows: InboxResolved[] = [];
+  for (const source of sources) {
+    for (const view of source.sessions ?? []) {
+      for (const record of boardFor(source.daemonId, view.config.id)?.resolved ?? []) {
+        rows.push({
+          key: inboxCardKey(source.daemonId, view.config.id, record.id),
+          daemonId: source.daemonId,
+          machineName: source.name,
+          view,
+          record,
+        });
+      }
+    }
+  }
+  return rows.sort(
+    (left, right) =>
+      instant(right.record.resolvedAt) - instant(left.record.resolvedAt) || left.key.localeCompare(right.key),
+  );
+};
+
+/** How many conversations the Resolved filter reads boards for: history is not worth a request per session. */
+export const RESOLVED_READ_LIMIT = 30;
+
+/**
+ * The conversations the Resolved filter should read: the most recently active ones whose board is not
+ * held yet, at most {@link RESOLVED_READ_LIMIT} counting those already held, across every machine.
+ */
+export const sessionsToReadForResolved = (
+  sources: readonly AttentionInboxSource[],
+  hasBoard: (daemonId: DaemonId, sessionId: string) => boolean,
+): readonly { readonly daemonId: DaemonId; readonly sessionId: string }[] => {
+  const recent = sources
+    .flatMap(source => (source.sessions ?? []).map(view => ({ daemonId: source.daemonId, view })))
+    .sort(
+      (left, right) => instant(right.view.state.lastActivityAt ?? '') - instant(left.view.state.lastActivityAt ?? ''),
+    )
+    .slice(0, RESOLVED_READ_LIMIT);
+  return recent
+    .filter(entry => !hasBoard(entry.daemonId, entry.view.config.id))
+    .map(entry => ({ daemonId: entry.daemonId, sessionId: entry.view.config.id }));
+};
+
 export const DONE_ACTION: InboxAction = { kind: 'resolve', label: 'Done' };
 export const DISMISS_ACTION: InboxAction = { kind: 'dismiss', label: 'Dismiss' };
 export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
@@ -166,19 +226,10 @@ export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
 };
 
 /** A to-do: the owner does something, nothing to choose. Its answers are Done and Need more info. */
-export const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
+const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
 
 /** The ferret was asked for more information and has not yet edited the item. */
 export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
-
-/** How many of an item's steps are ticked, out of how many; `complete` only when it has steps and all are. */
-export const stepsProgress = (
-  item: Pick<AttentionItem, 'steps' | 'stepsDone'>,
-): { readonly done: number; readonly total: number; readonly complete: boolean } => {
-  const total = item.steps?.length ?? 0;
-  const done = item.stepsDone?.length ?? 0;
-  return { done, total, complete: total > 0 && done >= total };
-};
 
 /** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
 export const tickedSteps = (
