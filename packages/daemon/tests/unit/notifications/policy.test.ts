@@ -232,6 +232,26 @@ describe('more-info push policy', () => {
     should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
   });
 
+  it('should say the item was updated after the owner’s discussion, under the same key', () => {
+    // Arrange
+    const discussed = AttentionItemSchema.parse({
+      ...titled,
+      waitingOn: 'ferret',
+      askedAt: titled.waitingSince,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+    });
+
+    // Act
+    const payload = moreInfoNotificationPayload('session-1', discussed, snapshot, 1, true);
+
+    // Assert
+    should(payload).containDeep({
+      eventKey: 'attention-info:A7:1',
+      body: 'Updated after your discussion: Which window should the release use?',
+    });
+  });
+
   it('should fall back to the ask for an old untitled item and clip the updated line', () => {
     // Arrange
     const old = AttentionItemSchema.parse({ ...item, subject: 'x'.repeat(240) });

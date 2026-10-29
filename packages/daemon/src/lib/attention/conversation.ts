@@ -2,6 +2,7 @@ import {
   type AttentionItem,
   type AttentionResponse,
   type AttentionSnapshot,
+  attentionTitle,
   MAX_ATTENTION_DETAIL_LENGTH,
   type ResolvedAttentionItem,
   type SessionAttentionSummary,
@@ -13,9 +14,10 @@ import {
  * An item is raised by a ferret, answered by the owner, and the answer reaches the ferret as an
  * ordinary message that names the item it answers — `[answer to !A3 «ask»] <answer>` — so the ferret
  * never has to poll its board. The owner may also answer in the conversation itself by referencing
- * the item (`!A3`, the reference grammar's Attention form, docs/reference-standard.md); a plain
- * message that references nothing never resolves anything, but it tells the ferret which items are
- * still open so it can resolve one itself when the message settled it.
+ * the item (`!A3`, the reference grammar's Attention form, docs/reference-standard.md). A plain message
+ * that references nothing is delivered exactly as typed and resolves nothing: a footer naming every open
+ * item on every message was re-read on every later turn for no gain, so the ferret learns of its items
+ * when something happens to one, and reads its board on demand (`attention ls`).
  *
  * Pure: every decision here is a function of the board and the words; the composition root does the
  * reading, the sending and the resolving.
@@ -88,6 +90,17 @@ export function needsInfoMessage(item: AttentionItem): string {
   return `[needs more info ${named(item)}] ${note === '' ? 'The owner needs more information.' : note}`;
 }
 
+/**
+ * The message a ferret receives when the owner wants to talk one of ITS items through before answering —
+ * they do not follow it, or its premise is wrong. The item stays open: the ferret answers in chat, then
+ * updates the item (`attention edit`) or closes it when the premise was wrong (`attention done`).
+ */
+export function discussMessage(item: AttentionItem, binary: string): string {
+  const note = item.history?.findLast(entry => entry.kind === 'discuss')?.note?.trim() ?? '';
+  const heading = `!${item.id} «${quoted(attentionTitle(item))}»`;
+  return `[discuss ${heading}] The owner wants to talk this through before answering: ${note === '' ? 'no note' : note}. Reply in chat to clear it up; then update the item (\`${binary} attention edit ${item.id}\`) or close it if the premise was wrong (\`${binary} attention done ${item.id}\`).`;
+}
+
 /** What a person's chat message becomes once the open board is taken into account. */
 export interface ConversationTurn {
   /** The words the ferret receives. */
@@ -101,21 +114,12 @@ export interface ConversationTurn {
  *
  * - It references open items: it IS the answer to them — prefixed `[answer to !A3 «ask»]` so the
  *   ferret knows what it answers, and they resolve.
- * - It references none and items are open: delivered as written, with one trailing line naming them,
- *   so the ferret can resolve one itself if the message settled it. Nothing is resolved for it.
- * - Nothing is open: unchanged.
+ * - It references none: delivered exactly as typed, however many items are open. Nothing is resolved.
  */
-export function conversationTurn(message: string, open: readonly AttentionItem[], binary: string): ConversationTurn {
+export function conversationTurn(message: string, open: readonly AttentionItem[]): ConversationTurn {
   const answers = referencedAttention(message, open);
   if (answers.length > 0) return { message: `[answer to ${answers.map(named).join(', ')}] ${message}`, answers };
-  // A harness prompt the daemon raised is the ferret's own parked form: it cannot close one, and it
-  // clears itself when the form goes, so the footer never names it.
-  const closable = open.filter(item => !(item.raisedBy === 'daemon' && item.source === 'question'));
-  if (closable.length === 0) return { message, answers };
-  return {
-    message: `${message}\n\n[open attention: ${closable.map(named).join('; ')} — if this message settles one, resolve it with \`${binary} attention done <id>\`]`,
-    answers,
-  };
+  return { message, answers };
 }
 
 /**
