@@ -13,9 +13,11 @@ import type {
 import type { FoundationPaths } from '../../../src/lib/paths.ts';
 import type { FileSystemPort } from '../../../src/lib/ports.ts';
 import type { SessionControlSubsystem } from '../../../src/lib/runtime/mounts/session-control.ts';
+import { withSystemCallsign } from '../../../src/lib/runtime/mounts/system-session-control.ts';
 import type { SessionDirectorySubsystem } from '../../../src/lib/runtime/mounts/sessions.ts';
 import type { SessionTranscriptReader } from '../../../src/lib/session/transcript/reader.ts';
 import type { TranscriptEvent } from '../../../src/lib/transcript/types.ts';
+import { issuerOver } from '../names/system-callsigns-support.ts';
 
 const AT = '2026-08-01T00:00:00.000Z';
 const paths = { home: '/daemon', state: '/daemon/state' } as FoundationPaths;
@@ -463,7 +465,10 @@ interface ScanWorld {
   readonly views: Map<string, SessionView>;
 }
 
-function scanWorld(events: readonly TranscriptEvent[] = [userEvent('First.'), userEvent(SCAN_SAYS, AT)]): ScanWorld {
+function scanWorld(
+  events: readonly TranscriptEvent[] = [userEvent('First.'), userEvent(SCAN_SAYS, AT)],
+  wrap: (control: SessionControlSubsystem) => SessionControlSubsystem = control => control,
+): ScanWorld {
   const store = new Store();
   const filesystem = files({});
   const started: StartSessionRequest[] = [];
@@ -494,7 +499,7 @@ function scanWorld(events: readonly TranscriptEvent[] = [userEvent('First.'), us
     store,
     { list: async () => [...views.values()], get: async id => views.get(id) } as SessionDirectorySubsystem,
     { tail: async () => events } as unknown as SessionTranscriptReader,
-    control,
+    wrap(control),
     () => config,
     () => AT,
   );
@@ -759,5 +764,64 @@ describe('LearningMiner scan', () => {
 
     // Assert
     should(stopped).deepEqual([['miner-1', 'lesson scan cancelled by the owner']]);
+  });
+});
+
+describe('the callsign of a learning session', () => {
+  const LEARNING = /^learning-[0-9a-f]{6}$/u;
+
+  it('should start a lesson scan under a learning id, never a first name', async () => {
+    // Arrange
+    const issuer = issuerOver();
+    const { miner, started } = scanWorld(undefined, control => withSystemCallsign(control, issuer, 'learning'));
+
+    // Act
+    await miner.start('scan-1', 0, ['session-1'], 'claude', 'opus');
+
+    // Assert
+    should(started[0]?.name).equal('Lesson Scan');
+    should(started[0]?.teammate).equal('learning-000001');
+  });
+
+  it('should start a batch miner under the same shared counter', async () => {
+    // Arrange
+    const issuer = issuerOver();
+    const requests: StartSessionRequest[] = [];
+    const inner = {
+      start: async (request: StartSessionRequest) => {
+        requests.push(request);
+        return session();
+      },
+      stop: async () => session(),
+      recover: async () => undefined,
+    } as SessionControlSubsystem;
+    const miner = new LearningMiner(
+      paths,
+      files({
+        '/daemon/state/sessions/session-1/turns/turn-001.md': 'Use direnv exec . for every command.',
+        '/daemon/state/sessions/session-1/channel/inbox.jsonl':
+          '{"type":"message","message":"Use direnv exec . for every command."}\n',
+        '/daemon/state/sessions/session-1/events.jsonl': '',
+      }),
+      new Store(),
+      { list: async () => [session()], get: async () => undefined } as SessionDirectorySubsystem,
+      {
+        tail: async () => [
+          { type: 'chat.user', timestamp: AT, data: { text: 'Use direnv exec . for every command.' } },
+        ],
+      } as unknown as SessionTranscriptReader,
+      withSystemCallsign(inner, issuer, 'learning'),
+      () => config,
+      () => AT,
+    );
+
+    // Act
+    await miner.run(true);
+    const next = await issuer.next('learning');
+
+    // Assert
+    should(requests[0]?.name).equal('Learning Miner');
+    should(requests[0]?.teammate).match(LEARNING);
+    should(next).equal('learning-000002');
   });
 });

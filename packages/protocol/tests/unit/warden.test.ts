@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { DEFAULT_WARDEN_CONFIG } from '../../src/lib/config-files.ts';
+import { displaySystemCallsign, isSystemCallsign } from '../../src/lib/system-callsigns.ts';
 import * as warden from '../../src/lib/warden.ts';
 import {
   INSTANT,
@@ -519,17 +520,17 @@ describe('warden investigator names', () => {
 
     // Assert
     should(name).equal('warden-00002a');
-    should(warden.displaySystemCallsign(name)).equal('warden-00002A');
+    should(displaySystemCallsign(name)).equal('warden-00002A');
     should(warden.wardenInvestigatorName(warden.WARDEN_INVESTIGATOR_MAX_SEQUENCE)).equal('warden-ffffff');
     should(warden.wardenInvestigatorSequence('Warden-00002A')).equal(42);
-    should(warden.displaySystemCallsign('hadi')).equal('hadi');
+    should(displaySystemCallsign('hadi')).equal('hadi');
   });
 
   it('should recognise only its own shape, never a pool name', () => {
     // Act + Assert
-    should(warden.isSystemCallsign('warden-000001')).be.true();
+    should(isSystemCallsign('warden-000001')).be.true();
     for (const other of ['warden', 'hadi', 'warden-1', 'warden-0000001', 'warden-00000g', 'warden-000000', undefined])
-      should(warden.isSystemCallsign(other)).be.false();
+      should(isSystemCallsign(other)).be.false();
   });
 
   it('should count on, wrap after FFFFFF to 1, and step past ids still in use', () => {

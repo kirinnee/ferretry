@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { SessionStatusSchema } from './session.ts';
+import {
+  nextSystemCallsignSequence,
+  SYSTEM_CALLSIGN_MAX_SEQUENCE,
+  systemCallsignName,
+  systemCallsignSequence,
+} from './system-callsigns.ts';
 
 /**
  * THE WARDEN WIRE — the supervisor that watches every ferret, and everything a client reads or sends
@@ -798,56 +804,23 @@ export const WARDEN_HISTORY_DAYS = 7;
 // ── Investigator names ──────────────────────────────────────────────────────────────────────────
 
 /**
- * Every investigator the Warden starts is called `warden-000001`, `warden-000002`, … `warden-FFFFFF`:
- * six hex digits from a counter in the Warden's own state, wrapping back to 1 and skipping any id still
- * in use. The human first names in the pool are for real ferrets: a system session never draws one, and
- * a name of this shape can never be a pool name (pool names are letters only).
- *
- * The callsign is STORED lowercase like every callsign (`warden-00002a`) and SHOWN with uppercase hex
- * (`warden-00002A`) — see {@link displaySystemCallsign}.
+ * Every investigator the Warden starts is called `warden-000001`, `warden-000002`, … `warden-FFFFFF`
+ * — the shape every system session shares (`system-callsigns.ts`), never a name from the first-name pool.
  */
 export const WARDEN_INVESTIGATOR_NAME_PATTERN = /^warden-([0-9a-f]{6})$/iu;
 
 /** The largest sequence: `warden-FFFFFF`. The next one wraps to 1. */
-export const WARDEN_INVESTIGATOR_MAX_SEQUENCE = 0xff_ff_ff;
+export const WARDEN_INVESTIGATOR_MAX_SEQUENCE = SYSTEM_CALLSIGN_MAX_SEQUENCE;
 
 /** The stored (lowercase) callsign for sequence `sequence`, 1 … {@link WARDEN_INVESTIGATOR_MAX_SEQUENCE}. */
-export const wardenInvestigatorName = (sequence: number): string => `warden-${sequence.toString(16).padStart(6, '0')}`;
+export const wardenInvestigatorName = (sequence: number): string => systemCallsignName('warden', sequence);
 
 /** The sequence number in an investigator's name, or `undefined` for any other name. */
-export function wardenInvestigatorSequence(name: string | undefined): number | undefined {
-  const match = WARDEN_INVESTIGATOR_NAME_PATTERN.exec((name ?? '').trim());
-  if (match?.[1] === undefined) return undefined;
-  const sequence = Number.parseInt(match[1], 16);
-  return sequence === 0 ? undefined : sequence;
-}
+export const wardenInvestigatorSequence = (name: string | undefined): number | undefined =>
+  systemCallsignSequence('warden', name);
 
-/**
- * The sequence after `last` that no live session holds: `last + 1`, wrapping from
- * {@link WARDEN_INVESTIGATOR_MAX_SEQUENCE} to 1, stepping past every sequence in `inUse`. `undefined`
- * only when every one of the 16,777,215 ids is in use.
- */
-export function nextWardenInvestigatorSequence(last: number, inUse: ReadonlySet<number>): number | undefined {
-  const start = Number.isInteger(last) && last >= 0 && last <= WARDEN_INVESTIGATOR_MAX_SEQUENCE ? last : 0;
-  for (let step = 1; step <= WARDEN_INVESTIGATOR_MAX_SEQUENCE; step += 1) {
-    const candidate = ((start + step - 1) % WARDEN_INVESTIGATOR_MAX_SEQUENCE) + 1;
-    if (!inUse.has(candidate)) return candidate;
-  }
-  return undefined;
-}
-
-/**
- * A callsign Ferretry gave a session it started itself. It is shown as an identifier
- * ({@link displaySystemCallsign}), never title-cased like a first name.
- */
-export const isSystemCallsign = (callsign: string | undefined): boolean =>
-  wardenInvestigatorSequence(callsign) !== undefined;
-
-/** `warden-00002a` → `warden-00002A`: the prefix as stored, the hex digits uppercase. Any other name unchanged. */
-export function displaySystemCallsign(callsign: string): string {
-  const sequence = wardenInvestigatorSequence(callsign);
-  return sequence === undefined ? callsign : `warden-${sequence.toString(16).toUpperCase().padStart(6, '0')}`;
-}
+/** The next investigator sequence after `last` that is not in `inUse`. */
+export const nextWardenInvestigatorSequence = nextSystemCallsignSequence;
 
 export const WardenBlessingViewSchema = z.object({
   sessionId: z.string().min(1),

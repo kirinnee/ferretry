@@ -306,7 +306,8 @@ import {
 } from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
-import { FileNameClaimStore } from '../src/adapters/names/index.ts';
+import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
+import { FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import {
   bunProbeSpawn,
@@ -770,6 +771,7 @@ import {
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
+  SystemCallsignIssuer,
   type NameClaim,
   type NameSubsystem,
   type IoPressurePort,
@@ -8733,6 +8735,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
+      // System sessions (the Learning miner, Pack clean-up) take ids of their own, never a pool name.
+      const systemCallsigns = new SystemCallsignIssuer({
+        counters: new FileSystemCallsignCounters(join(paths.state, 'system-callsigns.json'), stateFiles),
+        held: async () => (await liveCallsigns(storage)).map(claim => claim.callsign),
+        serial: callsignClaims,
+      });
       const sessionControl = releasingAttachmentsOnStop(
         releasingAttachmentsOnStop(
           createSessionControlSubsystem(
@@ -9485,7 +9493,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: learningBoard,
         sessions,
         transcripts: createTranscriptReader(storage),
-        sessionControl,
+        sessionControl: withSystemCallsign(sessionControl, systemCallsigns, 'learning'),
         config: () => configFiles.current().evaluation.effective.learning,
         configFiles,
         identities: agentIdentities(storage),
@@ -9674,7 +9682,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         probeSettings: async () => (await configFiles.load()).evaluation.effective.pack.probe,
         probe: packProbe,
-        start: async request => await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request)),
+        start: async request =>
+          await withSystemCallsign(sessionControl, systemCallsigns, 'pack').start(
+            request,
+            crypto.randomUUID(),
+            JSON.stringify(request),
+          ),
         status: async reference => {
           const id = tryParseSessionId(reference);
           return id === undefined ? undefined : (await sessions.get(id))?.state.status;
