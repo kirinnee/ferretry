@@ -40,7 +40,7 @@ const EMPHASIS = /(\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*\*|`[^`\n]+`)/u;
  * Plain text with its inline emphasis drawn: `**bold**` (a key number), `*italic*` and `code`. Anything
  * else stays text — React escapes it — so a ferret's point never injects markup.
  */
-export function renderEmphasis(text: string): ReactNode {
+function renderEmphasis(text: string): ReactNode {
   return text.split(EMPHASIS).map((part, index) => {
     // biome-ignore lint/suspicious/noArrayIndexKey: the pieces of one line keep their order
     const key = index;
@@ -84,7 +84,7 @@ export function PointForm({
 }
 
 /** The small word that says a line is new or changed, so the highlight never rests on colour alone. */
-export function NewMarker({ word }: { readonly word: 'new' | 'changed' }) {
+function NewMarker({ word }: { readonly word: 'new' | 'changed' }) {
   return <span className="fy-attn-new">{word}</span>;
 }
 

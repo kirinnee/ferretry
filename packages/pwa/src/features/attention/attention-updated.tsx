@@ -8,7 +8,14 @@
 import type { AttentionItem } from '@ferretry/protocol';
 import { ChevronDown, History } from 'lucide-react';
 import { type KeyboardEvent, useId, useRef, useState } from 'react';
-import { decidedSummary, revisionAuthor, revisionList, updatedAgo } from '../../lib/attention-revisions.ts';
+import {
+  decidedSummary,
+  revisionAuthor,
+  revisionList,
+  revisionStamp,
+  updatedAgo,
+} from '../../lib/attention-revisions.ts';
+import { PointForm } from './attention-brief.tsx';
 
 /** The one line "3 decided · 2 still open", when the item carries either list. */
 export function AttentionDecidedSummary({ item }: { readonly item: AttentionItem }) {
@@ -20,10 +27,50 @@ export function AttentionDecidedSummary({ item }: { readonly item: AttentionItem
   );
 }
 
-const clock = (at: string): string => {
-  const when = new Date(at);
-  return Number.isNaN(when.getTime()) ? at : when.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
-};
+/** The earlier versions of an item, newest first: when, who, which fields changed and what each said before. */
+export function AttentionRevisions({
+  item,
+  now,
+  id,
+}: {
+  readonly item: Pick<AttentionItem, 'revisions'>;
+  readonly now: number;
+  readonly id?: string;
+}) {
+  const entries = revisionList(item);
+  return (
+    <section aria-label="Earlier versions" className="fy-attn-revisions" data-attention-revisions="" id={id}>
+      <ol className="fy-attn-revisions__list">
+        {entries.map(entry => (
+          <li className="fy-attn-revisions__item" data-attention-revision={entry.at} key={`${entry.at}-${entry.by}`}>
+            <p className="fy-attn-revisions__head m-0">
+              <time dateTime={entry.at}>{revisionStamp(entry.at, now)}</time>
+              <span>
+                {revisionAuthor(entry.by)} changed {entry.changed.map(change => change.label).join(', ')}
+              </span>
+            </p>
+            <dl className="fy-attn-revisions__fields m-0">
+              {entry.changed.map(change => (
+                <div key={change.field}>
+                  {change.before === null ? (
+                    <dt>{change.label} was empty</dt>
+                  ) : (
+                    <>
+                      <dt>{change.label} was</dt>
+                      <dd className="m-0">
+                        <PointForm text={change.before} />
+                      </dd>
+                    </>
+                  )}
+                </div>
+              ))}
+            </dl>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
+}
 
 export function AttentionUpdated({
   item,
@@ -42,8 +89,6 @@ export function AttentionUpdated({
   const button = useRef<HTMLButtonElement>(null);
   const label = updatedAgo(item, now ?? drawnAt);
   if (label === null) return null;
-  const entries = revisionList(item);
-
   const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
     if (event.key !== 'Escape' || !open) return;
     event.stopPropagation();
@@ -68,33 +113,7 @@ export function AttentionUpdated({
         {label}
         <ChevronDown aria-hidden="true" className="fy-attn-updated__chevron" size={13} />
       </button>
-      {open ? (
-        <section aria-label="Earlier versions" className="fy-attn-revisions" data-attention-revisions="" id={listId}>
-          <ol className="fy-attn-revisions__list">
-            {entries.map(entry => (
-              <li
-                className="fy-attn-revisions__item"
-                data-attention-revision={entry.at}
-                key={`${entry.at}-${entry.by}`}
-              >
-                <p className="fy-attn-revisions__head m-0">
-                  <time dateTime={entry.at}>{clock(entry.at)}</time>
-                  <span aria-hidden="true">·</span>
-                  {revisionAuthor(entry.by)} changed {entry.changed.map(change => change.label).join(', ')}
-                </p>
-                <dl className="fy-attn-revisions__fields m-0">
-                  {entry.changed.map(change => (
-                    <div key={change.field}>
-                      <dt>{change.label} was</dt>
-                      <dd className="m-0 whitespace-pre-wrap break-words">{change.before}</dd>
-                    </div>
-                  ))}
-                </dl>
-              </li>
-            ))}
-          </ol>
-        </section>
-      ) : null}
+      {open ? <AttentionRevisions id={listId} item={item} now={now ?? drawnAt} /> : null}
     </span>
   );
 }

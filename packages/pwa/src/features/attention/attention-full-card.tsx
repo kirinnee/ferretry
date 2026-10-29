@@ -1,14 +1,14 @@
 /**
  * ONE ITEM'S FULL CARD, covering only the chat area (the header, the agenda line and the composer stay visible):
- * the header (who, the status pill, how long it has waited, when it was last updated), the title as the question,
- * then every section in ONE scroll (no scroll bar inside another), and an answer bar pinned at the bottom with
- * the options laid out as the swipes point (← ↑ →, the recommended one on the right; arrows only where it can be
- * swiped), "Add to reply" (↓: the item's "re:" chip into the composer), ‹ 2 of 5 › to the previous / next item
- * and ✕ to close. "Not needed…" is in the ⋯ menu. A swipe starts only from the top strip; the body scrolls.
+ * the header (who, the status, how long it has waited, and "Updated 6 min ago", which opens the earlier versions),
+ * the title as the question, then every section in ONE scroll (no scroll bar inside another), and a SHORT answer
+ * bar pinned at the bottom: the options in one row as the swipes point (← ↑ →, the recommended one on the right;
+ * arrows only where it can be swiped), the reason under them, then ONE row of ‹ 2 of 5 ›, "Add to reply" (↓: the
+ * item's "re:" chip into the composer), ⋯ ("Not needed…") and ✕. A swipe starts only from the top strip.
  */
 
 import type { AttentionItem } from '@ferretry/protocol';
-import { ArrowDown, ChevronLeft, ChevronRight, MessageSquarePlus, X } from 'lucide-react';
+import { ChevronDown, ChevronLeft, ChevronRight, MessageSquarePlus, X } from 'lucide-react';
 import { type PointerEvent, type ReactNode, useId, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
@@ -35,6 +35,7 @@ import { attentionAge } from './attention-board.tsx';
 import { AttentionBriefSections } from './attention-brief.tsx';
 import { AttentionDelivery } from './attention-delivery.tsx';
 import { AttentionDetail } from './attention-detail.tsx';
+import { AttentionRevisions } from './attention-updated.tsx';
 
 export interface AttentionFullCardProps {
   readonly item: AttentionItem;
@@ -90,6 +91,8 @@ export function AttentionFullCard({
 }: AttentionFullCardProps) {
   const titleId = useId();
   const [picks, setPicks] = useState<readonly string[]>([]);
+  const [revisionsOpen, setRevisionsOpen] = useState(false);
+  const revisionsId = useId();
   const [offset, setOffset] = useState<{ readonly dx: number; readonly dy: number } | null>(null);
   const drag = useRef<Drag | null>(null);
   const model = cardModel(item);
@@ -121,6 +124,60 @@ export function AttentionFullCard({
           }),
       }
     : undefined;
+
+  const stepper = (
+    <nav aria-label="Agenda items" className="fy-full__nav">
+      <button
+        aria-label="Previous item"
+        className="kt-btn fy-full__step"
+        data-attention-previous=""
+        disabled={onPrevious === undefined}
+        onClick={onPrevious}
+        type="button"
+      >
+        <ChevronLeft aria-hidden="true" size={18} />
+      </button>
+      <span className="fy-full__where" data-attention-position="">
+        {position.index + 1} of {position.total}
+      </span>
+      <button
+        aria-label="Next item"
+        className="kt-btn fy-full__step"
+        data-attention-next=""
+        disabled={onNext === undefined}
+        onClick={onNext}
+        type="button"
+      >
+        <ChevronRight aria-hidden="true" size={18} />
+      </button>
+    </nav>
+  );
+  const replyButton = (
+    <button
+      aria-label={canSwipe ? 'Add to reply, or swipe down' : 'Add to reply'}
+      className="kt-btn fy-full__reply"
+      data-attention-add-reply=""
+      disabled={busy && ownersTurn}
+      onClick={onAddReply}
+      title="Add this item to your reply"
+      type="button"
+    >
+      <MessageSquarePlus aria-hidden="true" size={16} />
+      <span className="fy-full__reply-label">Add to reply</span>
+    </button>
+  );
+  const closeButton = (
+    <button
+      aria-label="Close"
+      className="kt-btn fy-full__step fy-full__close"
+      data-attention-close=""
+      onClick={onClose}
+      title="Close"
+      type="button"
+    >
+      <X aria-hidden="true" size={18} />
+    </button>
+  );
 
   // A swipe is read from the top strip only: ← ↑ → answer, ↓ adds the item to the reply.
   const targets = canSwipe ? swipeTargets(item) : {};
@@ -198,9 +255,20 @@ export function AttentionFullCard({
           )}
           <span className="fy-full__age">{attentionAge(item.waitingSince, now)}</span>
           {updated === null ? null : (
-            <span className="fy-full__updated" data-attention-updated-at="">
+            <button
+              aria-controls={revisionsOpen ? revisionsId : undefined}
+              aria-expanded={revisionsOpen}
+              className="fy-full__updated"
+              data-attention-updated=""
+              data-attention-updated-at=""
+              onClick={() => setRevisionsOpen(open => !open)}
+              onPointerDown={event => event.stopPropagation()}
+              title="See the earlier versions of this item"
+              type="button"
+            >
               {updated}
-            </span>
+              <ChevronDown aria-hidden="true" className="fy-full__updated-chevron" size={12} />
+            </button>
           )}
         </header>
         <h2 className="fy-full__title" data-attention-title="" id={titleId}>
@@ -208,6 +276,7 @@ export function AttentionFullCard({
         </h2>
       </div>
       <div className="fy-full__body" data-attention-full-scroll="">
+        {revisionsOpen && updated !== null ? <AttentionRevisions id={revisionsId} item={item} now={now} /> : null}
         <AttentionDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} />
         {model.showAsk || picker !== undefined ? (
           <AttentionBriefSections
@@ -258,20 +327,9 @@ export function AttentionFullCard({
             onOption={option => give(optionAction(option, ''))}
             recommendationLine={model.recommendationLine}
             recommended={model.recommended}
-            secondaryExtra={
-              <button
-                className="kt-btn fy-full__reply"
-                data-attention-add-reply=""
-                disabled={busy}
-                onClick={onAddReply}
-                type="button"
-              >
-                <MessageSquarePlus aria-hidden="true" size={14} />
-                Add to reply
-                {canSwipe ? <ArrowDown aria-hidden="true" size={13} /> : null}
-                {canSwipe ? <span className="sr-only">, or swipe down</span> : null}
-              </button>
-            }
+            secondaryExtra={replyButton}
+            secondaryLead={stepper}
+            secondaryTail={closeButton}
             swipeHints={canSwipe}
             {...(model.composerHint === undefined ? {} : { composerHint: model.composerHint })}
             {...(model.notice ? { clear: () => give(CLEAR_ACTION) } : {})}
@@ -282,47 +340,13 @@ export function AttentionFullCard({
             <p className="fy-full__waiting-line" data-attention-waiting="" role="status">
               {status?.label ?? 'Waiting'} — it will update this.
             </p>
-            <button className="kt-btn fy-full__reply" data-attention-add-reply="" onClick={onAddReply} type="button">
-              <MessageSquarePlus aria-hidden="true" size={14} />
-              Add to reply
-            </button>
+            <div className="fy-attn-actions__row fy-attn-actions__row--secondary" data-hosted="">
+              {stepper}
+              {replyButton}
+              {closeButton}
+            </div>
           </div>
         )}
-        <nav aria-label="Agenda items" className="fy-full__nav">
-          <button
-            aria-label="Previous item"
-            className="kt-btn fy-full__step"
-            data-attention-previous=""
-            disabled={onPrevious === undefined}
-            onClick={onPrevious}
-            type="button"
-          >
-            <ChevronLeft aria-hidden="true" size={18} />
-          </button>
-          <span className="fy-full__where" data-attention-position="">
-            {position.index + 1} of {position.total}
-          </span>
-          <button
-            aria-label="Next item"
-            className="kt-btn fy-full__step"
-            data-attention-next=""
-            disabled={onNext === undefined}
-            onClick={onNext}
-            type="button"
-          >
-            <ChevronRight aria-hidden="true" size={18} />
-          </button>
-          <button
-            aria-label="Close"
-            className="kt-btn fy-full__step fy-full__close"
-            data-attention-close=""
-            onClick={onClose}
-            title="Close"
-            type="button"
-          >
-            <X aria-hidden="true" size={18} />
-          </button>
-        </nav>
       </footer>
     </article>
   );

@@ -35,10 +35,10 @@ const row = (
   );
 
 describe('the agenda row', () => {
-  it('is one title, one pill, up to three option chips and a reply button', async () => {
+  it('is one title, no pill for a plain needs-you, up to three option chips and a reply button', async () => {
     const view = await row();
     expect(pick(view, '[data-attention-row-open]', 'title').textContent).toBe('Pick the database');
-    expect(pick(view, '[data-agenda-status]', 'pill').textContent).toBe('Needs you');
+    expect(view.container.querySelector('[data-agenda-status]')).toBeNull();
     expect(chips(view).map(chip => chip.textContent)).toEqual(['SQLite', 'Postgres', 'Neither']);
     expect(pick(view, '[data-attention-add-reply]', 'reply').textContent).toContain('reply');
     await view.unmount();

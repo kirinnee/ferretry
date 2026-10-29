@@ -111,7 +111,7 @@ export function AttentionAgendaRow({
         >
           {title}
         </button>
-        {status === null ? null : <AgendaStatusPill status={status} />}
+        {status === null ? null : <AgendaStatusPill plainNeedsYou={false} status={status} />}
       </div>
       <div className="fy-agenda-row__acts">
         {chips.length === 0 ? null : (

@@ -17,7 +17,7 @@ import { cardAnswers, isTextOnlyAsk, needsReplyText } from './attention-answers.
 import { answersPerQuestion, visibleWhy } from './attention-inbox.ts';
 
 /** The longest ask that is still drawn as the card's heading. */
-export const QUESTION_HEADING_MAX = 160;
+const QUESTION_HEADING_MAX = 160;
 
 export interface CardModel {
   /** A plain notification: no answers, no turn; the owner reads it and clears it. */

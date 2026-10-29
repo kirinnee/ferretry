@@ -7,6 +7,7 @@ import {
   lastRevision,
   revisionHighlight,
   revisionList,
+  revisionStamp,
   updatedAgo,
 } from '../../src/lib/attention-revisions.ts';
 import { attentionItem } from '../support/attention-inbox.tsx';
@@ -112,7 +113,7 @@ describe('revisionList', () => {
       ['2026-07-30T00:00:00.000Z', 'human'],
     ]);
     expect(list[0]?.changed).toEqual([
-      { field: 'stillOpen', label: 'Still open', before: 'Nothing yet' },
+      { field: 'stillOpen', label: 'Still open', before: null },
       { field: 'ask', label: 'Answer type', before: 'open question' },
     ]);
     expect(list[1]?.changed[0]?.before).toBe('Which db?');
@@ -125,11 +126,23 @@ describe('revisionList', () => {
 });
 
 describe('describePrevious', () => {
-  it('reads text as itself, an empty field as nothing, and a list by its size', () => {
+  it('reads text as itself, an empty field as null, a text list as points and a list by its size', () => {
     expect(describePrevious('why', 'Because')).toBe('Because');
-    expect(describePrevious('why', undefined)).toBe('Nothing yet');
+    expect(describePrevious('why', undefined)).toBeNull();
     expect(describePrevious('terms', [{ term: 'a', meaning: 'b' }])).toBe('1 term');
     expect(describePrevious('links', [{ target: 'x' }, { target: 'y' }])).toBe('2 entries');
-    expect(describePrevious('steps', ['one', 'two'])).toBe('one; two');
+    expect(describePrevious('steps', ['one', 'two'])).toBe('- one\n- two');
+  });
+});
+
+describe('revisionStamp', () => {
+  const now = new Date(2026, 9, 29, 12, 0).getTime();
+  const local = (month: number, day: number, hour: number, minute: number): string =>
+    new Date(2026, month, day, hour, minute).toISOString();
+  it('is the clock today, weekday and clock within the week, else month and day', () => {
+    expect(revisionStamp(local(9, 29, 8, 54), now)).toBe('8:54');
+    expect(revisionStamp(local(9, 26, 8, 4), now)).toBe('Mon 8:04');
+    expect(revisionStamp(local(9, 1, 8, 54), now)).toBe('Oct 1');
+    expect(revisionStamp('nonsense', now)).toBe('nonsense');
   });
 });

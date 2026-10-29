@@ -48,7 +48,7 @@ export function AttentionDetail({
   const highlight = revisionHighlight(item);
   return (
     <section aria-label="Details" className="fy-attn-detail" data-attention-detail={item.id} data-layout={layout}>
-      {item.revisions === undefined ? null : (
+      {item.revisions === undefined || layout === 'full' ? null : (
         <div className="fy-attn-detail__updated">
           <AttentionUpdated item={item} />
         </div>
