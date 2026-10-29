@@ -626,10 +626,10 @@ describe('hypermedia teaching', () => {
     should(HYPERMEDIA_INSTRUCTION).containEql('prefers-reduced-motion');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
     should(HYPERMEDIA_INSTRUCTION).containEql('No colours: tone');
-    should(HYPERMEDIA_INSTRUCTION).containEql('themed for you: no %%{init}%% theme or colours');
+    should(HYPERMEDIA_INSTRUCTION).containEql('auto-themed, so no %%{init}%% or colours');
     // A phone column is narrow: a ferret is taught to draw top-down with short labels.
     should(HYPERMEDIA_INSTRUCTION).containEql('flowchart TB');
-    should(HYPERMEDIA_INSTRUCTION).containEql('short labels, phones are narrow');
+    should(HYPERMEDIA_INSTRUCTION).containEql('top-down, short labels');
     should(HYPERMEDIA_INSTRUCTION).not.containEql('flowchart LR');
     // In every prompt, so it is capped; raised from 1,200 for the three asks above, then from 1,600 for `chart`; 1,970 with the top-down hint.
     should(HYPERMEDIA_INSTRUCTION.length).be.below(2000);
