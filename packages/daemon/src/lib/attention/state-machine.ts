@@ -600,7 +600,10 @@ function canAddressAttention(actor: AttentionActor, entry: AttentionEntry): bool
 }
 
 function responseMatchesAsk(ask: AttentionAsk | undefined, response: AttentionResponse): boolean {
-  if (ask === undefined || ask.kind !== response.kind) return false;
+  if (ask === undefined) return false;
+  // The owner's own words instead of the options: any ask that offers options takes them.
+  if (response.kind === 'other') return ask.kind !== 'open-question' && ask.kind !== 'task';
+  if (ask.kind !== response.kind) return false;
   if (ask.kind !== 'multiple-choice' || response.kind !== 'multiple-choice') return true;
   return ask.options.some(option => option.label === response.choice);
 }
