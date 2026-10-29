@@ -5,12 +5,17 @@
  * - A WIDER SCREEN gets two panes: the open items on the left (conversation, summary, ferret · machine,
  *   age) and, on the right, the REAL chat of the selected item, with the item pinned above its composer
  *   (the same block the chat page draws). Answering happens there, through the chat.
- * - A PHONE gets the list alone; a row opens that ferret's chat at the item.
+ * - A PHONE gets the swipe deck: the newest card on top, drawn whole — every detail, its answers left · up ·
+ *   right and the reply — so it can be answered without opening anything else.
+ *
+ * A small OPEN / RESOLVED filter sits under the heading. Resolved history lives only here and behind a
+ * chat's header menu — never as a line under every conversation.
  *
  * The page renders off the shell's `AttentionInbox` alone, so it render-tests with a fake one; the chat
  * pane is supplied by the host as `renderChat`.
  */
 
+import { attentionCardAnswers } from '@ferretry/protocol';
 import { ArrowRight, CheckCheck, X } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
@@ -21,9 +26,8 @@ import {
   type FailedAttentionAction,
   type InboxAction,
   type InboxCard,
-  isTask,
-  isWaitingOnFerret,
-  swipeMap,
+  type InboxResolved,
+  RESOLVED_READ_LIMIT,
 } from '../../lib/attention-inbox.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAttentionPath } from '../../lib/pages/routes.ts';
@@ -32,6 +36,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { attentionAge, attentionReference } from './attention-board.tsx';
 import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
+import { ResolvedRow } from './attention-resolved.tsx';
 import { AttentionSwipeDeck } from './attention-swipe-deck.tsx';
 import { AttentionUndoToast } from './attention-undo-toast.tsx';
 
@@ -122,19 +127,95 @@ function InboxEmpty() {
   );
 }
 
-function InboxReading() {
+function InboxReading({ words = 'Reading what your ferrets asked…' }: { readonly words?: string }) {
   return (
     <p className="fy-attn-inbox__reading" data-attention-reading="" role="status">
       <Spinner size={16} />
-      Reading what your ferrets asked…
+      {words}
     </p>
   );
 }
 
+export type InboxFilter = 'open' | 'resolved';
+
+/** Open / Resolved: two toggle buttons, the chosen one pressed. */
+function InboxFilterBar({
+  filter,
+  onChange,
+}: {
+  readonly filter: InboxFilter;
+  readonly onChange: (next: InboxFilter) => void;
+}) {
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a pair of toggle buttons, not a form fieldset
+    <div aria-label="Show" className="fy-attn-inbox__filter" data-attention-filter="" role="group">
+      {(['open', 'resolved'] as const).map(entry => (
+        <button
+          aria-pressed={filter === entry}
+          className="fy-attn-inbox__filter-button"
+          data-attention-filter-option={entry}
+          key={entry}
+          onClick={() => onChange(entry)}
+          type="button"
+        >
+          {entry === 'open' ? 'Open' : 'Resolved'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The Resolved filter: every resolved item the inbox has read, newest first, each linked to its chat. */
+function InboxResolvedList({
+  inbox,
+  onNavigate,
+}: {
+  readonly inbox: AttentionInbox;
+  readonly onNavigate: (to: string) => void;
+}) {
+  const rows = inbox.resolved;
+  if (rows.length === 0)
+    return inbox.resolvedReading ? (
+      <InboxReading words="Reading resolved items…" />
+    ) : (
+      <p className="fy-attn-inbox__none" data-attention-resolved-empty="">
+        Nothing resolved in your {RESOLVED_READ_LIMIT} most recent conversations.
+      </p>
+    );
+  return (
+    <div className="fy-attn-inbox__resolved" data-attention-resolved-pane="">
+      <ul aria-label="Resolved" className="fy-attn-panel__records fy-attn-inbox__records">
+        {rows.map((row, index) => (
+          <ResolvedRow
+            id={`inbox-resolved-${index}`}
+            key={`${row.key}:${row.record.resolvedAt}`}
+            origin={resolvedOrigin(row, onNavigate)}
+            record={row.record}
+          />
+        ))}
+      </ul>
+      <p className="fy-attn-inbox__hint">
+        From your {RESOLVED_READ_LIMIT} most recent conversations
+        {inbox.resolvedReading ? ' · reading more…' : ''}
+      </p>
+    </div>
+  );
+}
+
+const resolvedOrigin = (row: InboxResolved, onNavigate: (to: string) => void) => {
+  const names = sessionsBarNames(row.view);
+  return {
+    ferret: names.ferret ?? names.title,
+    machine: row.machineName,
+    href: attentionConversationPath(row.daemonId, row.view.config.id, row.record.id),
+    onNavigate,
+  };
+};
+
 export interface AttentionInboxPageProps {
   readonly inbox: AttentionInbox;
   readonly onNavigate: (to: string) => void;
-  /** A phone gets the list alone; a row opens the chat. */
+  /** A phone gets the swipe deck, its top card drawn whole; a wider screen gets the list and the chat. */
   readonly phone: boolean;
   /** The clock card ages read; the browser's otherwise. */
   readonly now?: number;
@@ -148,19 +229,17 @@ export interface AttentionInboxPageProps {
   readonly reducedMotion?: boolean;
 }
 
-/** One row of the list: where it came from, what it asks, how long ago. */
+/** One row of the wide screen's list: where it came from, what it asks, how long ago. */
 function RowFace({
   card,
   selected,
   now,
-  phone,
   onSelect,
   onNavigate,
 }: {
   readonly card: InboxCard;
   readonly selected: boolean;
   readonly now: number | undefined;
-  readonly phone: boolean;
   readonly onSelect: (key: string) => void;
   readonly onNavigate: (to: string) => void;
 }) {
@@ -176,11 +255,7 @@ function RowFace({
       </span>
     </>
   );
-  return phone ? (
-    <RouteLink className="fy-attn-row" data-attention-row={card.key} onNavigate={onNavigate} to={origin.href}>
-      {body}
-    </RouteLink>
-  ) : (
+  return (
     <button
       aria-current={selected || undefined}
       className="fy-attn-row"
@@ -194,51 +269,19 @@ function RowFace({
   );
 }
 
-/** A phone's swipeable card: the row (a link into the chat) and its two answers as buttons — Done / Dismiss, or on a to-do Done / Need more info. */
-function SwipeRow({
-  card,
-  now,
-  onNavigate,
-  act,
-}: {
-  readonly card: InboxCard;
-  readonly now: number | undefined;
-  readonly onNavigate: (to: string) => void;
-  readonly act: (action: InboxAction) => void;
-}) {
-  const map = swipeMap(card.item);
-  const first = map.right;
-  const second = map.left;
-  const waiting = isTask(card.item) && isWaitingOnFerret(card.item);
-  return (
-    <div className="fy-attn-swiperow">
-      <RowFace card={card} now={now} onNavigate={onNavigate} onSelect={() => undefined} phone selected={false} />
-      {waiting ? (
-        <p className="fy-attn-swiperow__waiting m-0 text-meta text-muted" data-attention-waiting="" role="status">
-          Waiting on {inboxCardOrigin(card, onNavigate).ferret}
-        </p>
-      ) : null}
-      <div className="fy-attn-swiperow__actions">
-        {first === undefined ? null : (
-          <button className="kt-btn kt-btn--sm" data-attention-done="" onClick={() => act(first)} type="button">
-            {first.label}
-          </button>
-        )}
-        {second === undefined ? null : (
-          <button
-            className="kt-btn kt-btn--sm"
-            {...(second.kind === 'dismiss' ? { 'data-attention-dismiss': '' } : { 'data-attention-needs-info': '' })}
-            data-variant="ghost"
-            onClick={() => act(second)}
-            type="button"
-          >
-            {second.label}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+const ARROW = { left: '←', up: '↑', right: '→' } as const;
+
+/**
+ * What each swipe does on the card on top, in the order the answer bar lays them out — "← No · → Yes".
+ * Read off that card's own answers, so the hint can never promise a swipe the card does not take.
+ */
+export const swipeHintFor = (card: InboxCard | undefined): string => {
+  if (card === undefined) return '';
+  const answers = attentionCardAnswers(card.item);
+  return answers.length === 0
+    ? 'Reply in words, or open the chat'
+    : `Swipe ${answers.map(answer => `${ARROW[answer.direction]} ${answer.label}`).join(' · ')}`;
+};
 
 export function AttentionInboxPage({
   inbox,
@@ -252,6 +295,11 @@ export function AttentionInboxPage({
 }: AttentionInboxPageProps) {
   const headingId = useId();
   const [chosen, setChosen] = useState<string | null>(null);
+  const [filter, setFilter] = useState<InboxFilter>('open');
+  const choose = (next: InboxFilter): void => {
+    setFilter(next);
+    if (next === 'resolved') inbox.loadResolved();
+  };
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
   const empty = inbox.cards.length === 0;
   const selected = inbox.cards.find(card => card.key === chosen) ?? inbox.cards[0];
@@ -268,8 +316,11 @@ export function AttentionInboxPage({
         </p>
       </header>
       {banner}
+      <InboxFilterBar filter={filter} onChange={choose} />
       <OrphanedFailures inbox={inbox} />
-      {empty ? (
+      {filter === 'resolved' ? (
+        <InboxResolvedList inbox={inbox} onNavigate={onNavigate} />
+      ) : empty ? (
         inbox.reading ? (
           <InboxReading />
         ) : (
@@ -283,13 +334,11 @@ export function AttentionInboxPage({
                 cards={inbox.cards}
                 onAct={(card, action) => inbox.deferred.schedule(card, action)}
                 {...(reducedMotion === undefined ? {} : { reducedMotion })}
-                renderCard={(card, act) => <SwipeRow act={act} card={card} now={now} onNavigate={onNavigate} />}
+                renderCard={(card, act) => renderInboxCard({ inbox, onNavigate, now }, card, act, true)}
               />
               <p className="fy-attn-inbox__hint">
                 {inbox.cards.length > 1 ? `${inbox.cards.length - 1} more after this one · ` : ''}
-                {inbox.cards.some(card => isTask(card.item))
-                  ? 'Swipe right for Done, left for Need more info'
-                  : 'Swipe right for Done, left to dismiss'}
+                {swipeHintFor(inbox.cards[0])}
               </p>
             </div>
           ) : (
@@ -301,7 +350,6 @@ export function AttentionInboxPage({
                     now={now}
                     onNavigate={onNavigate}
                     onSelect={setChosen}
-                    phone={false}
                     selected={selected?.key === card.key}
                   />
                 </li>
@@ -315,7 +363,7 @@ export function AttentionInboxPage({
           )}
         </div>
       )}
-      {inbox.reading && !empty ? <InboxReading /> : null}
+      {inbox.reading && !empty && filter === 'open' ? <InboxReading /> : null}
       <AttentionUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
     </main>
   );

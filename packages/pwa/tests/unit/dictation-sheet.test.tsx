@@ -120,6 +120,14 @@ describe('dictationFailureCopy', () => {
 describe('dictationStripStatus', () => {
   const failure = { title: 'Dictation failed', hint: 'Try again.' };
 
+  it('says the result goes straight into the draft only when that is the setting', () => {
+    const review = dictationStripStatus('transcribing', '', undefined, failure, 'parakeet');
+    expect(review).toContain('You will review the result before it reaches your draft.');
+    const insert = dictationStripStatus('transcribing', '', undefined, failure, 'parakeet', false, true);
+    expect(insert).toContain('The result goes into your draft when it is ready.');
+    expect(insert).not.toContain('You will review');
+  });
+
   it('offers the standing hint while recording with nothing heard yet', () => {
     const status = dictationStripStatus('recording', '', undefined, failure);
     expect(status).toContain('press Stop');

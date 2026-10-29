@@ -315,7 +315,13 @@ describe('Add runtime: Add a new login', () => {
       calls,
       reloads,
       after,
-      routes: newLoginRoutes(after, { [LOGIN]: claudeFlow('awaiting-code', 'claude') }),
+      // The sign-in re-reads its flow every `pollMs`, so the machine answers that read too: still waiting
+      // for the code. Unscripted, a slow runner's first poll lands before the assertions below and the
+      // "didn't answer" refusal is the alert this test says is not there.
+      routes: newLoginRoutes(after, {
+        [LOGIN]: claudeFlow('awaiting-code', 'claude'),
+        'GET /v1/fleet/login/flow-1': claudeFlow('awaiting-code', 'claude'),
+      }),
     });
     await click(view.container, '[data-add-row="login"]');
     await click(view.container, '[data-add-runtime-login="claude"]');

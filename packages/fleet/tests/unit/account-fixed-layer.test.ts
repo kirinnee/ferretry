@@ -3,6 +3,7 @@ import should from 'should';
 import {
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
+  ALWAYS_ON_SECTIONS,
   ATTENTION_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
@@ -21,6 +22,7 @@ import {
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
   LESSONS_INSTRUCTION,
+  instructionDigest,
   launchInstructions,
   PACK_ENV,
   PACK_INSTRUCTION,
@@ -624,8 +626,12 @@ describe('hypermedia teaching', () => {
     should(HYPERMEDIA_INSTRUCTION).containEql('prefers-reduced-motion');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
     should(HYPERMEDIA_INSTRUCTION).containEql('No colours: tone');
-    should(HYPERMEDIA_INSTRUCTION).containEql('themed for you: no %%{init}%% theme or colours');
-    // In every prompt, so it is capped; raised from 1,200 for the three asks above, then from 1,600 for `chart`.
+    should(HYPERMEDIA_INSTRUCTION).containEql('auto-themed, so no %%{init}%% or colours');
+    // A phone column is narrow: a ferret is taught to draw top-down with short labels.
+    should(HYPERMEDIA_INSTRUCTION).containEql('flowchart TB');
+    should(HYPERMEDIA_INSTRUCTION).containEql('top-down, short labels');
+    should(HYPERMEDIA_INSTRUCTION).not.containEql('flowchart LR');
+    // In every prompt, so it is capped; raised from 1,200 for the three asks above, then from 1,600 for `chart`; 1,970 with the top-down hint.
     should(HYPERMEDIA_INSTRUCTION.length).be.below(2000);
   });
 });
@@ -672,30 +678,34 @@ describe('ATTENTION_INSTRUCTION', () => {
     const text = ATTENTION_INSTRUCTION('zz');
 
     // Assert
-    should(text).startWith('Attention: raise anything the human must decide or DO');
-    should(text).containEql('`zz attention add "<summary>"`');
-    // Every human action is its own item, never prose alone.
-    should(text).containEql('Every human action (incl. "Next steps: You: …") is its OWN item, never prose alone');
-    // Self-contained, in point form: the reader has not followed the conversation.
-    should(text).containEql('They read it cold: short bullets, one idea each');
-    should(text).containEql('no ticket/PR numbers, codenames, paths or unexplained acronyms');
+    // Why first: the owner reads the board, so an ask left in a reply reaches nobody.
+    should(text).startWith('Attention: the owner reads the board, not your replies');
+    // Every notification is an item, and progress is never one.
+    should(text).containEql('every notification is an Attention item (never progress)');
+    // Every human action is its own item, raised before the reply ends — never prose alone.
+    should(text).containEql(
+      'Before ending a reply that asks them to decide or DO anything ("Next steps: You: …"), raise each ask as its OWN item',
+    );
+    should(text).containEql('prose alone reaches nobody');
+    // A card: a title that is the push heading, and a one-line ask that is its text.
+    should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
+    should(text).containEql('Title ≤40 chars = push heading; ask, one line ≤120 = its text.');
+    // Isolated: the reader has not followed the conversation.
+    should(text).containEql('Cards stand alone, read cold: no "as above"/"as discussed"');
+    should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
-    should(text).containEql('one plain sentence under 90 chars, answer first');
-    should(text).containEql('`--context` repeats');
-    should(text).containEql('every step in order via `--step "<markdown>"`');
-    should(text).containEql('never a secret value');
-    should(text).containEql('so the item alone is enough');
-    should(text).containEql('`--question` each decision with 2–4 short `--option`s');
-    should(text).containEql('`--recommend <pick> --recommend-why <line>`');
-    // A tiny bad/good example.
-    should(text).containEql('Bad: "Need call on KT-412 re OCI cron"');
-    should(text).containEql('Good: "Keep the work login alive every 30 minutes?"');
-    should(text).containEql('Never for progress or finishing.');
+    // Kinds, at most three directional answers, the recommendation on the right.
+    should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
+    should(text).containEql('A choice: 2–3 `--option`s that say what each does');
+    should(text).containEql('`--recommend <pick> --recommend-why <line>` puts it on the right');
+    should(text).containEql('`--up "<label>"` adds a third answer (task, permission)');
+    should(text).containEql('each step via `--step "<markdown>"`');
+    should(text).containEql('no secrets');
     should(text).containEql('"[answer to !A3 …]"');
     // The need-more-info loop: expand the same item.
-    should(text).containEql('On "[needs more info !A3 …]", add what is missing with `zz attention edit <id>`');
+    should(text).containEql('On "[needs more info !A3 …]", add it with `zz attention edit <id>`');
     should(text).containEql('say in the item why not');
-    should(text).containEql('`zz attention done <id>`');
+    should(text).containEql('Moot? `zz attention done <id>`');
     should(text).not.containEql('notify');
     should(text).not.containEql('fy ');
   });
@@ -712,6 +722,32 @@ describe('ATTENTION_INSTRUCTION', () => {
       AGENT_INSTRUCTION('fy').indexOf(ATTENTION_INSTRUCTION('fy')),
     );
     should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('attention');
+  });
+});
+
+describe('ALWAYS_ON_SECTIONS', () => {
+  it('should be exactly the always-on instruction, section by section, in order', () => {
+    // Act
+    const sections = ALWAYS_ON_SECTIONS('zz');
+
+    // Assert
+    should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'attention']);
+    should(sections.map(section => section.text).join('\n\n')).equal(AGENT_INSTRUCTION('zz'));
+  });
+});
+
+describe('instructionDigest', () => {
+  it('should be a short, stable fingerprint that changes with the words', () => {
+    // Act
+    const once = instructionDigest(ATTENTION_INSTRUCTION('fy'));
+    const again = instructionDigest(ATTENTION_INSTRUCTION('fy'));
+    const other = instructionDigest(ATTENTION_INSTRUCTION('zz'));
+
+    // Assert
+    should(once).match(/^[0-9a-f]{14}$/u);
+    should(once).equal(again);
+    should(once).not.equal(other);
+    should(instructionDigest('')).match(/^[0-9a-f]{14}$/u);
   });
 });
 
@@ -732,9 +768,21 @@ describe('launchInstructions', () => {
     // Assert
     should(launched).deepEqual({
       sections: [
-        { id: 'tools', chars: AGENT_TOOLS_INSTRUCTION.length },
-        { id: 'settings', chars: SET_UP_FERRETRY_INSTRUCTION(binary).length },
-        { id: 'attention', chars: ATTENTION_INSTRUCTION(binary).length },
+        {
+          id: 'tools',
+          chars: AGENT_TOOLS_INSTRUCTION.length,
+          digest: instructionDigest(AGENT_TOOLS_INSTRUCTION),
+        },
+        {
+          id: 'settings',
+          chars: SET_UP_FERRETRY_INSTRUCTION(binary).length,
+          digest: instructionDigest(SET_UP_FERRETRY_INSTRUCTION(binary)),
+        },
+        {
+          id: 'attention',
+          chars: ATTENTION_INSTRUCTION(binary).length,
+          digest: instructionDigest(ATTENTION_INSTRUCTION(binary)),
+        },
         { id: 'hypermedia', chars: HYPERMEDIA_INSTRUCTION.length },
         { id: 'pack', chars: PACK_INSTRUCTION(binary).length },
         { id: 'learning', chars: LESSONS_INSTRUCTION(binary).length },

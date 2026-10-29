@@ -519,6 +519,16 @@ const appStore = async (
       const sessionId = decodeURIComponent(attentionRoute[1]);
       return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
     }
+    // The Processes tab's list, which the open session reads for the count on its tab: nothing runs.
+    const processesRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/processes$/u);
+    if (processesRoute?.[1] !== undefined) {
+      return Response.json({
+        sessionId: decodeURIComponent(processesRoute[1]),
+        observedAt: new Date().toISOString(),
+        available: true,
+        processes: [],
+      });
+    }
     if (url.endsWith('/terminals')) return Response.json(terminalListing);
     // The durable registry, and ONLY when a test supplies one. The default
     // stays the empty document every other page gets, because the registry's
@@ -3949,7 +3959,7 @@ describe('the fleet notification watch', () => {
     // through the subscription the shell handed over.
     expect(store.fleet.getSnapshot().daemons.get(alpha.daemonId)?.sessions?.length).toBe(1);
 
-    await moveTo('awaiting_question');
+    await moveTo('failed');
 
     // Delivered, and named after the session rather than the daemon: this is the
     // only assertion in the file that proves the whole chain — fleet diff, the
@@ -3962,7 +3972,7 @@ describe('the fleet notification watch', () => {
   it('stays silent on the same transition while the reader is looking at the page', async () => {
     const { moveTo, view } = await watchingShell(false);
 
-    await moveTo('awaiting_question');
+    await moveTo('failed');
 
     // Nothing about the transition changed — only `document.hidden`. So a
     // notification here would mean the watch is reading some other visibility,

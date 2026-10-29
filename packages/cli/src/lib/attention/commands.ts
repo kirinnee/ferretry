@@ -17,7 +17,10 @@ const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
 const WRITING_GUIDE = `The reader has NOT been following this session. Write for that reader, in point form:
-  <the ask>      the SUMMARY: one plain sentence under 90 characters, answer first — not backstory
+  --title        REQUIRED. What this is about, in a few plain words (aim for 40 characters, 60 at most,
+                 no IDs): it heads the card and is the notification's title — not the conversation's name
+  <the ask>      the ASK: one plain sentence, 120 characters or fewer, answer first — not backstory;
+                 it is the notification's body (\`--ask\` says the same when it is not given as words)
   --context      what is happening and why it matters; repeat the flag for one bullet each
   --term         TERM=meaning for every codename or term of art you use (repeat)
   --question     each thing they must answer (repeat); --option gives a lone question its choices
@@ -38,11 +41,11 @@ resolves it — but if the blocker clears some OTHER way (the human answers in c
 longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
 whose reason is gone but is still open is a bug, not a safe default.
 
-The board, the inbox and the push are titled with this conversation's name, so the summary need
-not repeat it.
+The card is swiped, so it offers at most 3 answers (left, up, right) — see --kind below.
 
-JSON body (every field optional except summary; questions and options may be plain strings):
-  {"summary": "Approve the OCI work-login plan",
+JSON body (title and ask are required; questions and options may be plain strings):
+  {"title": "OCI work login",
+   "ask": "Approve the OCI work-login plan?", "kind": "choice",
    "context": "The work login expires daily; the plan adds a 30-min keepalive.",
    "terms": [{"term": "OCI", "meaning": "Oracle Cloud Infrastructure"}],
    "questions": [{"question": "Which plan?", "options": ["Defaults", "I'll reply with changes"],
@@ -53,14 +56,18 @@ JSON body (every field optional except summary; questions and options may be pla
    "steps": ["Open **Settings** and choose Logins", "Run \`fy login work\` and paste the code it prints"],
    "body": "Anything longer than a list, as Markdown"}`;
 
-const ASK_KINDS = `--kind says what the human DOES:
-  permission   approve or reject
-  choice       pick one --option (repeat --option; 2 or more required)
-  review       say the answer is good, or ask for a clarification
-  task         do something, then mark it done or ask for more information
-  open         write a full answer (the default)
-Without --kind, steps with no question are a task, one --question with options is a choice, and several
-questions are answered in words.`;
+const ASK_KINDS = `--kind says what the human DOES, and the answers the card swipes with (left · up · right):
+  task         do something: ← Need more info · → Done      (--up "Skip" adds ↑ Skip)
+  yesno        a yes-or-no question: ← No · → Yes            (it brings its own options)
+  permission   approve or reject: ← Deny · → Allow          (--up "Always allow" adds ↑, which approves)
+  choice       pick one of 2 or 3 --option labels; the --recommend option (else the first) is →
+  review       say the answer is good, or ask for a clarification: ← Needs changes · → Looks good
+  info         nothing to decide, only to read: → Got it
+  reply        write a full answer (the default); no swipes
+(open, multiple-choice and answer-review are still accepted as older names.) More than 3 options is
+refused: split the item, or use --kind reply. --up-why "<line>" describes the --up answer.
+Without --kind, steps with no question are a task, --option makes a choice (exactly Yes and No, a yesno),
+one --question with options is a choice, and several questions are answered in words.`;
 
 const DISMISS_POLICY = `Agents may dismiss only attention items they raised themselves.
 A human may dismiss any attention item. Every dismissal remains in the resolution audit.`;
@@ -98,9 +105,13 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     attention
       .command('add')
       .description('raise something a human must decide or do')
-      .argument('[ask...]', 'the summary: one line naming what the human must decide or do')
-      .option('--summary <line>', 'the summary, when it is not given as words')
+      .argument('[ask...]', 'the ask: one line naming what the human must decide or do')
+      .option('-t, --title <text>', 'REQUIRED: what this is about, plain words, aim for 40 characters, no IDs')
+      .option('--ask <line>', 'the ask, when it is not given as words')
+      .option('--summary <line>', 'the same as --ask (the older name)')
       .option(`-k, --kind <kind>`, `what the human does: ${ASK_KIND_NAMES.join(', ')}`)
+      .option('--up <label>', 'the extra up-swipe answer of a task (dismisses, e.g. "Skip") or a permission (approves)')
+      .option('--up-why <line>', 'one line that describes the --up answer')
       .option('--task', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
       .option('-o, --option <label>', 'a choice label; repeat for each option', collect, [])
       .option('-c, --context <point>', 'what is happening and why it matters; repeat for bullet points', collect, [])
@@ -126,7 +137,8 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .command('edit')
       .description('reword an open item you raised — only the writing, never the ask')
       .argument('<id>', 'the attention reference, like !A3')
-      .option('--summary <line>', 'the new one-line summary')
+      .option('-t, --title <text>', 'the new title: what this is about, aim for 40 characters')
+      .option('--summary <line>', 'the new one-line ask')
       .option('-c, --context <point>', 'replace the context; repeat for bullet points', collect, [])
       .option('--term <TERM=meaning>', 'replace the terms with these; repeat', collect, [])
       .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
@@ -201,6 +213,8 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--approve', 'answer a permission ask with approval')
       .option('--reject', 'answer a permission ask with a refusal')
       .option('--choice <label>', 'answer a multiple-choice ask with one option label')
+      .option('--yes', 'answer a yes-or-no card with Yes')
+      .option('--no', 'answer a yes-or-no card with No')
       .option('--good', 'answer an answer-review ask: the answer is good')
       .option('--clarify <text>', 'answer an answer-review ask: ask for a clarification')
       .option('--answer <text>', 'answer an open question'),
@@ -222,10 +236,14 @@ export function registerAttentionCommands(program: Command, controller: Attentio
   scoped(
     attention
       .command('notify')
-      .description('push a notification to the human — not an attention item, nothing to resolve')
-      .argument('<message...>', 'the notification body')
-      .option('-t, --title <title>', 'the notification title')
-      .option('-k, --kind <kind>', 'completed or failed'),
+      .description('tell the human something with nothing to decide: raises an info item they acknowledge')
+      .argument('<message...>', 'what to tell them: one line (the ask); a longer text goes whole into the context')
+      .option('-t, --title <title>', 'the card heading (defaults to the start of the message, 40 characters)')
+      .option('-k, --kind <kind>', 'refused: progress and finishing never notify the owner')
+      .addHelpText(
+        'after',
+        '\nOnly an attention item notifies. Raise one (add) only when the human must decide or do something.',
+      ),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
     await controller.notify(words, merged<AttentionNotifyOptions>(command));
   });
@@ -241,7 +259,7 @@ function unknownVerb(words: readonly string[], verbs: readonly string[]): string
   const [first] = words;
   const offered = verbs.join(', ');
   if (first === undefined) return `attention needs a command. Did you mean: ${offered}`;
-  return `unknown command '${first}'. Did you mean: ${offered} — raise an item with \`attention add "<summary>"\``;
+  return `unknown command '${first}'. Did you mean: ${offered} — raise an item with \`attention add --title "<what>" "<the ask>"\``;
 }
 
 /** commander's repeatable-option reducer: `--option a --option b` collects both. */

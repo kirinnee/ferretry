@@ -7,18 +7,31 @@ import {
   type AttentionLink,
   type AttentionQuestion,
   type AttentionTerm,
+  defaultAttentionAnswers,
+  MAX_ATTENTION_CARD_ANSWERS,
   MAX_ATTENTION_SUBJECT_LENGTH,
+  MAX_ATTENTION_TITLE_LENGTH,
+  recommendedAttentionOption,
   toBullets,
+  type UpAnswer,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import { type AskFlags, parseAsk } from './ask.ts';
+import { type AskFlags, type CardAsk, parseAsk, parseKind, TOO_MANY_ANSWERS } from './ask.ts';
 
 /** The default `howToResolve` when the raiser did not name a concrete action. */
 const DEFAULT_HOW_TO_RESOLVE = 'Answer this item on the attention board (it records who answered).';
 
 /** The flags that describe a new item, beside its one-line summary. */
 export interface BriefFlags extends AskFlags {
+  /** The card's heading and the push's title: what this is about, in a few plain words. Required. */
+  readonly title?: string;
+  /** The one-line ask, when it is not given as words; `summary` is the older name for it. */
+  readonly ask?: string;
   readonly summary?: string;
+  /** The extra up-swipe answer a task (does dismiss) or a permission (does approve) takes. */
+  readonly up?: string;
+  /** One line that describes the `up` answer. */
+  readonly upWhy?: string;
   readonly why?: string;
   /** Repeated: more than one becomes bullets. */
   readonly context?: string | readonly string[];
@@ -51,7 +64,10 @@ const LinkInput = z.union([z.string(), z.object({ label: z.string().optional(), 
  * has one. Unknown keys are refused, so a misspelt field is said rather than silently dropped.
  */
 const BriefFileSchema = z.strictObject({
+  title: z.string().optional(),
+  ask: z.string().optional(),
   summary: z.string().optional(),
+  up: z.union([z.string(), z.object({ label: z.string(), description: z.string().optional() })]).optional(),
   why: z.string().optional(),
   context: Prose.optional(),
   resolve: z.string().optional(),
@@ -107,13 +123,17 @@ export function composeAddRequest(
   flags: BriefFlags,
   file: BriefFile = {},
 ): Extract<AttentionActionRequest, { action: 'add' }> {
-  const subject = summaryFrom(text(words.join(' ')) ?? text(flags.summary) ?? text(file.summary));
+  const subject = askLineFrom(
+    text(words.join(' ')) ?? text(flags.ask) ?? text(flags.summary) ?? text(file.ask) ?? text(file.summary),
+  );
+  const title = titleFrom(text(flags.title) ?? text(file.title));
   const options = flags.option !== undefined && flags.option.length > 0 ? flags.option : undefined;
   const fileOptions = file.options?.map(option);
   const questions = questionsFrom(flags, file, options);
   const steps = stepsFrom(flags.step) ?? stepsFrom(file.steps);
-  const kind = flags.kind ?? (flags.task === true ? 'task' : file.kind);
-  const ask = askFor(kind, options ?? fileOptions?.map(each => each.label), questions, steps !== undefined);
+  const named = flags.kind ?? (flags.task === true ? 'task' : file.kind);
+  const card = askFor(named, options ?? fileOptions?.map(each => each.label), questions, steps !== undefined);
+  const ask = withOptionDetail(card.ask, fileOptions);
   // A recommendation that is the lone question's own pick is said once, on the question.
   const recommendation = onQuestion(questions, flags) ? undefined : recommendationFrom(flags, file);
   const terms = flags.term !== undefined && flags.term.length > 0 ? flags.term.map(termFrom) : file.terms;
@@ -122,16 +142,29 @@ export function composeAddRequest(
   const urgency = text(flags.urgency) ?? text(file.urgency);
   const context = prose(flags.context) ?? prose(file.context);
   const body = text(flags.body) ?? text(file.body);
+  const answers = defaultAttentionAnswers(
+    card.kind,
+    ask,
+    recommendedAttentionOption({
+      ask,
+      ...(questions === undefined ? {} : { questions }),
+      ...(recommendation === undefined ? {} : { recommendation }),
+    }),
+    upFrom(card.kind, flags, file),
+  );
 
   const request = {
     action: 'add' as const,
     source: 'agent-raised' as const,
     sourceRef: null,
     subject,
+    title,
+    kind: card.kind,
     why: text(flags.why) ?? text(file.why) ?? subject,
     context: context ?? null,
     howToResolve: text(flags.resolve) ?? text(file.resolve) ?? DEFAULT_HOW_TO_RESOLVE,
-    ask: withOptionDetail(ask, fileOptions),
+    ...(ask === undefined ? {} : { ask }),
+    ...(answers.length === 0 ? {} : { answers }),
     ...(terms === undefined || terms.length === 0 ? {} : { terms }),
     ...(questions === undefined ? {} : { questions }),
     ...(recommendation === undefined ? {} : { recommendation }),
@@ -147,9 +180,9 @@ export function composeAddRequest(
   return parsed.data;
 }
 
-function summaryFrom(summary: string | undefined): string {
+function askLineFrom(summary: string | undefined): string {
   if (summary === undefined) {
-    throw new Error('say what you need (or --summary), or choose ls, done, dismiss, notify or history');
+    throw new Error('say what you need as words (or --ask), or choose ls, done, dismiss, notify or history');
   }
   const line = summary.replaceAll(/\s+/gu, ' ').trim();
   if (line.length > MAX_ATTENTION_SUBJECT_LENGTH) {
@@ -159,6 +192,39 @@ function summaryFrom(summary: string | undefined): string {
     );
   }
   return line;
+}
+
+/** The card's title: required, one line, and short enough to head a notification. */
+function titleFrom(raw: string | undefined): string {
+  if (raw === undefined) {
+    throw new Error(
+      'give the card a title: --title "<what this is about, ≤40 chars, plain words, no IDs>" — it is the notification heading',
+    );
+  }
+  const line = raw.replaceAll(/\s+/gu, ' ').trim();
+  if (line.length > MAX_ATTENTION_TITLE_LENGTH) {
+    throw new Error(
+      `the title may not exceed ${MAX_ATTENTION_TITLE_LENGTH} characters (got ${line.length}) — it is the notification heading; aim for 40`,
+    );
+  }
+  return line;
+}
+
+/**
+ * The up answer a task or a permission may carry. It fits no other kind, and `--up-why` only describes it.
+ */
+function upFrom(kind: CardAsk['kind'], flags: BriefFlags, file: BriefFile): UpAnswer | undefined {
+  const fromFile = typeof file.up === 'string' ? { label: file.up } : file.up;
+  const label = text(flags.up) ?? text(fromFile?.label);
+  const description = text(flags.upWhy) ?? (text(flags.up) === undefined ? text(fromFile?.description) : undefined);
+  if (label === undefined) {
+    if (text(flags.upWhy) !== undefined) throw new Error('--up-why describes --up: give --up "<label>" too');
+    return undefined;
+  }
+  if (kind !== 'task' && kind !== 'permission') {
+    throw new Error(`--up only fits --kind task (e.g. "Skip") or --kind permission (e.g. "Always allow"), not ${kind}`);
+  }
+  return { label, ...(description === undefined ? {} : { description }) };
 }
 
 /**
@@ -197,29 +263,37 @@ function askFor(
   options: readonly string[] | undefined,
   questions: readonly AttentionQuestion[] | undefined,
   hasSteps: boolean,
-): AttentionAsk {
+): CardAsk {
   const lone = questions?.length === 1 ? questions[0] : undefined;
-  const named = text(kind);
+  const named = parseKind(kind);
   if (named === 'task' && questions !== undefined) {
     throw new Error('a task asks nothing to answer: drop --question, or drop --task');
   }
+  if (named === 'info' && questions !== undefined) {
+    throw new Error('an info card asks nothing to answer: drop --question, or use --kind reply');
+  }
+  if (named === 'yesno' && lone?.options !== undefined) {
+    throw new Error('--kind yesno brings its own Yes and No: drop the question options (or use --kind choice)');
+  }
+  // More than three options is more than the swipes can give, wherever the options were written.
+  if ((lone?.options?.length ?? 0) > MAX_ATTENTION_CARD_ANSWERS) throw new Error(TOO_MANY_ANSWERS);
   // Steps and nothing to answer is a to-do: the human does it, then marks it done.
-  if (named === undefined && options === undefined && questions === undefined && hasSteps) return { kind: 'task' };
+  if (named === undefined && options === undefined && questions === undefined && hasSteps) {
+    return parseAsk({ kind: 'task' });
+  }
   if (named !== undefined || options !== undefined) {
     if (questions !== undefined && questions.length > 1 && options !== undefined) {
       throw new Error('--option belongs to a single question; give each of several questions its own options');
     }
     // `--kind choice` over a lone question that brought its own options chooses between those.
-    const choices =
-      options ??
-      (named === 'choice' || named === 'multiple-choice' ? lone?.options?.map(each => each.label) : undefined);
+    const choices = options ?? (named === 'choice' ? lone?.options?.map(each => each.label) : undefined);
     return parseAsk({
       ...(named === undefined ? {} : { kind: named }),
       ...(choices === undefined ? {} : { option: choices }),
     });
   }
-  if (lone?.options !== undefined) return { kind: 'multiple-choice', options: lone.options };
-  return { kind: 'open-question' };
+  if (lone?.options !== undefined) return parseAsk({ option: lone.options.map(each => each.label) });
+  return parseAsk({});
 }
 
 /** Whether `--recommend` was taken up as the lone question's own recommendation. */
@@ -229,8 +303,11 @@ function onQuestion(questions: readonly AttentionQuestion[] | undefined, flags: 
 }
 
 /** Option descriptions from the body, carried onto the ask's own options. */
-function withOptionDetail(ask: AttentionAsk, detailed: readonly AttentionAskOption[] | undefined): AttentionAsk {
-  if (ask.kind !== 'multiple-choice' || detailed === undefined) return ask;
+function withOptionDetail(
+  ask: AttentionAsk | undefined,
+  detailed: readonly AttentionAskOption[] | undefined,
+): AttentionAsk | undefined {
+  if (ask?.kind !== 'multiple-choice' || detailed === undefined) return ask;
   const byLabel = new Map(detailed.map(each => [each.label.trim(), each]));
   return { ...ask, options: ask.options.map(each => byLabel.get(each.label.trim()) ?? each) };
 }
@@ -311,6 +388,7 @@ function describeIssues(error: z.ZodError): string {
 
 /** The fields `fy attention edit` may change, as flags. */
 export interface EditFlags {
+  readonly title?: string;
   readonly summary?: string;
   readonly context?: string | readonly string[];
   readonly term?: readonly string[];
@@ -338,6 +416,7 @@ export function composeEditRequest(
   current: AttentionItem | undefined,
 ): Extract<AttentionActionRequest, { action: 'edit' }> {
   const summary = text(flags.summary);
+  const title = text(flags.title) === undefined ? undefined : titleFrom(text(flags.title));
   const context = prose(flags.context);
   const impact = prose(flags.impact);
   const urgency = text(flags.urgency);
@@ -361,6 +440,7 @@ export function composeEditRequest(
     action: 'edit' as const,
     id,
     ...(summary === undefined ? {} : { subject: summary }),
+    ...(title === undefined ? {} : { title }),
     ...(context === undefined ? {} : { context }),
     ...(terms === undefined ? {} : { terms }),
     ...(questions === undefined ? {} : { questions }),

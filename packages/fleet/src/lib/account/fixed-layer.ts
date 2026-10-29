@@ -279,7 +279,7 @@ export const HYPERMEDIA_INSTRUCTION = [
   'Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.',
   'Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.',
   'Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
-  '- mermaid: Mermaid source (flowchart, sequenceDiagram, …); themed for you: no %%{init}%% theme or colours.',
+  '- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.',
   '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
   '- html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.',
   '- map: JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.',
@@ -290,7 +290,7 @@ export const HYPERMEDIA_INSTRUCTION = [
   'type: mermaid',
   'alt: How a request reaches the daemon',
   '---',
-  'flowchart LR',
+  'flowchart TB',
   '  Phone --> Relay --> Daemon',
   '```',
   "It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.",
@@ -405,7 +405,7 @@ export const SET_UP_FERRETRY_INSTRUCTION = (fy: string): string =>
  * out on purpose (an item notifies by being raised).
  */
 export const ATTENTION_INSTRUCTION = (fy: string): string =>
-  `Attention: raise anything the human must decide or DO with \`${fy} attention add "<summary>"\` — that notifies them. Every human action (incl. "Next steps: You: …") is its OWN item, never prose alone. They read it cold: short bullets, one idea each; no ticket/PR numbers, codenames, paths or unexplained acronyms (or \`--term "X=meaning"\`). Summary: one plain sentence under 90 chars, answer first; \`--context\` repeats. \`--question\` each decision with 2–4 short \`--option\`s, then \`--recommend <pick> --recommend-why <line>\`. A to-do: every step in order via \`--step "<markdown>"\` (exact commands, where to click; never a secret value), so the item alone is enough. Bad: "Need call on KT-412 re OCI cron". Good: "Keep the work login alive every 30 minutes?". Never for progress or finishing. Answers arrive as "[answer to !A3 …]". On "[needs more info !A3 …]", add what is missing with \`${fy} attention edit <id>\` (or say in the item why not). Warned on add? Edit it. No longer needed? \`${fy} attention done <id>\`.`;
+  `Attention: the owner reads the board, not your replies, and every notification is an Attention item (never progress). Before ending a reply that asks them to decide or DO anything ("Next steps: You: …"), raise each ask as its OWN item: \`${fy} attention add --title "<what it is about>" "<the ask>"\` — prose alone reaches nobody. Title ≤40 chars = push heading; ask, one line ≤120 = its text. Cards stand alone, read cold: no "as above"/"as discussed", ticket/PR numbers, paths or unexplained acronyms (or \`--term "X=meaning"\`); \`--context\` bullets say why. \`--kind task|yesno|permission|choice|review|info\`. A choice: 2–3 \`--option\`s that say what each does; \`--recommend <pick> --recommend-why <line>\` puts it on the right. \`--up "<label>"\` adds a third answer (task, permission). A to-do: each step via \`--step "<markdown>"\` (exact commands, no secrets). Answers arrive as "[answer to !A3 …]". On "[needs more info !A3 …]", add it with \`${fy} attention edit <id>\` (or say in the item why not). Moot? \`${fy} attention done <id>\`.`;
 
 /**
  * Everything every agent runtime is told, as ONE appended system prompt section: the tools, the
@@ -415,13 +415,46 @@ export const ATTENTION_INSTRUCTION = (fy: string): string =>
 export const AGENT_INSTRUCTION = (fy: string): string =>
   `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${ATTENTION_INSTRUCTION(fy)}`;
 
+/** One section every agent runtime is told, whatever its switches: its id and its exact text. */
+export interface AlwaysOnSection {
+  readonly id: 'tools' | 'settings' | 'attention';
+  readonly text: string;
+}
+
+/**
+ * The sections of {@link AGENT_INSTRUCTION}, in order. They depend on nothing but the binary's name, so the
+ * daemon can tell a running ferret what changed in them since its launch (docs/launch-settings.md).
+ */
+export const ALWAYS_ON_SECTIONS = (fy: string): readonly AlwaysOnSection[] => [
+  { id: 'tools', text: AGENT_TOOLS_INSTRUCTION },
+  { id: 'settings', text: SET_UP_FERRETRY_INSTRUCTION(fy) },
+  { id: 'attention', text: ATTENTION_INSTRUCTION(fy) },
+];
+
+/**
+ * A short fingerprint of a section's text (cyrb53, 14 hex digits): enough to tell that the words changed,
+ * never enough to carry them. Pure, so the wrapper's description and the daemon's comparison agree.
+ */
+export function instructionDigest(text: string): string {
+  let h1 = 0xdeadbeef;
+  let h2 = 0x41c6ce57;
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index);
+    h1 = Math.imul(h1 ^ code, 2654435761);
+    h2 = Math.imul(h2 ^ code, 1597334677);
+  }
+  h1 = Math.imul(h1 ^ (h1 >>> 16), 2246822507) ^ Math.imul(h2 ^ (h2 >>> 13), 3266489909);
+  h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
+  return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(14, '0');
+}
+
 /**
  * What an agent launched with `env` is told, by section name and size — never the text: the sections
  * of the ONE appended system prompt, in the order the wrapper composes them, and whether the question
  * tool is left in.
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
- * the wrapper would not build: the tools, settings and attention sections always, each {@link FERRET_SECTIONS}
+ * the wrapper would not build: the tools, settings and attention sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
  * entry whose variable is exactly `1`, and the question tool only for a launch whose
  * {@link SESSION_MODE_ENV} is `interactive` (O3) — the same rule for Claude and Codex. It describes an
  * AGENT runtime's wrapper, the only kind a session can be started on.
@@ -430,9 +463,11 @@ export function launchInstructions(fy: string, env: Readonly<Record<string, stri
   const mode = env[SESSION_MODE_ENV] === 'interactive' ? 'interactive' : 'auto';
   return {
     sections: [
-      { id: 'tools', chars: AGENT_TOOLS_INSTRUCTION.length },
-      { id: 'settings', chars: SET_UP_FERRETRY_INSTRUCTION(fy).length },
-      { id: 'attention', chars: ATTENTION_INSTRUCTION(fy).length },
+      ...ALWAYS_ON_SECTIONS(fy).map(section => ({
+        id: section.id,
+        chars: section.text.length,
+        digest: instructionDigest(section.text),
+      })),
       ...FERRET_SECTIONS(fy)
         .filter(section => env[section.env] === '1')
         .map(section => ({

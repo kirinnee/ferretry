@@ -88,6 +88,19 @@ const MERMAID = [
   '  F --> G[SVG re-admitted, shown inline]',
 ].join('\n');
 
+/**
+ * THE DIAGRAM AN AGENT WRITES FIRST: a left-to-right flowchart. Six steps with real labels are about
+ * 1,100px wide at Mermaid's own size — far wider than a 390px phone, where it was squeezed to 8–10px text.
+ */
+const MERMAID_LEFT_TO_RIGHT = [
+  'flowchart LR',
+  '  A[Owner sends a message] --> B[Daemon queues the turn]',
+  '  B --> C[Ferret runs the tools]',
+  '  C --> D[Reply streams back]',
+  '  D --> E[Phone renders the block]',
+  '  E --> F[Owner reads the diagram]',
+].join('\n');
+
 /** A jison parse error: the reachable Mermaid failure, and the ugliest wording. */
 const MERMAID_BROKEN = 'graph TD\n  A[Unclosed --> B{{{';
 
@@ -235,5 +248,6 @@ export const FY_RENDER_VISUAL_CASES: Record<string, string> = {
     'A diagram whose front matter tried to repaint it',
     MERMAID_THEME_FRONTMATTER,
   ),
+  'mermaid-lr': fence('mermaid', 'How a message travels from the owner to the daemon and back', MERMAID_LEFT_TO_RIGHT),
   'mermaid-failure': fence('mermaid', 'A diagram that cannot be drawn', MERMAID_BROKEN),
 };

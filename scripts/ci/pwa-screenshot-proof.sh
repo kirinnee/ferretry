@@ -112,7 +112,19 @@ for scheme in "${schemes[@]}"; do
   # after the last frame it managed and never said why — on the first CI run of this gate, which found
   # a real 12px overflow. An artifact that carries every passing line and omits the failing one is
   # worse than no artifact, because it reads like a truncated success.
-  (cd packages/pwa && bun harness/screenshot.ts "${flags[@]}") 2>&1 | tee "${log}"
+  #
+  # A red run keeps its frames too, `failure-<viewport>.png` among them: the artifact of a run that timed
+  # out waiting for an element once held only this log, which names the element and never the screen.
+  status=0
+  (cd packages/pwa && bun harness/screenshot.ts "${flags[@]}") 2>&1 | tee "${log}" || status=$?
+  if [ "${status}" -ne 0 ]; then
+    mkdir -p "${artifact_dir}/${scheme}"
+    if [ -d packages/pwa/harness/out ]; then
+      find packages/pwa/harness/out -maxdepth 1 -name '*.png' -exec cp {} "${artifact_dir}/${scheme}/" \;
+    fi
+    echo "❌ the ${scope} harness failed in ${scheme}; the frames it reached are in ${artifact_dir}/${scheme}/" >&2
+    exit "${status}"
+  fi
 
   # THE CLOSING LINE, REQUIRED. The harness asserts its own tally and prints this only after both
   # viewports have completed, so demanding it here is what separates "every check passed" from "the

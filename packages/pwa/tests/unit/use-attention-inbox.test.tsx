@@ -298,6 +298,60 @@ describe('useAttentionInboxModel', () => {
   });
 });
 
+describe('the Resolved filter reads', () => {
+  const resolvedBoard = (sessionId: string): AttentionSnapshot => ({
+    ...board(sessionId, []),
+    resolved: [
+      {
+        ...item('A1', 0),
+        resolvedAt: at(3),
+        resolvedBy: 'human',
+        resolvedBySession: null,
+        resolvedByName: null,
+        resolutionNote: null,
+        disposition: 'done',
+      } as never,
+    ],
+  });
+
+  test('loadResolved reads the boards not yet held, once at a time, and then lists their records', async () => {
+    const { client, calls } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
+    const { timers } = manualTimers();
+    let inbox: AttentionInbox | null = null;
+    const latest = (): AttentionInbox => inbox as unknown as AttentionInbox;
+    view = await mount(
+      <Probe
+        client={client}
+        machines={[
+          { connection: studio, name: 'Studio', sessions: [waiting('a')] },
+          { connection: laptop, name: 'Laptop', sessions: [waiting('b')] },
+        ]}
+        onInbox={value => (inbox = value)}
+        timers={timers}
+      />,
+    );
+    await settle();
+    expect(latest().resolved).toEqual([]);
+    await interact(async () => {
+      latest().loadResolved();
+      latest().loadResolved();
+    });
+    await settle();
+    expect(
+      calls
+        .filter(call => call.method === 'revalidate')
+        .map(call => call.sessionId)
+        .sort(),
+    ).toEqual(['a', 'b']);
+    expect(latest().resolvedReading).toBe(false);
+    expect(latest().resolved.map(row => [row.view.config.id, row.record.id])).toEqual([['a', 'A1']]);
+    const before = calls.length;
+    await interact(async () => latest().loadResolved());
+    await settle();
+    expect(calls.length).toBe(before + 1);
+  });
+});
+
 describe('useInboxMachines', () => {
   test('pairs each machine with its last session list, null before a read', async () => {
     let snapshot: FleetSnapshot = { daemons: new Map() };

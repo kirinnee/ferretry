@@ -6,9 +6,11 @@ import {
   type AttentionInboxPageProps,
   AttentionNeedsYou,
   inboxCardOrigin,
+  swipeHintFor,
   waitingWords,
 } from '../../../src/features/attention/attention-inbox-page.tsx';
-import { type InboxCard } from '../../../src/lib/attention-inbox.ts';
+import type { ResolvedAttentionItem } from '@ferretry/protocol';
+import { type InboxCard, type InboxResolved, inboxCardKey } from '../../../src/lib/attention-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   attentionItem,
@@ -17,7 +19,6 @@ import {
   fakeInbox,
   InboxHarness,
   inboxCard,
-  menuAction,
 } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -155,17 +156,34 @@ describe('AttentionInboxPage two panes', () => {
     await mounted.unmount();
   });
 
-  it('on a phone deals the newest item as a row linking into the chat at the item', async () => {
+  it('on a phone deals the newest item as the whole card, its answers left · up · right, linked to the chat', async () => {
     const navigated: string[] = [];
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, renderChat: chat }, navigated));
     expect(mounted.container.querySelector('[data-fake-chat]')).toBeNull();
-    expect(mounted.container.querySelector('[data-attention-deck]')).not.toBeNull();
-    const row = rows(mounted)[0] as HTMLAnchorElement;
-    const href = row.getAttribute('href') ?? '';
-    expect(href).toContain('?attention=');
-    await interact(() => row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
+    const top = mounted.container.querySelector('.fy-attn-deck__top');
+    expect(top?.querySelector('[data-attention-title]')?.textContent).toBe('Rebase onto main?');
+    const answers = [...(top?.querySelectorAll('[data-attention-answer]') ?? [])].map(button =>
+      button.getAttribute('data-attention-option'),
+    );
+    expect(answers).toEqual(['Skip', 'Wait', 'Rebase now']);
+    expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe(
+      '1 more after this one · Swipe ← Skip · ↑ Wait · → Rebase now',
+    );
+    const link = top?.querySelector<HTMLAnchorElement>('a[href*="?attention="]');
+    const href = link?.getAttribute('href') ?? '';
+    expect(href).toContain('?attention=A3');
+    await interact(() => link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
     expect(navigated).toEqual([href]);
     await mounted.unmount();
+  });
+
+  it('names the swipes of the card on top, and says a text-only card is answered in words', () => {
+    expect(swipeHintFor(undefined)).toBe('');
+    expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · → Ship');
+    const words = inboxCard(
+      attentionItem('A9', { subject: 'What should the invite say?', ask: { kind: 'open-question' } }),
+    );
+    expect(swipeHintFor(words)).toBe('Reply in words, or open the chat');
   });
 
   it('on a phone says a to-do is waiting on its ferret, with no Done swipe to offer', async () => {
@@ -239,7 +257,10 @@ describe('AttentionNeedsYou', () => {
   it('answers undoably, and the toast outlives the last card it took', async () => {
     const fake = fakeInbox();
     const mounted = await mount(needsYou(fake, [bare]));
-    const done = await menuAction(mounted.container, 'done');
+    const done = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-attention-answer="right"]'),
+      'the Got it answer',
+    );
     await interact(() => done.click());
     expect(mounted.container.querySelector('[data-attention-needs-you]')).toBeNull();
     expect(toast(mounted).textContent).toContain('Marked !A1 done');
@@ -252,9 +273,11 @@ describe('AttentionNeedsYou', () => {
 });
 
 describe('AttentionCard swipe hints', () => {
-  it('marks Done and Dismiss with their swipe, and never an option', async () => {
+  it('marks each swiped answer with its direction, and never an extra option', async () => {
     const hinted = (mounted: Mounted): (string | null)[] =>
-      [...mounted.container.querySelectorAll('.fy-attn-card__swipe')].map(hint => hint.getAttribute('title'));
+      [...mounted.container.querySelectorAll('[data-attention-answer], [data-attention-option]')].map(
+        button => /swipe (left|up|right)/.exec(button.textContent ?? '')?.[0] ?? null,
+      );
     const options = await mount(
       <AttentionCard
         item={attentionItem('A9', { ask: choices('One', 'Two', 'Three', 'Four') })}
@@ -262,13 +285,16 @@ describe('AttentionCard swipe hints', () => {
         swipeHints
       />,
     );
-    expect(hinted(options)).toEqual([]);
+    expect(hinted(options)).toEqual(['swipe left', 'swipe up', 'swipe right', null]);
     await options.unmount();
 
     const bare = await mount(<AttentionCard item={attentionItem('A8')} onAct={() => {}} swipeHints />);
-    await menuAction(bare.container, 'done');
-    expect(hinted(bare)).toEqual(['swipe right', 'swipe left']);
+    expect(hinted(bare)).toEqual(['swipe right']);
     await bare.unmount();
+
+    const plain = await mount(<AttentionCard item={attentionItem('A7')} onAct={() => {}} />);
+    expect(hinted(plain)).toEqual([null]);
+    await plain.unmount();
   });
 });
 
@@ -311,7 +337,7 @@ describe('AttentionInboxPage banner slot', () => {
     );
     const root = withBanner.container;
     const banner = must(root.querySelector('[data-test-banner]'), 'the banner');
-    const first = must(root.querySelector('[data-attention-inbox] > :nth-child(3)'), 'the child after the head');
+    const first = must(root.querySelector('[data-attention-inbox] > :nth-child(3)'), 'the filter after the banner');
     expect(root.querySelector('[data-attention-inbox]')?.children[1]).toBe(banner);
     expect(first).not.toBe(banner);
     await withBanner.unmount();
@@ -335,5 +361,100 @@ describe('AttentionInboxPage refusals whose card has gone', () => {
     await interact(() => clear.click());
     expect(mounted.container.querySelector('[data-attention-failures]')).toBeNull();
     await mounted.unmount();
+  });
+});
+
+describe('AttentionInboxPage Resolved filter', () => {
+  const record = (id: string, resolvedAt: string): ResolvedAttentionItem =>
+    ({
+      ...attentionItem(id),
+      resolvedAt,
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      resolutionNote: null,
+      disposition: 'done',
+    }) as unknown as ResolvedAttentionItem;
+  const row = (id: string, resolvedAt: string): InboxResolved => {
+    const view = sessionView('sess-1', { config: { teammate: 'zoe', name: 'Fix the build' } });
+    return {
+      key: inboxCardKey(daemonId('studio'), view.config.id, id),
+      daemonId: daemonId('studio'),
+      machineName: 'Workshop',
+      view,
+      record: record(id, resolvedAt),
+    };
+  };
+  const mountFilter = (extra: { resolved?: readonly InboxResolved[]; resolvedReading?: boolean } = {}) => {
+    const fake = fakeInbox();
+    const navigated: string[] = [];
+    let loads = 0;
+    const mounted = mount(
+      <InboxHarness
+        cards={[threeWay]}
+        fake={fake}
+        loadResolved={() => {
+          loads += 1;
+        }}
+        render={inbox => (
+          <AttentionInboxPage
+            clock={fake.clock.now}
+            inbox={inbox}
+            now={NOW}
+            onNavigate={to => navigated.push(to)}
+            phone={false}
+          />
+        )}
+        {...extra}
+      />,
+    );
+    return { mounted, navigated, loads: () => loads };
+  };
+  const option = (root: ParentNode, which: 'open' | 'resolved') =>
+    must(root.querySelector<HTMLButtonElement>(`[data-attention-filter-option="${which}"]`), which);
+
+  it('starts on Open, and choosing Resolved reads the history and swaps the list', async () => {
+    const { mounted, loads } = mountFilter({
+      resolved: [row('A1', '2026-08-01T09:00:00.000Z'), row('A2', '2026-08-01T10:00:00.000Z')],
+    });
+    const view = await mounted;
+    const root = view.container;
+    expect(option(root, 'open').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-attention-resolved-pane]')).toBeNull();
+    await interact(() => option(root, 'resolved').click());
+    expect(loads()).toBe(1);
+    expect(option(root, 'resolved').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-attention-resolved-pane]')).not.toBeNull();
+    expect(
+      [...root.querySelectorAll('[data-attention-record]')].map(r => r.getAttribute('data-attention-record')),
+    ).toEqual(['A1', 'A2']);
+    expect(root.querySelector('[data-attention-record-origin]')?.textContent).toContain('Workshop');
+    await interact(() => option(root, 'open').click());
+    expect(root.querySelector('[data-attention-resolved-pane]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('a record links to its conversation', async () => {
+    const { mounted, navigated } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
+    const view = await mounted;
+    await interact(() => option(view.container, 'resolved').click());
+    await interact(() =>
+      must(view.container.querySelector<HTMLElement>('.fy-attn-panel__record-link'), 'link').click(),
+    );
+    expect(navigated).toHaveLength(1);
+    expect(navigated[0]).toContain('A1');
+    await view.unmount();
+  });
+
+  it('says it is reading, then says nothing is resolved', async () => {
+    const reading = await mountFilter({ resolvedReading: true }).mounted;
+    await interact(() => option(reading.container, 'resolved').click());
+    expect(reading.container.textContent).toContain('Reading resolved items');
+    await reading.unmount();
+
+    const none = await mountFilter().mounted;
+    await interact(() => option(none.container, 'resolved').click());
+    expect(none.container.querySelector('[data-attention-resolved-empty]')?.textContent).toContain('Nothing resolved');
+    await none.unmount();
   });
 });

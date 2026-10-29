@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import type { AttentionAsk, AttentionId, AttentionItem, AttentionResponse } from '@ferretry/protocol';
+import type {
+  AttentionAsk,
+  AttentionCardAnswer,
+  AttentionId,
+  AttentionItem,
+  AttentionResponse,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -1155,5 +1161,137 @@ describe('Attention state machine needs-info', () => {
     // Assert
     should(resolved.addressed?.waitingOn).be.undefined();
     should(resolved.addressed?.askedAt).be.undefined();
+  });
+});
+
+describe('Attention state machine card fields', () => {
+  const answers: AttentionCardAnswer[] = [
+    { direction: 'left', does: 'reject', label: 'Deny' },
+    { direction: 'up', does: 'approve', label: 'Always allow', description: 'for this repo' },
+    { direction: 'right', does: 'approve', label: 'Allow' },
+  ];
+  const card: Partial<RaiseAttentionRequest> = { title: 'Deploy approval', kind: 'permission', answers };
+
+  it('should carry the title, kind and answers onto the raised item, and into its snapshot', () => {
+    // Arrange / Act
+    const created = raised(AGENT, card);
+
+    // Assert
+    should(created.item).containDeep({ title: 'Deploy approval', kind: 'permission', answers });
+    should(created.snapshot.items[0]).containDeep({ title: 'Deploy approval', kind: 'permission' });
+  });
+
+  it('should treat an identical re-raise as unchanged and a different card as a new item', () => {
+    // Arrange
+    const first = raised(AGENT, card);
+
+    // Act
+    const same = succeeded(applyAttentionCommand(first.ledger, raiseCommand(AGENT, card, SECOND)));
+    const retitled = succeeded(
+      applyAttentionCommand(first.ledger, raiseCommand(AGENT, { ...card, title: 'Another title' }, SECOND)),
+    );
+    const reanswered = succeeded(
+      applyAttentionCommand(first.ledger, raiseCommand(AGENT, { ...card, answers: answers.slice(0, 2) }, SECOND)),
+    );
+
+    // Assert
+    should(same.change).equal('unchanged');
+    should(same.snapshot.count).equal(1);
+    should(retitled.change).equal('created');
+    should(retitled.snapshot.count).equal(2);
+    should(reanswered.snapshot.count).equal(2);
+  });
+
+  it('should let an edit reword the title only, never the kind or the answers', () => {
+    // Arrange
+    const created = raised(AGENT, card);
+
+    // Act
+    const edited = succeeded(
+      applyAttentionCommand(created.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { title: 'Deploy to production' },
+        at: SECOND,
+      }),
+    );
+    const same = succeeded(
+      applyAttentionCommand(edited.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { title: 'Deploy to production' },
+        at: THIRD,
+      }),
+    );
+
+    // Assert
+    should(edited.change).equal('refreshed');
+    should(edited.item).containDeep({ title: 'Deploy to production', kind: 'permission', answers });
+    should(edited.item?.waitingSince).equal(FIRST);
+    should(same.change).equal('unchanged');
+  });
+
+  it('should refresh the title of a stable daemon source with the rest of its words', () => {
+    // Arrange
+    const source = { source: 'task', sourceRef: 'F12', ask: undefined, kind: 'info', waitingSince: FIRST } as const;
+    const first = raised(DAEMON, { ...source, title: 'Task needs you' });
+
+    // Act
+    const next = succeeded(
+      applyAttentionCommand(
+        first.ledger,
+        raiseCommand(DAEMON, { ...source, title: 'Task F needs you', waitingSince: THIRD }, SECOND),
+      ),
+    );
+
+    // Assert
+    should(next.change).equal('refreshed');
+    should(next.item).containDeep({ id: 'A1', title: 'Task F needs you', kind: 'info' });
+  });
+
+  it('should load and answer an item stored before cards, which has no title, kind or answers', () => {
+    // Arrange
+    const old = raised(AGENT);
+
+    // Act
+    const decoded = parseAttentionLedger(JSON.parse(JSON.stringify(old.ledger)), SESSION_ID);
+    const answered = succeeded(
+      applyAttentionCommand(old.ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        at: SECOND,
+      }),
+    );
+
+    // Assert
+    should(old.item).not.have.property('title');
+    should(old.item).not.have.property('kind');
+    should(old.item).not.have.property('answers');
+    should(decoded).deepEqual(old.ledger);
+    should(answered.change).equal('answered');
+  });
+
+  it('should let an agent raise an info item with no ask, and still refuse any other kind without one', () => {
+    // Arrange
+    const info = { kind: 'info', title: 'Release ready', ask: undefined } as const;
+
+    // Act
+    const created = raised(AGENT, info);
+    const missing = failed(
+      applyAttentionCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(AGENT, { kind: 'permission', title: 'Deploy approval', ask: undefined }),
+      ),
+    );
+
+    // Assert
+    should(created.item).containDeep({ kind: 'info', title: 'Release ready' });
+    should(created.item).not.have.property('ask');
+    should(missing.error.code).equal('invalid');
   });
 });

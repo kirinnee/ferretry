@@ -18,7 +18,7 @@
  * a pure layout operation.
  */
 
-import { Columns2, MessageSquare, Plus, SquareTerminal, X } from 'lucide-react';
+import { Columns2, ListTree, MessageSquare, Plus, SquareTerminal, X } from 'lucide-react';
 import { type DragEvent, useEffect, useId, useRef, useState } from 'react';
 import type { WorkspaceSplitDirection, WorkspaceTab, WorkspaceTabId } from '../../lib/workspace-layout.ts';
 import { sidePaneTabIcon } from '../../shell/side-pane-tab-icons.ts';
@@ -70,6 +70,7 @@ export const workspacePanelElementId = (idPrefix: string, tabId: WorkspaceTabId)
 const TabIcon = ({ tab }: { readonly tab: WorkspaceTab }) => {
   if (tab.kind === 'chat') return <MessageSquare size={14} aria-hidden="true" />;
   if (tab.kind === 'console') return <SquareTerminal size={14} aria-hidden="true" />;
+  if (tab.kind === 'processes') return <ListTree size={14} aria-hidden="true" />;
   const Icon = sidePaneTabIcon(tab.kind);
   return <Icon size={14} aria-hidden="true" />;
 };

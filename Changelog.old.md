@@ -1,3 +1,43 @@
+## [4.100.0](https://github.com/kirinnee/ferretry/compare/v4.99.1...v4.100.0) (2026-10-29)
+
+### Features
+
+* **pwa:** draw nothing for empty Attention, move resolved out of chat ([#854](https://github.com/kirinnee/ferretry/issues/854)) ([2a9bd89](https://github.com/kirinnee/ferretry/commit/2a9bd89f7968bee5a0219cbd1d4a56a825fe9450))
+
+## [4.99.1](https://github.com/kirinnee/ferretry/compare/v4.99.0...v4.99.1) (2026-10-29)
+
+### Fixes
+
+* **fleet:** trim the Mermaid hint so the whole prompt fits its 7.1 KB cap ([#858](https://github.com/kirinnee/ferretry/issues/858)) ([7fc0f3e](https://github.com/kirinnee/ferretry/commit/7fc0f3e946c068e68afd4e9a3520c22595c9b6bb)), closes [#845](https://github.com/kirinnee/ferretry/issues/845) [#853](https://github.com/kirinnee/ferretry/issues/853)
+* **pwa:** let the gallery's theme flips land before the next click ([#856](https://github.com/kirinnee/ferretry/issues/856)) ([93e5344](https://github.com/kirinnee/ferretry/commit/93e534489312366e27de6fbb88c2071491a4777e))
+
+## [4.99.0](https://github.com/kirinnee/ferretry/compare/v4.98.0...v4.99.0) (2026-10-29)
+
+### Features
+
+* **daemon:** back the Attention rule with a turn-end check ([#853](https://github.com/kirinnee/ferretry/issues/853)) ([5a9d0ed](https://github.com/kirinnee/ferretry/commit/5a9d0edcd2f67f9ad7f3230cc2ed2be03e1f655c))
+* **pwa:** draw mermaid top-down and readable on phones ([#845](https://github.com/kirinnee/ferretry/issues/845)) ([8d613a5](https://github.com/kirinnee/ferretry/commit/8d613a51c7f2febeb2ef22fd0018ecd039e791fc))
+* **warden:** Jev becomes the Warden's first responder ([#855](https://github.com/kirinnee/ferretry/issues/855)) ([9ef031a](https://github.com/kirinnee/ferretry/commit/9ef031a933e967886db9939ace4674004094ce37))
+
+## [4.98.0](https://github.com/kirinnee/ferretry/compare/v4.97.2...v4.98.0) (2026-10-29)
+
+### Features
+
+* **pwa:** let dictation insert straight into the composer, with Undo ([#852](https://github.com/kirinnee/ferretry/issues/852)) ([61aab0f](https://github.com/kirinnee/ferretry/commit/61aab0faab38b28b9ed5d8a036b005f63343299c))
+
+## [4.97.2](https://github.com/kirinnee/ferretry/compare/v4.97.1...v4.97.2) (2026-10-29)
+
+### Fixes
+
+* **daemon:** read memory usage again when Bun reports it interrupted ([#841](https://github.com/kirinnee/ferretry/issues/841)) ([6ad30ce](https://github.com/kirinnee/ferretry/commit/6ad30cef12a2782f61eda67a47d61353ac7484c6))
+* **test:** stop requiring the newest releases to show changes in the in-app list ([#851](https://github.com/kirinnee/ferretry/issues/851)) ([006a643](https://github.com/kirinnee/ferretry/commit/006a64301e117a7ac8f88a33b2a3eb04d8eba642))
+
+## [4.97.1](https://github.com/kirinnee/ferretry/compare/v4.97.0...v4.97.1) (2026-10-29)
+
+### Fixes
+
+* **ci:** hold the compiled binaries' download to a manifest ([#842](https://github.com/kirinnee/ferretry/issues/842)) ([06ca66e](https://github.com/kirinnee/ferretry/commit/06ca66e1d52e8c89b6fe2f32ff206ff46a01d913)), closes [actions/download-artifact#454](https://github.com/actions/download-artifact/issues/454)
+
 ## [4.97.0](https://github.com/kirinnee/ferretry/compare/v4.96.1...v4.97.0) (2026-10-29)
 
 ### Features

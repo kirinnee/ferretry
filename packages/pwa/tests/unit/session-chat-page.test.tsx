@@ -2331,6 +2331,23 @@ describe('SessionChatPage', () => {
       }
     });
 
+    test('keeps the resolved history in the header menu as "N resolved", and shows no row when there is none', () => {
+      const withHistory = renderSessionChatPage(chatPage({ attention: attentionModel([], [resolvedItem]) }));
+      try {
+        expect(actionLabels(withHistory.root)).toContain('1 resolved');
+        expect(withHistory.root.findAllByType(AttentionPanel)).toHaveLength(1);
+        expect(withHistory.root.findAll(node => node.props?.['data-attention-record'] !== undefined)).toHaveLength(0);
+      } finally {
+        run(() => withHistory.unmount());
+      }
+      const without = renderSessionChatPage(chatPage({ attention: attentionModel([], []) }));
+      try {
+        expect(actionLabels(without.root).some(label => label.endsWith('resolved'))).toBe(false);
+      } finally {
+        run(() => without.unmount());
+      }
+    });
+
     test('renders no Attention surface at all for a host that has not subscribed', () => {
       const page = renderSessionChatPage(chatPage());
 

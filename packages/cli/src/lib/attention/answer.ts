@@ -1,16 +1,19 @@
-import type { AttentionResponse } from '@ferretry/protocol';
+import { type AttentionResponse, NO_LABEL, YES_LABEL } from '@ferretry/protocol';
 
 /** The flags that carry a human's answer to an ask. */
 export interface AnswerFlags {
   readonly approve?: boolean;
   readonly reject?: boolean;
   readonly choice?: string;
+  /** Answer a yes-or-no card: the same as `--choice Yes` / `--choice No`. */
+  readonly yes?: boolean;
+  readonly no?: boolean;
   readonly good?: boolean;
   readonly clarify?: string;
   readonly answer?: string;
 }
 
-const ONE_ANSWER = 'give exactly one answer: --approve/--reject, --choice, --good/--clarify, or --answer';
+const ONE_ANSWER = 'give exactly one answer: --approve/--reject, --yes/--no, --choice, --good/--clarify, or --answer';
 
 /**
  * Read the answer a `attention done` carries, or nothing when the item had no ask.
@@ -20,15 +23,20 @@ const ONE_ANSWER = 'give exactly one answer: --approve/--reject, --choice, --goo
  */
 export function parseAnswer(flags: AnswerFlags): AttentionResponse | undefined {
   const permission = flags.approve === true || flags.reject === true;
+  const yesNo = flags.yes === true || flags.no === true;
   const review = flags.good === true || flags.clarify !== undefined;
-  const chosen = [permission, flags.choice !== undefined, review, flags.answer !== undefined].filter(Boolean).length;
+  const chosen = [permission, yesNo, flags.choice !== undefined, review, flags.answer !== undefined].filter(
+    Boolean,
+  ).length;
 
   if (chosen === 0) return undefined;
   if (chosen > 1) throw new Error(ONE_ANSWER);
   if (flags.approve === true && flags.reject === true) throw new Error(ONE_ANSWER);
+  if (flags.yes === true && flags.no === true) throw new Error(ONE_ANSWER);
   if (flags.good === true && flags.clarify !== undefined) throw new Error(ONE_ANSWER);
 
   if (permission) return { kind: 'permission', decision: flags.approve === true ? 'approve' : 'reject' };
+  if (yesNo) return { kind: 'multiple-choice', choice: flags.yes === true ? YES_LABEL : NO_LABEL };
   if (flags.choice !== undefined)
     return { kind: 'multiple-choice', choice: required(flags.choice, '--choice', 'the label of one listed option') };
   if (flags.good === true) return { kind: 'answer-review', verdict: 'good' };

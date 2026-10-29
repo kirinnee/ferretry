@@ -6,6 +6,8 @@ import { livenessSampleOf, lookAtPaneProcesses } from '../../../src/lib/session/
 import {
   defaultWardenConfig,
   detectAnomalies,
+  firstResponse,
+  jevRoute,
   foldLivenessSample,
   type LivenessTrack,
   leftoverBrowserCandidates,
@@ -14,6 +16,12 @@ import {
   withLivenessLedger,
 } from '../../../src/lib/warden/index.ts';
 import { REPORT_SHAPES, type ReportCategory, type ReportShape } from '../../fixtures/warden/report-shapes.ts';
+import {
+  NUDGE_MESSAGES,
+  type NudgeMessageId,
+  TRIAGE_CRITERIA,
+  type TriageDecision,
+} from '../../../src/lib/speedups/jev.ts';
 
 /**
  * A replay of the 39 investigations one host paid for in late October 2026, through the REAL pure
@@ -278,5 +286,78 @@ describe('the replay’s positive controls', () => {
 
     // Assert — not the daemon's tmux client, not the other session's watcher.
     should(pids).deepEqual([1_001]);
+  });
+});
+
+/**
+ * The same ledger through Jev as first responder. Jev's real answers are not in the reports, so each
+ * row asks: had Jev agreed with what the investigation concluded, at confidence `sure`, what would it
+ * have settled alone under the default settings? LEAVE is a leave; NUDGE is a nudge with the library
+ * message that fits; KILL is a stop. An `act` or a `leave` is an investigation not bought.
+ */
+const NUDGE_FOR: Partial<Record<ReportCategory, NudgeMessageId>> = { 'ci-poll-loop': 'poll_loop', idle: 'lost_track' };
+
+const jevAgreeing = (shape: ReportShape, sure: number): TriageDecision => {
+  const verdict = shape.verdict === 'LEAVE' ? 'leave' : shape.verdict === 'NUDGE' ? 'nudge' : 'stop';
+  const id = NUDGE_FOR[shape.category];
+  return {
+    verdict,
+    confidence: sure,
+    reason: TRIAGE_CRITERIA[verdict],
+    model: 'jev-latest',
+    inputTokens: 600,
+    latencyMs: 90,
+    ...(verdict === 'nudge' && id !== undefined
+      ? { nudge: { id, message: NUDGE_MESSAGES[id], confidence: sure } }
+      : {}),
+  };
+};
+
+const DEFAULT_POLICY = {
+  leaveThreshold: defaultWardenConfig.guard.threshold,
+  acts: defaultWardenConfig.jevActs,
+  mayActAlone: defaultWardenConfig.mayActAlone,
+};
+
+const routes = (shapes: readonly ReportShape[], sure: number): Record<string, number> => {
+  const counted: Record<string, number> = {};
+  for (const shape of shapes) {
+    const route = jevRoute(firstResponse(jevAgreeing(shape, sure), DEFAULT_POLICY), true);
+    counted[route] = (counted[route] ?? 0) + 1;
+  }
+  return counted;
+};
+
+describe('the 39 paid investigations, with Jev as first responder', () => {
+  it('should have settled 35 of 39 alone had Jev agreed at 95%, buying 4 investigations instead of 39', () => {
+    // Act
+    const actual = routes(REPORT_SHAPES, 0.95);
+
+    // Assert — the 33 LEAVEs are left and both NUDGEs sent; the four KILLs are stops the owner never
+    // let the Warden do alone, so they still go to an investigation.
+    should(actual).deepEqual({ leave: 33, act: 2, investigation: 4 });
+  });
+
+  it('should leave the nudges to an investigation when Jev is sure enough to leave but not to nudge', () => {
+    // Act
+    const actual = routes(REPORT_SHAPES, 0.88);
+
+    // Assert
+    should(actual).deepEqual({ leave: 33, investigation: 6 });
+  });
+
+  it('should settle both flags the new rules still raise — the real CI loop with a specific nudge', () => {
+    // Arrange
+    const raised = escalated.map(entry => entry.shape);
+
+    // Act
+    const loop = firstResponse(
+      jevAgreeing(raised.find(shape => shape.real === true) as ReportShape, 0.95),
+      DEFAULT_POLICY,
+    );
+
+    // Assert
+    should(routes(raised, 0.95)).deepEqual({ leave: 1, act: 1 });
+    should(loop).match({ kind: 'act', act: 'nudge', message: NUDGE_MESSAGES.poll_loop });
   });
 });

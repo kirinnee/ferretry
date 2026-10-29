@@ -38,11 +38,12 @@ import {
 // ---- identity ------------------------------------------------------------------
 
 export type WorkspaceTabId = string;
-export type WorkspaceAgentTabKind = 'chat' | 'console';
+export type WorkspaceAgentTabKind = 'chat' | 'console' | 'processes';
 export type WorkspaceTabKind = WorkspaceAgentTabKind | SidePaneInstanceKind;
 
 export const WORKSPACE_CHAT_TAB_ID: WorkspaceTabId = 'chat';
 export const WORKSPACE_CONSOLE_TAB_ID: WorkspaceTabId = 'console';
+export const WORKSPACE_PROCESSES_TAB_ID: WorkspaceTabId = 'processes';
 export const AGENT_PANE_ID = 'agent';
 /** The id of the split joining the agent pane to the workspace subtree. */
 export const WORKSPACE_ROOT_SPLIT_ID = 'root';
@@ -123,6 +124,13 @@ const AGENT_TABS: readonly WorkspaceTab[] = [
     key: 'console',
     label: 'Console',
     title: "The agent's own CLI, live",
+  },
+  {
+    id: WORKSPACE_PROCESSES_TAB_ID,
+    kind: 'processes',
+    key: 'processes',
+    label: 'Processes',
+    title: 'What is running under this agent',
   },
 ];
 
@@ -672,6 +680,33 @@ const isCoherent = (layout: WorkspaceLayout): boolean => {
 };
 
 /**
+ * A layout saved before the Processes tab existed pins only Chat and Console. Rather than reset it (and
+ * lose the reader's splits and open tabs) the missing pinned tab is added to the end of the agent pane,
+ * where a fresh layout would have put it.
+ */
+const withPinnedAgentTabs = (value: Record<string, unknown>): Record<string, unknown> => {
+  const legacy = ['chat', 'console'];
+  const root = value.root;
+  if (!isRecord(root)) return value;
+  const agentOf = (node: Record<string, unknown>): Record<string, unknown> | null => {
+    if (node.type === 'pane') return node;
+    const first = Array.isArray(node.children) ? (node.children[0] as unknown) : null;
+    return isRecord(first) ? agentOf(first) : null;
+  };
+  const upgrade = (node: Record<string, unknown>): Record<string, unknown> => {
+    if (node.type === 'pane') return { ...node, tabs: [...(node.tabs as unknown[]), WORKSPACE_PROCESSES_TAB_ID] };
+    const children = node.children as unknown[];
+    return { ...node, children: [upgrade(children[0] as Record<string, unknown>), children[1]] };
+  };
+  const agent = agentOf(root);
+  const tabs = agent?.tabs;
+  if (agent?.id !== AGENT_PANE_ID || !Array.isArray(tabs) || tabs.length !== legacy.length) return value;
+  if (!tabs.every((id, i) => id === legacy[i]) || !isRecord(value.tabs)) return value;
+  const processes = AGENT_TABS.find(tab => tab.id === WORKSPACE_PROCESSES_TAB_ID);
+  return { ...value, root: upgrade(root), tabs: { ...value.tabs, [WORKSPACE_PROCESSES_TAB_ID]: processes } };
+};
+
+/**
  * Defensive, versioned parse. Garbage, an unknown version or a structurally
  * incoherent tree is a clean reset to the default layout — a remembered layout
  * is a convenience, never worth a broken session page.
@@ -687,20 +722,21 @@ export const parseWorkspaceLayout = (raw: unknown): WorkspaceLayout => {
   }
   if (!isRecord(value) || value.v !== WORKSPACE_LAYOUT_VERSION || !isRecord(value.tabs))
     return defaultWorkspaceLayout();
+  const saved = withPinnedAgentTabs(value);
   const seen = new Set<string>();
-  const root = parseNode(value.root, seen, 0);
-  const parked = parseParked(value.parked, seen);
+  const root = parseNode(saved.root, seen, 0);
+  const parked = parseParked(saved.parked, seen);
   if (!root || parked === undefined) return defaultWorkspaceLayout();
   const tabs: Record<WorkspaceTabId, WorkspaceTab> = {};
-  for (const [id, record] of Object.entries(value.tabs)) {
+  for (const [id, record] of Object.entries(isRecord(saved.tabs) ? saved.tabs : {})) {
     const tab = parseTab(id, record);
     if (!tab) return defaultWorkspaceLayout();
     tabs[id] = tab;
   }
-  const seq = typeof value.seq === 'number' && Number.isInteger(value.seq) && value.seq >= 0 ? value.seq : 0;
-  const focused = typeof value.focused === 'string' ? value.focused : AGENT_PANE_ID;
-  const announced = Array.isArray(value.announced)
-    ? value.announced.filter((entry): entry is string => typeof entry === 'string').slice(-WORKSPACE_ANNOUNCED_LIMIT)
+  const seq = typeof saved.seq === 'number' && Number.isInteger(saved.seq) && saved.seq >= 0 ? saved.seq : 0;
+  const focused = typeof saved.focused === 'string' ? saved.focused : AGENT_PANE_ID;
+  const announced = Array.isArray(saved.announced)
+    ? saved.announced.filter((entry): entry is string => typeof entry === 'string').slice(-WORKSPACE_ANNOUNCED_LIMIT)
     : [];
   const layout: WorkspaceLayout = {
     v: WORKSPACE_LAYOUT_VERSION,

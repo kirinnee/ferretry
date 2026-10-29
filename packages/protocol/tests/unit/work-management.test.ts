@@ -330,6 +330,14 @@ const resolvedAttention = {
 
 const attentionCases: SchemaCase[] = [
   { name: 'attention source', schema: attention.AttentionSourceSchema, value: 'agent-raised' },
+  { name: 'card kind', schema: attention.AttentionKindSchema, value: 'yesno' },
+  { name: 'swipe direction', schema: attention.AttentionDirectionSchema, value: 'up' },
+  { name: 'answer effect', schema: attention.AttentionAnswerEffectSchema, value: 'needs-info' },
+  {
+    name: 'card answer',
+    schema: attention.AttentionCardAnswerSchema,
+    value: { direction: 'up', does: 'approve', label: 'Always allow', description: 'Stop asking for this command' },
+  },
   {
     name: 'ask option',
     schema: attention.AttentionAskOptionSchema,

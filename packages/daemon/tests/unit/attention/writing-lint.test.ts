@@ -3,6 +3,7 @@ import should from 'should';
 import { lintAttentionWriting } from '../../../src/lib/attention/writing-lint.ts';
 
 const clean = {
+  title: 'Work login plan',
   subject: 'Pick a login plan',
   context: '- the old login expires\n- two plans fit',
   questions: [{ question: 'Which plan should I build?' }],
@@ -13,18 +14,18 @@ describe('attention writing lint', () => {
     should(lintAttentionWriting(clean)).deepEqual([]);
   });
 
-  it('should warn about a summary over the target length', () => {
+  it('should warn about an ask over the target length', () => {
     const actual = lintAttentionWriting({ ...clean, subject: 'word '.repeat(30).trim() });
 
     should(actual).have.length(1);
-    should(actual[0]).match(/^summary is 149 characters; keep it under 90/u);
+    should(actual[0]).match(/^ask is 149 characters; keep it under 120: .*--context/u);
   });
 
   it('should warn about ticket and pull request ids, naming where they sit', () => {
     const actual = lintAttentionWriting({ ...clean, subject: 'Unblock ABC-123', context: 'See #1234 and #77.' });
 
     should(actual).have.length(1);
-    should(actual[0]).match(/ticket or PR ids \("ABC-123", "#1234", "#77"\) in summary, context/u);
+    should(actual[0]).match(/ticket or PR ids \("ABC-123", "#1234", "#77"\) in ask, context/u);
   });
 
   it('should warn about links and file paths but not about plain slashes', () => {
@@ -84,5 +85,103 @@ describe('attention writing lint steps and body', () => {
     } as Parameters<typeof lintAttentionWriting>[0]);
 
     should(actual).deepEqual([]);
+  });
+});
+
+describe('attention writing lint: an isolated card', () => {
+  it('should ask for a title when the card has none, saying how to add one', () => {
+    const { title: _, ...untitled } = clean;
+    const actual = lintAttentionWriting(untitled);
+
+    should(actual).have.length(1);
+    should(actual[0]).match(/^no title: .*--title "<what this is about>".*under 40 characters.*notification heading/u);
+  });
+
+  it('should warn about a title too long for a lock screen', () => {
+    const actual = lintAttentionWriting({ ...clean, title: 'Decide how the work login gets renewed overnight' });
+
+    should(actual).have.length(1);
+    should(actual[0]).match(/^title is 48 characters; keep it under 40/u);
+  });
+
+  it('should read the title for ids and jargon like any other field', () => {
+    const actual = lintAttentionWriting({ ...clean, title: 'Unblock KT-412 OCI cron' });
+
+    should(actual.join('\n')).match(/"KT-412"\) in title/u);
+    should(actual.join('\n')).match(/unexplained capitals \("OCI"\) in title/u);
+  });
+
+  it('should warn about pointing at earlier messages, and say where', () => {
+    const cases = [
+      'Do it as above.',
+      'Ship the plan as discussed.',
+      'Merge the earlier pull request first.',
+      'The previous message has the details.',
+      'Approve the fix we discussed.',
+      'Same as before, per our discussion.',
+    ];
+    for (const context of cases) {
+      const actual = lintAttentionWriting({ ...clean, context });
+
+      should(actual).have.length(1);
+      should(actual[0]).match(/^points elsewhere \(.+\) in context: .*say the thing itself on the card/u);
+    }
+  });
+
+  it('should not mistake ordinary words for a back-reference', () => {
+    const actual = lintAttentionWriting({
+      ...clean,
+      context: 'The login expired earlier today. Renewal runs above the rate limit. See the steps below.',
+    });
+
+    should(actual).deepEqual([]);
+  });
+
+  it('should accept an id that says what it is in brackets, and still flag a bare one', () => {
+    const described = lintAttentionWriting({ ...clean, context: 'Waits on #812 (the push worker fix).' });
+    const bare = lintAttentionWriting({ ...clean, context: 'Waits on #812 and KT-9 (fix).' });
+
+    should(described).deepEqual([]);
+    should(bare).have.length(1);
+    should(bare[0]).match(/"KT-9", "#812".*"#812 \(the push worker fix\)"/u);
+  });
+
+  it('should warn about choice options that do not say what choosing them does', () => {
+    const actual = lintAttentionWriting({
+      ...clean,
+      kind: 'choice',
+      ask: { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'Option 2' }, { label: 'Ship it today' }] },
+    });
+
+    should(actual).have.length(1);
+    should(actual[0]).match(/^options "A", "Option 2" do not say what choosing them does/u);
+  });
+
+  it('should accept a short option with a description, and yes or no', () => {
+    const actual = lintAttentionWriting({
+      ...clean,
+      kind: 'choice',
+      ask: {
+        kind: 'multiple-choice',
+        options: [{ label: 'A', description: 'Renew the login every 30 minutes' }, { label: 'No' }, { label: 'Later' }],
+      },
+    });
+
+    should(actual).deepEqual([]);
+  });
+
+  it('should read the answers a card offers for jargon', () => {
+    const actual = lintAttentionWriting({
+      ...clean,
+      kind: 'permission',
+      ask: { kind: 'permission' },
+      answers: [
+        { direction: 'left', does: 'reject', label: 'Deny' },
+        { direction: 'up', does: 'approve', label: 'Always allow', description: 'Add it to the OCI allowlist' },
+        { direction: 'right', does: 'approve', label: 'Allow' },
+      ],
+    });
+
+    should(actual.join('\n')).match(/unexplained capitals \("OCI"\) in answer "Always allow"/u);
   });
 });

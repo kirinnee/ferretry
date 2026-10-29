@@ -50,6 +50,7 @@ describe('SINGLETON_DEFAULTS', () => {
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       browserMode: 'headless',
       autoResume: true,
+      attentionNudge: true,
       conversations: { listComputer: true },
     });
     should(SINGLETON_DEFAULTS.warden).equal(DEFAULT_WARDEN_CONFIG);
@@ -309,6 +310,14 @@ describe('configLoosening: warden', () => {
     [{ maxAssignedWardens: 3 }, ['the number of wardens that may run at once goes up from 1 to 3']],
     [{ intervalMinutes: 1 }, ['the minutes between Warden sweeps goes down from 2 to 1']],
     [{ minSpawnGapMinutes: 0 }, ['the minutes between two Warden investigations goes down from 15 to 0']],
+    [
+      { jevActs: { ...DEFAULT_WARDEN_CONFIG.jevActs, stop: 0.9 } },
+      ['how sure Jev must be to stop a ferret on its own goes down from 0.98 to 0.9'],
+    ],
+    [
+      { jevActs: { ...DEFAULT_WARDEN_CONFIG.jevActs, nudge: 0.85 } },
+      ['how sure Jev must be to nudge a ferret on its own goes down from 0.9 to 0.85'],
+    ],
   ] as const)('should hold %j, saying %j', (changes, expected) => {
     // Act
     const actual = configLoosening('warden', DEFAULT_WARDEN_CONFIG, wardenWith(changes));
@@ -323,6 +332,7 @@ describe('configLoosening: warden', () => {
     [{ maxAssignedWardens: 1 }, { maxAssignedWardens: 3 }],
     [{ intervalMinutes: 2 }, { intervalMinutes: 1 }],
     [{ minSpawnGapMinutes: 15 }, { minSpawnGapMinutes: 0 }],
+    [{ jevActs: { ...DEFAULT_WARDEN_CONFIG.jevActs, restart: 1 } }, { jevActs: DEFAULT_WARDEN_CONFIG.jevActs }],
   ] as const)('should apply the opposite edit (%j to %j) at once', (tighter, looser) => {
     // Act
     const actual = configLoosening('warden', wardenWith(looser), wardenWith(tighter));

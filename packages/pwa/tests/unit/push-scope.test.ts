@@ -225,7 +225,7 @@ describe('a tap opens the machine the notification came from', () => {
         's-1',
       ),
       sessionView('s-1'),
-      'question',
+      'failed',
     );
     expect(spec.url).toBe('/d/laptop/session/s-1');
     expect(notificationUrl(spec.url, origin, laptop)).toBe(`${origin}/d/laptop/session/s-1`);
