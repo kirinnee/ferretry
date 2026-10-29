@@ -195,7 +195,7 @@ describe('systemd supervisor lifecycle', () => {
     await should(supervisor.restartInPlace(daemonBinary.path)).be.rejectedWith(ServiceManagerCommandError);
   });
 
-  it('should stop politely first and escalate to a real kill only when asked', async () => {
+  it('should stop politely first and escalate to a real kill of the daemon alone only when asked', async () => {
     // Arrange
     const { supervisor, processes } = systemd();
 
@@ -203,10 +203,11 @@ describe('systemd supervisor lifecycle', () => {
     await supervisor.stop({ escalate: false });
     await supervisor.stop({ escalate: true });
 
-    // Assert
+    // Assert — `--kill-who=main`: the unit's control group also holds the tmux server every session's
+    // pane runs under, and a kill of the whole group ends every agent on the machine.
     should(processes.ran).deepEqual([
       'systemctl --user stop fyd.service',
-      'systemctl --user kill --signal=SIGKILL fyd.service',
+      'systemctl --user kill --kill-who=main --signal=SIGKILL fyd.service',
     ]);
   });
 
