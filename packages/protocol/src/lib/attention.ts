@@ -375,6 +375,45 @@ export type AttentionId = z.infer<typeof AttentionIdSchema>;
 export const AttentionBySchema = z.enum(['human', 'agent', 'daemon']);
 export type AttentionBy = z.infer<typeof AttentionBySchema>;
 
+/**
+ * What the owner did on the board that never reached the ferret, kept so the app can offer Retry: posting
+ * `{ ...reply, id }` to the board is the same action again. Each variant is the matching action request
+ * without its id.
+ */
+export const AttentionUndeliveredReplySchema = z.discriminatedUnion('action', [
+  z.strictObject({
+    action: z.literal('resolve'),
+    note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    response: AttentionResponseSchema.optional(),
+  }),
+  z.strictObject({
+    action: z.literal('dismiss'),
+    note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+  }),
+  z.strictObject({
+    action: z.literal('needs-info'),
+    note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+  }),
+  z.strictObject({
+    action: z.literal('discuss'),
+    note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+  }),
+]);
+export type AttentionUndeliveredReply = z.infer<typeof AttentionUndeliveredReplySchema>;
+
+/**
+ * Set on an item whose answer (or request to discuss, or for more information) the owner gave on the board
+ * but that was never proven to reach the ferret (docs/attention.md § Delivery): the item is open again, as a
+ * card, until the owner answers it again or retries. Cleared by the owner's next action on it.
+ */
+export const AttentionUndeliveredSchema = z.strictObject({
+  at: InstantSchema,
+  reply: AttentionUndeliveredReplySchema,
+  /** Why it did not arrive, in words a person reads. */
+  reason: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
+});
+export type AttentionUndelivered = z.infer<typeof AttentionUndeliveredSchema>;
+
 const AttentionItemBaseShape = {
   id: AttentionIdSchema,
   source: AttentionSourceSchema,
@@ -404,6 +443,8 @@ const AttentionItemBaseShape = {
   infoRequests: PositiveIntegerSchema.optional(),
   /** Bounded, oldest first: when the owner asked for more information and when the ferret added it. */
   history: z.array(AttentionHistoryEntrySchema).min(1).max(MAX_ATTENTION_HISTORY).optional(),
+  /** The owner's last action on this item never reached the ferret; present only on an open item. */
+  undelivered: AttentionUndeliveredSchema.optional(),
 };
 
 export const AttentionItemSchema = z
@@ -520,6 +561,22 @@ export const AttentionRepliesSchema = z.strictObject({
 });
 export type AttentionReplies = z.infer<typeof AttentionRepliesSchema>;
 
+/**
+ * Where the owner's answers to one ferret stand past the settle window (docs/attention.md § Delivery). A
+ * sibling of `replies` rather than more fields on it, so an app that reads `replies` strictly still reads
+ * a board from a newer machine.
+ */
+export const AttentionDeliverySchema = z.strictObject({
+  /** Items whose answer was handed to the ferret and is not yet proven in its transcript: "Sending…". */
+  sending: z.array(AttentionIdSchema).max(MAX_ATTENTION_RESOLUTIONS),
+  /**
+   * Present while held answers are due but the ferret's composer holds text (a person's draft) or could
+   * not be read: nothing is typed into it until it is empty.
+   */
+  heldForComposer: z.literal(true).optional(),
+});
+export type AttentionDelivery = z.infer<typeof AttentionDeliverySchema>;
+
 export const AttentionSnapshotSchema = z
   .object({
     v: z.literal(ATTENTION_SCHEMA_VERSION),
@@ -542,6 +599,8 @@ export const AttentionSnapshotSchema = z
     enrolled: NonNegativeIntegerSchema.optional(),
     /** Answers held for this ferret and when they go; absent when nothing is held. */
     replies: AttentionRepliesSchema.optional(),
+    /** Answers on their way to the ferret and not yet proven to arrive; absent when there are none. */
+    delivery: AttentionDeliverySchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.count !== value.items.length) {
@@ -676,6 +735,11 @@ export const SessionAttentionSummarySchema = z.object({
   ask: singleLine(MAX_ATTENTION_SUBJECT_LENGTH),
   /** When the NEWEST open item was raised: "newest needing you first" sorts by it. */
   latestAt: InstantSchema,
+  /**
+   * How many of the `open` items are in discussion (`waitingFor: 'discussion'`): waiting on the ferret,
+   * not on the owner, so they are not counted as needing the owner. Absent when none is.
+   */
+  discussing: PositiveIntegerSchema.optional(),
 });
 export type SessionAttentionSummary = z.infer<typeof SessionAttentionSummarySchema>;
 

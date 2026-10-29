@@ -552,6 +552,55 @@ describe('AttentionInboxPage list and card', () => {
     await mounted.unmount();
   });
 
+  it('lists an item in discussion under its own "In discussion" group, out of the count', async () => {
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        ask: choices('Yes', 'No'),
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing, twoWay]));
+    const waiting = must(mounted.container.querySelector('[data-attention-list]'), 'the list');
+    const talking = must(mounted.container.querySelector('[data-attention-discussion-list]'), 'the discussion group');
+    expect(waiting.textContent).not.toContain('Premise check');
+    expect(talking.textContent).toContain('In discussion');
+    expect(talking.querySelector('[data-attention-group-count]')?.textContent).toBe('1');
+    expect(talking.querySelector('[data-attention-row-title]')?.textContent).toBe('Premise check');
+    expect(mounted.container.querySelector('.fy-attn-inbox__title')?.textContent).toContain('1');
+    await interact(() => (talking.querySelector('[data-attention-row]') as HTMLElement).click());
+    expect(mounted.container.querySelector('[data-attention-pane]')?.textContent).toContain('Premise check');
+    await mounted.unmount();
+  });
+
+  it('is not "nothing waiting" while a discussion is open, and on a phone opens its conversation', async () => {
+    const navigated: string[] = [];
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing], { phone: true }, navigated));
+    expect(mounted.container.querySelector('[data-attention-list]')).toBeNull();
+    await interact(() =>
+      must(
+        mounted.container.querySelector<HTMLElement>('[data-attention-discussion-list] [data-attention-row]'),
+        'the discussion row',
+      ).click(),
+    );
+    expect(mounted.container.querySelector('[data-attention-inbox]')?.getAttribute('data-attention-inbox')).toBe(
+      'list',
+    );
+    expect(navigated).toHaveLength(1);
+    expect(navigated[0]).toContain('?attention=A6');
+    await mounted.unmount();
+  });
+
   it('on a phone says a to-do is waiting on its ferret, with no Done swipe to offer', async () => {
     const waiting = inboxCard(
       attentionItem('A8', {

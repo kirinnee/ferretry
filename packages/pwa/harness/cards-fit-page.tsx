@@ -65,6 +65,7 @@ const inbox: AttentionInbox = {
   unread: [],
   total: 1,
   cards: [card],
+  discussing: [],
   reading: false,
   resolved: [],
   resolvedReading: false,

@@ -17,6 +17,8 @@ import {
   DISMISS_ACTION,
   DONE_ACTION,
   directionOfAction,
+  discussingCards,
+  discussingSessions,
   historyLine,
   type InboxCard,
   inboxCardKey,
@@ -25,9 +27,12 @@ import {
   inboxResolved,
   isInDiscussion,
   NEEDS_INFO_ACTION,
+  needsYouCount,
+  needsYouItems,
   RESOLVED_READ_LIMIT,
   replyAction,
   SWIPE_SLOP_PX,
+  sessionAttention,
   sessionsToReadForResolved,
   swipeIntent,
   swipeMap,
@@ -525,5 +530,67 @@ describe('sessionsToReadForResolved', () => {
       { daemonId: STUDIO, sessionId: 'new' },
       { daemonId: STUDIO, sessionId: 'quiet' },
     ]);
+  });
+});
+
+describe('items in discussion', () => {
+  const discussed = (id: string, minutes: number): AttentionItem =>
+    ({ ...item(id, minutes), waitingOn: 'ferret', waitingFor: 'discussion' }) as AttentionItem;
+  const withDiscussing = (open: number, discussing: number): SessionAttentionSummary => ({
+    ...summary(open, 5),
+    discussing,
+  });
+  const sources = [
+    {
+      daemonId: STUDIO,
+      name: 'Studio',
+      sessions: [waiting('s', withDiscussing(2, 1)), waiting('only', withDiscussing(1, 1))],
+    },
+  ];
+  const boards = new Map([
+    [`${STUDIO}/s`, board('s', [item('A1', 2), discussed('A2', 9)])],
+    [`${STUDIO}/only`, board('only', [discussed('A1', 4)])],
+  ]);
+  const boardFor = (daemonId: DaemonId, sessionId: string) => boards.get(`${daemonId}/${sessionId}`);
+
+  test('should deal discussing items to the discussing list and keep them out of the deck', () => {
+    expect(inboxCards(unreadSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id])).toEqual([
+      ['s', 'A1'],
+    ]);
+    expect(
+      discussingCards(discussingSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
+    ).toEqual([
+      ['s', 'A2'],
+      ['only', 'A1'],
+    ]);
+  });
+
+  test('should count what needs the owner as open minus discussing', () => {
+    expect(needsYouCount({ open: 3, discussing: 1 })).toBe(2);
+    expect(needsYouCount({ open: 3 })).toBe(3);
+    expect(needsYouCount({ open: 1, discussing: 4 })).toBe(0);
+    expect(needsYouItems([item('A1', 1), discussed('A2', 2)])).toBe(1);
+  });
+
+  test('should count and badge only the needs-you part of a session', () => {
+    expect(unreadCount(waiting('s', withDiscussing(3, 1)))).toBe(2);
+    expect(unreadTotal(unreadSessions(sources))).toBe(1);
+  });
+
+  test('should not call a session with only discussing items unread', () => {
+    const only = waiting('only', withDiscussing(1, 1));
+    expect(sessionAttention(only)).toBeUndefined();
+    expect(unreadCount(only)).toBe(0);
+    expect(unreadSessions(sources).map(entry => entry.view.config.id)).toEqual(['s']);
+  });
+
+  test('should list the sessions that hold a discussion, whether or not they also need the owner', () => {
+    expect(discussingSessions(sources).map(entry => entry.view.config.id)).toEqual(['s', 'only']);
+  });
+
+  test('should move the summary key when a discussion starts or ends', () => {
+    expect(attentionSummaryKey(withDiscussing(2, 1))).not.toBe(attentionSummaryKey(summary(2, 5)));
+    expect(attentionSummaryKey(withDiscussing(2, 1))).not.toBe(attentionSummaryKey(withDiscussing(2, 2)));
+    expect(attentionSummaryKey(withDiscussing(2, 0))).toBe(attentionSummaryKey(summary(2, 5)));
   });
 });

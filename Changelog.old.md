@@ -1,3 +1,9 @@
+## [4.105.0](https://github.com/kirinnee/ferretry/compare/v4.104.0...v4.105.0) (2026-10-29)
+
+### Features
+
+* **attention:** premise vs context cards, fixed height, forward-only skipping ([#878](https://github.com/kirinnee/ferretry/issues/878)) ([db8fa62](https://github.com/kirinnee/ferretry/commit/db8fa621eca0952af11966b57141c69525f913e2))
+
 ## [4.104.0](https://github.com/kirinnee/ferretry/compare/v4.103.2...v4.104.0) (2026-10-29)
 
 ### Features

@@ -512,3 +512,91 @@ describe('AttentionPanel', () => {
     expect(card.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite');
   });
 });
+
+describe('AttentionPanel: delivery', () => {
+  const discussing = (id: string) => item(id, { waitingOn: 'ferret', waitingFor: 'discussion' } as never);
+  const withBoard = (base: AttentionSnapshot, extra: Partial<AttentionSnapshot>): AttentionSnapshot => ({
+    ...base,
+    ...extra,
+  });
+
+  test('should draw an item in discussion as a slim line, with no card and no answer chip', async () => {
+    view = await mount(panel({ snapshot: board([discussing('A3')]), chip: { on: false, onChange: () => undefined } }));
+    const c = must(view.container, 'view');
+    const line = must(c.querySelector<HTMLButtonElement>('[data-attention-discussing]'), 'the discussion line');
+    expect(line.textContent).toContain('In discussion');
+    expect(line.textContent).toContain('Ask A3');
+    expect(c.querySelector('[data-attention-card]')).toBeNull();
+    expect(c.querySelector('[data-attention-answer-chip]')).toBeNull();
+  });
+
+  test('should open the card when the discussion line is pressed', async () => {
+    view = await mount(panel({ snapshot: board([discussing('A3')]) }));
+    const c = must(view.container, 'view');
+    await interact(() => must(c.querySelector<HTMLButtonElement>('[data-attention-discussing]'), 'line').click());
+    expect(cardOf(c, 'A3')).not.toBeNull();
+    expect(c.querySelector('[data-attention-discussing]')).toBeNull();
+  });
+
+  test('should show an item that needs the owner before one in discussion', async () => {
+    view = await mount(panel({ snapshot: board([discussing('A3'), item('A5')]) }));
+    const c = must(view.container, 'view');
+    expect(cardOf(c, 'A5')).not.toBeNull();
+    expect(c.querySelector('[data-attention-discussing]')).toBeNull();
+  });
+
+  test('should say Sending… on a card whose answer the ferret has not yet received', async () => {
+    const snapshot = withBoard(board([item('A3')]), { delivery: { sending: ['A3'] } });
+    view = await mount(panel({ snapshot }));
+    const strip = must(cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-delivery]'), 'strip');
+    expect(strip.getAttribute('role')).toBe('status');
+    expect(strip.textContent).toBe('Sending…');
+  });
+
+  test('should say Sending… for an answer still in the settle window too', async () => {
+    const snapshot = withBoard(board([item('A3')]), {
+      replies: { pending: ['A3'], dueAt: '2026-07-31T12:00:08.000Z' },
+    });
+    view = await mount(panel({ snapshot }));
+    expect(
+      cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-delivery="sending"]'),
+    ).not.toBeNull();
+  });
+
+  test('should keep a slim Sending… line for an answered item until the daemon stops listing it', async () => {
+    const snapshot = withBoard(board([], [record('A3', '2026-07-31T11:59:00.000Z')]), {
+      delivery: { sending: ['A3'] },
+    });
+    view = await mount(panel({ snapshot }));
+    const line = must(must(view.container, 'view').querySelector('[data-attention-sending-line]'), 'the sending line');
+    expect(line.textContent).toContain('Sending…');
+    expect(line.textContent).toContain('Ask A3');
+    await view.render(panel({ snapshot: board([], [record('A3', '2026-07-31T11:59:00.000Z')]) }));
+    expect(view.container.querySelector('[data-attention-sending-line]')).toBeNull();
+  });
+
+  test("should say the answer didn't reach the ferret and Retry sends that same answer again", async () => {
+    const recorded = recordingClient();
+    const undelivered = item('A3', {
+      undelivered: {
+        at: '2026-07-31T11:59:00.000Z',
+        reply: { action: 'resolve', note: 'shipped' },
+        reason: 'Its box was busy.',
+      },
+    } as never);
+    view = await mount(panel({ client: recorded.client, ferret: 'zoe', snapshot: board([undelivered]) }));
+    const strip = must(
+      cardOf(must(view.container, 'view'), 'A3').querySelector<HTMLElement>('[data-attention-delivery="undelivered"]'),
+      'strip',
+    );
+    expect(strip.textContent).toContain("Your answer didn't reach zoe");
+    expect(strip.textContent).toContain('Its box was busy.');
+    await interact(() => must(strip.querySelector<HTMLButtonElement>('button[data-attention-retry]'), 'retry').click());
+    expect(recorded.calls).toEqual([{ method: 'resolve', id: 'A3', payload: 'shipped' }]);
+  });
+
+  test('should draw no strip on an item with nothing to say about delivery', async () => {
+    view = await mount(panel());
+    expect(must(view.container, 'view').querySelector('[data-attention-delivery]')).toBeNull();
+  });
+});

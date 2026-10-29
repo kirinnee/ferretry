@@ -157,7 +157,7 @@ describe('FileAttentionOutboxRepository', () => {
     await second.flush(SESSION);
     await second.flush(SESSION);
 
-    // Assert
-    should(sent).deepEqual(['attention-session-1-A1']);
+    // Assert — one message, under the id the second daemon stamped when it began the batch.
+    should(sent).deepEqual([`attention-session-1-A1-${Date.parse('2026-10-28T17:05:00.000Z').toString(36)}`]);
   });
 });

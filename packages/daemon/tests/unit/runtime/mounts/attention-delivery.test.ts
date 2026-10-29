@@ -6,8 +6,11 @@ import {
   ATTENTION_REPLY_CAP_MS,
   ATTENTION_REPLY_SETTLE_MS,
   type AttentionBoardChange,
+  AttentionBoardUndelivered,
   type AttentionChangeObserver,
+  type AttentionComposerState,
   AttentionConversation,
+  AttentionNotTyped,
   type AttentionOutbox,
   type AttentionOutboxRepository,
   AttentionReplyBatcher,
@@ -31,17 +34,24 @@ import { agentIn, CREDENTIALS, FakeLedgerRepository, human } from './support.ts'
 
 const START = Date.parse('2026-10-28T17:00:00.000Z');
 const SESSION = 's1';
+/** The stamp a batch begun when the first window closes carries in its send id. */
+const STAMP = (START + ATTENTION_REPLY_SETTLE_MS).toString(36);
 
 /** What the browser sends: the inbox and the in-ferret panel both answer through `attention-client.ts`. */
 const browser = { authorization: `Bearer ${CREDENTIALS.admin}` } as const;
 
-/** The send ledger's one rule that matters here: one send id is one message, however often it is sent. */
+/**
+ * The send ledger's one rule that matters here: one send id is one message, however often it is sent. A
+ * case may make it refuse, as the real send path does for a draft in the composer (nothing typed).
+ */
 class RecordingSends {
   readonly sent = new Map<string, { sessionId: string; message: string }>();
   attempts = 0;
+  refusal?: Error;
 
   async send(sessionId: string, message: string, sendId: string): Promise<void> {
     this.attempts += 1;
+    if (this.refusal !== undefined) throw this.refusal;
     if (!this.sent.has(sendId)) this.sent.set(sendId, { sessionId, message });
   }
 }
@@ -94,8 +104,16 @@ const inline = { run: async <T>(_key: string, task: () => Promise<T>): Promise<T
 function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
   const clock = new ManualClock();
   const timers = new ArmedTimers();
-  const batcher = new AttentionReplyBatcher(outboxes, sends, timers, inline, clock);
-  const attention = new AttentionService(
+  const composer: { state: AttentionComposerState } = { state: 'empty' };
+  const batcher = new AttentionReplyBatcher(outboxes, sends, timers, inline, clock, undefined, undefined, {
+    composer: { state: async () => composer.state },
+    receipts: { receipt: async () => ({ state: 'delivered' }) },
+    // The board, built just below, reopens what did not arrive — read lazily, as the composition root does.
+    undelivered: new AttentionBoardUndelivered({
+      undelivered: async (...parameters) => await attention.undelivered(...parameters),
+    }),
+  });
+  const attention: AttentionService = new AttentionService(
     new FakeLedgerRepository(),
     { now: () => clock.now() },
     { has: async sessionId => sessionId === SESSION },
@@ -133,8 +151,70 @@ function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
     clock.ms += timers.armed.get(SESSION) ?? 0;
     await batcher.flush(SESSION);
   };
-  return { sends, attention, batcher, clock, timers, outboxes, post, raise, settle };
+  return { sends, attention, batcher, clock, timers, outboxes, composer, dispatcher, post, raise, settle };
 }
+
+describe('the attention loop when a Discuss cannot reach the ferret (the owner’s "swipe Discuss doesn’t send")', () => {
+  it('should hold a Discuss while the ferret’s message box holds text, never typing into it', async () => {
+    // Arrange
+    const { sends, outboxes, composer, post, raise, settle, dispatcher } = loop();
+    const id = await raise('Set up ProtoDurian, step by step');
+    composer.state = 'occupied';
+
+    // Act — swipe down: Discuss.
+    await post({ action: 'discuss', id }, browser);
+    await settle();
+    const board = await dispatcher.dispatch(request({ path: `/v1/sessions/${SESSION}/attention`, headers: browser }));
+
+    // Assert — nothing typed, nothing recorded as delivered: it is still waiting to go, and the board says why.
+    should(sends.attempts).equal(0);
+    should(outboxes.files.get(SESSION)?.pending.map(each => each.id)).deepEqual([`${id}~1`]);
+    should(outboxes.files.get(SESSION)?.delivered).be.empty();
+    should(jsonBody(board).delivery).deepEqual({ sending: [], heldForComposer: true });
+  });
+
+  it('should give a Discuss the send path refused back to the owner as a card, instead of counting it delivered', async () => {
+    // Arrange — before this fix the refusal was swallowed and the outbox wrote the item down as delivered.
+    const { sends, outboxes, post, raise, settle, attention } = loop();
+    const id = await raise('Set up ProtoDurian, step by step');
+    sends.refusal = new Error('session s1 is quarantined awaiting a person');
+
+    // Act
+    await post({ action: 'discuss', id, note: 'I do not follow step 4' }, browser);
+    await settle();
+    const listed = await attention.list(SESSION);
+
+    // Assert — open again, out of discussion, with the discussion kept for Retry and the reason said.
+    if (!listed.ok) throw new Error(listed.error.message);
+    const [item] = listed.value.items;
+    should(item).not.have.property('waitingFor');
+    should(item?.undelivered).containDeep({
+      reply: { action: 'discuss', note: 'I do not follow step 4' },
+      reason: 'session s1 is quarantined awaiting a person',
+    });
+    should(outboxes.files.get(SESSION)?.delivered).be.empty();
+  });
+
+  it('should put a Discuss back to waiting when the send path typed nothing, and deliver it once the box is empty', async () => {
+    // Arrange — the composer read empty, then a person started typing before the keys went.
+    const { sends, clock, post, raise, settle, batcher, attention } = loop();
+    const id = await raise('Set up ProtoDurian, step by step');
+    sends.refusal = new AttentionNotTyped('the composer holds unsent text');
+
+    // Act
+    await post({ action: 'discuss', id }, browser);
+    await settle();
+    sends.refusal = undefined;
+    clock.ms += 5_000;
+    await batcher.flush(SESSION);
+    await batcher.watch(SESSION);
+    const listed = await attention.list(SESSION);
+
+    // Assert — delivered once, and the item stays in discussion.
+    should([...sends.sent.values()].map(each => each.message.slice(0, 9))).deepEqual(['[discuss ']);
+    should(listed.ok && listed.value.items[0]?.waitingFor).equal('discussion');
+  });
+});
 
 describe('the attention loop, from a ferret’s raise to its delivered answer', () => {
   it('should hold an answer for the settle window, say so on the board, then deliver it once', async () => {
@@ -151,14 +231,14 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     const held = sends.sent.size;
     await settle();
 
-    // Assert — nothing goes while the owner may still be answering; then one message, under the id a
-    // single answer always had.
+    // Assert — nothing goes while the owner may still be answering; then one message, under the item's id
+    // stamped with when its batch began.
     should(held).equal(0);
-    should(jsonBody(answered).replies).deepEqual({ pending: [id], dueAt: '2026-10-28T17:01:00.000Z' });
+    should(jsonBody(answered).replies).deepEqual({ pending: [id], dueAt: '2026-10-28T17:00:10.000Z' });
     should(timers.armed.get(SESSION)).equal(ATTENTION_REPLY_SETTLE_MS);
     should([...sends.sent.entries()]).deepEqual([
       [
-        `attention-${SESSION}-${id}`,
+        `attention-${SESSION}-${id}-${STAMP}`,
         { sessionId: SESSION, message: `[answer to !${id} «Does the loop work?»] Something’s off` },
       ],
     ]);
@@ -183,7 +263,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     // Assert
     should([...sends.sent.entries()]).deepEqual([
       [
-        `attention-${SESSION}-${named}-${doneInApp}-${doneAtShell}-${dismissed}`,
+        `attention-${SESSION}-${named}-${doneInApp}-${doneAtShell}-${dismissed}-${STAMP}`,
         {
           sessionId: SESSION,
           message: [
@@ -244,7 +324,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     ]);
   });
 
-  it('should restart the window on each answer, but never hold the first past the cap', async () => {
+  it('should restart the ten-second window on each card action (the cap is the batcher’s own case)', async () => {
     // Arrange
     const { clock, timers, post, raise } = loop();
     const ids = [
@@ -255,22 +335,17 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
       await raise('Five?'),
     ];
 
-    // Act — an answer every 40 s: each one is inside the last one's window.
+    // Act — an answer every 8 s: each one is inside the last one's window.
     const delays: number[] = [];
     for (const id of ids) {
       await post({ action: 'resolve', id }, browser);
       delays.push(timers.armed.get(SESSION) ?? -1);
-      clock.ms += 40_000;
+      clock.ms += 8_000;
     }
 
-    // Assert — the settle window each time, until the first answer's cap is nearer.
-    should(delays).deepEqual([
-      ATTENTION_REPLY_SETTLE_MS,
-      ATTENTION_REPLY_SETTLE_MS,
-      ATTENTION_REPLY_SETTLE_MS,
-      ATTENTION_REPLY_SETTLE_MS,
-      ATTENTION_REPLY_CAP_MS - 160_000,
-    ]);
+    // Assert — the full settle window again after every action, well inside the first answer's cap.
+    should(ATTENTION_REPLY_CAP_MS).be.above(ids.length * 8_000);
+    should(delays).deepEqual(ids.map(() => ATTENTION_REPLY_SETTLE_MS));
   });
 
   it('should deliver at once when the owner taps "Send now", and hold nothing after', async () => {
@@ -358,9 +433,14 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     const after = loop(outboxes, sends);
     await after.batcher.resume([SESSION, 'unknown-session']);
     await after.settle();
+    await after.batcher.watch(SESSION);
 
-    // Assert — the interrupted batch is the ledger's one message; the held answer goes once.
-    should([...sends.sent.keys()]).deepEqual([`attention-${SESSION}-${interrupted}`, `attention-${SESSION}-${held}`]);
+    // Assert — the interrupted batch is the ledger's one message; the held answer goes once; both are
+    // delivered only once their receipts are read.
+    should([...sends.sent.keys()]).deepEqual([
+      `attention-${SESSION}-${interrupted}`,
+      `attention-${SESSION}-${held}-${STAMP}`,
+    ]);
     should(outboxes.files.get(SESSION)).containDeep({ pending: [], sending: [], delivered: [interrupted, held] });
   });
 });

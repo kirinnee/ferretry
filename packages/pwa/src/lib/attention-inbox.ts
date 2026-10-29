@@ -52,11 +52,31 @@ const instant = (value: string): number => {
   return Number.isNaN(at) ? 0 : at;
 };
 
-/** The session's open Attention, or `undefined` when nothing waits on the owner. */
-export const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => view.state.attention;
+/**
+ * How many of a summary's open items need the OWNER: an item in discussion waits on its ferret, so it is
+ * not counted. Every badge, row and tab reads this and never `open` alone.
+ */
+export const needsYouCount = (summary: Pick<SessionAttentionSummary, 'open' | 'discussing'>): number =>
+  Math.max(0, summary.open - (summary.discussing ?? 0));
 
-/** How many open items a row's badge shows. */
-export const unreadCount = (view: SessionView): number => view.state.attention?.open ?? 0;
+/**
+ * The session's Attention that waits on the owner, or `undefined` when nothing does — including a
+ * session whose only open items are in discussion: it reads as read, not as unread.
+ */
+export const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => {
+  const summary = view.state.attention;
+  return summary === undefined || needsYouCount(summary) === 0 ? undefined : summary;
+};
+
+/** How many open items a row's badge shows: the ones that need the owner. */
+export const unreadCount = (view: SessionView): number => {
+  const summary = view.state.attention;
+  return summary === undefined ? 0 : needsYouCount(summary);
+};
+
+/** How many of an open board's items need the owner: the pinned panel's header count. */
+export const needsYouItems = (items: readonly Pick<AttentionItem, 'waitingOn' | 'waitingFor'>[]): number =>
+  items.filter(item => !isInDiscussion(item)).length;
 
 /** The badge's text: a count, capped so it never widens a row. */
 export const badgeText = (count: number): string => (count > 99 ? '99+' : String(count));
@@ -89,7 +109,7 @@ export const unreadSessions = (sources: readonly AttentionInboxSource[]): readon
 
 /** The open items across every listed conversation: the number on the Attention tab. */
 export const unreadTotal = (entries: readonly UnreadSession[]): number =>
-  entries.reduce((total, entry) => total + entry.attention.open, 0);
+  entries.reduce((total, entry) => total + needsYouCount(entry.attention), 0);
 
 /**
  * Sorts sessions so the ones with open Attention lead, newest first, and the rest keep their order.
@@ -104,11 +124,26 @@ export const attentionFirst = <T>(rows: readonly T[], viewOf: (row: T) => Sessio
 };
 
 /**
+ * Every conversation with an item in discussion, in the order the sources list them: what the inbox reads
+ * boards for, so a discussion is on the machine's record and not on a card until it needs the owner again.
+ */
+export const discussingSessions = (sources: readonly AttentionInboxSource[]): readonly UnreadSession[] =>
+  sources.flatMap(source =>
+    (source.sessions ?? []).flatMap(view => {
+      const attention = view.state.attention;
+      return attention?.discussing === undefined
+        ? []
+        : [{ daemonId: source.daemonId, machineName: source.name, view, attention }];
+    }),
+  );
+
+/**
  * What a board read is keyed on: the summary's facts. When they move the board moved, so the inbox
- * re-reads exactly that session's board; when they hold still it reads nothing.
+ * re-reads exactly that session's board; when they hold still it reads nothing. `discussing` is one of
+ * them: a discussion starting or ending moves no other fact, and another device must still re-read.
  */
 export const attentionSummaryKey = (summary: SessionAttentionSummary): string =>
-  `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}`;
+  `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}`;
 
 /** Where a conversation opens AT an item: the session's page, naming the item as the protocol says. */
 export const attentionConversationPath = (daemonId: DaemonId, sessionId: string, id: AttentionId): string =>
@@ -134,21 +169,18 @@ export interface InboxCard {
 export const inboxCardKey = (daemonId: DaemonId, sessionId: string, id: AttentionId): string =>
   JSON.stringify([daemonId, sessionId, id]);
 
-/**
- * The deck: every open item of every unread conversation whose board has been read, newest first.
- * `hidden` holds the keys the reader already answered and may still undo — they leave the deck at once.
- */
-export const inboxCards = (
+const collectCards = (
   entries: readonly UnreadSession[],
   boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
-  hidden: ReadonlySet<string> = new Set(),
+  hidden: ReadonlySet<string>,
+  wanted: (item: AttentionItem) => boolean,
 ): readonly InboxCard[] => {
   const cards: InboxCard[] = [];
   for (const entry of entries) {
     const board = boardFor(entry.daemonId, entry.view.config.id);
     for (const item of board?.items ?? []) {
       const key = inboxCardKey(entry.daemonId, entry.view.config.id, item.id);
-      if (!hidden.has(key))
+      if (wanted(item) && !hidden.has(key))
         cards.push({ key, daemonId: entry.daemonId, machineName: entry.machineName, view: entry.view, item });
     }
   }
@@ -157,6 +189,25 @@ export const inboxCards = (
       instant(right.item.waitingSince) - instant(left.item.waitingSince) || left.key.localeCompare(right.key),
   );
 };
+
+/**
+ * The deck: every open item that needs the owner, of every unread conversation whose board has been read,
+ * newest first. An item in discussion is not in it — it waits on its ferret, and comes back as a card when
+ * the ferret updates it. `hidden` holds the keys the reader already answered and may still undo — they
+ * leave the deck at once.
+ */
+export const inboxCards = (
+  entries: readonly UnreadSession[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
+  hidden: ReadonlySet<string> = new Set(),
+): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => !isInDiscussion(item));
+
+/** The items in discussion, as cards of the same shape and order as the deck's: what a future "In discussion" group lists. */
+export const discussingCards = (
+  entries: readonly UnreadSession[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
+  hidden: ReadonlySet<string> = new Set(),
+): readonly InboxCard[] => collectCards(entries, boardFor, hidden, isInDiscussion);
 
 export type { InboxAction, SwipeDirection };
 

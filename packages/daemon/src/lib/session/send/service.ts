@@ -42,6 +42,7 @@ import {
   type SendRepository,
   SendRetypeWithheld,
   type SendReviver,
+  SendScreenUnreadable,
   type SendSettlement,
   type SendTarget,
   type SendTerminal,
@@ -139,8 +140,8 @@ export function composerOccupiedRefusal(draft: string): SendDraftRefused {
  * Why nothing was typed when the agent's composer could not be read: it may hold a person's draft, and
  * a message typed onto one is submitted joined to it. Usually a passing repaint, so trying again works.
  */
-export function composerUnreadableRefusal(): SendRefused {
-  return new SendRefused(
+export function composerUnreadableRefusal(): SendScreenUnreadable {
+  return new SendScreenUnreadable(
     "the agent's screen could not be read to prove its composer empty, so nothing was typed; send it again " +
       'in a moment, or check the terminal for a half-written message',
   );

@@ -193,6 +193,22 @@ export class AttentionService {
     return this.apply(sessionId, { action: 'dismiss', actor, id, note, at: this.clock.now() });
   }
 
+  /**
+   * The owner's action on an item never reached its ferret: the item is the owner's again, as an open card
+   * saying so (docs/attention.md § Delivery). `request` names the request for more information or to discuss
+   * it that was not delivered; absent for an answer. Daemon-only: the delivery path is the one witness.
+   */
+  async undelivered(sessionId: string, id: AttentionId, reason: string, request?: number): Promise<AttentionMutation> {
+    return this.apply(sessionId, {
+      action: 'undelivered',
+      actor: { kind: 'daemon', cause: 'system' },
+      id,
+      reason,
+      ...(request === undefined ? {} : { request }),
+      at: this.clock.now(),
+    });
+  }
+
   /** Trusted source reconciliation; transport-facing composition must never expose this directly. */
   async resolveSource(
     sessionId: string,

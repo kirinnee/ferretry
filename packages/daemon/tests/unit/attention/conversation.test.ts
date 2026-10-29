@@ -302,6 +302,48 @@ describe('Attention in a conversation', () => {
     });
     should(sessionAttentionSummary(empty)).be.undefined();
   });
+
+  it('should count the items in discussion apart, and open the row to the oldest one still needing the owner', () => {
+    // Arrange
+    const discussing = item('A2', { waitingOn: 'ferret', askedAt: AT, waitingFor: 'discussion', infoRequests: 1 });
+    const asked = item('A6', { waitingOn: 'ferret', askedAt: AT, infoRequests: 1 });
+    const board = (items: AttentionItem[]) =>
+      AttentionSnapshotSchema.parse({
+        v: 1,
+        sessionId: 'session-1',
+        items,
+        resolved: [],
+        count: items.length,
+        parseErrors: 0,
+        updatedAt: AT,
+      });
+
+    // Act
+    const mixed = sessionAttentionSummary(board([discussing, OPEN, asked]));
+    const onlyTalk = sessionAttentionSummary(board([discussing]));
+
+    // Assert — a request for more information still needs the owner's eye; a discussion does not.
+    should(mixed).deepEqual({ open: 3, first: 'A3', ask: 'Which region?', latestAt: AT, discussing: 1 });
+    should(onlyTalk).deepEqual({ open: 1, first: 'A2', ask: 'Ask A2?', latestAt: AT, discussing: 1 });
+  });
+
+  it('should never take a chat message as the answer to an item in discussion: talking it through is the discussion', () => {
+    // Arrange
+    const discussing = item('A2', {
+      ask: { kind: 'open-question' },
+      waitingOn: 'ferret',
+      askedAt: AT,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+    });
+
+    // Act
+    const turn = conversationTurn('!A2 why does it need the prod key? and !A3 eu-west-1', [discussing, OPEN]);
+
+    // Assert — the open question is answered; the one in discussion is only talked about.
+    should(turn.answers.map(each => each.id)).deepEqual(['A3']);
+    should(turn.message).startWith('[answer to !A3 «Which region?»] ');
+  });
 });
 
 describe('needsInfoMessage', () => {
