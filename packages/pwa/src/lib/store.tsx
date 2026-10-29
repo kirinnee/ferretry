@@ -83,6 +83,7 @@ import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts'
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
+import { BackgroundChatFreshener, type BackgroundFreshEnvironment } from './background-fresh.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
 import { browserSessionCacheBackend } from './session-cache-storage.ts';
 import { sharingIdenticalReads } from './shared-reads.ts';
@@ -479,6 +480,8 @@ export interface AppStore {
   readonly readDefaultRelay: () => Promise<HostedRelayFallback>;
   /** What this device last saw of each machine's sessions, drawn before the network answers. */
   readonly sessionCache: SessionCache;
+  /** Keeps the interactive and recently opened chats fresh in the background (`lib/background-fresh.ts`). */
+  readonly backgroundFresh: BackgroundChatFreshener;
   /** Where each page and chat was scrolled, for Back, Forward and a reload of this tab. */
   readonly scrollMemory: ScrollMemory;
 }
@@ -486,6 +489,8 @@ export interface AppStore {
 export interface CreateAppStoreOptions {
   /** IndexedDB by default; `null` keeps the session cache in memory only. Injected by suites. */
   readonly sessionCacheBackend?: SessionCacheBackend | null;
+  /** The page and link facts the background chat refresh obeys; the browser's own by default. Injected by suites. */
+  readonly backgroundFreshEnvironment?: BackgroundFreshEnvironment;
   /** This tab's `sessionStorage` by default; `null` remembers no scroll position. Injected by suites. */
   readonly scrollMemoryStorage?: ScrollMemoryStorage | null;
   /**
@@ -845,6 +850,22 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const syncLandingPage = (): void =>
     syncLandingMarker(landingMarkerStorage, connections.getSnapshot().connections.length);
   syncLandingPage();
+  const backgroundFresh = new BackgroundChatFreshener({
+    fleet,
+    cache: sessionCache,
+    connections: () => connections.list(),
+    // The pooled client, so the read rides the measured carrier and shares the open chat's `ETag` memory.
+    readLog: async (daemon, sessionId) => await (await clients.client(daemon)).logs(sessionId),
+    settings: {
+      get: () => {
+        const { keepChatsFresh, keepChatsFreshNotOnCellular } = controls.snapshot().device;
+        return { enabled: keepChatsFresh, notOnCellular: keepChatsFreshNotOnCellular };
+      },
+      subscribe: controls.subscribe,
+    },
+    ...(options.backgroundFreshEnvironment === undefined ? {} : { environment: options.backgroundFreshEnvironment }),
+  });
+  backgroundFresh.start();
   // The document-lifetime store owns this document-lifetime convenience. Every
   // add, eviction, and explicit unpair now keeps the marker honest.
   connections.subscribe(syncLandingPage);
@@ -933,6 +954,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     pushService,
     readDefaultRelay,
     sessionCache,
+    backgroundFresh,
     scrollMemory,
     pair: async (seed, deviceName) => {
       const connection = await exchangePairing(seed, {

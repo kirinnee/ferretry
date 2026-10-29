@@ -28,6 +28,7 @@ export type SettingId =
   | 'install-app'
   | 'device-permissions'
   | 'connection-preference'
+  | 'keep-chats-fresh'
   | 'clear-cached-data'
   | 'about-device'
   | 'speedup-keys'
@@ -315,6 +316,25 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     ],
   },
   {
+    id: 'keep-chats-fresh',
+    label: 'Keep recent chats fresh',
+    description:
+      'Read the interactive chats and the 40 you opened last in the background so switching to one is instant. Off stops it; “Not on cellular” holds it back on mobile data. Paused while this tab is hidden or your browser asks to save data.',
+    keywords: [
+      'background',
+      'fresh',
+      'cache',
+      'prefetch',
+      'instant',
+      'switch',
+      'cellular',
+      'mobile data',
+      'save data',
+      'battery',
+      'chats',
+    ],
+  },
+  {
     id: 'clear-cached-data',
     label: 'Cached data',
     description:
@@ -517,6 +537,7 @@ export const SETTINGS_SECTIONS: readonly SettingsSectionDefinition[] = [
       'speedup-keys',
       'transcription-log',
       'dictation-debug',
+      'keep-chats-fresh',
       'clear-cached-data',
       'about-device',
     ],

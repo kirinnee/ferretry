@@ -78,6 +78,8 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   skillSuggestions: false,
   composerVimMode: true,
   openLinksIn: 'panel',
+  keepChatsFresh: false,
+  keepChatsFreshNotOnCellular: true,
 };
 
 const scopeRecord = (entries: readonly (readonly [string, string, number])[]): ControlsRecord => {
@@ -134,6 +136,8 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       composerVimMode: false,
       // A payload written before links had a home opens them in the reader's browser.
       openLinksIn: 'browser',
+      keepChatsFresh: true,
+      keepChatsFreshNotOnCellular: false,
     });
     // The old shape had no daemon scopes at all.
     should(Object.keys(record.scopes)).be.empty();

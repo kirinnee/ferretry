@@ -628,7 +628,7 @@ describe('parseCacheRecord', () => {
 
   it('accepts a well formed transcript', () => {
     const value = { kind: 'transcript', daemonId: 'a', savedAt: NOW, log: 'x', sends: [1] };
-    should(parseCacheRecord(value, NOW, 100)).eql(value);
+    should(parseCacheRecord(value, NOW, 100)).eql({ ...value, openedAt: NOW });
   });
 });
 

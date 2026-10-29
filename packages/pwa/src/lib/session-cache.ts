@@ -40,8 +40,14 @@ export interface SessionCacheBackend {
 }
 
 export interface SessionCacheLimits {
-  /** How many sessions' transcripts are kept, across every machine; the least recently saved go first. */
+  /**
+   * How many OPENED sessions' transcripts are kept, across every machine; the least recently opened go
+   * first. Interactive sessions the background keeps fresh without ever being opened are kept besides
+   * these, up to {@link SessionCacheLimits.background}.
+   */
   readonly transcripts: number;
+  /** The most transcripts kept for sessions that were never opened here: a backstop, not a target. */
+  readonly background: number;
   /** How much of each transcript log is kept: its end, which is what a chat opens on. */
   readonly transcriptChars: number;
   /** How many send ledger rows are kept per session: the newest. */
@@ -52,6 +58,7 @@ export interface SessionCacheLimits {
 
 export const SESSION_CACHE_LIMITS: SessionCacheLimits = {
   transcripts: 40,
+  background: 40,
   transcriptChars: 200_000,
   sends: 200,
   maxAgeMs: 14 * 24 * 60 * 60 * 1_000,
@@ -68,6 +75,16 @@ export interface CachedTranscript {
   readonly log: string;
   readonly sends: readonly unknown[];
   readonly savedAt: number;
+  /**
+   * When a reader last opened this chat on this device. Absent for a transcript only the background
+   * kept fresh: it is what the "40 most recently opened" bound counts.
+   */
+  readonly openedAt?: number;
+  /**
+   * The session's `journalSequence` when `log` was read: the point the background freshener resumes from.
+   * Absent when the log came from an open chat, which does not know it; the next pass then reads once.
+   */
+  readonly cursor?: number;
 }
 
 interface SessionsRecord extends CachedSessions {
@@ -78,9 +95,21 @@ interface SessionsRecord extends CachedSessions {
 interface TranscriptRecord extends CachedTranscript {
   readonly kind: 'transcript';
   readonly daemonId: string;
+  /**
+   * Written by the background for a session never opened here. Records from before opening was kept have
+   * neither this nor `openedAt`: they were all saved by an open chat, so they read as opened when saved.
+   */
+  readonly background?: true;
 }
 
 type CacheRecord = SessionsRecord | TranscriptRecord;
+
+interface TranscriptStamp {
+  readonly savedAt: number;
+  readonly openedAt: number | undefined;
+}
+
+const stamp = (record: CachedTranscript): TranscriptStamp => ({ savedAt: record.savedAt, openedAt: record.openedAt });
 
 const sessionsKey = (daemonId: DaemonId): string => JSON.stringify(['sessions', daemonId]);
 const transcriptKey = (scope: DaemonSessionScope): string => JSON.stringify(['transcript', daemonSessionKey(scope)]);
@@ -99,6 +128,8 @@ export const logTail = (log: string, limit: number): string => {
 const fresh = (savedAt: unknown, now: number, maxAgeMs: number): savedAt is number =>
   typeof savedAt === 'number' && Number.isFinite(savedAt) && savedAt <= now && now - savedAt <= maxAgeMs;
 
+const isTime = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+
 /** A stored value read back, or `null` when it is not one this version wrote — never trusted as-is. */
 export const parseCacheRecord = (value: unknown, now: number, maxAgeMs: number): CacheRecord | null => {
   if (typeof value !== 'object' || value === null) return null;
@@ -109,6 +140,9 @@ export const parseCacheRecord = (value: unknown, now: number, maxAgeMs: number):
     readonly sessions?: unknown;
     readonly log?: unknown;
     readonly sends?: unknown;
+    readonly openedAt?: unknown;
+    readonly cursor?: unknown;
+    readonly background?: unknown;
   };
   if (typeof record.daemonId !== 'string' || !fresh(record.savedAt, now, maxAgeMs)) return null;
   if (record.kind === 'sessions') {
@@ -117,14 +151,24 @@ export const parseCacheRecord = (value: unknown, now: number, maxAgeMs: number):
       ? { kind: 'sessions', daemonId: record.daemonId, savedAt: record.savedAt, sessions: sessions.data }
       : null;
   }
-  if (record.kind === 'transcript' && typeof record.log === 'string' && Array.isArray(record.sends))
+  if (record.kind === 'transcript' && typeof record.log === 'string' && Array.isArray(record.sends)) {
+    const openedAt = isTime(record.openedAt)
+      ? record.openedAt
+      : record.background === true
+        ? undefined
+        : record.savedAt;
     return {
       kind: 'transcript',
       daemonId: record.daemonId,
       savedAt: record.savedAt,
       log: record.log,
       sends: record.sends,
+      ...(openedAt === undefined ? { background: true as const } : { openedAt }),
+      ...(typeof record.cursor === 'number' && Number.isSafeInteger(record.cursor) && record.cursor >= 0
+        ? { cursor: record.cursor }
+        : {}),
     };
+  }
   return null;
 };
 
@@ -141,10 +185,12 @@ export class SessionCache {
   /** Keys known to be absent from storage, so a miss is asked once per document, not per render. */
   readonly #absent = new Set<string>();
   readonly #generations = new Map<DaemonId, number>();
+  /** When each transcript in this document was last opened, by storage key: the "recently opened" ranking. */
+  readonly #opened = new Map<string, number>();
   /** Bumped by a whole clear: every machine's generation moves with it. */
   #epoch = 0;
-  /** Every transcript key in storage with when it was saved, read once, for the size bound. */
-  #transcripts: Promise<Map<string, number>> | null = null;
+  /** Every transcript key in storage with when it was saved and opened, read once, for the size bounds. */
+  #transcripts: Promise<Map<string, TranscriptStamp>> | null = null;
   /** Writes in order, so a clear is never overtaken by a write issued before it. */
   #queue: Promise<void> = Promise.resolve();
 
@@ -182,11 +228,96 @@ export class SessionCache {
     return record?.kind === 'transcript' ? record : null;
   }
 
-  /** Keeps the tail of a session's log and its newest send rows. An unchanged log writes nothing. */
+  /**
+   * Keeps the tail of a session's log and its newest send rows, for a chat the reader has open: that
+   * counts as opening it. An unchanged log writes nothing. The cursor is dropped, because an open chat
+   * cannot say which journal position its log was read at.
+   */
   saveTranscript(
     scope: DaemonSessionScope,
     read: { readonly log?: string; readonly sends?: readonly unknown[] },
     generation: number,
+  ): void {
+    this.#saveTranscript(scope, read, generation, { opened: true, cursor: undefined });
+  }
+
+  /**
+   * Keeps what the background read for a session nobody has open. It never counts as opening: a session
+   * the reader never visited cannot push one they did visit out of the opened set. `cursor` is the
+   * journal position captured BEFORE the read started, so a log newer than its cursor only costs one
+   * more read, never a stale "current".
+   */
+  saveBackgroundTranscript(
+    scope: DaemonSessionScope,
+    read: { readonly log: string; readonly sends?: readonly unknown[] },
+    cursor: number | undefined,
+    generation: number,
+  ): void {
+    this.#saveTranscript(scope, read, generation, { opened: false, cursor });
+  }
+
+  /** Marks a chat opened now, so it ranks among the most recently opened. A session never saved is not made. */
+  markOpened(scope: DaemonSessionScope): void {
+    const key = transcriptKey(scope);
+    const before = this.#memory.get(key);
+    if (before?.kind !== 'transcript') return;
+    const { background: _background, ...kept } = before;
+    const record: TranscriptRecord = { ...kept, openedAt: this.#now() };
+    this.#store(key, record);
+    this.#enqueue(async backend => {
+      (await this.#transcriptIndex(backend)).set(key, stamp(record));
+    });
+  }
+
+  /**
+   * Whether this session is among the {@link SessionCacheLimits.transcripts} most recently opened. Answered
+   * from memory, so it is only as complete as what this document has read: `warm` loads the rest.
+   */
+  isRecentlyOpened(scope: DaemonSessionScope): boolean {
+    const mine = this.#opened.get(transcriptKey(scope));
+    if (mine === undefined) return false;
+    let newer = 0;
+    for (const openedAt of this.#opened.values()) if (openedAt > mine) newer += 1;
+    return newer < this.#limits.transcripts;
+  }
+
+  /** Reads which sessions were opened, once, from storage — so `isRecentlyOpened` is right after a reload. */
+  async warm(): Promise<void> {
+    const backend = this.#backend;
+    if (backend === null) return;
+    const generation = this.#epoch;
+    const known = await this.#queue.then(async () => await this.#transcriptIndex(backend)).catch(() => undefined);
+    if (known === undefined || generation !== this.#epoch) return;
+    for (const [key, { openedAt }] of known)
+      if (openedAt !== undefined && !this.#opened.has(key)) this.#opened.set(key, openedAt);
+  }
+
+  /**
+   * Drops transcripts the background kept for sessions no longer wanted, so the background class tracks
+   * what is interactive now and not what once was.
+   */
+  retainBackground(wanted: ReadonlySet<string>): void {
+    this.#enqueue(async backend => {
+      const known = await this.#transcriptIndex(backend);
+      for (const [key, { openedAt }] of [...known]) {
+        if (openedAt !== undefined || wanted.has(key)) continue;
+        known.delete(key);
+        this.#memory.delete(key);
+        await backend.delete(key);
+      }
+    });
+  }
+
+  /** The storage key a scope's transcript is kept under: what `retainBackground` is given. */
+  keyOf(scope: DaemonSessionScope): string {
+    return transcriptKey(scope);
+  }
+
+  #saveTranscript(
+    scope: DaemonSessionScope,
+    read: { readonly log?: string; readonly sends?: readonly unknown[] },
+    generation: number,
+    how: { readonly opened: boolean; readonly cursor: number | undefined },
   ): void {
     if (generation !== this.generation(scope.daemonId)) return;
     const key = transcriptKey(scope);
@@ -194,21 +325,55 @@ export class SessionCache {
     const before = previous?.kind === 'transcript' ? previous : undefined;
     const log = read.log === undefined ? (before?.log ?? '') : logTail(read.log, this.#limits.transcriptChars);
     const sends = read.sends === undefined ? (before?.sends ?? []) : read.sends.slice(-this.#limits.sends);
-    if (before !== undefined && before.log === log && JSON.stringify(before.sends) === JSON.stringify(sends)) return;
+    const cursor = read.log === undefined && how.opened ? before?.cursor : how.cursor;
+    if (
+      before !== undefined &&
+      before.log === log &&
+      before.cursor === cursor &&
+      JSON.stringify(before.sends) === JSON.stringify(sends) &&
+      (!how.opened || before.openedAt !== undefined)
+    ) {
+      if (how.opened) this.#opened.set(key, before.openedAt ?? this.#now());
+      return;
+    }
     const savedAt = this.#now();
-    this.#store(key, { kind: 'transcript', daemonId: scope.daemonId, savedAt, log, sends });
+    const openedAt = how.opened ? savedAt : before?.openedAt;
+    const record: TranscriptRecord = {
+      kind: 'transcript',
+      daemonId: scope.daemonId,
+      savedAt,
+      log,
+      sends,
+      ...(openedAt === undefined ? { background: true as const } : { openedAt }),
+      ...(cursor === undefined ? {} : { cursor }),
+    };
+    if (openedAt !== undefined) this.#opened.set(key, openedAt);
+    this.#store(key, record);
     this.#enqueue(async backend => {
       const known = await this.#transcriptIndex(backend);
-      known.set(key, savedAt);
-      const excess = [...known]
-        .sort((a, b) => a[1] - b[1])
-        .slice(0, Math.max(0, known.size - this.#limits.transcripts));
-      for (const [gone] of excess) {
+      known.set(key, stamp(record));
+      for (const gone of this.#excess(known)) {
         known.delete(gone);
         this.#memory.delete(gone);
+        this.#opened.delete(gone);
         await backend.delete(gone);
       }
     });
+  }
+
+  /** Keys over either bound: the least recently opened past `transcripts`, the oldest background past `background`. */
+  #excess(known: ReadonlyMap<string, TranscriptStamp>): readonly string[] {
+    const opened = [...known].filter(([, entry]) => entry.openedAt !== undefined);
+    const background = [...known].filter(([, entry]) => entry.openedAt === undefined);
+    const dropOldest = (entries: typeof opened, keep: number, time: (entry: TranscriptStamp) => number): string[] =>
+      entries
+        .sort((a, b) => time(a[1]) - time(b[1]))
+        .slice(0, Math.max(0, entries.length - keep))
+        .map(([key]) => key);
+    return [
+      ...dropOldest(opened, this.#limits.transcripts, entry => entry.openedAt ?? 0),
+      ...dropOldest(background, this.#limits.background, entry => entry.savedAt),
+    ];
   }
 
   /** Forgets one machine: its list and every transcript, in memory and in storage. */
@@ -218,6 +383,7 @@ export class SessionCache {
     for (const [key, record] of this.#memory) {
       if (record.daemonId !== daemonId) continue;
       this.#memory.delete(key);
+      this.#opened.delete(key);
       had = true;
     }
     this.#absent.clear();
@@ -237,6 +403,7 @@ export class SessionCache {
   async clearAll(): Promise<void> {
     this.#epoch += 1;
     this.#memory.clear();
+    this.#opened.clear();
     this.#absent.clear();
     this.#transcripts = Promise.resolve(new Map());
     this.#enqueue(async backend => await backend.clear());
@@ -275,16 +442,16 @@ export class SessionCache {
     this.#queue = this.#queue.then(async () => await write(backend)).catch(() => undefined);
   }
 
-  #transcriptIndex(backend: SessionCacheBackend): Promise<Map<string, number>> {
+  #transcriptIndex(backend: SessionCacheBackend): Promise<Map<string, TranscriptStamp>> {
     this.#transcripts ??= (async () => {
-      const known = new Map<string, number>();
+      const known = new Map<string, TranscriptStamp>();
       for (const key of await backend.keys()) {
         const record = parseCacheRecord(await backend.get(key), this.#now(), this.#limits.maxAgeMs);
         if (record === null) await backend.delete(key);
-        else if (record.kind === 'transcript') known.set(key, record.savedAt);
+        else if (record.kind === 'transcript') known.set(key, stamp(record));
       }
       return known;
-    })().catch(() => new Map<string, number>());
+    })().catch(() => new Map<string, TranscriptStamp>());
     return this.#transcripts;
   }
 }

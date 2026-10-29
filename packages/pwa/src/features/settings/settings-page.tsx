@@ -44,6 +44,7 @@ import type { SecretClientFactory } from '../secrets/secrets-surface.tsx';
 import type { WardenClientFactory } from '../warden/warden-config-card.tsx';
 import type { PairingClientFactory } from './add-device-settings.tsx';
 import { ClearCachedDataSetting } from './clear-cached-data.tsx';
+import { KeepChatsFreshSetting } from './keep-chats-fresh.tsx';
 import { ComposerEnterKeySettings } from './composer-enter-key-settings.tsx';
 import { ComposerSuggestionsSettings } from './composer-suggestions-settings.tsx';
 import { MotionSetting, OpenLinksInSetting, SessionsListSetting } from './conversation-settings.tsx';
@@ -522,6 +523,9 @@ export function SettingsPage({
         <p role="status" className="m-0 text-cell leading-base text-muted">
           The connection choice is unavailable until this page is composed with this device’s preferences.
         </p>
+      ),
+      'keep-chats-fresh': (
+        <KeepChatsFreshSetting device={device} onChange={patch => controls.setDeviceControls(patch)} />
       ),
       'clear-cached-data': (
         <ClearCachedDataSetting {...(onClearCachedData === undefined ? {} : { onClear: onClearCachedData })} />
