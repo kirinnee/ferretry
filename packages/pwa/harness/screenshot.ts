@@ -34,6 +34,7 @@
  *   bun harness/screenshot.ts --mcp-sign-in-only   # an MCP server's sign-in, its sheet and the callback page
  *   bun harness/screenshot.ts --context-tools-only [--light]   # Info › Context › MCP and Skills, and Components' MCP rows
  *   bun harness/screenshot.ts --pair-from-menu-only [--light]   # Pair a phone from the machine menu
+ *   bun harness/screenshot.ts --whats-new-only [--light]   # What's new: the release list, then older versions
  *   bun harness/screenshot.ts --session-context-menu-only [--light]   # right-click menu / long-press sheet on a session row
  *   bun harness/screenshot.ts --about-only [--light]   # Settings › Machine › About and its update states
  *   bun harness/screenshot.ts --agent-clis-only [--light]   # Settings › Machine › Agent CLIs, every install method
@@ -101,6 +102,8 @@ const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
 const CONTEXT_TOOLS_ONLY = process.argv.includes('--context-tools-only');
 /** "Pair a phone" from the machine menu: the switcher, the sheet and the minted (fake) QR. */
 const PAIR_FROM_MENU_ONLY = process.argv.includes('--pair-from-menu-only');
+/** "What's new": the in-app release list as a phone sheet and a desktop dialog. */
+const WHATS_NEW_ONLY = process.argv.includes('--whats-new-only');
 /** The sessions bar's row menu: right-click at the pointer on a desktop, a long-press sheet on a phone. */
 const SESSION_CONTEXT_MENU_ONLY = process.argv.includes('--session-context-menu-only');
 /** Settings › Machine › About: an update available, the mid-turn choice, and a deb's manual steps. */
@@ -156,6 +159,7 @@ const WALKS_SETTINGS = !(
   MCP_SIGN_IN_ONLY ||
   CONTEXT_TOOLS_ONLY ||
   PAIR_FROM_MENU_ONLY ||
+  WHATS_NEW_ONLY ||
   SESSION_CONTEXT_MENU_ONLY ||
   ABOUT_ONLY ||
   AGENT_CLIS_ONLY ||
@@ -792,6 +796,39 @@ const capturePairFromMenu = async (page: Page, viewportName: string): Promise<vo
   const focusedSwitcher = await page.evaluate(() => document.activeElement?.hasAttribute('data-sbar-machine') === true);
   if (!focusedSwitcher)
     fail(`closing the pairing sheet did not return focus to the machine switcher at ${viewportName}`);
+};
+
+/**
+ * "What's new" (`?whats-new`, `harness/whats-new.tsx`): the newest releases with their "New" chips, then
+ * the older ones after "Show older versions". Fails if the chips or the grouping are not what the fixed
+ * changelog says, if a row scrolls sideways, or if the sheet is not a sheet on a phone and a dialog elsewhere.
+ */
+const captureWhatsNew = async (page: Page, viewportName: string): Promise<void> => {
+  const shot = async (name: string): Promise<void> => {
+    const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    if (wide > 1) fail(`whats-new ${name} scrolls sideways by ${wide}px at ${viewportName}`);
+    const target = join(outDir, `whats-new-${name}-${SCHEME}-${viewportName}.png`);
+    await page.screenshot({ path: target, animations: 'disabled' });
+    process.stdout.write(`📸 whats new ${name} ${SCHEME} ${viewportName} -> ${target}\n`);
+  };
+  await page.goto(`${server.url}?whats-new`);
+  const body = page.locator('[data-whats-new-body]');
+  await body.waitFor({ state: 'visible' });
+  const frame = viewportName === 'mobile' ? 'sheet' : 'dialog';
+  if ((await page.locator(`[data-whats-new="${frame}"]`).count()) !== 1)
+    fail(`what's new is not a ${frame} at ${viewportName}`);
+  const chips = await body.locator('[data-whats-new-new]').count();
+  if (chips !== 2) fail(`expected 2 "New" chips, saw ${chips} at ${viewportName}`);
+  const first = (await body.locator('h3').first().textContent())?.trim();
+  if (first !== '4.93.0') fail(`the newest release is not first: ${first ?? 'none'}`);
+  await shot('top');
+
+  await body.locator('[data-whats-new-older]').scrollIntoViewIfNeeded();
+  await shot('end');
+  await body.locator('[data-whats-new-older]').click();
+  if ((await body.locator('[data-whats-new-release]').count()) <= 12) fail('"Show older versions" showed nothing more');
+  await page.keyboard.press('Escape');
+  await body.waitFor({ state: 'detached' });
 };
 
 /**
@@ -2234,6 +2271,10 @@ try {
           }
           if (PAIR_FROM_MENU_ONLY) {
             await capturePairFromMenu(page, viewport.name);
+            continue;
+          }
+          if (WHATS_NEW_ONLY) {
+            await captureWhatsNew(page, viewport.name);
             continue;
           }
           if (SESSION_CONTEXT_MENU_ONLY) {

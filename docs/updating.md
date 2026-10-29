@@ -289,6 +289,12 @@ around either. The agent hands the person the command instead:
   is a different protocol, see `version-skew.ts`).
 - **App updated**: after the signed service worker swaps to a new release, the next load says
   "Ferretry updated to vX" once ([pwa-release-signing.md](pwa-release-signing.md)).
+- **What's new**: About opens an in-app list of the newest releases (version, date, and short grouped
+  changes with the scope as a tag), also in the command palette. It is bundled at build time from
+  `Changelog.md` ([semantic-release](standards/semantic-release/index.md#the-in-app-page)), so it needs
+  no network. A **New** chip marks versions newer than the last one this device viewed; that record is
+  per browser (`localStorage`, `fy-whats-new-viewed-v1`) and a device that has never opened the page
+  starts caught up, so only the next release is new. **Full release on GitHub** stays as a secondary link.
 
 ## Surface
 

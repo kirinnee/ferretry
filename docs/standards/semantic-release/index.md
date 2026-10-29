@@ -75,6 +75,16 @@ preset only together with a notes generator that drives function templates. The
 `release-notes-render` contract renders sample commits through the real configuration and fails if
 the notes come out empty.
 
+### The in-app page
+
+The PWA reads `Changelog.md` at build time: `vite.config.ts` stamps the newest 40 sections into
+`__FY_CHANGELOG__`, and `packages/pwa/src/lib/changelog.ts` parses them (no run-time fetch, so the
+page works offline and always matches the build). The parser depends on the format above — a
+`## [version](compare-link) (date)` heading, `###` group titles, and `* **scope:** subject ([#PR](…))
+([hash](…))` bullets — so changing the notes layout means changing that parser and its test
+(`packages/pwa/tests/unit/changelog.test.ts` parses the whole real file and fails on an unreadable
+heading).
+
 ### Rebuilding history
 
 `bun scripts/release/backfill-changelog.ts --write` re-renders every section of `Changelog.md` from the
