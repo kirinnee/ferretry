@@ -223,11 +223,11 @@ describe('a to-do item', () => {
         origin={{ ferret: 'ottilie', machine: 'workshop', href: '/x', onNavigate: () => {} }}
       />,
     );
-    expect(view.container.querySelector('[data-attention-waiting]')?.textContent).toContain('Waiting on ottilie');
+    expect(view.container.querySelector('[data-attention-waiting]')?.textContent).toContain('With ottilie');
     expect(view.container.querySelector('[data-attention-answer]')).toBeNull();
   });
 
-  test('an item in discussion says so, and stays answerable', async () => {
+  test('an item the ferret was asked to discuss says who it is with, and stays answerable', async () => {
     const item = todo({
       waitingOn: 'ferret',
       askedAt: '2026-07-31T10:42:00.000Z',
@@ -241,9 +241,7 @@ describe('a to-do item', () => {
         origin={{ ferret: 'ottilie', machine: 'workshop', href: '/x', onNavigate: () => {} }}
       />,
     );
-    expect(view.container.querySelector('[data-attention-waiting]')?.textContent).toContain(
-      'In discussion with ottilie',
-    );
+    expect(view.container.querySelector('[data-attention-waiting]')?.textContent).toContain('With ottilie');
     expect(view.container.querySelector('[data-attention-answer="right"]')).not.toBeNull();
     expect(view.container.querySelector('[data-attention-discuss]')).toBeNull();
     expect(view.container.querySelector('[data-attention-history]')?.textContent).toMatch(/^You asked to discuss /u);

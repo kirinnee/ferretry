@@ -1,8 +1,7 @@
 /* "Updated 5 min ago", the earlier-versions list and the highlight of what the last edit changed
    (attention-updated.tsx, attention-brief.tsx). Role tokens only. The highlight is a soft background that fades
    out over ten seconds; the small "new" / "changed" word stays, so nothing rests on colour or on motion. */
-.fy-attn-card__living,
-.fy-ask__living {
+.fy-attn-card__living {
   display: flex;
   min-width: 0;
   flex-wrap: wrap;
@@ -83,7 +82,6 @@
   font-size: var(--text-xs);
   font-weight: var(--weight-strong);
   line-height: var(--leading-base);
-  text-transform: uppercase;
 }
 @keyframes fy-attn-fade {
   from {
@@ -96,4 +94,12 @@
 [data-attention-changed] {
   border-radius: var(--radius-control);
   animation: fy-attn-fade 10s ease-out forwards;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-attention-changed] {
+    animation: none;
+  }
+  .fy-attn-updated__chevron {
+    transition: none;
+  }
 }
