@@ -88,6 +88,7 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
     jevDecisions: 41,
     jevSkips: 37,
     investigations: 4,
+    jevActions: 3,
     averageInvestigationUsd: 0.3,
     savedUsd: 11.07,
   },
@@ -130,6 +131,29 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
       detail:
         'Jev was 96% sure it is healthy, so this flag is left alone for 1 h — cleared 3 times in a row, so it is left alone longer each time.',
       confidence: 0.96,
+    },
+    {
+      at: at(9),
+      sessionId: 'harness-jaylynn',
+      action: 'restart',
+      outcome: 'done',
+      by: 'jev',
+      anomalyKind: 'dead_monitor',
+      detail:
+        'Restarted its process with the conversation intact; its terminal had closed after running out of memory.',
+      confidence: 0.96,
+      reason: 'The process is gone and nothing is mid-edit, so a restart loses nothing.',
+    },
+    {
+      at: at(10),
+      sessionId: 'harness-marin',
+      action: 'stop',
+      outcome: 'held',
+      by: 'jev',
+      anomalyKind: 'abandoned_wreckage',
+      detail: 'Jev recommends stopping it, but you have not let the Warden stop a ferret alone, so it waits for you.',
+      confidence: 0.99,
+      reason: 'It has repeated the same failing command for an hour with no change.',
     },
     {
       at: at(12),

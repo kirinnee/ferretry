@@ -121,7 +121,7 @@ else's is written and held. An agent never confirms.
 | Layer             | Key          | What it does to a flag                                                                   | Spends         |
 | ----------------- | ------------ | ---------------------------------------------------------------------------------------- | -------------- |
 | Rules             | — (always)   | deterministic checks raise it; shown to you in Insights › Warden › Needs you             | nothing        |
-| Jev               | `layers.jev` | Jev looks first: a confident `skip` clears it; anything else is passed on                | Jev            |
+| Jev               | `layers.jev` | Jev answers first: leaves it, acts on it alone when sure enough, or hands it on          | Jev            |
 | LLM investigation | `layers.llm` | a read-only investigation (an assigned warden), rotated across `accounts`, as kteam does | investigations |
 
 The rules always run while `enabled` is on. Jev and the LLM investigation are switched on independently, and
@@ -134,10 +134,39 @@ waiting for you is not paid for every sweep.
 layers off, `llm` is `layers.llm` alone, and `jev` is both on (Jev in front of an investigation). An explicit
 `layers:` wins over it field by field, and the next write leaves `triage` out.
 
-**Jev is only a guard.** Its whole answer is `skip` or `investigate`. A skip below `guard.threshold`
-(0.70–0.95, default 0.85) counts as investigate, and so does every failure — no key, a timeout, a refusal, an
-answer it cannot read — so an unsure or broken guard costs money or your attention and never hides a stuck
-ferret. Jev never acts on a ferret. Without a Jev key every flag is passed on.
+**Jev is the first responder.** Its answer is **leave**, one act — **nudge**, **resume**, **restart**,
+**failover**, **stop** — or **unsure**, with the reason it chose (Jev only picks among fixed options, so the
+reason is the option's own description). It is offered only the acts that fit the flag: a stuck or frozen
+ferret may be nudged, restarted or stopped, one whose quota came back resumed; a question waiting for you, a
+finished ferret or a fault of the daemon is never acted on. A nudge's words are one of a fixed set of
+specific messages ("a command you started has run a long time with no output…") that Jev picks as surely as
+the nudge itself — no message, no nudge. What happens next:
+
+| Jev says, and how sure                                 | What happens                                                              |
+| ------------------------------------------------------ | ------------------------------------------------------------------------- |
+| leave, at or above `guard.threshold` (0.70–0.95, 0.85) | the flag is cleared, exactly like an investigation's LEAVE                |
+| an act, at or above its `jevActs` bar, allowed alone   | **done at once**, through the same remedies as an investigation           |
+| an act it is sure of but you keep for yourself         | handed on; shown to you as _Jev recommends …_ if no investigation follows |
+| failover                                               | handed on — Jev cannot name the login to move to                          |
+| unsure, below the bar, or any failure                  | handed on                                                                 |
+
+**Handed on** means an investigation while `layers.llm` is on and under its cap, and otherwise **Needs you**.
+Every failure hands on — no key, a timeout, a refusal, an answer it cannot read, the Jev cap, a provider
+back-off, an act that did not take — so an unsure or broken Jev costs money or your attention and never acts on
+noise or hides a stuck ferret. An investigation that fails leaves the flag standing in Needs you. Without a Jev
+key every flag is handed on.
+
+**How sure Jev must be to act alone** is `jevActs`, one bar per act, from 0.80 to 1 — riskier acts higher by
+default: `nudge` 0.90, `resume` 0.93, `restart` 0.95, `stop` 0.98. **`1` means Jev never does that act
+alone.** A bar is only half the permission: the matching `mayActAlone` must be on too, and `stop` is off by
+default, so out of the box a confident stop is a recommendation, not an act. Lowering a bar lets Jev act on
+less certainty, so an edit that lowers one is held until you confirm it, like any loosening.
+
+**One try per situation.** Jev acts on a flag's **subject** (see below — this episode, or this stuck command)
+once. The act is given the first rung of the backoff (`assignedCooldownMinutes`, at least 10 minutes) to land,
+and meanwhile the flag is not shown to you or looked at. If the same subject is still flagged after that, Jev is
+not asked again: it goes to an investigation, or to you. A new subject is a new situation, and Jev may act on
+it.
 
 **What leaves the machine.** With Jev on, a short summary of the flagged ferret — the anomaly, the sweep's
 one sentence, its recent transcript lines and the tail of its screen — is sent to TypeSafe AI (Jev). Every
@@ -146,15 +175,16 @@ cannot be redacted is never sent (that flag is passed on instead). The Jev key i
 through the outbound holder ([docs/secrets.md](secrets.md)); `guard.endpoint` cannot move it to another host.
 Investigations run on your own login and read the transcript, pane, diffs and CI. The rules send nothing.
 
-**Only an investigation acts on a ferret.** Its explicit `Verdict:` line is what acts — never prose — and only
-as far as `mayActAlone` allows: `nudge`, `resume`, `restart` and `failover` default on, **`stop` defaults off**.
+**What may act on a ferret: an investigation, and Jev when it is sure enough.** An investigation's explicit
+`Verdict:` line is what acts — never prose — and, like Jev, only as far as `mayActAlone` allows: `nudge`,
+`resume`, `restart` and `failover` default on, **`stop` defaults off**.
 (The one rule that acts without an investigation, `closeLeftovers`, closes a leftover browser and never
 touches the ferret — see below.)
 `restart` relaunches a dead or frozen process with its conversation intact — the resume path, replacing a
 pane that still looks alive — when the report recommends `RESTART`; a file that names `resume` but not
 `restart` gives `restart` the same answer. An act it may not
-do alone is held and listed under Needs you for you to decide. Every act and every Jev skip is listed under
-Recent actions with who decided it.
+do alone is held and listed under Needs you for you to decide. Every act, every hold and every Jev leave is
+listed under Recent actions and in the journal with who decided it — Jev's with how sure it was and why.
 
 **Which login investigates.** `accounts` is the order of logins, head first, and `failover.policy` says how
 they share the work: `fallback` uses the first and moves on only when it is unhealthy, `round_robin` takes
@@ -175,8 +205,9 @@ Jev cap hit, flags go straight to an investigation; with the investigation cap h
 can and the rest wait for you — and the Warden page says so. Jev is priced at
 `guard.usdPerMillionInputTokens` (published prices disagree, so it is a setting). An investigation is
 priced from its own transcript once analytics has read it; until then it counts at the average priced
-investigation, for the cap only. The status's savings line — skips × that average, minus Jev's own cost —
-appears only once an investigation has been priced.
+investigation, for the cap only. The status's savings line — (Jev's leaves + the acts it did alone) × that
+average, minus Jev's own cost — appears only once an investigation has been priced. The caps are unchanged by
+Jev acting: an act costs the one Jev answer it came from.
 
 **A cleared flag stays quiet until its situation changes.** Every flag on a ferret carries a **subject** —
 which episode of trouble it is: its turn and the moment the episode began (the transcript last grew, the
@@ -251,6 +282,7 @@ extra sweep a minute.
 enabled: true
 layers: { jev: true, llm: true }
 guard: { threshold: 0.85 }
+jevActs: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 }
 caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2 }
 mayActAlone: { stop: false }
 investigation: { effort: low }

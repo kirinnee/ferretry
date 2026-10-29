@@ -96,6 +96,8 @@ const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
 const ATTENTION_ONLY = process.argv.includes('--attention-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
+/** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent actions, nothing else. */
+const WARDEN_ONLY = process.argv.includes('--warden-only');
 /** Signing in to a remote MCP server: the Components tab's Sign-in section, its sheet, and the callback page. */
 const MCP_SIGN_IN_ONLY = process.argv.includes('--mcp-sign-in-only');
 /** Info › Context's MCP and Skills sub-tabs (every scope, Check, Sign in, Open), and the Components MCP rows. */
@@ -155,6 +157,7 @@ const WALKS_SETTINGS = !(
   FILES_ONLY ||
   TASK_BOARD_ONLY ||
   PROJECTS_ONLY ||
+  WARDEN_ONLY ||
   PAIRING_FAILURES_ONLY ||
   MCP_SIGN_IN_ONLY ||
   CONTEXT_TOOLS_ONLY ||
@@ -2251,6 +2254,21 @@ try {
             process.stdout.write(
               `📸 attention panel ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`,
             );
+            continue;
+          }
+          if (WARDEN_ONLY) {
+            // The settings card that carries Jev's per-act bars, then the page whose Recent actions show Jev's own.
+            const settings = page.locator('[data-testid="warden-config-card"]:has([data-warden-jev-act])').first();
+            await settings.waitFor({ state: 'attached' });
+            await settings.scrollIntoViewIfNeeded();
+            const settingsTarget = join(outDir, `warden-settings-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, settings, settingsTarget);
+            process.stdout.write(`📸 Warden settings ${viewport.name} -> ${settingsTarget}\n`);
+            const overview = page.locator('[data-harness="warden-overview"]');
+            await overview.scrollIntoViewIfNeeded();
+            const pageTarget = join(outDir, `warden-page-${SCHEME}-${viewport.name}.png`);
+            await captureElement(page, overview, pageTarget);
+            process.stdout.write(`📸 Warden page ${viewport.name} -> ${pageTarget}\n`);
             continue;
           }
           if (FILES_ONLY) {
