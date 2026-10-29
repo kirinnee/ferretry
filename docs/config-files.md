@@ -233,7 +233,7 @@ day before most of it has happened. A layer that reaches its share is off until 
 the status lists it in `spend.capsPaced` with `pacedUntil`, and the Warden page says _Jev paused until 07:00 UTC — new flags go to a full check_
 rather than _until midnight_. An investigation it holds back is queued, never dropped; a flag Jev is not
 asked about is passed on as it would be with the cap hit. Jev is priced at
-`guard.usdPerMillionInputTokens` (published prices disagree, so it is a setting). An investigation is
+`guard.usdPerMillionInputTokens` (default **$0.042** per million input tokens, output free, per docs.typesafe.ai/models.md as of 2026-10-29; a setting because the price can change). An investigation is
 priced from its own transcript once analytics has read it; until then it counts at the average priced
 investigation, for the cap only. The status's savings line — (Jev's leaves + the acts it did alone) × that
 average, minus Jev's own cost — appears only once an investigation has been priced. The caps are unchanged by
