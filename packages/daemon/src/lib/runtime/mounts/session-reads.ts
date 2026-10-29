@@ -6,7 +6,7 @@ import { OperatorReadError, type OperatorReadFailure, type OperatorReadService }
 import {
   TranscriptImageError,
   type TranscriptImageFailure,
-  type TranscriptImageReader,
+  type TranscriptImages,
 } from '../../session/transcript/image-reader.ts';
 import type { SessionDirectorySubsystem } from './sessions.ts';
 
@@ -212,7 +212,7 @@ const IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
 /**
  * One image of the session's transcript, named by a handle the log carried as a marker.
  *
- * THE HANDLE IS PROVED, NEVER TRUSTED (see `TranscriptImageReader`). It reads the same transcript at
+ * THE HANDLE IS PROVED, NEVER TRUSTED (see `TranscriptImageReader`, behind the `TranscriptImages` port). It reads the same transcript at
  * the same minimum as `logs`, so it widens nothing: whoever may read the text may read the picture.
  *
  * CACHEABLE, unlike `logs`: a handle names bytes of an append-only file, so `private` and `immutable`
@@ -221,7 +221,7 @@ const IMAGE_CACHE_CONTROL = 'private, max-age=31536000, immutable';
  * a `304` still costs a `stat` and a memory lookup, never a read of the image.
  */
 async function transcriptImage(
-  images: TranscriptImageReader,
+  images: TranscriptImages,
   sessions: SessionDirectorySubsystem,
   context: RouteContext,
 ): Promise<ApiResponse> {
@@ -261,7 +261,7 @@ async function transcriptImage(
 export function sessionReadRoutes(
   reads: OperatorReadService,
   sessions: SessionDirectorySubsystem,
-  images: TranscriptImageReader,
+  images: TranscriptImages,
 ): readonly ApiRoute[] {
   return [
     {

@@ -1,11 +1,8 @@
 import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
-import {
-  isOwnerMessage,
-  type TranscriptEvent,
-  type TranscriptHarness,
-  type PacedTranscriptParser,
-} from '../transcript/index.ts';
+import { isOwnerMessage } from '../transcript/owner.ts';
+import type { PacedTranscriptParser } from '../transcript/sliced.ts';
+import type { TranscriptEvent, TranscriptHarness } from '../transcript/types.ts';
 import { spokenText } from './conversation-text.ts';
 
 /** A filesystem entry deliberately narrowed to what read-only discovery needs. */
@@ -64,9 +61,21 @@ export interface ImportedConversationDetail extends ImportedConversation {
   readonly events: readonly TranscriptEvent[];
 }
 
-interface Candidate {
+/** One transcript file a listing or a detail reads: which harness wrote it, and where. Plain data. */
+export interface ForeignHistoryCandidate {
   readonly harness: TranscriptHarness;
   readonly source: string;
+}
+
+/** A foreign transcript read: its row and events, or why it was skipped. */
+export type ForeignTranscriptRead =
+  | { readonly conversation: ImportedConversation; readonly events: readonly TranscriptEvent[] }
+  | { readonly reason: string };
+
+/** Reads and describes one foreign transcript; where its parse runs is the adapter's choice. */
+export interface ForeignTranscriptReader {
+  /** `events` is `[]` unless `withEvents` (a listing needs only the row). */
+  read(candidate: ForeignHistoryCandidate, withEvents: boolean): Promise<ForeignTranscriptRead>;
 }
 
 function idFor(harness: TranscriptHarness, source: string): string {
@@ -107,64 +116,20 @@ async function jsonlBelow(files: ForeignHistoryFiles, root: string): Promise<rea
 }
 
 /**
- * Read-only index over a person's pre-Ferretry Claude/Codex homes.
+ * READS ONE FOREIGN TRANSCRIPT FROM FILES: the size gate, the whole-file parse and the row it describes.
  *
- * Nothing is copied or persisted: the source stays authoritative, which avoids making a stale copy
- * look resumable and ensures this daemon never touches another daemon's state. Each request builds
- * a fresh index, so a repaired harness file is visible without a background writer.
+ * This is what a listing does per file, and it is what the transcript parse worker runs, so the answer
+ * is the same wherever it is computed. A damaged, oversized or message-less file is a reason, never a
+ * shorter conversation.
  */
-export class ForeignHistoryImporter {
+export class FileForeignTranscriptReader implements ForeignTranscriptReader {
   constructor(
     private readonly files: ForeignHistoryFiles,
-    private readonly roots: ForeignHistoryRoots,
     /** Paced, because a listing parses every file up to 32 MiB whole and would hold the loop through each. */
     private readonly parsers: Readonly<Record<TranscriptHarness, PacedTranscriptParser>>,
   ) {}
 
-  async list(): Promise<ForeignHistoryListing> {
-    const candidates: Candidate[] = [
-      ...(await jsonlBelow(this.files, this.roots.claudeProjects)).map(source => ({
-        harness: 'claude' as const,
-        source,
-      })),
-      ...(await jsonlBelow(this.files, this.roots.codexSessions)).map(source => ({
-        harness: 'codex' as const,
-        source,
-      })),
-    ];
-    const conversations: ImportedConversation[] = [];
-    const skipped: SkippedForeignTranscript[] = [];
-    for (const candidate of candidates) {
-      const detail = await this.readCandidate(candidate);
-      if ('reason' in detail) skipped.push({ ...candidate, reason: detail.reason });
-      else conversations.push(detail.conversation);
-    }
-    return { conversations, skipped };
-  }
-
-  async get(id: string): Promise<ImportedConversationDetail | undefined> {
-    const candidates: Candidate[] = [
-      ...(await jsonlBelow(this.files, this.roots.claudeProjects)).map(source => ({
-        harness: 'claude' as const,
-        source,
-      })),
-      ...(await jsonlBelow(this.files, this.roots.codexSessions)).map(source => ({
-        harness: 'codex' as const,
-        source,
-      })),
-    ];
-    const candidate = candidates.find(item => idFor(item.harness, item.source) === id);
-    if (candidate === undefined) return undefined;
-    const detail = await this.readCandidate(candidate);
-    return 'reason' in detail ? undefined : { ...detail.conversation, events: detail.events };
-  }
-
-  private async readCandidate(
-    candidate: Candidate,
-  ): Promise<
-    | { readonly conversation: ImportedConversation; readonly events: readonly TranscriptEvent[] }
-    | { readonly reason: string }
-  > {
+  async read(candidate: ForeignHistoryCandidate, withEvents: boolean): Promise<ForeignTranscriptRead> {
     const size = await this.files.size(candidate.source);
     if (size !== undefined && size > FOREIGN_HISTORY_READ_MAX_BYTES)
       return {
@@ -195,6 +160,60 @@ export class ForeignHistoryImporter {
       ...(startedAt(events) === undefined ? {} : { startedAt: startedAt(events) }),
       readOnly: true,
     };
-    return { conversation, events };
+    return { conversation, events: withEvents ? events : [] };
+  }
+}
+
+/**
+ * Read-only index over a person's pre-Ferretry Claude/Codex homes.
+ *
+ * Nothing is copied or persisted: the source stays authoritative, which avoids making a stale copy
+ * look resumable and ensures this daemon never touches another daemon's state. Each request builds
+ * a fresh index, so a repaired harness file is visible without a background writer.
+ */
+export class ForeignHistoryImporter {
+  constructor(
+    private readonly files: ForeignHistoryFiles,
+    private readonly roots: ForeignHistoryRoots,
+    /** Reads each file: on this thread, or wherever the adapter parses. */
+    private readonly reader: ForeignTranscriptReader,
+  ) {}
+
+  async list(): Promise<ForeignHistoryListing> {
+    const candidates: ForeignHistoryCandidate[] = [
+      ...(await jsonlBelow(this.files, this.roots.claudeProjects)).map(source => ({
+        harness: 'claude' as const,
+        source,
+      })),
+      ...(await jsonlBelow(this.files, this.roots.codexSessions)).map(source => ({
+        harness: 'codex' as const,
+        source,
+      })),
+    ];
+    const conversations: ImportedConversation[] = [];
+    const skipped: SkippedForeignTranscript[] = [];
+    for (const candidate of candidates) {
+      const detail = await this.reader.read(candidate, false);
+      if ('reason' in detail) skipped.push({ ...candidate, reason: detail.reason });
+      else conversations.push(detail.conversation);
+    }
+    return { conversations, skipped };
+  }
+
+  async get(id: string): Promise<ImportedConversationDetail | undefined> {
+    const candidates: ForeignHistoryCandidate[] = [
+      ...(await jsonlBelow(this.files, this.roots.claudeProjects)).map(source => ({
+        harness: 'claude' as const,
+        source,
+      })),
+      ...(await jsonlBelow(this.files, this.roots.codexSessions)).map(source => ({
+        harness: 'codex' as const,
+        source,
+      })),
+    ];
+    const candidate = candidates.find(item => idFor(item.harness, item.source) === id);
+    if (candidate === undefined) return undefined;
+    const detail = await this.reader.read(candidate, true);
+    return 'reason' in detail ? undefined : { ...detail.conversation, events: detail.events };
   }
 }

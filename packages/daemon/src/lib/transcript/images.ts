@@ -20,7 +20,7 @@ import {
   MAX_TRANSCRIPT_IMAGE_RECORD_BYTES,
   type TranscriptImageHandle,
   type TranscriptImageMediaType,
-} from '@ferretry/protocol';
+} from '@ferretry/protocol/transcript-images';
 import type { TranscriptBytesRef, TranscriptEvent, TranscriptJsonValue } from './types.ts';
 
 /** One image an event holds: where its base64 is, and what the transcript CLAIMED it is. */

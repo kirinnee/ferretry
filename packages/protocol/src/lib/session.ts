@@ -8,7 +8,7 @@ import {
   PositiveIntegerSchema,
 } from './common.ts';
 import { ProviderQuotaBalanceSchema } from './fleet-credentials.ts';
-import { HarnessSchema } from './session-base.ts';
+import { HarnessSchema, SessionStatusSchema } from './session-base.ts';
 import { HarnessDialogSchema } from './session-dialog.ts';
 import { SessionLiveActivitySchema, SessionTranscriptMovedSchema } from './session-live.ts';
 import { PermissionRequestSchema } from './session-permission.ts';
@@ -349,25 +349,9 @@ export type RuntimeControlRequest = z.infer<typeof RuntimeControlRequestSchema>;
 export const SessionTurnStateSchema = z.enum(['working', 'your-turn', 'needs-input']);
 export type SessionTurnState = z.infer<typeof SessionTurnStateSchema>;
 
-export const SessionStatusSchema = z.enum([
-  'created',
-  'starting',
-  'running',
-  'thinking',
-  'tool_running',
-  'awaiting_question',
-  'awaiting_user',
-  'interrupted',
-  'rate_limited',
-  'retrying',
-  'kill_failed',
-  'waiting',
-  'completed',
-  'failed',
-  'stalled',
-  'stopped',
-]);
-export type SessionStatus = z.infer<typeof SessionStatusSchema>;
+// Defined in session-base.ts, so a module that needs only the status vocabulary (the conversation import
+// rows) does not load every schema this file holds; re-exported here, where it has always been found.
+export { type SessionStatus, SessionStatusSchema } from './session-base.ts';
 
 export const PendingQuestionOptionSchema = z.object({
   label: z.string().min(1),

@@ -126,6 +126,17 @@ export class BundledWorkerHost<Request, Response, Value> {
     });
   }
 
+  /**
+   * Posts `message` — one nobody waits an answer to — to the thread if one is running, and never starts
+   * one: news for a thread that is gone has no one to hear it. A thread that is left with nothing to do
+   * is (re)timed for its idle end, because what kept it may be exactly what this message ends.
+   */
+  notify(message: Request): void {
+    if (this.#worker === undefined) return;
+    this.#worker.postMessage(message);
+    if (this.#pending.size === 0) this.#armIdle();
+  }
+
   /** Ends the thread and refuses every request still waiting on it. */
   close(): void {
     this.#discard(new Error(`${this.#options.label} was closed`));
@@ -165,12 +176,13 @@ export class BundledWorkerHost<Request, Response, Value> {
     clearTimeout(pending.timeout);
     if (answer.ok) pending.resolve(answer.value);
     else pending.reject(answer.error);
-    if (this.#pending.size === 0) {
-      this.#idle = setTimeout(
-        () => this.#discard(new Error(`${this.#options.label} was ended`)),
-        this.#options.idleMs(),
-      );
-    }
+    if (this.#pending.size === 0) this.#armIdle();
+  }
+
+  /** The thread has nothing to do: it ends after the idle time read now. */
+  #armIdle(): void {
+    if (this.#idle !== undefined) clearTimeout(this.#idle);
+    this.#idle = setTimeout(() => this.#discard(new Error(`${this.#options.label} was ended`)), this.#options.idleMs());
   }
 
   /** A thread that errored or stalled: ended, its requests refused, and the next start backed off. */

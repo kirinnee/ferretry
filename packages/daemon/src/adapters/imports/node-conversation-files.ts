@@ -1,51 +1,17 @@
-import { link, mkdir, readdir, realpath, stat } from 'node:fs/promises';
+import { link, mkdir, realpath, stat } from 'node:fs/promises';
 import { dirname, join, sep } from 'node:path';
-import { HarnessSchema } from '@ferretry/protocol';
+import { HarnessSchema } from '@ferretry/protocol/session-base';
+// The modules these come from, not the `lib` barrel: importing the barrel loaded the whole daemon, ~200 MB.
 import {
-  type ConversationFileEntry,
-  type ConversationFileInfo,
-  type ConversationFiles,
   type ConversationLinker,
   type ConversationLinkOutcome,
-  type ConversationOwners,
-  conversationKey,
   conversationLinkFailure,
-} from '../../lib/index.ts';
+} from '../../lib/imports/conversation-adoption.ts';
+import { type ConversationOwners, conversationKey } from '../../lib/imports/conversations.ts';
 import { storedTranscriptProvenance } from '../session/transcript/storage-transcript-provenance.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
 
-/** The read-only file port conversation discovery uses. A link is never followed. */
-export class NodeConversationFiles implements ConversationFiles {
-  async entries(directory: string): Promise<readonly ConversationFileEntry[]> {
-    const entries = await readdir(directory, { withFileTypes: true }).catch(() => []);
-    return entries.map(entry => ({
-      name: entry.name,
-      kind: entry.isDirectory() ? 'directory' : entry.isFile() ? 'file' : 'other',
-    }));
-  }
-
-  async info(file: string): Promise<ConversationFileInfo | undefined> {
-    const details = await stat(file).catch(() => undefined);
-    return details?.isFile() === true ? { modifiedAtMs: details.mtimeMs, size: details.size } : undefined;
-  }
-
-  async tail(file: string, maxBytes: number): Promise<string | undefined> {
-    const details = await this.info(file);
-    if (details === undefined) return undefined;
-    return await Bun.file(file)
-      .slice(Math.max(0, details.size - maxBytes), details.size)
-      .text()
-      .catch(() => undefined);
-  }
-
-  async head(file: string, maxBytes: number): Promise<string | undefined> {
-    if ((await this.info(file)) === undefined) return undefined;
-    return await Bun.file(file)
-      .slice(0, maxBytes)
-      .text()
-      .catch(() => undefined);
-  }
-}
+export { NodeConversationFiles } from './node-conversation-file-reader.ts';
 
 const errorCode = (error: unknown): string | undefined =>
   typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : undefined;

@@ -3,11 +3,10 @@ import {
   CONVERSATION_EXCHANGE_COUNT,
   CONVERSATION_EXCHANGE_TEXT_MAX,
   type ConversationExchangeMessage,
-  parseHandoffPointer,
-  parseMessageAttachments,
-  readHandoffDocument,
-} from '@ferretry/protocol';
-import { isOwnerMessage, type TranscriptEvent } from '../transcript/index.ts';
+} from '@ferretry/protocol/conversation-import';
+import { parseHandoffPointer, parseMessageAttachments, readHandoffDocument } from '@ferretry/protocol/turn-handoff';
+import { isOwnerMessage } from '../transcript/owner.ts';
+import type { TranscriptEvent } from '../transcript/types.ts';
 
 /**
  * What the OWNER said in a conversation, read back out of a transcript that also records how it was
