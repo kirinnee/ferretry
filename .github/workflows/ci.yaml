@@ -452,6 +452,9 @@ jobs:
       - uses: ./.github/actions/install-nix
       - name: Cross-compile standalone binaries
         run: nix develop .#ci -c ./scripts/release/compile.sh
+      # The manifest every consumer holds its download to (.github/actions/download-binaries).
+      - name: List the binaries
+        run: ./scripts/ci/binaries-manifest.sh write dist/bin
       - name: Upload binaries
         uses: actions/upload-artifact@v4
         with:
@@ -471,10 +474,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/install-nix
       - name: Download compiled binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: cli-binaries
-          path: dist/bin
+        uses: ./.github/actions/download-binaries
       - name: Run SIT
         run: nix develop .#ci -c ./scripts/ci/test.sh sit
 
@@ -499,10 +499,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Download compiled binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: cli-binaries
-          path: dist/bin
+        uses: ./.github/actions/download-binaries
       # The smoke starts a real session, and a session lives in a tmux pane. Not every runner
       # image ships tmux (macOS never does), so install it where it is missing.
       - name: Install tmux
