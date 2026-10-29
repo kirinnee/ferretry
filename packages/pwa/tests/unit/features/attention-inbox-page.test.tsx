@@ -202,6 +202,39 @@ describe('AttentionInboxPage sections', () => {
     await mounted.unmount();
   });
 
+  it('separates the ferret, its task and its machine with real dots, never a collapsed space', async () => {
+    const mounted = await mount(page(fakeInbox(), [twoWay]));
+    const head = must(mounted.container.querySelector('.fy-inbox-group__head'), 'the group head');
+    const dots = [...head.querySelectorAll('.fy-inbox-group__dot')];
+    expect(dots.length).toBeGreaterThanOrEqual(1);
+    expect(dots.every(dot => dot.textContent === '·' && dot.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(head.querySelector('.fy-inbox-group__machine')?.textContent).not.toContain('·');
+    await mounted.unmount();
+  });
+
+  it('puts the chevron after the With ferrets title and count', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, withFerret]));
+    const toggle = must(
+      mounted.container.querySelector('[data-attention-section-toggle="with-ferrets"]'),
+      'the With ferrets toggle',
+    );
+    const last = toggle.lastElementChild;
+    expect(last?.classList.contains('fy-attn-group__chevron')).toBe(true);
+    expect(toggle.firstChild?.textContent).toBe('With ferrets');
+    await mounted.unmount();
+  });
+
+  it('shows no "Needs you" pill on a plain needs-you row', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay]));
+    expect(rows(mounted)).toHaveLength(1);
+    const tones = [...mounted.container.querySelectorAll('[data-agenda-status]')].map(pill =>
+      pill.getAttribute('data-tone'),
+    );
+    expect(tones).not.toContain('needs-you');
+    expect(mounted.container.textContent).not.toContain('Needs you ·');
+    await mounted.unmount();
+  });
+
   it('keeps With ferrets collapsed until it is asked for, and folds it away again', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, withFerret]));
     const toggle = () =>
