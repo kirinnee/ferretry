@@ -12,6 +12,7 @@ import {
   type AttentionResponse,
   type AttentionSnapshot,
   type AttentionSource,
+  type AttentionUndelivered,
   attentionBriefOf,
   MAX_ATTENTION_HISTORY,
   MAX_ATTENTION_PER_SESSION,
@@ -137,6 +138,19 @@ export type AttentionCommand =
       readonly at: string;
     }
   | {
+      /**
+       * The owner's action on an agent-raised item never reached the ferret (docs/attention.md § Delivery):
+       * the item is open again, as a card, with what the owner did kept for a retry. `request` names the
+       * request for more information or to discuss it that was not delivered; absent for an answer.
+       */
+      readonly action: 'undelivered';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly request?: number;
+      readonly reason: string;
+      readonly at: string;
+    }
+  | {
       readonly action: 'resolve-source';
       readonly actor: AttentionActor;
       readonly source: AttentionSource;
@@ -157,6 +171,7 @@ export type AttentionChange =
   | 'needs-info'
   | 'discussing'
   | 'info-added'
+  | 'reopened'
   | 'answered'
   | 'resolved'
   | 'dismissed'
@@ -303,6 +318,8 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
       return needsInfo(ledger, command);
     case 'discuss':
       return discuss(ledger, command);
+    case 'undelivered':
+      return undelivered(ledger, command);
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
@@ -315,6 +332,7 @@ type ProgressCommand = Extract<AttentionCommand, { action: 'progress' }>;
 type NeedsInfoCommand = Extract<AttentionCommand, { action: 'needs-info' }>;
 type DiscussCommand = Extract<AttentionCommand, { action: 'discuss' }>;
 type ResolveSourceCommand = Extract<AttentionCommand, { action: 'resolve-source' }>;
+type UndeliveredCommand = Extract<AttentionCommand, { action: 'undelivered' }>;
 
 function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutation {
   const { actor, request } = command;
@@ -546,7 +564,13 @@ function addressed(
   change: Extract<AttentionChange, 'answered' | 'resolved' | 'dismissed'>,
   response?: AttentionResponse,
 ): AttentionMutation {
-  const { waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...open } = target.item;
+  const {
+    waitingOn: _waitingOn,
+    askedAt: _askedAt,
+    waitingFor: _waitingFor,
+    undelivered: _undelivered,
+    ...open
+  } = target.item;
   const item = withResolvedBy(
     {
       ...open,
@@ -761,7 +785,7 @@ function replaceItem(
   ledger: AttentionLedger,
   item: AttentionItem,
   at: string,
-  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'discussing' | 'info-added'>,
+  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'discussing' | 'info-added' | 'reopened'>,
 ): AttentionMutation {
   const next: AttentionLedger = {
     ...ledger,
@@ -805,8 +829,9 @@ function needsInfo(ledger: AttentionLedger, command: NeedsInfoCommand): Attentio
   }
   if (target.item.waitingOn !== undefined) return unchanged(ledger);
   const note = command.note?.trim() ?? '';
+  const { undelivered: _undelivered, ...current } = target.item;
   const item: AttentionItem = {
-    ...target.item,
+    ...current,
     waitingOn: 'ferret',
     askedAt: command.at,
     infoRequests: (target.item.infoRequests ?? 0) + 1,
@@ -832,8 +857,9 @@ function discuss(ledger: AttentionLedger, command: DiscussCommand): AttentionMut
   }
   if (target.item.waitingOn !== undefined && target.item.waitingFor === 'discussion') return unchanged(ledger);
   const note = command.note?.trim() ?? '';
+  const { undelivered: _undelivered, ...current } = target.item;
   const item: AttentionItem = {
-    ...target.item,
+    ...current,
     waitingOn: 'ferret',
     askedAt: command.at,
     waitingFor: 'discussion',
@@ -841,6 +867,95 @@ function discuss(ledger: AttentionLedger, command: DiscussCommand): AttentionMut
     history: withHistory(target.item.history, { at: command.at, kind: 'discuss', ...(note === '' ? {} : { note }) }),
   };
   return replaceItem(ledger, item, command.at, 'discussing');
+}
+
+/**
+ * The owner's action never reached the ferret, so the item goes back to the owner as a card
+ * (docs/attention.md § Delivery). Only the daemon says so, and only of an item a ferret raised.
+ *
+ * - An ANSWER (or done, or dismiss) that was not delivered: the closed item is OPEN again, with what the
+ *   owner did kept in `undelivered` so a retry is one tap. An item no longer in the board's history, or
+ *   already open again, is left alone.
+ * - A request for more information or to discuss (`request`): the item stops waiting on the ferret, but
+ *   only while it is still waiting on THAT request — the ferret may have answered it, or the owner asked
+ *   again, since.
+ *
+ * A board already full of open items keeps the answer closed: the item cannot fit, and refusing is the
+ * one honest outcome (the caller records it).
+ */
+function undelivered(ledger: AttentionLedger, command: UndeliveredCommand): AttentionMutation {
+  if (command.actor.kind !== 'daemon') return failure('forbidden', 'only the daemon may report an undelivered answer');
+  const active = ledger.entries.filter(isActiveAttention);
+  if (command.request !== undefined) {
+    const target = active.find(entry => entry.item.id === command.id);
+    if (target === undefined || target.item.waitingOn === undefined || target.item.infoRequests !== command.request)
+      return unchanged(ledger);
+    const note = lastNote(target.item.history, target.item.waitingFor === 'discussion' ? 'discuss' : 'needs-info');
+    const action = target.item.waitingFor === 'discussion' ? ('discuss' as const) : ('needs-info' as const);
+    const { waitingOn: _w, askedAt: _a, waitingFor: _f, ...open } = target.item;
+    const item: AttentionItem = {
+      ...open,
+      undelivered: {
+        at: command.at,
+        reply: { action, ...(note === undefined ? {} : { note }) },
+        reason: command.reason,
+      },
+    };
+    return replaceItem(ledger, item, command.at, 'reopened');
+  }
+  if (active.some(entry => entry.item.id === command.id)) return unchanged(ledger);
+  const closed = ledger.entries.find(
+    (entry): entry is Extract<AttentionEntry, { lifecycle: 'addressed' }> =>
+      entry.lifecycle === 'addressed' && entry.item.id === command.id,
+  );
+  if (closed === undefined || closed.item.raisedBy !== 'agent') return unchanged(ledger);
+  if (active.length >= MAX_ATTENTION_PER_SESSION)
+    return failure(
+      'full',
+      `${command.id} cannot reopen: this board already holds ${MAX_ATTENTION_PER_SESSION} open items`,
+    );
+  const {
+    resolvedAt: _resolvedAt,
+    resolutionNote,
+    response,
+    disposition,
+    resolvedBy: _resolvedBy,
+    resolvedBySession: _resolvedBySession,
+    resolvedByName: _resolvedByName,
+    ...rest
+  } = closed.item;
+  const note = resolutionNote?.trim() === '' ? undefined : (resolutionNote ?? undefined);
+  const reply: AttentionUndelivered['reply'] =
+    disposition === 'dismissed'
+      ? { action: 'dismiss', ...(note === undefined ? {} : { note }) }
+      : {
+          action: 'resolve',
+          ...(note === undefined ? {} : { note }),
+          ...(response === undefined ? {} : { response }),
+        };
+  const parsed = AttentionItemSchema.safeParse({
+    ...rest,
+    undelivered: { at: command.at, reply, reason: command.reason },
+  });
+  if (!parsed.success) return unchanged(ledger);
+  const next: AttentionLedger = {
+    ...ledger,
+    entries: [
+      ...active,
+      { lifecycle: 'active', origin: closed.origin, item: parsed.data },
+      ...ledger.entries.filter(entry => entry !== closed && entry.lifecycle === 'addressed'),
+    ],
+    updatedAt: command.at,
+  };
+  return success(next, true, 'reopened', parsed.data);
+}
+
+/** The note on the newest history entry of this kind, if it had one. */
+function lastNote(
+  history: readonly AttentionHistoryEntry[] | undefined,
+  kind: AttentionHistoryEntry['kind'],
+): string | undefined {
+  return history?.findLast(entry => entry.kind === kind)?.note;
 }
 
 function stepRange(id: AttentionId, count: number, step: number): string {

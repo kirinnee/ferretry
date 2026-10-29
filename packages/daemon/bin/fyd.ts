@@ -117,6 +117,11 @@ import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-at
 import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
 import { KeyedAttentionReplyTimers } from '../src/adapters/attention/keyed-attention-reply-timers.ts';
 import {
+  LedgerAttentionReceipts,
+  PaneAttentionComposer,
+  SendAttentionMessenger,
+} from '../src/adapters/attention/send-attention-delivery.ts';
+import {
   StorageHarnessPromptJournal,
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
@@ -558,6 +563,7 @@ import {
   AttentionChangeFanout,
   AttentionConversation,
   AttentionMoreInfoPush,
+  AttentionBoardUndelivered,
   AttentionReplyBatcher,
   AttentionReplyDelivery,
   AttentionService,
@@ -8812,23 +8818,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const attentionBoards = new FileAttentionLedgerRepository(
         id => createSessionPaths(paths, parseSessionId(id)).directory,
       );
-      // Each ferret's held answers (docs/attention.md § The loop). The send is awaited by the batcher, outside
+      // Each ferret's held answers (docs/attention.md § Delivery). The send is awaited by the batcher, outside
       // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
-      // must not wait on that. The send ledger keeps one message per batch send id.
+      // must not wait on that. The send ledger keeps one message per batch send id, and is the one witness of
+      // whether it arrived; an answer that did not is reopened on the board, built just below (read lazily).
       const attentionReplies = new AttentionReplyBatcher(
         new FileAttentionOutboxRepository(id => createSessionPaths(paths, parseSessionId(id)).directory),
-        {
-          send: async (sessionId, message, sendId) => {
-            const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await sends.send({ id, sendId, message });
-          },
-        },
+        new SendAttentionMessenger(sends),
         new KeyedAttentionReplyTimers(),
         new KeyedSerialExecutor(),
         { now: () => clock.now() },
         {
           settleMs: attentionConfig.replySettleSeconds * 1_000,
           capMs: attentionConfig.replyMaxWaitSeconds * 1_000,
+          composerWaitMs: attentionConfig.replyComposerWaitSeconds * 1_000,
+          receiptMs: attentionConfig.replyReceiptSeconds * 1_000,
         },
         // A batch that falls due while the ferret is mid-turn waits for the turn to end. Unreadable state
         // is not busy, so a damaged document never holds an answer.
@@ -8839,6 +8843,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             const state = SessionStateSchema.safeParse(await storage.readState(id));
             return state.success && state.data.turnState === 'working';
           },
+        },
+        {
+          composer: new PaneAttentionComposer(sendTerminal),
+          receipts: new LedgerAttentionReceipts(sendLedger),
+          undelivered: new AttentionBoardUndelivered({
+            undelivered: async (...parameters) => await attention.undelivered(...parameters),
+          }),
         },
       );
       // Answers held across a restart are delivered, in the background, once the daemon is up.

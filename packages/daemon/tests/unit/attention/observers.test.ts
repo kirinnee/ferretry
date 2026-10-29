@@ -3,6 +3,7 @@ import type { AttentionItem, ResolvedAttentionItem, SessionAttentionSummary } fr
 import should from 'should';
 import {
   type AttentionBoardChange,
+  AttentionBoardUndelivered,
   AttentionChangeFanout,
   type AttentionChangeObserver,
   AttentionConversation,
@@ -539,5 +540,32 @@ describe('Attention discuss delivery', () => {
 
     // Assert
     should(messenger.sent).deepEqual([]);
+  });
+});
+
+describe('Attention undelivered answers', () => {
+  it('should reopen the item a failed answer was about, and end the discussion a failed request was about', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const sink = new AttentionBoardUndelivered(attention);
+    await attention.raise(SESSION, ASK, AGENT);
+    await attention.raise(SESSION, { ...ASK, subject: 'Second ask?' }, AGENT);
+    await attention.answer(SESSION, 'A1', { kind: 'multiple-choice', choice: 'Rebase now' }, HUMAN);
+    await attention.discuss(SESSION, 'A2', HUMAN, 'why?');
+
+    // Act
+    await sink.undelivered(SESSION, 'A1', 'it never appeared in the ferret’s transcript');
+    await sink.undelivered(SESSION, 'A2~1', 'the ferret was removed');
+    await sink.undelivered(SESSION, 'instructions~0123456789abcd', 'ignored');
+    const board = await attention.list(SESSION);
+
+    // Assert
+    if (!board.ok) throw new Error(board.error.message);
+    should(board.value.items.map(each => [each.id, each.undelivered?.reply.action, each.waitingOn ?? null])).deepEqual([
+      ['A1', 'resolve', null],
+      ['A2', 'discuss', null],
+    ]);
+    should(changes.seen.filter(each => each.change.change === 'reopened')).have.length(2);
   });
 });

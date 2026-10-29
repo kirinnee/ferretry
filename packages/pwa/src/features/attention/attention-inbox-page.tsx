@@ -469,6 +469,76 @@ function GroupedList({
   );
 }
 
+/** The collapse key of the In discussion group: never a conversation's `(daemonId, sessionId)` key. */
+const DISCUSSION_GROUP = 'in-discussion';
+
+/**
+ * The items the owner asked to talk through, under one "In discussion" header below the list: they wait on
+ * the ferret's reply, not on the owner, so they are out of the count and the swipe deck, but still one tap
+ * away. The header says whose they are on each row's line, since they come from every conversation.
+ */
+function DiscussionGroup({
+  cards,
+  selectedKey,
+  open,
+  onToggle,
+  onSelect,
+  now,
+  rowRefs,
+}: {
+  readonly cards: readonly InboxCard[];
+  readonly selectedKey: string | null;
+  readonly open: boolean;
+  readonly onToggle: () => void;
+  readonly onSelect: (key: string) => void;
+  readonly now: number | undefined;
+  readonly rowRefs: Map<string, HTMLButtonElement>;
+}) {
+  const rowsId = useId();
+  return (
+    <ul aria-label="In discussion" className="fy-attn-inbox__list" data-attention-discussion-list="">
+      <li className="fy-attn-group" data-attention-group={DISCUSSION_GROUP}>
+        <button
+          aria-controls={rowsId}
+          aria-expanded={open}
+          className="fy-attn-group__head"
+          data-attention-group-toggle=""
+          onClick={onToggle}
+          type="button"
+        >
+          <ChevronRight aria-hidden="true" className="fy-attn-group__chevron" data-open={open || undefined} size={14} />
+          <MessagesSquare aria-hidden="true" className="fy-attn-group__icon" size={12} />
+          <span className="fy-attn-group__name">
+            <span className="fy-attn-group__title">In discussion</span>
+            <span className="fy-attn-group__ferret"> · waiting on the ferret</span>
+          </span>
+          <span className="fy-attn-group__count" data-attention-group-count="">
+            {cards.length}
+          </span>
+        </button>
+        {open ? (
+          <ul className="fy-attn-group__rows" id={rowsId}>
+            {cards.map(card => (
+              <li key={card.key}>
+                <Row
+                  card={card}
+                  now={now}
+                  onSelect={onSelect}
+                  rowRef={element => {
+                    if (element === null) rowRefs.delete(card.key);
+                    else rowRefs.set(card.key, element);
+                  }}
+                  selected={selectedKey === card.key}
+                />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </li>
+    </ul>
+  );
+}
+
 const ARROW = { left: '←', up: '↑', right: '→' } as const;
 
 /**
@@ -548,20 +618,27 @@ export function AttentionInboxPage({
   const machineFilter = machines.some(entry => entry.daemonId === machine) ? machine : null;
   const listFilter: InboxListFilter = { machine: machineFilter, query };
   const visible = filterInboxCards(inbox.cards, listFilter);
+  const talking = filterInboxCards(inbox.discussing, listFilter);
   const groups = inboxGroups(visible);
+  const talkingOpen = !collapsed.has(DISCUSSION_GROUP);
+  // The queue is what waits on the owner; a discussion is picked from its own group and never dealt next.
   const order = groups.flatMap(group => group.cards.map(card => card.key));
-  const navigable = groups.flatMap(group => (collapsed.has(group.key) ? [] : group.cards.map(card => card.key)));
+  const navigable = [
+    ...groups.flatMap(group => (collapsed.has(group.key) ? [] : group.cards.map(card => card.key))),
+    ...(talkingOpen ? talking.map(card => card.key) : []),
+  ];
 
   // The selection follows the reader's pick while it is listed, and the item after it once it leaves.
   const lastOrder = useRef<readonly string[]>(order);
-  const selectedKey = nextSelection(lastOrder.current, chosen, order);
+  const queued = nextSelection(lastOrder.current, chosen, order);
+  const selectedKey = chosen !== null && talking.some(card => card.key === chosen) ? chosen : queued;
   const orderKey = order.join('\u0001');
   useEffect(() => {
     lastOrder.current = orderKey === '' ? [] : orderKey.split('\u0001');
     if (selectedKey !== chosen) setChosen(selectedKey);
     if (orderKey === '') setOpened(false);
   }, [orderKey, selectedKey, chosen]);
-  const selected = visible.find(card => card.key === selectedKey);
+  const selected = [...visible, ...talking].find(card => card.key === selectedKey);
 
   const choose = (next: InboxFilter): void => {
     setFilter(next);
@@ -581,6 +658,13 @@ export function AttentionInboxPage({
   const select = (key: string): void => {
     setChosen(key);
     if (phone) setOpened(true);
+  };
+  /** A discussion row: the card beside the list on a wide screen; on a phone, the conversation it is in. */
+  const selectTalking = (key: string): void => {
+    const card = talking.find(each => each.key === key);
+    if (phone && card !== undefined)
+      onNavigate(attentionConversationPath(card.daemonId, card.view.config.id, card.item.id));
+    else select(key);
   };
 
   // ↑/↓ and j/k walk the open rows on a wider screen, unless the reader is typing or inside the card.
@@ -612,13 +696,15 @@ export function AttentionInboxPage({
   }, [selectedKey, rowRefs]);
 
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
-  const empty = inbox.cards.length === 0;
+  const empty = inbox.cards.length === 0 && inbox.discussing.length === 0;
   const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
   const host: CardHostProps = { inbox, onNavigate, now, readRecent, onProgress, recentOpen };
   const atEnd = selectedKey === QUEUE_END;
   const skip = (): void => setChosen(skipSelection(order, selectedKey));
   const review = (): void => setChosen(order[0] ?? null);
-  const cardOpen = phone && opened && filter === 'open' && (selected !== undefined || atEnd);
+  // A phone deals only what waits on the owner; a discussion opens its conversation instead.
+  const cardOpen =
+    phone && opened && filter === 'open' && ((selected !== undefined && visible.includes(selected)) || atEnd);
 
   const header = (
     <header className="fy-attn-inbox__head">
@@ -661,20 +747,35 @@ export function AttentionInboxPage({
     ) : (
       <InboxEmpty />
     )
-  ) : visible.length === 0 ? (
+  ) : visible.length === 0 && talking.length === 0 ? (
     <NothingMatches onClear={clearFilters} />
   ) : (
     <div className="fy-attn-inbox__body">
-      <GroupedList
-        collapsed={collapsed}
-        groups={groups}
-        now={now}
-        onSelect={select}
-        onToggle={toggleGroup}
-        rowRefs={rowRefs}
-        selectedKey={phone ? null : selectedKey}
-        showMachine={machines.length > 1}
-      />
+      <div className="fy-attn-inbox__lists">
+        {groups.length === 0 ? null : (
+          <GroupedList
+            collapsed={collapsed}
+            groups={groups}
+            now={now}
+            onSelect={select}
+            onToggle={toggleGroup}
+            rowRefs={rowRefs}
+            selectedKey={phone ? null : selectedKey}
+            showMachine={machines.length > 1}
+          />
+        )}
+        {talking.length === 0 ? null : (
+          <DiscussionGroup
+            cards={talking}
+            now={now}
+            onSelect={selectTalking}
+            onToggle={() => toggleGroup(DISCUSSION_GROUP)}
+            open={talkingOpen}
+            rowRefs={rowRefs}
+            selectedKey={phone ? null : selectedKey}
+          />
+        )}
+      </div>
       {phone ? null : atEnd ? (
         <section aria-label="Skipped items" className="fy-attn-inbox__pane" data-attention-pane="end">
           <QueueEnd onReview={review} remaining={visible.length} />

@@ -549,6 +549,9 @@ describe('attention routes and held answers', () => {
       pending: async () => {
         throw new Error('outbox unreadable');
       },
+      delivery: async () => {
+        throw new Error('outbox unreadable');
+      },
       sendNow: async () => undefined,
     });
     const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
@@ -558,6 +561,27 @@ describe('attention routes and held answers', () => {
 
     // Assert — the board is the answer; a held outbox is decoration.
     should(response.status).equal(200);
+    should(jsonBody(response)).not.have.property('replies');
+    should(jsonBody(response)).not.have.property('delivery');
+  });
+
+  it('should serve the answers on their way as `delivery`, beside the held ones', async () => {
+    // Arrange
+    const routes = attentionRoutes(attentionService(), new FakeNotifications(), {
+      pending: async () => undefined,
+      delivery: async () => ({ sending: ['A2'], heldForComposer: true }),
+      sendNow: async () => undefined,
+    });
+    const dispatcher = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
+
+    // Act
+    const response = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
+
+    // Assert — "Sending…" is told from the board itself.
+    should(response.status).equal(200);
+    should(jsonBody(response))
+      .have.property('delivery')
+      .deepEqual({ sending: ['A2'], heldForComposer: true });
     should(jsonBody(response)).not.have.property('replies');
   });
 });

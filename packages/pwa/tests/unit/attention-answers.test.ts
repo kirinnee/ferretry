@@ -11,7 +11,9 @@ import {
   isTextOnlyAsk,
   kindWord,
   needsReplyText,
+  RETRY_LABEL,
   swipeTargets,
+  undeliveredAction,
 } from '../../src/lib/attention-answers.ts';
 import { swipeMap } from '../../src/lib/attention-inbox.ts';
 import { attentionItem, choices } from '../support/attention-inbox.tsx';
@@ -293,5 +295,39 @@ describe('the card’s kind', () => {
       ),
     ).toBe(false);
     expect(isTextOnlyAsk(attentionItem('A2', { ask: { kind: 'task' } }))).toBe(false);
+  });
+});
+
+describe('undeliveredAction: an answer that never arrived, as the action that sends it again', () => {
+  it('should resend a plain done as a resolve, keeping its note', () => {
+    expect(undeliveredAction({ action: 'resolve', note: 'shipped' })).toEqual({
+      kind: 'resolve',
+      label: RETRY_LABEL,
+      note: 'shipped',
+    });
+    expect(undeliveredAction({ action: 'resolve' })).toEqual({ kind: 'resolve', label: RETRY_LABEL });
+  });
+
+  it('should resend an answer that carried a response as that response', () => {
+    const response = { kind: 'multiple-choice', choice: 'Postgres' } as const;
+    expect(undeliveredAction({ action: 'resolve', response })).toEqual({
+      kind: 'respond',
+      label: RETRY_LABEL,
+      response,
+    });
+  });
+
+  it('should resend dismiss, needs-info and discuss as themselves', () => {
+    expect(undeliveredAction({ action: 'dismiss' })).toEqual({ kind: 'dismiss', label: RETRY_LABEL });
+    expect(undeliveredAction({ action: 'needs-info', note: 'which?' })).toEqual({
+      kind: 'needs-info',
+      label: RETRY_LABEL,
+      note: 'which?',
+    });
+    expect(undeliveredAction({ action: 'discuss', note: 'why?' })).toEqual({
+      kind: 'discuss',
+      label: RETRY_LABEL,
+      note: 'why?',
+    });
   });
 });

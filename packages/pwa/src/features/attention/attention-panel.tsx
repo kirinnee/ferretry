@@ -24,10 +24,10 @@
 
 import type { AttentionId, AttentionItem, AttentionSnapshot } from '@ferretry/protocol';
 import { ArrowRight, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
-import { actionSentence, type InboxAction } from '../../lib/attention-inbox.ts';
+import { actionSentence, type InboxAction, isInDiscussion } from '../../lib/attention-inbox.ts';
 import { nextSelection, QUEUE_END } from '../../lib/attention-inbox-list.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -37,6 +37,13 @@ import { attentionReference } from './attention-board.tsx';
 import { AttentionCard } from './attention-card.tsx';
 import { useAttentionCollapse } from './attention-collapse.ts';
 import { AttentionCollapseButton, AttentionCollapsedLine } from './attention-collapsed-line.tsx';
+import {
+  AttentionDeliveryContext,
+  AttentionDiscussionLine,
+  AttentionSendingLine,
+  attentionHeading,
+  deliveringIds,
+} from './attention-delivery.tsx';
 import { attentionPanelItemId } from './attention-resolved.tsx';
 
 export { attentionPanelItemId };
@@ -96,6 +103,8 @@ export interface AttentionAnswerChip {
 }
 
 export interface AttentionPanelProps {
+  /** The ferret's spoken name, for the words "Your answer didn't reach <ferret>". */
+  readonly ferret?: string;
   /** The panel's DOM id — the one the header's count names in `aria-controls`. */
   readonly id: string;
   readonly connection: DaemonConnection;
@@ -130,7 +139,7 @@ const failure = (reason: unknown): string =>
 
 /**
  * The open item the block shows — and so the item the next message answers: the chosen one, else the first
- * while none is chosen. A chosen item that has left shows nothing until the block moves on to the item
+ * that needs the owner (one in discussion waits on its ferret) while none is chosen. A chosen item that has left shows nothing until the block moves on to the item
  * after it (or to "You skipped N"), so a message is never offered as the answer to an item the reader did
  * not choose.
  */
@@ -138,9 +147,12 @@ export const shownAttentionItem = (
   snapshot: AttentionSnapshot | null,
   selectedId: AttentionId | null,
 ): AttentionItem | undefined =>
-  selectedId === null ? snapshot?.items[0] : snapshot?.items.find(entry => entry.id === selectedId);
+  selectedId === null
+    ? (snapshot?.items.find(entry => !isInDiscussion(entry)) ?? snapshot?.items[0])
+    : snapshot?.items.find(entry => entry.id === selectedId);
 
 export function AttentionPanel({
+  ferret,
   id,
   connection,
   scope,
@@ -159,6 +171,13 @@ export function AttentionPanel({
   const items = snapshot?.items ?? NO_ITEMS;
   const [cards, setCards] = useState<ReadonlyMap<AttentionId, CardState>>(new Map());
   const [announcement, setAnnouncement] = useState('');
+  // A discussion is a slim line until the reader opens it; opening it is theirs to undo by reloading.
+  const [openedDiscussion, setOpenedDiscussion] = useState<ReadonlySet<AttentionId>>(new Set());
+  const delivering = useMemo(() => deliveringIds(snapshot), [snapshot]);
+  const delivery = useMemo(
+    () => ({ sending: delivering, ...(ferret === undefined ? {} : { ferret }) }),
+    [delivering, ferret],
+  );
   const target = focus?.target ?? null;
   const location = target === null ? null : locateAttention(snapshot, target);
   const openIds = items.map(entry => entry.id);
@@ -167,7 +186,12 @@ export function AttentionPanel({
   const lastIds = useRef<readonly string[]>(openIds);
   const forward = nextSelection(lastIds.current, selectedId, openIds);
   const atEnd = forward === QUEUE_END;
-  const selected = atEnd ? undefined : (items.find(entry => entry.id === forward) ?? items[0]);
+  // While none is chosen the block opens on the first item that needs the owner, not one in discussion.
+  const selected = atEnd
+    ? undefined
+    : selectedId === null
+      ? shownAttentionItem(snapshot, null)
+      : (items.find(entry => entry.id === forward) ?? items[0]);
   const selectedIndex = selected === undefined ? -1 : items.indexOf(selected);
   const openKey = openIds.join('\u0001');
   // The order is remembered only while the selection is SETTLED (none chosen, or the chosen one open): until
@@ -240,6 +264,8 @@ export function AttentionPanel({
     if (focus === null || focus.target === null || unfoldedFor.current === focus.seq) return;
     if (locateAttention(snapshot, focus.target) !== 'open') return;
     unfoldedFor.current = focus.seq;
+    const opened = focus.target;
+    setOpenedDiscussion(current => new Set(current).add(opened));
     expandFold();
   }, [focus, snapshot, expandFold]);
 
@@ -256,7 +282,10 @@ export function AttentionPanel({
   const unavailable = snapshot === null && status === 'error';
   const state = selected === undefined ? undefined : cards.get(selected.id);
   const missing = target !== null && location === 'unknown';
-  const quiet = selected === undefined && !atEnd && !loading && !unavailable && !missing;
+  // An answered item is no longer open, but until the ferret has it the reader still sees it going.
+  const goingIds = [...delivering].filter(goingId => !items.some(entry => entry.id === goingId));
+  const quiet = selected === undefined && !atEnd && !loading && !unavailable && !missing && goingIds.length === 0;
+  const discussionShut = selected !== undefined && isInDiscussion(selected) && !openedDiscussion.has(selected.id);
   // The live region outlives the block: answering the last open item removes the block, and the sentence
   // that says what was sent must still be spoken.
   const live = (
@@ -268,126 +297,144 @@ export function AttentionPanel({
   return (
     <>
       {live}
-      <section
-        aria-label="Needs you"
-        className="fy-attn-panel"
-        data-attention-panel=""
-        data-folded={(folded && !loading && !unavailable) || undefined}
-        id={id}
-      >
-        {missing && target !== null ? (
-          <p className="fy-attn-panel__note" data-attention-missing={target} role="status">
-            <CircleAlert aria-hidden="true" size={14} />
-            {attentionReference(target)} is no longer open.
-          </p>
-        ) : null}
-        {snapshot !== null && snapshot.parseErrors > 0 ? (
-          <p className="fy-attn-panel__note" data-tone="err" role="alert">
-            <CircleAlert aria-hidden="true" size={14} />
-            The machine reported {snapshot.parseErrors} damaged Attention records; repair them before trusting this
-            list.
-          </p>
-        ) : null}
-        {loading ? (
-          <p className="fy-attn-panel__note" role="status">
-            <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
-            Checking this ferret's Attention…
-          </p>
-        ) : unavailable ? (
-          <p className="fy-attn-panel__note" data-tone="err" role="alert">
-            <CircleAlert aria-hidden="true" size={14} />
-            Attention cannot be read right now. Reconnect before assuming nothing needs you.
-          </p>
-        ) : atEnd && later ? (
-          <p className="fy-attn-panel__end" data-attention-queue-end="later">
-            All caught up for now — skipped cards wait in the inbox.
-          </p>
-        ) : atEnd ? (
-          <div className="fy-attn-panel__end" data-attention-queue-end="">
-            <span>You skipped {items.length} — review them now?</span>
-            <span className="fy-attn-panel__end-actions">
-              <button
-                className="kt-btn kt-btn--sm"
-                data-attention-review=""
-                data-variant="primary"
-                onClick={() => {
-                  const first = items[0];
-                  if (first !== undefined) onSelect(first.id);
-                }}
-                type="button"
-              >
-                Review skipped
-                <ArrowRight aria-hidden="true" size={13} />
-              </button>
-              <button
-                className="kt-btn kt-btn--sm"
-                data-attention-later=""
-                onClick={() => setLater(true)}
-                type="button"
-              >
-                Later
-              </button>
-            </span>
-          </div>
-        ) : selected === undefined ? null : folded ? (
-          <>
-            <AttentionCollapsedLine controls={id} item={selected} more={items.length - 1} onExpand={fold.expand} />
-            {repliesSlot}
-          </>
-        ) : (
-          <div
-            className="fy-attn-panel__item"
-            id={attentionPanelItemId(id, selected.id)}
-            key={selected.id}
-            tabIndex={-1}
-          >
-            {items.length > 1 ? (
-              <nav aria-label="Open items" className="fy-attn-pager">
+      <AttentionDeliveryContext.Provider value={delivery}>
+        <section
+          aria-label="Needs you"
+          className="fy-attn-panel"
+          data-attention-panel=""
+          data-folded={(folded && !loading && !unavailable) || undefined}
+          id={id}
+        >
+          {missing && target !== null ? (
+            <p className="fy-attn-panel__note" data-attention-missing={target} role="status">
+              <CircleAlert aria-hidden="true" size={14} />
+              {attentionReference(target)} is no longer open.
+            </p>
+          ) : null}
+          {snapshot !== null && snapshot.parseErrors > 0 ? (
+            <p className="fy-attn-panel__note" data-tone="err" role="alert">
+              <CircleAlert aria-hidden="true" size={14} />
+              The machine reported {snapshot.parseErrors} damaged Attention records; repair them before trusting this
+              list.
+            </p>
+          ) : null}
+          {loading ? (
+            <p className="fy-attn-panel__note" role="status">
+              <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
+              Checking this ferret's Attention…
+            </p>
+          ) : unavailable ? (
+            <p className="fy-attn-panel__note" data-tone="err" role="alert">
+              <CircleAlert aria-hidden="true" size={14} />
+              Attention cannot be read right now. Reconnect before assuming nothing needs you.
+            </p>
+          ) : atEnd && later ? (
+            <p className="fy-attn-panel__end" data-attention-queue-end="later">
+              All caught up for now — skipped cards wait in the inbox.
+            </p>
+          ) : atEnd ? (
+            <div className="fy-attn-panel__end" data-attention-queue-end="">
+              <span>You skipped {items.length} — review them now?</span>
+              <span className="fy-attn-panel__end-actions">
                 <button
-                  aria-label="Previous item"
-                  className="fy-attn-pager__step"
-                  disabled={selectedIndex <= 0}
-                  onClick={() => onSelect(items[selectedIndex - 1]?.id ?? selected.id)}
+                  className="kt-btn kt-btn--sm"
+                  data-attention-review=""
+                  data-variant="primary"
+                  onClick={() => {
+                    const first = items[0];
+                    if (first !== undefined) onSelect(first.id);
+                  }}
                   type="button"
                 >
-                  <ChevronLeft aria-hidden="true" size={16} />
+                  Review skipped
+                  <ArrowRight aria-hidden="true" size={13} />
                 </button>
-                <span aria-live="polite" className="fy-attn-pager__where" data-attention-pager="">
-                  Needs you · {selectedIndex + 1} of {items.length}
-                </span>
                 <button
-                  aria-label="Next item"
-                  className="fy-attn-pager__step"
-                  disabled={selectedIndex >= items.length - 1}
-                  onClick={() => onSelect(items[selectedIndex + 1]?.id ?? selected.id)}
+                  className="kt-btn kt-btn--sm"
+                  data-attention-later=""
+                  onClick={() => setLater(true)}
                   type="button"
                 >
-                  <ChevronRight aria-hidden="true" size={16} />
+                  Later
                 </button>
-              </nav>
-            ) : null}
-            <AttentionCard
-              busy={state?.busy ?? false}
-              error={state?.error ?? null}
-              highlighted={target === selected.id}
-              item={selected}
-              onAct={action => act(selected, action)}
-              onProgress={(step, done) => client.progress(connection, scope, selected.id, step, done)}
-              headerSlot={<AttentionCollapseButton controls={id} onCollapse={fold.collapse} />}
-              pinned
-              renderProse={renderProse}
-              {...(now === undefined ? {} : { now })}
+              </span>
+            </div>
+          ) : selected === undefined ? null : folded ? (
+            <>
+              <AttentionCollapsedLine controls={id} item={selected} more={items.length - 1} onExpand={fold.expand} />
+              {repliesSlot}
+            </>
+          ) : (
+            <div
+              className="fy-attn-panel__item"
+              id={attentionPanelItemId(id, selected.id)}
+              key={selected.id}
+              tabIndex={-1}
+            >
+              {items.length > 1 ? (
+                <nav aria-label="Open items" className="fy-attn-pager">
+                  <button
+                    aria-label="Previous item"
+                    className="fy-attn-pager__step"
+                    disabled={selectedIndex <= 0}
+                    onClick={() => onSelect(items[selectedIndex - 1]?.id ?? selected.id)}
+                    type="button"
+                  >
+                    <ChevronLeft aria-hidden="true" size={16} />
+                  </button>
+                  <span aria-live="polite" className="fy-attn-pager__where" data-attention-pager="">
+                    Needs you · {selectedIndex + 1} of {items.length}
+                  </span>
+                  <button
+                    aria-label="Next item"
+                    className="fy-attn-pager__step"
+                    disabled={selectedIndex >= items.length - 1}
+                    onClick={() => onSelect(items[selectedIndex + 1]?.id ?? selected.id)}
+                    type="button"
+                  >
+                    <ChevronRight aria-hidden="true" size={16} />
+                  </button>
+                </nav>
+              ) : null}
+              {discussionShut ? (
+                <AttentionDiscussionLine
+                  controls={id}
+                  item={selected}
+                  onExpand={() => setOpenedDiscussion(current => new Set(current).add(selected.id))}
+                />
+              ) : (
+                <AttentionCard
+                  busy={state?.busy ?? false}
+                  error={state?.error ?? null}
+                  highlighted={target === selected.id}
+                  item={selected}
+                  onAct={action => act(selected, action)}
+                  onProgress={(step, done) => client.progress(connection, scope, selected.id, step, done)}
+                  headerSlot={<AttentionCollapseButton controls={id} onCollapse={fold.collapse} />}
+                  pinned
+                  renderProse={renderProse}
+                  {...(now === undefined ? {} : { now })}
+                />
+              )}
+              {repliesSlot}
+              {chip === undefined || isInDiscussion(selected) ? null : (
+                <label className="fy-attn-chip" data-attention-answer-chip="">
+                  <input checked={chip.on} onChange={event => chip.onChange(event.target.checked)} type="checkbox" />
+                  Send my next message as the answer to {attentionReference(selected.id)}
+                </label>
+              )}
+            </div>
+          )}
+          {goingIds.map(goingId => (
+            <AttentionSendingLine
+              heading={attentionHeading(
+                snapshot?.resolved.find(entry => entry.id === goingId) ?? { subject: attentionReference(goingId) },
+              )}
+              key={goingId}
             />
-            {repliesSlot}
-            {chip === undefined ? null : (
-              <label className="fy-attn-chip" data-attention-answer-chip="">
-                <input checked={chip.on} onChange={event => chip.onChange(event.target.checked)} type="checkbox" />
-                Send my next message as the answer to {attentionReference(selected.id)}
-              </label>
-            )}
-          </div>
-        )}
-      </section>
+          ))}
+        </section>
+      </AttentionDeliveryContext.Provider>
     </>
   );
 }

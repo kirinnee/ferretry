@@ -28,6 +28,8 @@ import {
   DeferredAttentionActions,
   type DeferredAttentionState,
   type DeferredTimers,
+  discussingCards,
+  discussingSessions,
   type InboxAction,
   type InboxCard,
   type InboxResolved,
@@ -52,10 +54,12 @@ export interface AttentionInboxMachine {
 export interface AttentionInbox {
   /** Conversations with open Attention, newest needing you first. */
   readonly unread: readonly UnreadSession[];
-  /** Open items across them: the number every Attention badge shows. */
+  /** Open items that need the owner across them (items in discussion excluded): the number every Attention badge shows. */
   readonly total: number;
   /** The deck: every read open item, newest first, minus the answers still undoable or in flight. */
   readonly cards: readonly InboxCard[];
+  /** Items in discussion: waiting on their ferret, so not in the deck and not in `total`. */
+  readonly discussing: readonly InboxCard[];
   /** True while an unread conversation's board has not been read yet. */
   readonly reading: boolean;
   /** Resolved items of every conversation whose board is held, newest first: the Resolved filter's list. */
@@ -165,13 +169,20 @@ export function useAttentionInboxModel(
       }, timers),
     [client, connectionFor, timers],
   );
-  // An answer the reader gave is sent, not dropped, when the page goes away.
+  // An answer the reader gave is sent, not dropped, when the page goes away. A phone does not always fire
+  // `pagehide` when the reader swipes to another app — it hides the page and may kill it later — so the page
+  // going hidden flushes too: otherwise an answer still inside its undo window dies with the process.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const flush = (): void => deferred.flush();
+    const flushWhenHidden = (): void => {
+      if (document.visibilityState === 'hidden') deferred.flush();
+    };
     window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flushWhenHidden);
     return () => {
       window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
       deferred.flush();
     };
   }, [deferred]);
@@ -189,12 +200,25 @@ export function useAttentionInboxModel(
     [machines],
   );
   const unread = useStable(freshUnread, unreadKey(freshUnread));
+  const freshDiscussing = useMemo(
+    () =>
+      discussingSessions(
+        machines.map(machine => ({
+          daemonId: machine.connection.daemonId,
+          name: machine.name,
+          sessions: machine.sessions,
+        })),
+      ),
+    [machines],
+  );
+  const discussingEntries = useStable(freshDiscussing, unreadKey(freshDiscussing));
 
-  // Read each unread conversation's board when its summary moved since the last read.
+  // Read each conversation's board — one that needs the owner, or one with a discussion open — when its
+  // summary moved since the last read.
   const readKeys = useRef(new Map<string, string>());
   useEffect(() => {
     const seen = new Set<string>();
-    for (const entry of unread) {
+    for (const entry of [...unread, ...discussingEntries]) {
       const connection = connectionFor(entry.daemonId);
       if (connection === undefined) continue;
       const scope = daemonSessionScope(connection, entry.view.config.id);
@@ -206,7 +230,7 @@ export function useAttentionInboxModel(
       void client.revalidate(connection, scope).catch(() => undefined);
     }
     for (const id of [...readKeys.current.keys()]) if (!seen.has(id)) readKeys.current.delete(id);
-  }, [client, connectionFor, unread]);
+  }, [client, connectionFor, unread, discussingEntries]);
 
   const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
   const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
@@ -221,6 +245,14 @@ export function useAttentionInboxModel(
     [unread, boards, deferredState],
   );
   const cards = useStable(freshCards, cardsKey(freshCards));
+  const freshDiscussingCards = useMemo(
+    () =>
+      discussingCards(discussingEntries, (daemonId, sessionId) =>
+        boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
+      ),
+    [discussingEntries, boards],
+  );
+  const discussing = useStable(freshDiscussingCards, cardsKey(freshDiscussingCards));
   const reading = unread.some(
     entry => !boards.snapshots.has(daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id })),
   );
@@ -266,6 +298,7 @@ export function useAttentionInboxModel(
       unread,
       total: unreadTotal(unread),
       cards,
+      discussing,
       reading,
       resolved,
       resolvedReading,
@@ -274,7 +307,18 @@ export function useAttentionInboxModel(
       deferredState,
       connectionFor,
     }),
-    [unread, cards, reading, resolved, resolvedReading, loadResolved, deferred, deferredState, connectionFor],
+    [
+      unread,
+      cards,
+      discussing,
+      reading,
+      resolved,
+      resolvedReading,
+      loadResolved,
+      deferred,
+      deferredState,
+      connectionFor,
+    ],
   );
 }
 

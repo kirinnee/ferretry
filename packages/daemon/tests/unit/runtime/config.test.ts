@@ -720,13 +720,34 @@ describe('the session-worker pool size', () => {
 });
 
 describe('the attention reply window', () => {
-  it('should hold answers for a minute after the last, and three minutes after the first, unless told otherwise', () => {
+  it('should hold answers ten seconds after the last, and two minutes after the first, unless told otherwise', () => {
     // Assert
-    should(defaultDaemonConfig().attention).deepEqual({ replySettleSeconds: 60, replyMaxWaitSeconds: 180 });
-    should(parseDaemonConfig({ attention: { replySettleSeconds: 10 } }).attention).deepEqual({
+    should(defaultDaemonConfig().attention).deepEqual({
       replySettleSeconds: 10,
-      replyMaxWaitSeconds: 180,
+      replyMaxWaitSeconds: 120,
+      replyComposerWaitSeconds: 600,
+      replyReceiptSeconds: 900,
     });
+    should(parseDaemonConfig({ attention: { replySettleSeconds: 30 } }).attention).deepEqual({
+      replySettleSeconds: 30,
+      replyMaxWaitSeconds: 120,
+      replyComposerWaitSeconds: 600,
+      replyReceiptSeconds: 900,
+    });
+  });
+
+  it('should take the composer and receipt waits from config, within their bounds', () => {
+    // Act + Assert
+    should(
+      parseDaemonConfig({ attention: { replyComposerWaitSeconds: 60, replyReceiptSeconds: 120 } }).attention,
+    ).deepEqual({
+      replySettleSeconds: 10,
+      replyMaxWaitSeconds: 120,
+      replyComposerWaitSeconds: 60,
+      replyReceiptSeconds: 120,
+    });
+    should(() => parseDaemonConfig({ attention: { replyComposerWaitSeconds: 5 } })).throw();
+    should(() => parseDaemonConfig({ attention: { replyReceiptSeconds: 10 } })).throw();
   });
 
   it('should accept a settle equal to the cap, and the bounds of one second and one hour', () => {
@@ -734,10 +755,17 @@ describe('the attention reply window', () => {
     should(parseDaemonConfig({ attention: { replySettleSeconds: 1, replyMaxWaitSeconds: 1 } }).attention).deepEqual({
       replySettleSeconds: 1,
       replyMaxWaitSeconds: 1,
+      replyComposerWaitSeconds: 600,
+      replyReceiptSeconds: 900,
     });
     should(
       parseDaemonConfig({ attention: { replySettleSeconds: 3600, replyMaxWaitSeconds: 3600 } }).attention,
-    ).deepEqual({ replySettleSeconds: 3600, replyMaxWaitSeconds: 3600 });
+    ).deepEqual({
+      replySettleSeconds: 3600,
+      replyMaxWaitSeconds: 3600,
+      replyComposerWaitSeconds: 600,
+      replyReceiptSeconds: 900,
+    });
   });
 
   it('should refuse a settle longer than the cap, naming both keys, instead of clamping it', () => {

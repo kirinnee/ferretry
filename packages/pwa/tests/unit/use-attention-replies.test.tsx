@@ -17,7 +17,10 @@ const daemon = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.e
 const scope = daemonSessionScope(daemon, 's-1');
 const T0 = Date.parse('2026-10-28T12:00:00.000Z');
 
-const board = (replies?: { pending: string[]; dueAt: string; heldForTurn?: true }) => ({
+const board = (
+  replies?: { pending: string[]; dueAt: string; heldForTurn?: true },
+  delivery?: { sending: string[]; heldForComposer?: true },
+) => ({
   v: 1,
   sessionId: 's-1',
   items: [],
@@ -26,6 +29,7 @@ const board = (replies?: { pending: string[]; dueAt: string; heldForTurn?: true 
   parseErrors: 0,
   updatedAt: '2026-10-28T12:00:00.000Z',
   ...(replies === undefined ? {} : { replies }),
+  ...(delivery === undefined ? {} : { delivery }),
 });
 
 const json = (value: unknown): Response =>
@@ -82,6 +86,7 @@ const setup = async (initial: ReturnType<typeof board>) => {
     return (
       <AttentionRepliesNotice
         ferret="zoe"
+        heldForComposer={replies.heldForComposer}
         heldForTurn={replies.heldForTurn}
         onSendNow={replies.sendNow}
         secondsLeft={replies.secondsLeft}
@@ -144,6 +149,22 @@ describe('batched answers notice', () => {
     expect(root.querySelector('[data-attention-replies]')).toBeNull();
     await interact(() => time.advance(HELD_REREAD_MS));
     expect(calls.filter(call => call.method === 'GET')).toHaveLength(2);
+  });
+
+  test('should say it is waiting for the message box to be empty when due answers are held for the composer', async () => {
+    const held = board({ pending: ['A1'], dueAt: '2026-10-28T12:00:08.000Z' }, { sending: [], heldForComposer: true });
+    const { root, time, setNext } = await setup(held);
+    setNext(held);
+    await interact(() => time.advance(9_000));
+    const notice = must(root.querySelector('[data-attention-replies="composer"]'), 'the composer notice');
+    expect(notice.textContent).toContain("Waiting for zoe's message box to be empty");
+    expect(notice.getAttribute('role')).toBe('status');
+    expect(root.querySelector('[data-attention-send-now]')).toBeNull();
+  });
+
+  test('should not mention the message box when nothing is held for it', async () => {
+    const { root } = await setup(board({ pending: ['A1'], dueAt: '2026-10-28T12:00:30.000Z' }));
+    expect(root.textContent).not.toContain('message box');
   });
 
   test('shows nothing when the board carries no replies', async () => {

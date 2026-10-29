@@ -429,6 +429,13 @@
   flex-direction: column;
   gap: var(--gap-md);
 }
+/* What waits on the owner, then what is in discussion: one column that scrolls as one. */
+.fy-attn-inbox__lists {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+}
 .fy-attn-inbox__list,
 .fy-attn-group__rows {
   display: flex;
@@ -475,6 +482,10 @@
 }
 .fy-attn-group__chevron[data-open] {
   transform: rotate(90deg);
+}
+/* The In discussion group's mark, beside its chevron. */
+.fy-attn-group__icon {
+  flex-shrink: 0;
 }
 .fy-attn-group__name {
   min-width: 0;
@@ -607,7 +618,7 @@
     flex: 1;
     flex-direction: row;
   }
-  .fy-attn-inbox__list {
+  .fy-attn-inbox__lists {
     width: 360px;
     flex-shrink: 0;
     overflow-y: auto;

@@ -177,6 +177,31 @@ describe('useAttentionInboxModel', () => {
     expect(reads().filter(entry => entry === 'studio/a')).toHaveLength(3);
   });
 
+  test('reads the board of a conversation whose only open item is in discussion, and deals it apart', async () => {
+    const talking = {
+      ...item('A1', 1),
+      waitingOn: 'ferret',
+      askedAt: at(2),
+      waitingFor: 'discussion',
+    } as AttentionItem;
+    const { client, calls } = fakeClient(new Map([['studio/a', board('a', [talking])]]));
+    const { timers } = manualTimers();
+    let inbox: AttentionInbox | null = null;
+    const machines: readonly AttentionInboxMachine[] = [
+      { connection: studio, name: 'Studio', sessions: [waiting('a', { ...summary(1, 1), discussing: 1 })] },
+    ];
+    view = await mount(
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+    );
+    await settle();
+
+    const read = inbox as unknown as AttentionInbox;
+    expect(calls.filter(call => call.method === 'revalidate').map(call => call.sessionId)).toEqual(['a']);
+    expect(read.total).toBe(0);
+    expect(read.cards).toEqual([]);
+    expect(read.discussing.map(card => `${card.daemonId}/${card.item.id}`)).toEqual(['studio/A1']);
+  });
+
   test('sends a held answer to the right machine, by kind, when the window closes', async () => {
     const boards = new Map([
       ['studio/a', board('a', [item('A1', 1, { kind: 'permission' }), item('A2', 2), item('A3', 3), item('A4', 4)])],
@@ -282,6 +307,48 @@ describe('useAttentionInboxModel', () => {
     await settle();
     expect(calls.filter(call => call.method === 'dismiss')).toHaveLength(1);
     expect(read().connectionFor(studio.daemonId)).toBe(studio);
+  });
+
+  describe('when the page goes to the background', () => {
+    const setVisibility = (state: DocumentVisibilityState) =>
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+    afterEach(() => setVisibility('visible'));
+
+    const heldDismiss = async (client: DaemonAttentionClient) => {
+      const { timers } = manualTimers();
+      let inbox: AttentionInbox | null = null;
+      const machines: readonly AttentionInboxMachine[] = [
+        { connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 1))] },
+      ];
+      view = await mount(
+        <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+      );
+      await settle();
+      const [only] = (inbox as unknown as AttentionInbox).cards;
+      await interact(() => {
+        if (only !== undefined) (inbox as unknown as AttentionInbox).deferred.schedule(only, DISMISS_ACTION);
+      });
+    };
+
+    test('should send what is held when the page becomes hidden, as a phone does when the app is left', async () => {
+      const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+      const { client, calls } = fakeClient(boards);
+      await heldDismiss(client);
+      setVisibility('hidden');
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle();
+      expect(calls.filter(call => call.method === 'dismiss')).toHaveLength(1);
+    });
+
+    test('should keep holding while the page is visible, so the undo window stays open', async () => {
+      const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+      const { client, calls } = fakeClient(boards);
+      await heldDismiss(client);
+      setVisibility('visible');
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle();
+      expect(calls.filter(call => call.method === 'dismiss')).toHaveLength(0);
+    });
   });
 
   test('says it is reading while an unread board has not arrived', async () => {

@@ -115,9 +115,12 @@ export interface ConversationTurn {
  * - It references open items: it IS the answer to them — prefixed `[answer to !A3 «ask»]` so the
  *   ferret knows what it answers, and they resolve.
  * - It references none: delivered exactly as typed, however many items are open. Nothing is resolved.
+ * - An item IN DISCUSSION is never answered by chat: the owner asked to talk it through, and talking about
+ *   it (the app's answer chip still names it) is that discussion, delivered as typed. The ferret ends the
+ *   discussion by updating or closing the item; the owner answers it on its card.
  */
 export function conversationTurn(message: string, open: readonly AttentionItem[]): ConversationTurn {
-  const answers = referencedAttention(message, open);
+  const answers = referencedAttention(message, open).filter(item => !inDiscussion(item));
   if (answers.length > 0) return { message: `[answer to ${answers.map(named).join(', ')}] ${message}`, answers };
   return { message, answers };
 }
@@ -143,16 +146,33 @@ export function conversationResponse(item: AttentionItem, message: string): Atte
   return option === undefined ? undefined : { kind: 'multiple-choice', choice: option.label };
 }
 
+/** An item the owner asked to talk through, now waiting on the ferret's reply rather than on the owner. */
+export function inDiscussion(item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>): boolean {
+  return item.waitingOn !== undefined && item.waitingFor === 'discussion';
+}
+
 /**
- * The session list's view of a board: how many items are open, which is oldest, and when the newest
- * was raised — or `undefined` when nothing is open.
+ * The session list's view of a board: how many items are open, how many of those are in discussion, which
+ * is oldest, and when the newest was raised — or `undefined` when nothing is open.
+ *
+ * `first` is the oldest item that still needs the owner, falling back to the oldest open one when every open
+ * item is in discussion: a row opens to what waits on the owner. Counting the discussions apart is what keeps
+ * them out of the needs-you count while every device still re-reads the board when one starts or ends.
  */
 export function sessionAttentionSummary(snapshot: AttentionSnapshot): SessionAttentionSummary | undefined {
-  const [first] = snapshot.items;
-  if (first === undefined) return undefined;
+  const [oldest] = snapshot.items;
+  if (oldest === undefined) return undefined;
+  const first = snapshot.items.find(item => !inDiscussion(item)) ?? oldest;
   const latestAt = snapshot.items.reduce(
     (latest, item) => (item.waitingSince.localeCompare(latest) > 0 ? item.waitingSince : latest),
-    first.waitingSince,
+    oldest.waitingSince,
   );
-  return { open: snapshot.items.length, first: first.id, ask: first.subject, latestAt };
+  const discussing = snapshot.items.filter(inDiscussion).length;
+  return {
+    open: snapshot.items.length,
+    first: first.id,
+    ask: first.subject,
+    latestAt,
+    ...(discussing === 0 ? {} : { discussing }),
+  };
 }

@@ -6,6 +6,7 @@ import type {
   AttentionItem,
   AttentionResponse,
 } from '@ferretry/protocol';
+import { MAX_ATTENTION_PER_SESSION } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -1370,5 +1371,144 @@ describe('Attention state machine card fields', () => {
     should(created.item).containDeep({ kind: 'info', title: 'Release ready' });
     should(created.item).not.have.property('ask');
     should(missing.error.code).equal('invalid');
+  });
+});
+
+describe('Attention state machine undelivered', () => {
+  const SYSTEM: AttentionActor = { kind: 'daemon', cause: 'system' };
+  const REASON = 'it never appeared in the ferret’s transcript';
+  const undelivered = (ledger: AttentionLedger, request?: number, actor: AttentionActor = SYSTEM) =>
+    applyAttentionCommand(ledger, {
+      action: 'undelivered',
+      actor,
+      id: 'A1',
+      reason: REASON,
+      ...(request === undefined ? {} : { request }),
+      at: THIRD,
+    });
+
+  it('should reopen an answered item as a card, keeping the answer for a retry', () => {
+    // Arrange
+    const answered = succeeded(
+      applyAttentionCommand(raised().ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        note: 'ship it',
+        at: SECOND,
+      }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(answered.ledger));
+    const snapshot = attentionSnapshot(reopened.ledger);
+
+    // Assert — open again, out of the resolved history, and the retry is the same answer.
+    should(reopened.change).equal('reopened');
+    should(snapshot.items.map(item => item.id)).deepEqual(['A1']);
+    should(snapshot.resolved).be.empty();
+    should(snapshot.items[0]).not.have.properties(['resolvedAt', 'disposition', 'response']);
+    should(snapshot.items[0]?.undelivered).deepEqual({
+      at: THIRD,
+      reply: { action: 'resolve', note: 'ship it', response: { kind: 'permission', decision: 'approve' } },
+      reason: REASON,
+    });
+  });
+
+  it('should reopen a dismissed item with a dismiss to retry, and clear the mark when the owner acts again', () => {
+    // Arrange
+    const dismissed = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(dismissed.ledger));
+    const retried = succeeded(
+      applyAttentionCommand(reopened.ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: THIRD }),
+    );
+
+    // Assert
+    should(reopened.item?.undelivered?.reply).deepEqual({ action: 'dismiss' });
+    should(retried.addressed).not.have.property('undelivered');
+  });
+
+  it('should end an undelivered discussion: back to the owner, waiting on nobody, with the discussion to retry', () => {
+    // Arrange
+    const discussing = succeeded(
+      applyAttentionCommand(raised().ledger, {
+        action: 'discuss',
+        actor: HUMAN,
+        id: 'A1',
+        note: 'premise is off',
+        at: SECOND,
+      }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(discussing.ledger, 1));
+    const again = succeeded(
+      applyAttentionCommand(reopened.ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: THIRD }),
+    );
+
+    // Assert
+    should(reopened.change).equal('reopened');
+    should(reopened.item).not.have.properties(['waitingOn', 'askedAt', 'waitingFor']);
+    should(reopened.item?.undelivered?.reply).deepEqual({ action: 'discuss', note: 'premise is off' });
+    should(again.item).containDeep({ waitingFor: 'discussion', infoRequests: 2 });
+    should(again.item).not.have.property('undelivered');
+  });
+
+  it('should leave an item alone that moved on since: a newer request, the ferret’s update, an item still open', () => {
+    // Arrange
+    const discussing = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const updated = succeeded(
+      applyAttentionCommand(discussing.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Approve the deployment of v2?' },
+        at: THIRD,
+      }),
+    );
+
+    // Act + Assert
+    should(succeeded(undelivered(discussing.ledger, 2)).changed).be.false();
+    should(succeeded(undelivered(updated.ledger, 1)).changed).be.false();
+    should(succeeded(undelivered(raised().ledger)).changed).be.false();
+  });
+
+  it('should keep an undelivered answer closed, and say so, when the board has no room to reopen it', () => {
+    // Arrange — one answered item, then the board filled to its limit with open ones.
+    let ledger = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    ).ledger;
+    for (let index = 0; index < MAX_ATTENTION_PER_SESSION; index += 1)
+      ledger = succeeded(
+        applyAttentionCommand(
+          ledger,
+          raiseCommand(DAEMON, { subject: `Full ${index}?`, sourceRef: `full-${index}` }, SECOND),
+        ),
+      ).ledger;
+
+    // Act
+    const refused = failed(undelivered(ledger));
+
+    // Assert
+    should(refused.error.code).equal('full');
+    should(refused.error.message).match(/A1 cannot reopen/);
+  });
+
+  it('should be the daemon’s word alone, and only about an item a ferret raised', () => {
+    // Arrange
+    const owners = succeeded(
+      applyAttentionCommand(raised(HUMAN).ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act + Assert
+    should(failed(undelivered(raised().ledger, undefined, HUMAN)).error.code).equal('forbidden');
+    should(succeeded(undelivered(owners.ledger)).changed).be.false();
   });
 });
