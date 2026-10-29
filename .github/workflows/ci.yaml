@@ -167,12 +167,15 @@ jobs:
     # Integration Tests job's shared Chromium launches, so this needs no new tool and no further macOS
     # job. A sibling job rather than a step on an existing one, so it adds runner time and no wall clock.
     # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners"). The Settings walk
-    # fits a 2x4. The full gallery is two legs, one viewport each, on GitHub's free runner on every event:
-    # unsplit it walked its viewports one after the other, 643s on GitHub against ~427s on a Namespace
-    # 4x8, a third of the Namespace bill. Separate jobs, not one job running both at once: that was three
-    # software-rendered Chromes on four cores, and it timed out in 3 of 7 runs under load (#598).
-    # The unsplit gallery also stayed on Namespace on `main` (a `main: namespace` matrix key), because
-    # 643s on GitHub held every release back by ~3 minutes; each split leg takes about half that.
+    # fits a 2x4. The full gallery is two legs, one viewport each, each on a 4x8: unsplit it walked its
+    # viewports one after the other, 643s on GitHub against ~422s on a Namespace 4x8, and a viewport's
+    # walk peaks at 5-7GB so a leg cannot drop to a 2x4. A GitHub leg runs about as long as a Namespace one
+    # but waits in GitHub's queue, which on a busy day put the pull-request p90 near 11 minutes against
+    # 8, so a pull request keeps Namespace (docs/standards/ci-cd, "Runners": GitHub only when Namespace
+    # buys close to nothing).
+    # Separate jobs, not one job running both at once: that was three software-rendered Chromes on four
+    # cores, and it timed out in 3 of 7 runs under load (#598). On `main` both legs take the GitHub
+    # branch below, like every other job there.
     runs-on: >-
       ${{
         (matrix.shape == 'github' || github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
@@ -191,8 +194,8 @@ jobs:
       matrix:
         include:
           - { scheme: light, scope: settings, shape: 2x4 }
-          - { scheme: dark, scope: full, viewport: mobile, shape: github }
-          - { scheme: dark, scope: full, viewport: desktop, shape: github }
+          - { scheme: dark, scope: full, viewport: mobile, shape: 4x8 }
+          - { scheme: dark, scope: full, viewport: desktop, shape: 4x8 }
     steps:
       - uses: actions/checkout@v5
         with:

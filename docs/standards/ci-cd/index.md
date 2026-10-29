@@ -33,7 +33,7 @@ which stays on Namespace because it is the job that refreshes the cache volume (
 waits" is not quite true: `Release` waits for the slowest job, so a job that would hold it back keeps
 Namespace on `main` too. The unsplit full gallery did, with a `main: namespace` matrix key — 643s on
 GitHub, ~3 minutes more than any other `main` job — until it was split into one leg per viewport, each
-about half that, and the key went with it. A job
+about half that, and the key went with it (on a pull request the legs stay on Namespace 4x8, below). A job
 only moves to GitHub when Namespace buys it close to nothing: the time it adds to the run, its queue,
 its cache.
 
@@ -59,18 +59,18 @@ did before Namespace.
 **Where each job runs** on a pull request, with the busy cores measured by sampling `/proc/stat`
 every second, and the GitHub times from the last runs before Namespace (p50):
 
-| Job                                              | Runner        | Measured                           | Why                                                         |
-| ------------------------------------------------ | ------------- | ---------------------------------- | ----------------------------------------------------------- |
-| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores           | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path    |
-| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8       | knip needs more than a 2x4's 4GB; a 4x8 bought 16s          |
-| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                         | `bun test` runs one file at a time                          |
-| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                         | short builds; `Build Checks` also refreshes the cache       |
-| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                         | well inside the critical path                               |
-| `PWA Full Gallery (dark, <viewport>)`            | GitHub        | mobile 294s, desktop 324s, one run | one viewport a leg: free, and faster than ~427s unsplit 4x8 |
-| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB                     | one journey at a time                                       |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                       | free; seven groups keep the slowest near five minutes       |
-| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell              | billed a whole minute and a cache attachment on Namespace   |
-| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
+| Job                                              | Runner        | Measured                     | Why                                                       |
+| ------------------------------------------------ | ------------- | ---------------------------- | --------------------------------------------------------- |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores     | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path  |
+| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8 | knip needs more than a 2x4's 4GB; a 4x8 bought 16s        |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                   | `bun test` runs one file at a time                        |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                   | short builds; `Build Checks` also refreshes the cache     |
+| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                   | well inside the critical path                             |
+| `PWA Full Gallery (dark, <viewport>)`            | Namespace 4x8 | RAM peaks 5–7GB a viewport   | PR: GitHub legs wait in its queue (p90 ~11 min vs ~8)     |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB               | one journey at a time                                     |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                 | free; seven groups keep the slowest near five minutes     |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell        | billed a whole minute and a cache attachment on Namespace |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                            | free; macOS and arm64 have no Namespace equivalent here   |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
   with `cache: nix` mounts a persistent `/nix` BEFORE the [Nix install](#installing-nix), so the dev shell
