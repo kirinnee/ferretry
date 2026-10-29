@@ -1164,6 +1164,83 @@ describe('Attention state machine needs-info', () => {
   });
 });
 
+describe('Attention state machine discuss', () => {
+  const discuss = (ledger: AttentionLedger, note?: string, at = SECOND, actor: AttentionActor = HUMAN) =>
+    applyAttentionCommand(ledger, { action: 'discuss', actor, id: 'A1', ...(note === undefined ? {} : { note }), at });
+
+  it('should keep the item open, mark it in discussion and count the request on the shared counter', () => {
+    // Arrange
+    const created = raised();
+
+    // Act
+    const asked = succeeded(discuss(created.ledger, 'The premise is wrong'));
+
+    // Assert
+    should(asked.change).equal('discussing');
+    should(asked.item).containDeep({ waitingOn: 'ferret', askedAt: SECOND, waitingFor: 'discussion', infoRequests: 1 });
+    should(asked.item?.history).deepEqual([{ at: SECOND, kind: 'discuss', note: 'The premise is wrong' }]);
+  });
+
+  it('should treat a second ask as the same request, and turn an open request for information into a new one', () => {
+    // Arrange
+    const asked = succeeded(discuss(raised().ledger));
+    const info = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const again = succeeded(discuss(asked.ledger, 'again', THIRD));
+    const turned = succeeded(discuss(info.ledger, undefined, THIRD));
+
+    // Assert
+    should(again.change).equal('unchanged');
+    should(turned.change).equal('discussing');
+    should(turned.item).containDeep({ waitingFor: 'discussion', infoRequests: 2 });
+  });
+
+  it('should refuse an agent, a missing item, and an item no ferret raised', () => {
+    // Arrange
+    const created = raised();
+
+    // Act
+    const byAgent = failed(discuss(created.ledger, undefined, SECOND, AGENT));
+    const unknown = failed(
+      applyAttentionCommand(created.ledger, { action: 'discuss', actor: HUMAN, id: 'A9', at: SECOND }),
+    );
+    const unraised = failed(discuss(raised(HUMAN).ledger));
+
+    // Assert
+    should(byAgent.error.code).equal('forbidden');
+    should(unknown.error.code).equal('not-found');
+    should(unraised.error.code).equal('invalid');
+  });
+
+  it('should end the discussion when the ferret edits the item, and drop the mark when it is closed', () => {
+    // Arrange
+    const asked = succeeded(discuss(raised().ledger));
+
+    // Act
+    const edited = succeeded(
+      applyAttentionCommand(asked.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Use SQLite for the board?' },
+        at: THIRD,
+      }),
+    );
+    const closed = succeeded(
+      applyAttentionCommand(asked.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', note: null, at: THIRD }),
+    );
+
+    // Assert
+    should(edited.change).equal('info-added');
+    should(edited.item?.waitingFor).be.undefined();
+    should(edited.item?.history?.map(entry => entry.kind)).deepEqual(['discuss', 'updated']);
+    should(closed.ledger.entries[0]?.item.waitingFor).be.undefined();
+  });
+});
+
 describe('Attention state machine card fields', () => {
   const answers: AttentionCardAnswer[] = [
     { direction: 'left', does: 'reject', label: 'Deny' },
