@@ -33,8 +33,15 @@ async function script(body: string): Promise<string> {
 /** Run one child to completion, collecting every line it delivered. */
 async function run(
   path: string,
-  options: { readonly environment?: Record<string, string | undefined>; readonly write?: string } = {},
-): Promise<{ readonly lines: readonly string[]; readonly code: number; readonly wrote?: boolean }> {
+  options: {
+    readonly environment?: Record<string, string | undefined>;
+    readonly write?: string;
+  } = {},
+): Promise<{
+  readonly lines: readonly string[];
+  readonly code: number;
+  readonly wrote?: boolean;
+}> {
   const lines: string[] = [];
   const child = spawnHarnessLoginChild({
     command: [path],
@@ -135,7 +142,9 @@ describe('spawnHarnessLoginChild', () => {
     const path = await script('echo "key=${FY_LOGIN_PROBE:-unset}"\necho "leak=${FY_MUST_NOT_LEAK:-unset}"\n');
 
     // Act
-    const actual = await run(path, { environment: { PATH: '/usr/bin:/bin', FY_LOGIN_PROBE: 'present' } });
+    const actual = await run(path, {
+      environment: { PATH: '/usr/bin:/bin', FY_LOGIN_PROBE: 'present' },
+    });
 
     // Assert
     should(actual.lines).deepEqual(['key=present', 'leak=unset']);
@@ -257,6 +266,24 @@ describe('spawnHarnessLoginChild', () => {
     };
     for (let turn = 0; turn < 100 && alive(); turn += 1) await new Promise(r => setTimeout(r, 20));
     should(alive()).be.false();
+  });
+
+  it('should raise nothing for a signal that no process group or child can be sent', async () => {
+    // Neither the group kill nor the child's own kill can deliver a signal that does not exist; a cancel
+    // is still not an error worth propagating.
+    // Arrange
+    const path = await script('while true; do sleep 1; done\n');
+    const child = spawnHarnessLoginChild({
+      command: [path],
+      environment: { PATH: '/usr/bin:/bin' },
+      onLine: () => undefined,
+    });
+
+    // Act / Assert
+    should(() => child.kill('SIGNOSUCH' as 'SIGTERM')).not.throw();
+    // The child kept running, so an ordinary kill still has something to end.
+    child.kill();
+    should(await child.exited).not.equal(0);
   });
 
   it('should treat a second kill as nothing to raise', async () => {

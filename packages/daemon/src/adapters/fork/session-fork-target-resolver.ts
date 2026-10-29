@@ -214,7 +214,8 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
    */
   async validate(target: TransferTargetChoice, cwd: string): Promise<void> {
     const startup = forkStartupRuntimeRequest(target.harness, target.model, target.effort);
-    if (startup === undefined) return;
+    // A startup request exists only when an effort was chosen, so the null test narrows the type and nothing more.
+    if (startup === undefined || target.effort === null) return;
     const resolved = await resolveForkTargetAccount(this.ports.accounts, target.agent);
     if (resolved.account.id !== target.accountId || resolved.account.kind !== target.harness)
       throw new SessionForkTargetResolutionError(
@@ -225,9 +226,7 @@ export class SessionForkTargetResolver implements SessionForkTargetResolverPort 
     const wanted: HarnessRuntimeSwitchRequest = {
       harness: target.harness,
       ...(startup.action === 'model' && startup.model !== undefined ? { model: startup.model } : {}),
-      ...((startup.action === 'model' || startup.action === 'effort') && startup.effort !== undefined
-        ? { effort: startup.effort }
-        : {}),
+      effort: target.effort,
     };
     const plan = this.ports.harness.planSwitch(wanted, {
       wrapper: resolved.account.agent,
