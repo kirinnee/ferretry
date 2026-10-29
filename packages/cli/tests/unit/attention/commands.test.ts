@@ -19,10 +19,13 @@ const afterAdd = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2'
 function run(argv: string[], result = board) {
   const gateway = new RecordingAttentionGateway(board, result);
   const out = new CapturingOutput();
+  const sent: Array<{ words: readonly string[]; options: unknown }> = [];
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerAttentionCommands(program, new AttentionController(gateway, out, SESSION));
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, out };
+  registerAttentionCommands(program, new AttentionController(gateway, out, SESSION), async (words, options) => {
+    sent.push({ words, options });
+  });
+  return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, out, sent };
 }
 
 describe('attention command surface', () => {
@@ -286,31 +289,23 @@ describe('attention command surface', () => {
     should(gateway.applied[0]?.request).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 
-  it('should raise a notice for a notification', async () => {
+  it('should hand a notification to fy notify, with its body and ping', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(
-      ['attention', 'notify', 'the', 'build', 'is', 'green', '-t', 'CI', '--ping'],
-      afterAdd,
-    );
+    const { parsed, gateway, sent } = run([
+      'attention',
+      'notify',
+      'the',
+      'build',
+      'is',
+      'green',
+      '--body',
+      'detail',
+      '--ping',
+    ]);
     await parsed;
 
     // Assert
-    should(gateway.applied[0]?.request).match({
-      action: 'add',
-      kind: 'info',
-      title: 'CI',
-      subject: 'the build is green',
-      notice: true,
-      ping: true,
-    });
-  });
-
-  it('should refuse notify --kind completed and raise nothing', async () => {
-    // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'notify', 'all done', '--kind', 'completed']);
-
-    // Assert
-    await should(parsed).be.rejectedWith(/progress and finishing never notify the owner/u);
+    should(sent).deepEqual([{ words: ['the', 'build', 'is', 'green'], options: { body: 'detail', ping: true } }]);
     should(gateway.applied).be.empty();
   });
 

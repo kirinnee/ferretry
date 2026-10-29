@@ -68,8 +68,10 @@ export function recordTold(
     chars: section.text.length,
     digest: instructionDigest(section.text),
   }));
-  const kept = recorded.sections.filter(section => !ids.has(section.id as AlwaysOnSection['id']));
-  const order = ['tools', 'settings', 'attention'];
+  const kept = recorded.sections.filter(
+    section => !ids.has(section.id as AlwaysOnSection['id']) && section.id !== 'attention',
+  );
+  const order = ['tools', 'settings', 'notify'];
   const always = [...kept.filter(section => order.includes(section.id)), ...fresh].toSorted(
     (left, right) => order.indexOf(left.id) - order.indexOf(right.id),
   );

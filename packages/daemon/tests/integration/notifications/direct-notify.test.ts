@@ -101,65 +101,37 @@ function post(body: Record<string, unknown>) {
   });
 }
 
-async function ledgerLines(world: Awaited<ReturnType<typeof daemon>>): Promise<readonly Record<string, unknown>[]> {
-  const text = await world.files.readText(world.ledger.path);
-  return (text ?? '')
-    .trim()
-    .split('\n')
-    .filter(line => line !== '')
-    .map(line => JSON.parse(line) as Record<string, unknown>);
-}
-
-function pushedPayload(world: Awaited<ReturnType<typeof daemon>>, index = 0): Record<string, unknown> {
-  return JSON.parse(world.transport.deliveries[index]?.payload ?? '{}') as Record<string, unknown>;
-}
-
 afterAll(async () => {
   await cleanupTempDirectories();
 });
 
 describe('notify over the composed daemon surface', () => {
-  it('should push the info card the notify raised, once, with its title over its ask', async () => {
+  it('should raise the card and buzz nothing: a plain notify only moves the Inbox, however many devices are enrolled', async () => {
     // Arrange
     const world = await daemon({ records: [record()] });
 
     // Act
     const response = await world.surface.dispatch(post({ title: 'Release ready', body: 'The release is cut.' }));
-    const lines = await ledgerLines(world);
 
     // Assert
     should(response.status).equal(200);
-    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
-    should(world.transport.deliveries).have.length(1);
-    should(pushedPayload(world)).containDeep({ title: 'Release ready', body: 'The release is cut.' });
-    should(lines.map(line => line.phase)).deepEqual(['requested', 'outcome']);
-    should(lines[1]).containDeep({ delivered: 1, failed: 0 });
+    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 0 });
+    should(world.transport.deliveries).be.empty();
+    should(await world.files.readText(world.ledger.path)).be.undefined();
   });
 
-  it('should push the same for an automatic session as for an interactive one', async () => {
+  it('should buzz nothing for an automatic session either, nor for the same notify sent twice', async () => {
     // Arrange
     const world = await daemon({ mode: 'auto', records: [record()] });
 
     // Act
-    const response = await world.surface.dispatch(post({ body: 'Background agent update.' }));
+    const first = await world.surface.dispatch(post({ body: 'Background agent update.' }));
+    const second = await world.surface.dispatch(post({ body: 'Background agent update.' }));
 
     // Assert
-    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
-    should(pushedPayload(world)).containDeep({ title: 'Background agent update.', body: 'Background agent update.' });
-  });
-
-  it('should not push twice for the same notify while its card is still open', async () => {
-    // Arrange
-    const world = await daemon({ records: [record()] });
-
-    // Act
-    const first = await world.surface.dispatch(post({ body: 'Release ready.' }));
-    const second = await world.surface.dispatch(post({ body: 'Release ready.' }));
-
-    // Assert
-    should(jsonBody(first)).have.property('delivered', 1);
+    should(jsonBody(first)).have.property('delivered', 0);
     should(jsonBody(second)).have.property('delivered', 0);
-    should(world.transport.deliveries).have.length(1);
+    should(world.transport.deliveries).be.empty();
   });
 
   it('should refuse a notify that says it is progress or finishing, raising and pushing nothing', async () => {

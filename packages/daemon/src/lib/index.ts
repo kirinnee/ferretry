@@ -87,6 +87,7 @@ export * from './session/events/index.ts';
 export * from './session/filesystem/index.ts';
 export * from './session/harness/index.ts';
 export * from './session/health/index.ts';
+export * from './session/agenda-mode/index.ts';
 export * from './session/hypermedia/index.ts';
 export * from './session/launch/index.ts';
 export * from './session/lifecycle/index.ts';

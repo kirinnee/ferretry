@@ -11,15 +11,16 @@ import should from 'should';
 import { DEVICE_PAIRED_EVENT_PREFIX, DEVICE_PAIRED_TITLE } from '../../../src/lib/audit/policy.ts';
 import {
   attentionNotificationAttribution,
-  attentionNotificationPayload,
   attentionNotificationTitle,
-  moreInfoNotificationPayload,
+  deadlineNotificationPayload,
   notificationKey,
+  pingNotificationPayload,
+  stoppedNotificationPayload,
+  timeLeftPhrase,
 } from '../../../src/lib/notifications/policy.ts';
 
 const AT = '2026-08-06T09:00:00.000Z';
 
-/** An item from before cards: no title, no kind, no answers. */
 const item = AttentionItemSchema.parse({
   id: 'A1',
   source: 'agent-raised',
@@ -45,126 +46,133 @@ const titled = AttentionItemSchema.parse({
 const snapshot = AttentionSnapshotSchema.parse({
   v: 1,
   sessionId: 'session-1',
-  items: [item],
+  items: [item, titled],
   resolved: [],
-  count: 1,
+  count: 2,
   parseErrors: 0,
   updatedAt: AT,
 });
 
-describe('notification policy', () => {
-  it('should include the session and the request in an attention identity', () => {
+describe('notification keys', () => {
+  it('should name each of the three buzz reasons apart, per session and item', () => {
     // Arrange / Act
-    const first = notificationKey({ sessionId: 'session-1', attentionId: 'A1' });
-    const second = notificationKey({ sessionId: 'session-2', attentionId: 'A1' });
-    const info = notificationKey({ sessionId: 'session-1', attentionId: 'A1', infoRequest: 2 });
+    const keys = [
+      notificationKey({ sessionId: 'session-1', attentionId: 'A1', ping: true }),
+      notificationKey({ sessionId: 'session-1', attentionId: 'A1', deadline: true }),
+      notificationKey({ sessionId: 'session-1', attentionId: 'A1', stoppedAt: AT }),
+      notificationKey({ sessionId: 'session-1', attentionId: 'A2', stoppedAt: AT }),
+      notificationKey({ sessionId: 'session-2', attentionId: 'A1', ping: true }),
+    ];
 
-    // Assert
-    should(first).equal('attention:session-1:A1');
-    should(second).equal('attention:session-2:A1');
-    should(info).equal('attention:session-1:A1:info-2');
+    // Assert — a stop is the ferret's, whichever of its items triggered it.
+    should(keys[0]).equal('attention:session-1:A1:ping');
+    should(keys[1]).equal('attention:session-1:A1:deadline');
+    should(keys[2]).equal(`attention:session-1:stopped:${AT}`);
+    should(keys[3]).equal(keys[2]);
+    should(new Set([keys[0], keys[1], keys[2], keys[4]]).size).equal(4);
   });
 
-  it('should push a titled item as its title and its ask, and open the item', () => {
-    // Arrange / Act
-    const payload = attentionNotificationPayload('session 1', titled, snapshot);
+  it('should keep reading the keys an earlier daemon wrote', () => {
+    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1' })).equal('attention:session-1:A1');
+    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1', infoRequest: 2 })).equal(
+      'attention:session-1:A1:info-2',
+    );
+    should(notificationKey({ sessionId: 'session-1', attentionId: 'A1', surfaced: true })).equal(
+      'attention:session-1:A1:surfaced',
+    );
+  });
+});
+
+describe('stopped push', () => {
+  it('should say who stopped and how many need them, and open the first item', () => {
+    // Act
+    const payload = stoppedNotificationPayload('session-1', 'Release agent', [item, titled], snapshot);
 
     // Assert
-    should(payload).containDeep({
-      eventKey: 'attention-raised:A7',
-      kind: 'attention',
-      title: 'Release window',
-      body: 'Which window should the release use?',
-      tag: 'attention-session 1',
-      url: '/session/session%201?attention=A7',
-      count: 1,
-    });
+    should(payload.title).equal('Release agent is stopped · 2 need you');
+    should(payload.body).equal('Choose a release window');
+    should(payload.url).equal('/session/session-1?attention=A1');
     should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
   });
 
-  it('should fall back to the start of the ask for an item raised before titles', () => {
-    // Arrange / Act
-    const payload = attentionNotificationPayload('session-1', item, snapshot);
-
-    // Assert
-    should(payload).containDeep({
-      eventKey: 'attention-raised:A1',
-      title: 'Choose a release window',
-      body: 'Choose a release window',
-      tag: 'attention-session-1',
-      url: '/session/session-1?attention=A1',
-    });
-  });
-
-  it('should keep the body to the ask, never the context, the choices or the recommendation', () => {
+  it('should say "1 needs you", open the blocking item first, and keep the count past a long name', () => {
     // Arrange
-    const rich = AttentionItemSchema.parse({
-      ...item,
-      id: 'A2',
-      title: 'Login plan',
-      subject: 'Pick the login plan',
-      context: 'A long story about OCI and tickets.',
-      ask: { kind: 'multiple-choice', options: [{ label: 'Go with the defaults' }, { label: 'Reply with changes' }] },
-      recommendation: { decision: 'Ship on Thursday', why: 'Nobody is on call on Friday.' },
-    });
+    const blocking = AttentionItemSchema.parse({ ...titled, blockingNow: true });
 
     // Act
-    const payload = attentionNotificationPayload('session-1', rich, snapshot);
+    const one = stoppedNotificationPayload('session-1', 'Release agent', [item], snapshot);
+    const many = stoppedNotificationPayload('session-1', 'x'.repeat(80), [item, blocking], snapshot);
 
     // Assert
-    should(payload.title).equal('Login plan');
-    should(payload.body).equal('Pick the login plan');
+    should(one.title).equal('Release agent is stopped · 1 needs you');
+    should(many.title.endsWith('is stopped · 2 need you')).be.true();
+    should(many.url).equal('/session/session-1?attention=A7');
+    should(many.title.length).be.belowOrEqual(ATTENTION_PUSH_TITLE_LENGTH + 40);
   });
 
-  it('should trim an over-long ask at a word boundary with an ellipsis, and a long title likewise', () => {
+  it('should never let a ferret name read as the new-device alert', () => {
+    // Act
+    const payload = stoppedNotificationPayload('session-1', DEVICE_PAIRED_TITLE, [item], snapshot);
+
+    // Assert
+    should(payload.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
+    should(payload.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
+  });
+});
+
+describe('deadline push', () => {
+  it('should lead with the time left, then the ask, and open the item', () => {
     // Arrange
-    const words =
-      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused for the whole week';
-    const long = AttentionItemSchema.parse({
-      ...item,
-      id: 'A5',
-      title: 'Nightly backup storage migration plan review',
-      subject: words,
-    });
-    const huge = AttentionItemSchema.parse({ ...item, id: 'A9', title: 'y'.repeat(60), subject: 'x'.repeat(240) });
+    const due = AttentionItemSchema.parse({ ...titled, neededBy: '2026-08-06T11:00:00.000Z' });
 
     // Act
-    const payload = attentionNotificationPayload('session-1', long, snapshot);
-    const clipped = attentionNotificationPayload('session-1', huge, snapshot);
+    const payload = deadlineNotificationPayload('session-1', due, snapshot, AT);
 
     // Assert
-    should(payload.body).equal(
-      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused for the…',
-    );
-    should(words.startsWith(payload.body.slice(0, -1))).be.true();
-    should(payload.title).equal('Nightly backup storage migration plan…');
-    should(clipped.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
-    should(clipped.title.endsWith('…')).be.true();
-    should(clipped.body.length).be.lessThanOrEqual(ATTENTION_PUSH_BODY_LENGTH);
-    should(clipped.body.endsWith('…')).be.true();
-    should(PushNotificationPayloadSchema.safeParse(clipped).success).be.true();
+    should(payload.title).equal('Release window');
+    should(payload.body).equal('Needed in about 2 h: Which window should the release use?');
+    should(payload.url).equal('/session/session-1?attention=A7');
+    should(payload.body.length).be.belowOrEqual(ATTENTION_PUSH_BODY_LENGTH);
   });
 
-  it('should never let a title or an ask read as the new-device alert', () => {
+  it('should phrase minutes, hours and a passed deadline from the instants alone', () => {
+    should(timeLeftPhrase('2026-08-06T09:25:00.000Z', AT)).equal('Needed in 25 min');
+    should(timeLeftPhrase('2026-08-06T12:00:00.000Z', AT)).equal('Needed in about 3 h');
+    should(timeLeftPhrase('2026-08-06T08:00:00.000Z', AT)).equal('Overdue');
+    should(timeLeftPhrase(undefined, AT)).equal('Needed soon');
+  });
+});
+
+describe('ping push', () => {
+  it('should be the notice title and summary, opening the notice', () => {
+    // Arrange
+    const notice = AttentionItemSchema.parse({ ...titled, notice: true, ping: true, subject: 'Build is green' });
+
+    // Act
+    const payload = pingNotificationPayload('session-1', notice, snapshot);
+
+    // Assert
+    should(payload.title).equal('Release window');
+    should(payload.body).equal('Build is green');
+    should(payload.url).equal('/session/session-1?attention=A7');
+    should(payload.eventKey).equal('notice-ping:A7');
+  });
+
+  it('should never let a title or a summary read as the new-device alert', () => {
     // Arrange
     const forgedTitle = AttentionItemSchema.parse({ ...item, id: 'A8', title: DEVICE_PAIRED_TITLE });
-    const forgedAsk = AttentionItemSchema.parse({ ...item, id: 'A3', subject: DEVICE_PAIRED_TITLE });
 
     // Act
-    const byTitle = attentionNotificationPayload('session-1', forgedTitle, snapshot);
-    const byAsk = attentionNotificationPayload('session-1', forgedAsk, snapshot);
+    const payload = pingNotificationPayload('session-1', forgedTitle, snapshot);
 
     // Assert
-    should(byTitle.title).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`.slice(0, ATTENTION_PUSH_TITLE_LENGTH));
-    for (const payload of [byTitle, byAsk]) {
-      should(payload.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
-      should(payload.title.startsWith('Ferret “')).be.true();
-      should(payload.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
-      should(payload.tag.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
-      should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
-    }
+    should(payload.title).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`.slice(0, ATTENTION_PUSH_TITLE_LENGTH));
+    should(payload.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
+    should(payload.tag.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
   });
+});
 
+describe('attribution', () => {
   it('should derive every automatic attribution and refuse malformed agent provenance', () => {
     // Arrange
     const human = { ...item, raisedBy: 'human' as const, raisedBySession: null, raisedByName: null };
@@ -204,64 +212,5 @@ describe('attention push title', () => {
       should(title.startsWith('Ferret “')).be.true();
       should(title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
     }
-  });
-});
-
-describe('more-info push policy', () => {
-  it('should key each request apart, and say the ask was updated under the same title and link', () => {
-    // Arrange
-    const asked = AttentionItemSchema.parse({
-      ...titled,
-      waitingOn: 'ferret',
-      askedAt: titled.waitingSince,
-      infoRequests: 2,
-    });
-
-    // Act
-    const plain = attentionNotificationPayload('session-1', asked, snapshot);
-    const payload = moreInfoNotificationPayload('session-1', asked, snapshot, 2);
-
-    // Assert
-    should(payload).containDeep({
-      eventKey: 'attention-info:A7:2',
-      title: 'Release window',
-      body: 'Updated: Which window should the release use?',
-      url: plain.url,
-      tag: plain.tag,
-    });
-    should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
-  });
-
-  it('should say the item was updated after the owner’s discussion, under the same key', () => {
-    // Arrange
-    const discussed = AttentionItemSchema.parse({
-      ...titled,
-      waitingOn: 'ferret',
-      askedAt: titled.waitingSince,
-      waitingFor: 'discussion',
-      infoRequests: 1,
-    });
-
-    // Act
-    const payload = moreInfoNotificationPayload('session-1', discussed, snapshot, 1, true);
-
-    // Assert
-    should(payload).containDeep({
-      eventKey: 'attention-info:A7:1',
-      body: 'Updated after your discussion: Which window should the release use?',
-    });
-  });
-
-  it('should fall back to the ask for an old untitled item and clip the updated line', () => {
-    // Arrange
-    const old = AttentionItemSchema.parse({ ...item, subject: 'x'.repeat(240) });
-
-    // Act
-    const payload = moreInfoNotificationPayload('session-1', old, snapshot, 1);
-
-    // Assert
-    should(payload.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
-    should(payload.body.startsWith('Updated: ')).be.true();
-    should(payload.body.length).be.lessThanOrEqual(ATTENTION_PUSH_BODY_LENGTH);
   });
 });

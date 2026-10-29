@@ -239,6 +239,8 @@ export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FI
  * within `replyReceiptSeconds`. Either wait running out reopens the item as a card for the owner. Read at
  * start; a change needs a restart.
  *
+ * `deadlineWarnHours` (default 3) is how near an item's `neededBy` must be for its one deadline push.
+ *
  * `resurfaceAfterMinutes` is off unless set: an ask that has sat in discussion that long is surfaced to the
  * owner's queue by the daemon, its history saying the timer did it.
  */
@@ -250,6 +252,8 @@ export const DaemonAttentionConfigSchema = z
     replyReceiptSeconds: z.number().int().min(30).max(86_400).default(900),
     /** Absent (the default): an ask stays in discussion until its ferret surfaces it. Present: after this long it surfaces by itself. */
     resurfaceAfterMinutes: z.number().int().min(1).max(10_080).optional(),
+    /** An agenda item whose `neededBy` is within this many hours buzzes the phone, once (docs/notifications.md). */
+    deadlineWarnHours: z.number().min(0.25).max(168).default(3),
   })
   .refine(window => window.replySettleSeconds <= window.replyMaxWaitSeconds, {
     message: 'attention.replySettleSeconds must not exceed attention.replyMaxWaitSeconds',

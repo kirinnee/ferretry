@@ -67,7 +67,7 @@ Restart to apply", with the reason, and a one-tap Restart. It compares two thing
   the process was launched (a permission-mode, profile or fixed-layer change since).
 
 **Info › Runtime › Instructions** says what the running process was told: which Ferretry sections of its
-appended system prompt it carries (the tools, the settings rules, the Attention rule, and each of Hypermedia, Pack mode and
+appended system prompt it carries (the tools, the settings rules, the Notify rule, and each of Hypermedia, Pack mode, Agenda mode and
 Learning whose switch was on) with each one's size, its mode, and whether it may ask the owner a question.
 It reads `state.launchInstructions` (`SessionLaunchInstructionsSchema`), which the daemon records from the
 environment each pane is launched with — at every start, restart and revive — so a switch flipped since
@@ -79,7 +79,7 @@ next launch".
 
 A harness reads its appended system prompt once, at launch, and neither Claude Code nor Codex can re-read
 it mid-conversation. So a rule Ferretry tightens would otherwise reach a long-running ferret only when it
-restarted. The three sections every agent gets (the tools, the settings rules and the Attention rule,
+restarted. The three sections every agent gets (the tools, the settings rules and the Notify rule,
 `ALWAYS_ON_SECTIONS` in `@ferretry/fleet`) depend on nothing but the binary's name. Each launch now records
 a fingerprint of each one (`digest`, `instructionDigest`) beside its size.
 
@@ -92,7 +92,7 @@ so the next message queues nothing. The Instructions row then shows the new size
 - **The owner's message triggers it and goes out exactly as typed.** The note is its own message in the
   ferret's attention outbox, under the key `instructions~<digest>` (a key made from the note's words, so
   the same note is never queued twice). It rides the same quiet window and the same hold while the ferret
-  is mid-turn as the owner's answers ([attention.md](attention.md)), and joins a batch of them as one
+  is mid-turn as the owner's answers ([attention.md](attention.md#delivery)), and joins a batch of them as one
   message. Only an owner's message triggers it: a release must not start a turn for every ferret on the
   machine, and a teammate's message never does. If the note cannot be queued it is not marked as told, so
   the next owner message offers it again.

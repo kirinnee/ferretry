@@ -744,12 +744,14 @@ describe('the attention reply window', () => {
       replyMaxWaitSeconds: 120,
       replyComposerWaitSeconds: 600,
       replyReceiptSeconds: 900,
+      deadlineWarnHours: 3,
     });
     should(parseDaemonConfig({ attention: { replySettleSeconds: 30 } }).attention).deepEqual({
       replySettleSeconds: 30,
       replyMaxWaitSeconds: 120,
       replyComposerWaitSeconds: 600,
       replyReceiptSeconds: 900,
+      deadlineWarnHours: 3,
     });
   });
 
@@ -762,6 +764,7 @@ describe('the attention reply window', () => {
       replyMaxWaitSeconds: 120,
       replyComposerWaitSeconds: 60,
       replyReceiptSeconds: 120,
+      deadlineWarnHours: 3,
     });
     should(() => parseDaemonConfig({ attention: { replyComposerWaitSeconds: 5 } })).throw();
     should(() => parseDaemonConfig({ attention: { replyReceiptSeconds: 10 } })).throw();
@@ -774,6 +777,7 @@ describe('the attention reply window', () => {
       replyMaxWaitSeconds: 1,
       replyComposerWaitSeconds: 600,
       replyReceiptSeconds: 900,
+      deadlineWarnHours: 3,
     });
     should(
       parseDaemonConfig({ attention: { replySettleSeconds: 3600, replyMaxWaitSeconds: 3600 } }).attention,
@@ -782,6 +786,7 @@ describe('the attention reply window', () => {
       replyMaxWaitSeconds: 3600,
       replyComposerWaitSeconds: 600,
       replyReceiptSeconds: 900,
+      deadlineWarnHours: 3,
     });
   });
 
@@ -799,5 +804,16 @@ describe('the attention reply window', () => {
     should(() => parseDaemonConfig({ attention: { replyMaxWaitSeconds: 3601 } })).throw();
     should(() => parseDaemonConfig({ attention: { replySettleSeconds: 1.5 } })).throw();
     should(() => parseDaemonConfig({ attention: { quietSeconds: 5 } })).throw();
+  });
+});
+
+describe('the attention deadline warning', () => {
+  it('should warn three hours ahead unless told otherwise, within its bounds', () => {
+    // Act + Assert
+    should(defaultDaemonConfig().attention.deadlineWarnHours).equal(3);
+    should(parseDaemonConfig({ attention: { deadlineWarnHours: 0.25 } }).attention.deadlineWarnHours).equal(0.25);
+    should(parseDaemonConfig({ attention: { deadlineWarnHours: 168 } }).attention.deadlineWarnHours).equal(168);
+    should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 0.1 } })).throw();
+    should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 169 } })).throw();
   });
 });

@@ -1,10 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  AGENDA_ENV,
+  AGENDA_INSTRUCTION,
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
-  ATTENTION_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
@@ -21,9 +22,10 @@ import {
   fixedLayerFor,
   HYPERMEDIA_ENV,
   HYPERMEDIA_INSTRUCTION,
-  LESSONS_INSTRUCTION,
   instructionDigest,
+  LESSONS_INSTRUCTION,
   launchInstructions,
+  NOTIFY_INSTRUCTION,
   PACK_ENV,
   PACK_INSTRUCTION,
   PACK_ROUTING_ENV,
@@ -637,7 +639,7 @@ describe('hypermedia teaching', () => {
 });
 
 describe('Pack mode teaching', () => {
-  it('should be the per-ferret section between hypermedia and lessons, naming every step by the binary it is given', () => {
+  it('should be the per-ferret section after hypermedia, before agenda and lessons, naming every step by the binary it is given', () => {
     // Arrange
     const binary = 'zz';
 
@@ -646,7 +648,12 @@ describe('Pack mode teaching', () => {
     const teaching = PACK_INSTRUCTION(binary);
 
     // Assert
-    should(sections.map(section => section.env)).deepEqual([HYPERMEDIA_ENV, PACK_ENV, PASSIVE_LEARNING_ENV]);
+    should(sections.map(section => section.env)).deepEqual([
+      HYPERMEDIA_ENV,
+      PACK_ENV,
+      AGENDA_ENV,
+      PASSIVE_LEARNING_ENV,
+    ]);
     should(sections[1]?.text).equal(teaching);
     should(PACK_ENV).equal('FY_PACK');
     for (const step of [
@@ -672,68 +679,84 @@ describe('Pack mode teaching', () => {
   });
 });
 
-describe('ATTENTION_INSTRUCTION', () => {
-  it('should teach raising a structured item, never for progress, the answer message, and resolving, with the binary name given', () => {
+describe('NOTIFY_INSTRUCTION', () => {
+  it('should teach one quiet notice command, the opt-in ping, and no progress, with the binary name given', () => {
     // Act
-    const text = ATTENTION_INSTRUCTION('zz');
+    const text = NOTIFY_INSTRUCTION('zz');
 
     // Assert
-    // Why first: the owner reads the board, so an ask left in a reply reaches nobody.
-    should(text).startWith('Attention: the owner reads the board, not your replies');
-    // Every notification is an item, and progress is never one.
-    should(text).containEql('every notification is an Attention item (never progress)');
-    // Every human action is its own item, raised before the reply ends — never prose alone.
-    should(text).containEql(
-      'Before ending a reply that asks them to decide or DO anything, raise each ask as its OWN item',
-    );
-    // An ask starts in discussion in the chat; a card is a short title and a one-line ask.
-    should(text).containEql('starting in discussion:');
-    should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
-    should(text).containEql('Title ≤40 chars; ask ≤120.');
-    // Isolated: the reader has not followed the conversation, so they must be able to answer cold.
-    should(text).containEql('Owner answers cold: no "as above"');
-    should(text).containEql('ticket/PR numbers');
-    // Point form: the situation, why now and earlier answers are separate flags; a SMALL diagram or mock-up
-    // rides in the body when it shows the point faster than words.
-    should(text).containEql(
-      '`--premise` = situation, `--context` = why now, `--decided` = settled, `--still-open` = left',
-    );
-    should(text).containEql('a SMALL diagram/mock-up (fy-render svg|html|mermaid)');
-    should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
-    should(text).containEql('`--term "X=meaning"`');
-    // Kinds, at most three directional answers, the recommendation on the right.
-    should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
-    should(text).containEql('Choice: 2–3 `--option`s;');
-    should(text).containEql('`--recommend <pick> --recommend-why <line>`');
-    should(text).containEql('To-do: `--step "<md>"`');
-    // An answer is read apart: an option with its note, or the owner's own words instead of the options.
-    should(text).containEql('"[answer to !A3 …] <option> · note: …"');
-    should(text).containEql('"Other answer (none of the options): …"');
-    // The need-more-info loop: expand the same item.
-    should(text).containEql('"[needs more info !A3 …]" → `zz attention edit <id>`');
-    // The discussion loop: a reply about an ask closes nothing; update the card, close what it answered, surface the rest.
-    should(text).containEql(
-      '"[reply about !A3 …]" is chat: `zz attention edit <id>` its card (settled, still open, new options);',
-    );
-    should(text).containEql('`done` what it answered, `surface` the rest.');
-    // Open items are read on demand.
-    should(text).containEql('Open: `zz attention ls`');
-    should(text).not.containEql('notify');
-    should(text).not.containEql('fy ');
+    should(text).startWith('Notify: the owner reads the Inbox, not your replies.');
+    should(text).containEql('`zz notify "<summary>" [--body "<detail>"]`');
+    should(text).containEql('a quiet Inbox notice');
+    should(text).containEql('Add `--ping` only when it must reach their phone now.');
+    should(text).containEql('Never notify progress or chatter.');
+    // The agenda is its own switchable section: the always-on rule never teaches it, and never says Attention.
+    should(text).not.containEql('agenda');
+    should(text).not.containEql('Attention');
+    should(text).not.containEql('`fy ');
   });
 
   it('should stay short: it is in every prompt', () => {
     // Assert
-    should(ATTENTION_INSTRUCTION('fy').length).be.below(1_050);
+    should(NOTIFY_INSTRUCTION('fy').length).be.below(450);
   });
 
   it('should ride in the always-on instruction after the settings rules, not behind a switch', () => {
     // Assert
-    should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${ATTENTION_INSTRUCTION('fy')}`);
+    should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}`);
     should(AGENT_INSTRUCTION('fy').indexOf(SET_UP_FERRETRY_INSTRUCTION('fy'))).be.below(
-      AGENT_INSTRUCTION('fy').indexOf(ATTENTION_INSTRUCTION('fy')),
+      AGENT_INSTRUCTION('fy').indexOf(NOTIFY_INSTRUCTION('fy')),
     );
-    should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('attention');
+    should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('notify');
+  });
+});
+
+describe('AGENDA_INSTRUCTION', () => {
+  it('should teach adding one item per owner ask, cold-readable, with the verbs and flags, and the binary name given', () => {
+    // Act
+    const text = AGENDA_INSTRUCTION('zz');
+
+    // Assert
+    should(text).startWith('Agenda mode: keep an agenda of what ONLY the owner can do or decide.');
+    should(text).containEql('add each ask as its OWN item');
+    should(text).containEql('`zz agenda add --title "<what it is about>" "<the ask>"`');
+    should(text).containEql('Title ≤40 chars; ask ≤120.');
+    should(text).containEql('no "as above", ticket/PR numbers, paths or unexplained acronyms');
+    should(text).containEql('`--term "X=meaning"`');
+    should(text).containEql(
+      '`--premise` = situation, `--context` = why now, `--decided` = settled, `--still-open` = left',
+    );
+    should(text).containEql('`--body`: a SMALL diagram (fy-render svg|html|mermaid)');
+    should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
+    should(text).containEql('Choice: 2–3 `--option`s with `--recommend <pick> --recommend-why <line>`');
+    should(text).containEql('To-do: `--step "<md>"`');
+    // When it is needed: it blocks now, will block later, or by a time.
+    should(text).containEql('`--blocking`');
+    should(text).containEql('`--will-block`');
+    should(text).containEql('`--by <time>`');
+    // The answer and discussion loops, then resolving and reading.
+    should(text).containEql('"[answer to !A3 …]" is the answer');
+    should(text).containEql('"[re !A3 …]" is chat: `zz agenda edit <id>` its card');
+    should(text).containEql('`zz agenda done <id>`');
+    should(text).containEql('`zz agenda surface <id>`');
+    should(text).containEql('`zz agenda ls`');
+    should(text).not.containEql('Attention');
+    should(text).not.containEql('`fy ');
+  });
+
+  it('should stay within its cap: it is in every prompt that turns the mode on', () => {
+    // Assert
+    should(AGENDA_INSTRUCTION('fy').length).be.below(1_300);
+  });
+
+  it('should be a per-ferret section between pack and learning, on only when FY_AGENDA is exactly 1', () => {
+    // Act
+    const sections = FERRET_SECTIONS('fy');
+
+    // Assert
+    should(sections.map(section => section.id)).deepEqual(['hypermedia', 'pack', 'agenda', 'learning']);
+    should(sections.find(section => section.id === 'agenda')).match({ env: AGENDA_ENV });
+    should(AGENDA_ENV).equal('FY_AGENDA');
   });
 });
 
@@ -743,7 +766,7 @@ describe('ALWAYS_ON_SECTIONS', () => {
     const sections = ALWAYS_ON_SECTIONS('zz');
 
     // Assert
-    should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'attention']);
+    should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify']);
     should(sections.map(section => section.text).join('\n\n')).equal(AGENT_INSTRUCTION('zz'));
   });
 });
@@ -751,9 +774,9 @@ describe('ALWAYS_ON_SECTIONS', () => {
 describe('instructionDigest', () => {
   it('should be a short, stable fingerprint that changes with the words', () => {
     // Act
-    const once = instructionDigest(ATTENTION_INSTRUCTION('fy'));
-    const again = instructionDigest(ATTENTION_INSTRUCTION('fy'));
-    const other = instructionDigest(ATTENTION_INSTRUCTION('zz'));
+    const once = instructionDigest(NOTIFY_INSTRUCTION('fy'));
+    const again = instructionDigest(NOTIFY_INSTRUCTION('fy'));
+    const other = instructionDigest(NOTIFY_INSTRUCTION('zz'));
 
     // Assert
     should(once).match(/^[0-9a-f]{14}$/u);
@@ -771,6 +794,7 @@ describe('launchInstructions', () => {
       [SESSION_MODE_ENV]: 'interactive',
       [HYPERMEDIA_ENV]: '1',
       [PACK_ENV]: '1',
+      [AGENDA_ENV]: '1',
       [PASSIVE_LEARNING_ENV]: '1',
     };
 
@@ -791,12 +815,13 @@ describe('launchInstructions', () => {
           digest: instructionDigest(SET_UP_FERRETRY_INSTRUCTION(binary)),
         },
         {
-          id: 'attention',
-          chars: ATTENTION_INSTRUCTION(binary).length,
-          digest: instructionDigest(ATTENTION_INSTRUCTION(binary)),
+          id: 'notify',
+          chars: NOTIFY_INSTRUCTION(binary).length,
+          digest: instructionDigest(NOTIFY_INSTRUCTION(binary)),
         },
         { id: 'hypermedia', chars: HYPERMEDIA_INSTRUCTION.length },
         { id: 'pack', chars: PACK_INSTRUCTION(binary).length },
+        { id: 'agenda', chars: AGENDA_INSTRUCTION(binary).length },
         { id: 'learning', chars: LESSONS_INSTRUCTION(binary).length },
       ],
       mode: 'interactive',
@@ -816,24 +841,24 @@ describe('launchInstructions', () => {
     should(on.sections.find(section => section.id === 'pack')?.chars).equal(
       PACK_INSTRUCTION('fy').length + 1 + line.length,
     );
-    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'attention']);
+    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify']);
   });
 
   it.each([
     ['interactive', { [SESSION_MODE_ENV]: 'interactive' }],
     ['auto', { [SESSION_MODE_ENV]: 'auto' }],
     ['unset', {}],
-    ['every switch on', { [HYPERMEDIA_ENV]: '1', [PACK_ENV]: '1', [PASSIVE_LEARNING_ENV]: '1' }],
-    ['every switch off', { [HYPERMEDIA_ENV]: '0', [PACK_ENV]: '0', [PASSIVE_LEARNING_ENV]: '0' }],
+    ['every switch on', { [HYPERMEDIA_ENV]: '1', [PACK_ENV]: '1', [AGENDA_ENV]: '1', [PASSIVE_LEARNING_ENV]: '1' }],
+    ['every switch off', { [HYPERMEDIA_ENV]: '0', [PACK_ENV]: '0', [AGENDA_ENV]: '0', [PASSIVE_LEARNING_ENV]: '0' }],
   ])(
-    'should report the attention section, between settings and the per-ferret sections, for a %s launch',
+    'should report the notify section, between settings and the per-ferret sections, for a %s launch',
     (_name, env) => {
       // Act
       const ids = launchInstructions('fy', env).sections.map(section => section.id);
 
       // Assert
-      should(ids.slice(0, 3)).deepEqual(['tools', 'settings', 'attention']);
-      should(launchInstructions('fy', env).sections[2]?.chars).equal(ATTENTION_INSTRUCTION('fy').length);
+      should(ids.slice(0, 3)).deepEqual(['tools', 'settings', 'notify']);
+      should(launchInstructions('fy', env).sections[2]?.chars).equal(NOTIFY_INSTRUCTION('fy').length);
     },
   );
 
@@ -845,8 +870,49 @@ describe('launchInstructions', () => {
     const launched = launchInstructions('fy', env);
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'attention']);
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify']);
     should(launched.mode).equal('auto');
     should(launched.questions).be.false();
+  });
+
+  it('should list the agenda section only when FY_AGENDA is exactly 1, and keep the order hypermedia, pack, agenda, learning', () => {
+    // Act
+    const off = launchInstructions('fy', { [HYPERMEDIA_ENV]: '1', [PACK_ENV]: '1', [PASSIVE_LEARNING_ENV]: '1' });
+    const zero = launchInstructions('fy', { [AGENDA_ENV]: '0' });
+    const yes = launchInstructions('fy', { [AGENDA_ENV]: 'yes' });
+    const on = launchInstructions('fy', {
+      [HYPERMEDIA_ENV]: '1',
+      [PACK_ENV]: '1',
+      [AGENDA_ENV]: '1',
+      [PASSIVE_LEARNING_ENV]: '1',
+    });
+
+    // Assert
+    should(off.sections.map(section => section.id)).not.containEql('agenda');
+    should(zero.sections.map(section => section.id)).not.containEql('agenda');
+    should(yes.sections.map(section => section.id)).not.containEql('agenda');
+    should(on.sections.map(section => section.id)).deepEqual([
+      'tools',
+      'settings',
+      'notify',
+      'hypermedia',
+      'pack',
+      'agenda',
+      'learning',
+    ]);
+    // A per-ferret section carries a size, never a digest.
+    should(on.sections.find(section => section.id === 'agenda')).deepEqual({
+      id: 'agenda',
+      chars: AGENDA_INSTRUCTION('fy').length,
+    });
+  });
+
+  it('should keep every always-on digest stable whether or not the agenda is on', () => {
+    // Act
+    const off = launchInstructions('fy', {});
+    const on = launchInstructions('fy', { [AGENDA_ENV]: '1' });
+
+    // Assert
+    should(on.sections.slice(0, 3)).deepEqual(off.sections.slice(0, 3));
   });
 });

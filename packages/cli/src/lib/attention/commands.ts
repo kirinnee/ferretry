@@ -1,11 +1,11 @@
 import type { Command } from 'commander';
+import type { NotifyOptions } from '../notify/commands.ts';
 import { ASK_KIND_NAMES } from './ask.ts';
 import type {
   AttentionAddOptions,
   AttentionCommandOptions,
   AttentionController,
   AttentionEditOptions,
-  AttentionNotifyOptions,
   AttentionResolveOptions,
   AttentionStepOptions,
   AttentionSurfaceOptions,
@@ -94,7 +94,14 @@ function scoped(command: Command): Command {
  * first word that is not a verb (`fy agenda show A6`, a typo) is refused with the verbs on offer, never read
  * as the summary of a new item.
  */
-export function registerAttentionCommands(program: Command, controller: AttentionController): void {
+/** Sends one plain notification: `fy notify`'s own run, handed in so the alias cannot drift from it. */
+export type AttentionNotifier = (words: readonly string[], options: NotifyOptions) => Promise<void>;
+
+export function registerAttentionCommands(
+  program: Command,
+  controller: AttentionController,
+  notify?: AttentionNotifier,
+): void {
   mountVerbs(
     scoped(
       program
@@ -104,7 +111,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     ),
     'agenda',
     controller,
-    false,
+    undefined,
   );
   mountVerbs(
     scoped(
@@ -117,11 +124,16 @@ export function registerAttentionCommands(program: Command, controller: Attentio
     ),
     'attention',
     controller,
-    true,
+    notify,
   );
 }
 
-function mountVerbs(root: Command, name: string, controller: AttentionController, withNotify: boolean): void {
+function mountVerbs(
+  root: Command,
+  name: string,
+  controller: AttentionController,
+  notify: AttentionNotifier | undefined,
+): void {
   const attention = root.argument('[verb...]', 'what to do: one of the commands below').action((words: string[]) => {
     throw new Error(unknownVerb(name, words, verbNames(attention)));
   });
@@ -306,21 +318,20 @@ function mountVerbs(root: Command, name: string, controller: AttentionController
     await controller.dismiss(id, merged<AttentionResolveOptions>(command));
   });
 
-  if (!withNotify) return;
+  if (notify === undefined) return;
   scoped(
     attention
       .command('notify')
       .description('send the owner a plain notification — nothing to decide (the same as `fy notify`)')
-      .argument('<message...>', 'what to tell them: one line (the ask); a longer text goes whole into the context')
-      .option('-t, --title <title>', 'the card heading (defaults to the start of the message, 40 characters)')
-      .option('-k, --kind <kind>', 'refused: progress and finishing never notify the owner')
+      .argument('<summary...>', 'one line saying what the owner should know')
+      .option('--body <markdown>', 'the longer reading behind the summary, as Markdown')
       .option('--ping', "buzz the owner's phone for this notice")
       .addHelpText(
         'after',
         '\nA notice is read, not answered. Put something on the agenda (add) when the owner must decide or do.',
       ),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
-    await controller.notify(words, merged<AttentionNotifyOptions>(command));
+    await notify(words, merged<AttentionCommandOptions & NotifyOptions>(command));
   });
 }
 

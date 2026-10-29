@@ -9,11 +9,9 @@ import {
   AttentionConversation,
   type AttentionLedger,
   type AttentionLedgerRepository,
-  AttentionMoreInfoPush,
   type AttentionMutation,
   AttentionReplyDelivery,
   AttentionService,
-  AttentionSurfacedPush,
   SessionAttentionProjection,
   type SessionAttentionState,
 } from '../../../src/lib/attention/index.ts';
@@ -89,69 +87,6 @@ const ASK = {
   howToResolve: 'Pick one.',
   ask: { kind: 'multiple-choice' as const, options: [{ label: 'Rebase now' }, { label: 'Wait' }] },
 };
-
-describe('Attention surfaced push', () => {
-  it('should announce an ask once it leaves discussion for the owner, whoever surfaced it, and nothing else', async () => {
-    // Arrange
-    const announced: Array<{ sessionId: string; id: string }> = [];
-    const push = new AttentionSurfacedPush({
-      surfaced: async (sessionId, item) => {
-        announced.push({ sessionId, id: item.id });
-      },
-    });
-    const changes = new AttentionChangeFanout([push]);
-    const attention = service(new MemoryRepository(), changes);
-
-    // Act — a new ask is the owner's turn already; only a reply puts it in discussion to be surfaced.
-    await attention.raise(SESSION, ASK, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Already on the queue?' }, AGENT);
-    await attention.reply(SESSION, 'A1', HUMAN);
-    const before = announced.length;
-    await attention.surface(SESSION, 'A1', AGENT, 'Still open');
-    await attention.surface(SESSION, 'A1', AGENT);
-    await attention.surface(SESSION, 'A2', AGENT);
-
-    // Assert
-    should(before).equal(0);
-    should(announced).deepEqual([{ sessionId: SESSION, id: 'A1' }]);
-  });
-});
-
-describe('Attention edit on the owner’s turn and on the ferret’s', () => {
-  it('should announce nothing to the owner when a ferret updates the card of an ask, or hands a discussion back', async () => {
-    // Arrange
-    const announced: string[] = [];
-    const surfacedPush = new AttentionSurfacedPush({
-      surfaced: async (_session, item) => void announced.push(`surfaced ${item.id}`),
-    });
-    const moreInfoPush = new AttentionMoreInfoPush({
-      moreInfoAdded: async (_session, item) => void announced.push(`info ${item.id}`),
-    });
-    const changes = new RecordingChanges();
-    const attention = service(new MemoryRepository(), changes);
-    await attention.raise(SESSION, ASK, AGENT);
-
-    // Act
-    await attention.edit(SESSION, 'A1', { stillOpen: 'Which region?' }, AGENT);
-    await attention.edit(SESSION, 'A1', { decided: 'Use SQLite', stillOpen: 'Which size?' }, AGENT);
-    await attention.reply(SESSION, 'A1', HUMAN);
-    await attention.edit(SESSION, 'A1', { stillOpen: 'Which cluster?' }, AGENT);
-    for (const { sessionId, change } of changes.seen) {
-      await surfacedPush.changed(sessionId, change);
-      await moreInfoPush.changed(sessionId, change);
-    }
-
-    // Assert
-    should(changes.seen.map(each => each.change.change)).deepEqual([
-      'created',
-      'refreshed',
-      'refreshed',
-      'replied',
-      'refreshed',
-    ]);
-    should(announced).deepEqual([]);
-  });
-});
 
 describe('Attention board observers', () => {
   it('should tell change observers about every committed change, with its source, and never an unchanged one', async () => {
@@ -232,6 +167,32 @@ describe('Attention board observers', () => {
 
     // Assert
     should(state.writes).deepEqual([{ sessionId: SESSION, summary: undefined, reconciled: false }]);
+  });
+
+  it('should say a ferret works in agenda mode, and is stopped only while idle with an item on the owner', async () => {
+    // Arrange
+    const repository = new MemoryRepository();
+    await service(repository, new RecordingChanges()).raise(SESSION, ASK, AGENT);
+    const idle = { current: async () => NOW };
+    const state = new RecordingState();
+    const working = new SessionAttentionProjection(repository, state, inline, () => NOW, { enabled: async () => true });
+    const stopped = new SessionAttentionProjection(
+      repository,
+      state,
+      inline,
+      () => NOW,
+      { enabled: async () => true },
+      idle,
+    );
+
+    // Act
+    await working.refresh(SESSION);
+    await stopped.refresh(SESSION);
+
+    // Assert
+    should(state.writes[0]?.summary).have.property('agendaMode', true);
+    should(state.writes[0]?.summary).not.have.property('stopped');
+    should(state.writes[1]?.summary).have.properties({ agendaMode: true, stopped: true });
   });
 
   it('should reconcile every named session on its own, past one that cannot be read', async () => {
@@ -575,53 +536,6 @@ describe('Attention needs-info delivery', () => {
 
     // Assert
     should(messenger.sent).deepEqual([]);
-  });
-});
-
-describe('Attention more-info push', () => {
-  it('should announce an edit that answered a request, once, and nothing for an ordinary edit', async () => {
-    // Arrange
-    const changes = new RecordingChanges();
-    const attention = service(new MemoryRepository(), changes);
-    const pushed: string[] = [];
-    const observer = new AttentionMoreInfoPush({
-      moreInfoAdded: async (_session, item, _snapshot, discussion) => {
-        pushed.push(`${item.id}~${item.infoRequests}${discussion ? ' discussion' : ''}`);
-      },
-    });
-    await attention.raise(SESSION, ASK, AGENT);
-    await attention.edit(SESSION, 'A1', { subject: 'An ordinary edit?' }, AGENT);
-    await attention.needsInfo(SESSION, 'A1', HUMAN);
-    await attention.edit(SESSION, 'A1', { subject: 'More info added?' }, AGENT);
-    await attention.edit(SESSION, 'A1', { subject: 'More info added?' }, AGENT);
-
-    // Act
-    for (const { sessionId, change } of changes.seen) await observer.changed(sessionId, change);
-
-    // Assert
-    should(pushed).deepEqual(['A1~1']);
-  });
-
-  it('should push nothing when an edit hands a discussion back: only an answered request for information pushes', async () => {
-    // Arrange
-    const changes = new RecordingChanges();
-    const attention = service(new MemoryRepository(), changes);
-    const pushed: string[] = [];
-    const observer = new AttentionMoreInfoPush({
-      moreInfoAdded: async (_session, item) => {
-        pushed.push(item.id);
-      },
-    });
-    await attention.raise(SESSION, ASK, AGENT);
-    await attention.discuss(SESSION, 'A1', HUMAN, 'Why now?');
-    await attention.edit(SESSION, 'A1', { subject: 'Rebase after the freeze?' }, AGENT);
-    await attention.edit(SESSION, 'A1', { stillOpen: 'Which branch?' }, AGENT);
-
-    // Act
-    for (const { sessionId, change } of changes.seen) await observer.changed(sessionId, change);
-
-    // Assert
-    should(pushed).deepEqual([]);
   });
 });
 
