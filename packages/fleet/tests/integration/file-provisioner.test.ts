@@ -1,9 +1,11 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, describe, it, spyOn } from 'bun:test';
+import * as fs from 'node:fs/promises';
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, stat, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import should from 'should';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
+import { isMutationReservedName } from '../../src/adapters/mutation-journal.ts';
 import type { FleetManifest } from '../../src/lib/manifest.ts';
 import type { FleetApplyPlan } from '../../src/lib/provisioning.ts';
 import type { SharedHistoryMigration, SharedHistoryRequest } from '../../src/lib/shared-history.ts';
@@ -684,6 +686,101 @@ describe('FileFleetProvisioner', () => {
       await should(lstat(marker)).be.rejected();
     });
 
+    it('should refuse a sidecar that is not JSON, and say which sidecar', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      await mkdir(home, { recursive: true });
+      await Bun.write(config, 'model = "kept"\n');
+      await Bun.write(marker, '{ not json');
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      };
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act + Assert
+      const failure = await subject.apply(plan).then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      should((failure as Error).message).startWith(
+        `cannot safely reconcile Codex SQLite ownership sidecar ${marker}: `,
+      );
+      should(await readFile(marker, 'utf8')).equal('{ not json');
+      should(await readFile(config, 'utf8')).equal('model = "kept"\n');
+    });
+
+    it('should refuse to take over an sqlite_home that is not a string', async () => {
+      // Arrange — nothing says what to put back later, so sharing must not start.
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      await mkdir(home, { recursive: true });
+      await Bun.write(config, 'sqlite_home = 5\n');
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true }],
+      };
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act + Assert
+      await should(subject.apply(plan)).be.rejectedWith(
+        `existing sqlite_home must be a string before sharing can change it: ${config}`,
+      );
+      should(await readFile(config, 'utf8')).equal('sqlite_home = 5\n');
+      await should(lstat(marker)).be.rejected();
+    });
+
+    it('should refuse a sidecar location it cannot even inspect', async () => {
+      // Arrange — the account home is a file, so the sidecar beneath it cannot be looked at.
+      const root = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(home, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      await Bun.write(home, 'a file where the account home should be');
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: false }],
+      };
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act + Assert
+      await should(subject.apply(plan)).be.rejectedWith(/ENOTDIR/u);
+      should(await readFile(home, 'utf8')).equal('a file where the account home should be');
+    });
+
+    it('should refuse a sidecar placed outside the roots even when the config is inside them', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const outside = await temporaryDirectory();
+      const home = path.join(root, 'fleet', 'homes', 'codex-work');
+      const config = path.join(home, 'config.toml');
+      const marker = path.join(outside, '.ferretry-sqlite-home.json');
+      const sqliteHome = path.join(root, 'fleet', 'shared', 'codex', 'sqlite');
+      await mkdir(home, { recursive: true });
+      const plan: FleetApplyPlan = {
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'codex-sqlite-ownership', path: config, markerPath: marker, sqliteHome, enabled: true }],
+      };
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act + Assert
+      await should(subject.preview(plan)).be.rejectedWith(
+        `refusing to write outside configured fleet roots: ${marker}`,
+      );
+    });
+
     it.each([
       ['sidecar', '{"version":2}\n', 'model = "kept"\n'],
       [
@@ -1087,5 +1184,198 @@ describe('FileFleetProvisioner', () => {
     await should(promise).be.rejectedWith(/outside configured fleet roots/u);
     should(await Bun.file(first).exists()).be.false();
     should(await Bun.file(path.join(other, 'escaped')).exists()).be.false();
+  });
+
+  describe('prune-directory operations', () => {
+    it('should treat a directory that is not there as already swept', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const actual = await subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'prune-directory', path: directory, keep: ['kept'] }],
+      });
+
+      // Assert — nothing was created to sweep, and the apply still completed.
+      should(actual.prunedWrappers).deepEqual([]);
+      await should(lstat(directory)).be.rejected();
+      should(await Bun.file(path.join(root, 'fleet', 'manifest.json')).exists()).be.true();
+    });
+
+    it('should surface a named entry it cannot inspect for any reason other than its absence', async () => {
+      // Arrange — the directory is a file, so nothing beneath it can be looked at.
+      const root = await temporaryDirectory();
+      const directory = path.join(root, 'fleet', 'homes', 'one', 'skills');
+      await Bun.write(directory, 'a file where a directory should be');
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'prune-directory', path: directory, keep: [], only: ['stale'] }],
+      });
+
+      // Assert
+      await should(promise).be.rejectedWith(/ENOTDIR/u);
+      should(await readFile(directory, 'utf8')).equal('a file where a directory should be');
+      should(await Bun.file(path.join(root, 'fleet', 'manifest.json')).exists()).be.false();
+    });
+  });
+
+  it('should refuse shared-history requests when no shared-history adapter was supplied', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [],
+      sharedHistoryRequests: [{ kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] }],
+    };
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act + Assert
+    const message = 'shared-history operations were planned without a shared-history filesystem adapter';
+    await should(subject.preview(plan)).be.rejectedWith(message);
+    await should(subject.apply(plan)).be.rejectedWith(message);
+    should(await Bun.file(plan.manifestPath).exists()).be.false();
+  });
+
+  describe('settings that cannot be read back', () => {
+    const settingsPlan = (root: string, destination: string): FleetApplyPlan => ({
+      manifest: manifest(),
+      manifestPath: path.join(root, 'fleet', 'manifest.json'),
+      operations: [
+        {
+          kind: 'settings',
+          path: destination,
+          format: 'json',
+          layers: [{ from: 'inline', settings: { model: 'fresh' } }],
+          mode: 0o600,
+          preserveExisting: true,
+        },
+      ],
+    });
+
+    it('should refuse rather than merge over a settings file it is not allowed to read', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
+      await Bun.write(destination, '{"effortLevel":"high"}');
+      await chmod(destination, 0o000);
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      const promise = subject.apply(settingsPlan(root, destination));
+
+      // Assert — the unreadable file is put back exactly as it was.
+      await should(promise).be.rejectedWith(/could not be read \(.*EACCES/su);
+      await chmod(destination, 0o600);
+      should(await readFile(destination, 'utf8')).equal('{"effortLevel":"high"}');
+    });
+
+    it('should merge only the plan when the file it set aside has vanished before it could be read', async () => {
+      // Arrange — the set-aside copy is gone by the time the merge looks for it.
+      const root = await temporaryDirectory();
+      const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
+      await Bun.write(destination, '{"effortLevel":"high"}');
+      const real = fs.lstat;
+      let vanished = false;
+      const lstatSpy = spyOn(fs, 'lstat').mockImplementation(((target: string, ...rest: unknown[]) => {
+        if (!vanished && isMutationReservedName(path.basename(String(target)))) {
+          vanished = true;
+          return Promise.reject(Object.assign(new Error('ENOENT: no such file or directory'), { code: 'ENOENT' }));
+        }
+        return (real as (...args: unknown[]) => unknown)(target, ...rest);
+      }) as unknown as typeof fs.lstat);
+      const subject = new FileFleetProvisioner([root]);
+
+      try {
+        // Act
+        await subject.apply(settingsPlan(root, destination));
+      } finally {
+        lstatSpy.mockRestore();
+      }
+
+      // Assert
+      should(vanished).be.true();
+      should(JSON.parse(await readFile(destination, 'utf8'))).deepEqual({ model: 'fresh' });
+    });
+
+    it('should fail the apply and put the file back when the set-aside copy cannot be inspected', async () => {
+      // Arrange
+      const root = await temporaryDirectory();
+      const destination = path.join(root, 'fleet', 'homes', 'one', 'settings.json');
+      await Bun.write(destination, '{"effortLevel":"high"}');
+      const real = fs.lstat;
+      let failed = false;
+      const lstatSpy = spyOn(fs, 'lstat').mockImplementation(((target: string, ...rest: unknown[]) => {
+        if (!failed && isMutationReservedName(path.basename(String(target)))) {
+          failed = true;
+          return Promise.reject(Object.assign(new Error('EIO: i/o error'), { code: 'EIO' }));
+        }
+        return (real as (...args: unknown[]) => unknown)(target, ...rest);
+      }) as unknown as typeof fs.lstat);
+      const subject = new FileFleetProvisioner([root]);
+
+      // Act
+      let promise: Promise<unknown>;
+      try {
+        promise = subject.apply(settingsPlan(root, destination));
+        await promise.catch(() => undefined);
+      } finally {
+        lstatSpy.mockRestore();
+      }
+
+      // Assert
+      await should(promise).be.rejectedWith(/EIO/u);
+      should(await readFile(destination, 'utf8')).equal('{"effortLevel":"high"}');
+    });
+  });
+
+  it('should refuse to publish a staged entry that is no longer a regular file', async () => {
+    // Arrange — the copy is told to dereference, so a link in the staged tree means somebody swapped
+    // an entry after the copy finished; hard-linking it into the account home is not on offer.
+    const root = await temporaryDirectory();
+    const source = path.join(root, 'assets', 'skill');
+    const destination = path.join(root, 'fleet', 'homes', 'one', 'skill');
+    const elsewhere = path.join(root, 'elsewhere.txt');
+    await Bun.write(path.join(source, 'SKILL.md'), 'the skill\n');
+    await Bun.write(elsewhere, 'not part of the skill\n');
+    const real = fs.cp;
+    const cpSpy = spyOn(fs, 'cp').mockImplementation((async (from: string, to: string, options: never) => {
+      await real(from, to, options);
+      await rm(path.join(to, 'SKILL.md'));
+      await symlink(elsewhere, path.join(to, 'SKILL.md'));
+    }) as unknown as typeof fs.cp);
+    const subject = new FileFleetProvisioner([root]);
+
+    // Act
+    let promise: Promise<unknown>;
+    try {
+      promise = subject.apply({
+        manifest: manifest(),
+        manifestPath: path.join(root, 'fleet', 'manifest.json'),
+        operations: [{ kind: 'copy', source, path: destination }],
+      });
+      await promise.catch(() => undefined);
+    } finally {
+      cpSpy.mockRestore();
+    }
+
+    // Assert
+    const failure = await promise.then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    should((failure as Error).message).containEql(
+      `refusing to publish ${path.join(destination, 'SKILL.md')}: the staged entry is not a regular file`,
+    );
+    await should(lstat(destination)).be.rejected();
+    should(await readFile(elsewhere, 'utf8')).equal('not part of the skill\n');
   });
 });
