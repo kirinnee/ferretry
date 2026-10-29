@@ -13,6 +13,7 @@ import {
   type AttentionActionClient,
   type AttentionAgenda,
   type AttentionFocus,
+  attentionLedgerIds,
   useAttentionAgenda,
 } from '../../../src/features/attention/attention-agenda.tsx';
 import { AttentionFullCard } from '../../../src/features/attention/attention-full-card.tsx';
@@ -64,7 +65,9 @@ const client = (fail = false): AttentionActionClient => ({
   },
   needsInfo: async () => undefined,
   discuss: async () => undefined,
-  progress: async () => undefined,
+  progress: async (_c, _s, id, step, done) => {
+    calls.push(`progress:${id}:${step}:${done}`);
+  },
 });
 
 interface HostProps {
@@ -76,6 +79,7 @@ interface HostProps {
   readonly onOpenResolved?: (id: AttentionId) => void;
   readonly clientOverride?: AttentionActionClient;
   readonly repliesSlot?: ReactElement;
+  readonly status?: 'loading' | 'ready' | 'error';
 }
 
 let current: AttentionAgenda | undefined;
@@ -94,7 +98,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     focus,
     scope: rest.scope ?? scope,
     snapshot,
-    status: snapshot === null ? 'loading' : 'ready',
+    status: rest.status ?? (snapshot === null ? 'loading' : 'ready'),
     swipeable: !desktop,
     ...(rest.onOpenResolved === undefined ? {} : { onOpenResolved: rest.onOpenResolved }),
     ...(rest.repliesSlot === undefined ? {} : { repliesSlot: rest.repliesSlot }),
@@ -482,5 +486,147 @@ describe('the layout choices', () => {
     expect(other.root.findByType('button').props['data-docked']).toBe(false);
     run(() => other.root.findByType('button').props.onClick());
     expect(other.root.findByType('button').props['data-docked']).toBe(true);
+  });
+});
+
+const textOf = (node: ReactTestInstance | undefined): string =>
+  (node?.children ?? []).map(child => (typeof child === 'string' ? child : textOf(child))).join('');
+
+describe('what the agenda says about a board it cannot trust', () => {
+  const notes = (root: ReactTestInstance) =>
+    root.findAll(node => node.type === 'p' && node.props.className === 'fy-agenda-note');
+
+  test('says how many damaged records the machine reported', () => {
+    const view = mount({ snapshot: board(MIXED, { parseErrors: 2 }) });
+    const [note] = notes(view.root);
+    expect(note?.props.role).toBe('alert');
+    expect(textOf(note)).toContain('2 damaged agenda records');
+  });
+
+  test('says the list cannot be read instead of implying that nothing needs the owner', () => {
+    const view = mount({ snapshot: null, status: 'error' });
+    const [note] = notes(view.root);
+    expect(textOf(note)).toContain('cannot be read right now');
+    expect(lines(view.root)).toHaveLength(0);
+  });
+
+  test('keeps a resolved item’s id on the ledger, and reads no ids from an unread board', () => {
+    const resolved = [{ ...item('A9'), resolvedAt: '2026-07-31T11:59:00.000Z' }];
+    expect(attentionLedgerIds(board([item('A1')], {}, resolved))).toEqual(['A1', 'A9']);
+    expect(attentionLedgerIds(null)).toEqual([]);
+  });
+});
+
+describe('the full card’s steps', () => {
+  test('are reported to the machine for the item the card shows', async () => {
+    const view = mount({ snapshot: board(MIXED) });
+    run(() => toggle(view.root)[0]?.props.onClick());
+    run(() =>
+      view.root
+        .findAllByType(AttentionAgendaRow)
+        .find(row => row.props.item.id === 'A3')
+        ?.props.onOpen(),
+    );
+    await runAsync(async () => {
+      await view.root.findByType(AttentionFullCard).props.onProgress(2, true);
+    });
+    expect(calls).toEqual(['progress:A3:2:true']);
+  });
+});
+
+describe('the drawer’s scroll cue', () => {
+  const box = { scrollHeight: 400, scrollTop: 0, clientHeight: 200, firstElementChild: {} };
+  const watched: unknown[] = [];
+  let disconnected = 0;
+  let notify: (() => void) | undefined;
+  const original = globalThis.ResizeObserver;
+  afterEach(() => {
+    globalThis.ResizeObserver = original;
+    watched.length = 0;
+    disconnected = 0;
+    notify = undefined;
+    box.scrollHeight = 400;
+    box.scrollTop = 0;
+  });
+  const open = () => {
+    disconnected = 0;
+    globalThis.ResizeObserver = class {
+      constructor(callback: () => void) {
+        notify = callback;
+      }
+      observe(target: unknown) {
+        watched.push(target);
+      }
+      disconnect() {
+        disconnected += 1;
+      }
+    } as unknown as typeof ResizeObserver;
+    const view = render(<Host snapshot={board(MIXED)} />, { createNodeMock: () => box });
+    mounted.push(view);
+    run(() => toggle(view.root)[0]?.props.onClick());
+    return view;
+  };
+  const drawer = (view: ReturnType<typeof render>) =>
+    view.root.find(node => node.type === 'section' && node.props['data-agenda-drawer'] !== undefined);
+
+  test('shows when rows are hidden below, and goes when the drawer is scrolled to its end or resized to fit', () => {
+    const view = open();
+    expect(drawer(view).props['data-more']).toBe(true);
+    expect(watched).toEqual([box, box.firstElementChild]);
+
+    box.scrollTop = 200;
+    run(() => drawer(view).props.onScroll());
+    expect(drawer(view).props['data-more']).toBeUndefined();
+
+    box.scrollTop = 0;
+    box.scrollHeight = 200;
+    run(() => notify?.());
+    expect(drawer(view).props['data-more']).toBeUndefined();
+    box.scrollHeight = 400;
+    run(() => notify?.());
+    expect(drawer(view).props['data-more']).toBe(true);
+  });
+
+  test('stops watching when the drawer closes', () => {
+    const view = open();
+    run(() => toggle(view.root)[0]?.props.onClick());
+    expect(disconnected).toBe(1);
+  });
+
+  test('still measures once in a browser with no resize observer', () => {
+    const view = open();
+    run(() => view.unmount());
+    mounted.pop();
+    // @ts-expect-error the browser under test has no ResizeObserver
+    delete globalThis.ResizeObserver;
+    const bare = render(<Host snapshot={board(MIXED)} />, { createNodeMock: () => box });
+    mounted.push(bare);
+    run(() => toggle(bare.root)[0]?.props.onClick());
+    expect(drawer(bare).props['data-more']).toBe(true);
+  });
+});
+
+describe('the layout choice when the browser hides its storage', () => {
+  function Probe() {
+    const [docked] = useAgendaDock();
+    return <i data-docked={docked} />;
+  }
+
+  test('reads as not docked when asking for storage throws', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('storage is blocked');
+      },
+    });
+    try {
+      const view = render(<Probe />);
+      mounted.push(view);
+      expect(view.root.findByType('i').props['data-docked']).toBe(false);
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'localStorage', original);
+      else delete (globalThis as { localStorage?: unknown }).localStorage;
+    }
   });
 });
