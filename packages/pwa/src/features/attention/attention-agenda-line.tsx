@@ -95,20 +95,31 @@ export function AttentionAgendaLine({
           <ChevronUp aria-hidden="true" className="fy-agenda-line__chevron" data-open={open || undefined} size={14} />
         </button>
       )}
-      {repliesSlot !== undefined ? (
-        <div className="fy-agenda-line__status">{repliesSlot}</div>
-      ) : sending.count === 0 ? null : (
-        <span
-          className="fy-agenda-line__status fy-agenda-sending"
-          data-attention-sending-line=""
-          role="status"
-          title={sending.headings.length === 0 ? undefined : sending.headings.join(', ')}
-        >
-          <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
-          {sending.count === 1 ? 'Sending…' : `Sending ${sending.count}…`}
-        </span>
-      )}
+      <AgendaLineStatus repliesSlot={repliesSlot} sending={sending} />
     </div>
+  );
+}
+
+/** The line's right end: the held-replies notice when there is one, else what is on its way, else nothing. */
+function AgendaLineStatus({
+  repliesSlot,
+  sending,
+}: {
+  readonly repliesSlot: ReactNode | undefined;
+  readonly sending: AgendaSending;
+}) {
+  if (repliesSlot !== undefined) return <div className="fy-agenda-line__status">{repliesSlot}</div>;
+  if (sending.count === 0) return null;
+  return (
+    <span
+      className="fy-agenda-line__status fy-agenda-sending"
+      data-attention-sending-line=""
+      role="status"
+      title={sending.headings.length === 0 ? undefined : sending.headings.join(', ')}
+    >
+      <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
+      {sending.count === 1 ? 'Sending…' : `Sending ${sending.count}…`}
+    </span>
   );
 }
 
@@ -206,13 +217,15 @@ export function AttentionAgendaPanel({ onClose, ...rows }: AttentionAgendaPanelP
           <X aria-hidden="true" size={16} />
         </button>
       </header>
-      {rows.items.length === 0 ? (
-        <p className="fy-agenda-panel__empty">Nothing on the agenda.</p>
-      ) : (
-        <AgendaRows {...rows} />
-      )}
+      <AgendaPanelBody {...rows} />
     </aside>
   );
+}
+
+/** The docked panel's rows, or a plain line when there are none. */
+function AgendaPanelBody(rows: AgendaRowsProps) {
+  if (rows.items.length === 0) return <p className="fy-agenda-panel__empty">Nothing on the agenda.</p>;
+  return <AgendaRows {...rows} />;
 }
 
 export interface AttentionReferenceChipsProps {

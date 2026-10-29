@@ -72,6 +72,12 @@ const locateAttention = (snapshot: AttentionSnapshot | null, id: AttentionId): A
 export const attentionLedgerIds = (snapshot: AttentionSnapshot | null): readonly AttentionId[] =>
   snapshot === null ? [] : [...snapshot.items.map(item => item.id), ...snapshot.resolved.map(item => item.id)];
 
+/** Ticks or unticks one step of an item on this session's machine, from its full card. */
+const stepTicker =
+  (client: AttentionActionClient, connection: DaemonConnection, scope: DaemonSessionScope, id: AttentionId) =>
+  (step: number, done: boolean): Promise<void> =>
+    client.progress(connection, scope, id, step, done);
+
 /** Sends one answer, as the daemon is asked for it, to this session on this machine. */
 const runAttentionAction = async (
   client: AttentionActionClient,
@@ -335,12 +341,7 @@ export const useAttentionAgenda = ({
             {...(now === undefined ? {} : { now })}
             {...(previous === undefined ? {} : { onPrevious: () => update(() => ({ card: previous.id })) })}
             {...(next === undefined ? {} : { onNext: () => update(() => ({ card: next.id })) })}
-            {...(client === undefined
-              ? {}
-              : {
-                  onProgress: (step: number, done: boolean) =>
-                    client.progress(connection, scope, cardItem.id, step, done),
-                })}
+            {...(client === undefined ? {} : { onProgress: stepTicker(client, connection, scope, cardItem.id) })}
           />
         </AttentionDeliveryContext.Provider>
       </div>

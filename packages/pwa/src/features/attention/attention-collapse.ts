@@ -13,12 +13,14 @@ export interface CollapseStorage {
   setItem(key: string, value: string): void;
 }
 
+/** Whether a value can be read and written as storage. */
+const isCollapseStorage = (value: CollapseStorage | undefined): value is CollapseStorage =>
+  typeof value?.getItem === 'function' && typeof value?.setItem === 'function';
+
 const browserCollapseStorage = (): CollapseStorage | undefined => {
   try {
     const candidate = (globalThis as { localStorage?: CollapseStorage }).localStorage;
-    return candidate && typeof candidate.getItem === 'function' && typeof candidate.setItem === 'function'
-      ? candidate
-      : undefined;
+    return isCollapseStorage(candidate) ? candidate : undefined;
   } catch {
     return undefined;
   }
