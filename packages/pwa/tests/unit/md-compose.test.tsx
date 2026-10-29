@@ -76,6 +76,18 @@ describe('Markdown composer preference', () => {
     expect(parseMdComposePref(null)).toBe(MD_COMPOSE_DEFAULT);
   });
 
+  it('keeps the setting when the page cannot be told about it', () => {
+    withBrowser((storage, browser) => {
+      clearVolatilePreference(browser);
+      browser.dispatchEvent = () => {
+        throw new Error('event shim refused');
+      };
+      expect(() => writeMdComposePref('rich')).not.toThrow();
+      expect(storage.getItem(MD_COMPOSE_KEY)).toBe('rich');
+      expect(readMdComposePref()).toBe('rich');
+    });
+  });
+
   it('hydrates safely and retains a same-page value when persistence is denied', () => {
     withBrowser((storage, browser) => {
       storage.setItem(MD_COMPOSE_KEY, 'on');

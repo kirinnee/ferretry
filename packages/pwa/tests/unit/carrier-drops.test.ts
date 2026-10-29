@@ -149,6 +149,25 @@ describe('the carrier drop log', () => {
     expect(garbage).toEqual([]);
   });
 
+  it('should start with an empty log when storage refuses a read', () => {
+    // Arrange
+    const { environment } = page();
+    const refusing: CarrierDropStorage = {
+      getItem: () => {
+        throw new Error('SecurityError: storage is disabled');
+      },
+      setItem: () => undefined,
+    };
+
+    // Act
+    const log = new CarrierDropLog(environment, refusing);
+
+    // Assert
+    expect(log.snapshot()).toEqual([]);
+    log.dropped(MACHINE, 'relay', 'requests', END);
+    expect(log.snapshot()).toHaveLength(1);
+  });
+
   it('should keep the log for this tab when storage refuses a write, and still tell its subscribers', () => {
     // Arrange
     const { environment } = page();

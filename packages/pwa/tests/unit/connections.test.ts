@@ -253,6 +253,22 @@ describe('DaemonConnectionStore', () => {
     ).deepEqual([{ kind: 'direct', daemonUrl: 'https://b.example.test' }]);
   });
 
+  it('should drop a stored direct carrier whose address is not a daemon origin', () => {
+    should(
+      parseDaemonConnections(
+        persisted([
+          row('b', 1, {
+            carriers: [
+              { kind: 'direct', daemonUrl: 'not a url' },
+              { kind: 'direct', daemonUrl: 'https://b.example.test/with/path' },
+              { kind: 'direct', daemonUrl: 'ftp://b.example.test' },
+            ],
+          }),
+        ]),
+      ).connections[0]?.carriers,
+    ).deepEqual([{ kind: 'direct', daemonUrl: 'https://b.example.test' }]);
+  });
+
   it('should keep the last tunnel through a refresh that does not name one, and follow one that moved', () => {
     // Arrange — a set read while cloudflared reconnects says "not right now", not "gone".
     const store = new DaemonConnectionStore();

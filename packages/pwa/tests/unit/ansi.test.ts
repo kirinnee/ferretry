@@ -34,6 +34,24 @@ describe('parsing ANSI output', () => {
     expect(odd?.[0]?.style.fg).toEqual({ palette: 1 });
   });
 
+  it('merges neighbours that look the same and splits at any attribute that differs', () => {
+    expect(parseAnsi('ab\u001b[mcd')[0]).toHaveLength(1);
+    expect(parseAnsi('a\u001b[1m\u001b[22mb')[0]?.map(span => span.text)).toEqual(['ab']);
+    const splits = (on: number, off: number): readonly string[] | undefined =>
+      parseAnsi(`a\u001b[${on}mb\u001b[${off}mc`)[0]?.map(span => span.text);
+    for (const [on, off] of [
+      [1, 22],
+      [2, 22],
+      [3, 23],
+      [4, 24],
+      [9, 29],
+      [7, 27],
+    ] as const)
+      expect(splits(on, off)).toEqual(['a', 'b', 'c']);
+    expect(parseAnsi('\u001b[31ma\u001b[41mb')[0]).toHaveLength(2);
+    expect(parseAnsi('\u001b[31ma\u001b[32mb')[0]).toHaveLength(2);
+  });
+
   it('drops every other escape instead of showing it', () => {
     const text = 'a\u001b[2K\u001b[1Ab\u001b]0;title\u0007c\u001b]8;;http://x\u001b\\d\u001b(Be\u0007\u0001f';
     expect(parseAnsi(text).map(lineText)).toEqual(['abcdef']);

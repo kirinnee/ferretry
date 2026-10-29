@@ -34,6 +34,8 @@ describe('attachments', () => {
     expect(attachmentTypeLabel('application/vnd.openxmlformats-officedocument.wordprocessingml.document')).toBe(
       'Word document',
     );
+    for (const audio of ['audio/mpeg', 'audio/mp4', 'audio/wav', 'audio/webm', 'audio/ogg'])
+      expect(attachmentTypeLabel(audio)).toBe('Audio recording');
     expect(attachmentTypeLabel('video/mp4')).toBe('video/mp4');
     expect(attachmentTypeLabel(undefined)).toBe('File');
     expect(isBrowserOpenableAttachment('text/x-markdown')).toBe(true);
@@ -89,6 +91,32 @@ describe('attachments', () => {
     expect(isRetryableUnlockError('decryption_failed')).toBe(false);
     expect(unlockFailure({ code: 'wrong_password' })).toMatchObject({ retryable: true });
     expect(unlockFailure({ code: 'decryption_failed' })).toMatchObject({ retryable: false });
+    expect(unlockFailure({ code: 42 })).toMatchObject({ retryable: false });
+    expect(unlockFailure(new Error('boom'))).toMatchObject({ retryable: false });
+    expect(unlockFailure(null)).toMatchObject({
+      message: 'File could not be attached — try again',
+      retryable: false,
+    });
+  });
+
+  test('keeps a well-formed extraction failure on the transcript record and drops a malformed one', () => {
+    const base = {
+      id: 'att_2',
+      filename: 'scan.pdf',
+      mime: 'application/pdf',
+      size: 10,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-08-01T00:00:00Z',
+    };
+    const failure = { code: 'no_extractable_text', message: 'The file has no readable text.' };
+    const kept = attachmentFromView('session-a', { ...base, textExtractionFailure: failure });
+    expect(kept.textExtractionFailure).toEqual(failure);
+    expect(kept.textExtraction).toBeUndefined();
+    const dropped = attachmentFromView('session-a', {
+      ...base,
+      textExtractionFailure: { code: 'Bad Code', message: ' padded ' },
+    });
+    expect(dropped.textExtractionFailure).toBeUndefined();
   });
 
   test('derives safe transcript records, endpoint paths, and display sizes', () => {
