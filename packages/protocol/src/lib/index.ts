@@ -1,5 +1,6 @@
 export * from './address.ts';
 export * from './advertisement.ts';
+export * from './agenda-mode.ts';
 export * from './agent-address.ts';
 export * from './agent-messages.ts';
 export * from './agent-tools.ts';
