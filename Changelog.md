@@ -1,3 +1,11 @@
+## [4.99.0](https://github.com/kirinnee/ferretry/compare/v4.98.0...v4.99.0) (2026-10-29)
+
+### Features
+
+* **daemon:** back the Attention rule with a turn-end check ([#853](https://github.com/kirinnee/ferretry/issues/853)) ([5a9d0ed](https://github.com/kirinnee/ferretry/commit/5a9d0edcd2f67f9ad7f3230cc2ed2be03e1f655c))
+* **pwa:** draw mermaid top-down and readable on phones ([#845](https://github.com/kirinnee/ferretry/issues/845)) ([8d613a5](https://github.com/kirinnee/ferretry/commit/8d613a51c7f2febeb2ef22fd0018ecd039e791fc))
+* **warden:** Jev becomes the Warden's first responder ([#855](https://github.com/kirinnee/ferretry/issues/855)) ([9ef031a](https://github.com/kirinnee/ferretry/commit/9ef031a933e967886db9939ace4674004094ce37))
+
 ## [4.98.0](https://github.com/kirinnee/ferretry/compare/v4.97.2...v4.98.0) (2026-10-29)
 
 ### Features

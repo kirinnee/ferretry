@@ -1,3 +1,9 @@
+## [4.98.0](https://github.com/kirinnee/ferretry/compare/v4.97.2...v4.98.0) (2026-10-29)
+
+### Features
+
+* **pwa:** let dictation insert straight into the composer, with Undo ([#852](https://github.com/kirinnee/ferretry/issues/852)) ([61aab0f](https://github.com/kirinnee/ferretry/commit/61aab0faab38b28b9ed5d8a036b005f63343299c))
+
 ## [4.97.2](https://github.com/kirinnee/ferretry/compare/v4.97.1...v4.97.2) (2026-10-29)
 
 ### Fixes
