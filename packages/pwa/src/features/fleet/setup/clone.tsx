@@ -44,7 +44,7 @@ import { SecretCopyLauncher } from '../../secrets/secret-copy-panel.tsx';
 import { listSecrets, putSecret } from '../../secrets/secrets-api.ts';
 import { daemonDisplayName } from '../../settings/daemon-settings.tsx';
 import { readSpeedups } from '../../speedups/speedups-api.ts';
-import { readFleetProfiles } from '../catalog-api.ts';
+import { readFleetMachine, readFleetProfiles } from '../catalog-api.ts';
 import { readFleetCredentials } from '../credentials-api.ts';
 import { readFleetExport } from '../setup-api.ts';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
@@ -64,10 +64,18 @@ import {
   cloneSteps,
   copiesRows,
   documentSize,
+  CLONE_NO_DEFAULT,
+  cloneDefaultView,
   existingSentence,
   runnableTitle,
 } from './clone-model.ts';
-import { CloneItemsChoices, CloneLoginsSection, CloneNeedsList, CloneOutcomes } from './clone-settings.tsx';
+import {
+  CloneItemsChoices,
+  DefaultRuntimeChoice,
+  CloneLoginsSection,
+  CloneNeedsList,
+  CloneOutcomes,
+} from './clone-settings.tsx';
 import {
   ALL_CLONE_ITEMS,
   CLONE_ITEMS,
@@ -109,6 +117,8 @@ interface CloneResult {
   readonly preview: ClonePreview | null;
   readonly slots: readonly FleetCredentialView[];
   readonly outcomes: readonly { readonly item: CloneOutcomeItem; readonly outcome: CloneItemOutcome }[];
+  /** The source as the person names it, for the Done sentences. */
+  readonly sourceName: string;
 }
 
 function Foot({ children }: { readonly children: ReactNode }) {
@@ -161,6 +171,8 @@ export function CloneMachine(props: CloneMachineProps) {
   const [profiles, setProfiles] = useState(0);
   const [mode, setMode] = useState<CloneMode>('alongside');
   const [skip, setSkip] = useState<readonly string[]>([]);
+  // What the person picked for "Default runtime for new agents": a source runtime name, null for none, undefined until they pick.
+  const [defaultPick, setDefaultPick] = useState<string | null | undefined>(undefined);
   const [result, setResult] = useState<CloneResult | null>(null);
   const [stepper, setStepper] = useState<StepperState>(() =>
     startStepper({
@@ -226,6 +238,19 @@ export function CloneMachine(props: CloneMachineProps) {
   const preview = bundle === null ? null : clonePreview(bundle, machine, skip);
   const pickedReach = picked === null ? undefined : reach.get(picked);
   const sourceMachine = pickedReach?.kind === 'online' ? pickedReach.machine : null;
+  // The person's name for the source (`Liftoff EC2`); the bundle's own `machine` is only what it called itself, often a hostname.
+  const sourceName = pickedRecord === undefined ? (bundle?.machine ?? '') : daemonDisplayName(pickedRecord);
+  const defaultView =
+    bundle === null
+      ? null
+      : cloneDefaultView({
+          bundle,
+          mode,
+          machineName,
+          targetDefault: machine?.defaultRuntime ?? undefined,
+          sourceDefault: chosen.includes('controls') ? (sourceMachine?.defaultRuntime ?? undefined) : undefined,
+          picked: defaultPick,
+        });
 
   const readSource = (): void => {
     setSourceIssue(null);
@@ -259,6 +284,7 @@ export function CloneMachine(props: CloneMachineProps) {
       setBundle(exported.value);
       // A fresh read is a fresh review: nothing it lists has been left out yet, and every item it can copy is ticked.
       setSkip([]);
+      setDefaultPick(undefined);
       setChosen(ALL_CLONE_ITEMS.filter(id => itemReadable(id, read, pickedReach)));
       setReading(false);
       setStepper(current => stepForward(withSteps(current, steps)));
@@ -304,6 +330,8 @@ export function CloneMachine(props: CloneMachineProps) {
           bundle: { ...bundle },
           ...(skip.length === 0 ? {} : { skip: [...skip] }),
           source: { daemonId: String(pickedRecord.daemonId) },
+          names: { source: sourceName, target: machineName },
+          ...(defaultView === null || defaultView.send === undefined ? {} : { defaultRuntime: defaultView.send }),
         });
         // The fleet goes first because a copied default runtime may name a runtime it brings; when it
         // is refused nothing else is copied either, and the refusal stays on screen to act on.
@@ -320,7 +348,11 @@ export function CloneMachine(props: CloneMachineProps) {
         outcomes.push({ item: settings, outcome: await copyFile(settings.file, file.text) });
       }
       if (chosen.includes('controls') && sourceMachine !== null) {
-        const applied = await changes.apply(controlsChange(sourceMachine));
+        // The fleet copy already decided this machine's default; read it back so the controls do not undo it.
+        const decided = copiesFleet ? await target.read(client => readFleetMachine(client)) : null;
+        const applied = await changes.apply(
+          controlsChange(sourceMachine, decided?.kind === 'done' ? decided.value.defaultRuntime : undefined),
+        );
         outcomes.push({
           item: item('controls'),
           outcome: applied.kind === 'refused' ? { kind: 'refused', reason: applied.sentence } : { kind: 'copied' },
@@ -339,10 +371,11 @@ export function CloneMachine(props: CloneMachineProps) {
         preview: copiesFleet ? preview : null,
         slots: credentials?.kind === 'done' ? cloneSlots(credentials.value.credentials, bundle.machine) : [],
         outcomes,
+        sourceName,
       });
       setCopying(false);
       setStepper(current => stepForward(withSteps(current, steps)));
-      onCopied?.(bundle.machine);
+      onCopied?.(sourceName);
       onRetry();
     })();
   };
@@ -482,21 +515,21 @@ export function CloneMachine(props: CloneMachineProps) {
     for (const entry of CLONE_ITEMS) {
       if (itemReadable(entry.id, files, pickedReach))
         summaries[entry.id] = sourceItemSummary(entry.id, files, sourceMachine, bundle);
-      else unavailable[entry.id] = `${bundle.machine} didn’t share this one, so it can’t be copied.`;
+      else unavailable[entry.id] = `${sourceName} didn’t share this one, so it can’t be copied.`;
     }
-    const copyLabel = `Copy ${countWords(chosen.length, 'item')} from ${bundle.machine}`;
+    const copyLabel = `Copy ${countWords(chosen.length, 'item')} from ${sourceName}`;
 
     if (at === 'preview')
       return (
         <div className="flex min-w-0 flex-col gap-4" data-clone-step="preview">
           <p className="m-0 text-cell leading-base text-fg">
-            This is a one-time copy. Later changes on <span className="font-mono">{bundle.machine}</span> don’t follow.
+            This is a one-time copy. Later changes on <span className="font-mono">{sourceName}</span> don’t follow.
           </p>
           <CloneItemsChoices
             chosen={chosen}
             summaries={summaries}
             unavailable={unavailable}
-            source={bundle.machine}
+            source={sourceName}
             onToggle={(id, on) =>
               setChosen(current =>
                 on
@@ -518,11 +551,17 @@ export function CloneMachine(props: CloneMachineProps) {
                   />
                 ))}
               </SetupSection>
+              {defaultView === null || defaultView.candidates.length === 0 ? null : (
+                <DefaultRuntimeChoice
+                  view={defaultView}
+                  onPick={value => setDefaultPick(value === CLONE_NO_DEFAULT ? null : value)}
+                />
+              )}
               {preview.runnables.length === 0 ? null : (
                 <RunsHere
                   runnables={preview.runnables}
                   skip={skip}
-                  source={bundle.machine}
+                  source={sourceName}
                   machineName={machineName}
                   onToggle={(reference, copyIt) =>
                     setSkip(current =>
@@ -536,7 +575,7 @@ export function CloneMachine(props: CloneMachineProps) {
           <CloneLoginsSection
             logins={cloneLogins(copiesFleet ? bundle : null, held)}
             machineName={machineName}
-            sourceName={bundle.machine}
+            sourceName={sourceName}
             keys={keysToCopy(needs, sourceSecrets)}
             copyKeys={copyKeys}
             onCopyKeys={setCopyKeys}
@@ -569,7 +608,7 @@ export function CloneMachine(props: CloneMachineProps) {
               status="needs_sign_in"
               statusLabel="Doesn’t copy"
               title="History and device settings"
-              detail={`Past sessions stay on ${bundle.machine}; appearance and composer choices stay on each device.`}
+              detail={`Past sessions stay on ${sourceName}; appearance and composer choices stay on each device.`}
             />
           </SetupSection>
           {copiesFleet && preview.checkPaths.length > 0 ? (
@@ -611,7 +650,7 @@ export function CloneMachine(props: CloneMachineProps) {
           ) : null}
           {copiesFleet && preview.problem !== null ? (
             // Never offered: a bundle the review could misread is one the target refuses anyway.
-            <SetupNote live tone="err" name="bundle-refused" title={`${bundle.machine}’s setup can’t be copied`}>
+            <SetupNote live tone="err" name="bundle-refused" title={`${sourceName}’s setup can’t be copied`}>
               <span>{preview.problem}</span>
             </SetupNote>
           ) : hasSetup ? (
@@ -654,6 +693,12 @@ export function CloneMachine(props: CloneMachineProps) {
             },
           ]}
         />
+        {defaultView === null || defaultView.candidates.length === 0 ? null : (
+          <DefaultRuntimeChoice
+            view={defaultView}
+            onPick={value => setDefaultPick(value === CLONE_NO_DEFAULT ? null : value)}
+          />
+        )}
         {mode === 'replace' ? copyPanel('Replace and copy', 'danger') : copyPanel('Copy alongside')}
       </div>
     );
@@ -795,7 +840,7 @@ function DoneStep({
     result.slots.find(slot => slot.id === need.credentialId);
   return (
     <div className="flex min-w-0 flex-col gap-3" data-clone-step="done">
-      <SetupNote live tone="ok" name="cloned" title={`Copied from ${result.source}`}>
+      <SetupNote live tone="ok" name="cloned" title={`Copied from ${result.sourceName}`}>
         <span>{result.summary ?? `${countWords(result.outcomes.length, 'item')} copied.`}</span>
       </SetupNote>
       <CloneOutcomes outcomes={result.outcomes} onConfirm={onConfirm} />
@@ -858,7 +903,7 @@ function DoneStep({
           title={`Check ${countWords(result.preview.checkPaths.length, 'path')} on ${machineName}`}
         >
           <span>
-            {listWords(result.preview.checkPaths.map(check => check.title))} point at folders on {result.source}.
+            {listWords(result.preview.checkPaths.map(check => check.title))} point at folders on {result.sourceName}.
           </span>
         </SetupNote>
       )}

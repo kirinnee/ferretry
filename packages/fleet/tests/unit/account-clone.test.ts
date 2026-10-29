@@ -1280,3 +1280,131 @@ describe('Clone writes nothing the review did not list (review H1)', () => {
     should(parseCloneBundle(bundle)).deepEqual(bundle);
   });
 });
+
+describe('planClone default runtime for new agents', () => {
+  const agentBundle = (patch: Record<string, unknown> = {}): FleetCloneBundle =>
+    bundleWith({
+      credentials: [
+        { id: 'claude-you', harness: 'claude', label: 'you' },
+        { id: 'codex-work', harness: 'codex', label: 'work' },
+      ],
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
+        'claude-liftoff': { credential: 'claude-you', profile: 'default', agent: true },
+        'codex-work': { credential: 'codex-work', profile: 'default', agent: true },
+        helper: { credential: 'claude-you', profile: 'default', agent: false },
+      },
+      ...patch,
+    });
+
+  /** A target whose own default names a runtime Replace removes, which is the owner's failure. */
+  const targetWithDefault = (name = 'claude-kirin'): AccountModel =>
+    parseAccountModel({
+      version: 2,
+      machine: { defaultRuntime: name },
+      credentials: { 'claude-kirin': { harness: 'claude', store: 'host' } },
+      profiles: { base: { layers: [] } },
+      runtimes: { [name]: { credential: 'claude-kirin', profile: 'base', agent: true } },
+    });
+
+  it('should repair a replace whose target default is removed, to claude-default, and say so', () => {
+    // Act
+    const plan = planClone(targetWithDefault(), agentBundle(), options({ mode: 'replace', sourceName: 'Liftoff EC2' }));
+
+    // Assert
+    should(plan.model.machine.defaultRuntime).equal('claude-default');
+    should(plan.defaultRuntime).deepEqual({ kind: 'repaired', was: 'claude-kirin', now: 'claude-default' });
+    should(describeClone(plan, agentBundle(), 'Liftoff MBP', 'Liftoff EC2')).containEql(
+      "Liftoff MBP's default runtime for new agents (claude-kirin) is replaced by this copy, so new agents start on claude-default instead. Change it in the preview if you want another.",
+    );
+  });
+
+  it('should pick a runtime of the same family when the bundle has no claude-default', () => {
+    // Arrange
+    const bundle = agentBundle({
+      runtimes: {
+        'claude-liftoff': { credential: 'claude-you', profile: 'default', agent: true },
+        'codex-work': { credential: 'codex-work', profile: 'default', agent: true },
+      },
+    });
+
+    // Act
+    const plan = planClone(targetWithDefault(), bundle, options({ mode: 'replace' }));
+
+    // Assert
+    should(plan.model.machine.defaultRuntime).equal('claude-liftoff');
+  });
+
+  it('should leave the default unset, and say so, when the copy brings no agent runtime', () => {
+    // Act
+    const plan = planClone(targetWithDefault(), bundleWith(), options({ mode: 'replace' }));
+
+    // Assert
+    should(plan.model.machine.defaultRuntime).be.undefined();
+    should(plan.defaultRuntime).deepEqual({ kind: 'repaired', was: 'claude-kirin' });
+  });
+
+  it('should keep the target default on a plain copy because its runtime stays', () => {
+    // Act
+    const plan = planClone(targetWithDefault(), agentBundle(), options());
+
+    // Assert
+    should(plan.model.machine.defaultRuntime).equal('claude-kirin');
+    should(plan.defaultRuntime).deepEqual({ kind: 'kept', runtime: 'claude-kirin' });
+  });
+
+  it('should apply the runtime the person chose, under the name it lands with on an alongside copy', () => {
+    // Arrange
+    const target = parseAccountModel({
+      version: 2,
+      credentials: { 'claude-you': { harness: 'claude', store: 'host' } },
+      profiles: { default: { layers: [] } },
+      runtimes: { 'claude-liftoff': { credential: 'claude-you', profile: 'default', agent: true } },
+    });
+
+    // Act
+    const plan = planClone(target, agentBundle(), options({ defaultRuntime: 'claude-liftoff' }));
+
+    // Assert
+    should(plan.model.machine.defaultRuntime).equal('claude-liftoff-2');
+    should(plan.defaultRuntime).deepEqual({ kind: 'chosen', runtime: 'claude-liftoff-2' });
+  });
+
+  it('should leave the default unset when the person asks for none', () => {
+    // Act
+    const plan = planClone(targetWithDefault(), agentBundle(), options({ mode: 'replace', defaultRuntime: null }));
+
+    // Assert
+    should(plan.model.machine.defaultRuntime).be.undefined();
+    should(plan.defaultRuntime).deepEqual({ kind: 'unset' });
+  });
+
+  it('should refuse a chosen default that is not an agent runtime in the copy, and say what to do', () => {
+    // Act
+    const refusal = refusalOf(() =>
+      planClone(
+        targetWithDefault(),
+        agentBundle(),
+        options({ mode: 'replace', defaultRuntime: 'helper', sourceName: 'Liftoff EC2' }),
+      ),
+    );
+
+    // Assert
+    should(refusal.message).startWith(
+      "helper can't be the default runtime: the setup from Liftoff EC2 has no agent runtime by that name",
+    );
+    should(refusal.message).endWith('Pick another one.');
+  });
+
+  it('should name the machines by their display names in the refusal when the setup cannot be read', () => {
+    // Arrange
+    const bundle = bundleWith({ runtimes: { 'claude-default': { credential: 'missing', profile: 'default' } } });
+
+    // Act
+    const refusal = refusalOf(() => planClone(emptyTarget(), bundle, options({ sourceName: 'Liftoff EC2' })));
+
+    // Assert
+    should(refusal.message).containEql('Liftoff EC2');
+    should(refusal.message).not.containEql('studio-mac');
+  });
+});

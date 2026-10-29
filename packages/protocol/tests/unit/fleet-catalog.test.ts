@@ -424,6 +424,14 @@ describe('the account-model catalogue wire contract', () => {
         skip: ['hooks/guard'],
         source: { daemonId: 'sha256:abc' },
       },
+      {
+        kind: 'clone.import',
+        mode: 'replace',
+        bundle: { version: 1 },
+        defaultRuntime: 'claude-default',
+        names: { source: 'Liftoff EC2', target: 'Liftoff MBP' },
+      },
+      { kind: 'clone.import', mode: 'replace', bundle: { version: 1 }, defaultRuntime: null },
     ];
 
     // Act

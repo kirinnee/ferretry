@@ -334,10 +334,14 @@ export const needsSentence = (needs: readonly CloneNeed[]): string | null => {
 // ── The copy ─────────────────────────────────────────────────────────────────────────────────────
 
 /** The source's controls and default runtime as this machine's `machine.settings` change. */
-export const controlsChange = (source: FleetMachineView): FleetAccountChange => ({
+export const controlsChange = (
+  source: FleetMachineView,
+  /** What this machine's default is after the fleet copy, when there was one: that copy already decided it. */
+  defaultRuntime: string | null = source.defaultRuntime,
+): FleetAccountChange => ({
   kind: 'machine.settings',
   agentPermissions: source.agentPermissions,
-  defaultRuntime: source.defaultRuntime,
+  defaultRuntime,
   agentControl: source.agentControl,
 });
 

@@ -19,12 +19,15 @@
  */
 
 import {
+  type CloneAgentRuntime,
   type CloneRunnable,
+  cloneAgentRuntimes,
   cloneBundleProblem,
   cloneRunnables,
   type FleetCloneBundle,
   type FleetCredentialView,
   type FleetMachineView,
+  suggestCloneDefault,
 } from '@ferretry/protocol';
 import type { MachineReach } from '../shell/machine-reach.ts';
 import type { StepperStep } from '../shell/stepper-model.ts';
@@ -207,6 +210,80 @@ export const copiesRows = (preview: ClonePreview): readonly { readonly title: st
 /** "studio-mac already has 2 profiles and 3 runtimes." */
 export const existingSentence = (machineName: string, profiles: number, runtimes: number): string =>
   `${machineName} already has ${countWords(profiles, 'profile')} and ${countWords(runtimes, 'runtime')}. What should happen to them?`;
+
+// ── Default runtime for new agents ──────────────────────────────────────────────────────────────
+
+/** The select value for "leave it unset". */
+export const CLONE_NO_DEFAULT = '';
+/** The select value for "keep what this machine has now"; a runtime name can never contain a colon. */
+export const CLONE_KEEP_DEFAULT = 'keep:current';
+
+export interface CloneDefaultView {
+  /** The agent runtimes the copy brings, by the source's name. */
+  readonly candidates: readonly CloneAgentRuntime[];
+  /** Whether "keep the current default" is on offer: a plain copy leaves the target's runtimes standing. */
+  readonly canKeep: boolean;
+  /** The select's value: a runtime name, {@link CLONE_NO_DEFAULT} or {@link CLONE_KEEP_DEFAULT}. */
+  readonly selected: string;
+  /** What `clone.import` carries: a source runtime name, `null` to unset, or absent to let the target decide. */
+  readonly send: string | null | undefined;
+  /** What the choice means, in a sentence. */
+  readonly sentence: string;
+}
+
+export interface CloneDefaultInput {
+  readonly bundle: FleetCloneBundle;
+  readonly mode: CloneMode;
+  readonly machineName: string;
+  /** The default the target has now, when it has one. */
+  readonly targetDefault: string | undefined;
+  /** The source's default, when "Agent controls and default runtime" is being copied along. */
+  readonly sourceDefault: string | undefined;
+  /** What the person picked: a source runtime name, `null` for none, or nothing yet. */
+  readonly picked: string | null | undefined;
+}
+
+/**
+ * "Default runtime for new agents" as the Preview offers it. Replace deletes the target's runtimes, so a
+ * default that named one of them would dangle; the answer is always a concrete runtime the owner can see
+ * and change, never a silent drop. In order: what the person picked; the source's own default when its
+ * runtime is copied; the target's own default when a plain copy leaves it standing; otherwise the
+ * runtime `suggestCloneDefault` proposes (the planner picks the same one), or none when the target had none.
+ */
+export function cloneDefaultView(input: CloneDefaultInput): CloneDefaultView {
+  const { bundle, mode, machineName, targetDefault, sourceDefault, picked } = input;
+  const candidates = cloneAgentRuntimes(bundle);
+  const names = candidates.map(candidate => candidate.name);
+  const canKeep = mode === 'alongside' && targetDefault !== undefined;
+  const carried = sourceDefault !== undefined && names.includes(sourceDefault) ? sourceDefault : undefined;
+  const proposed = suggestCloneDefault({ candidates });
+  let selected: string;
+  if (picked === null) selected = CLONE_NO_DEFAULT;
+  else if (picked !== undefined && names.includes(picked)) selected = picked;
+  else if (carried !== undefined) selected = carried;
+  else if (canKeep) selected = CLONE_KEEP_DEFAULT;
+  else if (targetDefault !== undefined && proposed !== undefined) selected = proposed;
+  else selected = CLONE_NO_DEFAULT;
+
+  const send =
+    selected === CLONE_KEEP_DEFAULT
+      ? undefined
+      : selected === CLONE_NO_DEFAULT
+        ? targetDefault === undefined
+          ? undefined
+          : null
+        : selected;
+  const gone = mode === 'replace' && targetDefault !== undefined;
+  const sentence =
+    selected === CLONE_KEEP_DEFAULT
+      ? `${machineName} keeps its own default, ${targetDefault ?? ''}.`
+      : selected === CLONE_NO_DEFAULT
+        ? `No default is set on ${machineName}, so a session started with no runtime named uses the automatic one.`
+        : gone
+          ? `${machineName}’s default, ${targetDefault}, goes with the runtimes this copy replaces, so new agents start on ${selected}.`
+          : `New agents on ${machineName} start on ${selected}.${mode === 'alongside' ? ' If this machine already uses that name, the copy is added as -2 and the default follows it.' : ''}`;
+  return { candidates, canKeep, selected, send, sentence };
+}
 
 // ── Done ─────────────────────────────────────────────────────────────────────────────────────────
 
