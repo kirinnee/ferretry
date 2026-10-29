@@ -1094,6 +1094,27 @@ describe('OperatorReadService.logs image markers', () => {
     should(text.split('\n')[0]).not.containEql('1234');
   });
 
+  it('should scrub text that only looks like a marker, so marker syntax cannot carry a secret past redaction', async () => {
+    // Arrange
+    const reads = service({
+      tail: {
+        kind: 'read',
+        events: [
+          message('[fy-image 1234.5678.0 image/png]'),
+          shot({ data: 'AAAA', mediaType: 'image/png' }, at(4096, 300)),
+        ],
+      },
+      redactor: masking,
+    });
+
+    // Act
+    const [forged, real] = (await reads.logs('s1', 50)).split('\n');
+
+    // Assert
+    should(forged).equal('[09:08:07] assistant/message: [fy-image ####.####.0 image/png]');
+    should(real).equal('user/attachment: image [fy-image 4096.300.0 image/png]');
+  });
+
   it('should scrub a log with no marker in it as it always did', async () => {
     // Arrange
     const reads = service({ tail: { kind: 'read', events: [message('pin 1234')] }, redactor: masking });

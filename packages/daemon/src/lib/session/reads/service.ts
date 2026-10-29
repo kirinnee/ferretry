@@ -327,12 +327,14 @@ const spell = (index: number): string =>
 const unspell = (letters: string): number =>
   Number(letters.replace(/[a-j]/gu, letter => String(letter.charCodeAt(0) - 97)));
 
-const IMAGE_MARKER = /\[fy-image [0-9.]+ [a-z/-]+\]/gu;
 /** The NUL that fences a lifted marker: no secret a redactor masks can contain it. */
 const NUL = String.fromCharCode(0);
 const LIFTED_MARKER = new RegExp(`${NUL}fy-image-([a-j]+)${NUL}`, 'gu');
 
-const imageMarker = (image: RecordImage): string =>
+/** How a rendered log spells the marker for one image. */
+type MarkImage = (image: RecordImage) => string;
+
+const imageMarker: MarkImage = image =>
   formatTranscriptImageMarker({ handle: image.handle, mediaType: markerMediaType(image) });
 
 /**
@@ -343,7 +345,7 @@ const imageMarker = (image: RecordImage): string =>
  * one marker line per image, in place of the JSON dump that an image-only result used to print — which
  * was the image's base64 whenever it was small enough to be parsed.
  */
-function body(event: TranscriptEvent, images: readonly RecordImage[] = []): string {
+function body(event: TranscriptEvent, images: readonly RecordImage[] = [], mark: MarkImage = imageMarker): string {
   switch (event.kind) {
     case 'message':
     case 'reasoning':
@@ -353,13 +355,13 @@ function body(event: TranscriptEvent, images: readonly RecordImage[] = []): stri
     case 'tool-result': {
       const prefix = event.result.isError ? 'error ' : '';
       if (images.length === 0) return `${prefix}${event.result.text ?? JSON.stringify(event.result.content)}`;
-      return [`${prefix}${event.result.text ?? ''}`.trimEnd(), ...images.map(imageMarker)]
+      return [`${prefix}${event.result.text ?? ''}`.trimEnd(), ...images.map(mark)]
         .filter(line => line !== '')
         .join('\n');
     }
     case 'attachment': {
       const marker = images[0];
-      if (marker !== undefined) return `${event.attachment.kind} ${imageMarker(marker)}`;
+      if (marker !== undefined) return `${event.attachment.kind} ${mark(marker)}`;
       return `${event.attachment.kind}${event.attachment.kind === 'remote-control' ? ` ${event.attachment.url}` : ''}`;
     }
     case 'error':
@@ -387,14 +389,14 @@ function body(event: TranscriptEvent, images: readonly RecordImage[] = []): stri
  */
 export function renderTranscript(
   events: readonly TranscriptEvent[],
-  options: { readonly partialFirstRecord?: boolean } = {},
+  options: { readonly partialFirstRecord?: boolean; readonly mark?: MarkImage } = {},
 ): string {
   const images = numberRecordImages(events, options);
   return events
     .map((event, index) => {
       const when = stamp(event.timestamp);
       const header = `${when === undefined ? '' : `[${when}] `}${event.role}/${event.kind}`;
-      const [first = '', ...rest] = body(event, images[index]).split('\n');
+      const [first = '', ...rest] = body(event, images[index], options.mark).split('\n');
       return [`${header}: ${first}`, ...rest.map(line => `    ${line}`)].join('\n');
     })
     .join('\n');
@@ -553,9 +555,7 @@ export class OperatorReadService {
     // A tail of exactly `tail` events may have been cut inside its first record, and a record's images are
     // numbered from its first event — so that first record stays unmarked rather than named wrongly.
     if (turn === undefined)
-      return await this.redactKeepingMarkers(
-        renderTranscript(result.events, { partialFirstRecord: result.events.length >= tail }),
-      );
+      return await this.renderRedacted(result.events, { partialFirstRecord: result.events.length >= tail });
     if (!Number.isSafeInteger(turn) || turn < 0)
       throw new OperatorReadError('invalid_query', 'turn must be a non-negative integer');
     const starts = result.events.flatMap((event, index) =>
@@ -569,28 +569,34 @@ export class OperatorReadService {
       );
     const end = starts[turn + 1] ?? result.events.length;
     const turnEvents = result.events.slice(start, end);
-    return await this.redactKeepingMarkers(
-      renderTranscript(turnEvents.slice(-tail), {
-        partialFirstRecord:
-          turnEvents.length > tail || (start === 0 ? result.events.length >= tail : cutsRecord(result.events, start)),
-      }),
-    );
+    return await this.renderRedacted(turnEvents.slice(-tail), {
+      partialFirstRecord:
+        turnEvents.length > tail || (start === 0 ? result.events.length >= tail : cutsRecord(result.events, start)),
+    });
   }
 
   /**
-   * `text` scrubbed, with every image marker carried through untouched.
+   * `events` rendered and scrubbed, with every image marker the RENDERER wrote carried through untouched.
    *
    * A marker is digits and a media type this daemon wrote, not content, but a masked value that happens
-   * to be a run of digits would still reach into it and leave a handle that names nothing. So each marker
-   * is swapped for a token no secret can equal before the scrub and swapped back after it.
+   * to be a run of digits would still reach into it and leave a handle that names nothing. So the renderer
+   * writes a token no secret can equal in each marker's place, and the markers go back after the scrub.
+   * Only markers rendered here are lifted: text that merely LOOKS like one — a model can write anything —
+   * is scrubbed like every other word, or wrapping a secret in marker syntax would walk it past redaction.
    */
-  private async redactKeepingMarkers(text: string): Promise<string> {
+  private async renderRedacted(
+    events: readonly TranscriptEvent[],
+    options: { readonly partialFirstRecord: boolean },
+  ): Promise<string> {
     const markers: string[] = [];
-    const lifted = text.replace(IMAGE_MARKER, marker => {
-      markers.push(marker);
-      return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
+    const lifted = renderTranscript(events, {
+      ...options,
+      mark: image => {
+        markers.push(imageMarker(image));
+        return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
+      },
     });
-    if (markers.length === 0) return await this.redactor.redact(text);
+    if (markers.length === 0) return await this.redactor.redact(lifted);
     const scrubbed = await this.redactor.redact(lifted);
     return scrubbed.replace(LIFTED_MARKER, (whole, index: string) => markers[unspell(index)] ?? whole);
   }
