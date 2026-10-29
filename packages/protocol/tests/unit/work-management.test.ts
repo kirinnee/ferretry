@@ -430,6 +430,11 @@ const attentionCases: SchemaCase[] = [
     value: { sending: ['A2'], heldForComposer: true },
   },
   {
+    name: 'an agenda field an edit can clear',
+    schema: attention.AttentionClearableFieldSchema,
+    value: 'neededBy',
+  },
+  {
     name: 'an undelivered retry',
     schema: attention.AttentionUndeliveredReplySchema,
     value: { action: 'discuss', note: 'The premise is wrong' },
@@ -1209,6 +1214,24 @@ describe('attention schemas', () => {
       },
       { action: 'progress', id: 'A1', step: 0, done: true },
       { action: 'needs-info', id: 'A1' },
+      {
+        action: 'add',
+        notice: true,
+        ping: true,
+        subject: 'CI is green',
+        why: 'The branch builds again.',
+        howToResolve: 'Nothing to do.',
+      },
+      {
+        action: 'add',
+        subject: 'Approve the deploy',
+        why: 'Blocked',
+        howToResolve: 'Reply',
+        blockingNow: true,
+        willBlock: 'the release',
+        neededBy: INSTANT,
+      },
+      { action: 'edit', id: 'A1', willBlock: 'the release', clear: ['blockingNow', 'neededBy'] },
     ];
 
     // Act + Assert

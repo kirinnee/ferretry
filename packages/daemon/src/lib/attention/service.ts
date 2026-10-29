@@ -174,6 +174,11 @@ export class AttentionService {
     return this.apply(sessionId, { action: 'discuss', actor, id, note, at: this.clock.now() });
   }
 
+  /** The owner's chat message named this item: it is the ferret's turn now. Nothing resolves; nobody is pushed. */
+  async reply(sessionId: string, id: AttentionId, actor: AttentionActor): Promise<AttentionMutation> {
+    return this.apply(sessionId, { action: 'reply', actor, id, at: this.clock.now() }, 'conversation');
+  }
+
   /**
    * An item leaves discussion for the owner's queue. The raising ferret, the owner or the daemon's timer may
    * say so; surfacing an item already in the queue is no change.

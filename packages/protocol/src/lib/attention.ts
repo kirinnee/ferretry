@@ -343,10 +343,38 @@ export const attentionBriefOf = (value: AttentionBrief): AttentionBrief => ({
   ...(value.recommendation === undefined ? {} : { recommendation: value.recommendation }),
   ...(value.impact === undefined ? {} : { impact: value.impact }),
   ...(value.urgency === undefined ? {} : { urgency: value.urgency }),
+  ...(value.blockingNow === undefined ? {} : { blockingNow: value.blockingNow }),
+  ...(value.willBlock === undefined ? {} : { willBlock: value.willBlock }),
+  ...(value.neededBy === undefined ? {} : { neededBy: value.neededBy }),
   ...(value.links === undefined ? {} : { links: value.links }),
   ...(value.steps === undefined ? {} : { steps: value.steps }),
   ...(value.body === undefined ? {} : { body: value.body }),
 });
+
+/**
+ * What a raise may not say when it is a NOTICE (`fy notify`): a notice is read, not answered, so it carries no
+ * ask, answers or steps and is kind info; and only a notice can ask the phone to buzz (`ping`).
+ */
+export const attentionNoticeProblems = (value: {
+  readonly notice?: true | undefined;
+  readonly ping?: true | undefined;
+  readonly ask?: unknown;
+  readonly answers?: readonly unknown[] | undefined;
+  readonly steps?: readonly unknown[] | undefined;
+  readonly kind?: string | undefined;
+}): string[] => {
+  if (value.notice !== true) return value.ping === true ? ['ping is only for a notice'] : [];
+  return [
+    ...(value.ask === undefined ? [] : ['a notice has no ask']),
+    ...(value.answers === undefined ? [] : ['a notice has no answers']),
+    ...(value.steps === undefined ? [] : ['a notice has no steps: it is read, not done']),
+    ...(value.kind === undefined || value.kind === 'info' ? [] : ['a notice is kind info']),
+  ];
+};
+
+/** The agenda fields an edit can clear: they have no empty value to write, so clearing is named. */
+export const AttentionClearableFieldSchema = z.enum(['blockingNow', 'willBlock', 'neededBy']);
+export type AttentionClearableField = z.infer<typeof AttentionClearableFieldSchema>;
 
 /**
  * The one question an item asks, when it asks exactly one — the only case where its options are
@@ -721,11 +749,12 @@ const AddAttentionRequestSchema = z.strictObject({
   context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
-  /**
-   * Raise straight to the owner's queue instead of starting in discussion, for a ferret that knows nobody is
-   * watching its chat. Absent: a ferret-raised ask starts in discussion (docs/attention.md § The model).
-   */
+  /** Sent by older CLIs: a new ask is the owner's turn now, so there is nothing to surface to. Accepted, ignored. */
   surface: z.boolean().optional(),
+  /** A plain notification (`fy notify`): kind info, no ask or answers, never a turn (docs/agenda.md). */
+  notice: z.literal(true).optional(),
+  /** The ferret asked for the phone to buzz for this notice; only a notice can ask. */
+  ping: z.literal(true).optional(),
   ...AttentionBriefShape,
 });
 
@@ -740,6 +769,8 @@ export const AttentionActionRequestSchema = z
       title: AttentionCardShape.title,
       context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
       ...AttentionBriefShape,
+      /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
+      clear: z.array(AttentionClearableFieldSchema).min(1).max(3).optional(),
     }),
     z.strictObject({
       action: z.literal('resolve'),
@@ -787,9 +818,19 @@ export const AttentionActionRequestSchema = z
     }),
   ])
   .superRefine((value, context) => {
+    if (value.action === 'edit') {
+      for (const field of value.clear ?? []) {
+        if (value[field] !== undefined)
+          context.addIssue({ code: 'custom', message: `${field} cannot be set and cleared at once`, path: ['clear'] });
+      }
+      return;
+    }
     if (value.action !== 'add') return;
     for (const [path, message] of attentionAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
+    for (const problem of attentionNoticeProblems(value)) {
+      context.addIssue({ code: 'custom', message: problem });
     }
   });
 export type AttentionActionRequest = z.infer<typeof AttentionActionRequestSchema>;

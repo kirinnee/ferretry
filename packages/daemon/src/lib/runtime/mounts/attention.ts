@@ -48,7 +48,7 @@ export interface DirectNotificationSubsystem {
 }
 
 const NOTIFY_KIND_REFUSAL =
-  'progress and finishing never notify the owner — raise an item (fy attention add) only when they must decide or do something';
+  'progress and finishing never notify the owner — raise an item (fy agenda add) only when they must decide or do something';
 
 /**
  * How each domain refusal is reported.

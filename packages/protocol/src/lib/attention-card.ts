@@ -282,11 +282,14 @@ export const hasOwnTitle = (item: Pick<AttentionCardSource, 'title' | 'subject'>
  * WHOSE TURN an item is on the ferret's agenda: the OWNER's (it waits on them — the only turn that can stop a
  * ferret on the owner), the FERRET's (the owner replied, asked for more, or wants to talk it through, and the
  * ferret has not updated it yet), or DONE (resolved or dismissed). The internal discussion state is the ferret's
- * turn; the app shows no separate "in discussion" mode.
+ * turn; the app shows no separate "in discussion" mode. A NOTICE (`fy notify`) is nobody's turn: it is read,
+ * not answered, so it reads as `done` and never counts toward what waits on the owner.
  */
 export type AttentionTurn = 'owner' | 'ferret' | 'done';
 
 export const attentionTurn = (item: {
   readonly waitingOn?: 'ferret' | undefined;
   readonly resolvedAt?: string | undefined;
-}): AttentionTurn => (item.resolvedAt !== undefined ? 'done' : item.waitingOn === 'ferret' ? 'ferret' : 'owner');
+  readonly notice?: true | undefined;
+}): AttentionTurn =>
+  item.resolvedAt !== undefined || item.notice === true ? 'done' : item.waitingOn === 'ferret' ? 'ferret' : 'owner';
