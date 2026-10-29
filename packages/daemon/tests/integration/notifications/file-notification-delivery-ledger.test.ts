@@ -73,7 +73,7 @@ async function writeLines(
   await world.files.ensureDirectory(world.paths.state, 0o700);
   await Bun.write(
     world.ledger.path,
-    lines.map(line => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n') + '\n',
+    `${lines.map(line => (typeof line === 'string' ? line : JSON.stringify(line))).join('\n')}\n`,
   );
 }
 
@@ -81,7 +81,46 @@ afterAll(async () => {
   await cleanupTempDirectories();
 });
 
+function attentionBuzz(key: string, extra: Record<string, unknown>): NotificationRecord {
+  return NotificationRecordSchema.parse({
+    v: 1,
+    phase: 'requested',
+    key,
+    at: AT,
+    origin: 'attention',
+    attribution: 'attention:agent:session-1',
+    sessionId: 'session-1',
+    attentionId: 'A1',
+    sent: { kind: 'attention', interactive: false, title: 'Ada is stopped · 2 need you', body: 'Choose a region' },
+    enrolled: 1,
+    ...extra,
+  });
+}
+
 describe('FileNotificationDeliveryLedger', () => {
+  it('should keep one record per stop, per deadline and per ping, each found by its own key', async () => {
+    // Arrange
+    const world = await fixture('notification-ledger-buzz');
+    const stop = 'attention:session-1:stopped:2026-10-23T09:00:00.000Z';
+
+    // Act
+    await world.ledger.append(attentionBuzz(stop, { stoppedAt: '2026-10-23T09:00:00.000Z' }));
+    await world.ledger.append(attentionBuzz('attention:session-1:A1:deadline', { deadline: true }));
+    await world.ledger.append(attentionBuzz('attention:session-1:A1:ping', { ping: true }));
+
+    // Assert
+    should((await world.ledger.find(stop))?.requested).containDeep({ stoppedAt: '2026-10-23T09:00:00.000Z' });
+    should((await world.ledger.find('attention:session-1:A1:deadline'))?.requested).containDeep({ deadline: true });
+    should((await world.ledger.find('attention:session-1:A1:ping'))?.requested).containDeep({ ping: true });
+    should(await world.ledger.find('attention:session-1:A1')).be.undefined();
+  });
+
+  it('should refuse a record whose key does not name what it is for', () => {
+    // Act + Assert
+    should(() => attentionBuzz('attention:session-1:A1:ping', { deadline: true })).throw();
+    should(() => attentionBuzz('attention:session-1:stopped:other', { stoppedAt: '2026-10-23T09:00:00.000Z' })).throw();
+  });
+
   it('should append requested and outcome as individual lines and merge them on lookup', async () => {
     // Arrange
     const world = await fixture('notification-ledger-roundtrip');

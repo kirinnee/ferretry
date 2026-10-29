@@ -170,6 +170,32 @@ describe('Attention board observers', () => {
     should(state.writes).deepEqual([{ sessionId: SESSION, summary: undefined, reconciled: false }]);
   });
 
+  it('should say a ferret works in agenda mode, and is stopped only while idle with an item on the owner', async () => {
+    // Arrange
+    const repository = new MemoryRepository();
+    await service(repository, new RecordingChanges()).raise(SESSION, ASK, AGENT);
+    const idle = { current: async () => NOW };
+    const state = new RecordingState();
+    const working = new SessionAttentionProjection(repository, state, inline, () => NOW, { enabled: async () => true });
+    const stopped = new SessionAttentionProjection(
+      repository,
+      state,
+      inline,
+      () => NOW,
+      { enabled: async () => true },
+      idle,
+    );
+
+    // Act
+    await working.refresh(SESSION);
+    await stopped.refresh(SESSION);
+
+    // Assert
+    should(state.writes[0]?.summary).have.property('agendaMode', true);
+    should(state.writes[0]?.summary).not.have.property('stopped');
+    should(state.writes[1]?.summary).have.properties({ agendaMode: true, stopped: true });
+  });
+
   it('should reconcile every named session on its own, past one that cannot be read', async () => {
     // Arrange
     const repository = new MemoryRepository();

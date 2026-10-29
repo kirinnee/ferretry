@@ -413,7 +413,7 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
     `Agenda mode: keep an agenda of what ONLY the owner can do or decide. Before ending a reply that asks them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<what it is about>" "<the ask>"\`. Title ≤40 chars; ask ≤120. The owner reads it cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
     `\`--premise\` = situation, \`--context\` = why now, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: a SMALL diagram (fy-render svg|html|mermaid). \`--kind task|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option\`s with \`--recommend <pick> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
     `\`--blocking\`: you cannot go on without it; \`--will-block\`: it will block later; \`--by <time>\`: when it is needed (the phone is buzzed near it).`,
-    `"[answer to !A3 …]" is the answer; "[reply about !A3 …]" is chat: \`${fy} agenda edit <id>\` its card. \`${fy} agenda done <id>\` what it settled, \`${fy} agenda surface <id>\` what still needs them. Open: \`${fy} agenda ls\`.`,
+    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat: \`${fy} agenda edit <id>\` its card. \`${fy} agenda done <id>\` what it settled, \`${fy} agenda surface <id>\` what still needs them. Open: \`${fy} agenda ls\`.`,
   ].join('\n');
 
 /**

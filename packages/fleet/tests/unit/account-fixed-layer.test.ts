@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  AGENDA_ENV,
+  AGENDA_INSTRUCTION,
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
-  AGENDA_ENV,
-  AGENDA_INSTRUCTION,
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
@@ -736,7 +736,7 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
     should(text).containEql('"[answer to !A3 …]" is the answer');
-    should(text).containEql('"[reply about !A3 …]" is chat: `zz agenda edit <id>` its card');
+    should(text).containEql('"[re !A3 …]" is chat: `zz agenda edit <id>` its card');
     should(text).containEql('`zz agenda done <id>`');
     should(text).containEql('`zz agenda surface <id>`');
     should(text).containEql('`zz agenda ls`');
