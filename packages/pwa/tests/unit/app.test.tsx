@@ -864,14 +864,37 @@ const NOT_SET_UP = {
   '/v1/fleet/runtimes': { format: 'version-2', runtimes: [] },
 };
 
-/** Where a pairing lands is decided by one read of the machine, so it arrives a few turns later. */
-const landed = async (): Promise<void> => {
-  for (let turn = 0; turn < 20; turn += 1) await interact(() => new Promise(resolve => setTimeout(resolve, 5)));
+/**
+ * Waits for the root to land on `path`. Where a pairing lands is decided by one read of the machine,
+ * over a session that has to be opened first, so it arrives some unknowable number of turns later.
+ */
+const landed = async (path: string): Promise<void> => {
+  await settleUntil(
+    () => window.location.pathname === path,
+    () => `the root to land on ${path} (it is on ${window.location.pathname})`,
+    interact,
+  );
 };
 
 /** Which screen of the setup guide is on the glass, if it is on the glass at all. */
 const stepOfSetup = (container: HTMLElement): string | null | undefined =>
   container.querySelector('[data-onboarding="setup"]')?.getAttribute('data-onboarding-screen');
+
+/**
+ * Waits for a confirmed pairing to finish on the guide's last stage.
+ *
+ * NOT `settle()`. Redeeming the code is an exchange over a real session — a handshake whose
+ * WebCrypto settles off the JavaScript thread — so a fixed count of timer turns is a different
+ * budget on every machine. Measured: 2 to 12 turns on an idle machine and up to 20 under CPU load,
+ * against `settle()`'s 12, which is how "takes a scanned pairing link" read `scan` on CI.
+ */
+const pairedInGuide = async (container: HTMLElement): Promise<void> => {
+  await settleUntil(
+    () => stepOfSetup(container) === 'done',
+    () => `the pairing to finish on the guide's done stage (it is on ${stepOfSetup(container)})`,
+    interact,
+  );
+};
 
 /** Answers WHO INSTALLS IT the way a reader does. */
 const chooseDoer = async (container: HTMLElement, doer: string): Promise<void> => {
@@ -1403,7 +1426,7 @@ describe('AppShell', () => {
         'the confirmation control',
       ).click(),
     );
-    await settle();
+    await pairedInGuide(view.container);
 
     // Finishes in the guide, keeps the daemon this browser already had, and
     // leaves only when the reader says so.
@@ -1418,7 +1441,7 @@ describe('AppShell', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
@@ -1449,11 +1472,11 @@ describe('AppShell', () => {
         'the confirmation control',
       ).click(),
     );
-    await settle();
+    await pairedInGuide(view.container);
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
     await settle();
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
 
@@ -3689,7 +3712,7 @@ describe('the connection picker slot', () => {
       'the confirmation control',
     );
     await interact(() => confirm.click());
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
 
     // The root must land on the daemon the exchange returned, not on whichever
     // pairing happened to be selected before.
@@ -3723,7 +3746,7 @@ describe('the connection picker slot', () => {
       'the confirmation control',
     );
     await interact(() => confirm.click());
-    await settle();
+    await pairedInGuide(view.container);
 
     expect(store.connections.getSnapshot().connections.map(one => String(one.daemonId))).toEqual([GAMMA_ID]);
     // Setup finishes on its own last stage rather than teleporting the reader
@@ -3736,7 +3759,7 @@ describe('the connection picker slot', () => {
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}`);
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}`);
     await view.unmount();
   });
@@ -3764,7 +3787,7 @@ describe('the connection picker slot', () => {
         'the confirmation control',
       ).click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}/setup`);
 
     // The first run is a full screen of its own now, outside Settings.
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/setup`);
@@ -3779,11 +3802,11 @@ describe('the connection picker slot', () => {
         'the confirmation control',
       ).click(),
     );
-    await settle();
+    await pairedInGuide(view.container);
     await interact(() =>
       must(view.container.querySelector<HTMLButtonElement>('[data-onboarding-open-fleet]'), 'the fleet action').click(),
     );
-    await landed();
+    await landed(`/d/${GAMMA_ID}/setup`);
     // The first run is a full screen of its own now, outside Settings.
     expect(window.location.pathname).toBe(`/d/${GAMMA_ID}/setup`);
     await view.unmount();
