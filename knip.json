@@ -38,6 +38,7 @@
         "harness/screenshot.ts",
         "harness/attention-screenshot.ts",
         "harness/attention-page.tsx",
+        "harness/processes-tab-screenshot.tsx",
         "harness/notifications-screenshot.ts",
         "harness/notifications-page.tsx",
         "harness/engine-list-screenshot.tsx",

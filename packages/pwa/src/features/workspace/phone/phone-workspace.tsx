@@ -2,7 +2,7 @@
  * THE PHONE WORKSPACE: one thing at a time, with the same model as desktop.
  *
  *   header slot   the session header (the caller's — this file never draws it)
- *   chip row      Chat, Console, every workspace tab (✕ or a long-press closes one), ＋
+ *   chip row      Chat, Console, Processes, every workspace tab (✕ or a long-press closes one), ＋
  *   body          the active tab, swipe left/right for the neighbours
  *   key bar       esc / tab / ctrl / arrows, on terminal and console tabs only
  *
@@ -17,8 +17,8 @@
 import { type ReactNode, useCallback, useId, useRef } from 'react';
 import { useKeyboardOpen } from '../../../hooks/use-keyboard-open.ts';
 import {
-  type PhoneCloseTabActions,
   PhoneChipRow,
+  type PhoneCloseTabActions,
   type PhoneNewTabActions,
   phoneChipId,
   phonePanelId,
@@ -36,7 +36,7 @@ export interface PhoneTabRenderContext {
 export interface PhoneWorkspaceProps extends PhoneNewTabActions, PhoneCloseTabActions {
   /** The header, drawn above the chip row. */
   readonly header?: ReactNode;
-  /** Workspace tabs only — Chat and Console are always added in front. */
+  /** Workspace tabs only — Chat, Console and Processes are always added in front. */
   readonly tabs: readonly PhoneTab[];
   readonly activeId: string;
   readonly onSelect: (tabId: string) => void;
@@ -50,6 +50,8 @@ export interface PhoneWorkspaceProps extends PhoneNewTabActions, PhoneCloseTabAc
    * nowhere. The session page's Console types through `/console/input`; terminals always get one.
    */
   readonly consoleTakesKeys?: boolean;
+  /** The Processes chip, when the host labels it with a live count ("Processes · 3"). */
+  readonly processesTab?: PhoneTab;
 }
 
 export function PhoneWorkspace({
@@ -61,11 +63,12 @@ export function PhoneWorkspace({
   onTerminalInput,
   onFocusTerminal,
   consoleTakesKeys = true,
+  processesTab,
   ...actions
 }: PhoneWorkspaceProps) {
   const rowId = useId();
   const bodyRef = useRef<HTMLDivElement | null>(null);
-  const order = phoneTabOrder(tabs);
+  const order = phoneTabOrder(tabs, processesTab);
   const active = order.find(tab => tab.id === activeId) ?? PHONE_CHAT_TAB;
   const keyboardOpen = useKeyboardOpen();
   const { ctrl, setCtrl, intercept } = useStickyCtrl();

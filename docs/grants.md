@@ -143,6 +143,15 @@ capability. It acts only while the composer holds exactly the quoted draft, and 
 `terminal.input` with `detail.mode: 'composer'`, never with the text. See
 [docs/message-delivery.md](message-delivery.md).
 
+**So is a ferret's Processes tab.** `GET /v1/sessions/:sessionId/processes`, a process's
+`/output` and its `/stop` are all declared `terminal` / `use`. The list is every command line under that
+ferret's pane — what `ps` shows somebody with a shell there — an output read is what those commands print,
+exactly what a terminal shows, and Stop is SIGTERM to a command the agent started, which is less than typing
+Ctrl-C into the Console. None of the three can do anything a session terminal cannot, so none needs more; and
+a device trusted only to read the Chat should not read every command's output, so none needs less. Stop
+re-proves the process belongs to that pane with the same start time before signalling, and is audited as
+`terminal.input` with `detail.mode: 'process-stop'`. See [docs/processes.md](processes.md).
+
 Each has two axes, and they are different questions:
 
 - **use** — may the caller exercise the capability at all?

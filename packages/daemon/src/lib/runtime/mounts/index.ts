@@ -88,6 +88,7 @@ import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './sess
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
+import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
 import { sessionReadRoutes } from './session-reads.ts';
 import { type SessionRenameSubsystem, sessionRenameRoutes } from './session-rename.ts';
 import { type SessionResumeSubsystem, sessionResumeRoutes } from './session-resume.ts';
@@ -393,6 +394,8 @@ export interface MountedSubsystems {
   readonly sessionAttach: SessionAttachSubsystem;
   /** Typing into a session's own pane — the Console — governed as a session terminal is. */
   readonly sessionConsole: SessionConsoleSubsystem;
+  /** A ferret's own processes — listed, their output followed, one stopped — governed as the Console is. */
+  readonly sessionProcesses: SessionProcessSubsystem;
   /** Answering the harness's permission prompt on a session's own pane, governed as the Console is. */
   readonly sessionPermission: SessionPermissionSubsystem;
   /** Answering the harness's own dialog (hooks review, an MCP server, a sign-in) the same way. */
@@ -638,6 +641,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The Console's input: two segments deep under `/v1/sessions/:sessionId`, ending in the literal
         // `console/input` no other route uses, so it can neither shadow nor be shadowed.
         ...sessionConsoleRoutes(subsystems.sessionConsole, subsystems.sessions),
+        // The Processes tab: one to three segments under `/v1/sessions/:sessionId` starting with the literal
+        // `processes` no other route uses, so they can neither shadow nor be shadowed.
+        ...sessionProcessRoutes(subsystems.sessionProcesses, subsystems.sessions),
         // A permission answer: one segment under `/v1/sessions/:sessionId`, ending in the literal
         // `permission` no other route uses, so it can neither shadow nor be shadowed.
         ...sessionPermissionRoutes(subsystems.sessionPermission, subsystems.sessions),

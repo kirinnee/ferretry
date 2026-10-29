@@ -53,7 +53,9 @@ Because the daemon knows the values, it removes them from text before that text 
 rendered:
 
 - the output of a `use` child, on both stdout and stderr;
-- an operator read of a session's **screen**, its **transcript**, and its **journal**.
+- an operator read of a session's **screen**, its **transcript**, and its **journal**;
+- a ferret's **Processes** tab: every command line and every byte of a process's output
+  ([processes.md](processes.md#secrets) says what that cannot catch).
 
 So `fy secret use --with TOKEN -- sh -c 'echo $TOKEN'` returns `[redacted:TOKEN]`. The child really
 did hold the value; what came back is a mask.

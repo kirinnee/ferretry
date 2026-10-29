@@ -61,7 +61,7 @@ import {
 } from './workspace-tab-strip.tsx';
 
 /** Bodies of these kinds hold live state and stay mounted while deselected. */
-const RETAINED_KINDS: ReadonlySet<WorkspaceTabKind> = new Set(['chat', 'console', 'terminal', 'browser']);
+const RETAINED_KINDS: ReadonlySet<WorkspaceTabKind> = new Set(['chat', 'console', 'processes', 'terminal', 'browser']);
 
 export interface WorkspaceViewProps {
   readonly layout: WorkspaceLayout;
@@ -78,6 +78,8 @@ export interface WorkspaceViewProps {
   readonly onEndTerminal?: (tab: WorkspaceTab) => void;
   /** The agent's first name, when it has one: the Chat and Console tabs say whose they are. */
   readonly agentName?: string;
+  /** Words a tab shows instead of its layout label — the Processes tab's live count. The layout is untouched. */
+  readonly tabLabels?: ReadonlyMap<WorkspaceTabId, string>;
   readonly drivenTabIds?: ReadonlySet<WorkspaceTabId>;
   readonly agentSurfaces?: AgentSurfaceTabs;
   readonly maxPanes?: number;
@@ -142,7 +144,11 @@ function PaneView({ context, pane }: { readonly context: ViewContext; readonly p
   const tabs = pane.tabs
     .map(id => layout.tabs[id])
     .filter((tab): tab is WorkspaceTab => tab !== undefined)
-    .map(tab => agentTitled(tab, context.agentName));
+    .map(tab => agentTitled(tab, context.agentName))
+    .map(tab => {
+      const label = context.tabLabels?.get(tab.id);
+      return label === undefined ? tab : { ...tab, label };
+    });
   const bodies = tabs.filter(tab => tab.id === pane.active || RETAINED_KINDS.has(tab.kind));
   return (
     <section
