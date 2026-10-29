@@ -48,6 +48,8 @@ const BARE_OPTION = /^(?:[A-Za-z0-9]|(?:option|choice|plan|approach)\s*[A-Za-z0-
 const MIN_OPTION_LENGTH = 3;
 /** Short words that need no description. */
 const PLAIN_OPTIONS: ReadonlySet<string> = new Set(['yes', 'no', 'ok']);
+/** The kinds of card that put a decision to the owner, so a cold reader needs the situation to make it. */
+const DECISION_KINDS: ReadonlySet<AttentionKind> = new Set(['permission', 'choice', 'yesno', 'reply']);
 /** Capitals a reader already knows. */
 const PLAIN_CAPITALS: ReadonlySet<string> = new Set(['OK', 'AM', 'PM', 'UTC', 'ASAP', 'FYI', 'TODO', 'API']);
 
@@ -68,7 +70,9 @@ function fieldsOf(item: AttentionWriting): Field[] {
     if (text !== undefined && text !== null && text.trim() !== '') fields.push({ name, text });
   };
   push('title', item.title);
+  push('premise', item.premise);
   push('context', item.context);
+  push('decided', item.decided);
   item.questions?.forEach((question, index) => {
     const label = item.questions?.length === 1 ? 'question' : `question ${index + 1}`;
     push(label, [question.question, question.why ?? ''].join(' '));
@@ -85,6 +89,15 @@ function fieldsOf(item: AttentionWriting): Field[] {
 /** The words a `terms` entry defines, upper-cased so `oci` defines `OCI`. */
 function definedTerms(item: AttentionWriting): ReadonlySet<string> {
   return new Set((item.terms ?? []).map(entry => entry.term.trim().toUpperCase()));
+}
+
+/** Whether the item asks the owner to decide something: a permission, a choice, a question or an open question. */
+function isDecision(item: AttentionWriting): boolean {
+  return (item.questions?.length ?? 0) > 0 || DECISION_KINDS.has(attentionCardKind(item));
+}
+
+function isBlank(text: string | null | undefined): boolean {
+  return text === undefined || text === null || text.trim() === '';
 }
 
 function quoted(values: readonly string[]): string {
@@ -135,8 +148,10 @@ function isCoveredByTerm(word: string, defined: ReadonlySet<string>): boolean {
  * Advice on how an item is written, never a refusal: the item is already on the board and the owner
  * has been told. Each line names what to change, so the ferret can fix the item with `attention edit`.
  *
- * The owner reads cold — often on a phone, days later — so a CARD MUST BE ISOLATED: everything needed
- * to decide is on it. A short plain title (the push's heading) and ask (its text); no pointing at an
+ * The owner reads cold — often on a phone, days later — so THE RULE IS ISOLATION: could the owner answer
+ * with nothing else open? Everything needed to decide is on the card. (Premise, the situation, and context,
+ * why it matters now, are how a card gets there — a decision card with neither draws the strongest warning,
+ * but is never refused.) A short plain title (the push's heading) and ask (its text); no pointing at an
  * earlier message; no ticket or PR ids, links, file paths or capitals nobody has explained; options that
  * say what choosing them does. Anything in `terms` counts as explained, and an id followed by what it is
  * in brackets — `#812 (the push worker fix)` — counts as described.
@@ -161,6 +176,12 @@ export function lintAttentionWriting(item: AttentionWriting): string[] {
   if (ask.length > ATTENTION_ASK_TARGET_LENGTH) {
     warnings.push(
       `ask is ${ask.length} characters; keep it under ${ATTENTION_ASK_TARGET_LENGTH}: the one question or action, answer first; move the rest to --context`,
+    );
+  }
+
+  if (isDecision(item) && isBlank(item.premise) && isBlank(item.context)) {
+    warnings.push(
+      'a reader opening this cold cannot tell what is going on — add --premise points (the situation, one bullet each) with `attention edit <id> --premise "<what is going on>"`, and --context for why it matters now',
     );
   }
 
