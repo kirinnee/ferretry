@@ -452,7 +452,7 @@ export const Markdown = memo(function Markdown({
           // desktop they are the elements' implicit roles, so they are inert.
           code: withCopy(({ node: _node, className: fenceClassName, children, ...rest }) => {
             const language = fenceLanguage(fenceClassName);
-            const source = language ? String(children).replace(/\n$/u, '') : '';
+            const source = language ? String(children ?? '').replace(/\n$/u, '') : '';
             const html = language ? highlightToHtml(source, language) : null;
             // REFERENCES INSIDE CODE. The code text is decorated, never
             // rewritten: `decoratedCodeNodes` answers null unless it can slice

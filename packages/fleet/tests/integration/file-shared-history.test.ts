@@ -1,4 +1,5 @@
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, describe, it, spyOn } from 'bun:test';
+import * as fs from 'node:fs/promises';
 import {
   chmod,
   lstat,
@@ -505,6 +506,70 @@ describe('FileSharedHistoryFileSystem', () => {
       should(await readFile(occupied, 'utf8')).equal('do not lose me\n');
     } finally {
       await reader.close();
+    }
+  });
+
+  it('should surface a hard-link failure that is not a collision, leaving the source where it was', async () => {
+    // Arrange — the destination's directory refuses new names.
+    const root = await temporaryDirectory();
+    const source = path.join(root, 'source.jsonl');
+    const pool = path.join(root, 'pool');
+    const destination = path.join(pool, 'destination.jsonl');
+    await write(source, 'evidence\n');
+    await mkdir(pool);
+    await chmod(pool, 0o500);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    try {
+      // Act
+      const promise = subject.move(source, destination);
+
+      // Assert
+      await should(promise).be.rejectedWith(/EACCES/);
+      should(await readFile(source, 'utf8')).equal('evidence\n');
+      should(await subject.snapshot(destination)).be.undefined();
+    } finally {
+      await chmod(pool, 0o700);
+    }
+  });
+
+  it('should refuse to remove, as a link, an entry that is not a link', async () => {
+    // Arrange
+    const root = await temporaryDirectory();
+    const file = path.join(root, 'file');
+    await write(file, 'evidence');
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    // Act / Assert
+    await should(subject.removeSymbolicLink(file, file)).be.rejectedWith(/expected a symbolic link/);
+    await should(subject.removeSymbolicLink(path.join(root, 'missing'), file)).be.rejectedWith(
+      /expected a symbolic link/,
+    );
+    should(await readFile(file, 'utf8')).equal('evidence');
+  });
+
+  it('should refuse to describe a directory whose entry vanished while it was being read', async () => {
+    // Arrange — the listing names an entry that is no longer there by the time it is examined.
+    const root = await temporaryDirectory();
+    const directory = path.join(root, 'directory');
+    await write(path.join(directory, 'present'), 'evidence');
+    const listing = fs.readdir;
+    const spy = spyOn(fs, 'readdir').mockImplementation((async (target: string, ...rest: unknown[]) => {
+      const names = await (listing as (...args: unknown[]) => Promise<string[]>)(target, ...rest);
+      return target === directory ? [...names, 'vanished'] : names;
+    }) as unknown as typeof fs.readdir);
+    const subject = new FileSharedHistoryFileSystem([root]);
+
+    try {
+      // Act
+      const promise = subject.snapshot(directory);
+
+      // Assert
+      await should(promise).be.rejectedWith(
+        `shared-history entry disappeared while it was being read: ${path.join(directory, 'vanished')}`,
+      );
+    } finally {
+      spy.mockRestore();
     }
   });
 

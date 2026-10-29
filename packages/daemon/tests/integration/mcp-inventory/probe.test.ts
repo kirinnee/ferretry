@@ -203,6 +203,20 @@ describe('the MCP check transports', () => {
     should(notFound.message).match(/HTTP 404 — is this the MCP endpoint/u);
   });
 
+  it('should say an endpoint that redirects moved, rather than follow it', async () => {
+    // Arrange
+    const origin = serve(
+      () => new Response(null, { status: 302, headers: { location: 'http://127.0.0.1:9/elsewhere' } }),
+    );
+
+    // Act
+    const failure = await failureOf(probe.probe({ transport: 'http', url: `${origin}/mcp`, headers: {} }, deadline()));
+
+    // Assert
+    should(failure.kind).equal('protocol');
+    should(failure.message).equal('It redirected (HTTP 302); use the address it moved to.');
+  });
+
   it('should say nothing answered at a host with no server', async () => {
     // Arrange — a port that was just free.
     const origin = serve(() => new Response());

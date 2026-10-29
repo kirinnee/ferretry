@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { describe, it, spyOn } from 'bun:test';
 import { type AnalyticsPricingRate, FY_DEFAULT_DAEMON_URL, ManualAnalyticsPricingRateSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ConfigGrantDocument } from '../../../src/adapters/grants/index.ts';
@@ -10,6 +10,7 @@ import {
 } from '../../../src/lib/analytics/pricing-catalog.ts';
 import { AnalyticsPricingService } from '../../../src/lib/analytics/pricing-service.ts';
 import {
+  DaemonConfigDocumentSchema,
   DEFAULT_CAPABILITY_GRANTS,
   type FileSystemPort,
   type FoundationPaths,
@@ -609,5 +610,44 @@ describe('a configuration document this daemon will not act on', () => {
     should(read.kind).equal('unavailable');
     should(write.kind).equal('unavailable');
     should(documents.text()).equal(original);
+  });
+
+  it('should treat text that is not JSON as an unreadable pricing document and keep it as evidence', async () => {
+    // Arrange
+    const original = '{ "analyticsPricing": [';
+    const documents = documentStore(original);
+
+    // Act
+    const read = await documents.store.readPricing();
+    const write = await documents.store.writePricing({
+      catalog: [],
+      expectedCatalogFingerprint: 'cannot-match',
+      touchedPricingKeys: [],
+    });
+
+    // Assert
+    should(read.kind).equal('unavailable');
+    should(write.kind).equal('unavailable');
+    should(documents.text()).equal(original);
+  });
+
+  it('should not report an internal failure while parsing as an unreadable pricing document', async () => {
+    // Arrange — a defect inside the schema is this daemon's bug, not the operator's file, and
+    // calling it "cannot be read" would send them to fix a document that is fine.
+    const documents = documentStore('{}');
+    const parse = spyOn(DaemonConfigDocumentSchema, 'safeParse').mockImplementation(() => {
+      throw new Error('schema defect');
+    });
+
+    try {
+      // Act + Assert
+      await should(documents.store.readPricing()).be.rejectedWith('schema defect');
+      await should(
+        documents.store.writePricing({ catalog: [], expectedCatalogFingerprint: 'any', touchedPricingKeys: [] }),
+      ).be.rejectedWith('schema defect');
+    } finally {
+      parse.mockRestore();
+    }
+    should(documents.text()).equal('{}');
   });
 });

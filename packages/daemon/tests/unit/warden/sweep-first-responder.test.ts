@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { NUDGE_MESSAGES, TRIAGE_CRITERIA, type TriageDecision } from '../../../src/lib/speedups/jev.ts';
 import { jevNudgeMessage } from '../../../src/lib/warden/index.ts';
+import { WARDEN_TERMINAL_STATUSES } from '../../../src/lib/warden/types.ts';
 import { enabled, harness, JEV_SKIP, journalTypes, NOW, session, triageable } from './sweep-harness.ts';
 
 /**
@@ -290,6 +291,59 @@ describe('Jev’s one try at a situation', () => {
     should(subject.guarded).have.length(2);
     should(subject.remedies.map(remedy => remedy.action)).deepEqual(['nudge', 'nudge']);
     should(subject.spawns).be.empty();
+  });
+
+  describe('when the ferret is gone or finished by the time Jev acts', () => {
+    const acts = ['nudge', 'restart', 'stop'] as const;
+    const allowed = enabled({
+      layers: { jev: true, llm: true },
+      mayActAlone: { ...enabled().mayActAlone, nudge: true, restart: true, stop: true },
+    });
+    const after: readonly (readonly [string, () => readonly ReturnType<typeof stuck>[]])[] = [
+      ['missing from the fleet', () => []],
+      ...WARDEN_TERMINAL_STATUSES.map(
+        status => [status, () => [{ ...stuck(NOW), state: { ...stuck(NOW).state, status } }]] as const,
+      ),
+    ];
+    const run = async (act: (typeof acts)[number], fleetAtAct?: () => readonly ReturnType<typeof stuck>[]) => {
+      let subject: ReturnType<typeof harness> | undefined;
+      subject = harness({
+        config: allowed,
+        fleet: [stuck(NOW)],
+        guard: [jev(act, 0.99)],
+        evidence: async () => {
+          if (fleetAtAct !== undefined) subject?.setFleet(fleetAtAct());
+          return { recentTurns: ['turn one'], paneTail: 'screen' };
+        },
+      });
+      await subject.service.run({ force: false });
+      return subject;
+    };
+
+    for (const act of acts) {
+      it(`should carry out Jev's ${act} while the ferret is still there`, async () => {
+        // Arrange / Act
+        const subject = await run(act);
+
+        // Assert
+        should(subject.remedies.map(remedy => remedy.action)).deepEqual([act]);
+        should(subject.spawns).be.empty();
+      });
+
+      for (const [label, fleetAtAct] of after) {
+        it(`should run no ${act} and hand the flag on as it stands when the target is ${label}`, async () => {
+          // Arrange / Act
+          const subject = await run(act, fleetAtAct);
+
+          // Assert
+          should(subject.guarded).have.length(1);
+          should(subject.remedies).be.empty();
+          should(subject.state().actions ?? []).be.empty();
+          should(journalTypes(subject)).not.containEql('fleet.warden_acted');
+          should(journalTypes(subject)).not.containEql('fleet.warden_action_failed');
+        });
+      }
+    }
   });
 });
 

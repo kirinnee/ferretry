@@ -332,15 +332,12 @@ export function structuredQuestionStatePatch(
   // patch runs. If the durable state no longer names that predecessor, still restore its operator
   // attention while allowing a genuinely newer question to remain answerable — unless a human
   // already acknowledged that same tool, which is the one fact that closes it for good.
-  const orphanQuarantine =
-    evidence.kind === 'none'
-      ? records.find(
-          record =>
-            record.outcome === 'quarantined' &&
-            current.lastAnsweredQuestionToolUseId !== record.toolUseId &&
-            !acknowledgedTool(record.toolUseId),
-        )
-      : undefined;
+  const orphanQuarantine = records.find(
+    record =>
+      record.outcome === 'quarantined' &&
+      current.lastAnsweredQuestionToolUseId !== record.toolUseId &&
+      !acknowledgedTool(record.toolUseId),
+  );
   if (orphanQuarantine !== undefined) {
     const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
     const attentionStanding = releasedAnswerAttentionFor(current, orphanQuarantine.toolUseId, records);

@@ -162,6 +162,14 @@ describe('session dashboard row leaves', () => {
     expect(text(sparse)).not.toContain('rc');
   });
 
+  it('shows a labelled card’s label after its model', () => {
+    const card = render(
+      <SessionCard {...fullProps({ view: view('card-labelled', { config: { label: 'primary' } }) })} />,
+    ).root;
+    expect(text(card)).toContain('claude-test');
+    expect(card.findAllByProps({ title: 'primary' }).map(node => text(node))).toContain('primary');
+  });
+
   it('uses distinct compact and minimal table DOM, retaining flags only where compact has a signals cell', () => {
     const compact = render(
       <LeanSessionRow

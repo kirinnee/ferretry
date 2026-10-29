@@ -23,10 +23,14 @@ export interface DaemonHealthProbeOptions {
  * Only an actively refused connection does: the kernel answering on behalf of a port nothing holds.
  * Every other failure — a timeout, a reset, a name that would not resolve — leaves the question open,
  * and an open question is not a vacancy. The runtime reports the refusal as an error code rather than
- * in the message, so the code is what is read; the text is kept for the refusal a human reads.
+ * in the message, so the code is what is read; the text is kept for the refusal a human reads. Bun
+ * up to 1.3 spelled the code `ConnectionRefused`; Bun 1.4 spells it `ECONNREFUSED`, as Node does,
+ * and reading only the old spelling made every vacant port look held.
  */
+const REFUSED_CODES: ReadonlySet<unknown> = new Set(['ConnectionRefused', 'ECONNREFUSED']);
+
 function wasConnectionRefused(error: unknown): boolean {
-  return (error as { readonly code?: unknown } | null)?.code === 'ConnectionRefused';
+  return REFUSED_CODES.has((error as { readonly code?: unknown } | null)?.code);
 }
 
 function describe(error: unknown): string {

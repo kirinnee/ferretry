@@ -633,3 +633,27 @@ describe('adding a device always wants a passkey proved for it', () => {
     should(subject.mints).equal(1);
   });
 });
+
+describe('a pairing route reached without a presentation of its caller', () => {
+  it('should refuse rather than guess who is asking, for the device list and for minting', async () => {
+    // Arrange — the dispatcher always supplies a presentation, so the handlers are asked directly.
+    const grants = grantSubsystem();
+    await grants.refresh();
+    const routes = pairingRoutes(new FakePairing(), deviceGrantsOver(grants));
+    const asked = routes.filter(
+      route => (route.method === 'GET' && route.path === '/v1/pair/devices') || route.method === 'POST',
+    );
+    const mint = asked.find(route => route.path === '/v1/pair/code');
+    const list = asked.find(route => route.path === '/v1/pair/devices');
+    if (mint === undefined || list === undefined) throw new Error('the pairing routes must be mounted');
+
+    // Act + Assert
+    for (const route of [list, mint])
+      await Promise.resolve(
+        route.handle({ request: request({ method: route.method, path: route.path }), params: new Map() }),
+      ).should.be.rejectedWith({
+        status: 500,
+        code: 'internal_error',
+      });
+  });
+});

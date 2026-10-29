@@ -153,6 +153,24 @@ describe('CarrierPreferenceStore', () => {
   });
 });
 
+describe('a browser whose storage is absent or not a store', () => {
+  test('answers with the default and still changes the preference for the rest of the tab', () => {
+    const descriptor = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    try {
+      for (const value of [undefined, {}, { getItem: () => null }, { getItem: () => null, setItem: 'no' }]) {
+        Object.defineProperty(globalThis, 'localStorage', { configurable: true, value });
+        const store = new CarrierPreferenceStore();
+        should(store.preference(STUDIO)).equal('relay');
+        store.set(STUDIO, 'tunnel');
+        should(store.preference(STUDIO)).equal('tunnel');
+      }
+    } finally {
+      if (descriptor === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', descriptor);
+    }
+  });
+});
+
 describe('moving from the v1 key', () => {
   test('carries a deliberate narrowing forward and leaves Auto, which v1 stored as nothing, behind', () => {
     should(

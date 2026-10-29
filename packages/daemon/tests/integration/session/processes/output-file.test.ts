@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, open, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -119,6 +119,39 @@ describe('RegularOutputFile', () => {
 
     // Assert
     should(read).deepEqual({ kind: 'gone' });
+  });
+
+  it('should answer gone for a file it can see but cannot open', async () => {
+    // Arrange — the file exists when it is named and is refused when it is opened.
+    const path = join(directory, 'out.log');
+    await writeFile(path, 'hello');
+    const refusing = new RegularOutputFile({
+      lstat,
+      open: async () => {
+        throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+      },
+    });
+
+    // Act
+    const read = await refusing.read(path, undefined, 1_024);
+
+    // Assert
+    should(read).deepEqual({ kind: 'gone' });
+  });
+
+  it('should refuse a path whose file was swapped for another between being named and being opened', async () => {
+    // Arrange — the name resolved to one file; the descriptor it opens is another's.
+    const path = join(directory, 'out.log');
+    const swapped = join(directory, 'swapped.log');
+    await writeFile(path, 'what the follower was told');
+    await writeFile(swapped, 'what is there now');
+    const racing = new RegularOutputFile({ lstat: async () => await lstat(swapped), open });
+
+    // Act
+    const read = await racing.read(path, undefined, 1_024);
+
+    // Assert
+    should(read).deepEqual({ kind: 'refused', reason: 'Its output file changed while it was being opened.' });
   });
 
   it('should refuse a relative path, never resolving it against the daemon’s directory', async () => {

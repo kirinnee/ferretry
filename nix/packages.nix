@@ -3,7 +3,6 @@
   inherit (pkgs)
     actionlint
     bash
-    bun
     git
     go
     go-task
@@ -17,4 +16,6 @@
     wrangler
     yq-go
     ;
+  # Not `pkgs.bun`: the Bun version is pinned ahead of nixpkgs, and nix/bun.nix says why.
+  bun = import ./bun.nix { inherit pkgs; };
 }

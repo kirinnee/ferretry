@@ -295,6 +295,35 @@ describe('hosted relay control Durable Object', () => {
     ).equal(503);
   });
 
+  it('should refuse a metering event for a daemon whose metrics row is gone, rather than invent one', async () => {
+    const harness = makeObject();
+    await configure(harness);
+
+    const answer = await harness.object.fetch(request('/internal/meter', 'POST', { daemonId, bytes: 1 }));
+
+    should(await answer.json()).deepEqual({
+      ok: false,
+      code: RELAY_CLOSE_CODES.relayInternal,
+      reason: 'daemon metrics are lost',
+    });
+  });
+
+  it('should refuse a metrics snapshot holding a daemon row that is unreadable or filed under another key', async () => {
+    const harness = makeObject();
+    await configure(harness);
+    harness.storage.values.set('metrics:global', { ...initialHostedRelayGlobalMetrics(1_000), trackedDaemons: 1 });
+
+    harness.storage.values.set(`metrics:daemon:${daemonId}`, { daemonId, broken: true });
+    const unreadable = await harness.object.fetch(request('/operator/metrics'));
+    harness.storage.values.set(`metrics:daemon:${daemonId}`, initialHostedRelayDaemonMetrics(otherDaemonId, 1_000));
+    const misfiled = await harness.object.fetch(request('/operator/metrics'));
+
+    for (const response of [unreadable, misfiled]) {
+      should(response.status).equal(503);
+      should(await response.json()).deepEqual({ error: 'daemon metrics are damaged' });
+    }
+  });
+
   it('should refuse a metrics snapshot when durable keys and counters disagree', async () => {
     const harness = makeObject();
     await configure(harness);

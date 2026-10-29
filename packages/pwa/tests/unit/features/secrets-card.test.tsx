@@ -192,6 +192,30 @@ describe('SecretsCard', () => {
     expect(text(renderer.toJSON())).toContain('Saving…');
   });
 
+  it('shows the draft problem under the form: a replacement warning in warn, an unusable draft in err', () => {
+    // Arrange
+    const renderer = render(<SecretsCard list={list()} onPut={() => undefined} onRemove={() => undefined} />);
+    const field = (label: string) =>
+      renderer.root.findAllByType('input').find(input => input.props.placeholder?.includes(label));
+    const problemLine = () =>
+      renderer.root.findAllByType('p').find(p => /^m-0 text-meta text-(warn|err)$/.test(p.props.className ?? ''));
+
+    // Act — a rotation of a name the store already holds.
+    run(() => renderer.root.findByProps({ 'aria-label': 'Replace ANTHROPIC_API_KEY' }).props.onClick());
+    run(() => field('paste it here')?.props.onChange({ target: { value: 'sk-live-0123456789' } }));
+
+    // Assert
+    expect(problemLine()?.props.className).toContain('text-warn');
+    expect(text(problemLine()?.props.children)).toContain('replaces');
+
+    // Act — a value too short to mask.
+    run(() => field('paste it here')?.props.onChange({ target: { value: 'short' } }));
+
+    // Assert
+    expect(problemLine()?.props.className).toContain('text-err');
+    expect(text(problemLine()?.props.children)).toContain('masked out of output');
+  });
+
   it('does not submit a draft that is not ready', async () => {
     // Arrange
     const stored: string[] = [];
@@ -332,6 +356,44 @@ describe('SecretsSurface', () => {
 
     // Assert
     expect(calls).toEqual(['GET /v1/secrets', 'POST /v1/secrets', 'GET /v1/secrets']);
+  });
+
+  it('deletes and then re-reads, so the removed secret is gone from the screen', async () => {
+    // Arrange
+    const calls: string[] = [];
+    let deleted = false;
+    const renderer = render(
+      <SecretsSurface
+        connection={connection('a')}
+        createClient={async () =>
+          ({
+            request: async (
+              path: string,
+              schema: { parse: (value: unknown) => unknown },
+              init?: { method?: string },
+            ) => {
+              calls.push(`${init?.method ?? 'GET'} ${path}`);
+              if (init?.method === 'DELETE') {
+                deleted = true;
+                return schema.parse({ name: 'ANTHROPIC_API_KEY', removed: true });
+              }
+              return schema.parse(deleted ? list({ secrets: [] }) : list());
+            },
+          }) as never
+        }
+      />,
+    );
+    await runAsync(async () => undefined);
+    expect(text(renderer.toJSON())).toContain('ANTHROPIC_API_KEY');
+
+    // Act
+    await runAsync(async () => {
+      renderer.root.findByType(SecretsCard).props.onRemove('ANTHROPIC_API_KEY');
+    });
+
+    // Assert
+    expect(calls).toEqual(['GET /v1/secrets', 'DELETE /v1/secrets/ANTHROPIC_API_KEY', 'GET /v1/secrets']);
+    expect(text(renderer.toJSON())).toContain('No secrets on this daemon yet.');
   });
 
   it('surfaces a write failure without losing the list', async () => {

@@ -257,6 +257,24 @@ describe('StorageTransferEnvelopeWriter', () => {
     should(Object.hasOwn((await storage.readConfig(target)) as Record<string, unknown>, 'label')).equal(false);
   });
 
+  it('should build the document from the envelope alone when the stored configuration is not an object', async () => {
+    // Arrange
+    const { storage } = await openStorage('envelope-non-object');
+    const target = parseSessionId(TARGET_ID);
+    await storage.writeConfig(target, ['not', 'a', 'document']);
+    const applied = envelope('/work/forked');
+
+    // Act
+    await new StorageTransferEnvelopeWriter(storage).apply(TARGET_ID, applied);
+
+    // Assert: nothing of the array leaks into the merged document, and the envelope's fields land.
+    const document = (await storage.readConfig(target)) as Record<string, unknown>;
+    should(Array.isArray(document)).equal(false);
+    should(document.cwd).equal('/work/forked');
+    should(document.transferredFrom).eql(applied.transferredFrom);
+    should(Object.hasOwn(document, '0')).equal(false);
+  });
+
   it('should refuse a target key that is not a usable session id', async () => {
     // Arrange
     const { storage } = await openStorage('envelope-invalid');

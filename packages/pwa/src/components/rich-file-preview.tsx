@@ -112,8 +112,7 @@ export const parsePreviewCsv = (text: string): CsvTable => {
   };
   const pushRow = () => {
     pushCell();
-    if (rows.length < CSV_PREVIEW_ROWS) rows.push(row);
-    else truncated = true;
+    rows.push(row);
     row = [];
   };
   for (let index = 0; index < text.length; index += 1) {

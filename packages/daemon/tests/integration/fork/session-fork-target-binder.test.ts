@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { createHash } from 'node:crypto';
-import { truncate, readFile } from 'node:fs/promises';
+import { readFile, rm, truncate } from 'node:fs/promises';
 import { join } from 'node:path';
 import {
   type RuntimeControlRequest,
@@ -38,9 +38,13 @@ import { assignedTaskDocument } from '../../../src/lib/session/lifecycle/policy.
 import { sessionTmuxName } from '../../../src/lib/session/lifecycle/policy.ts';
 import { startupModelArguments } from '../../../src/lib/session/harness/startup.ts';
 import { claudeSessionArguments, claudeTranscriptFile } from '../../../src/lib/session/transcript/claude-path.ts';
+import { codexCorrelationArguments } from '../../../src/lib/session/transcript/codex-rollout.ts';
 import { SessionLifecycleService } from '../../../src/lib/session/lifecycle/service.ts';
 import { defaultSessionLifecycleSettings } from '../../../src/lib/session/lifecycle/settings.ts';
-import { MAX_ASSIGNED_TASK_LENGTH } from '../../../src/lib/session/lifecycle/types.ts';
+import {
+  MAX_ASSIGNED_TASK_LENGTH,
+  SESSION_BOARD_CAPABILITY_VARIABLE,
+} from '../../../src/lib/session/lifecycle/types.ts';
 import type { JsonValue } from '../../../src/lib/json.ts';
 import type { SessionLifecycleRecord } from '../../../src/lib/session/lifecycle/types.ts';
 import { type SessionId, parseSessionId } from '../../../src/lib/session-id.ts';
@@ -1257,5 +1261,434 @@ describe('SessionForkTargetBinder', () => {
 
     // Assert
     should(refused.message).match(/cannot be read, so this fork cannot prove it is the target it reserved/u);
+  });
+  describe('drift and damage a replay must refuse', () => {
+    /** The same ports with a few collaborators swapped, for the failures a real one cannot be made to produce. */
+    function bindWith(subject: Harness, swapped: Partial<SessionForkTargetBinderPorts>): SessionForkBoundTarget {
+      return new SessionForkTargetBinder({ ...subject.ports, ...swapped }).bind(TARGET_ID, subject.plan);
+    }
+
+    /** The real storage with only `updateConfig` replaced, so every other read and write stays the real one. */
+    function storageWithUpdateConfig(
+      storage: DaemonStorage,
+      updateConfig: DaemonStorage['updateConfig'],
+    ): DaemonStorage {
+      return new Proxy(storage, {
+        get: (target, property) => {
+          if (property === 'updateConfig') return updateConfig;
+          const held: unknown = Reflect.get(target, property, target);
+          return typeof held === 'function' ? (held as (...args: unknown[]) => unknown).bind(target) : held;
+        },
+      });
+    }
+
+    /** Create, persist and import: the point after which every later phase re-proves the whole target. */
+    async function imported(subject: Harness): Promise<SessionForkBoundTarget> {
+      const bound = subject.bind();
+      await bound.lifecycle.create(subject.plan);
+      await bound.plans.persist(subject.plan);
+      await bound.importer.importPlan(subject.plan, TARGET_ID);
+      return bound;
+    }
+
+    it('should acknowledge an import that already completed without reading the source again', async () => {
+      // Arrange: the edge and every artifact are on the target; only the receipt advance was lost.
+      const subject = await harness('replayed-import');
+      await imported(subject);
+      const file = join(subject.sessionDirectory(TARGET_ID), 'turns', 'turn-001.md');
+      const before = await readFile(file, 'utf8');
+      const replay = bindWith(subject, {
+        importPorts: {
+          ...subject.ports.importPorts,
+          conversation: {
+            digestPinned: async () => {
+              throw new Error('the source was read again');
+            },
+          },
+        },
+      });
+
+      // Act
+      const outcome = await replay.importer.importPlan(subject.plan, TARGET_ID);
+
+      // Assert
+      should(outcome.briefPath).equal(file);
+      should(outcome.copiedAttachmentIds).eql(subject.plan.facets.attachments.attachments.map(item => item.id));
+      should(await readFile(file, 'utf8')).equal(before);
+    });
+
+    it('should refuse to create when the account no longer serves the context window the plan froze', async () => {
+      // Arrange: a window override this daemon carries changed under a frozen plan.
+      const subject = await harness('window-drift', {
+        plan: base => ({ ...base, target: { ...base.target, contextWindow: 200_000 } }),
+      });
+
+      // Act
+      const refused = await refusal(subject.bind().lifecycle.create(subject.plan));
+
+      // Assert
+      should(refused.message).match(/account claude-auto-zelda no longer serves the target plan plan-fork-1/u);
+      should(refused.message).match(/its context window is 1000000 rather than 200000/u);
+      should(subject.counts().creates).equal(0);
+    });
+
+    it('should refuse a target whose private credential environment cannot be read', async () => {
+      // Arrange
+      const subject = await harness('environment-unreadable');
+      await subject.bind().lifecycle.create(subject.plan);
+      const bound = bindWith(subject, {
+        environment: {
+          read: async () => {
+            throw new Error('the environment file is gone');
+          },
+        },
+      });
+
+      // Act
+      const refused = await refusal(bound.lifecycle.create(subject.plan));
+
+      // Assert
+      should(refused.message).match(/private credential environment cannot be read: the environment file is gone/u);
+    });
+
+    it('should refuse a target whose private credential is missing or is not the one its record hashes', async () => {
+      // Arrange
+      const subject = await harness('credential-mismatch');
+      await subject.bind().lifecycle.create(subject.plan);
+      const missing = bindWith(subject, { environment: { read: async () => ({}) } });
+      const foreign = bindWith(subject, {
+        environment: { read: async () => ({ [SESSION_BOARD_CAPABILITY_VARIABLE]: 'somebody-elses-capability' }) },
+      });
+
+      // Act
+      const absent = await refusal(missing.lifecycle.create(subject.plan));
+      const other = await refusal(foreign.lifecycle.create(subject.plan));
+
+      // Assert: a torn creation never launches.
+      for (const refused of [absent, other])
+        should(refused.message).match(/private credential does not match the hash in its session record/u);
+    });
+
+    it('should refuse to persist a plan beneath a target that has no session record', async () => {
+      // Arrange: a receipt that claims creation although nothing was ever created.
+      const subject = await harness('no-record');
+
+      // Act
+      const refused = await refusal(subject.bind().plans.persist(subject.plan));
+
+      // Assert
+      should(refused.message).match(/has no session record, so plan plan-fork-1 cannot be applied to it/u);
+      should(await subject.plans.loadTargetPlan(subject.target)).equal(undefined);
+    });
+
+    it('should refuse to capture once the opening-turn document no longer matches the plan, and repair it by replaying the import', async () => {
+      // Arrange
+      const subject = await harness('brief-drift');
+      const bound = await imported(subject);
+      const file = subject.ports.imported.brief.file(TARGET_ID);
+      await Bun.write(file, 'somebody rewrote the opening turn');
+
+      // Act
+      const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+      await bound.importer.importPlan(subject.plan, TARGET_ID);
+      await bound.lifecycle.captureTranscriptProvenance();
+
+      // Assert: a later phase refuses the drift, the import phase re-drives the frozen plan over it.
+      should(refused.message).match(/opening-turn document does not match persisted transfer plan plan-fork-1/u);
+      should(await readFile(file, 'utf8')).equal(assignedTaskDocument(forkOpeningTurn(subject.plan)));
+      should(subject.counts().captures).equal(1);
+    });
+
+    describe('carried attachments', () => {
+      const BYTES = Buffer.from('the quick brown fox');
+      const SHA256 = createHash('sha256').update(BYTES).digest('hex');
+      const ATTACHMENT_ID = `att_${SHA256}`;
+      const manifest = {
+        id: ATTACHMENT_ID,
+        filename: 'notes.txt',
+        mime: 'text/plain',
+        size: BYTES.byteLength,
+        sha256: SHA256,
+        createdAt: AT,
+      };
+
+      async function withAttachment(label: string): Promise<Harness> {
+        const subject = await harness(label, {
+          plan: base => ({
+            ...base,
+            facets: { ...base.facets, attachments: { attachments: [{ ...manifest, encrypted: null }] } },
+          }),
+        });
+        const source = join(subject.sessionDirectory(SOURCE_ID), 'attachments', ATTACHMENT_ID);
+        await Bun.write(join(source, 'manifest.json'), JSON.stringify(manifest));
+        await Bun.write(join(source, 'original'), BYTES);
+        return subject;
+      }
+
+      it('should refuse a later phase when an imported attachment has gone missing, and repair it by replaying the import', async () => {
+        // Arrange
+        const subject = await withAttachment('attachment-missing');
+        const bound = await imported(subject);
+        const copied = join(subject.sessionDirectory(TARGET_ID), 'attachments', ATTACHMENT_ID, 'original');
+        should(await readFile(copied)).eql(BYTES);
+        await rm(copied);
+
+        // Act
+        const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+        const outcome = await bound.importer.importPlan(subject.plan, TARGET_ID);
+        await bound.lifecycle.captureTranscriptProvenance();
+
+        // Assert
+        should(refused.message).match(
+          new RegExp(`imported attachment ${ATTACHMENT_ID} does not match persisted transfer plan plan-fork-1`, 'u'),
+        );
+        should(outcome.copiedAttachmentIds).eql([ATTACHMENT_ID]);
+        should(await readFile(copied)).eql(BYTES);
+        should(subject.counts().captures).equal(1);
+      });
+
+      it('should refuse, not repair, an attachment whose proof fails for any reason but a proved mismatch', async () => {
+        // Arrange
+        const subject = await withAttachment('attachment-unprovable');
+        await imported(subject);
+        const bound = bindWith(subject, {
+          imported: {
+            brief: subject.ports.imported.brief,
+            attachments: {
+              verifyTarget: async () => {
+                throw new Error('the disk went away');
+              },
+            },
+          },
+        });
+
+        // Act
+        const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+
+        // Assert
+        should(refused.message).match(
+          new RegExp(
+            `imported attachment ${ATTACHMENT_ID} cannot be proved against plan plan-fork-1: the disk went away`,
+            'u',
+          ),
+        );
+        should(subject.counts().captures).equal(0);
+      });
+    });
+
+    describe('transcript capture', () => {
+      it('should reuse the capture already recorded instead of minting a second one', async () => {
+        // Arrange
+        const subject = await harness('capture-replay');
+        await drive(subject);
+        const before = await record(subject);
+
+        // Act
+        await subject.bind().lifecycle.captureTranscriptProvenance();
+
+        // Assert
+        should(subject.counts().captures).equal(1);
+        should((await record(subject)).config.command).eql(before.config.command);
+        should(((await subject.storage.readConfig(subject.target)) as Record<string, unknown>).transcript).eql({
+          v: 1,
+          home: TARGET_HARNESS_HOME,
+          harnessSessionId: TARGET_HARNESS_SESSION,
+          identity: 'minted',
+          file: claudeTranscriptFile(TARGET_HARNESS_HOME, subject.plan.durable.cwd, TARGET_HARNESS_SESSION),
+          resolvedAt: AT,
+        });
+      });
+
+      it('should refuse to capture for a target that has already left created without its own provenance', async () => {
+        // Arrange: somebody launched the target before its identity was captured.
+        const subject = await harness('late-capture');
+        const bound = await imported(subject);
+        await subject.ports.createLifecycle(subject.target).start(subject.target);
+
+        // Act
+        const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+
+        // Assert
+        should(refused.message).match(/reached lifecycle state \w+ without its own transcript provenance/u);
+        should(refused.message).match(/only before its first launch/u);
+        should(subject.counts().captures).equal(0);
+      });
+
+      it('should refuse to launch a target that has not been through capture', async () => {
+        // Arrange
+        const subject = await harness('start-uncaptured');
+        const bound = await imported(subject);
+
+        // Act
+        const refused = await refusal(bound.lifecycle.start());
+
+        // Assert
+        should(refused.message).match(
+          /no transcript provenance of its own although this fork is past the capture boundary/u,
+        );
+        should(subject.happened.filter(step => step === 'launch')).eql([]);
+      });
+
+      it('should refuse a wrapper that yields no transcript provenance', async () => {
+        // Arrange
+        const subject = await harness('capture-nothing');
+        await imported(subject);
+        const bound = bindWith(subject, {
+          transcripts: { capture: async () => ({ provenance: undefined, launchArguments: [] }) },
+        });
+
+        // Act
+        const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+
+        // Assert
+        should(refused.message).match(/claude wrapper did not yield transcript provenance/u);
+        should(((await subject.storage.readConfig(subject.target)) as Record<string, unknown>).transcript).equal(
+          undefined,
+        );
+      });
+
+      it('should refuse to report a capture that was not durable once written', async () => {
+        // Arrange: a write that resolves and persists nothing.
+        const subject = await harness('capture-lost');
+        await imported(subject);
+        const lossy = storageWithUpdateConfig(subject.storage, async () => ({}));
+        const bound = bindWith(subject, { storage: lossy });
+
+        // Act
+        const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+
+        // Assert
+        should(refused.message).match(/transcript provenance was not durable after capture/u);
+      });
+
+      it('should record only its own evidence when the document under the lock is no longer an object', async () => {
+        // Arrange: another writer replaces the configuration between the proof and the write.
+        const subject = await harness('capture-foreign-document');
+        await imported(subject);
+        const racing = storageWithUpdateConfig(subject.storage, async (id, transform) => {
+          await subject.storage.updateConfig(id, () => 'not a document');
+          return await subject.storage.updateConfig(id, transform);
+        });
+        const bound = bindWith(subject, { storage: racing });
+
+        // Act
+        await bound.lifecycle.captureTranscriptProvenance();
+
+        // Assert: nothing of the vanished document is invented around the capture.
+        const written = (await subject.storage.readConfig(subject.target)) as Record<string, unknown>;
+        should(Object.keys(written).sort()).eql(['command', 'transcript']);
+        should((written.command as string[]).slice(-LAUNCH_ARGUMENTS.length)).eql([...LAUNCH_ARGUMENTS]);
+      });
+
+      it('should refuse a minted record that names no harness session', async () => {
+        // Arrange
+        const subject = await harness('undiscovered-claude');
+        const bound = await imported(subject);
+        await subject.storage.updateConfig(
+          subject.target,
+          current =>
+            ({
+              ...(current as Record<string, unknown>),
+              transcript: { v: 1, home: TARGET_HARNESS_HOME, identity: 'undiscovered' },
+            }) as JsonValue,
+        );
+
+        // Act
+        const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+
+        // Assert
+        should(refused.message).match(/recorded transcript identity is "undiscovered" rather than "minted"/u);
+        should(subject.counts().captures).equal(0);
+      });
+
+      /** A codex target: its rollout can only be attributed through the correlation token its capture declares. */
+      async function codexSubject(label: string): Promise<Harness> {
+        const codex = account({
+          agent: 'codex-auto-zelda',
+          kind: 'codex',
+          wrapper: '/fleet/bin/codex-auto-zelda',
+          defaultModel: 'gpt-5',
+          models: [{ id: 'gpt-5', available: true }],
+        });
+        const planned = planner().plan({
+          id: parseSessionId(TARGET_ID),
+          account: codex,
+          mode: 'auto',
+          requestedModel: 'gpt-5',
+        });
+        if (planned.kind === 'unservable-model') throw new Error(planned.reason);
+        const subject = await harness(label, {
+          plan: base => ({
+            ...base,
+            target: {
+              ...base.target,
+              agent: 'codex-auto-zelda',
+              harness: 'codex',
+              model: 'gpt-5',
+              contextWindow: planned.plan.contextWindow,
+            },
+          }),
+        });
+        subject.publish({ account: codex, executable: '/fleet/bin/codex-auto-zelda' });
+        return subject;
+      }
+
+      it('should accept a replayed codex capture that carries its own correlation token', async () => {
+        // Arrange: the real capture's codex arm — a baseline now, the rollout resolved after launch.
+        const subject = await codexSubject('correlated-codex');
+        let captures = 0;
+        const bound = bindWith(subject, {
+          transcripts: {
+            capture: async request => {
+              captures += 1;
+              return {
+                provenance: {
+                  v: 1,
+                  home: '/fleet/homes/zelda',
+                  identity: 'undiscovered',
+                  baseline: [],
+                  correlationToken: request.correlationToken,
+                },
+                launchArguments: codexCorrelationArguments(request.correlationToken),
+              };
+            },
+          },
+        });
+        await bound.lifecycle.create(subject.plan);
+        await bound.plans.persist(subject.plan);
+        await bound.importer.importPlan(subject.plan, TARGET_ID);
+        await bound.lifecycle.captureTranscriptProvenance();
+
+        // Act: the replay re-proves the record the first capture wrote.
+        await bound.lifecycle.captureTranscriptProvenance();
+
+        // Assert
+        should(captures).equal(1);
+        const command = ((await subject.storage.readConfig(subject.target)) as { command: string[] }).command;
+        should(command[0]).equal('/fleet/bin/codex-auto-zelda');
+        should(command.slice(-2)).eql([...codexCorrelationArguments(subject.sessionDirectory(TARGET_ID))]);
+      });
+
+      it('should refuse a codex record that carries no correlation token of its own', async () => {
+        // Arrange
+        const subject = await codexSubject('undiscovered-codex');
+        const bound = await imported(subject);
+        await subject.storage.updateConfig(
+          subject.target,
+          current =>
+            ({
+              ...(current as Record<string, unknown>),
+              transcript: { v: 1, home: '/fleet/homes/zelda', identity: 'undiscovered' },
+            }) as JsonValue,
+        );
+
+        // Act
+        const refused = await refusal(bound.lifecycle.captureTranscriptProvenance());
+
+        // Assert
+        should(refused.message).match(/its correlation token undefined is not this target's own session directory/u);
+        should(subject.counts().captures).equal(0);
+      });
+    });
   });
 });

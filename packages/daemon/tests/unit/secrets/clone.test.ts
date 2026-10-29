@@ -7,7 +7,7 @@ import {
   type SecretCloneRefusal,
   type SecretImportOffer,
 } from '@ferretry/protocol';
-import { type DaemonIdentity, fromBase64Url, toBase64Url } from '@ferretry/relay';
+import { type DaemonIdentity, fromBase64Url, toBase64Url, type RelayCrypto } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
 import should from 'should';
 import {
@@ -68,7 +68,7 @@ interface Machine {
   readonly exports: SecretExportService;
 }
 
-function machine(identity: DaemonIdentity | undefined, clock: Clock): Machine {
+function machine(identity: DaemonIdentity | undefined, clock: Clock, exportCrypto: RelayCrypto = crypto_): Machine {
   const documents = new MemorySecretDocuments();
   const cipher = new FakeSecretCipher();
   const directory = new SecretDirectory(documents, cipher, clock);
@@ -78,12 +78,29 @@ function machine(identity: DaemonIdentity | undefined, clock: Clock): Machine {
     directory,
     imports: new SecretImportService({ crypto: crypto_, identity: source, directory, clock }),
     exports: new SecretExportService({
-      crypto: crypto_,
+      crypto: exportCrypto,
       identity: source,
       vault: new SecretVault(documents, cipher),
       clock,
     }),
   };
+}
+
+/** A crypto whose seal encrypts what `replace` says instead of what the exporter built — a careless source. */
+function sealing(replace: () => unknown): RelayCrypto {
+  return Object.create(crypto_, {
+    seal: {
+      value: (key: never, nonce: Uint8Array, aad: Uint8Array, _plaintext: Uint8Array) => {
+        const body = replace();
+        return crypto_.seal(
+          key,
+          nonce,
+          aad,
+          new TextEncoder().encode(typeof body === 'string' ? body : JSON.stringify(body)),
+        );
+      },
+    },
+  });
 }
 
 async function refusal(work: Promise<unknown>): Promise<SecretCloneRefusal> {
@@ -412,6 +429,48 @@ describe('copying secrets between machines', () => {
     await source.directory.put(token, VALUE);
     const offer = await target.imports.open();
     const { bundle } = await source.exports.seal(offer.importId, { offer, names: [token] as never });
+
+    // Act
+    const answer = await refusal(target.imports.complete(offer.importId, bundle));
+
+    // Assert
+    should(answer).equal('bundle_invalid');
+    should(await target.directory.list()).deepEqual([]);
+  });
+
+  it('should refuse a bundle whose sealed values are not the secrets its header names', async () => {
+    // Arrange — a source whose header promises API_KEY but whose sealed entries hold DB_PASSWORD.
+    const clock = new Clock();
+    const source = machine(
+      sourceIdentity,
+      clock,
+      sealing(() => ({ entries: [['DB_PASSWORD', VALUE]] })),
+    );
+    const target = machine(targetIdentity, clock);
+    await source.directory.put('API_KEY', VALUE);
+    const offer = await target.imports.open();
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
+
+    // Act
+    const answer = await refusal(target.imports.complete(offer.importId, bundle));
+
+    // Assert
+    should(answer).equal('bundle_invalid');
+    should(await target.directory.list()).deepEqual([]);
+  });
+
+  it('should refuse a bundle whose sealed plaintext is not JSON', async () => {
+    // Arrange
+    const clock = new Clock();
+    const source = machine(
+      sourceIdentity,
+      clock,
+      sealing(() => 'not json {'),
+    );
+    const target = machine(targetIdentity, clock);
+    await source.directory.put('API_KEY', VALUE);
+    const offer = await target.imports.open();
+    const { bundle } = await source.exports.seal(offer.importId, { offer, names: named('API_KEY') });
 
     // Act
     const answer = await refusal(target.imports.complete(offer.importId, bundle));

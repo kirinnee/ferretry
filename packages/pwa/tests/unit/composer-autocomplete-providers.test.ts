@@ -1016,3 +1016,96 @@ describe('composer session surfaces', () => {
     await expect(during.candidates(context('%', '', midflight.signal))).rejects.toThrow();
   });
 });
+
+describe('composer provider boundary branches', () => {
+  const catalogOf = (skills: readonly unknown[]) => async () => json({ harness: 'claude', skills });
+  const load = (skills: readonly unknown[]) =>
+    loadSkillsCatalog(daemonA, scopeA, new AbortController().signal, catalogOf(skills));
+
+  it('refuses a catalog row that is not a described, named skill', async () => {
+    await expect(load(['not-an-object'])).rejects.toMatchObject({
+      status: 502,
+      message: 'daemon returned an invalid skill',
+    });
+    await expect(load([{ name: 'summary' }])).rejects.toMatchObject({ message: 'daemon returned an invalid skill' });
+    await expect(load([{ name: '  ', description: 'blank name' }])).rejects.toMatchObject({
+      message: 'daemon returned an invalid skill',
+    });
+  });
+
+  it('refuses a skill scope or origin the daemon contract does not name', async () => {
+    await expect(load([{ name: 'summary', description: 'd', scope: 'machine' }])).rejects.toMatchObject({
+      status: 502,
+      message: 'daemon returned an invalid skill scope',
+    });
+    await expect(load([{ name: 'summary', description: 'd', origin: 'gemini' }])).rejects.toMatchObject({
+      status: 502,
+      message: 'daemon returned an invalid skill origin',
+    });
+  });
+
+  it('rethrows a DOMException abort that arrives while the reader is still typing instead of reporting it as a failure', async () => {
+    const provider = createSkillsProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => {
+        throw new DOMException('The operation was aborted.', 'AbortError');
+      },
+    });
+
+    await expect(provider.candidates(context('/', ''))).rejects.toMatchObject({ name: 'AbortError' });
+  });
+
+  it('says why a file selector is refused on every row it cannot apply to', async () => {
+    const provider = createFilesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      fetcher: async () => fsListing({ path: 'src', entries: [{ name: 'app.ts', type: 'file' }] }),
+    });
+
+    const backwards = await provider.candidates(context('@', 'src/app.ts:20-12'));
+    expect(backwards.candidates[0]).toMatchObject({
+      disabled: true,
+      disabledReason: 'line selection must use positive lines and an end at or after its start',
+    });
+
+    const column = await provider.candidates(context('@', 'src/app.ts:12:4'));
+    expect(column.candidates[0]).toMatchObject({
+      disabled: true,
+      disabledReason: 'column selection is not part of the @file grammar',
+    });
+  });
+
+  it('orders agents by their latest recorded moment, falling back through each timestamp the session carries', () => {
+    const stamped = (
+      id: string,
+      teammate: string,
+      state: { finishedAt?: string; startedAt?: string },
+      config: { updatedAt?: string; createdAt?: string },
+    ) =>
+      sessionView(id, {
+        config: { teammate, ...config } as never,
+        state: { lastActivityAt: undefined, ...state },
+      });
+    const sessions = [
+      stamped('s-finished', 'fin', { finishedAt: '2026-03-01T00:00:00.000Z' }, { updatedAt: undefined }),
+      stamped('s-started', 'sta', { startedAt: '2026-04-01T00:00:00.000Z' }, { updatedAt: undefined }),
+      stamped('s-updated', 'upd', {}, { updatedAt: '2026-05-01T00:00:00.000Z' }),
+      stamped('s-created', 'cre', {}, { updatedAt: undefined, createdAt: '2026-06-01T00:00:00.000Z' }),
+      stamped('s-unstamped', 'nul', {}, { updatedAt: undefined, createdAt: 'not-a-date' }),
+    ];
+    const [agents] = createDirectReferenceProviders({ daemon: daemonA, scope: scopeA, getSessions: () => sessions });
+
+    const result = agents?.candidates(context(':', ''));
+
+    expect(result).toMatchObject({
+      candidates: [
+        { replacement: ':cre' },
+        { replacement: ':upd' },
+        { replacement: ':sta' },
+        { replacement: ':fin' },
+        { replacement: ':nul' },
+      ],
+    });
+  });
+});

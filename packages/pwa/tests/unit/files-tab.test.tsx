@@ -183,6 +183,52 @@ describe('the Files tab', () => {
     }
   });
 
+  it('moves focus to the opened file on a pointer that hovers, and leaves it alone on touch', async () => {
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file', size: 12 }] } };
+    const paneOf = (container: HTMLElement): HTMLElement =>
+      must(container.querySelector<HTMLElement>('.kt-fs-scroll'), 'the file pane');
+    // The input policy is one tab-wide store other suites also steer: state it outright rather than inherit it.
+    const queries = Object.getPrototypeOf(window.matchMedia('(pointer: fine)')) as object;
+    const original = Object.getOwnPropertyDescriptor(queries, 'matches');
+    Object.defineProperty(queries, 'matches', {
+      configurable: true,
+      get(this: { readonly media: string }) {
+        return this.media === '(pointer: fine)' || this.media === '(hover: hover)';
+      },
+    });
+    const pointer = (type: string): Promise<void> =>
+      interact(() => {
+        window.dispatchEvent(Object.assign(new Event('pointerdown'), { pointerType: type }));
+      });
+    try {
+      await pointer('touch');
+      const touch = await open(<FilesTab daemon={daemon} scope={scope} />);
+      try {
+        await click(touch.container, 'Open file a.ts, 12 B');
+        await settle();
+        expect(touch.container.textContent).toContain('contents of a.ts');
+        expect(document.activeElement).not.toBe(paneOf(touch.container));
+      } finally {
+        await touch.unmount();
+      }
+
+      resetFilesTabStates();
+      await pointer('mouse');
+      const mouse = await open(<FilesTab daemon={daemon} scope={scope} />);
+      try {
+        await click(mouse.container, 'Open file a.ts, 12 B');
+        await settle();
+        expect(mouse.container.textContent).toContain('contents of a.ts');
+        expect(document.activeElement).toBe(paneOf(mouse.container));
+      } finally {
+        await mouse.unmount();
+      }
+    } finally {
+      if (original) Object.defineProperty(queries, 'matches', original);
+      await pointer('touch');
+    }
+  });
+
   it('never shows one daemon’s open files under another daemon’s connection', async () => {
     fixture.listings = { '': { entries: [{ name: 'secrets.md', type: 'file' }] } };
     const view = await open(<FilesTab daemon={daemon} scope={scope} />);
@@ -252,6 +298,58 @@ describe('the Files tab', () => {
       await click(view.container, 'Clear line selection for src/a.ts');
       await settle();
       expect(view.container.querySelector('.kt-fs-location')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('reopens a file it already holds as the rendered view, in its one tab', async () => {
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    fixture.files = { 'a.ts': { path: 'a.ts', content: 'const a = 1;' } };
+    const view = await open(<FilesTab daemon={daemon} scope={scope} />);
+    try {
+      await click(view.container, 'Open file a.ts');
+      await settle();
+      await click(view.container, 'Show raw bytes for a.ts');
+      await settle();
+      await click(view.container, 'Back to the file list');
+      await settle();
+
+      await click(view.container, 'Open file a.ts');
+      await settle();
+      expect(byLabel(view.container, 'Show raw bytes for a.ts').getAttribute('aria-pressed')).toBe('false');
+      expect(view.container.querySelectorAll('[aria-label="Close a.ts"]')).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('moves the highlight of a file it already holds when the same file is referenced again', async () => {
+    fixture.files = { 'src/a.ts': { path: 'src/a.ts', content: 'one\ntwo\nthree' } };
+    const view = await open(
+      <FilesTab
+        daemon={daemon}
+        scope={scope}
+        requestedReference={{ sequence: 1, reference: { path: 'src/a.ts', line: 2 } }}
+        onRequestedReferenceHandled={() => undefined}
+      />,
+    );
+    try {
+      const title = () => must(view.container.querySelector('.kt-fs-title-path'), 'the title').textContent;
+      expect(title()).toBe('@src/a.ts:2');
+      await view.render(
+        withSessionSearch(
+          <FilesTab
+            daemon={daemon}
+            scope={scope}
+            requestedReference={{ sequence: 2, reference: { path: 'src/a.ts', line: 3 } }}
+            onRequestedReferenceHandled={() => undefined}
+          />,
+        ),
+      );
+      await settle();
+      expect(title()).toBe('@src/a.ts:3');
+      expect(view.container.querySelectorAll('[aria-label="Close src/a.ts"]')).toHaveLength(1);
     } finally {
       await view.unmount();
     }

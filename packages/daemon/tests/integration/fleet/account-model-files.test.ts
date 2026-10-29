@@ -498,6 +498,18 @@ describe('a reviewed change applied by the real provisioner', () => {
     // Assert
     should(error).be.instanceOf(Error);
   });
+
+  it('should refuse to read ids when ids.json is present but is not a readable file, rather than reading none', async () => {
+    // Arrange — the ids document's place is taken by a directory, so the read fails with something other than ENOENT.
+    const host = await machine();
+    await mkdir(path.join(host.fleet, 'ids.json'), { recursive: true });
+
+    // Act
+    const error = await failure(host.deps.ids());
+
+    // Assert
+    should((error as NodeJS.ErrnoException).code).equal('EISDIR');
+  });
 });
 
 describe('whether the launcher scripts on disk are the ones a plan would write', () => {

@@ -74,9 +74,9 @@ function procPath(fd: number): string {
 }
 
 /** Was this component a symlink? Message fidelity only; the link is already refused. */
-async function isSymlinkAt(parentProcPath: string, segment: string): Promise<boolean> {
+async function isSymlinkAt(lstatOf: typeof lstat, parentProcPath: string, segment: string): Promise<boolean> {
   try {
-    return (await lstat(`${parentProcPath}/${segment}`)).isSymbolicLink();
+    return (await lstatOf(`${parentProcPath}/${segment}`)).isSymbolicLink();
   } catch {
     return false;
   }
@@ -306,6 +306,7 @@ class ProcfsPinnedRoot implements PinnedRoot {
   constructor(
     private readonly handle: FileHandle,
     readonly rootReal: string,
+    private readonly lstatOf: typeof lstat = lstat,
   ) {}
 
   get policyCwd(): string {
@@ -378,7 +379,8 @@ class ProcfsPinnedRoot implements PinnedRoot {
   }
 
   private async notADirectory(from: string, segment: string, reported: string): Promise<FsError> {
-    if (await isSymlinkAt(from, segment)) return await symlinkRefusal(this.rootReal, from, segment, reported);
+    if (await isSymlinkAt(this.lstatOf, from, segment))
+      return await symlinkRefusal(this.rootReal, from, segment, reported);
     return new FsError('not_a_directory', `not a directory: ${reported}`);
   }
 }
@@ -392,6 +394,9 @@ class ProcfsPinnedRoot implements PinnedRoot {
  * and never re-walked.
  */
 export class ProcfsSessionRootPinner implements SessionRootPinner {
+  /** `lstatOf` is the one call a swap can lose a race inside, so a caller can supply a losing one. */
+  constructor(private readonly lstatOf: typeof lstat = lstat) {}
+
   async pin(cwd: string): Promise<PinnedRoot> {
     // A security precondition, not an optimisation: listings, Git and the component walk all need a path
     // alias for an already-open descriptor, and using `cwd` as a fallback would validate one tree and
@@ -407,7 +412,7 @@ export class ProcfsSessionRootPinner implements SessionRootPinner {
       // The chokepoint every entry point shares, so a denied root is refused for listings, content, diffs
       // and changes alike.
       if (rootIsDenied(rootReal)) throw new FsError('denied', 'session cwd is not served');
-      return new ProcfsPinnedRoot(handle, rootReal);
+      return new ProcfsPinnedRoot(handle, rootReal, this.lstatOf);
     } catch (error) {
       await handle.close().catch(() => undefined);
       throw error;

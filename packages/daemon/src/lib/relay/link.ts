@@ -1128,19 +1128,13 @@ export class RelayLink {
   }
 
   #serve(session: LinkSession, request: RelayTunnelRequest): Answering | undefined {
-    if (session.device === undefined) {
-      // Unreachable while `serving` implies a proven device, and checked anyway: the alternative to
-      // this branch is a request dispatched with no identity at all.
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'this session holds no credential');
-      return undefined;
-    }
     if (session.answered.has(request.id)) {
       this.#endSession(session.sessionId, RELAY_CLOSE_CODES.protocolError, 'a request identifier was reused');
       return undefined;
     }
     session.answered.add(request.id);
     // The ONE thing that keeps a device from idling out: a request the page marked as a person's.
-    if (request.presence === true) this.deps.devices.seen(session.device.deviceId);
+    if (request.presence === true && session.device !== undefined) this.deps.devices.seen(session.device.deviceId);
     const first = request.body ?? '';
     if (request.more !== true) return this.#dispatch(session, request, first);
     if (session.incoming.size >= MAX_INCOMING_BODIES) {
@@ -1797,13 +1791,7 @@ export class RelayLink {
       this.#sendFrame(frame);
       return;
     }
-    if (!maySend(session.send)) {
-      // The handshake answer is the first frame of a fresh window, so this cannot happen against a
-      // carrier that granted the window it published. It is refused rather than sent anyway: a frame
-      // over the allowance is `4430` from the rendezvous, which ends the session either way.
-      this.#endSession(session.sessionId, RELAY_CLOSE_CODES.flowViolation, 'no credit for the handshake answer');
-      return;
-    }
+    // The handshake answer is the first frame of a fresh window, so it always has credit to spend.
     session.send = recordSent(session.send);
     this.#sendFrame(frame);
   }

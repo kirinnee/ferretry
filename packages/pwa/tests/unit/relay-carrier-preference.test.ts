@@ -374,6 +374,24 @@ describe('Tunnel only', () => {
     await settle(5);
   });
 
+  it('should say what failed when the tunnel the daemon revealed did not answer either', async () => {
+    const { router, daemon, hosts, paths } = await setup({
+      published: [RELAY],
+      reach: { 'relay.example': 'live' },
+      preference: 'tunnel',
+      publishes: [TUNNEL, RELAY],
+    });
+
+    await should(fetchProjects(router, daemon)).be.rejectedWith(
+      /^No configured connection worked: Cloudflare tunnel was not reachable/u,
+    );
+
+    // The daemon was asked over its relay, the tunnel it named was dialled, and nothing else was tried.
+    should(hosts()).eql([DIRECT_HOST, 'relay.example', TUNNEL_HOST]);
+    should(paths()).eql(['/v1/carriers']);
+    await settle(5);
+  });
+
   it('should follow a re-provisioned hostname when the one it kept no longer answers', async () => {
     const moved: ConnectionMethod = { kind: 'tunnel', tunnelUrl: 'https://n3w.tunnels.example.com' };
     const { router, daemon, hosts, paths } = await setup({

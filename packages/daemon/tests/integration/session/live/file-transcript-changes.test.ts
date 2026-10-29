@@ -155,6 +155,54 @@ describe('FileTranscriptChanges', () => {
     should(heard).be.empty();
   });
 
+  it('should release a subscription it finished taking after the watch was closed', async () => {
+    // Arrange — the stamp read that precedes subscribing is still pending when the watch is closed.
+    const subscribed: string[] = [];
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    let entered: (() => void) | undefined;
+    const statEntered = new Promise<void>(resolve => {
+      entered = resolve;
+    });
+    let released: (() => void) | undefined;
+    const subscriptionReleased = new Promise<void>(resolve => {
+      released = resolve;
+    });
+    const heard: string[] = [];
+    const watch = new FileTranscriptChanges({
+      file: async () => '/transcripts/session.jsonl',
+      stat: async () => {
+        entered?.();
+        await gate;
+        return { size: 1, mtimeMs: 1 };
+      },
+      files: {
+        subscribe: path => {
+          subscribed.push(path);
+          return { close: () => released?.() };
+        },
+      },
+      clock: { now: () => NOW },
+    }).watch('s1', at => heard.push(at));
+
+    // Act
+    await statEntered;
+    watch.close();
+    release?.();
+    await Promise.race([
+      subscriptionReleased,
+      Bun.sleep(2_000).then(() => {
+        throw new Error('the late subscription was never released');
+      }),
+    ]);
+
+    // Assert — a subscription taken for a closed watch would keep the hub listening for nobody.
+    should(subscribed).deepEqual(['/transcripts/session.jsonl']);
+    should(heard).be.empty();
+  });
+
   it('should say nothing about a file whose stamp cannot be read, rather than guess it changed', async () => {
     // Arrange — a stamp read that fails before and after the notice reads as "no stamp" both times.
     const root = await workspace();

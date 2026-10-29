@@ -369,6 +369,148 @@ describe('CodexTranscriptParser', () => {
     should(incomplete.events).containDeep([{ kind: 'tool-result', result: { isError: true } }]);
   });
 
+  it('should name each built-in tool call by its item type when the payload names none', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+    const call = (type: string, extra: Record<string, unknown>) =>
+      subject.parseRecord({ type: 'response_item', payload: { type, call_id: `call-${type}`, ...extra } });
+
+    // Act
+    const actual = [
+      call('web_search_call', { action: { query: 'synthetic' } }),
+      call('computer_call', { action: { type: 'screenshot' } }),
+      call('apply_patch_call', { input: '*** Begin Patch' }),
+      call('mcp_call', { execution: { server: 'fixture' } }),
+    ];
+
+    // Assert
+    should(actual.flatMap(result => result.issues)).be.empty();
+    should(actual.flatMap(result => result.events)).containDeep([
+      { kind: 'tool-call', call: { id: 'call-web_search_call', name: 'web_search', input: { query: 'synthetic' } } },
+      { kind: 'tool-call', call: { id: 'call-computer_call', name: 'computer', input: { type: 'screenshot' } } },
+      { kind: 'tool-call', call: { id: 'call-apply_patch_call', name: 'apply_patch', input: '*** Begin Patch' } },
+      {
+        kind: 'tool-call',
+        call: { id: 'call-mcp_call', name: 'mcp', input: { execution: { server: 'fixture' } } },
+      },
+    ]);
+  });
+
+  it('should keep a tool call that carries no arguments at all, with an empty input', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+
+    // Act
+    const actual = subject.parseRecord({
+      type: 'response_item',
+      payload: { type: 'computer_call', call_id: 'call-bare' },
+    });
+
+    // Assert
+    should(actual.issues).be.empty();
+    should(actual.events).containDeep([{ kind: 'tool-call', call: { id: 'call-bare', name: 'computer', input: {} } }]);
+  });
+
+  it('should refuse a generic tool call that names no tool, since its type cannot name one', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+
+    // Act
+    const actual = subject.parseRecord({
+      type: 'response_item',
+      payload: { type: 'tool_call', call_id: 'call-nameless' },
+    });
+
+    // Assert
+    should(actual.events).be.empty();
+    should(actual.issues).containDeep([
+      { code: 'invalid-record', message: 'Codex tool call lacks id or name', itemType: 'tool_call' },
+    ]);
+  });
+
+  it('should read an error message from whichever field the harness used', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+
+    // Act
+    const actual = [
+      subject.parseRecord({ type: 'error', text: 'Plain text failure.' }),
+      subject.parseRecord({ type: 'error', error: { message: 'Nested message.', type: 'rate_limit' } }),
+      subject.parseRecord({ type: 'event_msg', payload: { type: 'stream_error', error: { error: 'Nested error.' } } }),
+    ];
+
+    // Assert
+    should(actual.flatMap(result => result.issues)).be.empty();
+    should(actual.flatMap(result => result.events)).containDeep([
+      { kind: 'error', error: { message: 'Plain text failure.', recoverable: true } },
+      { kind: 'error', error: { message: 'Nested message.', code: 'rate_limit', recoverable: true } },
+      { kind: 'error', error: { message: 'Nested error.', recoverable: true } },
+    ]);
+  });
+
+  it('should report an error record that carries no message anywhere', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+
+    // Act
+    const actual = [
+      subject.parseRecord({ type: 'error', code: 'only_a_code' }),
+      subject.parseRecord({ type: 'event_msg', payload: { type: 'error' } }),
+    ];
+
+    // Assert
+    should(actual.flatMap(result => result.events)).be.empty();
+    should(actual.map(result => result.issues)).containDeep([
+      [{ code: 'invalid-record', message: 'Codex error record has no message', recordType: 'error' }],
+      [
+        {
+          code: 'invalid-record',
+          message: 'Codex error record has no message',
+          recordType: 'event_msg',
+          itemType: 'error',
+        },
+      ],
+    ]);
+  });
+
+  it('should take message content that is a bare string, alone or inside an array', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+    const message = (content: unknown) =>
+      subject.parseRecord({ type: 'response_item', payload: { type: 'message', role: 'assistant', content } });
+
+    // Act
+    const alone = message('Bare string reply.');
+    const inArray = message(['First.', { type: 'output_text', text: 'Second.' }]);
+
+    // Assert
+    should(alone.issues).be.empty();
+    should(alone.events).containDeep([
+      { kind: 'message', role: 'assistant', text: 'Bare string reply.', blockIndex: 0 },
+    ]);
+    should(inArray.events).containDeep([
+      { kind: 'message', text: 'First.', blockIndex: 0 },
+      { kind: 'message', text: 'Second.', blockIndex: 1 },
+    ]);
+  });
+
+  it('should report a reasoning item whose summary and content hold no text', () => {
+    // Arrange
+    const subject = new CodexTranscriptParser();
+
+    // Act
+    const actual = subject.parseRecord({
+      type: 'response_item',
+      payload: { type: 'reasoning', summary: [], content: [] },
+    });
+
+    // Assert
+    should(actual.events).be.empty();
+    should(actual.issues).containDeep([
+      { code: 'invalid-record', message: 'Codex reasoning item has no text', itemType: 'reasoning' },
+    ]);
+  });
+
   it('should preserve canonical variants while suppressing mirrored chat records', () => {
     // Arrange
     const subject = new CodexTranscriptParser();

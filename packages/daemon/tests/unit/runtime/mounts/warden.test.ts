@@ -93,6 +93,30 @@ describe('reading concise warden reports', () => {
     should(foreign.status).equal(404);
   });
 
+  it('should serve a readable report as plain text to a live warden', async () => {
+    // Arrange
+    class ReportingWarden extends FakeWarden {
+      override async report(reportPath: string): Promise<string | undefined> {
+        return reportPath === '/state/warden/reports/sweep.md' ? '# sweep\nall quiet\n' : undefined;
+      }
+    }
+
+    // Act
+    const response = await dispatcher(new ReportingWarden()).dispatch(
+      request({
+        method: 'GET',
+        path: '/v1/warden/report',
+        query: [['path', '/state/warden/reports/sweep.md']],
+        headers: warden,
+      }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.body).equal('# sweep\nall quiet\n');
+    should(response.headers.get('content-type')).equal('text/plain; charset=utf-8');
+  });
+
   it('should reject an omitted report path instead of treating it as empty evidence', async () => {
     const response = await dispatcher().dispatch(get('/v1/warden/report', warden));
 

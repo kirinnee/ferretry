@@ -333,6 +333,17 @@ describe('StreamingRecognitionSession', () => {
     should(w.events).not.containEql('start');
   });
 
+  it('a microphone that is refused after a cancel is not reported and leaves nothing to release', async () => {
+    const w = world();
+    w.session.start();
+    w.session.cancel();
+    w.open.reject(Object.assign(new Error('denied'), { name: 'NotAllowedError' }));
+    await tick();
+    should(w.failures).eql([]);
+    should(w.recording.cancels).equal(0);
+    should(w.events).not.containEql('start');
+  });
+
   it('a hidden page cancels and says so, but not once the take has ended', async () => {
     const w = world();
     await opened(w);

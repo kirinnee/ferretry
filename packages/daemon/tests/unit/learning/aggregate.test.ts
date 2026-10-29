@@ -129,6 +129,49 @@ describe('learning aggregation', () => {
     should(actual.observations[0]?.gist).have.length(400);
   });
 
+  it('should aim a rule at the automation guidance only when the miner names it as the target', () => {
+    // Arrange
+    const observations = [
+      {
+        key: 'verified',
+        sessionId: 'session-1',
+        kind: 'preference',
+        gist: 'Use environment',
+        quote: 'run the project environment',
+      },
+    ];
+    const proposalOf = (extra: object) => ({
+      title: 'Use project environment',
+      ruleText: 'Use the project environment.',
+      observationKeys: ['verified'],
+      ...extra,
+    });
+
+    // Act
+    const run = (extra: object) =>
+      applyMinerOutput(
+        [],
+        [],
+        { observations, proposals: [proposalOf(extra)] },
+        new Map([['session-1', digest()]]),
+        new Map(),
+        'run-1',
+        at,
+      ).proposals[0]?.target;
+
+    // Assert
+    should(run({ target: 'automation-guidance', anchor: '## Unattended runs' })).deepEqual({
+      kind: 'automation-guidance',
+      path: 'automation.md',
+      anchor: '## Unattended runs',
+    });
+    should(run({ target: 'global-agent-guidance' })).deepEqual({
+      kind: 'global-agent-guidance',
+      path: 'guidance.md',
+      anchor: '## Agent rules',
+    });
+  });
+
   it('should permanently suppress a proposal matching a tombstone by identity or title', () => {
     // Arrange
     const output = {

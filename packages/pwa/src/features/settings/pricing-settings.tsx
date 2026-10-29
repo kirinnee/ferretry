@@ -24,10 +24,9 @@ import {
   useRef,
   useState,
 } from 'react';
-
-import { useDaemonClient } from '../../lib/store.tsx';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { useDaemonClient } from '../../lib/store.tsx';
 import { EYEBROW, PanelPath } from '../../shell/panel-typography.tsx';
 import {
   type AnalyticsPricingClient,
@@ -572,7 +571,6 @@ function Field({
   readonly detail?: string;
   readonly children: ReactNode;
 }) {
-  const describedBy = [detail ? `${id}-detail` : '', error ? `${id}-error` : ''].filter(Boolean).join(' ') || undefined;
   return (
     <label className="grid min-w-0 gap-1 text-meta font-semibold text-fg" htmlFor={id}>
       {label}
@@ -581,11 +579,7 @@ function Field({
           {detail}
         </span>
       ) : null}
-      {typeof children === 'object' && children !== null ? (
-        children
-      ) : (
-        <span aria-describedby={describedBy}>{children}</span>
-      )}
+      {children}
       {error ? (
         <span id={`${id}-error`} className="font-normal leading-base text-err" role="alert">
           {error}

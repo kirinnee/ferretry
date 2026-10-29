@@ -11,7 +11,7 @@ import {
   type McpProbeSpec,
   mcpCheckBaseEnvironment,
 } from '../../../src/lib/mcp-inventory/index.ts';
-import { inventoryWorld, PROJECT, PROJECT_KEY } from './support.ts';
+import { inventoryWorld, PROJECT, PROJECT_KEY, session } from './support.ts';
 
 const TOKEN = 'project-access-token-value';
 
@@ -158,6 +158,63 @@ describe('McpCheckService', () => {
     should(result.outcome).equal('connected');
     should(result.message).match(/not approved in this project yet/u);
     should(probe.specs).have.length(1);
+  });
+
+  describe('a Codex server whose token lives in an environment variable', () => {
+    const BEARER_VARIABLE = 'FY_MCP_LINEAR_0123456789ABCDEF_TOKEN';
+
+    function codexChecker(probe: FakeProbe, launch: Record<string, string>) {
+      const world = inventoryWorld();
+      const inventory = new McpInventoryService({
+        ...world.deps,
+        sessions: { get: async id => (id === 'c1' ? session(PROJECT, '/fy/fleet/bin/codex-work') : undefined) },
+      });
+      const service = new McpCheckService({
+        inventory,
+        probe,
+        launchEnvironment: async runtime => (runtime === 'codex-work' ? launch : {}),
+        baseEnvironment: () => ({ PATH: '/usr/bin' }),
+        bearer: async () => undefined,
+        redactor: { redact: async text => text },
+        now: () => 0,
+      });
+      const idOfLinear = async () => {
+        const found = (await inventory.session('c1')).servers.find(server => server.name === 'linear');
+        if (found === undefined) throw new Error('no linear');
+        return found.id;
+      };
+      return { service, idOfLinear };
+    }
+
+    it('should send the variable’s value as a bearer token', async () => {
+      // Arrange
+      const probe = new FakeProbe();
+      const { service, idOfLinear } = codexChecker(probe, { [BEARER_VARIABLE]: 'codex-launch-token' });
+
+      // Act
+      const result = await service.check(await idOfLinear(), 'c1');
+
+      // Assert
+      should(result.outcome).equal('connected');
+      should(probe.specs[0]).deepEqual({
+        transport: 'http',
+        url: 'https://mcp.linear.app/mcp',
+        headers: { Authorization: 'Bearer codex-launch-token' },
+      });
+    });
+
+    it('should name the variable it could not fill when the launch does not hold it', async () => {
+      // Arrange
+      const probe = new FakeProbe(new McpProbeFailure('unauthorized', 'It answered 401.'));
+      const { service, idOfLinear } = codexChecker(probe, {});
+
+      // Act
+      const result = await service.check(await idOfLinear(), 'c1');
+
+      // Assert
+      should(probe.specs[0]).deepEqual({ transport: 'http', url: 'https://mcp.linear.app/mcp', headers: {} });
+      should(result.message).containEql(`Not set for this check: ${BEARER_VARIABLE}.`);
+    });
   });
 
   it('should refuse to check Ferretry’s own tools server', async () => {

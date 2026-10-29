@@ -111,6 +111,33 @@ describe('bounded CSV preview parsing', () => {
       malformed: false,
     });
   });
+
+  it('keeps only the first columns of a wide row and says the table was cut', () => {
+    const wide = Array.from({ length: 41 }, (_, index) => `c${index}`).join(',');
+    const parsed = parsePreviewCsv(`${wide}\nnext`);
+    expect(parsed.rows[0]).toHaveLength(40);
+    expect(parsed.rows[0]?.at(-1)).toBe('c39');
+    expect(parsed.rows[1]).toEqual(['next']);
+    expect(parsed.truncated).toBe(true);
+    expect(parsed.malformed).toBe(false);
+  });
+
+  it('clips a plain cell at its character cap and says the table was cut', () => {
+    const parsed = parsePreviewCsv(`${'a'.repeat(2_001)},tail`);
+    expect(parsed.rows).toEqual([['a'.repeat(2_000), 'tail']]);
+    expect(parsed.truncated).toBe(true);
+  });
+
+  it('clips a quoted cell at its character cap, quoted quotes included', () => {
+    const clipped = parsePreviewCsv(`"${'b'.repeat(2_001)}",tail`);
+    expect(clipped.rows).toEqual([['b'.repeat(2_000), 'tail']]);
+    expect(clipped.truncated).toBe(true);
+    expect(clipped.malformed).toBe(false);
+
+    const quotes = parsePreviewCsv(`"${'c'.repeat(2_000)}"",tail"`);
+    expect(quotes.rows).toEqual([['c'.repeat(2_000)]]);
+    expect(quotes.truncated).toBe(true);
+  });
 });
 
 describe('rich preview containment', () => {

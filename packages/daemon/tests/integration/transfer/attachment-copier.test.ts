@@ -549,6 +549,70 @@ describe('FileSessionAttachmentCopier', () => {
     should((await readdir(target)).sort()).deepEqual(['manifest.json', 'original']);
   });
 
+  it('refuses to verify a target session id that is not usable, before touching the disk', async () => {
+    // Arrange
+    const home = await tempDirectory('transfer-attachment-verify-id');
+    const minted = await mintAttachment(home, SOURCE, new Uint8Array([7, 7]));
+
+    // Act
+    const error = await reject(
+      copier(home).verifyTarget({ newSessionId: '../escape', expectedManifest: minted.expectedManifest }),
+    );
+
+    // Assert
+    should(error).be.instanceOf(SessionAttachmentCopyError);
+    should((error as SessionAttachmentCopyError).failure).equal('invalid');
+    should((error as SessionAttachmentCopyError).message).match(/target session id is not usable/u);
+  });
+
+  it('refuses a source manifest that is not JSON as corrupt, and leaves no target behind', async () => {
+    // Arrange
+    const home = await tempDirectory('transfer-attachment-manifest-json');
+    const minted = await mintAttachment(home, SOURCE, new Uint8Array([8, 8]));
+    await Bun.write(join(minted.directory, 'manifest.json'), '{not json');
+
+    // Act
+    const error = await reject(copier(home).copyOriginal(planned(minted)));
+
+    // Assert
+    should((error as SessionAttachmentCopyError).failure).equal('corrupt');
+    should((error as SessionAttachmentCopyError).message).match(/manifest is not valid JSON/u);
+    should(await stat(join(home, 'attachments', DAEMON, TARGET, minted.id)).catch(() => undefined)).equal(undefined);
+  });
+
+  it('reports a source artifact that cannot be read as itself, not as a missing attachment', async () => {
+    // Arrange — the original is a directory: it exists, so this is not "not found", and it cannot be read.
+    const home = await tempDirectory('transfer-attachment-unreadable');
+    const minted = await mintAttachment(home, SOURCE, new Uint8Array([6, 6]));
+    await rm(join(minted.directory, 'original'));
+    await mkdir(join(minted.directory, 'original'));
+
+    // Act
+    const error = await reject(copier(home).copyOriginal(planned(minted)));
+
+    // Assert
+    should(error).not.be.instanceOf(SessionAttachmentCopyError);
+    should((error as NodeJS.ErrnoException).code).equal('EISDIR');
+  });
+
+  it('repairs a target whose manifest is torn, treating it as unproved rather than as a failure', async () => {
+    // Arrange
+    const home = await tempDirectory('transfer-attachment-torn-proof');
+    const minted = await mintAttachment(home, SOURCE, new Uint8Array([5, 5]));
+    await copier(home).copyOriginal(planned(minted));
+    const target = join(home, 'attachments', DAEMON, TARGET, minted.id);
+    await Bun.write(join(target, 'manifest.json'), '{"torn');
+
+    // Act
+    const verification = await reject(
+      copier(home).verifyTarget({ newSessionId: TARGET, expectedManifest: minted.expectedManifest }),
+    );
+
+    // Assert: verification refuses the drift read-only; it never throws a parser's error.
+    should((verification as SessionAttachmentCopyError).failure).equal('corrupt');
+    should(await readFile(join(target, 'manifest.json'), 'utf8')).equal('{"torn');
+  });
+
   it('refuses an unusable identity or a target that aliases the source with an invalid failure', async () => {
     // Arrange
     const home = await tempDirectory('transfer-attachment-invalid');

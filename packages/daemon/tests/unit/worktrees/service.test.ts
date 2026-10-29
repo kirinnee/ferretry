@@ -860,6 +860,26 @@ describe('surviving a crash between the registry and Git', () => {
     should(registry.state.worktrees[0]?.removedAt).equal('2026-08-04T09:00:00.000Z');
   });
 
+  it('should abandon the removal stamp when a later failure leaves the owned checkout in place', async () => {
+    // Arrange — the failure came after the stamp but the checkout is still ours, so nothing was removed
+    const operations = new RecordingOperations({
+      removalFails: new Error('a later step failed'),
+      presence: { kind: 'owned' },
+    });
+    const { subject, registry } = build({ entries: [record()], operations });
+
+    // Act
+    const error = await thrown(
+      subject.remove({ path: record().path, overrides: [], deleteBranch: false, confirmations: [] }),
+    );
+
+    // Assert — the original error survives, and the row is live again rather than stuck mid-removal
+    should((error as Error).message).equal('a later step failed');
+    should(operations.probed).eql([record().path]);
+    should(registry.state.worktrees[0]?.removalStartedAt).be.undefined();
+    should(registry.state.worktrees[0]?.removedAt).be.undefined();
+  });
+
   it('should retain the recovery stamp when an ambiguous failure cannot be reconciled', async () => {
     // Arrange
     const operations = new RecordingOperations({

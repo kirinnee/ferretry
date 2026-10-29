@@ -142,6 +142,57 @@ describe('ForeignHistoryImporter', () => {
     });
   });
 
+  test('skips a transcript with no message in it rather than listing an empty conversation', async () => {
+    const source = `${CLAUDE_ROOT}/project/bookkeeping.jsonl`;
+    const history = importer(
+      new FixtureFiles(
+        {
+          [CLAUDE_ROOT]: [{ name: 'project', kind: 'directory' }],
+          [`${CLAUDE_ROOT}/project`]: [{ name: 'bookkeeping.jsonl', kind: 'file' }],
+        },
+        { [source]: `${JSON.stringify({ type: 'unrecognised-bookkeeping', sessionId: 'x' })}\n` },
+      ),
+    );
+
+    await expect(history.list()).resolves.toEqual({
+      conversations: [],
+      skipped: [{ harness: 'claude', source, reason: 'the transcript contains no renderable messages' }],
+    });
+  });
+
+  test('never lists a transcript whose parser reports a partial record, even with no issue named', async () => {
+    const source = `${CLAUDE_ROOT}/project/partial.jsonl`;
+    const real = new ClaudeTranscriptParser();
+    const partial = new PacedTranscriptParser(
+      {
+        harness: real.harness,
+        parse: (input: Parameters<ClaudeTranscriptParser['parse']>[0]) => ({
+          ...real.parse(input),
+          remainder: '{"type":"user"',
+        }),
+        parseRecord: real.parseRecord.bind(real),
+        createInputObserver: real.createInputObserver.bind(real),
+      },
+      UNPACED,
+    );
+    const history = new ForeignHistoryImporter(
+      new FixtureFiles(
+        {
+          [CLAUDE_ROOT]: [{ name: 'project', kind: 'directory' }],
+          [`${CLAUDE_ROOT}/project`]: [{ name: 'partial.jsonl', kind: 'file' }],
+        },
+        { [source]: `${validClaude}\n` },
+      ),
+      { claudeProjects: CLAUDE_ROOT, codexSessions: CODEX_ROOT },
+      { claude: partial, codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED) },
+    );
+
+    await expect(history.list()).resolves.toEqual({
+      conversations: [],
+      skipped: [{ harness: 'claude', source, reason: 'the transcript ends with an incomplete record' }],
+    });
+  });
+
   test('never follows symlinks while walking foreign homes', async () => {
     const history = importer(
       new FixtureFiles(

@@ -691,6 +691,36 @@ describe('a relay session carrying a body larger than one record', () => {
     should(session.live()).be.true();
   });
 
+  it('should end a stream whose text frame cannot fit in one sealed record, and say why', async () => {
+    const { session, socket } = await streaming();
+    const closed: { code: number; reason: string }[] = [];
+    session.onStreamClosed(end => closed.push(end));
+    const before = socket.sent.length;
+
+    session.sendStream({ kind: 'text', text: 'x'.repeat(MAX_PLAINTEXT_BYTES) });
+    await drain();
+
+    // The seal refused it, so nothing of it left; the stream ended abnormally with the seal's own reason.
+    should(socket.sent.length).equal(before);
+    should(socket.closed?.code).equal(RELAY_CLOSE_CODES.frameTooLarge);
+    should(socket.closed?.reason).match(/payload exceeds one record/u);
+    should(closed).eql([{ code: 1006, reason: 'payload exceeds one record' }]);
+    should(session.streaming()).be.false();
+  });
+
+  it('should end a stream session whose daemon answers with a record that does not open the stream', async () => {
+    const harness = await opened({ mode: { kind: 'stream', device: device.claim, path: '/v1/events' } });
+    await harness.session.receiveBinary(await harness.daemon.answer(harness.socket.sent[0] as Uint8Array));
+    const ready = failure(harness.session.ready());
+
+    await harness.session.receiveBinary(await harness.daemon.record(ACCEPTED));
+
+    const refusal = await ready;
+    should(refusal.code).equal(RELAY_CLOSE_CODES.protocolError);
+    should(refusal.message).match(/did not open this stream before answering/u);
+    should(harness.session.streaming()).be.false();
+  });
+
   it('should refuse an answer part that arrives with no answer to continue, or a second start', async () => {
     const stray = await serving();
     const strayAnswer = failure(stray.session.request({ method: 'GET', path: '/a' }));

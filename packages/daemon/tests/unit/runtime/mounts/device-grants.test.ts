@@ -402,6 +402,19 @@ describe('the device-grant service on its own', () => {
     });
   });
 
+  it('should refuse a remote narrowing without a live step-up, and write nothing', async () => {
+    // Arrange
+    const grants = grantSubsystem();
+    await grants.refresh();
+    const service = deviceGrantsOver(grants, new Map([[targetId, LIMITED_DEVICE_GRANTS]]));
+
+    // Act + Assert
+    await should(service.change(targetId, { fleet: { use: false } }, presentation({ stepUp: false }))).be.rejectedWith({
+      failure: 'step-up-required',
+      message: /passkey confirmation from this device/u,
+    });
+  });
+
   it('should report a device removed between the read and the write as not found', async () => {
     // Arrange
     const grants = grantSubsystem();

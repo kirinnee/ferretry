@@ -447,6 +447,36 @@ describe('an account removed from the pool', () => {
     should(test.cloudflare.liveTunnels(leaving.accountId)).be.empty();
   });
 
+  it('should count a released tunnel on a removed account as orphaned and leave it retired for the account to return', async () => {
+    const leaving = poolAccount(1);
+    const staying = poolAccount(2);
+    const test = world(leaving, staying);
+    const daemon = await newDaemonIdentity();
+    expectOk(await test.provision(daemon));
+    test.state.pool = ready(staying);
+
+    const released = expectOk(await test.release(daemon));
+    should(released).match({ released: true });
+    should(released).not.have.property('problem');
+    should([...test.store.retired.keys()]).have.length(1);
+
+    const calls = test.cloudflare.calls.length;
+    should(await test.provisioner.reclaim(test.state.pool)).eql({
+      retired: 0,
+      deleted: 0,
+      failed: 0,
+      orphaned: 1,
+      more: false,
+      problems: [],
+    });
+    should(test.cloudflare.calls.length).equal(calls);
+    should([...test.store.retired.keys()]).have.length(1);
+
+    test.state.pool = ready(leaving, staying);
+    should(await test.provisioner.reclaim(test.state.pool)).match({ deleted: 1, orphaned: 0 });
+    should(test.cloudflare.liveTunnels(leaving.accountId)).be.empty();
+  });
+
   it('should leave every row alone while the pool does not parse', async () => {
     const test = world(poolAccount(1));
     const daemon = await newDaemonIdentity();

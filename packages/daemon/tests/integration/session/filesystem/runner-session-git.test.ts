@@ -361,13 +361,14 @@ exit 0
   });
 
   it('should degrade to a status list when the optional stats pass fails', async () => {
-    // Arrange: counts are enrichment; losing them must not take a readable directory down.
+    // Arrange: counts are enrichment; losing them must not take a readable directory down. The stats pass
+    // is told apart by its flag: every command carries `status.showUntrackedFiles`, so `*status*` matches it too.
     const stubbed = await gitOnPath(`#!/bin/sh
 case "$*" in
   *rev-parse*--is-inside-work-tree*) printf 'true\\n/tmp/x\\n\\n'; exit 0 ;;
   *rev-parse*HEAD*) exit 0 ;;
-  *status*) printf '## main\\0 M a.ts\\0'; exit 0 ;;
   *numstat*) echo 'fatal: no' >&2; exit 129 ;;
+  *status*) printf '## main\\0 M a.ts\\0'; exit 0 ;;
 esac
 exit 0
 `);

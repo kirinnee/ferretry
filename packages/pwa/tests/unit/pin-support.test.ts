@@ -86,6 +86,45 @@ describe('pin support', () => {
     removeBackground();
   });
 
+  it('skips a jump controller that throws while answering whether it is in front', async () => {
+    const calls: string[] = [];
+    const removeTearingDown = registerPinJumpController({
+      isForeground: () => {
+        throw new Error('torn down');
+      },
+      jumpTo: async blockId => {
+        calls.push(`tearing-down:${blockId}`);
+        return 'jumped';
+      },
+    });
+    const removeForeground = registerPinJumpController({
+      isForeground: () => true,
+      jumpTo: async blockId => {
+        calls.push(`foreground:${blockId}`);
+        return 'not-found';
+      },
+    });
+    expect(await requestPinJump('block-2')).toBe('not-found');
+    expect(calls).toEqual(['foreground:block-2']);
+    removeForeground();
+    expect(await requestPinJump('block-2')).toBe('no-transcript');
+    removeTearingDown();
+  });
+
+  it('compacts a long pin into a one-line picker label ending in an ellipsis', () => {
+    const pinId = '11111111-1111-4111-8111-111111111111';
+    const long = `${'word '.repeat(30)}end`;
+    const snapshot: DaemonPinSnapshot = {
+      snapshots: new Map([[daemonSessionKey(scopeA), board('shared', long)]]),
+      statuses: new Map(),
+    };
+    const label = createPinReferenceResolver(snapshot)({ ...scopeA, pinId })?.label ?? '';
+    expect(label.endsWith('…')).toBe(true);
+    expect(label.length).toBeLessThanOrEqual(72);
+    expect(label.startsWith('word word word')).toBe(true);
+    expect(label).not.toContain('  ');
+  });
+
   it('truncates captured selections and adds them only to the connection that owns the foreground scope', async () => {
     const bodies: unknown[] = [];
     const client = new DaemonPinClient(undefined, async (_input, init) => {

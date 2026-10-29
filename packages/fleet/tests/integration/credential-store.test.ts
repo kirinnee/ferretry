@@ -411,6 +411,22 @@ describe('PlatformFleetCredentialStore copying a file-backed credential', () => 
     should(await readFile(linked, 'utf8')).equal('untouched');
   });
 
+  it('should surface a failure to inspect the credential file other than its being absent', async () => {
+    // Arrange — a target "home" that is really a file, so the credential path under it cannot be
+    // looked at: an unreadable destination is a refusal to write, never mistaken for a missing one.
+    const donorHome = await temporaryDirectory();
+    const notAHome = path.join(await temporaryDirectory(), 'not-a-home');
+    const blob = JSON.stringify({ tokens: { refresh_token: 'placeholder-refresh' } });
+    await writeFile(codexPath(donorHome), blob);
+    await writeFile(notAHome, 'a file where a home should be');
+
+    // Act / Assert
+    await fileStore()
+      .clone('codex', member(donorHome), member(notAHome, 'account-two'))
+      .should.be.rejectedWith(/ENOTDIR/u);
+    should(await readFile(notAHome, 'utf8')).equal('a file where a home should be');
+  });
+
   it('should replace the credential file rather than rewrite it in place', async () => {
     // Arrange — a second name for the target's credential file. An in-place truncate-and-write is
     // visible under both names, and a crash part-way leaves a truncated credential under both.

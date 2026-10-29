@@ -7,6 +7,7 @@ import {
   STEP_UP_REQUIRED_CODE,
 } from '@ferretry/protocol';
 import should from 'should';
+import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher, ApiRouter } from '../../../../src/lib/api/index.ts';
 import { DEFAULT_CAPABILITY_GRANTS } from '../../../../src/lib/grants/index.ts';
 import { PushError } from '../../../../src/lib/push/index.ts';
@@ -455,5 +456,32 @@ describe('push routes', () => {
 
     should(response.status).equal(403);
     should(jsonBody(response).code).equal('grant_not_granted');
+  });
+});
+
+describe('push routes refusing a cross-device act with nothing to explain', () => {
+  it('should still say why in its own words when the guard has no sentence for the refusal', async () => {
+    // Arrange — the boundary's guard lets the caller through; the routes' own guard knows nothing.
+    const grants = grantSubsystem({ grants: DEFAULT_CAPABILITY_GRANTS });
+    await grants.refresh();
+    const surface = new ApiDispatcher(
+      new ApiRouter(pushRoutes(new FakePush(), NO_GOVERNED_ROUTES_GUARD)),
+      credentials,
+      grants,
+      undefined,
+      { held: () => true },
+    );
+
+    // Act
+    const response = await surface.dispatch(
+      request({ method: 'GET', path: '/v1/push/subscriptions', headers: admin, loopback: false }),
+    );
+
+    // Assert
+    should(response.status).equal(403);
+    should(jsonBody(response)).deepEqual({
+      error: 'only a device that may manage devices can change another device’s notifications',
+      code: 'grant_undetermined',
+    });
   });
 });

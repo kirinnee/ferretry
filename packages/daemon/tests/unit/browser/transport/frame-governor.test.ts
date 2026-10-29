@@ -32,6 +32,13 @@ class FakeClock implements FrameClock {
     return this.due === undefined ? undefined : this.due.at - this.current;
   }
 
+  /** Fires the armed timer without advancing time, as a real timer that wakes a hair early does. */
+  fireEarly(): void {
+    const due = this.due;
+    this.due = undefined;
+    due?.callback();
+  }
+
   /** Advances time and fires the armed timer when it comes due. */
   advance(ms: number): void {
     this.current += ms;
@@ -139,6 +146,30 @@ describe('browser frame governor', () => {
     // Assert
     should(sink.written).deepEqual(['frame-1', 'frame-3']);
     should(governor.snapshot().pendingFrame).be.undefined();
+  });
+
+  it('should wait out the rest of the interval when its timer wakes before it has elapsed', () => {
+    // Arrange
+    const { clock, sink, governor } = build();
+    governor.bind('session-1');
+    governor.capture('session-1', 'frame-1', () => undefined);
+    clock.advance(10);
+    governor.capture('session-1', 'frame-2', () => undefined);
+    clock.advance(MIN_FRAME_INTERVAL_MS - 20);
+
+    // Act: the timer fires 10 ms short of the interval.
+    clock.fireEarly();
+
+    // Assert: the frame is kept and the timer is re-armed for exactly the time that is left.
+    should(sink.written).deepEqual(['frame-1']);
+    should(governor.snapshot().pendingFrame).equal('frame-2');
+    should(clock.armedDelay).equal(10);
+
+    // Act
+    clock.advance(10);
+
+    // Assert
+    should(sink.written).deepEqual(['frame-1', 'frame-2']);
   });
 
   it('should hold acknowledgements while the sink is blocked and release them on drain', () => {

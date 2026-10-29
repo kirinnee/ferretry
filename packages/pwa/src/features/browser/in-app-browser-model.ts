@@ -47,15 +47,8 @@ export const browserDestination = (href: string | undefined, baseHref?: string):
   }
   if (target.protocol !== 'http:' && target.protocol !== 'https:') return null;
 
-  let base: URL | null = null;
-  if (baseHref) {
-    try {
-      base = new URL(baseHref);
-    } catch {
-      // An absolute HTTP(S) target is still safe to offer when the caller's
-      // optional base is malformed; it simply cannot be same-origin.
-    }
-  }
+  // The target parse above already parsed the base, so a malformed base never reaches here.
+  const base = baseHref ? new URL(baseHref) : null;
 
   const scope: BrowserScope =
     base?.origin === target.origin

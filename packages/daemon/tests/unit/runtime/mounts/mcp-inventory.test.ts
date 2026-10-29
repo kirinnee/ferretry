@@ -103,3 +103,42 @@ describe('the MCP inventory routes', () => {
     should(jsonBody(builtin)).containEql({ code: 'mcp_check_builtin' });
   });
 });
+
+describe('the MCP inventory routes refusing what cannot be answered', () => {
+  it('should refuse a session id in the path that cannot be one', async () => {
+    // Act
+    const response = await api().dispatch(request({ path: '/v1/sessions/%2Fetc/mcp/servers', headers: human }));
+
+    // Assert
+    should(response.status).equal(400);
+    should(jsonBody(response)).containEql({ code: 'invalid_session_id' });
+  });
+
+  it('should let a failure that is not a refusal surface as itself, not as a status of its own', async () => {
+    // Arrange
+    const broken = new ApiDispatcher(
+      new ApiRouter(
+        mcpInventoryRoutes({
+          ...subsystem(),
+          inventory: {
+            machine: async () => {
+              throw new Error('the machine inventory could not be read');
+            },
+            session: async () => {
+              throw new Error('unused');
+            },
+          },
+        }),
+      ),
+      CREDENTIALS,
+      GRANTED,
+    );
+
+    // Act
+    const response = await broken.dispatch(request({ path: '/v1/mcp', headers: human }));
+
+    // Assert
+    should(response.status).equal(500);
+    should(jsonBody(response)).not.have.property('code', 'mcp_server_unknown');
+  });
+});

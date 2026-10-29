@@ -211,12 +211,10 @@ export const FileInstanceSurface = ({ daemon, scope, instance, markdown }: FileI
               markdown={markdown}
               preview={{ daemon, scope, revision: file.revision }}
             />
-          ) : file.loading ? (
-            <Loading what={baseName(path)} />
           ) : file.error ? (
             <Failed what={baseName(path)} error={file.error} onRetry={file.reload} />
           ) : (
-            <Note role="status">Nothing to show.</Note>
+            <Loading what={baseName(path)} />
           )}
         </div>
       </div>

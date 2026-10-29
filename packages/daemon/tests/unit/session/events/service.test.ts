@@ -1290,3 +1290,95 @@ describe('the transcript signal on a per-session event stream', () => {
     should(transcripts.watched).be.empty();
   });
 });
+
+/** A source whose subscription closes the handler before `subscribe` returns, as a racing teardown would. */
+class ClosingSource extends ScriptedSource {
+  onSubscribe: () => void = () => undefined;
+
+  override subscribe(listener: (event: StoredSessionEvent) => void): () => void {
+    const release = super.subscribe(listener);
+    this.onSubscribe();
+    return release;
+  }
+}
+
+/** A scheduler that refuses to arm once told to, so a re-arm inside a timer callback throws. */
+class RefusingScheduler extends ManualScheduler {
+  refuse = false;
+
+  override after(milliseconds: number, action: () => void): EventStreamTimer {
+    if (this.refuse) throw new Error('the scheduler is gone');
+    return super.after(milliseconds, action);
+  }
+}
+
+describe('an event stream whose evidence or plumbing breaks mid-flight', () => {
+  it('should release a subscription it took if the stream was closed while subscribing', async () => {
+    // Arrange
+    const source = new ClosingSource({ pages: [[stored('s1', 1)]] });
+    const downstream = new RecordingDownstream();
+    const handler = new FleetEventStreamService(source, new ManualScheduler()).handler(SESSION, downstream);
+    source.onSubscribe = () => handler.close();
+
+    // Act
+    await handler.open();
+
+    // Assert — the late subscription is released, nothing is replayed, and nobody is told the daemon broke.
+    should(source.subscribed).equal(1);
+    should(source.unsubscribed).equal(1);
+    should(source.replayed).be.empty();
+    should(downstream.sent).be.empty();
+    should(downstream.closes).be.empty();
+  });
+
+  it('should close on evidence when a fleet backlog repeats a durable position', async () => {
+    // Arrange — the same session and sequence twice cannot be deduplicated outside the overlap queue.
+    const harness = subject(FLEET, {
+      backlog: { sessionIds: ['s1'], events: [stored('s1', 1, 1), stored('s1', 1, 2)] },
+    });
+
+    // Act
+    await harness.handler.open();
+
+    // Assert
+    should(harness.downstream.closes).deepEqual([[1011, 'event evidence unavailable']]);
+    should(harness.source.unsubscribed).equal(1);
+  });
+
+  it('should close on evidence when the idle proof cannot be re-armed', async () => {
+    // Arrange
+    const source = new ScriptedSource({ pages: [[stored('s1', 1)]] });
+    const scheduler = new RefusingScheduler();
+    const downstream = new RecordingDownstream();
+    const handler = new FleetEventStreamService(source, scheduler).handler(SESSION, downstream);
+    await handler.open();
+    scheduler.refuse = true;
+
+    // Act
+    scheduler.fire();
+
+    // Assert — the proof itself went out, and the failed schedule ended the stream visibly.
+    should(downstream.frames().filter(frame => frame.kind === 'idle')).have.length(2);
+    should(downstream.closes).deepEqual([[1011, 'event evidence unavailable']]);
+  });
+
+  it('should close on evidence when a transcript signal cannot be framed', async () => {
+    // Arrange — the hub hands over a timestamp the frame schema refuses.
+    let report: ((at: string) => void) | undefined;
+    const transcripts: TranscriptChangeSource = {
+      watch: (_sessionId, onChange) => {
+        report = onChange;
+        return { refresh: () => undefined, close: () => undefined };
+      },
+    };
+    const harness = transcriptSubject(TRANSCRIPT_SESSION, transcripts);
+    await harness.handler.open();
+
+    // Act
+    report?.('not an instant');
+
+    // Assert
+    should(harness.downstream.closes).deepEqual([[1011, 'event evidence unavailable']]);
+    should(harness.transcriptFrames()).be.empty();
+  });
+});

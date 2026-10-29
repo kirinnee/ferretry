@@ -136,6 +136,35 @@ describe('RoutingMigration', () => {
     should(PackFileSchema.safeParse(pack).success).be.true();
   });
 
+  it('should still render what an old guide said when the file no longer fits the guide schema', async () => {
+    // Arrange — the old keys beside one the guide schema does not know, so the strict schema refuses the file.
+    const guide = [
+      'notes: kept by hand',
+      'useCases:',
+      '  - title: Hard planning',
+      '    candidates:',
+      '      - model: claude-opus-5-5',
+      '        effort: max',
+      'routing:',
+      '  prompt: Keep Opus for reviews.',
+      '',
+    ].join('\n');
+    should(ModelsGuideFileSchema.safeParse(parsed(guide)).success).be.false();
+    const { subject, state } = build(guide, undefined);
+
+    // Act
+    const outcome = await subject.run();
+
+    // Assert
+    const prompt = [
+      "Pick each sub-task's model by the kind of work, best first:",
+      '- Hard planning: claude-opus-5-5 at max.',
+      'Keep Opus for reviews.',
+    ].join('\n');
+    should(outcome).containDeep({ outcome: 'migrated', prompt, cut: false });
+    should(parsed(state.guide.text)).deepEqual({ notes: 'kept by hand', prompt });
+  });
+
   it('should run once: a second start finds nothing to do', async () => {
     // Arrange
     const { subject, events } = build(LEGACY_GUIDE, LEGACY_PACK);

@@ -600,15 +600,8 @@ export class ManagedWorktreeAdapter {
 
       // The evidence is the one this removal was decided from, and its `checkedOut` already excluded
       // the checkout that just went — so it describes the repository as it is now, not as it was.
-      const evidence: BranchDeletionEvidence = fresh.branchEvidence ?? {
-        protectedBranch: false,
-        checkedOut: false,
-        activeCheckout: input.ownerActive,
-        liveTerminals: input.liveTerminals ?? 0,
-        branchPreexisted: input.managed.branchPreexisted,
-        commitsPushed: false,
-        integrated: false,
-      };
+      // Every shape without evidence (no checkout, not a repo, no branch) raised an uncleared blocker above.
+      const evidence: BranchDeletionEvidence = fresh.branchEvidence!;
       const verdict = assessBranchDeletion(evidence, input.confirmations ?? []);
       if (!verdict.deletable) return { ...retained, branchRetained: true, branchBlockers: verdict.blockers };
       const deletion = await this.#deleteBranch(

@@ -11,14 +11,15 @@ import type { ReactTestRenderer } from 'react-test-renderer';
 
 import {
   jevKeyStatus,
-  WardenConfigCard,
   type WardenClientFactory,
+  WardenConfigCard,
   WardenConfigSurface,
 } from '../../../src/features/warden/warden-config-card.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { wardenConfig, wardenFailover, wardenStatus } from '../../support/warden.ts';
 import { configChangeHarness } from '../config-change-support.tsx';
+import { runtimeCatalog, runtimeView } from '../picker-support.ts';
 
 const connection = (id: string) =>
   daemonConnection({ daemonId: id, baseUrl: `https://${id}.example.test`, deviceId: `token-${id}` });
@@ -551,6 +552,34 @@ describe('WardenConfigSurface', () => {
       // Assert
       expect(json(renderer)).toContain('Machine default — first');
       expect(json(renderer)).not.toContain('Not set — choose a login');
+      run(() => renderer.unmount());
+    });
+
+    it('should relabel the logins from the runtimes the machine now reports after a runtimes move', async () => {
+      // Arrange: the first read sees no runtime, so a login is named by its wrapper alone.
+      const state = { runtimes: runtimeCatalog() };
+      const make = (): Client =>
+        client({
+          request: (async (path: string) => {
+            if (path === SPEEDUPS_PATH) return speedups(false);
+            if (path === '/v1/fleet/runtimes') return state.runtimes;
+            throw new Error(`unexpected ${path}`);
+          }) as Client['request'],
+        });
+      const harness = configChangeHarness(connection('a').daemonId);
+      const renderer = render(
+        harness.wrap(<WardenConfigSurface connection={connection('a')} createClient={async () => make()} />),
+      );
+      await settle();
+      expect(json(renderer)).not.toContain('Claude main');
+
+      // Act: a runtime for that login is added elsewhere.
+      state.runtimes = runtimeCatalog(runtimeView({ wrapper: 'claude-default', name: 'Claude main' }));
+      await harness.move(['runtimes']);
+      await settle();
+
+      // Assert
+      expect(json(renderer)).toContain('Claude main');
       run(() => renderer.unmount());
     });
 

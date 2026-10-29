@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  anomalySubject,
   declaredWaitDeadlineMs,
   detectAnomalies,
   fingerprintAnomalies,
@@ -678,5 +679,33 @@ describe('what the detector is allowed to see', () => {
     // Assert
     should(with_).eql(without);
     should(kinds(with_.anomalies)).eql(['unattended_question']);
+  });
+});
+
+describe('anomaly subjects', () => {
+  it('should name a stuck command by its process so a later turn does not make it news again', () => {
+    // Arrange
+    const anomaly = { kind: 'sus_subprocess' as const, since: ago(20), ledger: { subprocessKey: 'sleep-4242' } };
+
+    // Act
+    const early = anomalySubject(anomaly, { turn: 3, startedAt: ago(30) });
+    const later = anomalySubject(anomaly, { turn: 9, startedAt: ago(30) });
+
+    // Assert
+    should(early).equal('cmd:sleep-4242');
+    should(later).equal(early);
+  });
+
+  it('should fall back to the turn and the episode start when the command is unknown', () => {
+    // Act
+    const dated = anomalySubject(
+      { kind: 'sus_subprocess', since: ago(20), ledger: { subprocessSince: '2026-07-30T11:00:00.000Z' } },
+      { turn: 3 },
+    );
+    const bare = anomalySubject({ kind: 'sus_subprocess', since: undefined }, {});
+
+    // Assert
+    should(dated).equal('turn:3|since:2026-07-30T11:00:00.000Z');
+    should(bare).equal('turn:?|since:?');
   });
 });

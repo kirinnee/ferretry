@@ -53,6 +53,18 @@ describe('grouping the process list', () => {
     expect(groups.some(group => group.key === 'server')).toBe(false);
   });
 
+  it('lists every child of one parent under that parent, in the order the daemon sent them', () => {
+    type Listed = (typeof ALL_PROCESSES.processes)[number];
+    const parent = ALL_PROCESSES.processes[1] as Listed;
+    const first = ALL_PROCESSES.processes[2] as Listed;
+    const second = { ...first, id: '201.4' } as Listed;
+    const rows = groupProcesses(processList([parent, first, second]))
+      .flatMap(group => group.rows)
+      .filter(row => row.process.id === parent.id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.children.map(child => child.id)).toEqual([first.id, '201.4']);
+  });
+
   it('keeps a process whose parent is not listed at the top level', () => {
     const orphan = { ...ALL_PROCESSES.processes[2], parentId: '9.9' } as (typeof ALL_PROCESSES.processes)[number];
     const only = groupProcesses(processList([orphan]));

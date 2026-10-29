@@ -588,6 +588,45 @@ describe('FileSessionForkReceiptStore host-power-loss durability ordering', () =
     should(files.calls.slice(-2)).deepEqual([`sync-directory:${forks}`, `discard:${winnerTemporary}`]);
   });
 
+  it('refuses to adopt a winner whose receipt vanished between losing the race and reading it', async () => {
+    // Arrange — the link loses with EEXIST, yet no receipt exists to read: the winner was removed.
+    class LosesTheRace extends RecordingReceiptFileOperations {
+      override async link(): Promise<void> {
+        throw errno('EEXIST');
+      }
+    }
+    const files = new LosesTheRace();
+    const { subject, state, forks } = await harness('fork-receipt-vanished-winner', {
+      uniqueId: uniqueIds('loser'),
+      files,
+    });
+    const file = forkReceiptFile(state, KEY);
+
+    // Act
+    const failure = await reject(subject.claim(claimedReceipt()));
+
+    // Assert — a named refusal rather than an answer as if unclaimed, and the loser's own bytes are cleaned.
+    should(failure).be.instanceOf(SessionForkReceiptInvalidError);
+    should((failure as SessionForkReceiptInvalidError).detail).match(/vanished between the claim race and the read/u);
+    should(existsSync(file)).be.false();
+    should(await readdir(forks)).deepEqual([]);
+  });
+
+  it('refuses a directory creation whose first created path is not an ancestor of the receipt directory', async () => {
+    // Arrange — a filesystem answer that cannot be right: `mkdir` reports a path elsewhere on the host.
+    class MisreportsCreation extends RecordingReceiptFileOperations {
+      override async ensureDirectory(): Promise<string | undefined> {
+        return '/ferretry-elsewhere/created';
+      }
+    }
+    const files = new MisreportsCreation();
+    const { subject } = await harness('fork-receipt-misreported-creation', { uniqueId: uniqueIds('unused'), files });
+
+    // Act / Assert — refused before anything is written or linked, instead of walking upward forever.
+    await should(subject.claim(claimedReceipt())).be.rejectedWith(/is not beneath mkdir's first parent/u);
+    should(files.calls).deepEqual([]);
+  });
+
   it('never overwrites or removes a foreign temporary when exclusive creation collides', async () => {
     const { subject, state, forks } = await harness('fork-receipt-temp-collision', {
       uniqueId: uniqueIds('foreign'),

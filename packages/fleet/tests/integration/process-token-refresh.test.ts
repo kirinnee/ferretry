@@ -5,7 +5,7 @@
  * server that does not — so each is proved separately, and neither is allowed to conclude anything
  * about the credential: this port's only successful outcome is `ran`.
  */
-import { afterEach, describe, it } from 'bun:test';
+import { afterEach, describe, it, spyOn } from 'bun:test';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -338,6 +338,37 @@ describe('spawnFleetTokenRefreshProcess', () => {
 
     // Assert
     should(await child.exited).equal(0);
+  });
+
+  it('should never fail a renewal because the child refused to let its input end', async () => {
+    // Arrange — a child whose stdin rejects being ended, as a pipe the kernel already tore down would.
+    const ended: string[] = [];
+    const spawn = spyOn(Bun, 'spawn').mockImplementation((() => ({
+      stdin: {
+        write: () => 0,
+        flush: () => Promise.resolve(0),
+        end: () => {
+          ended.push('end');
+          return Promise.reject(new Error('EPIPE: broken pipe'));
+        },
+      },
+      stdout: null,
+      stderr: null,
+      exited: Promise.resolve(0),
+      kill: () => undefined,
+    })) as unknown as typeof Bun.spawn);
+
+    try {
+      // Act
+      const child = spawnFleetTokenRefreshProcess(['codex'], { PATH: '/usr/bin:/bin' });
+      await child.close();
+
+      // Assert — the refusal was met and swallowed: closing is cleanup, never a verdict.
+      should(ended).deepEqual(['end']);
+      should(await child.exited).equal(0);
+    } finally {
+      spawn.mockRestore();
+    }
   });
 
   it('should stop a server that would otherwise never exit', async () => {

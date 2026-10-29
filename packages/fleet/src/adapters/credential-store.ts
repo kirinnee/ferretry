@@ -501,15 +501,12 @@ export class PlatformFleetCredentialStore implements FleetCredentialStore {
   }
 
   /**
-   * One keychain item's material. With `account`, the item stored under exactly that (`acct`, `svce`)
-   * pair — the lookup Claude itself makes. Without it, the first item of that name, which is only
-   * right where nothing else could carry the name (the legacy per-home path).
+   * One keychain item's material: the first item of that name, which is only right where nothing else
+   * could carry the name (the legacy per-home path).
    */
-  async #readKeychainItem(service: string, account?: string): Promise<CredentialMaterial> {
+  async #readKeychainItem(service: string): Promise<CredentialMaterial> {
     const { code, stdout } = await this.deps.command.run(
-      account === undefined
-        ? ['security', 'find-generic-password', '-s', service, '-w']
-        : ['security', 'find-generic-password', '-a', account, '-s', service, '-w'],
+      ['security', 'find-generic-password', '-s', service, '-w'],
       this.#timeout(),
     );
     if (code === KEYCHAIN_ITEM_NOT_FOUND) return { outcome: 'absent' };

@@ -1535,9 +1535,6 @@ export class WardenSweepService {
       return { state: next, outcome, decided, settled: true };
     }
     if (outcome.kind === 'act') {
-      // A ferret that has gone or finished since is not acted on: the flag is handed on as it stands.
-      if (target === undefined || isTerminalStatus(target.state.status))
-        return { state: next, outcome, decided, settled: false };
       const act: WardenVerdictAct = { action: outcome.act, reason: outcome.reason };
       const sure = `Jev, ${Math.round(outcome.confidence * 100)}% sure`;
       const done = await this.carryOut(
@@ -1799,6 +1796,10 @@ export class WardenSweepService {
       readonly stopReason: string;
     },
   ): Promise<{ readonly state: WardenRuntimeState; readonly done: boolean }> {
+    // Read the fleet afresh: the sweep's snapshot is older than the verdict, and nothing else stands in
+    // front of these remedies, so a ferret gone or finished since is never restarted, resumed or stopped.
+    const target = (await this.ports.fleet.fleet()).find(session => session.config.id === targetId);
+    if (target === undefined || isTerminalStatus(target.state.status)) return { state, done: false };
     try {
       if (act.action === 'failover') await this.ports.remedies.failover(targetId, act.agent);
       else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);

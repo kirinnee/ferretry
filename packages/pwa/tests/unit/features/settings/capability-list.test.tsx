@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import { type CapabilityGrantView, DAEMON_CAPABILITIES, type DaemonCapability } from '@ferretry/protocol';
 import type { ReactTestRenderer } from 'react-test-renderer';
-import { CapabilityList } from '../../../../src/features/settings/capability-list.tsx';
+import { CapabilityList, WeightMark } from '../../../../src/features/settings/capability-list.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { capabilityWeight, connectionPosture, openReason } from '../../../../src/lib/grants.ts';
 import { render } from '../../../support/react.ts';
@@ -381,5 +381,35 @@ describe('the list itself', () => {
       <CapabilityList connection={localLookingConnection()} capabilities={allCapabilities()} governed />,
     );
     expect(attr(renderer, 'data-capability-list')).toBe('alpha');
+  });
+});
+
+describe('the access-weight mark on its own', () => {
+  it('draws one pip in the "safe" colour and says it only reads, for the narrow class no row carries today', () => {
+    const mark = render(<WeightMark weight="narrow" />);
+    const root = mark.root.findByProps({ 'data-capability-weight': 'narrow' });
+    const pips = mark.root.findAll(
+      node => typeof node.type === 'string' && String(node.props.className ?? '').includes('h-2 w-2'),
+    );
+    const filled = pips.filter(pip => !String(pip.props.className).includes('bg-transparent'));
+
+    expect(String(root.props['aria-label'])).toContain('Reads only');
+    expect(pips).toHaveLength(3);
+    expect(filled).toHaveLength(1);
+    expect(String(filled[0]?.props.className)).toContain('border-ok-border bg-ok');
+  });
+
+  it('colours the other classes warm so the three never read alike', () => {
+    const colourOf = (weight: 'broad' | 'moderate') => {
+      const mark = render(<WeightMark weight={weight} />);
+      return String(
+        mark.root.findAll(
+          node => typeof node.type === 'string' && String(node.props.className ?? '').includes('h-2 w-2'),
+        )[0]?.props.className,
+      );
+    };
+
+    expect(colourOf('broad')).toContain('bg-err');
+    expect(colourOf('moderate')).toContain('bg-warn');
   });
 });

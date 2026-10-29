@@ -403,3 +403,28 @@ describe('attention helpers and transport', () => {
   // `tests/unit/attention-client.test.ts` and driven for real by the focused
   // action modal. The board keeps what it actually is: a pure render.
 });
+
+describe('AttentionBoard brief', () => {
+  it('draws the terms and recommendation of a rich item and keeps its background in the one disclosure', async () => {
+    const rich = {
+      ...item,
+      terms: [{ term: 'pairing record', meaning: 'The signed proof that this browser may load session data.' }],
+      recommendation: { decision: 'Approve', why: 'It is the browser you just opened.' },
+    };
+    const { container } = await mount(
+      <AttentionBoard
+        connection={connection}
+        snapshot={snapshot({ items: [rich] })}
+        loading={false}
+        error={null}
+        onAction={() => undefined}
+      />,
+    );
+    expect(container.querySelector('[data-attention-section="terms"]')?.textContent).toContain('pairing record');
+    expect(container.querySelector('[data-attention-section="recommendation"]')?.textContent).toContain(
+      'It is the browser you just opened.',
+    );
+    expect(container.querySelectorAll('[data-attention-section="context"]')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-part="context"]')).toHaveLength(1);
+  });
+});

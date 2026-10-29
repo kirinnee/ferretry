@@ -157,6 +157,45 @@ describe('digestConversation', () => {
       failure: 'target_not_message',
     });
   });
+
+  it('should refuse an event with no byte offset rather than guessing its position', () => {
+    // Arrange
+    const unaddressed: TranscriptEvent = { kind: 'message', harness: 'claude', role: 'user', text: 'no offset' };
+    const batch = transcript([unaddressed]);
+
+    // Act
+    const failure = () => digestConversation('session-1', batch, point(0));
+
+    // Assert
+    should(failure).throw(ConversationDigestError, {
+      failure: 'incomplete_transcript',
+      message: /unaddressable message event/u,
+    });
+  });
+
+  it('should treat a tool-role message as an omitted harness-specific result, not a portable message', () => {
+    // Arrange
+    const toolMessage: TranscriptEvent = {
+      kind: 'message',
+      harness: 'claude',
+      role: 'tool',
+      text: 'exit 0',
+      byteOffset: 40,
+    };
+    const batch = transcript([message(0, 'user', 'run it'), toolMessage, message(90, 'assistant', 'done')]);
+
+    // Act
+    const digest = digestConversation('session-1', batch, point(90));
+    const refusal = () => digestConversation('session-1', batch, point(40));
+
+    // Assert
+    should(digest.messages.map(entry => entry.text)).eql(['run it', 'done']);
+    should(digest.omissions).eql([{ point: point(40), kind: 'tool-result', reason: 'harness-specific' }]);
+    should(refusal).throw(ConversationDigestError, {
+      failure: 'target_not_message',
+      message: 'transcript point 40:0 is not a portable conversation message',
+    });
+  });
 });
 
 describe('sameConversationMessagePoint', () => {

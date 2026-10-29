@@ -101,6 +101,12 @@ describe('notification payloads', () => {
     const bSpec = buildNotification(b, waiting, 'attention');
     should(aSpec.title).equal('[Zelda] Session same/id');
     should(aSpec.body).equal('Waiting for you at the prompt.');
+    const yours = buildNotification(
+      a,
+      sessionView('same/id', { state: { status: 'running', turn: 4, turnState: 'your-turn' } }),
+      'attention',
+    );
+    should(yours.body).equal('Your turn — finished and waiting for you.');
     should(aSpec.sessionId).equal('same/id');
     should(aSpec.tag).not.equal(bSpec.tag);
     should(aSpec.url).equal('/d/daemon-a/session/same%2Fid');

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionFileIndexResponse } from '@ferretry/protocol';
 import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   changesUrl,
   codeReferenceRelativePath,
@@ -21,7 +22,7 @@ import {
 } from '../../src/components/files-api.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
-import { browserFetch } from '../../src/lib/runtime-models.ts';
+import { browserFetch, DaemonResponseError } from '../../src/lib/runtime-models.ts';
 import { render, runAsync } from '../support/react.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'a-token' });
@@ -177,6 +178,25 @@ describe('files API', () => {
     // A daemon that cannot serve the surface KEEPS the tab: the reason has to be stated somewhere,
     // and a silently missing tab states nothing.
     expect(fsTabAvailable('unsupported')).toBeTrue();
+  });
+
+  it('words a grant refusal as one, with the daemon’s own sentence after the guidance when it has one', () => {
+    const bare = describeFsError(new DaemonResponseError(403, '', 'grant_not_granted'));
+    expect(bare.length).toBeGreaterThan(0);
+    expect(describeFsError(new DaemonResponseError(403, 'grant it on the host.', 'grant_not_granted'))).toBe(
+      `${bare} grant it on the host.`,
+    );
+  });
+
+  it('reads its probe from the same record when rendered without a browser', () => {
+    resetFsProbes();
+    const seen: string[] = [];
+    const Probe = () => {
+      seen.push(useFsProbe(daemonA, scopeA).state);
+      return null;
+    };
+    renderToStaticMarkup(createElement(Probe));
+    expect(seen).toEqual(['probing']);
   });
 
   it('settles on unsupported and keeps the daemon’s own reason for the disclosure', async () => {

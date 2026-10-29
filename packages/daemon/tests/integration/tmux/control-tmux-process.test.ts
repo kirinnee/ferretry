@@ -566,3 +566,15 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
     should(dialled).equal(0);
   });
 });
+
+describe('ControlModeTmuxProcess construction', () => {
+  it('should refuse a relative executable or socket even when the spawn path is injected', () => {
+    // Arrange — the default spawn path refuses relative paths itself, before the transport can; an
+    // injected one must not let a relative path reach the control client.
+    const injected: TmuxCommandPort = { execute: async () => ({ code: 0, stdout: '', stderr: '' }) };
+
+    // Act / Assert
+    should(() => new ControlModeTmuxProcess('tmux', '/run/fy/tmux.sock', injected)).throw(/must both be absolute/u);
+    should(() => new ControlModeTmuxProcess('/usr/bin/tmux', 'tmux.sock', injected)).throw(/must both be absolute/u);
+  });
+});

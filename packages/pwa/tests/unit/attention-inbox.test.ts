@@ -41,6 +41,7 @@ import {
   unreadCount,
   unreadSessions,
   unreadTotal,
+  updatedSinceAsked,
   waitingSentence,
 } from '../../src/lib/attention-inbox.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
@@ -269,6 +270,27 @@ describe('replies', () => {
     expect(actionSentence(inboxOptions(card({ ask: choice('Wait', 'Go') }))[0] ?? DONE_ACTION, 'A3')).toBe(
       'Answered !A3: Wait',
     );
+  });
+});
+
+describe('an item the ferret edited after being asked', () => {
+  test('needs the owner again with its note, and says nothing unless the last thing was an update', () => {
+    const at = '2026-10-29T10:00:00Z';
+    expect(updatedSinceAsked({ history: [{ at, kind: 'updated', note: 'Added the log' }] })).toEqual({
+      at,
+      note: 'Added the log',
+    });
+    expect(updatedSinceAsked({ history: [{ at, kind: 'updated' }] })).toEqual({ at });
+    expect(
+      updatedSinceAsked({
+        history: [
+          { at, kind: 'updated' },
+          { at, kind: 'needs-info' },
+        ],
+      }),
+    ).toBeNull();
+    expect(updatedSinceAsked({ history: [{ at, kind: 'updated' }], waitingOn: 'ferret' })).toBeNull();
+    expect(updatedSinceAsked({})).toBeNull();
   });
 });
 

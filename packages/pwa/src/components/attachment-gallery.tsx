@@ -298,16 +298,17 @@ const acquireImage = (
   });
 
 /**
- * The cache slot of a stored or transcript image, or null for an inline one that carries its own bytes.
+ * The cache slot of a stored or transcript image; an inline one carries its own bytes and has none.
  * A transcript image's slot is named by its handle behind a prefix no stored attachment id can wear, and
  * like every slot it carries the daemon and the session.
  */
-const imageScope = (daemon: DaemonConnection, image: TranscriptImage): DaemonAttachmentScope | null =>
+const imageScope = (
+  daemon: DaemonConnection,
+  image: Exclude<TranscriptImage, { readonly kind: 'inline' }>,
+): DaemonAttachmentScope =>
   image.kind === 'attachment'
     ? daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), image.attachmentId)
-    : image.kind === 'transcript'
-      ? daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), transcriptImageCacheId(image.handle))
-      : null;
+    : daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), transcriptImageCacheId(image.handle));
 
 /** The placeholder a transcript image holds its place with: no size is known until the bytes arrive. */
 const TRANSCRIPT_PLACEHOLDER = 'aspect-[16/10] w-[min(100%,320px)]';
@@ -341,14 +342,14 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
   // biome-ignore lint/correctness/useExhaustiveDependencies: `kind`, `sessionId`, `attachmentId` and `inlineSrc` ARE the image's identity; the refs carry the rest.
   useEffect(() => {
     setFailed(null);
-    if (kind === 'inline') {
+    const current = imageRef.current;
+    if (current.kind === 'inline') {
       setSrc(inlineSrc);
       return;
     }
     setSrc('');
     if (!visible) return;
-    const scope = imageScope(daemonRef.current, imageRef.current);
-    if (!scope) return;
+    const scope = imageScope(daemonRef.current, current);
     let active = true;
     void acquireImage(cache, load, daemonRef.current, scope)
       .then(url => {
@@ -457,7 +458,6 @@ const GalleryViewer = ({ daemon, entries, index, onIndexChange, onClose }: Galle
         continue;
       }
       const scope = imageScope(daemonRef.current, entry.image);
-      if (!scope) continue;
       held.push(scope);
       void acquireImage(cache, load, daemonRef.current, scope)
         .then(url => {

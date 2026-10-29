@@ -337,6 +337,22 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
+  it('keeps dragging when the browser has already released the pointer it cannot capture', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    Object.defineProperty(deckTop(mounted), 'setPointerCapture', {
+      configurable: true,
+      value: () => {
+        throw new DOMException('The pointer is not active', 'NotFoundError');
+      },
+    });
+    const target = await dragBy(mounted, 180, 0);
+    expect(stamp(mounted)?.getAttribute('data-attention-stamp')).toBe('right');
+    await release(target, 180, 0);
+    expect(pending(fake)).toEqual(['Rebase now']);
+    await mounted.unmount();
+  });
+
   it('swallows the click a drag ends in, so a swipe that ends over a button does not also press it', async () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay]));

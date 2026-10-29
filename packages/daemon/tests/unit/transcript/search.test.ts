@@ -119,6 +119,7 @@ describe('searchTranscript', () => {
         kind: 'attachment',
         attachment: { kind: 'file', uri: 'fixture://needle' },
       },
+      { harness: 'codex', role: 'system', kind: 'compaction', trigger: 'auto', tokensBefore: 1, tokensAfter: 1 },
       { harness: 'codex', role: 'system', kind: 'settings', settings: { model: 'needle-model' } },
       { harness: 'codex', role: 'system', kind: 'turn', state: 'completed' },
       { harness: 'codex', role: 'system', kind: 'usage', usage: { model: 'needle-model' } },

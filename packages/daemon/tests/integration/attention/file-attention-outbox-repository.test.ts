@@ -14,7 +14,11 @@ async function createRepository() {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-attention-outbox-'));
   homes.push(home);
   const directory = (sessionId: string) => join(home, 'sessions', sessionId);
-  return { home, directory, repository: new FileAttentionOutboxRepository(directory, () => 'fixed') };
+  return {
+    home,
+    directory,
+    repository: new FileAttentionOutboxRepository(directory, () => 'fixed'),
+  };
 }
 
 afterEach(async () => {
@@ -48,8 +52,20 @@ describe('FileAttentionOutboxRepository', () => {
     const { repository } = await createRepository();
     const outbox = {
       ...emptyAttentionOutbox(SESSION),
-      pending: [{ id: 'A3~2', message: '[needs more info !A3 «Log in»] Which account?', at: AT }],
-      sending: [{ sendId: 'attention-session-1-A1-A3~1', ids: ['A1', 'A3~1'], message: 'm' }],
+      pending: [
+        {
+          id: 'A3~2',
+          message: '[needs more info !A3 «Log in»] Which account?',
+          at: AT,
+        },
+      ],
+      sending: [
+        {
+          sendId: 'attention-session-1-A1-A3~1',
+          ids: ['A1', 'A3~1'],
+          message: 'm',
+        },
+      ],
       delivered: ['A1', 'A3~1'],
     };
 
@@ -68,7 +84,10 @@ describe('FileAttentionOutboxRepository', () => {
     await mkdir(directory('session-2'), { recursive: true });
     await writeFile(
       repository.file('session-2'),
-      JSON.stringify({ ...emptyAttentionOutbox('someone-else'), sessionId: 'someone-else' }),
+      JSON.stringify({
+        ...emptyAttentionOutbox('someone-else'),
+        sessionId: 'someone-else',
+      }),
     );
 
     // Act
@@ -79,6 +98,21 @@ describe('FileAttentionOutboxRepository', () => {
     should(damaged).be.null();
     should(misfiled).be.null();
     should(await readdir(directory(SESSION))).deepEqual(['attention-replies.json.damaged-fixed']);
+  });
+
+  it('should surface a read failure that is not a missing file rather than discarding the outbox', async () => {
+    // Arrange — the outbox's place is taken by a directory, so reading it fails with something other than ENOENT.
+    const { repository } = await createRepository();
+    await mkdir(repository.file(SESSION), { recursive: true });
+
+    // Act
+    const failure = await repository.read(SESSION).then(
+      () => undefined,
+      error => error as NodeJS.ErrnoException,
+    );
+
+    // Assert
+    should(failure?.code).equal('EISDIR');
   });
 
   it('should refuse a session id that could leave the session tree', async () => {
@@ -104,8 +138,12 @@ describe('FileAttentionOutboxRepository', () => {
     const { directory } = await createRepository();
     const sent: string[] = [];
     const timers = { schedule: () => undefined, cancel: () => undefined };
-    const serial = { run: async <T>(_key: string, task: () => Promise<T>): Promise<T> => await task() };
-    const messenger = { send: async (_sessionId: string, _message: string, sendId: string) => void sent.push(sendId) };
+    const serial = {
+      run: async <T>(_key: string, task: () => Promise<T>): Promise<T> => await task(),
+    };
+    const messenger = {
+      send: async (_sessionId: string, _message: string, sendId: string) => void sent.push(sendId),
+    };
     const first = new AttentionReplyBatcher(new FileAttentionOutboxRepository(directory), messenger, timers, serial, {
       now: () => AT,
     });

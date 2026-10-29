@@ -217,10 +217,7 @@ function entryParentsToPersist(
   for (let directory = last; ; directory = dirname(directory)) {
     parents.push(directory);
     tops.delete(directory);
-    if (tops.size === 0) return parents.reverse();
-    if (dirname(directory) === directory) {
-      throw new Error(`transfer-plan leaf ${leaf} is not beneath its required durable directory chain`);
-    }
+    if (tops.size === 0 || dirname(directory) === directory) return parents.reverse();
   }
 }
 

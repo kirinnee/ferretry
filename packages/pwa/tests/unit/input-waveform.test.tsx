@@ -325,6 +325,23 @@ describe('startInputWaveform', () => {
     expect(disconnected()).toBe(1);
   });
 
+  it('reports the analyser failure, not the disconnect failure, when the branch is already gone', () => {
+    const { context } = recordingContext();
+    const canvas = withContext(fakeCanvas(), context);
+    const hostile = {
+      getFloatTimeDomainData: () => undefined,
+      set fftSize(_value: number) {
+        throw new Error('nope');
+      },
+    };
+    const { monitor, disconnected } = monitorOf(hostile, () => {
+      throw new Error('already gone');
+    });
+    const { runtime } = manualRuntime();
+    expect(() => startInputWaveform({ monitor, canvas, noSignalElement: noSignalNode(), runtime })).toThrow('nope');
+    expect(disconnected()).toBe(1);
+  });
+
   it('releases the branch when the reduced-motion query refuses a listener', () => {
     const { context } = recordingContext();
     const canvas = withContext(fakeCanvas(), context);

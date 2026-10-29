@@ -5,10 +5,10 @@ import {
   AboutMachineSurface,
   aboutSettingsTab,
 } from '../../../../src/features/settings/about-machine.tsx';
+import { type WhatsNewEntry, WhatsNewProvider } from '../../../../src/features/whats-new/whats-new-host.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { updateView } from './about-machine-support.ts';
-import { type WhatsNewEntry, WhatsNewProvider } from '../../../../src/features/whats-new/whats-new-host.tsx';
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'device-a' });
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');
@@ -217,6 +217,17 @@ describe('AboutMachineSurface', () => {
     await interact(() => button.click());
     expect(opened).toBe(1);
     expect(container.querySelector('[data-about-changelog]')?.textContent).toContain('Full release on GitHub');
+  });
+
+  it('opens What’s new without a New badge once the latest entry has been read', async () => {
+    const container = await show(new FakeMachine(updateView()), 5, {
+      open: () => undefined,
+      unread: false,
+      latest: '4.29.0',
+    });
+
+    expect(container.querySelector('[data-about-whats-new]')?.textContent).toContain('What’s new');
+    expect(container.querySelector('[data-about-whats-new-unread]')).toBeNull();
   });
 
   it('shows no Update button when the machine is current', async () => {

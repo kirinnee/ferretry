@@ -1416,3 +1416,172 @@ describe('SharedHistoryMigration', () => {
     for (const promise of promises) await should(promise).be.rejected();
   });
 });
+
+describe('shared history planning and apply edge cases', () => {
+  it('should refuse an account entry of the wrong kind, naming the entry and the path', async () => {
+    // Arrange
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${HOME_A}/projects`, file('not a directory', 1));
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const promise = subject.preview(onlyA());
+
+    // Assert
+    await should(promise).be.rejectedWith(/account projects must be a directory, found file: .*\/projects/u);
+  });
+
+  it('should refuse to quarantine a collision outside the conflicts directory', async () => {
+    // Arrange — a hostile snapshot names a child so that its quarantine path climbs out of the root.
+    const climbing = '../../../../escaped';
+    const files = new MemorySharedHistoryFileSystem();
+    const realSnapshot = files.snapshot.bind(files);
+    files.snapshot = async (target, options) => {
+      if (target === `${HOME_A}/projects`) return directory({ [climbing]: file('incoming', 5) });
+      if (target === `${POOL}/projects`) return directory({ [climbing]: file('pooled', 1) });
+      return await realSnapshot(target, options);
+    };
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const promise = subject.preview(onlyA());
+
+    // Assert
+    await should(promise).be.rejectedWith(/shared-history conflict path escaped its root/u);
+  });
+
+  it('should refuse to merge prompt history that was not read completely', async () => {
+    // Arrange
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${HOME_A}/history.jsonl`, file('{"display":"a","timestamp":1}\n', 1));
+    files.seed(`${POOL}/history.jsonl`, file('{"display":"p","timestamp":2}\n', 2));
+    const realSnapshot = files.snapshot.bind(files);
+    files.snapshot = async (target, options) => {
+      const node = await realSnapshot(target, options);
+      if (node?.kind !== 'file') return node;
+      const { text: _text, ...unread } = node;
+      return unread;
+    };
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const promise = subject.preview(onlyA());
+
+    // Assert
+    await should(promise).be.rejectedWith(/history JSONL was not read completely/u);
+  });
+
+  it('should not claim a half-applied action when the journal says every action was applied', async () => {
+    // Arrange
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(JOURNAL, file(journalText(), 1));
+    files.seed(PROGRESS, file(progressText({ completed: 2 }), 1));
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const error = await subject.preview(onlyA()).catch(caught => caught);
+
+    // Assert
+    should(error).be.instanceOf(SharedHistoryRecoveryRequiredError);
+    const message = (error as SharedHistoryRecoveryRequiredError).message;
+    should(message).match(/at least 2 of 2 actions applied; undo the applied actions in reverse/u);
+    should(message).not.match(/half applied/u);
+  });
+
+  it('should replan when the pooled history is rewritten after the plan observed it', async () => {
+    // Arrange
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${POOL}/history.jsonl`, file('{"display":"pooled","timestamp":1}\n', 1));
+    files.seed(`${HOME_A}/history.jsonl`, file('{"display":"account","timestamp":2}\n', 2));
+    let rewritten = false;
+    files.afterExclusiveWrite = () => {
+      if (rewritten) return;
+      rewritten = true;
+      files.seed(`${POOL}/history.jsonl`, file('{"display":"rewritten","timestamp":9}\n', 9));
+    };
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    await subject.materialize(onlyA());
+
+    // Assert
+    should(rewritten).be.true();
+    should(await files.snapshot(`${POOL}/history.jsonl`, { readText: true })).match({
+      text: '{"display":"rewritten","timestamp":9}\n{"display":"account","timestamp":2}\n',
+    });
+  });
+
+  it('should replan when the quarantined copy of a history file is not what the plan read', async () => {
+    // Arrange
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${POOL}/history.jsonl`, file('{"display":"pooled","timestamp":1}\n', 1));
+    files.seed(`${HOME_A}/history.jsonl`, file('{"display":"account","timestamp":2}\n', 2));
+    const realMove = files.move.bind(files);
+    let tampered = false;
+    files.move = async (source, destination) => {
+      await realMove(source, destination);
+      if (tampered || !source.endsWith('history.jsonl')) return;
+      tampered = true;
+      files.seed(destination, file('{"display":"account","timestamp":2}\n{"display":"late","timestamp":3}\n', 3));
+    };
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    await subject.materialize(onlyA());
+
+    // Assert — the retry planned against the file as it now is, so the late line is pooled too.
+    should(tampered).be.true();
+    should(await files.snapshot(`${POOL}/history.jsonl`, { readText: true })).match({
+      text: '{"display":"pooled","timestamp":1}\n{"display":"account","timestamp":2}\n{"display":"late","timestamp":3}\n',
+    });
+  });
+
+  it('should replan when the quarantined copy changes after the pooled history was appended', async () => {
+    // Arrange
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(`${POOL}/history.jsonl`, file('{"display":"pooled","timestamp":1}\n', 1));
+    files.seed(`${HOME_A}/history.jsonl`, file('{"display":"account","timestamp":2}\n', 2));
+    let quarantined = '';
+    const realMove = files.move.bind(files);
+    files.move = async (source, destination) => {
+      await realMove(source, destination);
+      if (quarantined === '' && source.endsWith('history.jsonl')) quarantined = destination;
+    };
+    const realAppend = files.appendTextIfPrefix.bind(files);
+    let tampered = false;
+    files.appendTextIfPrefix = async (target, expected, addition) => {
+      const appended = await realAppend(target, expected, addition);
+      if (!tampered) {
+        tampered = true;
+        files.seed(quarantined, file('{"display":"account","timestamp":2}\n{"display":"late","timestamp":3}\n', 3));
+      }
+      return appended;
+    };
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    await subject.materialize(onlyA());
+
+    // Assert — the appended lines were never reversed, and the retry added the late one.
+    should(tampered).be.true();
+    should(await files.snapshot(`${POOL}/history.jsonl`, { readText: true })).match({
+      text: '{"display":"pooled","timestamp":1}\n{"display":"account","timestamp":2}\n{"display":"late","timestamp":3}\n',
+    });
+  });
+
+  it('should roll back and report an empty-directory removal that fails for any other reason', async () => {
+    // Arrange
+    const { files, subject } = seededMigration();
+    files.failures.set(`removeEmptyDirectory:${HOME_B}/projects/project`, new Error('permission denied'));
+
+    // Act
+    const error = await subject.materialize(request()).catch(caught => caught);
+
+    // Assert
+    should(error).be.instanceOf(SharedHistoryMigrationError);
+    should((error as SharedHistoryMigrationError).message).match(/permission denied/u);
+    should((error as SharedHistoryMigrationError).rollbackFailures).deepEqual([]);
+    should(files.has(`${HOME_B}/projects/project/session.jsonl`)).be.true();
+    should(files.has(JOURNAL)).be.false();
+  });
+});

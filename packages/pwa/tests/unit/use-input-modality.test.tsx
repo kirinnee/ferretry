@@ -181,6 +181,30 @@ describe('createInputModalityStore', () => {
     store.dispose();
     expect(legacyListeners.size).toBe(0);
   });
+
+  it('keeps the media signals when the pointer listener cannot be attached or detached', () => {
+    const source = new FakeSource();
+    source.addPointerListener = () => {
+      throw new Error('pointer events are unavailable');
+    };
+    source.removePointerListener = () => {
+      throw new Error('pointer events cannot be removed');
+    };
+    const store = createInputModalityStore(() => source);
+    const changes: number[] = [];
+    store.subscribe(() => changes.push(1));
+    expect(store.read()).toEqual({ touchAffected: false, enterSends: true });
+
+    source.media.get(queries.finePrimary)?.set(false);
+    source.media.get(queries.coarsePrimary)?.set(true);
+    source.media.get(queries.hoverPrimary)?.set(false);
+    source.media.get(queries.noHoverPrimary)?.set(true);
+    expect(store.read()).toEqual({ touchAffected: true, enterSends: false });
+    expect(changes.length).toBeGreaterThan(0);
+
+    expect(() => store.dispose()).not.toThrow();
+    expect(store.getSnapshot()).toEqual({ touchAffected: true, enterSends: false });
+  });
 });
 
 const Probe = () => {

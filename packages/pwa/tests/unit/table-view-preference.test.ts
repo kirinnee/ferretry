@@ -63,6 +63,34 @@ describe('TableViewPreferenceStore', () => {
     should(none.snapshot()).equal('table');
   });
 
+  test('a browser whose storage getter throws or lacks the methods is read as having no storage', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const restore = (): void => {
+      if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', original);
+    };
+    try {
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        get: () => {
+          throw new Error('storage access refused');
+        },
+      });
+      const refused = new TableViewPreferenceStore();
+      should(refused.snapshot()).equal('cards');
+      refused.set('table');
+      should(refused.snapshot()).equal('table');
+
+      Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {} });
+      const incomplete = new TableViewPreferenceStore();
+      incomplete.set('table');
+      should(incomplete.snapshot()).equal('table');
+      should(Object.keys(globalThis.localStorage)).deepEqual([]);
+    } finally {
+      restore();
+    }
+  });
+
   test('the browser default reads the real storage when there is one', () => {
     globalThis.localStorage?.removeItem?.(TABLE_VIEW_KEY);
     should(new TableViewPreferenceStore().snapshot()).equal('cards');

@@ -481,12 +481,10 @@ export const FilesTab = ({
                 markdown={markdown}
                 preview={{ daemon, scope, revision: file.revision }}
               />
-            ) : file.loading ? (
-              <Loading what={baseName(active.path)} />
             ) : file.error ? (
               <Failed what={baseName(active.path)} error={file.error} onRetry={file.reload} />
             ) : (
-              <Note role="status">Nothing to show.</Note>
+              <Loading what={baseName(active.path)} />
             )
           ) : // "Files still browse normally" is a CLAIM, so it is made only where the listing beside it
           // proves it. Stated unconditionally it contradicted the failure panel underneath it, and a
@@ -505,12 +503,10 @@ export const FilesTab = ({
               )}
               <BrowseList listing={listing.data} dir={dir} changes={changeMap} onEnter={setDir} onOpenFile={openFile} />
             </>
-          ) : listing.loading ? (
-            <Loading what={dir || 'the session root'} />
           ) : listing.error ? (
             <Failed what={dir || 'the session root'} error={listing.error} onRetry={listing.reload} />
           ) : (
-            <Note role="status">Nothing to show.</Note>
+            <Loading what={dir || 'the session root'} />
           )}
         </div>
       </div>

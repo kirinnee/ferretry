@@ -28,6 +28,10 @@ describe('analytics query text editing', () => {
     expect(withMetric('sum(nope', 'turns')).toBe('sum(nope');
   });
 
+  it('rethrows what the formatter raises that is not a query error', () => {
+    expect(() => toggleGroupLabel('sum(cost_usd)', Symbol('label') as never)).toThrow(TypeError);
+  });
+
   it('changes the aggregation and keeps the rest', () => {
     expect(withAggregation('sum(cost_usd) by (model) [7d]', 'avg')).toBe('avg(cost_usd) by (model) [7d]');
   });

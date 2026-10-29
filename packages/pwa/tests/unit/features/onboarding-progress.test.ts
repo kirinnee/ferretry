@@ -602,6 +602,21 @@ describe('OnboardingProgressStore', () => {
       else Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'localStorage');
     }
   });
+  it('reads no storage when the browser refuses even to hand over the property', () => {
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new DOMException('denied', 'SecurityError');
+      },
+    });
+    try {
+      expect(browserOnboardingStorage()).toBeUndefined();
+    } finally {
+      if (original) Object.defineProperty(globalThis, 'localStorage', original);
+      else Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'localStorage');
+    }
+  });
 });
 
 describe('walk', () => {

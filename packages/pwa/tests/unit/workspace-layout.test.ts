@@ -203,6 +203,20 @@ describe('closeWorkspaceTab', () => {
     expect(isWorkspaceVisible(collapsed)).toBe(true);
   });
 
+  it('collapses a nested pane and keeps its sibling and the pane beside them in place', () => {
+    const cap = { maxPanes: 4 };
+    const two = twoWorkspacePanes();
+    const [first, beside] = workspaceIds(two);
+    const three = splitWorkspacePane(two, first as string, 'row', app.id, cap);
+    expect(workspaceIds(three)).toHaveLength(3);
+    const collapsed = closeWorkspaceTab(three, dev.id);
+    const remaining = workspaceIds(collapsed);
+    expect(remaining).toHaveLength(2);
+    expect(remaining).toContain(beside as string);
+    expect(workspacePane(collapsed, beside as string)).toMatchObject({ tabs: [login.id] });
+    expect(ids(collapsed)).toEqual(['chat', 'console', 'processes', app.id, login.id]);
+  });
+
   it('closes a parked tab without revealing the workspace', () => {
     const hidden = toggleWorkspacePane(withThree());
     const next = closeWorkspaceTab(hidden, dev.id);

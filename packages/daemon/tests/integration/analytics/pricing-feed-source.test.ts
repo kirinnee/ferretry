@@ -194,6 +194,29 @@ describe('the bounded analytics pricing feed', () => {
     should(cancelled).be.true();
   });
 
+  it('should still answer the status when releasing a refused response body throws', async () => {
+    // Arrange — a body that is already unusable raises the moment it is asked to cancel.
+    let asked = false;
+    const refused = {
+      ok: false,
+      status: 502,
+      body: {
+        cancel: () => {
+          asked = true;
+          throw new Error('body already torn down');
+        },
+      },
+    } as unknown as Response;
+    const pricing = new HttpAnalyticsPricingFeed({ fetcher: async () => refused });
+
+    // Act
+    const actual = await pricing.read(source);
+
+    // Assert
+    should(actual).deepEqual({ kind: 'status', status: 502 });
+    should(asked).be.true();
+  });
+
   it('should refuse a declared oversized body before trying to read it', async () => {
     // Arrange
     let cancelled = false;

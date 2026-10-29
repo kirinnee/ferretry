@@ -1,5 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
+import { MAX_SECRETS_PER_DAEMON } from '@ferretry/protocol';
 import {
   NO_REDACTION,
   combinedReferences,
@@ -84,6 +85,25 @@ describe('the secret directory', () => {
     should(await store.remove('TOKEN')).be.true();
     should(await store.remove('TOKEN')).be.false();
     should(await store.list()).deepEqual([]);
+  });
+
+  it('should refuse a new name once the daemon holds its limit, yet still let one be replaced', async () => {
+    // Arrange
+    const store = directory();
+    for (let index = 0; index < MAX_SECRETS_PER_DAEMON; index += 1) await store.put(`HELD_${index}`, TOKEN);
+
+    // Act
+    const refused = await store.put('ONE_TOO_MANY', TOKEN).then(
+      () => undefined,
+      (caught: unknown) => caught,
+    );
+    const replaced = await store.put('HELD_0', 'rotated-value');
+
+    // Assert
+    should(refused).be.instanceof(SecretStoreError);
+    should((refused as SecretStoreError).failure).equal('full');
+    should(replaced.name).equal('HELD_0');
+    should(await store.list()).have.length(MAX_SECRETS_PER_DAEMON);
   });
 
   it('should refuse a document written by a cipher it does not open, rather than report it empty', async () => {

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import type { SessionView, StartSessionRequest } from '@ferretry/protocol';
 import type { ReactElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 
 import { ProjectDetailPage } from '../../../src/features/projects/project-detail.tsx';
 import { SessionSearchProvider } from '../../../src/features/session-search/session-search.tsx';
@@ -512,5 +513,36 @@ describe('ProjectDetailPage', () => {
     // in this page's reads, and the project it found is the laptop's.
     expect(asked.toSorted()).toEqual(['fleet:laptop', 'projects:laptop']);
     expect(view.container.querySelector(`[data-project-detail="${PROJECT_ID}"]`)).not.toBeNull();
+  });
+});
+
+describe('ProjectDetailPage on the server', () => {
+  it('renders the loading registry from the fleet snapshot without reading anything', () => {
+    // Arrange
+    const asked: string[] = [];
+    const store = storeFor({
+      projects: {
+        projects: async () => {
+          asked.push('projects');
+          return [project];
+        },
+      },
+      fleet: {
+        list: async () => {
+          asked.push('fleet');
+          return [];
+        },
+        get: async () => {
+          throw new Error('a project page never reads one session');
+        },
+      },
+    });
+
+    // Act
+    const markup = renderToStaticMarkup(shell(store));
+
+    // Assert
+    expect(markup).toContain('Loading this daemon’s project registry…');
+    expect(asked).toEqual([]);
   });
 });

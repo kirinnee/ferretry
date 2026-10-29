@@ -584,21 +584,18 @@ interface HarnessHarvest {
 const CODEX_PLUMBING_KEYS = ['cli_auth_credentials_store', 'sqlite_home'] as const;
 
 /** How many hook handlers a hooks block carries, for "6 settings, 1 hook". */
-const countHooks = (block: unknown): number =>
-  isRecord(block)
-    ? Object.values(block).reduce<number>(
-        (total, handlers) =>
-          total +
-          (Array.isArray(handlers)
-            ? handlers.reduce<number>(
-                (inner, handler) =>
-                  inner + (isRecord(handler) && Array.isArray(handler.hooks) ? handler.hooks.length : 1),
-                0,
-              )
-            : 0),
-        0,
-      )
-    : 0;
+const countHooks = (block: Readonly<Record<string, unknown>>): number =>
+  Object.values(block).reduce<number>(
+    (total, handlers) =>
+      total +
+      (Array.isArray(handlers)
+        ? handlers.reduce<number>(
+            (inner, handler) => inner + (isRecord(handler) && Array.isArray(handler.hooks) ? handler.hooks.length : 1),
+            0,
+          )
+        : 0),
+    0,
+  );
 
 function harvest(scan: HostHarnessScan, names: SecretNames, secrets: ImportedSecret[]): HarnessHarvest {
   const { harness } = scan;

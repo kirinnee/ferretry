@@ -733,6 +733,15 @@ describe('rendezvous: departures and the sweep', () => {
     should(closures(step.effects)[0]).match({ socketId: 'phone', code: RELAY_CLOSE_CODES.daemonAbsent });
   });
 
+  it('should end a client whose session outlived a forgotten daemon without addressing anyone else', () => {
+    // A document that lost its daemon claim but kept a session must still close the phone cleanly.
+    const opened = withClient();
+    const orphaned: RendezvousState = { ...opened.state, daemon: null };
+    const step = reduceRendezvous(orphaned, { kind: 'socket-closed', socketId: 'phone', at: 4_000 });
+    should(step.state.sessions).deepEqual([]);
+    should(step.effects).deepEqual([]);
+  });
+
   it('should tell the daemon when one client goes, and ignore a socket it does not know', () => {
     const opened = withClient();
     const step = reduceRendezvous(opened.state, { kind: 'socket-closed', socketId: 'phone', at: 4_000 });

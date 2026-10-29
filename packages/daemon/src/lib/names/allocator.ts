@@ -109,13 +109,6 @@ export class NameAllocator {
         },
       };
     }
-    if (!Number.isInteger(availableIndex) || availableIndex < 0 || availableIndex >= available.length) {
-      return {
-        ok: false,
-        error: { code: 'random_source_failed', message: 'callsign random source returned an invalid index' },
-      };
-    }
-
     const source = requested ? ('fallback' as const) : ('automatic' as const);
     const selected = available[availableIndex];
     if (selected === undefined) {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { PinSnapshot } from '@ferretry/protocol';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   DaemonPinsBoard,
   PinsBoard,
@@ -229,5 +230,21 @@ describe('PinsBoard', () => {
     await expect(
       mount(<DaemonPinsBoard connection={other} scope={scope} client={new DaemonPinClient()} />),
     ).rejects.toThrow('pin board scope');
+  });
+});
+
+describe('DaemonPinsBoard on the server', () => {
+  it('renders the empty board from the store snapshot without fetching', () => {
+    let fetched = 0;
+    const idle = new DaemonPinClient(undefined, async () => {
+      fetched += 1;
+      return response(snapshot([]));
+    });
+
+    const markup = renderToStaticMarkup(<DaemonPinsBoard connection={connection} scope={scope} client={idle} />);
+
+    expect(markup).toContain('No pins yet.');
+    expect(markup).toContain('New pin note');
+    expect(fetched).toBe(0);
   });
 });

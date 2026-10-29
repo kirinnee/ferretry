@@ -259,4 +259,63 @@ describe('NameAllocator', () => {
     // Assert
     should(actual.ok).be.true();
   });
+
+  it('should reject a fractional random index that addresses no available callsign', async () => {
+    // Arrange
+    const subject = new NameAllocator(new MemoryClaimStore(), { nextIndex: () => 0.5 }, ['ada', 'bert']);
+
+    // Act
+    const actual = await subject.allocate({ ownerId: 'new', nowMs: 0 });
+
+    // Assert
+    should(actual.ok).be.false();
+    if (!actual.ok) {
+      should(actual.error.code).equal('random_source_failed');
+      should(actual.error.message).equal('callsign random source returned an invalid index');
+    }
+  });
+
+  it('should answer a store failure when an automatic claim throws after a clean read', async () => {
+    // Arrange — the ledger lists fine but the atomic claim itself fails
+    const store = new MemoryClaimStore();
+    store.tryClaim = async () => {
+      throw new Error('disk full at /home/operator/.fy/state/callsigns.json');
+    };
+    const subject = new NameAllocator(store, firstIndex, ['ada']);
+
+    // Act
+    const actual = await subject.allocate({ ownerId: 'new', nowMs: 0 });
+
+    // Assert
+    should(actual.ok).be.false();
+    if (!actual.ok) {
+      should(actual.error.code).equal('claim_store_failed');
+      should(actual.error.message).equal('callsign persistence failed');
+    }
+  });
+
+  it('should report the pool exhausted when every candidate is claimed by a racing owner', async () => {
+    // Arrange — the listing shows free names, but each atomic claim loses to a concurrent owner
+    const attempted: string[] = [];
+    const store = new MemoryClaimStore();
+    store.tryClaim = async claim => {
+      attempted.push(claim.callsign);
+      return {
+        claimed: false,
+        conflict: { callsign: claim.callsign, ownerId: 'racer', claimedAtMs: 0, expiresAtMs: 1_000 },
+      };
+    };
+    const subject = new NameAllocator(store, firstIndex, ['ada', 'bert']);
+
+    // Act
+    const actual = await subject.allocate({ ownerId: 'new', nowMs: 10 });
+
+    // Assert
+    should(attempted).deepEqual(['ada', 'bert']);
+    should(actual.ok).be.false();
+    if (!actual.ok) {
+      should(actual.error.code).equal('pool_exhausted');
+      should(actual.error.message).equal('every callsign is claimed in the active resolution window');
+    }
+  });
 });

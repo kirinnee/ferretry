@@ -64,21 +64,26 @@ describe('daemon boot adapters', () => {
 
   it('should clear the way only for an actively refused connection', async () => {
     // Arrange: the runtime reports a vacant port by error CODE; everything else leaves it open.
-    const refused: DaemonFetchPort = {
-      fetch: async () =>
-        await Promise.reject(Object.assign(new Error('Unable to connect.'), { code: 'ConnectionRefused' })),
-    };
+    const refusedWith = (code: string): DaemonFetchPort => ({
+      fetch: async () => await Promise.reject(Object.assign(new Error('Unable to connect.'), { code })),
+    });
     const timedOut: DaemonFetchPort = {
       fetch: async () =>
         await Promise.reject(Object.assign(new Error('The operation timed out.'), { name: 'TimeoutError' })),
     };
 
     // Act
-    const vacant = await new DaemonHealthProbe(refused).identify({ url: 'http://127.0.0.1:7089' });
+    const vacant = await new DaemonHealthProbe(refusedWith('ConnectionRefused')).identify({
+      url: 'http://127.0.0.1:7089',
+    });
+    const vacantOnBun14 = await new DaemonHealthProbe(refusedWith('ECONNREFUSED')).identify({
+      url: 'http://127.0.0.1:7089',
+    });
     const held = await new DaemonHealthProbe(timedOut).identify({ url: 'http://127.0.0.1:7089' });
 
     // Assert
     should(vacant).deepEqual({ kind: 'vacant' });
+    should(vacantOnBun14).deepEqual({ kind: 'vacant' });
     // FAIL CLOSED: a probe that could not finish is not evidence of a free address.
     should(held.kind).equal('stranger');
     should(held)

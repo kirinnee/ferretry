@@ -195,6 +195,31 @@ describe('the durable answer ledger', () => {
     should(actual).match({ outcome: 'accepted', reason: /unrecognized outcome/u });
   });
 
+  it('keeps the reason a daemon wrote for a settled outcome, and for an outcome it does not know', async () => {
+    // Arrange
+    const { ledger } = await subject();
+    await ledger.append(ID, record({ requestId: 'request-1', outcome: 'failed', reason: 'the pane closed' }));
+    await appendFile(
+      ledger.file(ID),
+      `${JSON.stringify({
+        requestId: 'request-2',
+        toolUseId: 'tool-2',
+        fingerprint: 'print-2',
+        acceptedAt: NOW,
+        outcome: 'future-release',
+        reason: 'a newer daemon explained itself',
+      })}\n`,
+    );
+
+    // Act
+    const known = await ledger.read(ID, 'request-1');
+    const unknown = await ledger.read(ID, 'request-2');
+
+    // Assert
+    should(known).match({ outcome: 'failed', reason: 'the pane closed' });
+    should(unknown).match({ outcome: 'accepted', reason: 'a newer daemon explained itself' });
+  });
+
   it('stamps each line with the time it was written, so the history stays legible', async () => {
     // Arrange
     const { ledger } = await subject();

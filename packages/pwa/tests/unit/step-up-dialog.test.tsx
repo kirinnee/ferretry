@@ -4,6 +4,7 @@
  */
 
 import { describe, expect, it } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   FIRST_PASSKEY_TITLE,
   STEP_UP_SCOPE_NOTE,
@@ -323,5 +324,16 @@ describe('the unlock prompt', () => {
     } finally {
       await mounted.unmount();
     }
+  });
+});
+
+describe('the passkey prompt on the server', () => {
+  it('renders nothing while the gate holds no prompt, and never starts a ceremony', () => {
+    const { gate, ceremonies } = harness();
+
+    const markup = renderToStaticMarkup(<StepUpDialog gate={gate} machineName={id => `Name of ${id}`} />);
+
+    expect(markup).toBe('');
+    expect(ceremonies).toEqual([]);
   });
 });

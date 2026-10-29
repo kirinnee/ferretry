@@ -64,6 +64,18 @@ describe('parseLiveMarkdown', () => {
     expect(lines[8]?.checked).toBe(false);
   });
 
+  test('keeps a blank line inside a fence as code with nothing to show', () => {
+    const lines = parseLiveMarkdown('```\n\ncode\n```');
+    expect(lines.map(line => [line.kind, line.text])).toEqual([
+      ['fence', '```'],
+      ['code', ''],
+      ['code', 'code'],
+      ['fence', '```'],
+    ]);
+    expect(lines[1]?.runs).toEqual([]);
+    expect(lines[2]?.runs.map(run => run.text)).toEqual(['code']);
+  });
+
   test('makes code of everything after an unclosed fence', () => {
     expect(parseLiveMarkdown('```\n# not a heading').map(line => line.kind)).toEqual(['fence', 'code']);
   });

@@ -393,6 +393,18 @@ describe('ComponentsTab — edit and new (E20)', () => {
     expect(text(root, '[data-components-saved]')).toBe('Saved. Add it to a profile to use it.');
   });
 
+  it('goes back from a new component to the list of its kind, and from there to the kinds', async () => {
+    const root = await open();
+    await click(root, '[data-component-kind="settings"]');
+    await click(root, '[data-component-new="settings"]');
+    expect(text(root, 'h3')).toBe('New settings');
+    await click(root, '[data-component-cancel]');
+    expect(root.querySelector('[data-components-page]')?.getAttribute('data-components-page')).toBe('list');
+    expect(root.querySelector('[data-component-new="settings"]')).not.toBeNull();
+    await click(root, '[data-catalog-back]');
+    expect(root.querySelector('[data-components-page]')?.getAttribute('data-components-page')).toBe('kinds');
+  });
+
   it('offers a model set’s default from the models typed', async () => {
     const machine = scriptedMachine();
     const root = await open(machine);
