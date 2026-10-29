@@ -388,14 +388,21 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     if (!pane.alive || pane.dead) return await this.settle(id, record, 'timed_out', 'session_ended');
     // Not delivered, and nothing will be until somebody answers the dialog: retyping would type into it.
     if (pane.blockingPrompt !== undefined) return await this.settle(id, record, 'unaccounted', 'blocked_by_prompt');
-    if (hold === 'unreadable') return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
+    // A send typed into a mid-turn pane is in the harness's queue, and the queue is where a frame can
+    // fail to show it: a long message pushes its own head off the top of a short pane. That is a reason
+    // to WAIT, not to report — the turn's end either submits what the queue held (the transcript then
+    // proves it delivered) or leaves it provably empty. Only a pane no turn is running in has nothing
+    // left to wait for, and an unreadable one is then said as unconfirmed.
+    const waitsForTurnEnd = paneMidTurn(target, pane) && typedIntoBusyPane(record);
+    if (hold === 'unreadable' && !waitsForTurnEnd)
+      return await this.settle(id, record, 'unaccounted', 'pane_unreadable');
     // Still held — behind a busy turn, or sitting in the composer. That is waiting, not loss.
     if (verdict?.holding === true || hold !== 'nowhere') return await this.wait(id, record, now);
     // A mid-turn pane can hold a copy where no reading reaches: a queue rendering this daemon does not
     // recognise is exactly that, and calling it lost is how one message became four copies. So a send
     // already typed into a mid-turn pane is proven absent only once the turn ends — when the harness
     // has either submitted what it held, and the transcript says so, or holds nothing at all.
-    if (paneMidTurn(target, pane) && typedIntoBusyPane(record)) return await this.wait(id, record, now);
+    if (waitsForTurnEnd) return await this.wait(id, record, now);
     // PROVEN ABSENT: not in the transcript, not in the harness's queue, not on screen.
     const reason: SendUnaccountedReason = verdict?.released === true ? 'composer_discarded' : 'not_delivered';
     if ((record.attempt ?? 1) < attemptsAllowed(record, this.settings)) {

@@ -134,12 +134,19 @@ before the keys). Two places enforce it:
 - **The tracker** proves such a send absent only once the turn has ended. While the pane is mid-turn it
   waits — pushing the deadline out, up to the hold ceiling, without spending an attempt — because at
   the turn boundary the harness either submits what it held (and the transcript proves it) or holds
-  nothing at all.
+  nothing at all. **An unreadable pane waits too**: a queue that runs past the top of a short pane (a
+  multi-line peer message in a 24-row pane loses its head) makes the capture unreadable, and that is
+  a reason to wait for the turn to end, not to say "unconfirmed" — it is reported (`pane_unreadable`)
+  only when no turn is running to wait for. A dialog on screen still settles it `blocked_by_prompt`.
+- **The screen reader** proves a queued message whose head scrolled off the pane by its visible tail
+  (at least 12 characters that end the payload), and ignores lone ```fence rows on both sides because
+Claude's queue does not draw them (fixture`claude-2.1.281-busy-queued-overflow.txt`).
 - **Every re-attempt**, the tracker's as well as a person's, re-reads the pane under the send lock first.
   Shown held in the queue: the daemon's retry settles it `queued` on that proof and types nothing (a
   person's is refused). Shown typed in the composer: refused. The pane cannot be read, or the queue runs
   off it: refused unless forced, and the tracker settles the send `unaccounted` (`pane_unreadable`) —
-  never "not delivered". Mid-turn and already typed into a mid-turn pane once: refused unless forced
+  never "not delivered" — unless the pane is mid-turn and the send was already typed into it, when the
+  tracker keeps waiting for the turn to end instead. Mid-turn and already typed into a mid-turn pane once: refused unless forced
   (`SendRetypeWithheld`, reason `held` / `busy` / `unreadable`).
 
 An `unaccounted` send's notice to an agent sender says it **could not be confirmed** and may still have
