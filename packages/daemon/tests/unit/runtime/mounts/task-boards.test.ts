@@ -1200,3 +1200,73 @@ describe('the task board membership mount, at its edges', () => {
     should(response.status).equal(500);
   });
 });
+
+describe('the task board membership mount, replaying a promoted coordinator replacement', () => {
+  it('should recognise the promoted child grant on retry and deliver the same key without minting another', async () => {
+    // Arrange — the invitation flow gives the board a second membership root, and that root asks for a
+    // coordinator child grant for a session that has not launched yet; the operator then promotes it.
+    const world = await withBoard();
+    const invited = TaskBoardInvitationViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/invitations/request',
+          { targetSessionId: 'outsider' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+    await post(
+      world,
+      '/invitations/approve',
+      { invitationRequestId: invited.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    await post(
+      world,
+      '/invitations/accept',
+      {},
+      {
+        'x-fy-session-board-capability': 'session:outsider',
+        'x-fy-board-invitation-capability': world.delivered.at(-1)?.[1][BOARD_INVITATION_CAPABILITY_VARIABLE] ?? '',
+      },
+    );
+    const outsiderCapability = world.capabilityFor('outsider') ?? '';
+    await post(world, '/invitations/verify', {}, peer(outsiderCapability));
+    const coordinatorGrant = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'successor', role: 'coordinator' },
+          peer(outsiderCapability),
+        ),
+      ),
+    );
+    await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: coordinatorGrant.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const prelaunchCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    const body = {
+      requestId: 'route-promoted-replay',
+      sessionId: 'root',
+      replacementSessionId: 'successor',
+      replacementRootSessionId: 'outsider',
+    };
+    const first = await post(world, '/coordinator/replace', body, operator(world));
+    should(first.status).equal(200);
+    const grantsAfterFirst = world.state.boards[0]?.grants.length;
+
+    // Act — the same request again, as a client retrying after a lost response would send it.
+    const replay = await post(world, '/coordinator/replace', body, operator(world));
+
+    // Assert — the promotion is recognised by the grant it revoked, so the retry reuses the delivered
+    // key instead of deriving a fresh one and stranding the session that already holds the first.
+    should(replay.status).equal(200);
+    should(world.delivered.at(-1)).eql(['successor', { [BOARD_CAPABILITY_VARIABLE]: prelaunchCapability }]);
+    should(world.state.boards[0]?.grants.length).equal(grantsAfterFirst);
+  });
+});
