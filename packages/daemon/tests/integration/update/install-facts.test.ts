@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { classifyInstallMethod } from '@ferretry/protocol';
 import should from 'should';
 import { type FactCommandResult, HostInstallFacts, type InstallFactsSeams } from '../../../src/adapters/index.ts';
+import { runBounded } from '../../../src/adapters/update/install-facts.ts';
 
 const STORE = '/nix/store/0123456789abcdfghijklmnpqrsvwxyz-ferretry-4.28.0';
 const HOME = '/home/kirin';
@@ -125,5 +126,10 @@ describe('the host install facts', () => {
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
+  });
+
+  it('runs a bounded command and says nothing for one that is not installed, on any host', async () => {
+    await should(runBounded(['sh', '-c', 'printf ok'], 5_000)).resolvedWith({ code: 0, stdout: 'ok' });
+    await should(runBounded(['fy-no-such-executable-anywhere'], 5_000)).resolvedWith(undefined);
   });
 });
