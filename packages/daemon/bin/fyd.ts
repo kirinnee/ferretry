@@ -10484,7 +10484,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     }
     throw error;
   }
-  cleanups.push(() => opened.storage.close());
+  // Live sockets end BEFORE storage closes, and cleanups run in registration order. A terminal stream
+  // polls the pane through the lifecycle service, which reads storage: closed first, a poll in flight
+  // fails and the viewer is told 1011 "terminal redraw failed" instead of the 1000 "daemon shutting
+  // down" it is owed. The host does not exist yet, so this is bound once it does.
+  let closeLiveSockets: () => void = () => {};
+  cleanups.push(() => {
+    closeLiveSockets();
+    return opened.storage.close();
+  });
   world.notices.step('state home opened', opened.paths.home);
 
   progress.enter('loading configuration');
@@ -10579,10 +10587,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(refusal.message);
     return refusal.exitCode;
   }
-  // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
-  // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
-  // stream is over while the socket it writes to still exists.
-  cleanups.push(() => server.closeSockets());
+  // Sockets are closed by the cleanup registered ahead of storage (see `closeLiveSockets`); the host
+  // stops after, so a live terminal stream's redraw timer is told it is over while its socket exists.
+  closeLiveSockets = () => server.closeSockets();
   cleanups.push(() => server.stop());
   world.notices.step('listening', `${config.bindUrl} — answering /healthz while the boot continues`);
   /**
