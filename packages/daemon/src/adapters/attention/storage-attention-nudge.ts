@@ -15,7 +15,11 @@ export const ATTENTION_NUDGED_EVENT = 'attention.nudged';
  * not say answers nothing.
  */
 export class StorageAttentionNudgeSessions {
-  constructor(private readonly storage: Pick<DaemonStorage, 'readConfig' | 'append'>) {}
+  /** `agenda` reads whether agenda mode is on for a session (the launch setting); absent, it is off. */
+  constructor(
+    private readonly storage: Pick<DaemonStorage, 'readConfig' | 'append'>,
+    private readonly agenda?: { read(sessionId: string): Promise<boolean> },
+  ) {}
 
   async subject(sessionId: string): Promise<(NudgeSubject & { readonly harness: TranscriptHarness }) | undefined> {
     const id = tryParseSessionId(sessionId);
@@ -27,6 +31,7 @@ export class StorageAttentionNudgeSessions {
     return {
       parent: typeof config.parent === 'string' && config.parent !== '',
       mode: config.mode === 'interactive' ? 'interactive' : 'auto',
+      agenda: (await this.agenda?.read(sessionId).catch(() => false)) ?? false,
       harness,
     };
   }

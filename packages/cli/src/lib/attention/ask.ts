@@ -53,7 +53,7 @@ export function parseKind(raw: string | undefined): AttentionKind | undefined {
 }
 
 /**
- * Build the kind and the ask an `attention add` describes.
+ * Build the kind and the ask an `agenda add` describes.
  *
  * Supplying `--option` without `--kind` implies a choice, because that is the only kind options mean
  * anything for — and any other kind carrying options is a mistake worth naming rather than silently

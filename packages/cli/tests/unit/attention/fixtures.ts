@@ -38,6 +38,8 @@ interface HumanItemFields extends AttentionBrief {
   howToResolve: string;
   waitingSince: string;
   waitingOn: 'ferret';
+  notice: true;
+  ping: true;
   waitingFor: 'info' | 'discussion';
   askedAt: string;
   ask: AttentionAsk;
@@ -142,8 +144,13 @@ export class RecordingAttentionGateway implements IAttentionGateway {
 /** Captures what the controller printed. */
 export class CapturingOutput implements IAttentionOutput {
   readonly messages: string[] = [];
+  readonly diagnostics: string[] = [];
 
   success(message: string): void {
     this.messages.push(message);
+  }
+
+  diagnostic(message: string): void {
+    this.diagnostics.push(message);
   }
 }

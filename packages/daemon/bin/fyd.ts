@@ -3042,8 +3042,8 @@ function createSessionSendSubsystem(
   readHandoff: (sessionId: SessionId, name: string) => Promise<SessionHandoff | undefined>,
   /**
    * A PERSON's message read against the ferret's open Attention (`AttentionConversation`): the words it
-   * receives, and the items it answered resolved once it was accepted. A teammate's message is never
-   * read this way — only the owner answers the owner's items.
+   * receives, and the items it named made the ferret's turn once it was accepted (nothing resolves). A
+   * teammate's message is never read this way — only the owner talks about the owner's items.
    */
   conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
   /**
@@ -3081,7 +3081,9 @@ function createSessionSendSubsystem(
               );
             });
       const person = request.senderSessionId === undefined;
-      const turn = person ? await conversation.prepare(id, request.message) : { message: request.message, answers: [] };
+      const turn = person
+        ? await conversation.prepare(id, request.message)
+        : { message: request.message, referenced: [] };
       const outcome = await service
         .send({
           id,
@@ -3093,9 +3095,9 @@ function createSessionSendSubsystem(
           ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
         })
         .catch((error: unknown) => sendRefusal(error));
-      // Resolved only once the words were accepted: an item must never read as answered by a message the
+      // Only once the words were accepted: an item must never read as the ferret's turn for a message the
       // ferret was not given.
-      if (turn.answers.length > 0) await conversation.settle(id, turn, request.message);
+      if (turn.referenced.length > 0) await conversation.settle(id, turn);
       if (person) await instructions.queueIfStale(id);
       return {
         ...(await view(id, 'took the message')),

@@ -1,5 +1,6 @@
 import {
   ATTENTION_PUSH_TITLE_LENGTH,
+  AttentionActionRequestSchema,
   type AttentionId,
   type AttentionSnapshot,
   clipAtWord,
@@ -13,6 +14,7 @@ import {
   composeEditRequest,
   type EditFlags,
   parseBriefFile,
+  titleFrom,
 } from './brief.ts';
 import type { IAttentionBriefInput, IAttentionGateway, IAttentionOutput } from './ports.ts';
 import { attentionReference, parseAttentionReference } from './reference.ts';
@@ -23,6 +25,7 @@ import {
   renderAttentionMutation,
   renderRepliesSent,
 } from './render.ts';
+import { parseNeededBy } from './when.ts';
 
 /** Options every attention command accepts. */
 export interface AttentionCommandOptions {
@@ -33,7 +36,9 @@ export interface AttentionCommandOptions {
 }
 
 /** Flags that describe a new attention item, and where its JSON body is read from. */
-export interface AttentionAddOptions extends AttentionCommandOptions, BriefFlags {
+export interface AttentionAddOptions extends AttentionCommandOptions, Omit<BriefFlags, 'neededBy'> {
+  /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
+  readonly by?: string;
   /** A JSON body with the same fields; `-` reads standard input. */
   readonly jsonFile?: string;
   /** A Markdown file for the body; `-` reads standard input. */
@@ -41,7 +46,9 @@ export interface AttentionAddOptions extends AttentionCommandOptions, BriefFlags
 }
 
 /** Flags that reword an open item. */
-export interface AttentionEditOptions extends AttentionCommandOptions, EditFlags {
+export interface AttentionEditOptions extends AttentionCommandOptions, Omit<EditFlags, 'neededBy'> {
+  /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
+  readonly by?: string;
   /** A Markdown file for the new body; `-` reads standard input. */
   readonly bodyFile?: string;
 }
@@ -65,10 +72,16 @@ export interface AttentionSurfaceOptions extends AttentionCommandOptions {
 export interface AttentionNotifyOptions extends AttentionCommandOptions {
   readonly title?: string;
   readonly kind?: string;
+  /** Ask for the owner's phone to buzz for this notice. */
+  readonly ping?: boolean;
 }
 
+/** The one line the deprecated `fy attention` prints to stderr before it does what `fy agenda` does. */
+export const ATTENTION_DEPRECATION =
+  '`fy attention` is now `fy agenda` — the same commands; `fy attention` will be removed.';
+
 /**
- * Drives `fy attention …`.
+ * Drives `fy agenda …` (and the deprecated `fy attention …`).
  *
  * Every verb defaults to the session the command runs inside, so an agent raising its own blocker
  * needs no id; `--session` targets another board for a human working the fleet. The daemon still
@@ -81,7 +94,14 @@ export class AttentionController {
     private readonly ownSessionId: string | undefined,
     /** Reads `--json-file`; absent where no command can name one. */
     private readonly input?: IAttentionBriefInput,
+    /** The clock `--by` reads relative and clock times against; injected so it is testable. */
+    private readonly now: () => number = Date.now,
   ) {}
+
+  /** Said once on stderr by the deprecated `attention` spelling; stdout stays the command's own. */
+  deprecatedAlias(): void {
+    this.out.diagnostic(ATTENTION_DEPRECATION);
+  }
 
   async list(options: AttentionCommandOptions): Promise<void> {
     const snapshot = await this.gateway.snapshot(this.#target(options));
@@ -96,7 +116,7 @@ export class AttentionController {
     const open = snapshot.items.find(item => item.id === id);
     const resolved = snapshot.resolved.find(item => item.id === id);
     const found = open ?? resolved;
-    if (found === undefined) throw new Error(`no attention item ${attentionReference(id)} in ${sessionId}`);
+    if (found === undefined) throw new Error(`no agenda item ${attentionReference(id)} in ${sessionId}`);
     this.out.success(options.json === true ? JSON.stringify(found, null, 2) : renderAttentionItem(found));
   }
 
@@ -115,7 +135,11 @@ export class AttentionController {
 
   async add(words: readonly string[], options: AttentionAddOptions): Promise<void> {
     const [file, body] = await this.#inputs(options.jsonFile, options.bodyFile);
-    const request = composeAddRequest(words, { ...options, ...(body === undefined ? {} : { body }) }, file);
+    const request = composeAddRequest(
+      words,
+      { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
+      file,
+    );
     const sessionId = this.#target(options);
 
     // The board is read first so the item just raised can be named by identity rather than guessed at
@@ -124,7 +148,7 @@ export class AttentionController {
     const after = await this.gateway.apply(sessionId, request);
 
     const raised = onlyNewId(before, after);
-    const verb = raised === undefined ? 'attention recorded' : `attention ${attentionReference(raised)} recorded`;
+    const verb = raised === undefined ? 'agenda item recorded' : `agenda ${attentionReference(raised)} recorded`;
     this.#report(after, options, () => renderAttentionMutation(verb, undefined, after, raised));
   }
 
@@ -136,7 +160,11 @@ export class AttentionController {
     const [, body] = await this.#inputs(undefined, options.bodyFile);
     const snapshot = await this.gateway.apply(
       sessionId,
-      composeEditRequest(id, { ...options, ...(body === undefined ? {} : { body }) }, current),
+      composeEditRequest(
+        id,
+        { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
+        current,
+      ),
     );
     this.#report(snapshot, options, () => renderAttentionMutation('edited', attentionReference(id), snapshot, id));
   }
@@ -199,7 +227,7 @@ export class AttentionController {
     );
   }
 
-  /** Moves an item out of discussion onto the owner's queue; the owner gets a push for it. */
+  /** Hands an item back to the owner: it is their turn again. Nothing pings. */
   async surface(reference: string, options: AttentionSurfaceOptions): Promise<void> {
     const id = parseAttentionReference(reference);
     const why = text(options.why);
@@ -223,9 +251,9 @@ export class AttentionController {
   }
 
   /**
-   * Only an attention item notifies the owner, so `notify` raises an `info` card: the title is `--title` or
-   * the start of the text, the ask is the text as one line, and a text that does not fit one line goes
-   * whole into the context.
+   * `notify` raises a notice: a plain notification with nothing to decide. The title is `--title` or the
+   * start of the text, the subject is the text as one line, and a text that does not fit one line goes
+   * whole into the context. `--ping` asks for the phone to buzz.
    */
   async notify(words: readonly string[], options: AttentionNotifyOptions): Promise<void> {
     refuseProgressKind(options.kind);
@@ -233,21 +261,26 @@ export class AttentionController {
     if (message === '') throw new Error('notify needs the notification text');
     const line = message.replaceAll(/\s+/gu, ' ');
     const fits = line.length <= MAX_ATTENTION_SUBJECT_LENGTH;
-    const request = composeAddRequest(
-      [fits ? line : clipAtWord(line, MAX_ATTENTION_SUBJECT_LENGTH)],
-      {
-        kind: 'info',
-        title: text(options.title) ?? clipAtWord(line, ATTENTION_PUSH_TITLE_LENGTH),
-        resolve: 'Acknowledge it on the attention board (Got it).',
-        ...(fits ? {} : { context: message }),
-      },
-      {},
-    );
+    const subject = fits ? line : clipAtWord(line, MAX_ATTENTION_SUBJECT_LENGTH);
+    const title = titleFrom(text(options.title) ?? clipAtWord(line, ATTENTION_PUSH_TITLE_LENGTH));
+    const request = AttentionActionRequestSchema.parse({
+      action: 'add',
+      source: 'agent-raised',
+      sourceRef: null,
+      subject,
+      title,
+      kind: 'info',
+      why: subject,
+      context: fits ? null : message,
+      howToResolve: 'Nothing to do: it is a notice.',
+      notice: true,
+      ...(options.ping === true ? { ping: true } : {}),
+    });
     const sessionId = this.#target(options);
     const before = await this.gateway.snapshot(sessionId);
     const after = await this.gateway.apply(sessionId, request);
     const raised = onlyNewId(before, after);
-    const verb = raised === undefined ? 'info raised' : `info ${attentionReference(raised)} raised`;
+    const verb = raised === undefined ? 'notice sent' : `notice ${attentionReference(raised)} sent`;
     this.#report(after, options, () => renderAttentionMutation(verb, undefined, after, raised));
   }
 
@@ -274,6 +307,12 @@ export class AttentionController {
     return parseBriefFile(await this.input.read(named));
   }
 
+  /** `--by` read against the clock, as the request's `neededBy`; nothing when it was not given. */
+  #neededBy(by: string | undefined): { neededBy?: string } {
+    const typed = text(by);
+    return typed === undefined ? {} : { neededBy: parseNeededBy(typed, this.now()) };
+  }
+
   /** Which session this invocation acts on. */
   #target(options: AttentionCommandOptions): string {
     const explicit = options.session?.trim() ?? '';
@@ -288,6 +327,12 @@ export class AttentionController {
   }
 }
 
+/** The options minus `--by`, which is read separately into `neededBy`. */
+function withoutBy<T extends { readonly by?: string }>(options: T): Omit<T, 'by'> {
+  const { by: _by, ...rest } = options;
+  return rest;
+}
+
 /** A trimmed flag value, or nothing when the flag was absent or blank. */
 function text(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? '';
@@ -300,7 +345,7 @@ function refuseProgressKind(value: string | undefined): void {
   if (kind === undefined) return;
   if (kind === 'completed' || kind === 'failed') {
     throw new Error(
-      'progress and finishing never notify the owner — raise an item (fy attention add) only when they must decide or do something',
+      'progress and finishing never notify the owner — raise an item (fy agenda add) only when they must decide or do something',
     );
   }
   throw new Error(`notify takes no --kind (it raises an info card), not "${kind}"`);

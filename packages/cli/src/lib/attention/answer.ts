@@ -19,7 +19,7 @@ const ONE_ANSWER =
   'give exactly one answer: --approve/--reject, --yes/--no, --choice, --good/--clarify, --answer, or --other';
 
 /**
- * Read the answer a `attention done` carries, or nothing when the item had no ask.
+ * Read the answer an `agenda done` carries, or nothing when the item had no ask.
  *
  * Every conflicting combination is refused here rather than sent: the daemon would reject a response
  * whose kind does not match the ask anyway, and a local message can name the flag that clashed.

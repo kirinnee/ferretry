@@ -137,7 +137,7 @@ function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
     await dispatcher.dispatch(request({ method: 'POST', path, headers, body: JSON.stringify(body) }));
   const raise = async (subject: string, ask: unknown = { kind: 'open-question' }): Promise<string> => {
     const response = await post(
-      { action: 'add', subject, why: `${subject} why`, howToResolve: 'answer it', ask, surface: true },
+      { action: 'add', subject, why: `${subject} why`, howToResolve: 'answer it', ask },
       agentIn(SESSION),
     );
     should(response.status).equal(200);
@@ -390,7 +390,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     should(sends.sent.size).equal(0);
   });
 
-  it('should deliver a `!A1` reply in chat as the one message, and hold nothing when it resolves', async () => {
+  it('should deliver a `!A1` reply in chat as the one message, and put the item in discussion without closing it', async () => {
     // Arrange
     const { sends, timers, attention, raise } = loop();
     const id = await raise('What should I call the next test item?');
@@ -399,14 +399,16 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
 
     // Act — what the send route does with a person's chat message: prepare, deliver, then settle.
     const turn = await conversation.prepare(SESSION, words);
-    await conversation.settle(SESSION, turn, words);
+    await conversation.settle(SESSION, turn);
 
-    // Assert — the chat message itself is the delivery; the board closing adds nothing.
-    should(turn.message).equal(`[answer to !${id} «What should I call the next test item?»] ${words}`);
+    // Assert — the chat message itself is the delivery, and now it is the ferret's turn; nothing is held or resent.
+    should(turn.message).equal(`[re !${id} «What should I call the next test item?»] ${words}`);
+    should(turn.referenced.map(item => item.id)).deepEqual([id]);
     should(timers.armed.size).equal(0);
     should(sends.sent.size).equal(0);
     const board = await attention.list(SESSION);
-    should(board.ok && board.value.resolved.map(item => item.id)).deepEqual([id]);
+    should(board.ok && board.value.resolved).be.empty();
+    should(board.ok && board.value.items[0]).containDeep({ id, waitingOn: 'ferret', waitingFor: 'discussion' });
   });
 
   it('should deliver what a restart interrupted, once, under the same send id', async () => {

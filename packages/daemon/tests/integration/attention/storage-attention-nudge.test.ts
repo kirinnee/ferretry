@@ -46,7 +46,7 @@ const said = (text: string, messageId: string): TranscriptEvent => ({
   messageId,
 });
 
-async function open() {
+async function open(agendaOn = true) {
   const home = await mkdtemp(join(tmpdir(), 'ferretry-attention-nudge-'));
   homes.add(home);
   const factory = new DaemonStorageFactory(
@@ -82,7 +82,11 @@ async function open() {
   // The send slice's ledger: one message per send id, the rest are duplicates of it.
   const delivered = new Map<string, { sessionId: string; message: string }>();
   let enabled = true;
-  const sessions = new StorageAttentionNudgeSessions(storage);
+  const agenda = new Map<string, boolean>([
+    ['lead-1', agendaOn],
+    ['child-1', agendaOn],
+  ]);
+  const sessions = new StorageAttentionNudgeSessions(storage, { read: async id => agenda.get(id) ?? false });
   const nudge = new AttentionTurnNudge(
     {
       enabled: async () => enabled,
@@ -149,10 +153,27 @@ describe('the turn-end Attention check', () => {
     should(message?.sessionId).equal('lead-1');
     should(message?.message).startWith(ATTENTION_NUDGE_MARK);
     should(message?.message).containEql('- run `hms` to link the new skill\n- approve the deploy');
+    should(message?.message).containEql('`fy agenda add --title');
     should(message?.message).containEql('or your question tool');
     const journal = await world.nudged(LEAD);
     should(journal.length).be.aboveOrEqual(1);
     should(journal[0]?.data).deepEqual({ asks: ['run `hms` to link the new skill', 'approve the deploy'] });
+  });
+
+  it('should word the nudge as a notice when the session’s agenda mode is off', async () => {
+    // Arrange
+    const world = await open(false);
+    world.transcripts.set('lead-1', [owner('ship it'), said(REPLY, 'msg-1')]);
+
+    // Act
+    await world.turnEnds(LEAD);
+    await world.settle();
+
+    // Assert
+    const [message] = [...world.delivered.values()];
+    should(message?.message).containEql('`fy notify "<summary>"`');
+    should(message?.message).not.containEql('agenda add');
+    should(message?.message).not.containEql('question tool');
   });
 
   it('should not nudge again on the turn the nudge started, even when the reply still lists asks', async () => {
@@ -270,7 +291,12 @@ describe('StorageAttentionNudgeSessions', () => {
     should(await sessions.subject('../escape')).be.undefined();
     should(await sessions.subject('missing-1')).be.undefined();
     should(await sessions.subject('bare-1')).be.undefined();
-    should(await sessions.subject('child-1')).deepEqual({ parent: true, mode: 'auto', harness: 'claude' });
+    should(await sessions.subject('child-1')).deepEqual({
+      parent: true,
+      mode: 'auto',
+      agenda: false,
+      harness: 'claude',
+    });
     await sessions.record('../escape', ['x']);
   });
 
@@ -284,7 +310,23 @@ describe('StorageAttentionNudgeSessions', () => {
     should(await new StorageAttentionNudgeSessions(world.storage).subject('codex-1')).deepEqual({
       parent: false,
       mode: 'auto',
+      agenda: false,
       harness: 'codex',
     });
+  });
+
+  it('should take the agenda flag from the store it is given, and read a store that fails as off', async () => {
+    // Arrange
+    const world = await open();
+    const on = new StorageAttentionNudgeSessions(world.storage, { read: async () => true });
+    const broken = new StorageAttentionNudgeSessions(world.storage, {
+      read: async () => {
+        throw new Error('launch settings unreadable');
+      },
+    });
+
+    // Act + Assert
+    should((await on.subject('lead-1'))?.agenda).be.true();
+    should((await broken.subject('lead-1'))?.agenda).be.false();
   });
 });

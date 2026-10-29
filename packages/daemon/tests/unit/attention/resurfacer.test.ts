@@ -11,6 +11,7 @@ import {
 
 const SESSION = 'session-1';
 const AGENT = { kind: 'agent' as const, sessionId: SESSION, name: 'Ada' };
+const HUMAN = { kind: 'human' as const };
 
 class MemoryRepository implements AttentionLedgerRepository {
   readonly ledgers = new Map<string, AttentionLedger>();
@@ -69,10 +70,11 @@ function world(afterMinutes = 30) {
 }
 
 describe('Attention resurfacer', () => {
-  it('should surface an ask that has sat in discussion past the limit, and say the timer did it', async () => {
+  it('should surface an ask that has sat in discussion since the owner replied past the limit, and say the timer did it', async () => {
     // Arrange
     const { attention, clock, resurfacer } = world(30);
     await attention.raise(SESSION, ASK, AGENT);
+    await attention.reply(SESSION, 'A1', HUMAN);
     clock.at = '2026-10-23T10:31:00.000Z';
 
     // Act
@@ -90,11 +92,12 @@ describe('Attention resurfacer', () => {
     });
   });
 
-  it('should leave an ask that is still inside the limit, one already surfaced, and surface nothing twice', async () => {
+  it('should leave an ask that is still inside the limit, one on the owner’s turn, and surface nothing twice', async () => {
     // Arrange
     const { attention, clock, resurfacer } = world(30);
     await attention.raise(SESSION, ASK, AGENT);
-    await attention.raise(SESSION, { ...ASK, subject: 'Which cluster?', surface: true }, AGENT);
+    await attention.reply(SESSION, 'A1', HUMAN);
+    await attention.raise(SESSION, { ...ASK, subject: 'Which cluster?' }, AGENT);
     clock.at = '2026-10-23T10:29:00.000Z';
 
     // Act

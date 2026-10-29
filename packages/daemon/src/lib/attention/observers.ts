@@ -2,7 +2,6 @@ import type { SessionAttentionSummary } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import {
   boardReplyMessage,
-  conversationResponse,
   conversationTurn,
   discussMessage,
   needsInfoMessage,
@@ -160,30 +159,24 @@ export class AttentionBoardUndelivered implements AttentionUndeliveredSink {
 
 /**
  * A person's chat message, read against the ferret's open items (`conversationTurn`): the words to
- * deliver, and — once they are accepted — the items they answered resolved in the owner's name.
+ * deliver, and — once they are accepted — each item they named made the ferret's turn. Nothing resolves.
  *
  * Total on the way in: a board that cannot be read leaves the message exactly as written, because a
  * person's words must never be refused for the sake of a decoration.
  */
 export class AttentionConversation {
-  constructor(private readonly attention: Pick<AttentionService, 'list' | 'answer' | 'resolve'>) {}
+  constructor(private readonly attention: Pick<AttentionService, 'list' | 'reply'>) {}
 
   async prepare(sessionId: string, message: string): Promise<ReturnType<typeof conversationTurn>> {
     const listed = await this.attention.list(sessionId).catch(() => undefined);
-    if (listed === undefined || !listed.ok) return { message, answers: [] };
+    if (listed === undefined || !listed.ok) return { message, referenced: [] };
     return conversationTurn(message, listed.value.items);
   }
 
-  /** Resolves every item the accepted message answered; each on its own, none able to fail the send. */
-  async settle(sessionId: string, turn: ReturnType<typeof conversationTurn>, original: string): Promise<void> {
-    for (const item of turn.answers) {
-      const response = conversationResponse(item, original);
-      const note = original.trim().slice(0, 2_048);
-      await (
-        response === undefined
-          ? this.attention.resolve(sessionId, item.id, { kind: 'human' }, note, 'conversation')
-          : this.attention.answer(sessionId, item.id, response, { kind: 'human' }, null, 'conversation')
-      ).catch(() => undefined);
+  /** Makes every item the accepted message named the ferret's turn; each on its own, none able to fail the send. */
+  async settle(sessionId: string, turn: ReturnType<typeof conversationTurn>): Promise<void> {
+    for (const item of turn.referenced) {
+      await this.attention.reply(sessionId, item.id, { kind: 'human' }).catch(() => undefined);
     }
   }
 }
