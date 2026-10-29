@@ -67,7 +67,7 @@ const board = (
 });
 
 interface Call {
-  readonly method: 'respond' | 'resolve' | 'dismiss' | 'needs-info' | 'progress';
+  readonly method: 'respond' | 'resolve' | 'dismiss' | 'needs-info' | 'discuss' | 'progress';
   readonly id: string;
   readonly payload: unknown;
 }
@@ -101,6 +101,13 @@ const recordingClient = (settle: (call: Call) => Promise<void> = async () => und
       expect(at).toBe(daemon);
       expect(where).toBe(scope);
       const call: Call = { method: 'needs-info', id, payload: note };
+      calls.push(call);
+      await settle(call);
+    },
+    discuss: async (at, where, id, note) => {
+      expect(at).toBe(daemon);
+      expect(where).toBe(scope);
+      const call: Call = { method: 'discuss', id, payload: note };
       calls.push(call);
       await settle(call);
     },
@@ -315,6 +322,22 @@ describe('AttentionPanel', () => {
     expect(view.container.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe(
       'Answered !A3: Allow',
     );
+  });
+
+  test('Discuss asks to talk it through at once, through discuss, and says so', async () => {
+    const recorded = recordingClient();
+    view = await mount(panel({ client: recorded.client }));
+    await interact(() => buttonNamed(cardOf(must(view?.container, 'view'), 'A3'), 'Discuss').click());
+    expect(recorded.calls).toEqual([{ method: 'discuss', id: 'A3', payload: undefined }]);
+    expect(view.container.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe(
+      'Asked to discuss !A3',
+    );
+  });
+
+  test('an item the ferret did not raise offers no Discuss', async () => {
+    const human = item('A3', { raisedBy: 'human', raisedBySession: null, raisedByName: null } as never);
+    view = await mount(panel({ snapshot: board([human]) }));
+    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-discuss]')).toBeNull();
   });
 
   test('Done resolves and Dismiss dismisses, each with no note', async () => {

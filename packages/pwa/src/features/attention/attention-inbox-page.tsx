@@ -15,11 +15,12 @@
  * pane is supplied by the host as `renderChat`.
  */
 
-import { attentionCardAnswers } from '@ferretry/protocol';
-import { ArrowRight, CheckCheck, X } from 'lucide-react';
+import { attentionCardAnswers, DISCUSS_LABEL } from '@ferretry/protocol';
+import { ArrowRight, CheckCheck, MessagesSquare, X } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
+import { canDiscussNow } from '../../lib/attention-answers.ts';
 import {
   actionSentence,
   attentionConversationPath,
@@ -27,7 +28,9 @@ import {
   type InboxAction,
   type InboxCard,
   type InboxResolved,
+  isInDiscussion,
   RESOLVED_READ_LIMIT,
+  waitingSentence,
 } from '../../lib/attention-inbox.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAttentionPath } from '../../lib/pages/routes.ts';
@@ -253,6 +256,12 @@ function RowFace({
         {origin.task === undefined ? origin.machine : `${origin.ferret} · ${origin.machine}`} ·{' '}
         {attentionReference(card.item.id)} · {attentionAge(card.item.waitingSince, now)}
       </span>
+      {isInDiscussion(card.item) ? (
+        <span className="fy-attn-row__state" data-attention-row-discussion="">
+          <MessagesSquare aria-hidden="true" size={11} />
+          {waitingSentence(card.item)}
+        </span>
+      ) : null}
     </>
   );
   return (
@@ -272,15 +281,21 @@ function RowFace({
 const ARROW = { left: '←', up: '↑', right: '→' } as const;
 
 /**
- * What each swipe does on the card on top, in the order the answer bar lays them out — "← No · → Yes".
- * Read off that card's own answers, so the hint can never promise a swipe the card does not take.
+ * What each swipe does on the card on top, in the order the answer bar lays them out — "Swipe ← No · →
+ * Yes · ↓ Discuss". Read off that card's own answers, so the hint can never promise a swipe the card does
+ * not take; ↓ Discuss closes it wherever a ferret can be talked to, even on a card with no answers.
  */
 export const swipeHintFor = (card: InboxCard | undefined): string => {
   if (card === undefined) return '';
-  const answers = attentionCardAnswers(card.item);
-  return answers.length === 0
-    ? 'Reply in words, or open the chat'
-    : `Swipe ${answers.map(answer => `${ARROW[answer.direction]} ${answer.label}`).join(' · ')}`;
+  const swipes = [
+    ...attentionCardAnswers(card.item).map(answer => `${ARROW[answer.direction]} ${answer.label}`),
+    ...(canDiscussNow(card.item) ? [`↓ ${DISCUSS_LABEL}`] : []),
+  ];
+  const [only] = swipes;
+  if (only === undefined) return 'Reply in words, or open the chat';
+  return attentionCardAnswers(card.item).length === 0
+    ? `Reply in words, or open the chat · ${only}`
+    : `Swipe ${swipes.join(' · ')}`;
 };
 
 export function AttentionInboxPage({

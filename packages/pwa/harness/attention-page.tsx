@@ -281,6 +281,23 @@ const TASK_CARDS: readonly InboxCard[] = [
   card(REBASE, SESSIONS[0] as SessionView, 'studio'),
 ];
 
+const DISCUSSING = item('A7', 6, {
+  subject: 'Which database should keep the board’s finished items across restarts?',
+  why: 'The board forgets every finished item when the app restarts.',
+  ask: { kind: 'multiple-choice', options: [{ label: 'SQLite' }, { label: 'Postgres' }, { label: 'Keep memory' }] },
+  kind: 'choice',
+  waitingOn: 'ferret',
+  waitingFor: 'discussion',
+  askedAt: ago(4),
+  history: [{ at: ago(4), kind: 'discuss', note: 'Why not just keep the board in memory?' }],
+} as Partial<AttentionItem>);
+
+const DISCUSS_CARDS: readonly InboxCard[] = [
+  card(DISCUSSING, SESSIONS[0] as SessionView, 'studio'),
+  card(REBASE, SESSIONS[1] as SessionView, 'studio'),
+  card(DEPLOY, SESSIONS[0] as SessionView, 'studio'),
+];
+
 const BOARD: AttentionSnapshot = {
   v: 1,
   sessionId: 'fr',
@@ -362,7 +379,7 @@ function ChatPane({
       <div className="p-panel">
         <AttentionPanel
           chip={{ on: chip, onChange: setChip }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
           connection={CONNECTION}
           focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
           id="attention-panel"
@@ -528,7 +545,7 @@ function QuietChat({ open }: { readonly open: readonly AttentionItem[] }): React
       <div className="p-panel">
         <AttentionPanel
           chip={{ on: true, onChange: () => undefined }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
           connection={CONNECTION}
           focus={null}
           id="attention-panel"
@@ -595,6 +612,10 @@ createRoot(root).render(
     <Inbox cards={TASK_CARDS} phone />
   ) : view === 'task-inbox-desktop' ? (
     <Inbox cards={TASK_CARDS} phone={false} />
+  ) : view === 'discuss-inbox-phone' ? (
+    <Inbox cards={DISCUSS_CARDS} phone />
+  ) : view === 'discuss-inbox-desktop' ? (
+    <Inbox cards={DISCUSS_CARDS} phone={false} />
   ) : view === 'overload' ? (
     <Panel board={OVERLOAD_BOARD} target={null} />
   ) : view === 'rich' ? (

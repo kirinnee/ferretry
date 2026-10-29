@@ -24,7 +24,15 @@ import {
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
-import { answerAction, cardAnswers, isTextOnlyAsk, kindWord, optionAction } from '../../lib/attention-answers.ts';
+import {
+  answerAction,
+  canDiscussNow,
+  cardAnswers,
+  discussAction,
+  isTextOnlyAsk,
+  kindWord,
+  optionAction,
+} from '../../lib/attention-answers.ts';
 import {
   answersPerQuestion,
   hasAttentionBrief,
@@ -35,6 +43,7 @@ import {
   replyAction,
   updatedSinceAsked,
   visibleWhy,
+  waitingSentence,
 } from '../../lib/attention-inbox.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
@@ -137,7 +146,6 @@ export function AttentionCard({
       ? undefined
       : { decision: lone.recommended, ...(lone.why === undefined ? {} : { why: lone.why }) });
   const hasDismissAnswer = answers.some(answer => answer.does === 'dismiss');
-  const ferret = origin?.ferret ?? 'the ferret';
   const focusRequests = (draft?.focusTick ?? 0) + localTick;
 
   const openReply = (): void => {
@@ -353,7 +361,8 @@ export function AttentionCard({
         replyRef={replyRef}
         arrows={swipeHints || pinned}
         swipeHints={swipeHints}
-        {...(isWaitingOnFerret(item) ? { waitingOn: ferret } : {})}
+        {...(isWaitingOnFerret(item) ? { waiting: waitingSentence(item, origin?.ferret) } : {})}
+        {...(canDiscussNow(item) ? { onDiscuss: () => give(discussAction(reply)) } : {})}
         {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}
       />
       {origin === undefined || pinned ? null : (

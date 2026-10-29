@@ -259,6 +259,11 @@ export class DaemonAttentionClient {
     return this.#mutate(daemon, scope, { action: 'needs-info', id, ...(note === undefined ? {} : { note }) });
   }
 
+  /** Asks the ferret to talk an item through before the owner answers; the item stays open, "in discussion". */
+  discuss(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'discuss', id, ...(note === undefined ? {} : { note }) });
+  }
+
   /** Unpair one daemon without perturbing any other daemon's cache or work. */
   clearDaemon(daemonId: DaemonId): void {
     this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);

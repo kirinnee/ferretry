@@ -161,6 +161,13 @@ try {
       page = await open(desktop, theme, 'task-inbox-desktop');
       await shot(page, scheme, 'task-inbox-desktop', true);
       await page.close();
+      // An item the owner asked to discuss: the row says "In discussion"; the card stays answerable.
+      page = await open(phone, theme, 'discuss-inbox-phone');
+      await shot(page, scheme, 'discuss-inbox-phone');
+      await page.close();
+      page = await open(desktop, theme, 'discuss-inbox-desktop');
+      await shot(page, scheme, 'discuss-inbox-desktop', true);
+      await page.close();
       for (const [direction, sign] of [
         ['right', 1],
         ['left', -1],

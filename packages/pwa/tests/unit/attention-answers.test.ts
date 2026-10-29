@@ -4,7 +4,9 @@ import {
   answerAction,
   answerActions,
   answerNote,
+  canDiscussNow,
   cardAnswers,
+  discussAction,
   hasCustomLabel,
   isTextOnlyAsk,
   kindWord,
@@ -120,14 +122,52 @@ describe('the swipe map is built from the card’s answers', () => {
     expect(labels(attentionItem('A1', { ask: { kind: 'task' } }))).toEqual({
       left: 'Need more info',
       right: 'Done',
+      down: 'Discuss',
     });
-    expect(labels(attentionItem('A2', { kind: 'yesno' }))).toEqual({ left: 'No', right: 'Yes' });
-    expect(labels(attentionItem('A3', { ask: { kind: 'permission' } }))).toEqual({ left: 'Deny', right: 'Allow' });
+    expect(labels(attentionItem('A2', { kind: 'yesno' }))).toEqual({ left: 'No', right: 'Yes', down: 'Discuss' });
+    expect(labels(attentionItem('A3', { ask: { kind: 'permission' } }))).toEqual({
+      left: 'Deny',
+      right: 'Allow',
+      down: 'Discuss',
+    });
     expect(labels(attentionItem('A4', { kind: 'review' }))).toEqual({
       left: 'Needs changes',
       right: 'Looks good',
+      down: 'Discuss',
     });
-    expect(labels(attentionItem('A5'))).toEqual({ right: 'Got it' });
+    expect(labels(attentionItem('A5'))).toEqual({ right: 'Got it', down: 'Discuss' });
+  });
+
+  it('always adds Discuss down on a ferret-raised card, never in one of the three answer slots', () => {
+    const item = attentionItem('A1', { ask: choices('One', 'Two', 'Three') });
+    const targets = swipeTargets(item, 'why this?');
+    expect(Object.keys(targets).sort()).toEqual(['down', 'left', 'right', 'up']);
+    expect(targets.down).toEqual({
+      label: 'Discuss',
+      action: { kind: 'discuss', label: 'Discuss', note: 'why this?' },
+    });
+    expect(targets.down?.answer).toBeUndefined();
+    expect(swipeMap(item).down).toEqual({ kind: 'discuss', label: 'Discuss' });
+  });
+
+  it('hides Discuss on an item no ferret raised, and once the item is already in discussion', () => {
+    const human = attentionItem('A1', { raisedBy: 'human', raisedBySession: null, raisedByName: null } as never);
+    expect(canDiscussNow(human)).toBe(false);
+    expect(swipeTargets(human).down).toBeUndefined();
+    const inDiscussion = attentionItem('A2', {
+      waitingOn: 'ferret',
+      askedAt: '2026-07-31T10:42:00.000Z',
+      waitingFor: 'discussion',
+    });
+    expect(canDiscussNow(inDiscussion)).toBe(false);
+    expect(swipeTargets(inDiscussion).down).toBeUndefined();
+    expect(canDiscussNow(attentionItem('A3'))).toBe(true);
+    expect(canDiscussNow({ kind: 'info' } as never)).toBe(false);
+  });
+
+  it('sends the discuss note trimmed, and none when the reply is blank', () => {
+    expect(discussAction('  hmm  ')).toEqual({ kind: 'discuss', label: 'Discuss', note: 'hmm' });
+    expect(discussAction('   ')).toEqual({ kind: 'discuss', label: 'Discuss' });
   });
 
   it('gives a choice its recommended option on the right, then up, then left', () => {
@@ -148,14 +188,14 @@ describe('the swipe map is built from the card’s answers', () => {
 
   it('gives a card with no answers no swipe at all, so no direction ever commits', () => {
     const reply = attentionItem('A1', { ask: { kind: 'open-question' } });
-    expect(swipeTargets(reply)).toEqual({});
-    expect(swipeMap(reply)).toEqual({});
+    expect(Object.keys(swipeTargets(reply))).toEqual(['down']);
+    expect(Object.keys(swipeMap(reply))).toEqual(['down']);
     expect(answerActions(reply)).toEqual([]);
   });
 
   it('gives exactly the answers the ferret wrote, leaving the other directions empty', () => {
     const item = withAnswers([{ direction: 'up', does: 'dismiss', label: 'Skip' }], { ask: { kind: 'task' } });
-    expect(Object.keys(swipeMap(item))).toEqual(['up']);
+    expect(Object.keys(swipeMap(item))).toEqual(['up', 'down']);
     const only = withAnswers([{ direction: 'right', does: 'approve', label: 'Allow' }], { kind: 'info' });
     expect(swipeMap(only).left).toBeUndefined();
     expect(swipeMap(only).up).toBeUndefined();
@@ -174,6 +214,7 @@ describe('the swipe map is built from the card’s answers', () => {
   it('carries the reply as the note on every sendable swipe', () => {
     const item = attentionItem('A1', { ask: { kind: 'permission' } });
     expect(swipeMap(item, 'only /tmp')).toEqual({
+      down: { kind: 'discuss', label: 'Discuss', note: 'only /tmp' },
       left: {
         kind: 'respond',
         label: 'Deny',
@@ -204,18 +245,18 @@ describe('the swipe map is built from the card’s answers', () => {
 describe('an old item migrates to the same controls', () => {
   it('turns an old three-way choice into three swipes and no extra buttons', () => {
     const old = attentionItem('A1', { ask: choices('One', 'Two', 'Three') });
-    expect(Object.keys(swipeTargets(old)).sort()).toEqual(['left', 'right', 'up']);
+    expect(Object.keys(swipeTargets(old)).sort()).toEqual(['down', 'left', 'right', 'up']);
     expect(answerActions(old)).toHaveLength(3);
   });
 
   it('turns an old two-option choice into left and right only', () => {
     const old = attentionItem('A1', { ask: choices('Yes', 'No') });
-    expect(Object.keys(swipeTargets(old)).sort()).toEqual(['left', 'right']);
+    expect(Object.keys(swipeTargets(old)).sort()).toEqual(['down', 'left', 'right']);
   });
 
   it('keeps options past the third as extra buttons, sent as choices and never swiped', () => {
     const old = attentionItem('A1', { ask: choices('One', 'Two', 'Three', 'Four', 'Five') });
-    expect(Object.keys(swipeTargets(old)).sort()).toEqual(['left', 'right', 'up']);
+    expect(Object.keys(swipeTargets(old)).sort()).toEqual(['down', 'left', 'right', 'up']);
     const actions = answerActions(old, 'note');
     expect(actions).toHaveLength(5);
     expect(actions.slice(3)).toEqual([

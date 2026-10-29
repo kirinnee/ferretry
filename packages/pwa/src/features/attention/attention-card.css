@@ -754,6 +754,16 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-reply-toggle__chevron[data-open] {
   transform: rotate(180deg);
 }
+/* Discuss: a quiet button beside Reply — the fixed fourth answer, the downward swipe. */
+.fy-attn-discuss {
+  min-height: 36px;
+  flex-shrink: 0;
+  gap: 6px;
+  color: var(--muted);
+}
+.fy-attn-actions__row--end {
+  justify-content: flex-end;
+}
 
 /* The detail scrolls inside the card; the header and the answer bar stay put. In the deck the card is
    capped to the screen, and the detail is its own scroller: a vertical drag there scrolls the detail, a
@@ -802,6 +812,16 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-deck__peek .fy-attn-card {
   max-height: none;
   height: 100%;
+}
+
+/* DISCUSS IS THE DOWNWARD SWIPE. The card's detail is its own scroller and keeps vertical panning (the
+   deck's inline `touch-action`); the header, title and answer bar are the parts a drag down can be read
+   from, so they hand the browser nothing vertical the card uses. */
+.fy-attn-deck__top[data-has-discuss] .fy-attn-card > :not(.fy-attn-card__scroll) {
+  touch-action: pan-up;
+}
+.fy-attn-deck__top[data-has-discuss][data-has-up] .fy-attn-card > :not(.fy-attn-card__scroll) {
+  touch-action: none;
 }
 
 /* The stamp: arrow and label, opaque, growing as the drag nears the threshold. */
