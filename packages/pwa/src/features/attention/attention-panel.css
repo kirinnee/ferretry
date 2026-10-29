@@ -165,3 +165,86 @@
   color: var(--faint);
   white-space: pre-wrap;
 }
+
+/* THE FOLD (attention-collapse.ts): a ⌄ at the end of the pinned card's header, and — folded — one slim
+   line above the composer. The line is a real button, so Enter and Space unfold it. */
+.fy-attn-collapse {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  margin: -6px -6px -6px 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-attn-collapse:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-attn-collapse:focus-visible,
+.fy-attn-collapsed:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+.fy-attn-panel[data-folded] {
+  max-height: none;
+  overflow: visible;
+}
+.fy-attn-collapsed {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  align-items: center;
+  gap: var(--gap-xs);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--accent-soft);
+  padding: 0 var(--gap-sm);
+  color: var(--fg);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.fy-attn-collapsed:hover {
+  border-color: var(--accent);
+}
+.fy-attn-collapsed__dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.fy-attn-collapsed__lead,
+.fy-attn-collapsed__more {
+  flex-shrink: 0;
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+}
+.fy-attn-collapsed__sep {
+  flex-shrink: 0;
+  color: var(--faint);
+}
+.fy-attn-collapsed__title {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-attn-collapsed__more {
+  color: var(--muted);
+}
+.fy-attn-collapsed__go {
+  flex-shrink: 0;
+  margin-left: auto;
+  color: var(--faint);
+  font-size: var(--text-base, 1rem);
+}
