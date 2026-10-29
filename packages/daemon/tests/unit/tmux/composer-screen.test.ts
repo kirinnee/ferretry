@@ -508,3 +508,41 @@ describe('the ink of a composer outranks where its cursor sits', () => {
     should(composerRows('nothing to type into\n')).be.undefined();
   });
 });
+
+/**
+ * Claude Code 2.1.281 in a 24-row pane, holding two queued peer messages. The first is a multi-line
+ * message long enough to push its own head off the top of the frame, so only its tail is on screen;
+ * it also draws that message without its lone ``` fence row. Captured from a real busy session.
+ */
+describe('a Claude queue that runs past the top of a short pane', () => {
+  const frame = readFileSync(join(FIXTURES, 'claude-2.1.281-busy-queued-overflow.txt'), 'utf8');
+  const cursor = { x: 2, y: 17 };
+  const envelope =
+    '[message from ferret geraldine (session mvsrxp4z-35ae1b1b) — not from the owner]\n' +
+    'No reply needed. To reply: fy send geraldine "<reply>"\n\n';
+  const FIRST =
+    `${envelope}First paragraph of a queued message that is long enough to wrap over several rows in a ` +
+    'standard width pane so the reader has to follow wrapped continuation rows properly.\n\n' +
+    '  - bullet one\n  - bullet two\n\nSecond paragraph: ```\ncode line\n```\nEnd.';
+  const SECOND = `${envelope}short second queued message`;
+
+  it('should prove the message whose head scrolled off by the tail still on screen', () => {
+    should(paneHoldOf(frame, cursor, FIRST, false)).equal('queue');
+  });
+
+  it('should still prove the message drawn in full', () => {
+    should(paneHoldOf(frame, cursor, SECOND, false)).equal('queue');
+  });
+
+  it('should report the queue as incomplete, and a message it cannot find as unknown rather than absent', () => {
+    const queue = readHarnessQueue(frame);
+    should(queue.complete).be.false();
+    should(queue.cutOff).startWith('- bullet two');
+    should(paneHoldOf(frame, cursor, `${envelope}a message that was never typed here at all`, false)).equal('unknown');
+  });
+
+  it('should not take a short tail of the cut-off message for a different payload', () => {
+    should(paneHoldOf(frame, cursor, 'Second paragraph: ``` code line End.', false)).equal('unknown');
+    should(paneHoldOf(frame, cursor, 'End.', false)).equal('unknown');
+  });
+});

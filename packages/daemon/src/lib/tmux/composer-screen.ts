@@ -207,6 +207,11 @@ export function composerInput(reading: ComposerReading | undefined): string {
 export interface HarnessQueue {
   readonly entries: readonly string[];
   readonly complete: boolean;
+  /**
+   * The rows of a queued message whose first row is above the top of the frame, when the block runs
+   * off it: a message too long for a short pane loses its head and keeps its tail on screen.
+   */
+  readonly cutOff?: string;
 }
 
 /** The messages a harness shows as waiting in its own queue: Codex's pending block, then Claude's. */
@@ -219,7 +224,11 @@ export function readHarnessQueue(visible: string): HarnessQueue {
   const lines = visible.replaceAll('\r\n', '\n').split('\n');
   const at = lineIndexOfComposer(lines);
   const claude = readClaudeQueue(lines, at);
-  return { entries: [...readCodexPending(lines, at ?? lines.length), ...claude.entries], complete: claude.complete };
+  return {
+    entries: [...readCodexPending(lines, at ?? lines.length), ...claude.entries],
+    complete: claude.complete,
+    ...(claude.cutOff === undefined ? {} : { cutOff: claude.cutOff }),
+  };
 }
 
 /**
@@ -287,7 +296,9 @@ function readClaudeQueue(lines: readonly string[], at: number | undefined): Harn
     }
     break;
   }
-  return { entries, complete: index >= 0 };
+  if (index >= 0) return { entries, complete: true };
+  const cutOff = body.filter(row => row !== '').join(' ');
+  return { entries, complete: false, ...(cutOff === '' ? {} : { cutOff }) };
 }
 
 function claudeQueueHint(lines: readonly string[], at: number | undefined): number | undefined {
@@ -297,8 +308,12 @@ function claudeQueueHint(lines: readonly string[], at: number | undefined): numb
   return undefined;
 }
 
+/**
+ * Claude's queue draws a message without its fence rows: a payload's lone ``` line is absent from the
+ * rows it shows (measured, 2.1.281), so fences are dropped from both sides before they are compared.
+ */
 function squeezed(value: string): string {
-  return value.normalize('NFC').replace(/\s+/gu, '');
+  return value.normalize('NFC').replaceAll('```', '').replace(/\s+/gu, '');
 }
 
 /** Below this length a clipped entry proves nothing: `ok…` is the start of too many messages. */
@@ -316,6 +331,15 @@ export function showsPayload(drawn: string, text: string): boolean {
   if (!shown.endsWith('…')) return false;
   const prefix = shown.slice(0, -1);
   return prefix.length >= CLIPPED_MATCH_MIN && wanted.startsWith(prefix);
+}
+
+/**
+ * Whether rows drawn from the middle of a message are the END of this payload — the part of a queued
+ * message a short pane still shows once its head has scrolled off. Too short a tail proves nothing.
+ */
+function endsPayload(tail: string, text: string): boolean {
+  const shown = squeezed(tail);
+  return shown.length >= CLIPPED_MATCH_MIN && squeezed(text).endsWith(shown);
 }
 
 /**
@@ -361,5 +385,6 @@ export function paneHoldOf(visible: string, cursor: ComposerCursor, text: string
   }
   const queue = readHarnessQueue(visible);
   if (queue.entries.some(entry => showsPayload(entry, text))) return 'queue';
+  if (queue.cutOff !== undefined && endsPayload(queue.cutOff, text)) return 'queue';
   return queue.complete ? 'absent' : 'unknown';
 }
