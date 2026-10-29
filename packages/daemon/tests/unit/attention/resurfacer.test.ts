@@ -31,8 +31,10 @@ class MemoryRepository implements AttentionLedgerRepository {
 class Timers implements AttentionSweepTimers {
   readonly scheduled: Array<{ key: string; delayMs: number }> = [];
   readonly cancelled: string[] = [];
-  schedule(key: string, delayMs: number): void {
+  readonly callbacks: Array<() => void> = [];
+  schedule(key: string, delayMs: number, run: () => void): void {
     this.scheduled.push({ key, delayMs });
+    this.callbacks.push(run);
   }
   cancel(key: string): void {
     this.cancelled.push(key);
@@ -112,15 +114,23 @@ describe('Attention resurfacer', () => {
 
   it('should sweep on start, keep sweeping on its interval, and stop on request', async () => {
     // Arrange
-    const { resurfacer, timers } = world();
+    const { attention, clock, resurfacer, timers } = world(30);
+    await attention.raise(SESSION, ASK, AGENT);
+    await attention.reply(SESSION, 'A1', HUMAN);
+    clock.at = '2026-10-23T10:31:00.000Z';
 
     // Act
     resurfacer.start();
     await new Promise(resolve => setTimeout(resolve, 0));
+    timers.callbacks[0]?.();
+    await new Promise(resolve => setTimeout(resolve, 0));
     resurfacer.stop();
 
     // Assert
-    should(timers.scheduled).deepEqual([{ key: 'attention-resurface', delayMs: 60_000 }]);
+    should(timers.scheduled).deepEqual([
+      { key: 'attention-resurface', delayMs: 60_000 },
+      { key: 'attention-resurface', delayMs: 60_000 },
+    ]);
     should(timers.cancelled).deepEqual(['attention-resurface']);
   });
 });
