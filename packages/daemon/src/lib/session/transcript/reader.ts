@@ -44,6 +44,15 @@ export interface TranscriptDigestJournal {
   assertReadable(sessionId: string): Promise<void>;
 }
 
+/**
+ * A held fold of each session's portable rows, extended by what was appended (`ConversationIndex`).
+ *
+ * A port rather than the class so the reader can be handed one without knowing how it holds its folds.
+ */
+export interface TranscriptRowsIndex {
+  rows(target: TranscriptTarget, file: string): Promise<readonly PortableConversationRow[] | undefined>;
+}
+
 /** The most recent window of a transcript, which is all any in-flight question needs. */
 export const DEFAULT_TRANSCRIPT_TAIL = 400;
 
@@ -133,7 +142,8 @@ async function tailWindow(
   const window = source.window(file, { sessionId, start: { at: 'tail', bytes } });
   let events: TranscriptEvent[] = [];
   // A window that began mid-file cannot number its lines, so a first batch that does began at byte
-  // zero: there is nothing older for a wider window to find. No batch at all is an empty file.
+  // zero: there is nothing older for a wider window to find. A placed window always answers its first
+  // step with a batch (see `NodeTranscriptWindow`), so no batch at all is an empty or unplaceable file.
   let fromStart: boolean | undefined;
   let complete = false;
   let offset = 0;
@@ -258,6 +268,7 @@ export class SessionTranscriptReader {
     sources: readonly TranscriptSource[],
     private readonly resolver: TranscriptFileResolver,
     private readonly journal?: TranscriptDigestJournal,
+    private readonly index?: TranscriptRowsIndex,
   ) {
     this.bySource = new Map(sources.map(source => [source.harness, source]));
   }
@@ -370,7 +381,7 @@ export class SessionTranscriptReader {
     await this.requireJournalProof(target);
     const file = await this.resolver.file(target.sessionId).catch(() => undefined);
     if (file === undefined) return undefined;
-    return this.rowsOf(target, await this.readFile(target, file));
+    return await this.rowsFrom(target, file);
   }
 
   /**
@@ -387,6 +398,18 @@ export class SessionTranscriptReader {
     file: string,
   ): Promise<readonly PortableConversationRow[] | undefined> {
     await this.requireJournalProof(target);
+    return await this.rowsFrom(target, file);
+  }
+
+  /**
+   * The rows of one resolved file: from the conversation index when this reader has one, which folds
+   * only what was appended since its last read, or from one complete read when it does not.
+   */
+  private async rowsFrom(
+    target: TranscriptTarget,
+    file: string,
+  ): Promise<readonly PortableConversationRow[] | undefined> {
+    if (this.index !== undefined) return await this.index.rows(target, file);
     return this.rowsOf(target, await this.readFile(target, file));
   }
 

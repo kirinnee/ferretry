@@ -1,5 +1,6 @@
 export * from './claude-path.ts';
 export * from './codex-rollout.ts';
+export * from './conversation-index.ts';
 export * from './digest.ts';
 export * from './discovery-pacing.ts';
 export * from './image-reader.ts';

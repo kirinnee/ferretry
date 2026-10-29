@@ -456,7 +456,12 @@ import {
   TmuxPaneQueue,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { LOOP_PARSE_PACING, NodeTranscriptImageFiles, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import {
+  LOOP_PARSE_PACING,
+  NodeTranscriptFileRuntime,
+  NodeTranscriptImageFiles,
+  NodeTranscriptSource,
+} from '../src/adapters/transcript/index.ts';
 import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
   FileSessionAttachmentCopier,
@@ -607,8 +612,10 @@ import {
   CodexTranscriptParser,
   type ConversationAdopter,
   type ConversationConvert,
+  ConversationDigestError,
   type ConversationFilesPort,
   ConversationImportService,
+  ConversationIndex,
   type ConversationLinker,
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
@@ -7238,6 +7245,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     new NodeTranscriptSource(codexTranscriptParser),
   ];
   /**
+   * Every session's addressable conversation, folded once and extended by what was appended — one for
+   * the daemon, so a page of a long session costs its appended bytes rather than the whole file. See
+   * `ConversationIndex` for what is proved before a held fold is extended.
+   */
+  const conversationIndex = new ConversationIndex(
+    transcriptSources,
+    new NodeTranscriptFileRuntime(),
+    LOOP_PARSE_PACING,
+  );
+  /**
    * A separate read surface for conversations that existed before Ferretry.
    *
    * It shares the exact parser instances used by managed sessions, but its filesystem capability
@@ -7299,6 +7316,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       transcriptSources,
       resolver,
       new StorageTranscriptDigestJournal(storage),
+      conversationIndex,
     );
     return {
       read: async sessionId => {
@@ -7313,10 +7331,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         if (provenance === undefined || provenance.identity === 'undiscovered' || provenance.file !== file)
           return { kind: 'unresolved' };
 
-        const rows = await reader
-          .portableRowsFromFile({ sessionId, harness: config.data.harness }, file)
-          .catch(() => undefined);
-        if (rows === undefined) return { kind: 'unreadable' };
+        // A refusal keeps its reason: "could not read completely" alone cannot tell a damaged record
+        // from a missing journal from a file replaced mid-read, and the operator needs to know which.
+        let rows: Awaited<ReturnType<SessionTranscriptReader['portableRowsFromFile']>>;
+        try {
+          rows = await reader.portableRowsFromFile({ sessionId, harness: config.data.harness }, file);
+        } catch (error) {
+          return {
+            kind: 'unreadable',
+            reason: error instanceof ConversationDigestError ? error.message : 'an unexpected error stopped its read',
+          };
+        }
+        if (rows === undefined) return { kind: 'unreadable', reason: 'no transcript source speaks its harness' };
         return {
           kind: 'read',
           context: { sessionId, incarnation: config.data.incarnation, provenance },

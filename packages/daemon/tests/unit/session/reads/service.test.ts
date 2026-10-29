@@ -768,12 +768,26 @@ describe('OperatorReadService.messages', () => {
     should(missing).be.instanceof(OperatorReadError).and.have.property('failure', 'no_transcript');
     should(damaged).be.instanceof(OperatorReadError).and.have.property('failure', 'transcript_unreadable');
     should(unnamed).be.instanceof(OperatorReadError).and.have.property('failure', 'no_transcript');
-    // COMPLETELY, and the code is unchanged. A complete read is bounded at 32 MiB and a read that stops
-    // there reports `source-truncated`, which the digest owner refuses on rather than returning the rows
-    // it did manage to read — so an operator who reads "could not read it" and retries is being told the
-    // wrong thing. Clients still match the code; this asserts the human-facing half did not regress.
+    // COMPLETELY, and the code is unchanged. A damaged record or a record past the per-record bound is
+    // refused by the digest owner rather than the rows around it returned — so an operator who reads
+    // "could not read it" and retries is being told the wrong thing. Clients still match the code; this asserts the human-facing half did not regress.
     should((damaged as OperatorReadError).message).match(/could not read completely$/u);
     should((damaged as OperatorReadError).message).not.match(/could not read it$/u);
+  });
+
+  it('should say why a proved transcript could not be read completely, when the read knows', async () => {
+    // Arrange — "a damaged record" and "a missing journal" are both `transcript_unreadable`, and the
+    // human reading the error needs to know which one to go and fix.
+    const reads = service({ read: { kind: 'unreadable', reason: 'transcript for s1 is incomplete (invalid-json)' } });
+
+    // Act
+    const refusal = await reads.messages('s1', undefined, undefined).catch((error: unknown) => error);
+
+    // Assert
+    should(refusal).be.instanceof(OperatorReadError).and.have.property('failure', 'transcript_unreadable');
+    should((refusal as OperatorReadError).message).equal(
+      'session s1 has a proved transcript this daemon could not read completely: transcript for s1 is incomplete (invalid-json)',
+    );
   });
 
   it('should fail closed when the read answered under another session context', async () => {

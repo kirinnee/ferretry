@@ -193,6 +193,29 @@ describe('a window over a 300 MB transcript', () => {
     should(step.batch?.cursor.byteOffset).equal(user('old', -60_000).length + 2 * MiB);
   });
 
+  it('carries its limit notice on its own when the file is replaced under its first read', async () => {
+    const directory = await temporaryDirectory();
+    const file = join(directory, 'replaced.jsonl');
+    await writeFile(file, `${user('old', -60_000)}${'x'.repeat(2 * MiB)}\n${user('new', 1_000)}`);
+    await writeFile(`${file}.next`, user('other', 1_000));
+    // The read lands, then the file is swapped before the window checks it is still the one it read:
+    // that read is discarded and no batch comes of it, so the notice placement owes rides alone.
+    const runtime = new (class extends CountingRuntime {
+      override async readFrom(path: string, byteOffset: number, byteLimit: number): Promise<BoundedTranscriptRead> {
+        const read = await super.readFrom(path, byteOffset, byteLimit);
+        await rename(`${file}.next`, file);
+        return read;
+      }
+    })();
+
+    const step = await source(runtime, { maxWindowBytes: MiB })
+      .window(file, { sessionId: 's', start: since(0) })
+      .next();
+
+    should(step.batch?.issues.map(issue => issue.code)).eql(['source-truncated']);
+    should(step.batch?.events).eql([]);
+  });
+
   it('scans back past a chunk that holds no timestamp or no record boundary', async () => {
     const file = join(await temporaryDirectory(), 'tools.jsonl');
     // A huge old tool result (no boundary inside a chunk), then a stretch with no timestamp at all.
@@ -254,15 +277,24 @@ describe('a window from the end', () => {
     should(whole[0]?.cursor.nextLine).equal(4);
   });
 
-  it('places nothing past the end when the tail holds no boundary', async () => {
+  it('places nothing past the end when the tail holds no boundary, and says it began mid-file', async () => {
     const file = join(await temporaryDirectory(), 'one.jsonl');
-    await writeFile(file, `${user('a', 0)}${'x'.repeat(100)}`);
+    const content = `${user('a', 0)}${'x'.repeat(100)}`;
+    await writeFile(file, content);
 
     const step = await source(new CountingRuntime())
       .window(file, { sessionId: 's', start: { at: 'tail', bytes: 10 } })
       .next();
 
-    should(step).eql({ more: false });
+    // An empty batch rather than none: its cursor, which numbers no line, is how a tail learns the
+    // window began after byte zero and that a wider one would find the records before it.
+    should(step.more).be.false();
+    should(step.batch?.events).eql([]);
+    should(step.batch?.cursor).eql({
+      identity: step.batch?.cursor.identity,
+      byteOffset: Buffer.byteLength(content),
+      pendingBytes: 0,
+    });
   });
 });
 

@@ -273,6 +273,46 @@ describe('SessionTranscriptReader', () => {
     should(rows).be.empty();
   });
 
+  it('should answer rows from its conversation index when it has one, after the journal proof', async () => {
+    // Arrange: the index folds only what was appended, so a reader holding one never reads the file whole.
+    const calls: string[] = [];
+    const row = {
+      point: { v: 1, byteOffset: 0, blockIndex: 0 },
+      role: 'user',
+      text: 'from the index',
+      rawPrefix: new Uint8Array(32),
+    } as const;
+    const subject = new SessionTranscriptReader(
+      [
+        source('claude', async () => {
+          throw new Error('a reader with an index must not read the file whole');
+        }),
+      ],
+      resolving('/resolved.jsonl'),
+      { assertReadable: async sessionId => void calls.push(`journal ${sessionId}`) },
+      {
+        rows: async (target, file) => {
+          calls.push(`index ${target.sessionId} ${file}`);
+          return [row];
+        },
+      },
+    );
+
+    // Act
+    const resolved = await subject.portableRows({ sessionId: 'session-1', harness: 'claude' });
+    const pinned = await subject.portableRowsFromFile({ sessionId: 'session-1', harness: 'claude' }, '/pinned.jsonl');
+
+    // Assert
+    should(resolved).eql([row]);
+    should(pinned).eql([row]);
+    should(calls).eql([
+      'journal session-1',
+      'index session-1 /resolved.jsonl',
+      'journal session-1',
+      'index session-1 /pinned.jsonl',
+    ]);
+  });
+
   it('should answer no rows for a session whose transcript cannot be named or read', async () => {
     // Arrange
     const unresolvable = new SessionTranscriptReader(

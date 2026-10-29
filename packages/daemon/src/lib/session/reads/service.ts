@@ -223,14 +223,15 @@ export type OperatorMessageReadResult =
   /**
    * The exact file was proved, but it could not be read COMPLETELY as evidence.
    *
-   * It covers a file that vanished or would not parse and, deliberately, one that is simply too big:
-   * a complete read is bounded at 32 MiB (`DEFAULT_MAX_READ_BYTES` in the file transcript source), and
-   * a read that stops there reports `source-truncated`, which the digest owner counts as an incomplete
-   * transcript and refuses on. That fail-closed chain is why this is one variant rather than three —
-   * a shorter-looking conversation is LOST HISTORY, not a valid prefix, and serving its rows would
-   * offer a fork cut at a coordinate whose prefix the daemon never actually saw.
+   * It covers a file that vanished, would not parse, or held a record past the per-record bound. A
+   * transcript's SIZE is no longer one of them: the conversation index folds a long transcript a bounded
+   * read at a time, and leaves a live writer's unterminated last line for the next read. It stays one
+   * variant because a shorter-looking conversation is LOST HISTORY, not a valid prefix, and serving its
+   * rows would offer a fork cut at a coordinate whose prefix the daemon never actually saw.
+   *
+   * `reason` is the refusal's own words, for the human reading the error: which of those it was.
    */
-  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'unreadable'; readonly reason?: string }
   /** A completed read. `rows` may legitimately be empty — nothing portable has been said yet. */
   | {
       readonly kind: 'read';
@@ -619,10 +620,11 @@ export class OperatorReadService {
    * the conversation this page already claimed, and continuing past it would stitch one page of a
    * conversation onto another.
    *
-   * WHAT IT COSTS. One complete read per page — the source's own O(n) pass — plus one fixed-size MAC
-   * per served row and one for the cursor, and ONE vault open for the page's scrub. There is
-   * deliberately no second incremental parser and no re-hashing of whole prefixes per row, which is
-   * what a chained commitment buys.
+   * WHAT IT COSTS. The bytes appended since the session's last read — the conversation index folds a
+   * transcript once and extends it, so a page of a long session no longer re-reads it from byte zero —
+   * plus one fixed-size MAC per served row and one for the cursor, and ONE vault open for the page's
+   * scrub. The index is the source's own window and the digest owner's own fold, not a second parser,
+   * and nothing re-hashes a whole prefix per row, which is what a chained commitment buys.
    */
   async messages(
     sessionId: string,
@@ -639,19 +641,20 @@ export class OperatorReadService {
         'no_transcript',
         `session ${sessionId} has no transcript this daemon can prove is its own`,
       );
-    // "COULD NOT READ COMPLETELY", and that last word is load-bearing. One public code answers three
-    // things: a file that vanished, a file that would not parse, and a file whose complete read stopped
-    // at the 32 MiB v1 bound and reported `source-truncated` — which the digest owner counts as an
-    // incomplete transcript and refuses on rather than returning the rows it did manage to read. An
-    // operator told merely that the transcript could not be read will reasonably retry; told it could
-    // not be read COMPLETELY, they know a partial page existed and was deliberately withheld, because
-    // paging a prefix this daemon cannot prove is whole would offer a fork cut against history that may
-    // already be missing. The CODE is unchanged — clients still match `transcript_unreadable` — and this
-    // distinction is for the human reading the message.
+    // "COULD NOT READ COMPLETELY", and that last word is load-bearing. One public code answers a file
+    // that vanished, a file that would not parse and a record past the per-record bound — each of which
+    // the digest owner counts as an incomplete transcript and refuses on rather than returning the rows
+    // it did manage to read. An operator told merely that the transcript could not be read will
+    // reasonably retry; told it could not be read COMPLETELY, they know a partial page existed and was
+    // deliberately withheld, because paging a prefix this daemon cannot prove is whole would offer a fork
+    // cut against history that may already be missing. The CODE is unchanged — clients still match
+    // `transcript_unreadable` — and the distinction, with the refusal's own reason, is for the human.
     if (read.kind === 'unreadable')
       throw new OperatorReadError(
         'transcript_unreadable',
-        `session ${sessionId} has a proved transcript this daemon could not read completely`,
+        `session ${sessionId} has a proved transcript this daemon could not read completely${
+          read.reason === undefined ? '' : `: ${read.reason}`
+        }`,
       );
     // A token framed over an undiscovered provenance would be evidence about a snapshot the daemon has
     // since replaced, and it would stop verifying the moment the identity was established. So an
