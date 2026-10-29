@@ -54,10 +54,14 @@ export const DEFAULT_MAX_READ_BYTES = 32 * 1024 * 1024;
 /**
  * The most bytes retained for one unterminated record while waiting for its newline.
  *
- * A record larger than this cannot be parsed into anything useful, so it is discarded and reported
- * rather than buffered until the process dies.
+ * A record larger than this is discarded and reported rather than buffered until the process dies. It
+ * was 4 MiB, which a pasted screenshot passes: such a record, split across two bounded reads or caught
+ * mid-write, was dropped — and a messages read over a transcript holding one refused the whole
+ * conversation as incomplete. It is now two bounded reads: far past the largest record measured in a
+ * real 296 MB transcript (1.3 MB), past any screenshot a harness accepts, and still a bound — what one
+ * record can pin is 64 MiB for as long as its newline takes to arrive, never the file.
  */
-export const DEFAULT_MAX_PENDING_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_MAX_PENDING_BYTES = 64 * 1024 * 1024;
 
 /**
  * How far back from a file's end a `since` window may reach.
@@ -985,7 +989,13 @@ class NodeTranscriptWindow implements TranscriptWindow {
       return failed('transcript window could not be placed');
     }
     this.state = {
-      initialized: true,
+      // Not yet initialized, so the first step answers with a batch even when it reads nothing: its
+      // cursor is the only way a caller learns where the window was placed. A tail window over a file
+      // whose last record outgrows it is placed at the END — no record boundary inside it but the final
+      // newline — and answering that step with no batch read, to the tail, as "began at byte zero":
+      // the tail stopped there with no events, and a conversation ending in a pasted screenshot showed
+      // nothing at all. Its batch now says it began mid-file, and the tail widens.
+      initialized: false,
       seekToEnd: false,
       positioned: true,
       availability: 'present',

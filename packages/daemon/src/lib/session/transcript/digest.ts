@@ -150,7 +150,25 @@ type ConversationPassEntry =
       readonly point: ConversationMessagePoint;
       readonly omission: ConversationDigestOmission;
       readonly refusal: string;
+      /** False for record-level evidence sharing its point with a block: the point names the block. */
+      readonly targetable: boolean;
     };
+
+/**
+ * Whether an event claims a block of its record — and with it the point — rather than describing the
+ * record as a whole.
+ *
+ * A message is always a block, and so is anything the parser numbered. Record-level evidence — a
+ * Claude assistant record's token usage, a turn boundary — carries no block index, and `pointOf` reads
+ * that as block 0. It used to then collide with the record's own first block and refuse the whole
+ * transcript as ambiguous, which is every Claude assistant record that reports usage: every real
+ * conversation answered `transcript_unreadable`. It is not ambiguous. A cut or a cursor names a
+ * block, so a record-level event yields the point to the block that holds it and is never the target
+ * of a cut there; on a record with no block at that point it is still the evidence a cut refuses on.
+ */
+function claimsBlock(event: TranscriptEvent): boolean {
+  return event.kind === 'message' || event.blockIndex !== undefined;
+}
 
 /**
  * Normalize every event once, refusing incomplete or ambiguous evidence.
@@ -167,8 +185,9 @@ function conversationPass(sessionId: string, transcript: TranscriptBatch): reado
       `transcript for ${sessionId} is incomplete (${incomplete.code}); refusing to make a partial conversation digest`,
     );
 
-  const entries: ConversationPassEntry[] = [];
-  const seenPoints = new Set<string>();
+  // Every block's point first, so record-level evidence can yield to a block wherever it falls in the
+  // record's events. Two BLOCKS at one point are still ambiguous, and still refused.
+  const blockPoints = new Set<string>();
   for (const event of transcript.events) {
     const point = pointOf(event);
     if (point === undefined)
@@ -176,13 +195,20 @@ function conversationPass(sessionId: string, transcript: TranscriptBatch): reado
         'incomplete_transcript',
         `transcript for ${sessionId} has an unaddressable ${event.kind} event; refusing to guess its position`,
       );
+    if (!claimsBlock(event)) continue;
     const key = pointKey(point);
-    if (seenPoints.has(key))
+    if (blockPoints.has(key))
       throw new ConversationDigestError(
         'incomplete_transcript',
         `transcript for ${sessionId} has duplicate message point ${key}; refusing an ambiguous byte offset`,
       );
-    seenPoints.add(key);
+    blockPoints.add(key);
+  }
+
+  const entries: ConversationPassEntry[] = [];
+  for (const event of transcript.events) {
+    const point = pointOf(event) as ConversationMessagePoint;
+    const key = pointKey(point);
 
     if (event.kind === 'message' && event.role !== 'tool') {
       entries.push({
@@ -206,7 +232,13 @@ function conversationPass(sessionId: string, transcript: TranscriptBatch): reado
       event.kind === 'message'
         ? `transcript point ${key} is not a portable conversation message`
         : `transcript point ${key} is ${event.kind}, not a portable conversation message`;
-    entries.push({ kind: 'omission', point, omission, refusal });
+    entries.push({
+      kind: 'omission',
+      point,
+      omission,
+      refusal,
+      targetable: claimsBlock(event) || !blockPoints.has(key),
+    });
   }
   return entries;
 }
@@ -237,7 +269,7 @@ function cutConversation(
       continue;
     }
     omissions.push(entry.omission);
-    if (isTarget) throw new ConversationDigestError('target_not_message', entry.refusal);
+    if (isTarget && entry.targetable) throw new ConversationDigestError('target_not_message', entry.refusal);
   }
   if (cut === undefined)
     throw new ConversationDigestError(
@@ -327,6 +359,103 @@ export function portableConversationRows(
     if (entry.kind === 'row')
       rows.push({ ...entry.message, rawPrefix: rawPrefixFor(sessionId, entry.message.point, commitments) });
   return rows;
+}
+
+/**
+ * Where an incremental fold of one transcript's portable rows stands.
+ *
+ * It is the two facts the next fold must continue from and nothing else: `H` over every physical
+ * record already folded, and the byte the next record has to begin at. A fold that is handed a
+ * record beginning anywhere else refuses — see {@link extendPortableConversationRows}.
+ */
+export interface PortableConversationCheckpoint {
+  /** `H` over every record folded so far; the chain's start value before the first. */
+  readonly rawPrefix: Uint8Array;
+  /** One past the last folded record's final byte (its terminator included). */
+  readonly end: number;
+}
+
+/** The last physical record a fold consumed, so a later reader can prove it is still in the file. */
+export interface PortableConversationLastRecord {
+  readonly byteOffset: number;
+  /** Its length in the file, terminator included. */
+  readonly byteLength: number;
+  /** `H` before this record: extending it by the record's bytes must give the checkpoint's value. */
+  readonly before: Uint8Array;
+}
+
+/** One fold's result: the rows it added, and where the next fold continues. */
+export interface PortableConversationExtension {
+  readonly rows: readonly PortableConversationRow[];
+  readonly checkpoint: PortableConversationCheckpoint;
+  /** Absent only when the batch carried no record, so the previous last record still stands. */
+  readonly lastRecord?: PortableConversationLastRecord;
+}
+
+/** The checkpoint before byte zero: nothing folded, the chain at its domain-separated start. */
+export function startPortableConversation(): PortableConversationCheckpoint {
+  return { rawPrefix: sessionTranscriptRawPrefixStart(), end: 0 };
+}
+
+/** How long a fold may hash before it hands the event loop back, matching the sliced parse's own budget. */
+const FOLD_BUDGET_MS = 12;
+
+/** The clock and the yield a fold paces itself with; the sliced parse's pacing satisfies it. */
+export interface PortableConversationPacing {
+  now(): number;
+  yieldToLoop(): Promise<void>;
+}
+
+/**
+ * The rows of ONE MORE BATCH of a transcript already folded up to `checkpoint`, each bound to the
+ * commitment for its record — the same rows {@link portableConversationRows} gives for the same bytes.
+ *
+ * It exists so a transcript of hundreds of megabytes is folded once, a bounded read at a time, rather
+ * than re-read from byte zero for every page: the chain is a running hash, so `H` at the end of one
+ * batch is all the next batch needs. The refusals are the whole-file fold's own — the same pass, the
+ * same incomplete issues — plus one that only a fold in pieces needs: every record must begin EXACTLY
+ * where the previous one ended. A gap is bytes no hash covered and an overlap is bytes hashed twice, and
+ * either would bind a row to a prefix of a file that does not exist; contiguity from the checkpoint is
+ * what makes "this rawPrefix covers every byte before it" true rather than assumed.
+ *
+ * The hashing hands the loop back every {@link FOLD_BUDGET_MS}, because one batch is up to a bounded
+ * read of records and a bounded read is 32 MiB.
+ */
+export async function extendPortableConversationRows(
+  sessionId: string,
+  checkpoint: PortableConversationCheckpoint,
+  transcript: TranscriptBatch,
+  pacing: PortableConversationPacing,
+): Promise<PortableConversationExtension> {
+  const records = requireRawRecords(sessionId, transcript);
+  // The pass first: it refuses an incomplete batch before a byte of it is hashed.
+  const entries = conversationPass(sessionId, transcript);
+  const commitments = new Map<number, Uint8Array>();
+  let rawPrefix = checkpoint.rawPrefix;
+  let end = checkpoint.end;
+  let lastRecord: PortableConversationLastRecord | undefined;
+  let sliceStartedAt = pacing.now();
+  for (const record of records) {
+    if (record.byteOffset !== end)
+      throw new ConversationDigestError(
+        'incomplete_transcript',
+        `transcript for ${sessionId} has a physical record at byte offset ${record.byteOffset} where the next one must begin at ${end}; refusing a raw prefix over bytes it did not read exactly once`,
+      );
+    if (pacing.now() - sliceStartedAt >= FOLD_BUDGET_MS) {
+      await pacing.yieldToLoop();
+      sliceStartedAt = pacing.now();
+    }
+    const before = rawPrefix;
+    rawPrefix = extendSessionTranscriptRawPrefix(rawPrefix, record.bytes);
+    commitments.set(record.byteOffset, rawPrefix);
+    end = record.byteOffset + record.bytes.byteLength;
+    lastRecord = { byteOffset: record.byteOffset, byteLength: record.bytes.byteLength, before };
+  }
+  const rows: PortableConversationRow[] = [];
+  for (const entry of entries)
+    if (entry.kind === 'row')
+      rows.push({ ...entry.message, rawPrefix: rawPrefixFor(sessionId, entry.message.point, commitments) });
+  return { rows, checkpoint: { rawPrefix, end }, ...(lastRecord === undefined ? {} : { lastRecord }) };
 }
 
 /**

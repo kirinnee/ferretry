@@ -254,15 +254,24 @@ describe('a window from the end', () => {
     should(whole[0]?.cursor.nextLine).equal(4);
   });
 
-  it('places nothing past the end when the tail holds no boundary', async () => {
+  it('places nothing past the end when the tail holds no boundary, and says it began mid-file', async () => {
     const file = join(await temporaryDirectory(), 'one.jsonl');
-    await writeFile(file, `${user('a', 0)}${'x'.repeat(100)}`);
+    const content = `${user('a', 0)}${'x'.repeat(100)}`;
+    await writeFile(file, content);
 
     const step = await source(new CountingRuntime())
       .window(file, { sessionId: 's', start: { at: 'tail', bytes: 10 } })
       .next();
 
-    should(step).eql({ more: false });
+    // An empty batch rather than none: its cursor, which numbers no line, is how a tail learns the
+    // window began after byte zero and that a wider one would find the records before it.
+    should(step.more).be.false();
+    should(step.batch?.events).eql([]);
+    should(step.batch?.cursor).eql({
+      identity: step.batch?.cursor.identity,
+      byteOffset: Buffer.byteLength(content),
+      pendingBytes: 0,
+    });
   });
 });
 
