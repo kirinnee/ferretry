@@ -246,7 +246,7 @@ function StartCard({ call }: { readonly call: PackStartCall }) {
         {progress.state === 'unread' ? (
           <p className="fy-pack-muted fy-pack-line">Its answer was not recognised — see the command.</p>
         ) : null}
-        <Brief call={call} />
+        <Brief call={call} key="brief" />
       </>
     );
   const outcome = progress.value;
@@ -273,7 +273,7 @@ function StartCard({ call }: { readonly call: PackStartCall }) {
             Tried again — the next start is below.
           </p>
         ) : null}
-        <Brief call={call} />
+        <Brief call={call} key="brief" />
       </>
     );
   const started = outcome.attempts.filter(attempt => attempt.outcome === 'started').at(-1);
@@ -302,7 +302,7 @@ function StartCard({ call }: { readonly call: PackStartCall }) {
         </Fold>
       ) : null}
       <LiveState id={outcome.id} />
-      <Brief call={call} />
+      <Brief call={call} key="brief" />
       {call.collected === undefined ? null : <Collected progress={call.collected} />}
     </>
   );

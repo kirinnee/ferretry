@@ -93,7 +93,7 @@ describe('transcriptEntriesFromLog', () => {
     expect(entries.map(entry => [entry.kind, entry.label, entry.text])).toEqual([['tool', undefined, 'ran a tool']]);
     expect(entries[0]?.tools).toEqual([
       {
-        key: expect.stringMatching(/^log:1:/u) as unknown as string,
+        key: expect.stringMatching(/^log:[0-9a-z]+:\d+$/u) as unknown as string,
         use: { name: 'Read', input: { path: 'src/App.tsx' } },
         result: { text: 'output' },
       },
@@ -656,7 +656,8 @@ describe('transcriptEntriesFromLog · who a user record is from', () => {
   test('keeps the id the record would have had, whatever it was read as', () => {
     const [peer] = transcriptEntriesFromLog(peerLog, NOW);
     const [plain] = transcriptEntriesFromLog(peerLog.replace('[10:01:02] ', ''), NOW);
-    expect(peer?.id).toMatch(/^log:0:/);
+    // Named by the record itself (`recordIds`), so reading it as a peer message does not rename it.
+    expect(peer?.id).toMatch(/^log:[0-9a-z]+:\d+$/u);
     expect(plain).not.toHaveProperty('at');
     expect(plain?.peer?.name).toBe('torrey');
   });

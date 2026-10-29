@@ -52,7 +52,7 @@ import {
 import { CodeBlock } from './code-block.tsx';
 import { QuestionCard } from './question-card.tsx';
 import { Spinner } from './spinner.tsx';
-import { type NamedTranscriptImage, toolImageAlt, TranscriptImages } from './transcript-images.tsx';
+import { type NamedTranscriptImage, TranscriptImages, toolImageAlt } from './transcript-images.tsx';
 
 const iconFor = (kind: ToolKind) => {
   switch (kind) {
@@ -173,6 +173,23 @@ export const ToolGroup = memo(function ToolGroup({ calls, live, isLast, schedule
 
 const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGroupProps) {
   const [open, setOpen] = useState(false);
+  /**
+   * WHICH CALLS THE READER OPENED, held by the run rather than by each line. A lone finished call is
+   * drawn as a bare line and the same call inside a group as a child of it, so the moment a second
+   * call finishes the line moves in the tree — and state kept in the line would close under the
+   * reader. Opening a lone line also opens the group it will become part of.
+   */
+  const [openCalls, setOpenCalls] = useState<ReadonlySet<string>>(() => new Set());
+  const toggleCall = (key: string): void => {
+    const opening = !openCalls.has(key);
+    setOpenCalls(current => {
+      const next = new Set(current);
+      if (opening) next.add(key);
+      else next.delete(key);
+      return next;
+    });
+    if (opening) setOpen(true);
+  };
 
   // The trailing unfinished call of a live session is "running".
   const lastCall = calls[calls.length - 1];
@@ -195,7 +212,7 @@ const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGr
   if (history.length === 1 && first !== undefined) {
     return (
       <>
-        <ToolLine call={first} />
+        <ToolLine call={first} onToggle={toggleCall} open={openCalls.has(first.key)} />
         <RunImages calls={history} />
         {runningLine}
       </>
@@ -225,7 +242,7 @@ const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGr
         {open ? (
           <div className="border-l border-border-soft pl-1.5">
             {history.map(call => (
-              <ToolLine call={call} key={call.key} />
+              <ToolLine call={call} key={call.key} onToggle={toggleCall} open={openCalls.has(call.key)} />
             ))}
           </div>
         ) : null}
@@ -251,8 +268,15 @@ function RunningLine({ call, scheduler }: { readonly call: ToolCall; readonly sc
   );
 }
 
-function ToolLine({ call }: { readonly call: ToolCall }) {
-  const [open, setOpen] = useState(false);
+function ToolLine({
+  call,
+  open,
+  onToggle,
+}: {
+  readonly call: ToolCall;
+  readonly open: boolean;
+  readonly onToggle: (key: string) => void;
+}) {
   const summary = call.orphanResult ? ORPHAN_RESULT : extractToolSummary(call.use.name, call.use.input);
   const Icon = iconFor(summary.kind);
   const failed = call.result?.isError === true;
@@ -273,7 +297,7 @@ function ToolLine({ call }: { readonly call: ToolCall }) {
           'flex w-full items-center gap-1.5 rounded-control px-1.5 py-px text-left',
           hasBody ? 'cursor-pointer hover:bg-surface-2' : 'cursor-default',
         )}
-        onClick={() => hasBody && setOpen(value => !value)}
+        onClick={() => hasBody && onToggle(call.key)}
         type="button"
       >
         {/* The per-tool hue is kept but shrunk to 10px and left un-boosted, so it
