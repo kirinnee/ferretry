@@ -1,3 +1,10 @@
+## [4.97.2](https://github.com/kirinnee/ferretry/compare/v4.97.1...v4.97.2) (2026-10-29)
+
+### Fixes
+
+* **daemon:** read memory usage again when Bun reports it interrupted ([#841](https://github.com/kirinnee/ferretry/issues/841)) ([6ad30ce](https://github.com/kirinnee/ferretry/commit/6ad30cef12a2782f61eda67a47d61353ac7484c6))
+* **test:** stop requiring the newest releases to show changes in the in-app list ([#851](https://github.com/kirinnee/ferretry/issues/851)) ([006a643](https://github.com/kirinnee/ferretry/commit/006a64301e117a7ac8f88a33b2a3eb04d8eba642))
+
 ## [4.97.1](https://github.com/kirinnee/ferretry/compare/v4.97.0...v4.97.1) (2026-10-29)
 
 ### Fixes
