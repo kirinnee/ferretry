@@ -286,3 +286,56 @@ describe('NotificationService more-info push', () => {
     });
   });
 });
+
+describe('NotificationService grouped and surfaced pushes', () => {
+  const second = AttentionItemSchema.parse({ ...item, id: 'A2', subject: 'Pick a region' });
+  const third = AttentionItemSchema.parse({ ...item, id: 'A3', subject: 'Approve the rollback' });
+
+  it('should push ONE "<ferret> needs 3 things" for a burst, and none for the same burst again', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.groupRaised(SESSION, [item, second, third], snapshot);
+    await world.service.groupRaised(SESSION, [item, second, third], snapshot);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(world.push.dispatches[0]?.payload).containDeep({
+      title: 'Release agent needs 3 things',
+      body: 'Choose a release window · Pick a region · Approve the rollback',
+      url: `/session/${SESSION}?attention=A1`,
+    });
+  });
+
+  it('should announce a group of one as the item itself', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.groupRaised(SESSION, [item], snapshot);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(world.push.dispatches[0]?.payload.title).equal('Choose a release window');
+    should(world.ledger.appends[0]).containDeep({ key: `attention:${SESSION}:A1` });
+  });
+
+  it('should push a surfaced card once, apart from its raise, and keep its own ledger key', async () => {
+    // Arrange
+    const world = fixture();
+
+    // Act
+    await world.service.attentionRaised(SESSION, item, snapshot);
+    await world.service.surfaced(SESSION, item, snapshot);
+    await world.service.surfaced(SESSION, item, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(2);
+    should(world.ledger.records.filter(record => record.phase === 'requested').map(record => record.key)).deepEqual([
+      `attention:${SESSION}:A1`,
+      `attention:${SESSION}:A1:surfaced`,
+    ]);
+    should(world.push.dispatches[1]?.payload.eventKey).equal('attention-surfaced:A1');
+  });
+});

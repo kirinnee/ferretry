@@ -137,7 +137,7 @@ function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
     await dispatcher.dispatch(request({ method: 'POST', path, headers, body: JSON.stringify(body) }));
   const raise = async (subject: string, ask: unknown = { kind: 'open-question' }): Promise<string> => {
     const response = await post(
-      { action: 'add', subject, why: `${subject} why`, howToResolve: 'answer it', ask },
+      { action: 'add', subject, why: `${subject} why`, howToResolve: 'answer it', ask, surface: true },
       agentIn(SESSION),
     );
     should(response.status).equal(200);

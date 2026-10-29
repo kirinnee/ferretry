@@ -87,7 +87,9 @@ function itemLines(item: AttentionItem): string[] {
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
   if (attentionInDiscussion(item)) {
-    lines.push(`${INDENT}in discussion: the owner asked to talk this through ${item.askedAt ?? ''}`.trimEnd());
+    lines.push(
+      `${INDENT}in discussion: not on the owner's queue yet, talk it through in chat ${item.askedAt ?? ''}`.trimEnd(),
+    );
   } else if (item.waitingOn !== undefined) {
     lines.push(`${INDENT}waiting on the ferret: more information asked ${item.askedAt ?? ''}`.trimEnd());
   }

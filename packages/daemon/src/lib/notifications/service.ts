@@ -3,8 +3,11 @@ import type { AttentionRaisedObserver } from '../attention/index.ts';
 import {
   attentionNotificationAttribution,
   attentionNotificationPayload,
+  groupedAttentionNotificationPayload,
   moreInfoNotificationPayload,
   notificationKey,
+  type SessionNotificationPayload,
+  surfacedNotificationPayload,
 } from './policy.ts';
 import {
   type NotificationClock,
@@ -13,6 +16,7 @@ import {
   NotificationRecordSchema,
   type NotificationSerialExecutor,
   type NotificationSessionDirectory,
+  type NotificationSessionFacts,
 } from './types.ts';
 
 export interface NotificationServiceOptions {
@@ -57,6 +61,33 @@ export class NotificationService implements AttentionRaisedObserver {
     await this.attentionRaised(sessionId, item, snapshot, item.infoRequests, discussion);
   }
 
+  /** The push an ask makes when it leaves its discussion for the owner's queue. Total, once per item. */
+  async surfaced(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void> {
+    await this.announce(sessionId, item, { surfaced: true }, () =>
+      surfacedNotificationPayload(sessionId, item, snapshot),
+    );
+  }
+
+  /**
+   * ONE push for the asks a ferret raised in the same breath: "<ferret> needs 3 things: …". It is recorded
+   * under the first item's identity, so a repeat of the same group is no second push. A group of one is the
+   * item's ordinary raise.
+   */
+  async groupRaised(
+    sessionId: string,
+    items: readonly [AttentionItem, ...AttentionItem[]],
+    snapshot: AttentionSnapshot,
+  ): Promise<void> {
+    const [first, ...rest] = items;
+    if (rest.length === 0) {
+      await this.attentionRaised(sessionId, first, snapshot);
+      return;
+    }
+    await this.announce(sessionId, first, {}, session =>
+      groupedAttentionNotificationPayload(sessionId, session.name, items, snapshot),
+    );
+  }
+
   /** Announces one committed item at most once under its durable board identity. */
   async attentionRaised(
     sessionId: string,
@@ -65,20 +96,26 @@ export class NotificationService implements AttentionRaisedObserver {
     infoRequest?: number,
     discussion = false,
   ): Promise<void> {
-    const key = notificationKey({
-      sessionId,
-      attentionId: item.id,
-      ...(infoRequest === undefined ? {} : { infoRequest }),
-    });
+    await this.announce(sessionId, item, infoRequest === undefined ? {} : { infoRequest }, () =>
+      infoRequest === undefined
+        ? attentionNotificationPayload(sessionId, item, snapshot)
+        : moreInfoNotificationPayload(sessionId, item, snapshot, infoRequest, discussion),
+    );
+  }
+
+  private async announce(
+    sessionId: string,
+    item: AttentionItem,
+    variant: { readonly infoRequest?: number; readonly surfaced?: true },
+    compose: (session: NotificationSessionFacts) => SessionNotificationPayload,
+  ): Promise<void> {
+    const key = notificationKey({ sessionId, attentionId: item.id, ...variant });
     await this.options.serial
       .run(key, async () => {
         if ((await this.options.ledger.find(key)) !== undefined) return;
         const session = await this.options.sessions.describe(sessionId);
         if (session === undefined) return;
-        const payload =
-          infoRequest === undefined
-            ? attentionNotificationPayload(sessionId, item, snapshot)
-            : moreInfoNotificationPayload(sessionId, item, snapshot, infoRequest, discussion);
+        const payload = compose(session);
         const enrolled = (await this.options.push.list()).length;
         await this.options.ledger.append(
           NotificationRecordSchema.parse({
@@ -90,7 +127,7 @@ export class NotificationService implements AttentionRaisedObserver {
             attribution: attentionNotificationAttribution(item),
             sessionId,
             attentionId: item.id,
-            ...(infoRequest === undefined ? {} : { infoRequest }),
+            ...variant,
             sent: {
               kind: payload.kind,
               interactive: session.interactive,

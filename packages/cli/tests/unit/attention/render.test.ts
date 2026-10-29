@@ -444,7 +444,9 @@ describe('attention items in discussion', () => {
     );
 
     // Assert
-    should(discussed).containEql('in discussion: the owner asked to talk this through 2026-07-31T09:10:00.000Z');
+    should(discussed).containEql(
+      "in discussion: not on the owner's queue yet, talk it through in chat 2026-07-31T09:10:00.000Z",
+    );
     should(discussed).not.containEql('waiting on the ferret');
     should(asked).containEql('waiting on the ferret: more information asked');
     should(asked).not.containEql('in discussion');

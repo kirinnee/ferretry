@@ -64,6 +64,7 @@ const post = (body: unknown, headers: Readonly<Record<string, string>> = human) 
  *  without an `ask` is a refusal rather than an open-ended "please look at this". */
 const raise = {
   action: 'add',
+  surface: true,
   title: 'Release unblock',
   subject: 'which base branch?',
   why: 'the ticket names two',
@@ -623,6 +624,7 @@ describe('attention route discuss', () => {
 describe('attention route needs-info', () => {
   const task = {
     action: 'add',
+    surface: true,
     subject: 'Log in to the cloud',
     why: 'The deploy needs it',
     howToResolve: 'Follow the steps',
@@ -680,6 +682,55 @@ describe('attention route needs-info', () => {
     should(edited.status).equal(200);
     should((jsonBody(edited).items as readonly Record<string, unknown>[])[0]).not.have.property('waitingOn');
     should(jsonBody(edited)).have.property('warnings');
+  });
+});
+
+describe('attention route surface', () => {
+  const ask = { ...raise, surface: undefined };
+
+  it('should start a ferret ask in discussion, let its raiser surface it, and keep surface idempotent', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const raised = await dispatch(post(ask, agentIn('s1')));
+
+    // Act
+    const surfaced = await dispatch(
+      post({ action: 'surface', id: 'A1', why: 'Still open: the branch' }, agentIn('s1')),
+    );
+    const again = await dispatch(post({ action: 'surface', id: 'A1' }, agentIn('s1')));
+
+    // Assert
+    should((jsonBody(raised).items as readonly unknown[])[0]).containDeep({
+      id: 'A1',
+      waitingOn: 'ferret',
+      waitingFor: 'discussion',
+    });
+    should(surfaced.status).equal(200);
+    should((jsonBody(surfaced).items as readonly Record<string, unknown>[])[0]).not.have.property('waitingOn');
+    should((jsonBody(surfaced).items as readonly Record<string, unknown>[])[0]).containDeep({
+      history: [{ kind: 'surfaced', note: 'Still open: the branch' }],
+    });
+    should(again.status).equal(200);
+  });
+
+  it('should let the owner surface it, refuse another ferret and an unknown item, and leave a closed one alone', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(ask, agentIn('s1')));
+    await dispatch(post({ ...ask, subject: 'second' }, agentIn('s1')));
+
+    // Act
+    const other = await dispatch(post({ action: 'surface', id: 'A1' }, agentIn('s2')));
+    const unknown = await dispatch(post({ action: 'surface', id: 'A9' }));
+    const owner = await dispatch(post({ action: 'surface', id: 'A2' }));
+    await dispatch(post({ action: 'resolve', id: 'A1' }));
+    const closed = await dispatch(post({ action: 'surface', id: 'A1' }));
+
+    // Assert
+    should(other.status).equal(403);
+    should(unknown.status).equal(404);
+    should(owner.status).equal(200);
+    should(closed.status).equal(200);
   });
 });
 

@@ -13,6 +13,7 @@ import {
   type AttentionMutation,
   AttentionReplyDelivery,
   AttentionService,
+  AttentionSurfacedPush,
   SessionAttentionProjection,
   type SessionAttentionState,
 } from '../../../src/lib/attention/index.ts';
@@ -80,6 +81,7 @@ function service(repository: MemoryRepository, changes: AttentionChangeObserver)
 }
 
 const ASK = {
+  surface: true,
   source: 'agent-raised' as const,
   sourceRef: null,
   subject: 'Rebase onto main now?',
@@ -88,6 +90,31 @@ const ASK = {
   howToResolve: 'Pick one.',
   ask: { kind: 'multiple-choice' as const, options: [{ label: 'Rebase now' }, { label: 'Wait' }] },
 };
+
+describe('Attention surfaced push', () => {
+  it('should announce an ask once it reaches the owner queue, whoever surfaced it, and nothing else', async () => {
+    // Arrange
+    const announced: Array<{ sessionId: string; id: string }> = [];
+    const push = new AttentionSurfacedPush({
+      surfaced: async (sessionId, item) => {
+        announced.push({ sessionId, id: item.id });
+      },
+    });
+    const changes = new AttentionChangeFanout([push]);
+    const attention = service(new MemoryRepository(), changes);
+
+    // Act
+    await attention.raise(SESSION, { ...ASK, surface: undefined }, AGENT);
+    await attention.raise(SESSION, { ...ASK, surface: true, subject: 'Already on the queue?' }, AGENT);
+    const before = announced.length;
+    await attention.surface(SESSION, 'A1', AGENT, 'Still open');
+    await attention.surface(SESSION, 'A1', AGENT);
+
+    // Assert
+    should(before).equal(0);
+    should(announced).deepEqual([{ sessionId: SESSION, id: 'A1' }]);
+  });
+});
 
 describe('Attention board observers', () => {
   it('should tell change observers about every committed change, with its source, and never an unchanged one', async () => {
@@ -311,8 +338,8 @@ describe('Attention board observers', () => {
     should(after).containDeep({ ok: true, value: { count: 0 } });
     const resolved = after.ok ? after.value.resolved : [];
     const byId = new Map(resolved.map(each => [each.id, each]));
-    should(byId.get('A1')).containDeep({ resolvedBy: 'human', resolutionNote: message });
-    should(byId.get('A1')?.response).be.undefined();
+    should(byId.get('A1')).containDeep({ resolvedBy: 'human' });
+    should(byId.get('A1')?.response).deepEqual({ kind: 'other', answer: 'wait, eu-west-1' });
     should(byId.get('A2')).containDeep({ response: { kind: 'open-question', answer: 'wait, eu-west-1' } });
     should(byId.get('A3')).containDeep({ disposition: 'done', resolutionNote: message });
     should(changes.seen.slice(-3).every(each => each.change.via === 'conversation')).be.true();

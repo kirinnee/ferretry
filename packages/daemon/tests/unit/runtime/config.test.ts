@@ -719,6 +719,23 @@ describe('the session-worker pool size', () => {
   });
 });
 
+describe('the attention resurface timer', () => {
+  it('should be off unless configured, and accept a limit of one minute to a week', () => {
+    should(defaultDaemonConfig().attention.resurfaceAfterMinutes).be.undefined();
+    should(parseDaemonConfig({ attention: { resurfaceAfterMinutes: 45 } }).attention.resurfaceAfterMinutes).equal(45);
+    should(parseDaemonConfig({ attention: { resurfaceAfterMinutes: 1 } }).attention.resurfaceAfterMinutes).equal(1);
+    should(parseDaemonConfig({ attention: { resurfaceAfterMinutes: 10_080 } }).attention.resurfaceAfterMinutes).equal(
+      10_080,
+    );
+  });
+
+  it('should refuse a limit that is zero, fractional or longer than a week', () => {
+    should(() => parseDaemonConfig({ attention: { resurfaceAfterMinutes: 0 } })).throw();
+    should(() => parseDaemonConfig({ attention: { resurfaceAfterMinutes: 1.5 } })).throw();
+    should(() => parseDaemonConfig({ attention: { resurfaceAfterMinutes: 10_081 } })).throw();
+  });
+});
+
 describe('the attention reply window', () => {
   it('should hold answers ten seconds after the last, and two minutes after the first, unless told otherwise', () => {
     // Assert

@@ -19,10 +19,12 @@ export interface NotificationIdentity {
   readonly attentionId: string;
   /** The owner's request for more information this push answers; absent for the item's own raise. */
   readonly infoRequest?: number;
+  /** The push that announces the item's move onto the owner's queue, apart from the one its raise made. */
+  readonly surfaced?: boolean;
 }
 
 export function notificationKey(identity: NotificationIdentity): string {
-  return `attention:${identity.sessionId}:${identity.attentionId}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}`;
+  return `attention:${identity.sessionId}:${identity.attentionId}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}${identity.surfaced === true ? ':surfaced' : ''}`;
 }
 
 /**
@@ -51,6 +53,52 @@ export function attentionNotificationPayload(
     body: clipAtWord(oneLine(item.subject), ATTENTION_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, item.id),
+    count: snapshot.count,
+  }) as SessionNotificationPayload;
+}
+
+/**
+ * What a push says when a ferret's ask left its discussion for the owner's queue: the card's title and ask, as the
+ * raise would have said them, under its own event so the owner's device shows it as a new card.
+ */
+export function surfacedNotificationPayload(
+  sessionId: string,
+  item: AttentionItem,
+  snapshot: AttentionSnapshot,
+): SessionNotificationPayload {
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: `attention-surfaced:${item.id}`,
+    sessionId,
+    kind: 'attention',
+    title: attentionNotificationTitle(attentionTitle(item)),
+    body: clipAtWord(oneLine(item.subject), ATTENTION_PUSH_BODY_LENGTH),
+    tag: `attention-${sessionId}`,
+    url: attentionNotificationPath(sessionId, item.id),
+    count: snapshot.count,
+  }) as SessionNotificationPayload;
+}
+
+/**
+ * What ONE push says for several asks a ferret raised in the same breath: "<ferret> needs 3 things:
+ * <title> · <title> · <title>". The title carries the count, the body the card titles, and a tap opens the first.
+ */
+export function groupedAttentionNotificationPayload(
+  sessionId: string,
+  ferret: string,
+  items: readonly [AttentionItem, ...AttentionItem[]],
+  snapshot: AttentionSnapshot,
+): SessionNotificationPayload {
+  const [first] = items;
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: `attention-group:${first.id}`,
+    sessionId,
+    kind: 'attention',
+    title: attentionNotificationTitle(`${oneLine(ferret)} needs ${items.length} things`),
+    body: clipAtWord(items.map(item => oneLine(attentionTitle(item))).join(' · '), ATTENTION_PUSH_BODY_LENGTH),
+    tag: `attention-${sessionId}`,
+    url: attentionNotificationPath(sessionId, first.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
 }

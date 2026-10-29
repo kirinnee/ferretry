@@ -48,6 +48,7 @@ function request(overrides: Partial<RaiseAttentionRequest> = {}): RaiseAttention
     context: 'This deploy changes the public service.',
     howToResolve: 'Approve or reject the request.',
     ask: { kind: 'permission' },
+    surface: true,
     ...overrides,
   };
 }
@@ -1535,5 +1536,177 @@ describe('Attention state machine undelivered', () => {
     // Act + Assert
     should(failed(undelivered(raised().ledger, undefined, HUMAN)).error.code).equal('forbidden');
     should(succeeded(undelivered(owners.ledger)).changed).be.false();
+  });
+});
+
+describe('Attention state machine: an ask starts in discussion', () => {
+  const born = (overrides: Partial<RaiseAttentionRequest> = {}) => raised(AGENT, { surface: false, ...overrides });
+  const surface = (
+    ledger: AttentionLedger,
+    actor: AttentionActor = AGENT,
+    why?: string,
+    at = SECOND,
+  ): AttentionMutation =>
+    applyAttentionCommand(ledger, { action: 'surface', actor, id: 'A1', ...(why === undefined ? {} : { why }), at });
+
+  it('should start a ferret-raised ask in discussion with no history, no request counted and the raise time as its start', () => {
+    // Act
+    const created = born();
+
+    // Assert
+    should(created.change).equal('created');
+    should(created.item).containDeep({ waitingOn: 'ferret', askedAt: FIRST, waitingFor: 'discussion' });
+    should(created.item?.infoRequests).be.undefined();
+    should(created.item?.history).be.undefined();
+  });
+
+  it('should start an ask a ferret raised with surface straight on the owner’s queue', () => {
+    // Act
+    const created = raised(AGENT, { surface: true });
+
+    // Assert
+    should(created.item?.waitingOn).be.undefined();
+    should(created.item?.waitingFor).be.undefined();
+    should(created.item?.askedAt).be.undefined();
+  });
+
+  it('should start what a warden, a source or the owner raised on the queue, and a plain info item too', () => {
+    // Assert
+    for (const actor of [WARDEN, DAEMON, HUMAN]) {
+      const created = raised(actor, { surface: false, sourceRef: actor.kind === 'daemon' ? 'ref' : null });
+      should(created.item?.waitingOn).be.undefined();
+    }
+    should(born({ kind: 'info', ask: { kind: 'open-question' } }).item?.waitingOn).be.undefined();
+  });
+
+  it('should move a surfaced ask to the queue: clear the wait, record why, and report surfaced', () => {
+    // Arrange
+    const created = born();
+
+    // Act
+    const surfaced = succeeded(surface(created.ledger, AGENT, 'The owner did not answer'));
+
+    // Assert
+    should(surfaced.change).equal('surfaced');
+    should(surfaced.changed).be.true();
+    should(surfaced.item?.waitingOn).be.undefined();
+    should(surfaced.item?.waitingFor).be.undefined();
+    should(surfaced.item?.askedAt).be.undefined();
+    should(surfaced.item?.history).deepEqual([{ at: SECOND, kind: 'surfaced', note: 'The owner did not answer' }]);
+    should(attentionSnapshot(surfaced.ledger).items[0]).deepEqual(surfaced.item);
+  });
+
+  it('should record a surfaced entry without a note when no why is given', () => {
+    // Act
+    const surfaced = succeeded(surface(born().ledger));
+
+    // Assert
+    should(surfaced.item?.history).deepEqual([{ at: SECOND, kind: 'surfaced' }]);
+  });
+
+  it('should let the owner surface it too', () => {
+    // Act
+    const surfaced = succeeded(surface(born().ledger, HUMAN));
+
+    // Assert
+    should(surfaced.change).equal('surfaced');
+  });
+
+  it('should be no change to surface an item that is already on the queue', () => {
+    // Arrange
+    const once = succeeded(surface(born().ledger));
+
+    // Act
+    const again = succeeded(surface(once.ledger, AGENT, 'again', THIRD));
+    const never = succeeded(surface(raised(AGENT, { surface: true }).ledger));
+
+    // Assert
+    should(again.changed).be.false();
+    should(attentionSnapshot(again.ledger).items[0]?.history).have.length(1);
+    should(never.changed).be.false();
+  });
+
+  it('should refuse another ferret, an item that is not there, and a wait that is for information', () => {
+    // Arrange
+    const created = born();
+    const waiting = succeeded(
+      applyAttentionCommand(raised(AGENT, { surface: true }).ledger, {
+        action: 'needs-info',
+        actor: HUMAN,
+        id: 'A1',
+        at: SECOND,
+      }),
+    );
+
+    // Act + Assert
+    should(failed(surface(created.ledger, OTHER_AGENT)).error.code).equal('forbidden');
+    should(failed(surface(emptyAttentionLedger(SESSION_ID, FIRST))).error.code).equal('not-found');
+    should(failed(surface(waiting.ledger)).error.code).equal('invalid');
+  });
+
+  it('should refuse the daemon unless it is the resurface timer', () => {
+    // Arrange
+    const created = born();
+
+    // Act + Assert
+    should(failed(surface(created.ledger, WARDEN)).error.code).equal('forbidden');
+    should(succeeded(surface(created.ledger, { kind: 'daemon', cause: 'system' })).change).equal('surfaced');
+  });
+
+  it('should leave a closed item alone', () => {
+    // Arrange
+    const closed = succeeded(
+      applyAttentionCommand(born().ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const result = succeeded(surface(closed.ledger));
+
+    // Assert
+    should(result.changed).be.false();
+  });
+
+  it('should keep an ask in discussion when its own ferret rewords it, and clear the wait only for an owner’s request', () => {
+    // Arrange
+    const created = born();
+
+    // Act
+    const reworded = succeeded(
+      applyAttentionCommand(created.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Approve the deployment tonight?' },
+        at: SECOND,
+      }),
+    );
+
+    // Assert
+    should(reworded.change).not.equal('info-added');
+    should(reworded.item).containDeep({ waitingOn: 'ferret', waitingFor: 'discussion' });
+  });
+
+  it('should let the owner talk a surfaced ask through again, which a ferret’s edit then answers', () => {
+    // Arrange
+    const surfaced = succeeded(surface(born().ledger));
+    const discussing = succeeded(
+      applyAttentionCommand(surfaced.ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: THIRD }),
+    );
+
+    // Act
+    const answered = succeeded(
+      applyAttentionCommand(discussing.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Approve it tonight?' },
+        at: '2026-07-30T13:00:00Z',
+      }),
+    );
+
+    // Assert
+    should(discussing.item).containDeep({ waitingFor: 'discussion', infoRequests: 1 });
+    should(answered.change).equal('info-added');
+    should(answered.item?.waitingOn).be.undefined();
   });
 });

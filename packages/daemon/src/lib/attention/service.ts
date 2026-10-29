@@ -174,6 +174,19 @@ export class AttentionService {
     return this.apply(sessionId, { action: 'discuss', actor, id, note, at: this.clock.now() });
   }
 
+  /**
+   * An item leaves discussion for the owner's queue. The raising ferret, the owner or the daemon's timer may
+   * say so; surfacing an item already in the queue is no change.
+   */
+  async surface(
+    sessionId: string,
+    id: AttentionId,
+    actor: AttentionActor,
+    why?: string | null,
+  ): Promise<AttentionMutation> {
+    return this.apply(sessionId, { action: 'surface', actor, id, why, at: this.clock.now() });
+  }
+
   async resolve(
     sessionId: string,
     id: AttentionId,

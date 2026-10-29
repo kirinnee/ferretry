@@ -369,12 +369,12 @@ export const MAX_ATTENTION_HISTORY = 20;
 
 /**
  * One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44":
- * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), or the ferret
- * updated it (`updated`).
+ * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), the ferret
+ * updated it (`updated`), or the item left discussion for the queue (`surfaced`, the why as its note).
  */
 export const AttentionHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
-  kind: z.enum(['needs-info', 'discuss', 'updated']),
+  kind: z.enum(['needs-info', 'discuss', 'updated', 'surfaced']),
   note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
 });
 export type AttentionHistoryEntry = z.infer<typeof AttentionHistoryEntrySchema>;
@@ -490,14 +490,18 @@ const AttentionItemBaseShape = {
   ...AttentionBriefShape,
   /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
   stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_ATTENTION_STEPS).optional(),
-  /** Set while the owner has asked the raising ferret for more information, or to discuss it, and it has not yet updated it. */
+  /**
+   * Set while the item waits on its raising ferret: the ask is IN DISCUSSION (every ferret-raised ask starts
+   * there, until `surface`), or the owner asked for more information and it has not yet updated it.
+   */
   waitingOn: z.literal('ferret').optional(),
-  /** When the owner asked; present exactly while `waitingOn` is. */
+  /** When the wait began (the raise, for an ask born in discussion); present exactly while `waitingOn` is. */
   askedAt: InstantSchema.optional(),
   /**
-   * What the owner is waiting on the ferret FOR, only while `waitingOn` is set: `discussion` when the owner
-   * wants to talk the item through before answering ("in discussion"). Absent reads as `info`, so an item
-   * written before discussions existed reads exactly as it did.
+   * What the wait is FOR, only while `waitingOn` is set: `discussion` while the ask is being talked through in
+   * the ferret's chat, before it reaches the owner's queue ("in discussion"); an ask a ferret raises starts
+   * there, and the owner's `discuss` puts a surfaced one back. Absent reads as `info`, so an item written
+   * before discussions existed reads exactly as it did.
    */
   waitingFor: z.enum(['info', 'discussion']).optional(),
   /** How many times the owner has asked for more information or to discuss it: one request counter for both. */
@@ -699,6 +703,11 @@ const AddAttentionRequestSchema = z.strictObject({
   context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
+  /**
+   * Raise straight to the owner's queue instead of starting in discussion, for a ferret that knows nobody is
+   * watching its chat. Absent: a ferret-raised ask starts in discussion (docs/attention.md § The model).
+   */
+  surface: z.boolean().optional(),
   ...AttentionBriefShape,
 });
 
@@ -734,15 +743,24 @@ export const AttentionActionRequestSchema = z
       note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
     }),
     /**
-     * The owner wants to talk an item through before answering — the premise is wrong, or the card is not
-     * understood. The item stays open, marked in discussion (`waitingFor: 'discussion'`), and the raising
-     * ferret is told `[discuss !A3 «title»] …` to reply in chat. Every card a ferret raised takes it; it is
-     * never one of the card's three answers.
+     * The owner wants to talk a SURFACED item through before answering — the premise is wrong, or the card is
+     * not understood. The item stays open, marked in discussion (`waitingFor: 'discussion'`), and the raising
+     * ferret is told `[discuss !A3 «title»] …` to reply in chat. Kept for older apps: the current app talks
+     * to the ferret in chat, where the ask already starts.
      */
     z.strictObject({
       action: z.literal('discuss'),
       id: AttentionIdSchema,
       note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    }),
+    /**
+     * The raising ferret (or the owner) moves an item out of discussion into the owner's queue: the owner did
+     * not answer it in chat. The optional `why` is one line kept in the item's history.
+     */
+    z.strictObject({
+      action: z.literal('surface'),
+      id: AttentionIdSchema,
+      why: singleLine(MAX_ATTENTION_SUBJECT_LENGTH).optional(),
     }),
     z.strictObject({
       action: z.literal('dismiss'),
@@ -805,8 +823,9 @@ export const SessionAttentionSummarySchema = z.object({
   /** When the NEWEST open item was raised: "newest needing you first" sorts by it. */
   latestAt: InstantSchema,
   /**
-   * How many of the `open` items are in discussion (`waitingFor: 'discussion'`): waiting on the ferret,
-   * not on the owner, so they are not counted as needing the owner. Absent when none is.
+   * How many of the `open` items are in discussion (`waitingFor: 'discussion'`): still being talked through
+   * in the ferret's chat, not on the owner's queue, so they are not counted as needing the owner. Absent
+   * when none is.
    */
   discussing: PositiveIntegerSchema.optional(),
 });

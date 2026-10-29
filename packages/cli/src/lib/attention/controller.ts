@@ -56,6 +56,11 @@ export interface AttentionResolveOptions extends AttentionCommandOptions, Answer
   readonly note?: string;
 }
 
+/** Flags that surface an item. */
+export interface AttentionSurfaceOptions extends AttentionCommandOptions {
+  readonly why?: string;
+}
+
 /** Flags that shape an info card raised from a message. */
 export interface AttentionNotifyOptions extends AttentionCommandOptions {
   readonly title?: string;
@@ -192,6 +197,18 @@ export class AttentionController {
     this.#report(snapshot, options, () =>
       renderAttentionMutation('asked to discuss', attentionReference(id), snapshot),
     );
+  }
+
+  /** Moves an item out of discussion onto the owner's queue; the owner gets a push for it. */
+  async surface(reference: string, options: AttentionSurfaceOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const why = text(options.why);
+    const snapshot = await this.gateway.apply(this.#target(options), {
+      action: 'surface',
+      id,
+      ...(why === undefined ? {} : { why }),
+    });
+    this.#report(snapshot, options, () => renderAttentionMutation('surfaced', attentionReference(id), snapshot));
   }
 
   async dismiss(reference: string, options: AttentionResolveOptions): Promise<void> {

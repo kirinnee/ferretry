@@ -33,6 +33,8 @@ export interface BriefFlags extends AskFlags {
   /** One line that describes the `up` answer. */
   readonly upWhy?: string;
   readonly why?: string;
+  /** Raise straight to the owner's queue instead of starting in discussion. */
+  readonly surface?: boolean;
   /** Repeated: the situation, one point each; more than one becomes bullets. */
   readonly premise?: string | readonly string[];
   /** Repeated: why it matters now, one point each; more than one becomes bullets. */
@@ -183,6 +185,7 @@ export function composeAddRequest(
     ...(links === undefined || links.length === 0 ? {} : { links }),
     ...(steps === undefined ? {} : { steps }),
     ...(body === undefined ? {} : { body }),
+    ...(flags.surface === true ? { surface: true } : {}),
   };
   const parsed = AttentionActionRequestSchema.safeParse(request);
   if (!parsed.success) throw new Error(describeIssues(parsed.error));

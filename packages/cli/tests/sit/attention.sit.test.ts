@@ -124,7 +124,7 @@ class FakeAttentionDaemon {
       return;
     }
 
-    if (request.action === 'edit' || request.action === 'progress') {
+    if (request.action === 'edit' || request.action === 'progress' || request.action === 'surface') {
       throw new Error(`the fake daemon does not ${request.action} items`);
     }
     const index = this.#items.findIndex(item => item.id === request.id);

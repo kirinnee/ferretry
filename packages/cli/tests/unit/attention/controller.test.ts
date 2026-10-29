@@ -684,6 +684,33 @@ describe('attention controller discuss', () => {
   });
 });
 
+describe('attention controller surface', () => {
+  it('should surface with a trimmed why, and say the item is on the owner queue', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
+
+    // Act
+    await controller.surface('?A1', { why: '  Still open: the account  ' });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A1', why: 'Still open: the account' });
+    should(out.messages[0]).containEql('surfaced !A1');
+  });
+
+  it('should send no why when none was given, and reject a bad reference before the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = build(SESSION, snapshot([]));
+
+    // Act
+    await controller.surface('A1', {});
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A1' });
+    await should(controller.surface('nope', {})).be.rejected();
+    should(gateway.applied).have.length(1);
+  });
+});
+
 describe('attention controller needs-info', () => {
   it('should ask for more information with the note, and say the item stays open', async () => {
     // Arrange

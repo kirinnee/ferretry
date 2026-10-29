@@ -70,6 +70,8 @@ export interface RaiseAttentionRequest extends AttentionBrief, AttentionCardFiel
   readonly waitingSince?: string;
   readonly howToResolve: string;
   readonly ask?: AttentionAsk;
+  /** A ferret's raise straight to the owner's queue; absent, its ask starts in discussion. */
+  readonly surface?: boolean;
 }
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
@@ -138,6 +140,14 @@ export type AttentionCommand =
       readonly at: string;
     }
   | {
+      /** An item leaves discussion for the owner's queue; `why` is the one line kept in its history. */
+      readonly action: 'surface';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly why?: string | null;
+      readonly at: string;
+    }
+  | {
       /**
        * The owner's action on an agent-raised item never reached the ferret (docs/attention.md § Delivery):
        * the item is open again, as a card, with what the owner did kept for a retry. `request` names the
@@ -170,6 +180,7 @@ export type AttentionChange =
   | 'progressed'
   | 'needs-info'
   | 'discussing'
+  | 'surfaced'
   | 'info-added'
   | 'reopened'
   | 'answered'
@@ -318,6 +329,8 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
       return needsInfo(ledger, command);
     case 'discuss':
       return discuss(ledger, command);
+    case 'surface':
+      return surface(ledger, command);
     case 'undelivered':
       return undelivered(ledger, command);
     case 'resolve-source':
@@ -331,6 +344,7 @@ type EditCommand = Extract<AttentionCommand, { action: 'edit' }>;
 type ProgressCommand = Extract<AttentionCommand, { action: 'progress' }>;
 type NeedsInfoCommand = Extract<AttentionCommand, { action: 'needs-info' }>;
 type DiscussCommand = Extract<AttentionCommand, { action: 'discuss' }>;
+type SurfaceCommand = Extract<AttentionCommand, { action: 'surface' }>;
 type ResolveSourceCommand = Extract<AttentionCommand, { action: 'resolve-source' }>;
 type UndeliveredCommand = Extract<AttentionCommand, { action: 'undelivered' }>;
 
@@ -396,6 +410,12 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
       ...(request.ask === undefined ? {} : { ask: request.ask }),
       ...cardFieldsOf(request),
       ...attentionBriefOf(request),
+      // A ferret's ask is born in discussion (docs/attention.md § The model): the owner answers it in chat,
+      // and the ferret surfaces it if they do not. No request is counted and nothing is told to the ferret:
+      // nobody asked for the discussion, it is simply where an ask starts.
+      ...(startsInDiscussion(actor, request)
+        ? { waitingOn: 'ferret' as const, askedAt: command.at, waitingFor: 'discussion' as const }
+        : {}),
     },
     actor,
   );
@@ -406,6 +426,20 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
     updatedAt: command.at,
   };
   return success(next, true, 'created', item);
+}
+
+/**
+ * Whether a raise starts in discussion: every ask a ferret raises, unless it raised straight to the queue
+ * (`surface`). An `info` item has no question to discuss, and what the daemon raises (the warden, a prompt,
+ * a source) waits on the owner from the start.
+ */
+function startsInDiscussion(actor: AttentionActor, request: RaiseAttentionRequest): boolean {
+  return actor.kind === 'agent' && request.surface !== true && request.kind !== 'info';
+}
+
+/** An item that began in discussion and has had no request of the owner's: a ferret's reword does not end it. */
+function bornInDiscussion(item: AttentionItem): boolean {
+  return item.waitingOn !== undefined && item.waitingFor === 'discussion' && item.infoRequests === undefined;
 }
 
 function refreshStable(
@@ -749,7 +783,8 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
   }
   const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...kept } = target.item;
   const stepsChanged = patch.steps !== undefined && !sameSteps(target.item.steps, patch.steps);
-  const keepsWaiting = target.item.waitingOn === undefined || command.actor.kind !== 'agent';
+  const keepsWaiting =
+    target.item.waitingOn === undefined || command.actor.kind !== 'agent' || bornInDiscussion(target.item);
   const item: AttentionItem = {
     ...kept,
     ...(keepsWaiting && target.item.waitingOn !== undefined
@@ -788,7 +823,7 @@ function replaceItem(
   ledger: AttentionLedger,
   item: AttentionItem,
   at: string,
-  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'discussing' | 'info-added' | 'reopened'>,
+  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'discussing' | 'surfaced' | 'info-added' | 'reopened'>,
 ): AttentionMutation {
   const next: AttentionLedger = {
     ...ledger,
@@ -870,6 +905,44 @@ function discuss(ledger: AttentionLedger, command: DiscussCommand): AttentionMut
     history: withHistory(target.item.history, { at: command.at, kind: 'discuss', ...(note === '' ? {} : { note }) }),
   };
   return replaceItem(ledger, item, command.at, 'discussing');
+}
+
+/**
+ * An item leaves discussion for the owner's queue: the owner did not answer it in chat. The raising ferret
+ * surfaces it (so does the owner, and the daemon's own timer), and only an open item in discussion moves.
+ * An item already in the queue is left as it is, so surfacing twice is surfacing once; an item that waits on
+ * the ferret for more information is not in discussion, and is answered by editing it.
+ */
+function surface(ledger: AttentionLedger, command: SurfaceCommand): AttentionMutation {
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) {
+    return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
+      ? unchanged(ledger)
+      : failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  }
+  // The daemon's resurface timer (`system`) may surface any item; a warden or a source may surface only its own.
+  const allowed =
+    command.actor.kind === 'daemon' && command.actor.cause === 'system'
+      ? true
+      : canAddressAttention(command.actor, target);
+  if (!allowed) {
+    return failure('forbidden', 'only the owner, the ferret that raised an item, or the daemon timer may surface it');
+  }
+  if (target.item.waitingOn === undefined) return unchanged(ledger);
+  if (target.item.waitingFor !== 'discussion') {
+    return failure('invalid', `${command.id} waits on more information, not on a discussion: edit it instead`);
+  }
+  const why = command.why?.trim() ?? '';
+  const { waitingOn: _w, askedAt: _a, waitingFor: _f, ...open } = target.item;
+  const item: AttentionItem = {
+    ...open,
+    history: withHistory(target.item.history, {
+      at: command.at,
+      kind: 'surfaced',
+      ...(why === '' ? {} : { note: why }),
+    }),
+  };
+  return replaceItem(ledger, item, command.at, 'surfaced');
 }
 
 /**

@@ -555,6 +555,36 @@ describe('attention discuss command', () => {
   });
 });
 
+describe('attention surface command', () => {
+  it('should send the surface request with its why, and without one when none is given', async () => {
+    // Arrange + Act
+    const withWhy = run(['attention', 'surface', '!A1', '--why', 'Still open: which region'], snapshot([]));
+    await withWhy.parsed;
+    const bare = run(['attention', 'surface', 'A2'], snapshot([]));
+    await bare.parsed;
+
+    // Assert
+    should(withWhy.gateway.applied[0]?.request).deepEqual({
+      action: 'surface',
+      id: 'A1',
+      why: 'Still open: which region',
+    });
+    should(bare.gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A2' });
+  });
+
+  it('should raise straight to the owner queue with add --surface, and start in discussion without it', async () => {
+    // Arrange + Act
+    const queued = run(['attention', 'add', 'pick a cluster', '--title', 'Pick a cluster', '--surface'], afterAdd);
+    await queued.parsed;
+    const talked = run(['attention', 'add', 'pick a cluster', '--title', 'Pick a cluster'], afterAdd);
+    await talked.parsed;
+
+    // Assert
+    should(queued.gateway.applied[0]?.request).match({ surface: true });
+    should(talked.gateway.applied[0]?.request).not.have.property('surface');
+  });
+});
+
 describe('attention needs-info command', () => {
   it('should send the owner’s request with its note', async () => {
     // Arrange + Act

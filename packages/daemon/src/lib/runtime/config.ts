@@ -238,6 +238,9 @@ export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FI
  * for a person's draft to clear, and it counts as delivered only once the ferret's transcript proves it,
  * within `replyReceiptSeconds`. Either wait running out reopens the item as a card for the owner. Read at
  * start; a change needs a restart.
+ *
+ * `resurfaceAfterMinutes` is off unless set: an ask that has sat in discussion that long is surfaced to the
+ * owner's queue by the daemon, its history saying the timer did it.
  */
 export const DaemonAttentionConfigSchema = z
   .strictObject({
@@ -245,6 +248,8 @@ export const DaemonAttentionConfigSchema = z
     replyMaxWaitSeconds: z.number().int().min(1).max(3_600).default(120),
     replyComposerWaitSeconds: z.number().int().min(10).max(86_400).default(600),
     replyReceiptSeconds: z.number().int().min(30).max(86_400).default(900),
+    /** Absent (the default): an ask stays in discussion until its ferret surfaces it. Present: after this long it surfaces by itself. */
+    resurfaceAfterMinutes: z.number().int().min(1).max(10_080).optional(),
   })
   .refine(window => window.replySettleSeconds <= window.replyMaxWaitSeconds, {
     message: 'attention.replySettleSeconds must not exceed attention.replyMaxWaitSeconds',

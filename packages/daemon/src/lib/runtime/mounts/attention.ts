@@ -179,11 +179,13 @@ async function apply(
           ? attention.needsInfo(sessionId, request.id, actor, request.note)
           : request.action === 'discuss'
             ? attention.discuss(sessionId, request.id, actor, request.note)
-            : request.action === 'dismiss'
-              ? attention.dismiss(sessionId, request.id, actor, request.note)
-              : request.response === undefined
-                ? attention.resolve(sessionId, request.id, actor, request.note)
-                : attention.answer(sessionId, request.id, request.response, actor, request.note));
+            : request.action === 'surface'
+              ? attention.surface(sessionId, request.id, actor, request.why)
+              : request.action === 'dismiss'
+                ? attention.dismiss(sessionId, request.id, actor, request.note)
+                : request.response === undefined
+                  ? attention.resolve(sessionId, request.id, actor, request.note)
+                  : attention.answer(sessionId, request.id, request.response, actor, request.note));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAttentionWriting(mutation.item) : [];

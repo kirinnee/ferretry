@@ -686,33 +686,35 @@ describe('ATTENTION_INSTRUCTION', () => {
     should(text).containEql(
       'Before ending a reply that asks them to decide or DO anything, raise each ask as its OWN item',
     );
-    // A card: a title that is the push heading, and a one-line ask that is its text.
+    // An ask starts in discussion in the chat, one per thing; a card is a short title and a one-line ask.
+    should(text).containEql('one per thing, starting in chat discussion:');
     should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
-    should(text).containEql('Title ≤40 chars (push heading); ask ≤120.');
+    should(text).containEql('Title ≤40 chars; ask ≤120.');
     // Isolated: the reader has not followed the conversation, so they must be able to answer cold.
     should(text).containEql('Owner answers cold: no "as above"');
     should(text).containEql('ticket/PR numbers');
     // Point form: the situation, why now and earlier answers are separate flags; a SMALL diagram or mock-up
     // rides in the body when it shows the point faster than words.
     should(text).containEql('`--premise` = situation, `--context` = why now, `--decided` = earlier answers');
-    should(text).containEql('a SMALL diagram/mock-up (fy-render svg|html|mermaid) if it beats words');
+    should(text).containEql('a SMALL diagram/mock-up (fy-render svg|html|mermaid)');
     should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
     // Kinds, at most three directional answers, the recommendation on the right.
     should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
     should(text).containEql('Choice: 2–3 `--option`s;');
     should(text).containEql('`--recommend <pick> --recommend-why <line>`');
-    should(text).containEql('`--up "<label>"`: 3rd answer (task, permission)');
-    should(text).containEql('`--step "<md>"` each');
+    should(text).containEql('To-do: `--step "<md>"`');
     // An answer is read apart: an option with its note, or the owner's own words instead of the options.
     should(text).containEql('"[answer to !A3 …] <option> · note: …"');
     should(text).containEql('"Other answer (none of the options): …"');
     // The need-more-info loop: expand the same item.
     should(text).containEql('"[needs more info !A3 …]" → `zz attention edit <id>`');
-    // The discussion loop: talk first, then update or close; open items are read on demand.
-    should(text).containEql('"[discuss !A3 …]" reply in chat, then edit/done');
+    // The discussion loop: a reply about an ask closes nothing; close what it answered, surface the rest.
+    should(text).containEql('"[reply about !A3 …]" is chat; nothing closes:');
+    should(text).containEql('`zz attention done <id>` what it answered');
+    should(text).containEql('`zz attention surface <id>` the rest');
+    // Open items are read on demand.
     should(text).containEql('Open: `zz attention ls`');
-    should(text).containEql('Moot? `zz attention done <id>`');
     should(text).not.containEql('notify');
     should(text).not.containEql('fy ');
   });

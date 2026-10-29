@@ -563,6 +563,9 @@ import {
   AttentionChangeFanout,
   AttentionConversation,
   AttentionMoreInfoPush,
+  AttentionResurfacer,
+  AttentionSurfacedPush,
+  GroupedAttentionRaises,
   AttentionBoardUndelivered,
   AttentionReplyBatcher,
   AttentionReplyDelivery,
@@ -8889,7 +8892,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // rather than being flattened into "no attention".
           has: async id => (await sessions.get(id)) !== undefined,
         },
-        notifications,
+        // A ferret's asks start in discussion: one push for the ones it raises in the same breath.
+        new GroupedAttentionRaises(notifications, new KeyedAttentionReplyTimers()),
         new AttentionChangeFanout([
           // The session list's unread signal, kept true to the board.
           attentionProjection,
@@ -8898,6 +8902,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AttentionReplyDelivery(attentionReplies, CLIENT_NAME),
           // The ferret's edit that answers the owner's request for more information: pushed once more.
           new AttentionMoreInfoPush(notifications),
+          // An ask that left its discussion for the owner's queue: pushed as a card now waiting on them.
+          new AttentionSurfacedPush(notifications),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {
@@ -8907,6 +8913,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         ]),
       );
+      // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
+      if (attentionConfig.resurfaceAfterMinutes !== undefined) {
+        new AttentionResurfacer(
+          attentionBoards,
+          attention,
+          () => storage.listSessions().map(session => session.id),
+          new KeyedAttentionReplyTimers(),
+          () => clock.now(),
+          attentionConfig.resurfaceAfterMinutes,
+        ).start();
+      }
       // A harness parked on its own prompt waits on the owner, so it is an item on the board, raised and
       // cleared from the state documents storage writes — and caught up once at start, in the background.
       const harnessPrompts = new HarnessPromptAttention(

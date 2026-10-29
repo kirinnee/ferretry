@@ -61,7 +61,7 @@ export const DISCUSS_LABEL = 'Discuss';
 export const attentionCanDiscuss = (item: { readonly raisedBy: 'human' | 'agent' | 'daemon' }): boolean =>
   item.raisedBy === 'agent';
 
-/** Whether an open item is in discussion: the owner asked to talk it through and the ferret has not updated it. */
+/** Whether an open item is in discussion: still being talked through in chat, not yet surfaced to the owner's queue. */
 export const attentionInDiscussion = (item: {
   readonly waitingOn?: 'ferret' | undefined;
   readonly waitingFor?: 'info' | 'discussion' | undefined;

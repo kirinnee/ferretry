@@ -168,6 +168,25 @@ export class AttentionMoreInfoPush implements AttentionChangeObserver {
   }
 }
 
+/** Announces that an ask left its discussion for the owner's queue. */
+export interface SurfacedAnnouncer {
+  surfaced(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
+}
+
+/**
+ * The owner is pushed for an ask that reached their queue: the card now waits on them, and until now they
+ * only had a chat message (or a grouped push) about it. Once per item, whoever surfaced it — the ferret, the
+ * owner, or the resurface timer.
+ */
+export class AttentionSurfacedPush implements AttentionChangeObserver {
+  constructor(private readonly announcer: SurfacedAnnouncer) {}
+
+  async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
+    if (change.change !== 'surfaced' || change.item === undefined) return;
+    await this.announcer.surfaced(sessionId, change.item, change.snapshot);
+  }
+}
+
 /**
  * A person's chat message, read against the ferret's open items (`conversationTurn`): the words to
  * deliver, and — once they are accepted — the items they answered resolved in the owner's name.

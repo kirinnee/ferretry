@@ -8,6 +8,7 @@ import type {
   AttentionNotifyOptions,
   AttentionResolveOptions,
   AttentionStepOptions,
+  AttentionSurfaceOptions,
 } from './controller.ts';
 
 const SESSION_FLAG = '-s, --session <id>';
@@ -140,6 +141,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('-l, --link <target>', 'a PR, file or reference worth opening; repeat', collect, [])
       .option('--step <markdown>', 'one step the human follows, in order; repeat', collect, [])
       .option('--body-file <path>', 'a Markdown file of instructions, or - for stdin')
+      .option('--surface', 'raise straight to the owner queue; by default an ask starts in discussion, in the chat')
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
       .addHelpText('after', `\n${ASK_KINDS}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {
@@ -219,6 +221,16 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('-n, --note <text>', 'what is unclear or wrong, told to the ferret'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.discuss(id, merged<AttentionResolveOptions>(command));
+  });
+
+  scoped(
+    attention
+      .command('surface')
+      .description('move an ask you raised from the chat discussion onto the owner queue (and push the owner)')
+      .argument('<id>', 'the attention reference, like !A3')
+      .option('-w, --why <line>', 'one line on why the owner must look now, for example what is still open'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.surface(id, merged<AttentionSurfaceOptions>(command));
   });
 
   scoped(

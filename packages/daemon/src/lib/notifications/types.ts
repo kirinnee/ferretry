@@ -54,13 +54,15 @@ export const AttentionNotificationRequestedRecordSchema = z
     attentionId: AttentionIdSchema,
     /** Present on the push that announces the information a ferret added: which request of the owner's it answers. */
     infoRequest: PositiveIntegerSchema.optional(),
+    /** Present on the push that announces an item moved out of discussion onto the owner's queue. */
+    surfaced: z.literal(true).optional(),
     sent: SentNotificationSchema,
     enrolled: NonNegativeIntegerSchema,
   })
   .refine(
     record =>
       record.key ===
-      `attention:${record.sessionId}:${record.attentionId}${record.infoRequest === undefined ? '' : `:info-${record.infoRequest}`}`,
+      `attention:${record.sessionId}:${record.attentionId}${record.infoRequest === undefined ? '' : `:info-${record.infoRequest}`}${record.surfaced === true ? ':surfaced' : ''}`,
     {
       message: 'the attention notification key does not name its session and item',
       path: ['key'],
