@@ -6,7 +6,7 @@
 
 import { type AttentionItem, type AttentionTurn, attentionTurn } from '@ferretry/protocol';
 
-export type AgendaTone = 'blocking' | 'needs-you' | 'will-block' | 'needed-by' | 'ferret' | 'done';
+type AgendaTone = 'blocking' | 'needs-you' | 'will-block' | 'needed-by' | 'ferret' | 'done';
 
 export interface AgendaStatus {
   readonly turn: AttentionTurn;
@@ -70,16 +70,16 @@ export const agendaStatus = (item: AttentionItem, ferret: string, now = Date.now
 
 const RANK: Readonly<Record<AgendaTone, number>> = {
   blocking: 0,
-  'will-block': 1,
   'needed-by': 1,
-  'needs-you': 1,
-  ferret: 2,
-  done: 3,
+  'will-block': 2,
+  'needs-you': 3,
+  ferret: 4,
+  done: 5,
 };
 
-/** Notifications sort among the items that need the owner, after the ones that block. */
+/** Notifications sort with the plain "needs you" items, after everything that blocks or is due. */
 const rankOf = (item: AttentionItem): number =>
-  isNotice(item) ? 1 : RANK[(agendaStatus(item, '') as AgendaStatus).tone];
+  isNotice(item) ? RANK['needs-you'] : RANK[(agendaStatus(item, '') as AgendaStatus).tone];
 
 const deadlineOf = (item: AttentionItem): number => {
   const at = item.neededBy === undefined ? Number.NaN : Date.parse(item.neededBy);
@@ -87,8 +87,9 @@ const deadlineOf = (item: AttentionItem): number => {
 };
 
 /**
- * The agenda's order: blocking first, then what needs the owner (the nearest deadline first, then the one that
- * has waited longest), then what is with the ferret, then what is done. Returns a new array.
+ * The agenda's order: blocking now, then what is due (the nearest deadline first), then what will block, then
+ * what plainly needs the owner (the one that has waited longest first), then what is with the ferret, then what is
+ * done. Returns a new array.
  */
 export const sortAgenda = (items: readonly AttentionItem[]): readonly AttentionItem[] =>
   [...items].sort(

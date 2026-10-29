@@ -57,7 +57,7 @@ describe('AttentionUpdated', () => {
     ]);
     expect(items[0]?.textContent).toContain('The ferret changed Decided so far, Still open, Why it matters');
     expect(items[0]?.textContent).toContain('Old reason.');
-    expect(items[0]?.textContent).toContain('Nothing yet');
+    expect(items[0]?.textContent).toContain('Still open was empty');
     expect(list.querySelector('button, input, textarea')).toBeNull();
     await view.unmount();
   });

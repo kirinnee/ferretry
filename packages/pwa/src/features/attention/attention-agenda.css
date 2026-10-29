@@ -18,47 +18,43 @@
   line-height: var(--leading-base);
 }
 
-/* ---- the status pill ------------------------------------------------------------------------------------- */
+/* ---- the status mark ------------------------------------------------------------------------------------- */
+/* A small coloured dot and the words in the ink colour: no fill, no border. The words carry the meaning. */
 .fy-agenda-pill {
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
   flex-shrink: 0;
   align-items: center;
-  padding: 1px var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
-  color: var(--muted);
+  gap: 6px;
+  color: var(--fg);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   line-height: var(--leading-base);
   overflow-wrap: anywhere;
 }
-.fy-agenda-pill[data-tone='blocking'] {
-  border-color: var(--err-border);
-  background: var(--err-bg);
-  color: var(--err);
+.fy-agenda-pill::before {
+  content: '';
+  width: 7px;
+  height: 7px;
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--muted);
 }
-.fy-agenda-pill[data-tone='will-block'],
-.fy-agenda-pill[data-tone='needed-by'] {
-  border-color: var(--warn-border);
-  background: var(--warn-bg);
-  color: var(--warn);
+.fy-agenda-pill[data-tone='blocking']::before,
+.fy-agenda-pill[data-overdue]::before {
+  background: var(--err);
 }
-.fy-agenda-pill[data-tone='needs-you'] {
-  border-color: var(--accent-border);
-  background: var(--accent-soft);
-  color: var(--accent);
+.fy-agenda-pill[data-tone='will-block']::before,
+.fy-agenda-pill[data-tone='needed-by']::before {
+  background: var(--warn);
 }
-.fy-agenda-pill[data-overdue] {
-  border-color: var(--err-border);
-  color: var(--err);
+.fy-agenda-pill[data-tone='needs-you']::before {
+  background: var(--accent);
 }
 .fy-agenda-pill__when {
   color: var(--muted);
   font-weight: var(--weight-normal);
-  white-space: pre;
 }
 
 /* ---- one row of the drawer ------------------------------------------------------------------------------- */
@@ -236,18 +232,41 @@
   font-weight: var(--weight-medium);
 }
 .fy-full__notice {
-  padding: 1px var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: var(--surface-2);
+  color: var(--fg);
   font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
 }
 .fy-full__age,
 .fy-full__updated {
   font-size: var(--text-xs);
 }
+/* "Updated 6 min ago": the one place the item says it was edited, and what opens the earlier versions. */
 .fy-full__updated {
-  color: var(--faint);
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 2px;
+  margin: 0;
+  padding: 0 var(--gap-xs);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+.fy-full__updated:hover {
+  color: var(--fg);
+}
+.fy-full__updated[aria-expanded='true'] .fy-full__updated-chevron {
+  transform: rotate(180deg);
+}
+@media (pointer: coarse) {
+  .fy-full__updated {
+    min-height: 44px;
+    margin-block: -10px;
+  }
 }
 /* The title IS the question, so it reads as one. */
 .fy-full__title {
@@ -288,30 +307,53 @@
   color: var(--err);
   font-size: var(--text-meta);
 }
-.fy-full__reply {
-  min-height: 44px;
-  gap: var(--gap-xs);
-  color: var(--muted);
-}
 .fy-full__waiting {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-sm);
+  flex-direction: column;
+  gap: var(--gap-xs);
 }
 .fy-full__waiting-line {
   margin: 0;
   color: var(--muted);
   font-size: var(--text-sm);
 }
+/* The options in ONE row: the arrow beside the label, not over it; the tag drops under only when it must. */
+.fy-full .fy-attn-answers > .fy-attn-answer {
+  min-height: 44px;
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0 6px;
+  padding-block: 4px;
+}
+.fy-full .fy-attn-answers > .fy-attn-answer > svg {
+  order: 0;
+}
+/* ONE row: ‹ 1 of 7 ›, Add to reply, ⋯, ✕. */
+.fy-full .fy-attn-actions__row--secondary[data-hosted] {
+  flex-wrap: nowrap;
+  justify-content: flex-start;
+  gap: var(--gap-xs);
+}
+.fy-full__reply {
+  min-width: 44px;
+  min-height: 44px;
+  justify-content: center;
+  gap: var(--gap-xs);
+  margin-left: auto;
+  color: var(--muted);
+}
+.fy-full .fy-attn-menu__button {
+  min-width: 44px;
+  min-height: 44px;
+}
 .fy-full__nav {
   display: flex;
+  flex-shrink: 0;
   align-items: center;
   gap: var(--gap-xs);
 }
 .fy-full__where {
-  min-width: 4.5rem;
+  min-width: 3.5rem;
   color: var(--muted);
   font-size: var(--text-sm);
   font-variant-numeric: tabular-nums;
@@ -322,14 +364,38 @@
   display: inline-flex;
   min-width: 44px;
   min-height: 44px;
+  flex-shrink: 0;
   align-items: center;
   justify-content: center;
 }
 .fy-full__step:disabled {
   opacity: 0.35;
 }
-.fy-full__close {
-  margin-left: auto;
+@media (max-width: 767.98px) {
+  .fy-full__reply-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+/* A mouse needs less room: the bar stays about two lines tall. */
+@media (min-width: 768px) {
+  .fy-full__bar {
+    padding-block: var(--gap-xs);
+  }
+  .fy-full .fy-attn-answers > .fy-attn-answer {
+    min-height: 40px;
+    padding-block: 2px;
+  }
+  .fy-full__step,
+  .fy-full__reply,
+  .fy-full .fy-attn-menu__button {
+    min-width: 36px;
+    min-height: 36px;
+  }
 }
 .fy-full .fy-render {
   max-width: 100%;

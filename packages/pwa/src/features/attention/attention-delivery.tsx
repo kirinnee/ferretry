@@ -1,7 +1,7 @@
 /**
  * WHERE THE OWNER'S ANSWER STANDS, drawn where the owner looks for it: on the card, and in the pinned panel.
  *
- * An answer is DONE only when the ferret has it (docs/attention.md § Delivery), so the board says three
+ * An answer is DONE only when the ferret has it (docs/attention.md § Delivery), so the board says two
  * things this file draws and nothing else:
  *
  * - "Sending…": the daemon holds the answer (`replies.pending`) or has handed it over and not yet seen it
@@ -10,8 +10,6 @@
  * - "Your answer didn't reach <ferret>": the item is open again (`undelivered`), with the answer it was
  *   given, so Retry sends exactly that again. It is the same action the answer was, through the same client:
  *   the card holds no transport (`onAct`), and the host decides whether an undo window comes first.
- * - "In discussion": the owner asked to talk it through, so the item waits on its ferret and is a slim line
- *   until it is opened, not a card that asks for an answer.
  *
  * The strip reads the panel's facts through {@link AttentionDeliveryContext} rather than new props on the
  * card: the card stays the one component every place draws, and a place that provides no context (the
@@ -25,11 +23,10 @@ import {
   attentionTitle,
   hasOwnTitle,
 } from '@ferretry/protocol';
-import { LoaderCircle, MessageCircle, TriangleAlert } from 'lucide-react';
+import { LoaderCircle, TriangleAlert } from 'lucide-react';
 import { createContext, useContext } from 'react';
 import { type InboxAction, undeliveredAction } from '../../lib/attention-answers.ts';
 import { Button } from '../../shell/primitives.tsx';
-import { attentionReference } from './attention-board.tsx';
 
 /** What the strip needs beyond the item itself, provided by the host that knows the board. */
 export interface AttentionDeliveryState {
@@ -90,49 +87,5 @@ export function AttentionDelivery({ item, ferret, busy = false, onAct }: Attenti
         Retry
       </Button>
     </div>
-  );
-}
-
-/** One answered item still on its way, as a slim line: it goes when the daemon stops listing it. */
-export function AttentionSendingLine({ heading }: { readonly heading: string }) {
-  return (
-    <p className="fy-attn-delivery" data-attention-delivery="sending" data-attention-sending-line="" role="status">
-      <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
-      <span className="fy-attn-delivery__text">
-        Sending… <span className="fy-attn-delivery__title">{heading}</span>
-      </span>
-    </p>
-  );
-}
-
-export interface AttentionDiscussionLineProps {
-  readonly item: AttentionItem;
-  /** The panel's DOM id the line opens a card in, for `aria-controls`. */
-  readonly controls: string;
-  readonly onExpand: () => void;
-}
-
-/** "In discussion · <title> ›": the item is waiting on its ferret; pressing it opens the card as usual. */
-export function AttentionDiscussionLine({ item, controls, onExpand }: AttentionDiscussionLineProps) {
-  return (
-    <button
-      aria-controls={controls}
-      aria-expanded="false"
-      aria-label={`In discussion: ${attentionHeading(item)}. Open ${attentionReference(item.id)}`}
-      className="fy-attn-collapsed fy-attn-discussing"
-      data-attention-discussing=""
-      onClick={onExpand}
-      type="button"
-    >
-      <MessageCircle aria-hidden="true" className="fy-attn-discussing__icon" size={14} />
-      <span className="fy-attn-collapsed__lead">In discussion</span>
-      <span aria-hidden="true" className="fy-attn-collapsed__sep">
-        ·
-      </span>
-      <span className="fy-attn-collapsed__title">{attentionHeading(item)}</span>
-      <span aria-hidden="true" className="fy-attn-collapsed__go">
-        ›
-      </span>
-    </button>
   );
 }

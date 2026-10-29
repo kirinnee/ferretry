@@ -6,6 +6,9 @@
 
 import type { AttentionItem, AttentionRevisableField, AttentionRevision } from '@ferretry/protocol';
 
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const;
+
 const POINT = /^\s*[-*•]\s+(\S.*)$/u;
 
 /** The points of a text written as bullets (every non-blank line one), or `null` when it is prose. */
@@ -49,8 +52,6 @@ const FIELD_LABEL: Readonly<Record<AttentionRevisableField, string>> = {
   steps: 'Steps',
   body: 'More detail',
 };
-
-export const revisionFieldLabel = (field: AttentionRevisableField): string => FIELD_LABEL[field];
 
 /** The most recent edit, or `null` when the item was never edited. */
 export const lastRevision = (item: Pick<AttentionItem, 'revisions'>): AttentionRevision | null =>
@@ -133,14 +134,18 @@ export const decidedSummary = (item: Pick<AttentionItem, 'decided' | 'stillOpen'
     .join(' · ');
 };
 
-/** A field as it was, in words a reader can scan: text as itself, a list as its size, an answer type by name. */
-export const describePrevious = (field: AttentionRevisableField, value: unknown): string => {
-  if (value === undefined || value === null || value === '') return 'Nothing yet';
+/**
+ * A field as it was, in words a reader can scan: text as itself, a list of words as bullets, a list of other things
+ * as its size, an answer type by name. `null` when the field was empty.
+ */
+export const describePrevious = (field: AttentionRevisableField, value: unknown): string | null => {
+  if (value === undefined || value === null || (typeof value === 'string' && value.trim() === '')) return null;
   if (typeof value === 'string') return value;
   if (typeof value === 'number' || typeof value === 'boolean') return String(value);
   if (Array.isArray(value)) {
-    if (value.length === 0) return 'Nothing yet';
-    if (value.every((entry): entry is string => typeof entry === 'string')) return value.join('; ');
+    if (value.length === 0) return null;
+    if (value.every((entry): entry is string => typeof entry === 'string'))
+      return value.map(entry => `- ${entry}`).join('\n');
     return plural(value.length, field === 'terms' ? 'term' : 'entry').replace('entrys', 'entries');
   }
   if (typeof value === 'object') {
@@ -159,7 +164,8 @@ export interface RevisionEntry {
   readonly changed: readonly {
     readonly field: AttentionRevisableField;
     readonly label: string;
-    readonly before: string;
+    /** The field as it was; `null` when it was empty. */
+    readonly before: string | null;
   }[];
 }
 
@@ -182,3 +188,16 @@ export const revisionList = (item: Pick<AttentionItem, 'revisions'>): readonly R
       before: describePrevious(field, (revision.previous as Record<string, unknown>)[field]),
     })),
   }));
+
+/** When an edit was made, in the fewest words: "8:54" today, "Mon 8:54" within the week, else "Oct 29". */
+export const revisionStamp = (at: string, now: number): string => {
+  const when = new Date(at);
+  if (Number.isNaN(when.getTime())) return at;
+  const today = new Date(now);
+  const day = (value: Date): number => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+  const days = Math.round((day(today) - day(when)) / 86_400_000);
+  const clock = `${String(when.getHours())}:${String(when.getMinutes()).padStart(2, '0')}`;
+  if (days === 0) return clock;
+  if (days > 0 && days < 7) return `${WEEKDAYS[when.getDay()] as string} ${clock}`;
+  return `${MONTHS[when.getMonth()] as string} ${String(when.getDate())}`;
+};

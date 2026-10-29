@@ -75,15 +75,17 @@ describe('agendaStatus', () => {
 });
 
 describe('sortAgenda', () => {
-  it('orders blocking, then needs you (nearest deadline, then oldest), then the ferret', () => {
+  it('orders blocking, needed-by, will-block, plain needs you, then the ferret', () => {
     const items = [
       attentionItem('A1', { waitingOn: 'ferret' }),
       attentionItem('A2', { waitingSince: at(29, 10) }),
       attentionItem('A3', { blockingNow: true, waitingSince: at(29, 11) }),
       attentionItem('A4', { waitingSince: at(29, 9) }),
       attentionItem('A5', { neededBy: at(29, 17), waitingSince: at(29, 11) }),
+      attentionItem('A6', { willBlock: 'the release', waitingSince: at(29, 12) }),
+      attentionItem('A7', { neededBy: at(29, 15), waitingSince: at(29, 12) }),
     ];
-    expect(sortAgenda(items).map(item => item.id)).toEqual(['A3', 'A5', 'A4', 'A2', 'A1']);
+    expect(sortAgenda(items).map(item => item.id)).toEqual(['A3', 'A7', 'A5', 'A6', 'A4', 'A2', 'A1']);
     expect(items[0]?.id).toBe('A1');
   });
 });

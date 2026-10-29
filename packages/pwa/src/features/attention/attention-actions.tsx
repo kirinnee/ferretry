@@ -34,7 +34,7 @@ const sameLabel = (a: string, b: string | undefined): boolean =>
   b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** The small tag on the recommended option. Words, not colour alone, so a screen reader says it too. */
-export function RecommendedTag() {
+function RecommendedTag() {
   return (
     <span className="fy-attn-tag" data-attention-recommended="">
       <span className="sr-only">, </span>
@@ -45,7 +45,7 @@ export function RecommendedTag() {
 }
 
 /** A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. */
-export function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDismiss: () => void }) {
+function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDismiss: () => void }) {
   const menuId = useId();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -216,8 +216,12 @@ export interface AttentionActionsProps {
   readonly onDismiss: () => void;
   /** A plain notification: the one action is "Clear". */
   readonly clear?: () => void;
-  /** Quiet extras at the end of the second row (the full card's "Add to reply"). */
+  /** Quiet extras in the second row (the full card's "Add to reply"), between `secondaryLead` and the ⋯ menu. */
   readonly secondaryExtra?: ReactNode;
+  /** The start of the second row (the full card's `‹ 1 of 7 ›`). */
+  readonly secondaryLead?: ReactNode;
+  /** The end of the second row, after the ⋯ menu (the full card's ✕). */
+  readonly secondaryTail?: ReactNode;
   /** Several questions: one "Send answers" button replaces the answers. */
   readonly sendAnswers?: { readonly ready: boolean; readonly onSend: () => void };
 }
@@ -240,19 +244,24 @@ export function AttentionActions({
   onDismiss,
   clear,
   secondaryExtra,
+  secondaryLead,
+  secondaryTail,
   sendAnswers,
 }: AttentionActionsProps) {
   const hintId = useId();
   const menu = dismissInMenu ? <ActionMenu busy={busy} onDismiss={onDismiss} /> : null;
   const skip = onSkip === undefined ? null : <SkipButton busy={busy} onSkip={onSkip} />;
   const details = onOpenDetail === undefined ? null : <DetailsButton onOpen={onOpenDetail} />;
+  const hosted = secondaryLead !== undefined || secondaryExtra !== undefined || secondaryTail !== undefined;
   const secondary =
-    skip === null && details === null && menu === null && secondaryExtra === undefined ? null : (
-      <div className="fy-attn-actions__row fy-attn-actions__row--secondary">
+    skip === null && details === null && menu === null && !hosted ? null : (
+      <div className="fy-attn-actions__row fy-attn-actions__row--secondary" data-hosted={hosted || undefined}>
+        {secondaryLead}
         {skip}
         {details}
         {secondaryExtra}
         {menu}
+        {secondaryTail}
       </div>
     );
   const waitingLine =
@@ -282,10 +291,11 @@ export function AttentionActions({
             )}
             Send answers
           </button>
-          {skip}
-          {details}
-          {menu}
+          {hosted ? null : skip}
+          {hosted ? null : details}
+          {hosted ? null : menu}
         </div>
+        {hosted ? secondary : null}
       </div>
     );
   }

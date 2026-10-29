@@ -176,4 +176,25 @@ describe('the full card', () => {
     expect(view.container.querySelector('nav')?.getAttribute('aria-label')).toBe('Agenda items');
     await view.unmount();
   });
+
+  it('has one Updated control, in the header, that opens the earlier versions', async () => {
+    const view = await card({
+      revisions: [{ at: '2026-10-29T09:55:00.000Z', by: 'agent', changed: ['why'], previous: { why: 'Old.' } }],
+    });
+    expect(view.container.querySelectorAll('[data-attention-updated]')).toHaveLength(1);
+    const button = pick(view, '[data-attention-updated]', 'Updated');
+    expect(button.closest('.fy-full__top')).not.toBeNull();
+    expect(view.container.querySelector('[data-attention-revisions]')).toBeNull();
+    await interact(() => button.click());
+    expect(button.getAttribute('aria-expanded')).toBe('true');
+    expect(pick(view, '[data-attention-revisions]', 'list').textContent).toContain('Old.');
+    await view.unmount();
+  });
+
+  it('keeps the reply control in the one footer row, named for assistive tech', async () => {
+    const view = await card();
+    const reply = pick(view, '[data-attention-add-reply]', 'reply');
+    expect(reply.getAttribute('aria-label')).toContain('Add to reply');
+    await view.unmount();
+  });
 });

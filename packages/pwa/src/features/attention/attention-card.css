@@ -327,21 +327,36 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   border-bottom: 0;
 }
 .fy-attn-sec__heading {
-  display: flex;
-  align-items: center;
-  gap: 6px;
   margin: 0;
   color: var(--fg);
   font-size: var(--text-base);
-  font-weight: var(--weight-strong);
+  font-weight: var(--weight-display, var(--weight-strong));
+  line-height: var(--leading-base);
 }
-.fy-attn-sec__heading::before {
-  content: '';
-  width: 6px;
-  height: 6px;
-  flex-shrink: 0;
-  border-radius: var(--radius-pill);
-  background: var(--attn-tone, var(--accent));
+.fy-attn-sec--open + .fy-attn-sec--open {
+  margin-top: var(--gap-md);
+}
+/* One list style in every section: the same indent, spacing and ink-coloured marker, whether the points are
+   written as bullets or arrive as Markdown. */
+.fy-attn-secs[data-layout='open'] li::marker {
+  color: var(--fg);
+}
+.fy-attn-sec--open .md ul,
+.fy-attn-sec--open .md ol {
+  display: flex;
+  margin: 0;
+  padding-left: 18px;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-attn-sec--open .md li {
+  margin: 0;
+}
+.fy-attn-sec--open .md > :first-child {
+  margin-top: 0;
+}
+.fy-attn-sec--open .md > :last-child {
+  margin-bottom: 0;
 }
 .fy-attn-sec--open > .fy-attn-sec__body {
   padding: 0;
@@ -349,9 +364,6 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 }
 .fy-attn-sec--open .md {
   color: inherit;
-}
-.fy-attn-sec--decided > .fy-attn-sec__body {
-  color: var(--muted);
 }
 .fy-attn-options {
   display: flex;
