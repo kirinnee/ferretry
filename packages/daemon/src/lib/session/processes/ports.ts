@@ -51,10 +51,7 @@ export interface ProcessTreePort {
 
 /** Which rows the harness owns — itself and its long-lived helpers — by pid. */
 export interface ProcessProvenancePort {
-  identify(
-    rows: readonly ProcessDetailRow[],
-    rootPid: number,
-  ): Promise<ReadonlyMap<number, { readonly kind: string }>>;
+  identify(rows: readonly ProcessDetailRow[], rootPid: number): Promise<ReadonlyMap<number, { readonly kind: string }>>;
 }
 
 /** The pane the attach proof names: pane id, pid and process start, freshly matched. */

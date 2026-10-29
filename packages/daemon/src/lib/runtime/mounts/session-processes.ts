@@ -20,12 +20,11 @@ export interface SessionProcessSubsystem {
   stop(sessionId: string, processId: string): Promise<SessionProcessStopResult>;
 }
 
-const PROCESS_REFUSALS: Readonly<Record<SessionProcessFailure, { readonly status: number; readonly code: string }>> =
-  {
-    not_found: { status: 404, code: 'process_not_found' },
-    changed: { status: 409, code: 'process_changed' },
-    not_stoppable: { status: 409, code: 'process_not_stoppable' },
-  };
+const PROCESS_REFUSALS: Readonly<Record<SessionProcessFailure, { readonly status: number; readonly code: string }>> = {
+  not_found: { status: 404, code: 'process_not_found' },
+  changed: { status: 409, code: 'process_changed' },
+  not_stoppable: { status: 409, code: 'process_not_stoppable' },
+};
 
 function sessionId(context: RouteContext): string {
   const decoded = decodeParameter(context.params.get('sessionId') ?? '');

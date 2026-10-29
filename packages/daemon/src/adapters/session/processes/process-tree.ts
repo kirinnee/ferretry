@@ -134,9 +134,7 @@ export async function classifyStreamLink(
 async function streamTarget(base: string, fd: 1 | 2): Promise<ProcessStreamTarget | undefined> {
   const link = await readlink(join(base, 'fd', String(fd))).catch(() => undefined);
   if (link === undefined) return { kind: 'other', description: 'closed or not readable' };
-  return await classifyStreamLink(link, async path =>
-    (await lstat(path).catch(() => undefined))?.isFile() === true,
-  );
+  return await classifyStreamLink(link, async path => (await lstat(path).catch(() => undefined))?.isFile() === true);
 }
 
 async function childrenOf(proc: string, pid: number): Promise<readonly number[]> {

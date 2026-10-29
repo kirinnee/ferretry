@@ -80,7 +80,8 @@ export class HarnessProcessProvenance implements ProcessProvenancePort {
     const proc = this.procRoot;
     // Where there is no procfs the pane's directory is unknown, so its configured servers stay
     // unexplained — listed as helpers by the tree rule, never assumed to be anything else.
-    const directory = proc === undefined ? undefined : await readlink(join(proc, String(rootPid), 'cwd')).catch(() => undefined);
+    const directory =
+      proc === undefined ? undefined : await readlink(join(proc, String(rootPid), 'cwd')).catch(() => undefined);
     const configuredServers = directory === undefined ? [] : await this.servers.read(directory);
     return identifyKnownProcesses(
       rows.map(row => ({ pid: row.pid, ppid: row.ppid, startedSecondsAgo: 0, argv: row.argv })),
