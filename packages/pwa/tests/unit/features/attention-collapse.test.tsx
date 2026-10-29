@@ -249,6 +249,44 @@ describe('the fold is remembered per device and per conversation', () => {
       refuse.mockRestore();
     }
   });
+
+  test("switching conversation in place shows that conversation's own fold", async () => {
+    view = await mount(panel());
+    await click(foldButton(view.container), 'the fold button');
+    expect(foldedLine(view.container)).not.toBeNull();
+
+    await view.render(panel({ scope: otherScope }));
+    expect(foldedLine(view.container)).toBeNull();
+    expect(foldButton(view.container)).not.toBeNull();
+
+    await view.render(panel({ scope }));
+    expect(foldedLine(view.container)).not.toBeNull();
+  });
+
+  for (const [what, define] of [
+    ['absent', { value: undefined, configurable: true }],
+    [
+      'refusing to be read',
+      {
+        configurable: true,
+        get: () => {
+          throw new Error('SecurityError');
+        },
+      },
+    ],
+  ] as const) {
+    test(`browser storage that is ${what} still folds for the rest of the tab`, async () => {
+      const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+      Object.defineProperty(globalThis, 'localStorage', define);
+      try {
+        view = await mount(panel());
+        await click(foldButton(view.container), 'the fold button');
+        expect(foldedLine(view.container)).not.toBeNull();
+      } finally {
+        if (original) Object.defineProperty(globalThis, 'localStorage', original);
+      }
+    });
+  }
 });
 
 describe('only an item it has not seen unfolds it', () => {
