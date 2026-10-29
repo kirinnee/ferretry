@@ -17,7 +17,6 @@ import {
   fakeInbox,
   InboxHarness,
   inboxCard,
-  menuAction,
 } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -239,7 +238,10 @@ describe('AttentionNeedsYou', () => {
   it('answers undoably, and the toast outlives the last card it took', async () => {
     const fake = fakeInbox();
     const mounted = await mount(needsYou(fake, [bare]));
-    const done = await menuAction(mounted.container, 'done');
+    const done = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-attention-answer="right"]'),
+      'the Got it answer',
+    );
     await interact(() => done.click());
     expect(mounted.container.querySelector('[data-attention-needs-you]')).toBeNull();
     expect(toast(mounted).textContent).toContain('Marked !A1 done');
@@ -252,9 +254,11 @@ describe('AttentionNeedsYou', () => {
 });
 
 describe('AttentionCard swipe hints', () => {
-  it('marks Done and Dismiss with their swipe, and never an option', async () => {
+  it('marks each swiped answer with its direction, and never an extra option', async () => {
     const hinted = (mounted: Mounted): (string | null)[] =>
-      [...mounted.container.querySelectorAll('.fy-attn-card__swipe')].map(hint => hint.getAttribute('title'));
+      [...mounted.container.querySelectorAll('[data-attention-answer], [data-attention-option]')].map(
+        button => /swipe (left|up|right)/.exec(button.textContent ?? '')?.[0] ?? null,
+      );
     const options = await mount(
       <AttentionCard
         item={attentionItem('A9', { ask: choices('One', 'Two', 'Three', 'Four') })}
@@ -262,13 +266,16 @@ describe('AttentionCard swipe hints', () => {
         swipeHints
       />,
     );
-    expect(hinted(options)).toEqual([]);
+    expect(hinted(options)).toEqual(['swipe left', 'swipe up', 'swipe right', null]);
     await options.unmount();
 
     const bare = await mount(<AttentionCard item={attentionItem('A8')} onAct={() => {}} swipeHints />);
-    await menuAction(bare.container, 'done');
-    expect(hinted(bare)).toEqual(['swipe right', 'swipe left']);
+    expect(hinted(bare)).toEqual(['swipe right']);
     await bare.unmount();
+
+    const plain = await mount(<AttentionCard item={attentionItem('A7')} onAct={() => {}} />);
+    expect(hinted(plain)).toEqual([null]);
+    await plain.unmount();
   });
 });
 

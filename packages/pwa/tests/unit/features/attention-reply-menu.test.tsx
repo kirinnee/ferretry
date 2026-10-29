@@ -12,10 +12,13 @@ const typeInto = async (root: HTMLElement, text: string): Promise<HTMLTextAreaEl
 };
 
 describe('AttentionCard reply and menu', () => {
-  it('sends the typed reply on Ctrl+Enter and on the send button, then clears the box', async () => {
+  it('sends the reply of a text-only ask on Ctrl+Enter and on the send button, then clears the box', async () => {
     const acts: InboxAction[] = [];
     const view = await mount(
-      <AttentionCard item={attentionItem('A1', { subject: 'Have a look' })} onAct={a => acts.push(a)} />,
+      <AttentionCard
+        item={attentionItem('A1', { subject: 'Have a look', ask: { kind: 'open-question' } })}
+        onAct={a => acts.push(a)}
+      />,
     );
     const box = await typeInto(view.container, 'looks fine');
     await interact(() => pressKey(box, 'Enter', { ctrlKey: true }));
@@ -30,7 +33,7 @@ describe('AttentionCard reply and menu', () => {
     await view.unmount();
   });
 
-  it('walks the ⋯ menu with the arrows and closes it on a press outside it', async () => {
+  it('opens the ⋯ menu on Dismiss, closes it on Esc with focus back, and on a press outside it', async () => {
     const view = await mount(
       <AttentionCard
         item={attentionItem('A2', { subject: 'Pick', ask: choices('Ship', 'Hold') })}
@@ -40,13 +43,14 @@ describe('AttentionCard reply and menu', () => {
     const more = must(view.container.querySelector<HTMLButtonElement>('[data-attention-more]'), 'the ⋯ button');
     await interact(() => more.click());
     const menu = must(view.container.querySelector<HTMLElement>('[role="menu"]'), 'the menu');
-    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')] as [HTMLElement, HTMLElement];
-    expect(document.activeElement).toBe(items[0]);
-    await interact(() => pressKey(items[0], 'ArrowDown'));
-    expect(document.activeElement).toBe(items[1]);
-    await interact(() => pressKey(items[1], 'ArrowUp'));
-    expect(document.activeElement).toBe(items[0]);
-    await interact(() => pressKey(items[0], 'Tab'));
+    const items = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')];
+    expect(items.map(item => item.textContent?.trim())).toEqual(['Dismiss']);
+    expect(document.activeElement).toBe(items[0] ?? null);
+    await interact(() => pressKey(must(items[0], 'item'), 'Escape'));
+    expect(view.container.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(more);
+    await interact(() => more.click());
+    expect(view.container.querySelector('[role="menu"]')).not.toBeNull();
     await interact(() => document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })));
     expect(view.container.querySelector('[role="menu"]')).toBeNull();
     await view.unmount();
