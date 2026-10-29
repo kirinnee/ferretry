@@ -98,6 +98,8 @@ export interface AttentionCardProps {
    * wide pointer screen, where nothing swipes, draws the item this way.
    */
   readonly flat?: boolean;
+  /** Opens what the item knows beyond its question (`AttentionDetail`): the side panel, or the phone's full view. */
+  readonly onOpenDetail?: () => void;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
