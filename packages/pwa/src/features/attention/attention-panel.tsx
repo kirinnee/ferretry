@@ -34,6 +34,8 @@ import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { attentionReference } from './attention-board.tsx';
 import { AttentionCard } from './attention-card.tsx';
+import { useAttentionCollapse } from './attention-collapse.ts';
+import { AttentionCollapseButton, AttentionCollapsedLine } from './attention-collapsed-line.tsx';
 import { attentionPanelItemId } from './attention-resolved.tsx';
 
 export { attentionPanelItemId };
@@ -153,6 +155,10 @@ export function AttentionPanel({
   const location = target === null ? null : locateAttention(snapshot, target);
   const selected = shownAttentionItem(snapshot, selectedId);
   const selectedIndex = selected === undefined ? -1 : items.indexOf(selected);
+  const openIds = items.map(entry => entry.id);
+  const fold = useAttentionCollapse(scope, openIds, snapshot !== null);
+  const folded = fold.collapsed;
+  const expandFold = fold.expand;
 
   const setCard = (itemId: AttentionId, state: CardState | null): void =>
     setCards(current => {
@@ -182,6 +188,7 @@ export function AttentionPanel({
     if (focus === null || handled.current === focus.seq || focus.target === null) return;
     const where = locateAttention(snapshot, focus.target);
     if (where === 'pending') return;
+    if (where === 'open' && folded) return;
     if (where === 'open' && selected?.id !== focus.target) {
       onSelect(focus.target);
       return;
@@ -196,7 +203,25 @@ export function AttentionPanel({
     const item = document.getElementById(attentionPanelItemId(id, focus.target));
     item?.scrollIntoView?.({ block: 'nearest' });
     item?.focus({ preventScroll: true });
-  }, [focus, snapshot, id, selected?.id, onSelect, onOpenResolved]);
+  }, [focus, snapshot, id, selected?.id, folded, onSelect, onOpenResolved]);
+
+  // A LINK TO AN OPEN ITEM UNFOLDS THE CARD: the reader pressed `!A3`, so the item must be there to show.
+  const unfoldedFor = useRef<number | null>(null);
+  useEffect(() => {
+    if (focus === null || focus.target === null || unfoldedFor.current === focus.seq) return;
+    if (locateAttention(snapshot, focus.target) !== 'open') return;
+    unfoldedFor.current = focus.seq;
+    expandFold();
+  }, [focus, snapshot, expandFold]);
+
+  // A folded card is a "not now": the next message is not offered as its answer until it is unfolded.
+  const chipChange = chip?.onChange;
+  const wasFolded = useRef(false);
+  useEffect(() => {
+    if (folded === wasFolded.current) return;
+    wasFolded.current = folded;
+    chipChange?.(!folded);
+  }, [folded, chipChange]);
 
   const loading = snapshot === null && (status === 'idle' || status === 'loading');
   const unavailable = snapshot === null && status === 'error';
@@ -214,7 +239,13 @@ export function AttentionPanel({
   return (
     <>
       {live}
-      <section aria-label="Needs you" className="fy-attn-panel" data-attention-panel="" id={id}>
+      <section
+        aria-label="Needs you"
+        className="fy-attn-panel"
+        data-attention-panel=""
+        data-folded={(folded && !loading && !unavailable) || undefined}
+        id={id}
+      >
         {missing && target !== null ? (
           <p className="fy-attn-panel__note" data-attention-missing={target} role="status">
             <CircleAlert aria-hidden="true" size={14} />
@@ -238,7 +269,12 @@ export function AttentionPanel({
             <CircleAlert aria-hidden="true" size={14} />
             Attention cannot be read right now. Reconnect before assuming nothing needs you.
           </p>
-        ) : selected === undefined ? null : (
+        ) : selected === undefined ? null : folded ? (
+          <>
+            <AttentionCollapsedLine controls={id} item={selected} more={items.length - 1} onExpand={fold.expand} />
+            {repliesSlot}
+          </>
+        ) : (
           <div
             className="fy-attn-panel__item"
             id={attentionPanelItemId(id, selected.id)}
@@ -277,6 +313,7 @@ export function AttentionPanel({
               item={selected}
               onAct={action => act(selected, action)}
               onProgress={(step, done) => client.progress(connection, scope, selected.id, step, done)}
+              headerSlot={<AttentionCollapseButton controls={id} onCollapse={fold.collapse} />}
               pinned
               renderProse={renderProse}
               {...(now === undefined ? {} : { now })}

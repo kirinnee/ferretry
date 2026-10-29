@@ -74,6 +74,8 @@ export interface AttentionCardProps {
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   /** Pinned above the composer: no origin, the detail folded behind "Details". */
   readonly pinned?: boolean;
+  /** A control at the end of the header, after the age — the pinned card's fold button. */
+  readonly headerSlot?: ReactNode;
   /** Extra DOM id for scroll targets. */
   readonly id?: string;
 }
@@ -93,6 +95,7 @@ export function AttentionCard({
   onProgress,
   id,
   pinned = false,
+  headerSlot,
 }: AttentionCardProps) {
   const titleId = useId();
   const draft = useReplyDraft();
@@ -246,6 +249,7 @@ export function AttentionCard({
             ? attentionAge(item.waitingSince, now).replace(/^waiting /, '')
             : attentionAge(item.waitingSince, now)}
         </span>
+        {headerSlot}
       </header>
       <h3 className="fy-attn-card__title" data-attention-title="" id={titleId}>
         {title}
