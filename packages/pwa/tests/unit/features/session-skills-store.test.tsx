@@ -77,6 +77,45 @@ describe('useSessionSkills', () => {
     }
   });
 
+  it('hands back a promise that settles only once an in-flight read has finished, then nothing', async () => {
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const fetcher: DaemonFetch = async () => {
+      await gate;
+      return Response.json(catalog('floop'));
+    };
+    let latest: SessionSkillsRead | null = null;
+    const tree = render(
+      <Probe
+        fetcher={fetcher}
+        onRead={read => {
+          latest = read;
+        }}
+        scope={scopeA}
+      />,
+    );
+    try {
+      const pending = (latest as SessionSkillsRead | null)?.settled();
+      expect(pending).toBeInstanceOf(Promise);
+
+      let finished = false;
+      void pending?.then(() => {
+        finished = true;
+      });
+      await settle();
+      expect(finished).toBe(false);
+
+      release?.();
+      await settle();
+      expect(finished).toBe(true);
+      expect((latest as SessionSkillsRead | null)?.settled()).toBeUndefined();
+    } finally {
+      run(() => tree.unmount());
+    }
+  });
+
   it('treats a second call as the reader asking again', async () => {
     let answer = catalog('floop');
     const asked: string[] = [];

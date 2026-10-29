@@ -7,6 +7,7 @@ import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-e
 import {
   ApiDispatcher,
   ApiRouter,
+  AttentionService,
   attentionRoutes,
   createFoundationPaths,
   NO_GOVERNED_ROUTES_GUARD,
@@ -19,10 +20,10 @@ import {
   type WebPushTransport,
 } from '../../../src/lib/index.ts';
 import { jsonBody, request } from '../../unit/api/support.ts';
-import { deviceId, pushId, record } from '../../unit/push/support.ts';
+import { record } from '../../unit/push/support.ts';
 import {
-  attentionService,
   CREDENTIALS,
+  FakeLedgerRepository,
   human,
   NO_HELD_REPLIES,
   sessionView,
@@ -31,7 +32,6 @@ import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts'
 
 const SESSION = 's1';
 const AT = '2026-08-06T12:00:00.000Z';
-const REQUEST_ID = 'notification-request-1';
 
 class RecordingTransport implements WebPushTransport {
   readonly deliveries: PushDelivery[] = [];
@@ -81,17 +81,23 @@ async function daemon(
     serial: new KeyedSerialExecutor(),
     clock: { now: () => AT },
   });
-  const routes = attentionRoutes(attentionService(), notifications, NO_HELD_REPLIES);
+  const attention = new AttentionService(
+    new FakeLedgerRepository(),
+    { now: () => AT },
+    { has: async sessionId => sessionId === SESSION },
+    notifications,
+  );
+  const routes = attentionRoutes(attention, notifications, NO_HELD_REPLIES);
   const surface = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
-  return { paths, files, ledger, sessions, transport, routes, surface };
+  return { files, ledger, transport, routes, surface };
 }
 
-function post(body: string, requestId: string | null = REQUEST_ID) {
+function post(body: Record<string, unknown>) {
   return request({
     method: 'POST',
     path: `/v1/sessions/${SESSION}/notify`,
-    headers: { ...human, ...(requestId === null ? {} : { 'x-fy-request-id': requestId }) },
-    body: JSON.stringify({ body }),
+    headers: { ...human },
+    body: JSON.stringify(body),
   });
 }
 
@@ -104,143 +110,100 @@ async function ledgerLines(world: Awaited<ReturnType<typeof daemon>>): Promise<r
     .map(line => JSON.parse(line) as Record<string, unknown>);
 }
 
+function pushedPayload(world: Awaited<ReturnType<typeof daemon>>, index = 0): Record<string, unknown> {
+  return JSON.parse(world.transport.deliveries[index]?.payload ?? '{}') as Record<string, unknown>;
+}
+
 afterAll(async () => {
   await cleanupTempDirectories();
 });
 
-describe('direct notification over the composed daemon surface', () => {
-  it('should deliver through real PushService and record requested before outcome', async () => {
+describe('notify over the composed daemon surface', () => {
+  it('should push the info card the notify raised, once, with its title over its ask', async () => {
     // Arrange
-    const enrolment = record();
-    const world = await daemon({ records: [enrolment] });
+    const world = await daemon({ records: [record()] });
 
     // Act
-    const response = await world.surface.dispatch(post('Release ready.'));
+    const response = await world.surface.dispatch(post({ title: 'Release ready', body: 'The release is cut.' }));
     const lines = await ledgerLines(world);
 
     // Assert
     should(response.status).equal(200);
     should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
     should(world.transport.deliveries).have.length(1);
+    should(pushedPayload(world)).containDeep({ title: 'Release ready', body: 'The release is cut.' });
     should(lines.map(line => line.phase)).deepEqual(['requested', 'outcome']);
-    should(lines[0]).containDeep({
-      origin: 'direct',
-      attribution: 'admin-cli',
-      sessionId: SESSION,
-      request: { body: 'Release ready.', title: null, kind: null },
-      sent: { kind: 'question', interactive: true, body: 'Release ready.' },
-      enrolled: 1,
-    });
     should(lines[1]).containDeep({ delivered: 1, failed: 0 });
   });
 
-  it('should replay the same request id with a byte-identical body and exactly one delivery', async () => {
+  it('should push the same for an automatic session as for an interactive one', async () => {
     // Arrange
-    const world = await daemon({ records: [record()] });
+    const world = await daemon({ mode: 'auto', records: [record()] });
 
     // Act
-    const first = await world.surface.dispatch(post('Release ready.'));
-    const second = await world.surface.dispatch(post('Release ready.'));
+    const response = await world.surface.dispatch(post({ body: 'Background agent update.' }));
 
     // Assert
-    should(first.status).equal(200);
-    should(second.status).equal(200);
-    should(second.body).equal(first.body);
-    should(world.transport.deliveries).have.length(1);
-    should(await ledgerLines(world)).have.length(2);
+    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
+    should(pushedPayload(world)).containDeep({ title: 'Background agent update.', body: 'Background agent update.' });
   });
 
-  it('should reject a missing request id without evidence or delivery', async () => {
+  it('should not push twice for the same notify while its card is still open', async () => {
     // Arrange
     const world = await daemon({ records: [record()] });
 
     // Act
-    const response = await world.surface.dispatch(post('Release ready.', null));
+    const first = await world.surface.dispatch(post({ body: 'Release ready.' }));
+    const second = await world.surface.dispatch(post({ body: 'Release ready.' }));
+
+    // Assert
+    should(jsonBody(first)).have.property('delivered', 1);
+    should(jsonBody(second)).have.property('delivered', 0);
+    should(world.transport.deliveries).have.length(1);
+  });
+
+  it('should refuse a notify that says it is progress or finishing, raising and pushing nothing', async () => {
+    // Arrange
+    const world = await daemon({ records: [record()] });
+
+    // Act
+    const response = await world.surface.dispatch(post({ body: 'All done.', kind: 'completed' }));
 
     // Assert
     should(response.status).equal(400);
-    should(jsonBody(response)).have.property('code', 'missing_request_id');
+    should(jsonBody(response)).have.property('code', 'invalid');
+    should(world.transport.deliveries).be.empty();
     should(await world.files.readText(world.ledger.path)).be.undefined();
+  });
+
+  it('should answer delivered 0 and still raise the card when no device is enrolled', async () => {
+    // Arrange
+    const world = await daemon();
+
+    // Act
+    const response = await world.surface.dispatch(post({ body: 'Release ready.' }));
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 0 });
     should(world.transport.deliveries).be.empty();
   });
 
-  it('should refuse one request id reused with a different body', async () => {
-    // Arrange
-    const world = await daemon({ records: [record()] });
-
-    // Act
-    const first = await world.surface.dispatch(post('Release ready.'));
-    const changed = await world.surface.dispatch(post('Different notification.'));
-
-    // Assert
-    should(first.status).equal(200);
-    should(changed.status).equal(400);
-    should(jsonBody(changed)).have.property('code', 'invalid');
-    should(world.transport.deliveries).have.length(1);
-  });
-
-  it('should deliver to every enrolment with no server-stored preference left to consult', async () => {
-    // Arrange — the daemon no longer stores or enforces any per-device preference: every enrolled
-    // device is sent every event, and showing it is entirely the browser's own local decision.
-    const enrolment = record();
-    const world = await daemon({ records: [enrolment] });
-
-    // Act
-    const response = await world.surface.dispatch(post('Release ready.'));
-    const lines = await ledgerLines(world);
-
-    // Assert
-    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
-    should(world.transport.deliveries).have.length(1);
-    should(lines[0]).containDeep({ enrolled: 1 });
-    should(lines[1]).containDeep({ delivered: 1, failed: 0 });
-  });
-
-  it('should deliver to an automatic session the same as an interactive one', async () => {
-    // Arrange
-    const enrolment = record();
-    const world = await daemon({ mode: 'auto', records: [enrolment] });
-
-    // Act
-    const response = await world.surface.dispatch(post('Background agent update.'));
-    const lines = await ledgerLines(world);
-
-    // Assert
-    should(jsonBody(response)).deepEqual({ sessionId: SESSION, delivered: 1 });
-    should(world.transport.deliveries).have.length(1);
-    should(lines[0]).containDeep({ sent: { interactive: false } });
-  });
-
-  it('should replay a settled delivery after the session is deleted', async () => {
-    // Arrange
-    const world = await daemon({ records: [record()] });
-    const first = await world.surface.dispatch(post('Release ready.'));
-    world.sessions.delete(SESSION);
-
-    // Act
-    const replay = await world.surface.dispatch(post('Release ready.'));
-
-    // Assert
-    should(replay.status).equal(200);
-    should(replay.body).equal(first.body);
-    should(world.transport.deliveries).have.length(1);
-  });
-
-  it('should fail closed on a hand-planted complete malformed ledger line', async () => {
+  it('should answer delivered 0, not an error, when the notification ledger is damaged', async () => {
     // Arrange
     const world = await daemon({ records: [record()] });
     await world.files.appendLineDurable(world.ledger.path, 'not json');
 
     // Act
-    const response = await world.surface.dispatch(post('Release ready.'));
+    const response = await world.surface.dispatch(post({ body: 'Release ready.' }));
 
     // Assert
-    should(response.status).equal(500);
-    should(jsonBody(response)).have.property('code', 'corrupt');
+    should(response.status).equal(200);
+    should(jsonBody(response)).have.property('delivered', 0);
     should(world.transport.deliveries).be.empty();
   });
 
-  it('should mount exactly the path literal the compiled CLI gateway calls', async () => {
+  it('should mount exactly the path literal older CLIs call', async () => {
     // Arrange
     const world = await daemon();
 
@@ -249,34 +212,5 @@ describe('direct notification over the composed daemon surface', () => {
 
     // Assert
     should(literals).containEql('POST /v1/sessions/:sessionId/notify');
-  });
-
-  it('should keep direct request identities daemon-wide across different sessions', async () => {
-    // Arrange
-    const secondId = 's2';
-    const firstDevice = record();
-    const secondDevice = record({
-      id: pushId('b'),
-      deviceId: deviceId('b'),
-      subscription: { ...firstDevice.subscription, endpoint: 'https://fcm.googleapis.com/send/two' },
-    });
-    const world = await daemon({ records: [firstDevice, secondDevice] });
-    world.sessions.set(secondId, sessionView(secondId, { mode: 'interactive' }));
-    await world.surface.dispatch(post('Release ready.'));
-
-    // Act
-    const response = await world.surface.dispatch(
-      request({
-        method: 'POST',
-        path: `/v1/sessions/${secondId}/notify`,
-        headers: { ...human, 'x-fy-request-id': REQUEST_ID },
-        body: JSON.stringify({ body: 'Release ready.' }),
-      }),
-    );
-
-    // Assert
-    should(response.status).equal(400);
-    should(jsonBody(response)).have.property('code', 'invalid');
-    should(world.transport.deliveries).have.length(2);
   });
 });

@@ -162,10 +162,10 @@ export function withinAuditBounds(entry: AuditEntry): AuditEntry {
 /**
  * The eventKey and tag prefix only this alert may carry, and the title it opens with.
  *
- * RESERVED, because an agent can push its own words through `POST /v1/sessions/:id/notify`: an agent
- * that could send "A new device was paired" — or a reassuring fake — would be able to impersonate the
- * one notification a person must be able to trust. `directNotificationPayload` puts the session's
- * name, labelled as an agent, in front of every agent title, and its eventKey and tag are fixed, so no
+ * RESERVED, because an agent pushes its own words: an Attention card's title is the push's heading. An
+ * agent that could send "A new device was paired" — or a reassuring fake — would be able to impersonate
+ * the one notification a person must be able to trust. `attentionNotificationTitle` labels any title
+ * that reads as this alert as `Ferret “…”`, and an Attention push's eventKey and tag are its own, so no
  * agent payload can open with either.
  */
 export const DEVICE_PAIRED_EVENT_PREFIX = 'device-paired:';

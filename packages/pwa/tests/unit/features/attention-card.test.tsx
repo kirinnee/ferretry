@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
+import { PointForm } from '../../../src/features/attention/attention-brief.tsx';
 import type { InboxAction } from '../../../src/lib/attention-inbox.ts';
 import { attentionItem, choices } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
@@ -40,25 +41,23 @@ const sections = (root: ParentNode): string[] =>
   [...root.querySelectorAll('[data-attention-section]')].map(node => node.getAttribute('data-attention-section') ?? '');
 
 describe('AttentionCard sections', () => {
-  test('a rich item draws its sections in order, only the first question open', async () => {
+  test('a rich item draws every section, in order, all open — the card shows everything to decide', async () => {
     view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual(['context', 'terms', 'questions', 'recommendation', 'impact', 'links']);
-    const open = [...view.container.querySelectorAll('[data-attention-section]')]
-      .filter(node => node.hasAttribute('open'))
-      .map(node => node.getAttribute('data-attention-section'));
-    expect(open).toEqual(['questions']);
+    expect(sections(view.container)).toEqual(['context', 'questions', 'recommendation', 'impact', 'terms', 'links']);
+    // Open means drawn, not folded: no section is a `<details>` the reader has to open.
+    expect(view.container.querySelectorAll('details[data-attention-section]')).toHaveLength(0);
     expect(view.container.textContent).toContain('Urgency:');
   });
 
   test('the summary is drawn once, and a why that repeats it is not drawn', async () => {
     view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
     expect(view.container.textContent?.split('Pick the storage').length).toBe(2);
-    expect(view.container.querySelector('.fy-attn-card__why')).toBeNull();
+    expect(view.container.querySelector('[data-attention-why]')).toBeNull();
   });
 
   test('a different why is kept', async () => {
     view = await mount(<AttentionCard item={{ ...rich, why: 'It blocks the release.' }} onAct={() => {}} />);
-    expect(view.container.querySelector('.fy-attn-card__why')?.textContent).toContain('It blocks the release.');
+    expect(view.container.querySelector('[data-attention-why]')?.textContent).toContain('It blocks the release.');
   });
 
   test('an external link opens safely in a new tab', async () => {
@@ -71,13 +70,13 @@ describe('AttentionCard sections', () => {
   test('an old item stays minimal: the summary, its context and its options', async () => {
     const old = attentionItem('A2', { subject: 'Approve?', context: 'Halfway there.', ask: choices('Yes', 'No') });
     view = await mount(<AttentionCard item={old} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual([]);
-    expect(view.container.querySelector('.fy-attn-card__context')?.textContent).toBe('Halfway there.');
+    expect(sections(view.container)).toEqual(['context']);
+    expect(view.container.querySelector('[data-attention-section="context"]')?.textContent).toContain('Halfway there.');
     expect(view.container.querySelectorAll('[data-attention-option]')).toHaveLength(2);
     expect(view.container.querySelector('[data-attention-recommended]')).toBeNull();
   });
 
-  test('the title is the conversation name, with ferret · machine beneath', async () => {
+  test('the header names the ferret and machine, the title stands above the detail, the recommendation is one of its sections', async () => {
     view = await mount(
       <AttentionCard
         item={rich}
@@ -85,24 +84,33 @@ describe('AttentionCard sections', () => {
         origin={{ ferret: 'Kai', task: 'Release train', machine: 'Laptop', href: '/x', onNavigate: () => {} }}
       />,
     );
-    expect(view.container.querySelector('.fy-attn-card__origin-title')?.textContent).toBe('Release train');
-    expect(view.container.querySelector('.fy-attn-card__origin-sub')?.textContent).toBe('Kai · Laptop');
+    expect(view.container.querySelector('.fy-attn-card__origin-title')?.textContent).toBe('Kai');
+    expect(view.container.querySelector('.fy-attn-card__origin-sub')?.textContent).toBe('Laptop');
+    expect(view.container.querySelector('[data-attention-title]')?.textContent).toBeTruthy();
+    expect(view.container.querySelector('[data-attention-recommendation]')?.textContent).toContain('Use SQLite');
+    expect(view.container.querySelector('[data-attention-scroll] [data-attention-title]')).toBeNull();
+    expect(
+      view.container.querySelector(
+        '[data-attention-scroll] [data-attention-section="recommendation"] [data-attention-recommendation]',
+      ),
+    ).not.toBeNull();
   });
 });
 
 describe('AttentionCard recommended option', () => {
-  test('marks the recommended option of a single question with a visible badge', async () => {
+  test('a choice puts the recommended option on the right, as the primary answer', async () => {
     const single = attentionItem('A3', {
       subject: 'Pick',
       questions: [{ question: 'Which?', options: [{ label: 'SQLite' }, { label: 'Postgres' }], recommended: 'SQLite' }],
       ask: choices('SQLite', 'Postgres'),
     });
     view = await mount(<AttentionCard item={single} onAct={() => {}} />);
-    const marked = [...view.container.querySelectorAll('[data-attention-option]')].filter(
-      node => node.querySelector('[data-attention-recommended]') !== null,
+    const right = must(view.container.querySelector('[data-attention-answer="right"]'), 'right answer');
+    expect(right.getAttribute('data-attention-option')).toBe('SQLite');
+    expect(right.getAttribute('data-variant')).toBe('primary');
+    expect(view.container.querySelector('[data-attention-answer="left"]')?.getAttribute('data-attention-option')).toBe(
+      'Postgres',
     );
-    expect(marked.map(node => node.getAttribute('data-attention-option'))).toEqual(['SQLite']);
-    expect(marked[0]?.textContent).toContain('Recommended');
   });
 });
 
@@ -167,11 +175,12 @@ describe('AttentionCard point form', () => {
     expect(points('impact')).toEqual(['blocks the release', 'costs a day']);
   });
 
-  test('prose, or a mix of prose and bullets, stays a paragraph', async () => {
+  test('with the plain renderer, prose or a mix of prose and bullets stays a paragraph', async () => {
     view = await mount(
       <AttentionCard
         item={{ ...rich, context: 'Intro line.\n- then a point', impact: 'Plain words.' }}
         onAct={() => {}}
+        renderProse={text => <PointForm text={text} />}
       />,
     );
     expect(view.container.querySelectorAll('[data-attention-section="context"] li').length).toBe(0);

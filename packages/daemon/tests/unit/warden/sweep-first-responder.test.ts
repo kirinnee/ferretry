@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import { NUDGE_MESSAGES, TRIAGE_CRITERIA, type TriageDecision } from '../../../src/lib/speedups/jev.ts';
 import { jevNudgeMessage } from '../../../src/lib/warden/index.ts';
+import { WARDEN_TERMINAL_STATUSES } from '../../../src/lib/warden/types.ts';
 import { enabled, harness, JEV_SKIP, journalTypes, NOW, session, triageable } from './sweep-harness.ts';
 
 /**
@@ -247,8 +248,8 @@ describe('Jev’s one try at a situation', () => {
     should(feed.items.map(item => item.sessionId)).containEql('s1');
   });
 
-  it('should let Jev act again on a different stuck command', async () => {
-    // Arrange
+  it('should send a different stuck command to an investigation unasked within a day of Jev’s act', async () => {
+    // Arrange — the nudge starts the ferret moving, and it gets stuck again on a new command.
     const time = clock();
     const subject = harness({
       config: layers(true),
@@ -264,8 +265,140 @@ describe('Jev’s one try at a situation', () => {
     await subject.service.run({ force: false });
 
     // Assert
+    should(subject.guarded).have.length(1);
+    should(subject.remedies.map(remedy => remedy.action)).deepEqual(['nudge']);
+    should(subject.spawns).have.length(1);
+    should(journalTypes(subject)).containEql('fleet.warden_jev_handed_on');
+  });
+
+  it('should let Jev act again on the same ferret a day later', async () => {
+    // Arrange
+    const time = clock();
+    const subject = harness({
+      config: layers(true),
+      fleet: [stuck(time.now())],
+      guard: [jev('nudge', 0.95)],
+      now: time.now,
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+    time.advance(24 * 60 + 5);
+    subject.setFleet([stuck(time.now(), 'pid:77')]);
+    await subject.service.run({ force: false });
+
+    // Assert
     should(subject.guarded).have.length(2);
     should(subject.remedies.map(remedy => remedy.action)).deepEqual(['nudge', 'nudge']);
     should(subject.spawns).be.empty();
+  });
+
+  describe('when the ferret is gone or finished by the time Jev acts', () => {
+    const acts = ['nudge', 'restart', 'stop'] as const;
+    const allowed = enabled({
+      layers: { jev: true, llm: true },
+      mayActAlone: { ...enabled().mayActAlone, nudge: true, restart: true, stop: true },
+    });
+    const after: readonly (readonly [string, () => readonly ReturnType<typeof stuck>[]])[] = [
+      ['missing from the fleet', () => []],
+      ...WARDEN_TERMINAL_STATUSES.map(
+        status => [status, () => [{ ...stuck(NOW), state: { ...stuck(NOW).state, status } }]] as const,
+      ),
+    ];
+    const run = async (act: (typeof acts)[number], fleetAtAct?: () => readonly ReturnType<typeof stuck>[]) => {
+      let subject: ReturnType<typeof harness> | undefined;
+      subject = harness({
+        config: allowed,
+        fleet: [stuck(NOW)],
+        guard: [jev(act, 0.99)],
+        evidence: async () => {
+          if (fleetAtAct !== undefined) subject?.setFleet(fleetAtAct());
+          return { recentTurns: ['turn one'], paneTail: 'screen' };
+        },
+      });
+      await subject.service.run({ force: false });
+      return subject;
+    };
+
+    for (const act of acts) {
+      it(`should carry out Jev's ${act} while the ferret is still there`, async () => {
+        // Arrange / Act
+        const subject = await run(act);
+
+        // Assert
+        should(subject.remedies.map(remedy => remedy.action)).deepEqual([act]);
+        should(subject.spawns).be.empty();
+      });
+
+      for (const [label, fleetAtAct] of after) {
+        it(`should run no ${act} and hand the flag on as it stands when the target is ${label}`, async () => {
+          // Arrange / Act
+          const subject = await run(act, fleetAtAct);
+
+          // Assert
+          should(subject.guarded).have.length(1);
+          should(subject.remedies).be.empty();
+          should(subject.state().actions ?? []).be.empty();
+          should(journalTypes(subject)).not.containEql('fleet.warden_acted');
+          should(journalTypes(subject)).not.containEql('fleet.warden_action_failed');
+        });
+      }
+    }
+  });
+});
+
+describe('one act per ferret at a time', () => {
+  /** Parked on a peer that is gone, past its own deadline: two kinds of flag on one ferret, both nudgeable. */
+  const parkedOnAGhost = () =>
+    session({
+      id: 's1',
+      status: 'running',
+      state: { turnState: 'your-turn', waiting: { until: iso(NOW - 60 * MINUTE), peer: 'gone' } },
+    });
+
+  it('should not act twice on one ferret in one sweep, and hold its other flags while the act lands', async () => {
+    // Arrange
+    const subject = harness({ config: layers(true), fleet: [parkedOnAGhost()], guard: [jev('nudge', 0.95)] });
+
+    // Act
+    const run = await subject.service.run({ force: false });
+    const feed = await subject.service.attention();
+
+    // Assert
+    should(run.anomalies.map(anomaly => anomaly.kind).toSorted()).deepEqual([
+      'declared_wait_overdue',
+      'peer_wait_unanswerable',
+    ]);
+    should(subject.remedies).have.length(1);
+    should(subject.guarded).have.length(1);
+    should(subject.spawns).be.empty();
+    should(feed.items.map(item => item.sessionId)).not.containEql('s1');
+  });
+
+  it('should not ask Jev about a ferret an assigned warden is investigating', async () => {
+    // Arrange
+    const subject = harness({
+      config: layers(true),
+      fleet: [triageable('q1'), session({ id: 'w9', label: 'warden' })],
+      guard: [jev('resume', 0.95)],
+      state: {
+        assignments: {
+          q1: {
+            wardenId: 'w9',
+            spawnedAt: iso(NOW - MINUTE),
+            capability: 'cap',
+            kinds: ['sus_thinking'],
+            reportPath: '/r.md',
+          },
+        },
+      },
+    });
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.guarded).be.empty();
+    should(subject.remedies).be.empty();
   });
 });

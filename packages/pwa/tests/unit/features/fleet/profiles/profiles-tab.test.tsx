@@ -205,6 +205,41 @@ describe('ProfilesTab — the profile page', () => {
     expect(text(root, '[data-profiles-saved]')).toBe('Saved. New sessions use the new contents.');
   });
 
+  it('keeps the last resolved values on screen while a second edit is still being read', async () => {
+    const machine = scriptedMachine({ preview: defaultPreview() });
+    const props = tabProps(machine);
+    let release: (() => void) | undefined;
+    let hold: Promise<void> | undefined;
+    mounted = await mountSettled(
+      <ProfilesTab
+        {...props}
+        createClient={async connection => {
+          const client = await props.createClient(connection);
+          return {
+            ...client,
+            request: async (path, schema, init) => {
+              if (hold !== undefined && path === '/v1/fleet/profiles/preview') await hold;
+              return client.request(path, schema, init);
+            },
+          };
+        }}
+      />,
+    );
+    const root = mounted.container;
+    await click(root, '[data-profile-row="Default"]');
+    hold = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    await click(root, '[data-library-add="mcp/notes"]');
+    await click(root, '[data-profile-item="mcp/notes"] [data-item-remove]');
+    await click(root, '[data-profile-view="resolved"]');
+    expect(root.querySelector('[data-resolved-row="permissions.defaultMode"]')).not.toBeNull();
+    release?.();
+    await settle();
+    expect(root.querySelector('[data-resolved-row="permissions.defaultMode"]')).not.toBeNull();
+    expect(machine.calls.filter(call => call.path === '/v1/fleet/profiles/preview')).toHaveLength(3);
+  });
+
   it('discards an edit back to the saved contents', async () => {
     const root = await open(scriptedMachine({ preview: defaultPreview() }));
     await click(root, '[data-profile-row="Default"]');
@@ -476,6 +511,20 @@ describe('ProfilesTab — delete (E21)', () => {
     expect(moving).toContain('Pick another profile for this runtime first');
     expect(moving).toContain('It is taken out of Agent work and Review first.');
     expect(moving).toContain('There is no other profile to move to yet.');
+  });
+
+  it('blocks deleting a profile only another profile contains, naming no runtime', async () => {
+    const catalog = studioCatalog({
+      profiles: profileCatalog([profile('Inner', ['mcp/github'], { baseFor: ['Outer'] })]),
+      runtimes: runtimeCatalog([]),
+    });
+    const root = await open(scriptedMachine({ catalog, preview: defaultPreview() }));
+    await click(root, '[data-profile-row="Inner"]');
+    await click(root, '[data-profile-delete]');
+    const blocked = text(root, '[data-catalog-note="delete"]');
+    expect(blocked).toContain('Inner is in use, so it can’t be deleted');
+    expect(blocked).toContain('It is inside Outer.');
+    expect(blocked).not.toContain('these runtimes use it');
   });
 
   it('moves the runtimes on it to the profile picked and deletes it', async () => {

@@ -11,108 +11,34 @@ import type {
   TranscriptParseInput,
   TranscriptParser,
   TranscriptParseResult,
-  TranscriptRawRecord,
   TranscriptReadOptions,
   TranscriptSource,
   TranscriptWindow,
   TranscriptWindowOptions,
   TranscriptWindowStep,
 } from '../../lib/transcript/types.ts';
+import { countLines, parseTranscriptInSlices, type TranscriptParsePacing } from '../../lib/transcript/sliced.ts';
 
 const READ_CHUNK_BYTES = 64 * 1024;
 const CURSOR_ANCHOR_BYTES = 512;
 
-/**
- * How many bytes of transcript are parsed between two looks at the clock, and how long a parse may hold
- * the event loop before it yields.
- *
- * A bounded read is still up to 32 MiB, and parsing it in one synchronous call held a daemon's event
- * loop for seconds — on a Mac with three 200 MB transcripts, long enough that nothing answered at all.
- * The parse is cut at record boundaries and hands the loop back whenever a slice has run past the
- * budget, so a large read costs time, never responsiveness.
- */
-const PARSE_SLICE_BYTES = 256 * 1024;
-const PARSE_BUDGET_MS = 12;
-
-/** Lets every timer and socket waiting on the loop run before the parse continues. */
-const yieldToLoop = (): Promise<void> => new Promise(resolve => setImmediate(resolve));
-
-/** Where a slice of at most `limit` bytes starting at `from` ends: just past a newline, or at the end. */
-function sliceEnd(bytes: Uint8Array, from: number, limit: number): number {
-  if (bytes.byteLength - from <= limit) return bytes.byteLength;
-  const newline = bytes.lastIndexOf(0x0a, from + limit - 1);
-  if (newline >= from) return newline + 1;
-  // One record longer than a slice: it is parsed whole, up to its own terminator.
-  const next = bytes.indexOf(0x0a, from + limit);
-  return next < 0 ? bytes.byteLength : next + 1;
-}
+/** The daemon's own pacing: its monotonic clock, and a yield that lets every timer and socket run. */
+export const LOOP_PARSE_PACING: TranscriptParsePacing = {
+  now: () => performance.now(),
+  yieldToLoop: () => new Promise(resolve => setImmediate(resolve)),
+};
 
 /**
- * The same parse as `parser.parse` over `bytes`, cut into record-aligned slices with the event loop
- * handed back between them once a slice runs past {@link PARSE_BUDGET_MS}.
+ * {@link parseTranscriptInSlices} over the bytes of a read, paced by the daemon's own event loop.
  *
- * Every slice but the last ends on a record terminator, so none leaves a remainder, and one observer
- * carries the parser's cross-record state through all of them exactly as one call would. Line numbers
- * and byte offsets continue from slice to slice, so what is reported is what one whole parse reports.
+ * A bounded read is up to 32 MiB; see `PARSE_SLICE_BYTES` for why it is never parsed in one call.
  */
 export async function parseInSlices(
   parser: TranscriptParser,
-  input: Omit<TranscriptParseInput, 'text' | 'bytes'> & { readonly bytes: Uint8Array },
+  input: Omit<TranscriptParseInput, 'text' | 'bytes'> & { readonly bytes: Uint8Array | readonly Uint8Array[] },
   observer: TranscriptInputObserver = parser.createInputObserver(),
 ): Promise<TranscriptParseResult> {
-  const { bytes } = input;
-  if (bytes.byteLength <= PARSE_SLICE_BYTES)
-    return parser.parse({ ...input, text: Buffer.from(bytes).toString('utf8') }, observer);
-  const events: TranscriptParseResult['events'][number][] = [];
-  const observedInputs: TranscriptParseResult['observedInputs'][number][] = [];
-  const issues: TranscriptParseResult['issues'][number][] = [];
-  const rawRecords: TranscriptRawRecord[] = [];
-  let parsedRecords = 0;
-  let ignoredRecords = 0;
-  let remainder = '';
-  let line = input.startLine ?? 1;
-  let byteOffset = input.startByteOffset ?? 0;
-  let sliceStartedAt = performance.now();
-  for (let from = 0; from < bytes.byteLength; ) {
-    const to = sliceEnd(bytes, from, PARSE_SLICE_BYTES);
-    const slice = bytes.subarray(from, to);
-    const last = to >= bytes.byteLength;
-    const parsed = parser.parse(
-      {
-        ...input,
-        text: Buffer.from(slice).toString('utf8'),
-        bytes: slice,
-        endOfInput: last ? input.endOfInput : false,
-        startLine: line,
-        startByteOffset: byteOffset,
-      },
-      observer,
-    );
-    events.push(...parsed.events);
-    observedInputs.push(...parsed.observedInputs);
-    issues.push(...parsed.issues);
-    if (parsed.rawRecords !== undefined) rawRecords.push(...parsed.rawRecords);
-    parsedRecords += parsed.parsedRecords;
-    ignoredRecords += parsed.ignoredRecords;
-    remainder = parsed.remainder;
-    line += countLines(slice);
-    byteOffset += slice.byteLength;
-    from = to;
-    if (!last && performance.now() - sliceStartedAt >= PARSE_BUDGET_MS) {
-      await yieldToLoop();
-      sliceStartedAt = performance.now();
-    }
-  }
-  return {
-    harness: parser.harness,
-    events,
-    observedInputs,
-    issues,
-    remainder,
-    parsedRecords,
-    ignoredRecords,
-    rawRecords,
-  };
+  return await parseTranscriptInSlices(parser, input, LOOP_PARSE_PACING, observer);
 }
 
 /**
@@ -128,10 +54,14 @@ export const DEFAULT_MAX_READ_BYTES = 32 * 1024 * 1024;
 /**
  * The most bytes retained for one unterminated record while waiting for its newline.
  *
- * A record larger than this cannot be parsed into anything useful, so it is discarded and reported
- * rather than buffered until the process dies.
+ * A record larger than this is discarded and reported rather than buffered until the process dies. It
+ * was 4 MiB, which a pasted screenshot passes: such a record, split across two bounded reads or caught
+ * mid-write, was dropped — and a messages read over a transcript holding one refused the whole
+ * conversation as incomplete. It is now two bounded reads: far past the largest record measured in a
+ * real 296 MB transcript (1.3 MB), past any screenshot a harness accepts, and still a bound — what one
+ * record can pin is 64 MiB for as long as its newline takes to arrive, never the file.
  */
-export const DEFAULT_MAX_PENDING_BYTES = 4 * 1024 * 1024;
+export const DEFAULT_MAX_PENDING_BYTES = 64 * 1024 * 1024;
 
 /**
  * How far back from a file's end a `since` window may reach.
@@ -306,29 +236,31 @@ export class NodeTranscriptFileRuntime implements TranscriptFileRuntime {
   async readFrom(file: string, byteOffset: number, byteLimit: number): Promise<BoundedTranscriptRead> {
     if (byteLimit < 1) return { bytes: new Uint8Array(), truncated: true };
     const handle = await open(file, 'r');
-    const chunks: Buffer[] = [];
-    let position = byteOffset;
-    let total = 0;
-    let truncated = false;
     try {
-      while (total < byteLimit) {
-        const chunk = Buffer.allocUnsafe(Math.min(READ_CHUNK_BYTES, byteLimit - total));
-        const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, position);
+      // Sized from the file once, so a read is ONE buffer filled in place. Gathering it in chunks and
+      // joining them allocated and copied every byte of up to 32 MiB a second time, in one synchronous
+      // call — and on a host short of memory, the allocation is where the event loop waits. Bytes
+      // appended after the measurement are left for the next read, as if this one had finished first.
+      const { size } = await handle.stat();
+      const buffer = Buffer.allocUnsafe(Math.max(0, Math.min(byteLimit, size - byteOffset)));
+      let total = 0;
+      while (total < buffer.byteLength) {
+        const length = Math.min(READ_CHUNK_BYTES, buffer.byteLength - total);
+        const { bytesRead } = await handle.read(buffer, total, length, byteOffset + total);
         if (bytesRead === 0) break;
-        chunks.push(chunk.subarray(0, bytesRead));
-        position += bytesRead;
         total += bytesRead;
       }
+      let truncated = false;
       if (total === byteLimit) {
         // One byte past the limit separates "the file ends here" from "the cap stopped us".
         const probe = Buffer.allocUnsafe(1);
-        const { bytesRead } = await handle.read(probe, 0, 1, position);
+        const { bytesRead } = await handle.read(probe, 0, 1, byteOffset + total);
         truncated = bytesRead > 0;
       }
+      return { bytes: buffer.subarray(0, total), truncated };
     } finally {
       await handle.close();
     }
-    return { bytes: Buffer.concat(chunks), truncated };
   }
 
   watch(directory: string, onChange: () => void, onError: (error: Error) => void): TranscriptWatchHandle {
@@ -424,19 +356,6 @@ function createWakeController(): WakeController {
       settle?.();
     },
   };
-}
-
-/**
- * How many record terminators `bytes` holds.
- *
- * By `indexOf`, which the runtime answers with a native scan, rather than by iterating the bytes: the
- * iterator cost about 30 ms a megabyte, and a bounded read counts up to 32 MiB of them, so counting
- * lines alone held the event loop longer than parsing the records did.
- */
-function countLines(bytes: Uint8Array): number {
-  let lines = 0;
-  for (let at = bytes.indexOf(0x0a); at >= 0; at = bytes.indexOf(0x0a, at + 1)) lines += 1;
-  return lines;
 }
 
 function lastNewline(bytes: Uint8Array): number {
@@ -792,13 +711,29 @@ async function reconcileFollow(
   const skippedBytes = appended.byteLength - consumed.byteLength;
   const skippedLines = base.skipToNewline && resumeAt >= 0 ? 1 : 0;
 
-  const combined = Buffer.concat([Buffer.from(base.partial), Buffer.from(consumed)]);
-  const newline = lastNewline(combined);
-  const complete = newline >= 0 ? combined.subarray(0, newline + 1) : Buffer.alloc(0);
-  const tail = newline >= 0 ? combined.subarray(newline + 1) : combined;
+  // The record carried over from the last read is joined to its own end in this one, and nothing else
+  // is: every later record is parsed where the read put it. Joining the WHOLE read to the carried
+  // bytes copied up to 32 MiB in one synchronous call on every read that followed a partial line —
+  // and on a host short of memory that allocation, not the parse, is where the event loop waited.
+  const lastFeed = lastNewline(consumed);
+  const firstFeed = lastFeed < 0 ? -1 : firstNewline(consumed);
+  const tailLength = lastFeed < 0 ? base.partial.byteLength + consumed.byteLength : consumed.byteLength - lastFeed - 1;
   // An unterminated record that outgrows the pending limit would otherwise be buffered forever.
-  const overflowed = tail.byteLength > limits.maxPendingBytes;
-  const partial = overflowed ? Buffer.alloc(0) : tail;
+  const overflowed = tailLength > limits.maxPendingBytes;
+  const complete: readonly Uint8Array[] =
+    lastFeed < 0
+      ? []
+      : [
+          base.partial.byteLength === 0
+            ? consumed.subarray(0, firstFeed + 1)
+            : Buffer.concat([base.partial, consumed.subarray(0, firstFeed + 1)]),
+          consumed.subarray(firstFeed + 1, lastFeed + 1),
+        ];
+  const partial = overflowed
+    ? new Uint8Array()
+    : lastFeed < 0
+      ? Buffer.concat([base.partial, consumed])
+      : consumed.subarray(lastFeed + 1);
   const byteOffset = base.byteOffset + appended.byteLength;
   let afterInfo: TranscriptFileInfo | undefined;
   try {
@@ -825,8 +760,8 @@ async function reconcileFollow(
   const parsed = await parseInSlices(
     parser,
     {
-      // The very bytes the text is decoded from, so the parser can report each record's exact slice
-      // instead of a re-encoding of what the decoder made of it.
+      // The very bytes of the read, so the parser can report each record's exact slice instead of a
+      // re-encoding of what a decoder made of it.
       bytes: complete,
       source: file,
       sessionId: options.sessionId,
@@ -847,7 +782,7 @@ async function reconcileFollow(
     partial: Buffer.from(partial),
     skipToNewline: skipping || overflowed,
     anchor: advanceAnchor(base.anchor, appended),
-    nextLine: base.nextLine + skippedLines + countLines(complete),
+    nextLine: base.nextLine + skippedLines + complete.reduce((lines, piece) => lines + countLines(piece), 0),
     ...(base.linesUnknown === true ? { linesUnknown: true as const } : {}),
     modifiedMs: afterInfo.modifiedMs,
   };
@@ -856,8 +791,8 @@ async function reconcileFollow(
     issues.push(
       sourceIssue(parser, file, 'oversized-record', 'transcript record exceeds the pending byte limit', {
         line: next.nextLine,
-        byteOffset: byteOffset - tail.byteLength,
-        byteLength: tail.byteLength,
+        byteOffset: byteOffset - tailLength,
+        byteLength: tailLength,
       }),
     );
   } else if (partial.byteLength > 0 && (appended.byteLength > 0 || reset)) {
@@ -1054,7 +989,13 @@ class NodeTranscriptWindow implements TranscriptWindow {
       return failed('transcript window could not be placed');
     }
     this.state = {
-      initialized: true,
+      // Not yet initialized, so the first step answers with a batch even when it reads nothing: its
+      // cursor is the only way a caller learns where the window was placed. A tail window over a file
+      // whose last record outgrows it is placed at the END — no record boundary inside it but the final
+      // newline — and answering that step with no batch read, to the tail, as "began at byte zero":
+      // the tail stopped there with no events, and a conversation ending in a pasted screenshot showed
+      // nothing at all. Its batch now says it began mid-file, and the tail widens.
+      initialized: false,
       seekToEnd: false,
       positioned: true,
       availability: 'present',
@@ -1204,7 +1145,7 @@ export class NodeTranscriptSource implements TranscriptSource {
     const parsed = await parseInSlices(
       this.parser,
       {
-        // The SAME bounded bytes the text is decoded from. Record-exact evidence can only come from
+        // The bounded bytes themselves, never a decoding. Record-exact evidence can only come from
         // these: a decode replaces every invalid sequence irreversibly, and two different malformed
         // records would otherwise commit to one value and become able to replace each other.
         bytes,

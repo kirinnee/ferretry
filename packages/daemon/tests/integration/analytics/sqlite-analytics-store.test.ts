@@ -15,6 +15,7 @@ import {
   type FoundationPaths,
   resolveStateHome,
 } from '../../../src/lib/index.ts';
+import { refusedSession, storedSession } from '../support/analytics-fixtures.ts';
 
 /**
  * The analytics materialization, against a real SQLite file on disk.
@@ -36,92 +37,15 @@ async function temporaryPaths(): Promise<FoundationPaths> {
 const live = new Set<AnalyticsIndexStore>();
 
 /** Closes a store once, so the teardown does not close it a second time and raise on a shut database. */
-function closeStore(store: AnalyticsIndexStore): void {
+async function closeStore(store: AnalyticsIndexStore): Promise<void> {
   live.delete(store);
-  store.close();
+  await store.close();
 }
 
 async function open(paths: FoundationPaths): Promise<{ store: AnalyticsIndexStore; rebuildRequired: boolean }> {
   const result = await new BunSqliteAnalyticsStoreFactory().open(paths, new StateFileSystem(paths));
   live.add(result.store);
   return result;
-}
-
-function storedSession(overrides: Partial<AnalyticsStoredSession> = {}): AnalyticsStoredSession {
-  return {
-    raw: {
-      id: 's1',
-      agent: 'claude',
-      model: 'claude-opus-5',
-      contextWindow: 1_000_000,
-      harness: 'claude',
-      mode: 'auto',
-      status: 'completed',
-      label: 'batch',
-      cwd: '/work',
-      parent: null,
-      tree: null,
-      day: '2026-08-01',
-      week: '2026-07-27',
-      createdAt: '2026-08-01T00:00:00.000Z',
-      pricingModel: 'claude-opus-5',
-      equivalentApiCostUsdMicros: 52_500,
-      tokens: 1_500,
-      inputTokens: 1_000,
-      outputTokens: 500,
-      cachedInputTokens: 0,
-      cacheWriteInputTokens: 0,
-      cacheWrite5mInputTokens: 0,
-      cacheWrite1hInputTokens: 0,
-      reasoningTokens: null,
-      turns: 3,
-      durationMs: 3_600_000,
-      activeDurationMs: 1_200_000,
-      machine: null,
-      timeToFirstOutputMs: null,
-      contextEndPercent: 40,
-      stalled: false,
-      failed: false,
-      migrated: false,
-      completed: true,
-      ...overrides.raw,
-    },
-    finishedAt: '2026-08-01T01:00:00.000Z',
-    usageRefusal: null,
-    pricing: {
-      kind: 'priced',
-      identity: {
-        raw: 'claude-opus-5',
-        modelId: 'claude-opus-5',
-        variant: null,
-        contextWindow: null,
-        revision: null,
-      },
-      rate: {
-        pricingKey: 'operator:claude-opus-5:2026-08',
-        modelId: 'claude-opus-5',
-        provider: 'anthropic',
-        currency: 'USD',
-        rateUnit: 'million_tokens',
-        ratesUsdMicrosPerMillion: {
-          input: 15_000_000,
-          cachedRead: 1_500_000,
-          cacheWrite5m: 18_750_000,
-          cacheWrite1h: 30_000_000,
-          output: 75_000_000,
-        },
-        source: { kind: 'manual' },
-        lastSyncedAt: null,
-        verifiedAt: '2026-08-01T00:00:00.000Z',
-        validFrom: '2026-08-01T00:00:00.000Z',
-        validThrough: null,
-      },
-      equivalentApiCostUsdMicros: 52_500,
-    },
-    signature: 'signature-1',
-    ingestedAt: '2026-08-02T00:00:00.000Z',
-    ...overrides,
-  };
 }
 
 /** The same row priced from a provider feed rather than by hand, with a reasoning rate applied. */
@@ -143,33 +67,8 @@ function syncedSession(): AnalyticsStoredSession {
   };
 }
 
-/** A session whose transcript this daemon could not read: no tokens, no cost, and a stored reason. */
-function refusedSession(id: string): AnalyticsStoredSession {
-  const base = storedSession();
-  return {
-    ...base,
-    raw: {
-      ...base.raw,
-      id,
-      tokens: null,
-      inputTokens: null,
-      outputTokens: null,
-      cachedInputTokens: null,
-      cacheWriteInputTokens: null,
-      cacheWrite5mInputTokens: null,
-      cacheWrite1hInputTokens: null,
-      reasoningTokens: null,
-      equivalentApiCostUsdMicros: null,
-      pricingModel: null,
-    },
-    usageRefusal: 'transcript_unresolved',
-    pricing: null,
-    signature: `signature-${id}`,
-  };
-}
-
 afterEach(async () => {
-  for (const store of [...live]) closeStore(store);
+  for (const store of [...live]) await closeStore(store);
   for (const directory of directories) await rm(directory, { recursive: true, force: true });
   directories.clear();
 });
@@ -182,7 +81,7 @@ describe('the analytics store on disk', () => {
     const paths = await temporaryPaths();
     const first = await open(paths);
     first.store.upsert([storedSession()]);
-    closeStore(first.store);
+    await closeStore(first.store);
 
     // Act — a SECOND open of the same file, as a restarted daemon would do.
     const second = await open(paths);
@@ -213,6 +112,47 @@ describe('the analytics store on disk', () => {
       refusedUsageSessions: 1,
       lastIngestedAt: '2026-08-02T00:00:00.000Z',
     });
+  });
+
+  it('should round-trip an unpriced session with its stated reason, with or without a model identity', async () => {
+    // "Unpriced" is a result an operator can act on, so the reason has to survive a restart rather than
+    // collapse into a free session or a lost price.
+    // Arrange
+    const paths = await temporaryPaths();
+    const first = await open(paths);
+    const base = storedSession();
+    const named: AnalyticsStoredSession = {
+      ...base,
+      raw: { ...base.raw, id: 'named', equivalentApiCostUsdMicros: null },
+      pricing: {
+        kind: 'unpriced',
+        identity: {
+          raw: 'claude-opus-5',
+          modelId: 'claude-opus-5',
+          variant: null,
+          contextWindow: null,
+          revision: null,
+        },
+        reason: 'unknown_pricing_model',
+      },
+      signature: 'signature-named',
+    };
+    const anonymous: AnalyticsStoredSession = {
+      ...base,
+      raw: { ...base.raw, id: 'anonymous', pricingModel: null, equivalentApiCostUsdMicros: null },
+      pricing: { kind: 'unpriced', identity: null, reason: 'missing_pricing_model' },
+      signature: 'signature-anonymous',
+    };
+    first.store.upsert([named, anonymous]);
+    closeStore(first.store);
+
+    // Act — a restarted daemon reads the file back.
+    const second = await open(paths);
+
+    // Assert
+    const byId = new Map(second.store.rows().map(row => [row.raw.id, row.pricing]));
+    should(byId.get('named')).deepEqual(named.pricing);
+    should(byId.get('anonymous')).deepEqual(anonymous.pricing);
   });
 
   it('should refuse at the schema to hold a token count beside a refusal', async () => {
@@ -318,7 +258,7 @@ describe('the analytics store on disk', () => {
     const paths = await temporaryPaths();
     const first = await open(paths);
     first.store.upsert([syncedSession()]);
-    closeStore(first.store);
+    await closeStore(first.store);
 
     // Act — a SECOND open of the same file, as a restarted daemon would do.
     const second = await open(paths);
@@ -362,7 +302,7 @@ describe('the analytics store on disk', () => {
     for (const { column, value, synced } of corruptions) {
       const { store } = await open(paths);
       store.upsert([synced ? syncedSession() : storedSession()]);
-      closeStore(store);
+      await closeStore(store);
       const database = new Database(paths.analyticsIndex, { strict: true });
       database.query(`UPDATE analytics_sessions SET ${column} = ?`).run(value);
       database.close();
@@ -375,7 +315,7 @@ describe('the analytics store on disk', () => {
       should(row?.raw.id).equal('s1');
       should(row?.pricing).be.null();
       reopened.store.drop();
-      closeStore(reopened.store);
+      await closeStore(reopened.store);
     }
   });
 
@@ -386,7 +326,7 @@ describe('the analytics store on disk', () => {
     const paths = await temporaryPaths();
     const first = await open(paths);
     first.store.upsert([storedSession()]);
-    closeStore(first.store);
+    await closeStore(first.store);
     const database = new Database(paths.analyticsIndex, { strict: true });
     database.exec('ALTER TABLE analytics_sessions DROP COLUMN reasoning_tokens');
     database.close();
@@ -404,7 +344,7 @@ describe('the analytics store on disk', () => {
     const paths = await temporaryPaths();
     const first = await open(paths);
     first.store.upsert([storedSession()]);
-    closeStore(first.store);
+    await closeStore(first.store);
     const database = new Database(paths.analyticsIndex, { strict: true });
     database.exec(`PRAGMA user_version = ${ANALYTICS_INDEX_SCHEMA_VERSION + 1}`);
     database.close();
@@ -424,7 +364,7 @@ describe('the analytics store on disk', () => {
     const paths = await temporaryPaths();
     const first = await open(paths);
     first.store.upsert([storedSession()]);
-    closeStore(first.store);
+    await closeStore(first.store);
     const database = new Database(paths.analyticsIndex, { strict: true });
     database.query('UPDATE analytics_meta SET home = ?').run('/somewhere/else');
     database.close();
@@ -441,7 +381,7 @@ describe('the analytics store on disk', () => {
     // A valid SQLite file the daemon does not own: whatever it holds is not this daemon's fleet.
     // Arrange
     const paths = await temporaryPaths();
-    closeStore((await open(paths)).store);
+    await closeStore((await open(paths)).store);
     const database = new Database(paths.analyticsIndex, { strict: true });
     database.exec('DROP TABLE analytics_sessions');
     database.exec('CREATE TABLE somebody_elses_rows (value TEXT NOT NULL)');
@@ -453,6 +393,26 @@ describe('the analytics store on disk', () => {
     // Assert
     should(opened.rebuildRequired).be.true();
     should(opened.store.rows()).be.empty();
+  });
+
+  it('should discard a database whose state-home record cannot be read rather than fail to open', async () => {
+    // A file with tables but no `analytics_meta` at all cannot say whose it is; that is a file to discard,
+    // not an error that takes the daemon down.
+    // Arrange
+    const paths = await temporaryPaths();
+    const first = await open(paths);
+    first.store.upsert([storedSession()]);
+    closeStore(first.store);
+    const database = new Database(paths.analyticsIndex, { strict: true });
+    database.exec('DROP TABLE analytics_meta');
+    database.close();
+
+    // Act
+    const second = await open(paths);
+
+    // Assert
+    should(second.rebuildRequired).be.true();
+    should(second.store.rows()).be.empty();
   });
 
   it('should refuse a symlinked index file rather than following it out of the state home', async () => {

@@ -219,6 +219,28 @@ describe('BunGitRunner', () => {
   );
 
   it(
+    'should report spawn_failed, with its cause, when the git program cannot be found',
+    async () => {
+      // Arrange — the directory exists, so the working-directory check passes; only the program is missing.
+      const repository = await tempRepository('runner-no-git');
+      const subject = new BunGitRunner(() => ({ PATH: path.join(repository.root, 'no-such-bin') }));
+
+      // Act
+      const actual = await subject
+        .run({ cwd: repository.root, args: ['status'] })
+        .then(() => undefined)
+        .catch((error: unknown) => error);
+
+      // Assert
+      should(actual).be.instanceof(GitProcessError);
+      should((actual as GitProcessError).code).equal('spawn_failed');
+      should((actual as GitProcessError).message).equal('could not start Git');
+      should((actual as GitProcessError).cause).not.be.undefined();
+    },
+    GIT_TEST_TIMEOUT_MS,
+  );
+
+  it(
     'should scrub inherited GIT_* variables while keeping the rest of the environment',
     async () => {
       // Arrange — an inherited GIT_DIR from the daemon's own process would silently retarget Git.

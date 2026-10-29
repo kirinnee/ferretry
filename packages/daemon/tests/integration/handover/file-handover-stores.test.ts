@@ -198,4 +198,20 @@ describe('FileHandoverReceiptStore', () => {
     const store = new FileHandoverReceiptStore(join(home, 'state', 'nothing-here'));
     should(await store.pendingSourceSessionIds()).be.empty();
   });
+
+  it('refuses a sessions directory the filesystem cannot list, rather than answering an empty roster', async () => {
+    // Arrange — the sessions directory's place is taken by a file, so listing fails with something other than absence.
+    const blocker = join(home, 'state', 'sessions-file');
+    await writeFile(blocker, 'not a directory');
+    const store = new FileHandoverReceiptStore(blocker);
+
+    // Act
+    const failure = await store.pendingSourceSessionIds().then(
+      () => undefined,
+      (error: unknown) => error as NodeJS.ErrnoException,
+    );
+
+    // Assert
+    should(failure?.code).equal('ENOTDIR');
+  });
 });

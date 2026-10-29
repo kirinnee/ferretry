@@ -6,8 +6,6 @@ import type {
   AttentionItem,
   AttentionResponse,
   AttentionSnapshot,
-  DirectNotificationRequest,
-  DirectNotificationResponse,
   ResolvedAttentionItem,
 } from '@ferretry/protocol';
 import type { IAttentionGateway, IAttentionOutput } from '../../../src/lib/attention/ports';
@@ -40,8 +38,12 @@ interface HumanItemFields extends AttentionBrief {
   howToResolve: string;
   waitingSince: string;
   waitingOn: 'ferret';
+  waitingFor: 'info' | 'discussion';
   askedAt: string;
   ask: AttentionAsk;
+  title: string;
+  kind: NonNullable<AttentionItem['kind']>;
+  answers: NonNullable<AttentionItem['answers']>;
 }
 
 /** An item an agent raised, which is what the CLI's `add` produces. */
@@ -114,13 +116,11 @@ export function snapshot(
 export class RecordingAttentionGateway implements IAttentionGateway {
   readonly read: string[] = [];
   readonly applied: Array<{ sessionId: string; request: AttentionActionRequest }> = [];
-  readonly notified: Array<{ sessionId: string; request: DirectNotificationRequest }> = [];
   readonly flushed: string[] = [];
 
   constructor(
     private readonly board: AttentionSnapshot,
     private readonly result: AttentionSnapshot = board,
-    private readonly delivered = 2,
   ) {}
 
   snapshot(sessionId: string): Promise<AttentionSnapshot> {
@@ -131,11 +131,6 @@ export class RecordingAttentionGateway implements IAttentionGateway {
   apply(sessionId: string, request: AttentionActionRequest): Promise<AttentionSnapshot> {
     this.applied.push({ sessionId, request });
     return Promise.resolve(this.result);
-  }
-
-  notify(sessionId: string, request: DirectNotificationRequest): Promise<DirectNotificationResponse> {
-    this.notified.push({ sessionId, request });
-    return Promise.resolve({ sessionId, delivered: this.delivered });
   }
 
   sendReplies(sessionId: string): Promise<AttentionSnapshot> {

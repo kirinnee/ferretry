@@ -412,6 +412,18 @@ describe('<DictationSheet>', () => {
     expect(view.container.textContent).not.toContain('vendor');
     await view.unmount();
   });
+
+  it('says a finished take goes straight into the draft, when that is the reader’s setting', async () => {
+    const view = await mount(<DictationSheet {...sheetProps({ insertsDirectly: true })} />);
+    const panel = must(view.container.querySelector('[data-dictation-panel]'), 'the panel');
+    const describedBy = must(panel.getAttribute('aria-describedby'), 'a description id');
+    const description = must(view.container.querySelector(`#${CSS.escape(describedBy)}`), 'the description');
+
+    expect(description.textContent).toContain('A finished take goes into your draft at the caret');
+    expect(description.textContent).toContain('never sent automatically');
+    expect(description.textContent).not.toContain('until you press Insert');
+    await view.unmount();
+  });
 });
 
 /** The stage union is exhaustive: every member must render without throwing. */

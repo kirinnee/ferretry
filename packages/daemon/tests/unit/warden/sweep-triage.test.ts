@@ -716,11 +716,12 @@ describe('the fleet warden under Jev', () => {
     should(subject.state().sweepCoverage?.anomalies).deepEqual([{ sessionId: 's2', kind: 'quota_reset_passed' }]);
   });
 
-  it('should refuse past the hourly limit before paying Jev', async () => {
+  it('should still let Jev answer first past the hourly limit, and hold back only the investigation', async () => {
     // Arrange
     const subject = harness({
       config: jev({ caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 1 } }),
       fleet: [triageable('s1')],
+      guard: [JEV_INVESTIGATE],
       state: {
         investigations: [
           {
@@ -741,7 +742,8 @@ describe('the fleet warden under Jev', () => {
 
     // Assert
     should(actual.message).equal('hourly investigation limit reached (1 per hour)');
-    should(subject.guarded).be.empty();
+    should(subject.guarded).have.length(1);
+    should(subject.spawns).be.empty();
   });
 
   it('should send every flag straight to the investigation while the Jev cap holds Jev off', async () => {

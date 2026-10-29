@@ -95,4 +95,13 @@ describe('WardenVerdicts', () => {
     expect(tree).toContain('Ran by: unknown (older report)');
     expect(tree).not.toContain('switched account');
   });
+
+  it('names the model hint as the agent default when the report carries no model', () => {
+    expect(
+      verdictProvenanceLine({ agent: 'claude-default', modelSource: 'harness', modelHint: 'opus', harness: 'claude' }),
+    ).toBe('claude-default · opus (agent default) · claude');
+    expect(verdictProvenanceLine({ agent: 'claude-default', modelSource: 'harness' })).toBe(
+      'claude-default · model unknown · harness unknown',
+    );
+  });
 });

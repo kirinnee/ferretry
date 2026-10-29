@@ -8,6 +8,8 @@ import {
 } from '../../../src/adapters/index.ts';
 import {
   TERMINAL_INPUT_REDRAW_LADDER_MS,
+  TERMINAL_MAX_INPUT_FRAME_BYTES,
+  TERMINAL_MAX_QUEUED_INPUT_BYTES,
   TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
   TERMINAL_POLL_HISTORY_LINES,
   TERMINAL_REATTACH_LINES,
@@ -462,5 +464,35 @@ describe('TerminalStreamBridge', () => {
 
     // Assert — the attach's redraw only; the complete redraw the second capture was for went nowhere.
     should(text(sent)).deepEqual([PROMPT_REDRAW]);
+  });
+
+  it('should close the stream when queued input outgrows its budget while the pane is not draining it', async () => {
+    // A pane that stops taking keystrokes must not let a viewer pile up input in daemon memory.
+    // Arrange — the first write never finishes, so every later frame waits behind it.
+    const service = new FakeService();
+    let unblock: () => void = () => undefined;
+    service.write = async () => {
+      await new Promise<void>(resolve => (unblock = resolve));
+    };
+    const closed: Array<[number, string]> = [];
+    const bridge = new TerminalStreamBridge(
+      service,
+      'session-a',
+      '0123456789ab',
+      { send: () => undefined, close: (code, reason) => closed.push([code, reason]) },
+      new FakeScheduler(),
+    );
+    const frame = new Uint8Array(TERMINAL_MAX_INPUT_FRAME_BYTES);
+    const frames = TERMINAL_MAX_QUEUED_INPUT_BYTES / TERMINAL_MAX_INPUT_FRAME_BYTES;
+
+    // Act — a full budget is admitted; one frame more is not.
+    for (let sent = 0; sent < frames; sent += 1) bridge.fromClient(frame);
+    const admittedOnly = [...closed];
+    bridge.fromClient(frame);
+    unblock();
+
+    // Assert
+    should(admittedOnly).deepEqual([]);
+    should(closed).deepEqual([[1009, 'terminal input queue exceeded']]);
   });
 });

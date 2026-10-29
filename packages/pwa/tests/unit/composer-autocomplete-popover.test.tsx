@@ -161,6 +161,29 @@ describe('composer autocomplete popover', () => {
     expect(rendered).toContain('Optional: add :LINE before accepting the file.');
   });
 
+  test('keeps consecutive candidates of one group in a single section and draws a status dot per agent', () => {
+    const agents: readonly ComposerAutocompleteCandidate[] = [
+      { id: 'agent-a', kind: 'agent', label: 'alpha', group: 'Agents', badge: 'running', replacement: ':alpha' },
+      { id: 'agent-b', kind: 'agent', label: 'beta', group: 'Agents', badge: 'waiting', replacement: ':beta' },
+      { id: 'agent-c', kind: 'agent', label: 'gamma', group: 'Agents', badge: 'finished', replacement: ':gamma' },
+    ];
+    const view = mounted(
+      render(<ComposerAutocompletePopover surface={surfaceOf({ candidates: agents, activeIndex: 0 })} />),
+    );
+
+    expect(view.root.findAllByType('fieldset').map(group => group.props['aria-label'])).toEqual(['Agents']);
+    expect(options(view).map(row => row.props.id)).toEqual([
+      'composer-autocomplete-test-option-0',
+      'composer-autocomplete-test-option-1',
+      'composer-autocomplete-test-option-2',
+    ]);
+    expect(view.root.findAllByProps({ className: 'fy-ac-dot' }).map(dot => dot.props['data-tone'])).toEqual([
+      'ok',
+      'warn',
+      'idle',
+    ]);
+  });
+
   test('shows a refused row honestly and never lets a pointer insert it', () => {
     const accepted: number[] = [];
     const view = mounted(

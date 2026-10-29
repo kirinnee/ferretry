@@ -1356,6 +1356,41 @@ describe('FileFleetProvisioner rollback', () => {
     should(actual.committed.manifestPath).equal(manifestPath);
   });
 
+  it('should name an unclearable claim on a refusal that never reached the rollback', async () => {
+    // Arrange — the preview a refusal comes from runs inside the lock, and a successor takes the
+    // claim before it fails, so the release cannot clear it and the plain refusal must still say so.
+    const root = await temporaryDirectory();
+    const manifestPath = path.join(root, 'fleet', 'manifest.json');
+    const lockPath = path.join(root, 'fleet', '.fy-fleet-apply.lock');
+    const sharedHistory = {
+      preview: async () => {
+        await rm(lockPath, { recursive: true, force: true });
+        await mkdir(lockPath, { recursive: true });
+        await writeFile(
+          path.join(lockPath, 'claim-the-successor.json'),
+          `${JSON.stringify({ owner: 1, token: 'the-successor', at: 0 })}\n`,
+        );
+        throw new Error('history pool cannot be inspected');
+      },
+    } as unknown as SharedHistoryMigration;
+    const plan: FleetApplyPlan = {
+      manifest: manifest(),
+      manifestPath,
+      operations: [],
+      sharedHistoryRequests: [{ kind: 'claude', poolRoot: path.join(root, 'fleet', 'shared'), homes: [] }],
+    };
+
+    // Act
+    const actual = await new FileFleetProvisioner([root], sharedHistory).apply(plan).catch((error: unknown) => error);
+
+    // Assert
+    should(actual).be.instanceOf(Error);
+    should((actual as Error).message).equal(
+      `history pool cannot be inspected; the exclusive apply claim at ${lockPath} could not be cleared`,
+    );
+    should(((actual as Error).cause as Error).message).equal('history pool cannot be inspected');
+  });
+
   it('should leave the committed state alone when the claim released cleanly', async () => {
     // Arrange — the field is absent rather than present-and-empty when there is nothing stuck.
     const root = await temporaryDirectory();

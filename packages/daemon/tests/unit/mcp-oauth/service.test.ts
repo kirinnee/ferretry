@@ -213,6 +213,39 @@ describe('McpOAuthService', () => {
       should(message).containEql('(network error: ConnectionRefused)');
     });
 
+    it('should start a sign-in with a provider that advertises no revocation endpoint', async () => {
+      // Arrange
+      const w = world({ noRevocation: true });
+
+      // Act
+      const flow = await w.service.start('linear', {});
+      const flowDocument = await w.state.read();
+
+      // Assert — the flow is usable, and nothing records an endpoint the provider never named
+      should(new URL(flow.authorizeUrl).pathname).equal('/auth/authorize');
+      should(JSON.stringify(flowDocument)).not.containEql('revoke');
+    });
+
+    it('should say the server could not be reached when reading its answer fails unexpectedly', async () => {
+      // Arrange — an answer the transport delivers but that cannot be read, not a dead host
+      const w = world();
+      w.http.request = async () => ({
+        status: 401,
+        header: () => {
+          throw new Error('malformed answer');
+        },
+        text: '',
+      });
+
+      // Act
+      const message = await refusedWith(w.service.start('linear', {}), 'mcp_auth_discovery');
+
+      // Assert
+      should(message).equal(
+        'Ferretry could not reach the server to find out how it signs in. Check its address and try again.',
+      );
+    });
+
     it('should refuse a server that describes no authorization server anywhere', async () => {
       // Arrange — the MCP endpoint answers 401 with no challenge and every metadata address is a 404.
       const w = world();

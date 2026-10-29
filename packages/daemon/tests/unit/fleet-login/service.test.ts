@@ -1059,6 +1059,36 @@ describe('a login that cannot run', () => {
       should(await subject.service.status(started.flowId)).not.have.property('recheck');
     });
 
+    it('should keep a Codex flow failed, with what this read found, when its login is still not there', async () => {
+      // Arrange
+      const finding = 'Checked the file /fy/fleet/credentials/work/auth.json — nothing there.';
+      const subject = fixture({
+        target: () =>
+          storeTarget({
+            credentialId: CODEX_CREDENTIAL,
+            harness: 'codex',
+            check: async () => ({ signedIn: false, finding }),
+          }),
+      });
+      const started = await subject.service.start({ credentialId: CODEX_CREDENTIAL }, HOST);
+      const child = await subject.child();
+      child.emit(CODEX_URL_LINE, CODEX_CODE_LINE);
+      child.exit(0);
+      await subject.settle();
+
+      // Act
+      const actual = await subject.service.submit(started.flowId, { method: 'recheck' });
+
+      // Assert
+      should(actual).deepEqual({ outcome: 'refused', reason: `${NO_USABLE_LOGIN} ${finding}` });
+      should(await subject.service.status(started.flowId)).match({
+        harness: 'codex',
+        state: 'failed',
+        reason: `${NO_USABLE_LOGIN} ${finding}`,
+        recheck: true,
+      });
+    });
+
     it('should look again for a Codex sign-in too', async () => {
       // Arrange
       const subject = fixture();

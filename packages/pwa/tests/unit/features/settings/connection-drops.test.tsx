@@ -91,6 +91,27 @@ describe('the connection drops panel', () => {
     expect(drops.snapshot().map(drop => drop.daemonId)).toEqual([beta.daemonId]);
   });
 
+  it('should say the copy was blocked, and keep the drops listed, when the clipboard refuses', async () => {
+    // Arrange
+    const drops = new CarrierDropLog(environment, memory());
+    const shown = await mount(
+      <ConnectionDrops connection={alpha} drops={drops} write={async () => Promise.reject(new Error('denied'))} />,
+    );
+    await interact(() => {
+      drops.dropped(alpha.daemonId, 'tunnel', 'stream', END);
+    });
+
+    // Act
+    await interact(() =>
+      must(shown.container.querySelector<HTMLButtonElement>('[data-connection-drops-copy]'), 'copy').click(),
+    );
+
+    // Assert
+    expect(shown.container.textContent).toContain('Copy was blocked — select the lines instead.');
+    expect(shown.container.textContent).not.toContain('Copied the drops.');
+    expect(shown.container.querySelectorAll('li')).toHaveLength(1);
+  });
+
   it('should sit under the recorder on the Performance tab when the app has a drop log', async () => {
     // Arrange
     const drops = new CarrierDropLog(environment, memory());

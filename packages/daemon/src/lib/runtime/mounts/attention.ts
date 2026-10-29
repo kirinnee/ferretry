@@ -1,17 +1,19 @@
 import {
+  ATTENTION_PUSH_TITLE_LENGTH,
   type AttentionActionRequest,
   AttentionActionRequestSchema,
   type AttentionErrorCode,
   type AttentionSnapshot,
+  clipAtWord,
   type DirectNotificationRequest,
   DirectNotificationRequestSchema,
   DirectNotificationResponseSchema,
-  FY_REQUEST_ID_HEADER,
+  MAX_ATTENTION_SUBJECT_LENGTH,
 } from '@ferretry/protocol';
 import { type ApiActor, isHumanAdminActor, parseActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
-import { type ApiResponse, decodeParameter, headerValue } from '../../api/http.ts';
+import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import {
@@ -22,8 +24,8 @@ import {
   type EditAttentionPatch,
   isAttentionSessionId,
   lintAttentionWriting,
+  type RaiseAttentionRequest,
 } from '../../attention/index.ts';
-import type { NotificationResult } from '../../notifications/index.ts';
 
 /**
  * The attention board's HTTP surface: what a session is blocked on, and the human's answer to it.
@@ -32,22 +34,21 @@ import type { NotificationResult } from '../../notifications/index.ts';
  * `/v1/sessions/:sessionId/attention` — so mounting it is what turns the shipped `fy attention`,
  * `fy answer` and `fy resolve` commands from 404s into a working capability.
  *
- * The sibling notify route is the explicit, audited outbound path. It uses the same server-derived
- * actor and allows an agent only its own session; a human may target any known session. Its delivered
- * count means push endpoints accepted the payload, never that a person observed it.
+ * The sibling notify route stays for older CLIs, but ONLY ATTENTION ITEMS NOTIFY: it raises an `info`
+ * item through the same path as an add, so its push is the item's push and carries the same card. It uses
+ * the same server-derived actor and allows an agent only its own session; a human may target any known
+ * session. Its delivered count means push endpoints accepted the payload, never that a person observed it.
  */
 
 export interface DirectNotificationSubsystem {
-  notifyDirect(
-    sessionId: string,
-    request: DirectNotificationRequest,
-    actor: AttentionActor,
-    attribution: string,
-    requestId: string,
-  ): Promise<NotificationResult>;
+  /** How many devices accepted the push the raise of this item made; zero when it pushed to none. */
+  attentionDelivered(sessionId: string, attentionId: string): Promise<number>;
   /** How many devices are enrolled for push on this machine right now. */
   enrolledDevices(): Promise<number>;
 }
+
+const NOTIFY_KIND_REFUSAL =
+  'progress and finishing never notify the owner — raise an item (fy attention add) only when they must decide or do something';
 
 /**
  * How each domain refusal is reported.
@@ -105,19 +106,27 @@ function pathSessionId(context: RouteContext): string {
   return decoded;
 }
 
-type HeldReplies = Pick<AttentionRepliesSubsystem, 'pending'>;
+type HeldReplies = Pick<AttentionRepliesSubsystem, 'pending' | 'delivery'>;
 
 /**
- * The board with the answers this machine is holding for the ferret (`replies`), so the owner's screen
- * can say they are on their way. A held outbox that cannot be read is left off: the board is the answer.
+ * The board with the answers this machine is holding for the ferret (`replies`) and the ones on their way
+ * but not yet proven to arrive (`delivery`), so the owner's screen can say "Sending…". An outbox that
+ * cannot be read is left off: the board is the answer.
  */
 async function withReplies(
   replies: HeldReplies,
   sessionId: string,
   snapshot: AttentionSnapshot,
 ): Promise<AttentionSnapshot> {
-  const held = await replies.pending(sessionId).catch(() => undefined);
-  return held === undefined ? snapshot : { ...snapshot, replies: held };
+  const [held, delivery] = await Promise.all([
+    replies.pending(sessionId).catch(() => undefined),
+    replies.delivery(sessionId).catch(() => undefined),
+  ]);
+  return {
+    ...snapshot,
+    ...(held === undefined ? {} : { replies: held }),
+    ...(delivery === undefined ? {} : { delivery }),
+  };
 }
 
 async function list(attention: AttentionService, replies: HeldReplies, context: RouteContext): Promise<ApiResponse> {
@@ -168,11 +177,13 @@ async function apply(
         ? attention.progress(sessionId, request.id, request.step, request.done, actor)
         : request.action === 'needs-info'
           ? attention.needsInfo(sessionId, request.id, actor, request.note)
-          : request.action === 'dismiss'
-            ? attention.dismiss(sessionId, request.id, actor, request.note)
-            : request.response === undefined
-              ? attention.resolve(sessionId, request.id, actor, request.note)
-              : attention.answer(sessionId, request.id, request.response, actor, request.note));
+          : request.action === 'discuss'
+            ? attention.discuss(sessionId, request.id, actor, request.note)
+            : request.action === 'dismiss'
+              ? attention.dismiss(sessionId, request.id, actor, request.note)
+              : request.response === undefined
+                ? attention.resolve(sessionId, request.id, actor, request.note)
+                : attention.answer(sessionId, request.id, request.response, actor, request.note));
   if (!mutation.ok) return refusal(mutation.error);
   const written = mutation.change === 'created' || mutation.change === 'refreshed' || mutation.change === 'info-added';
   const warnings = written && mutation.item !== undefined ? lintAttentionWriting(mutation.item) : [];
@@ -201,26 +212,41 @@ function editPatch(request: Extract<AttentionActionRequest, { action: 'edit' }>)
   return patch;
 }
 
-/** The caller-owned identity of a retryable notification mutation. */
-function notificationRequestId(context: RouteContext): string {
-  const value = headerValue(context.request, FY_REQUEST_ID_HEADER)?.trim() ?? '';
-  if (value === '') {
-    throw new ApiError(
-      400,
-      `a notification must carry ${FY_REQUEST_ID_HEADER}: without it a retried request becomes a second push to the human's devices`,
-      'missing_request_id',
-    );
-  }
-  return value;
+/**
+ * The `info` item an old notify request becomes: its title is the request's own or the start of the text,
+ * its ask the text on one line, and the whole text rides in the context when the ask had to be cut.
+ */
+function infoRequest(request: DirectNotificationRequest): RaiseAttentionRequest {
+  const line = request.body.replaceAll(/\s+/gu, ' ').trim();
+  const subject = clipAtWord(line, MAX_ATTENTION_SUBJECT_LENGTH);
+  return {
+    source: 'agent-raised',
+    sourceRef: null,
+    kind: 'info',
+    title: clipAtWord(request.title ?? line, ATTENTION_PUSH_TITLE_LENGTH),
+    subject,
+    why: 'The ferret sent you a message that needs no decision.',
+    ...(subject === line ? {} : { context: request.body.trim() }),
+    howToResolve: 'Read it, then tap Got it.',
+  };
 }
 
-async function notify(notifications: DirectNotificationSubsystem, context: RouteContext): Promise<ApiResponse> {
+async function notify(
+  attention: AttentionService,
+  notifications: DirectNotificationSubsystem,
+  context: RouteContext,
+): Promise<ApiResponse> {
   const sessionId = pathSessionId(context);
-  const requestId = notificationRequestId(context);
   const actor = attentionActor(context.actor);
   const request = await parseBody(context.request, DirectNotificationRequestSchema);
-  const result = await notifications.notifyDirect(sessionId, request, actor, context.actor ?? '', requestId);
-  return result.ok ? jsonResponse(DirectNotificationResponseSchema.parse(result.value)) : refusal(result.error);
+  if (request.kind !== undefined) return refusal({ code: 'invalid', message: NOTIFY_KIND_REFUSAL });
+  const mutation = await attention.raise(sessionId, infoRequest(request), actor);
+  if (!mutation.ok) return refusal(mutation.error);
+  const delivered =
+    mutation.change === 'created' && mutation.item !== undefined
+      ? await notifications.attentionDelivered(sessionId, mutation.item.id).catch(() => 0)
+      : 0;
+  return jsonResponse(DirectNotificationResponseSchema.parse({ sessionId, delivered }));
 }
 
 /**
@@ -263,7 +289,7 @@ export function attentionRoutes(
       path: '/v1/sessions/:sessionId/notify',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await notify(notifications, context),
+      handle: async context => await notify(attention, notifications, context),
     },
   ];
 }

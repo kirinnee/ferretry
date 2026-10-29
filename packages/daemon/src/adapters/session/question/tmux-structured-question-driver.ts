@@ -5,7 +5,6 @@ import {
   bindReviewPage,
   bindTabStrip,
   boundQuestionIndex,
-  FREE_FORM_LABEL,
   type QuestionScreen,
   questionScreen,
   type RenderedQuestion,
@@ -336,9 +335,8 @@ export class TmuxStructuredQuestionDriver implements StructuredQuestionDriver {
           { phase: 'preflight', questionIndex: index, reason: 'cursor-missing' },
         ),
       );
-    const choices = answer.kind === 'selection' ? answer.labels.map(compact) : [FREE_FORM_LABEL];
-    if (choices.some(label => !form.labels.includes(label)))
-      throw atQuestion(
+    const refusal = (): StructuredQuestionDriveFailure =>
+      atQuestion(
         pending,
         index,
         new StructuredQuestionDriveError('the requested answer is not an option in the bound rendered form', 'none', {
@@ -347,6 +345,8 @@ export class TmuxStructuredQuestionDriver implements StructuredQuestionDriver {
           reason: 'choice-missing',
         }),
       );
+    const choices = answer.kind === 'selection' ? answer.labels.map(compact) : [];
+    if (choices.some(label => !form.labels.includes(label))) throw refusal();
     let at = form.cursor;
     const moveTo = async (target: number): Promise<void> => {
       const key = target >= at ? 'Down' : 'Up';
@@ -354,7 +354,8 @@ export class TmuxStructuredQuestionDriver implements StructuredQuestionDriver {
       at = target;
     };
     if (answer.kind === 'other') {
-      await this.enterFreeForm(session, question, form, answer.text, moveTo, keys);
+      if (form.freeForm === undefined) throw refusal();
+      await this.enterFreeForm(session, question, form, form.freeForm, answer.text, moveTo, keys);
       return;
     }
     if (question.multiSelect === true) {
@@ -459,16 +460,11 @@ export class TmuxStructuredQuestionDriver implements StructuredQuestionDriver {
     session: string,
     question: RenderedQuestion,
     form: BoundQuestionForm,
+    free: NonNullable<BoundQuestionForm['freeForm']>,
     text: string,
     moveTo: (target: number) => Promise<void>,
     keys: Keys,
   ): Promise<void> {
-    const free = form.freeForm;
-    if (free === undefined)
-      throw new StructuredQuestionDriveError('the bound rendered form has no free-form row', 'none', {
-        phase: 'preflight',
-        reason: 'choice-missing',
-      });
     await moveTo(free.index);
     if (free.entry === 'page') {
       const opened = (await this.tmux.state(session)).visible;

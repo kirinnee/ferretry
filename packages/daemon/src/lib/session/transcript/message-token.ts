@@ -131,14 +131,22 @@ export function sessionTranscriptRawPrefixStart(): Uint8Array {
  * One fixed-cost step per physical record. The previous VALUE is folded in rather than the previous
  * prefix being re-read, which is what makes a page of k rows one transcript pass plus k hashes
  * instead of k passes over the prefix.
+ *
+ * The record's frame is hashed as its length and then the record itself, never joined into one buffer
+ * first: the bytes hashed are the same, and a multi-megabyte screenshot record is not copied just to be
+ * read once by the hash.
  */
 export function extendSessionTranscriptRawPrefix(previous: Uint8Array, rawRecord: Uint8Array): Uint8Array {
   return createHash('sha256')
-    .update(frameSessionTranscriptValue(SESSION_TRANSCRIPT_RAW_PREFIX_ROW_DOMAIN))
+    .update(RAW_PREFIX_ROW_DOMAIN_FRAME)
     .update(frameSessionTranscriptValue(previous))
-    .update(frameSessionTranscriptValue(rawRecord))
+    .update(sessionTranscriptUnsigned64(rawRecord.length))
+    .update(rawRecord)
     .digest();
 }
+
+/** `frame(row-domain)`, which every step of the chain begins with. */
+const RAW_PREFIX_ROW_DOMAIN_FRAME = frameSessionTranscriptValue(SESSION_TRANSCRIPT_RAW_PREFIX_ROW_DOMAIN);
 
 /**
  * Everything a tag is taken over besides the row itself: which session, which run of it, and the

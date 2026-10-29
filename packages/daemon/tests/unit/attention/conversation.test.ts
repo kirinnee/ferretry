@@ -11,6 +11,7 @@ import {
   boardReplyMessage,
   conversationResponse,
   conversationTurn,
+  discussMessage,
   needsInfoMessage,
   referencedAttention,
   responseWords,
@@ -107,11 +108,100 @@ describe('Attention in a conversation', () => {
     // Act / Assert
     should(boardReplyMessage(answered)).equal('[answer to !A2 «Rebase onto main now?»] Wait');
     should(boardReplyMessage(answeredWithNote)).equal('[answer to !A3 «Which region?»] eu-west-1\n\nNote: cheapest');
-    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Only after 6pm');
+    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Done.\n\nNote: Only after 6pm');
     should(boardReplyMessage(bareDone)).equal('[done !A5 «Look at the flaky test»] The owner marked this done.');
     should(boardReplyMessage(dismissed)).equal('[dismissed !A5 «Look at the flaky test»] No longer needed');
     should(boardReplyMessage(bareDismiss)).equal(
       '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
+    );
+  });
+
+  it('should deliver the answer AND the owner’s reply for every action, with and without a reply', () => {
+    // Arrange
+    const asked = (note?: string) =>
+      item('A5', {
+        waitingOn: 'ferret',
+        askedAt: AT,
+        infoRequests: 1,
+        history: [{ at: AT, kind: 'needs-info', ...(note === undefined ? {} : { note }) }],
+      });
+    const choose = (note?: string) =>
+      closed(CHOICE, {
+        response: { kind: 'multiple-choice', choice: 'Rebase now' },
+        ...(note === undefined ? {} : { resolutionNote: note }),
+      });
+    const permission = (decision: 'approve' | 'reject', note?: string) =>
+      closed(PERMISSION, {
+        response: { kind: 'permission', decision },
+        ...(note === undefined ? {} : { resolutionNote: note }),
+      });
+    const REVIEW = item('A6', { subject: 'Is the summary right?', ask: { kind: 'answer-review' } });
+    const review = (note?: string) =>
+      closed(REVIEW, {
+        response: { kind: 'answer-review', verdict: 'good' },
+        ...(note === undefined ? {} : { resolutionNote: note }),
+      });
+    const done = (note?: string) => closed(PLAIN, note === undefined ? {} : { resolutionNote: note });
+    const dismiss = (note?: string) =>
+      closed(PLAIN, { disposition: 'dismissed', ...(note === undefined ? {} : { resolutionNote: note }) });
+
+    // Act
+    const lines = {
+      choose: boardReplyMessage(choose()),
+      chooseNote: boardReplyMessage(choose('after lunch')),
+      approve: boardReplyMessage(permission('approve')),
+      approveNote: boardReplyMessage(permission('approve', 'only for this repo')),
+      reject: boardReplyMessage(permission('reject')),
+      rejectNote: boardReplyMessage(permission('reject', 'use the staging account')),
+      good: boardReplyMessage(review()),
+      goodNote: boardReplyMessage(review('nice and short')),
+      done: boardReplyMessage(done()),
+      doneNote: boardReplyMessage(done('merged it myself')),
+      dismiss: boardReplyMessage(dismiss()),
+      dismissNote: boardReplyMessage(dismiss('not this week')),
+      needsInfo: needsInfoMessage(asked()),
+      needsInfoNote: needsInfoMessage(asked('which account?')),
+    };
+
+    // Assert
+    should(lines).deepEqual({
+      choose: '[answer to !A2 «Rebase onto main now?»] Rebase now',
+      chooseNote: '[answer to !A2 «Rebase onto main now?»] Rebase now\n\nNote: after lunch',
+      approve: '[answer to !A4 «Deploy?»] Approved.',
+      approveNote: '[answer to !A4 «Deploy?»] Approved.\n\nNote: only for this repo',
+      reject: '[answer to !A4 «Deploy?»] Rejected.',
+      rejectNote: '[answer to !A4 «Deploy?»] Rejected.\n\nNote: use the staging account',
+      good: '[answer to !A6 «Is the summary right?»] Your answer is good.',
+      goodNote: '[answer to !A6 «Is the summary right?»] Your answer is good.\n\nNote: nice and short',
+      done: '[done !A5 «Look at the flaky test»] The owner marked this done.',
+      doneNote: '[answer to !A5 «Look at the flaky test»] Done.\n\nNote: merged it myself',
+      dismiss: '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
+      dismissNote: '[dismissed !A5 «Look at the flaky test»] not this week',
+      needsInfo: '[needs more info !A5 «Ask A5?»] The owner needs more information.',
+      needsInfoNote: '[needs more info !A5 «Ask A5?»] which account?',
+    });
+  });
+
+  it('should read a non-default answer label as the start of the owner’s reply, after the answer', () => {
+    // Arrange — the app words an answer that is not its kind's default as the note's first words:
+    // permission ↑ "Always allow" is an approve, task ↑ "Skip" is a dismiss.
+    const always = closed(PERMISSION, {
+      response: { kind: 'permission', decision: 'approve' },
+      resolutionNote: 'Always allow — it is the same repo every time',
+    });
+    const alwaysBare = closed(PERMISSION, {
+      response: { kind: 'permission', decision: 'approve' },
+      resolutionNote: 'Always allow',
+    });
+    const skip = closed(PLAIN, { disposition: 'dismissed', resolutionNote: 'Skip — the owner of that test is away' });
+
+    // Act / Assert
+    should(boardReplyMessage(always)).equal(
+      '[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow — it is the same repo every time',
+    );
+    should(boardReplyMessage(alwaysBare)).equal('[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow');
+    should(boardReplyMessage(skip)).equal(
+      '[dismissed !A5 «Look at the flaky test»] Skip — the owner of that test is away',
     );
   });
 
@@ -128,7 +218,7 @@ describe('Attention in a conversation', () => {
 
   it('should prefix a message that references open items and answer them', () => {
     // Arrange / Act
-    const turn = conversationTurn('!A3 eu-west-1, and !A2 Wait', [CHOICE, OPEN], 'fy');
+    const turn = conversationTurn('!A3 eu-west-1, and !A2 Wait', [CHOICE, OPEN]);
 
     // Assert
     should(turn.message).equal(
@@ -137,20 +227,20 @@ describe('Attention in a conversation', () => {
     should(turn.answers.map(each => each.id)).deepEqual(['A2', 'A3']);
   });
 
-  it('should tell the ferret which items are open, without resolving any, for a plain message', () => {
-    // Arrange / Act
-    const turn = conversationTurn('How is it going?', [CHOICE, OPEN], 'fy');
-    const empty = conversationTurn('How is it going?', [], 'fy');
+  it('should deliver a plain message exactly as typed, however many items are open, and resolve none', () => {
+    // Arrange
+    const open = [CHOICE, OPEN, PERMISSION, PLAIN, item('A6'), item('A7')];
+
+    // Act
+    const turn = conversationTurn('How is it going?', open);
+    const empty = conversationTurn('How is it going?', []);
 
     // Assert
-    should(turn.message).equal(
-      'How is it going?\n\n[open attention: !A2 «Rebase onto main now?»; !A3 «Which region?» — if this message settles one, resolve it with `fy attention done <id>`]',
-    );
-    should(turn.answers).deepEqual([]);
+    should(turn).deepEqual({ message: 'How is it going?', answers: [] });
     should(empty).deepEqual({ message: 'How is it going?', answers: [] });
   });
 
-  it('should leave a harness prompt out of the footer, while a reference still answers it', () => {
+  it('should still answer a harness prompt the message references, and leave an unreferenced one alone', () => {
     // Arrange
     const harness = item('A6', {
       source: 'question',
@@ -163,15 +253,11 @@ describe('Attention in a conversation', () => {
     } as Partial<AttentionItem>);
 
     // Act
-    const alone = conversationTurn('How is it going?', [harness], 'fy');
-    const mixed = conversationTurn('How is it going?', [harness, OPEN], 'fy');
-    const answered = conversationTurn('!A6 eu', [harness], 'fy');
+    const plain = conversationTurn('How is it going?', [harness, OPEN]);
+    const answered = conversationTurn('!A6 eu', [harness]);
 
     // Assert
-    should(alone).deepEqual({ message: 'How is it going?', answers: [] });
-    should(mixed.message).endWith(
-      '[open attention: !A3 «Which region?» — if this message settles one, resolve it with `fy attention done <id>`]',
-    );
+    should(plain).deepEqual({ message: 'How is it going?', answers: [] });
     should(answered.answers.map(each => each.id)).deepEqual(['A6']);
   });
 
@@ -216,6 +302,48 @@ describe('Attention in a conversation', () => {
     });
     should(sessionAttentionSummary(empty)).be.undefined();
   });
+
+  it('should count the items in discussion apart, and open the row to the oldest one still needing the owner', () => {
+    // Arrange
+    const discussing = item('A2', { waitingOn: 'ferret', askedAt: AT, waitingFor: 'discussion', infoRequests: 1 });
+    const asked = item('A6', { waitingOn: 'ferret', askedAt: AT, infoRequests: 1 });
+    const board = (items: AttentionItem[]) =>
+      AttentionSnapshotSchema.parse({
+        v: 1,
+        sessionId: 'session-1',
+        items,
+        resolved: [],
+        count: items.length,
+        parseErrors: 0,
+        updatedAt: AT,
+      });
+
+    // Act
+    const mixed = sessionAttentionSummary(board([discussing, OPEN, asked]));
+    const onlyTalk = sessionAttentionSummary(board([discussing]));
+
+    // Assert — a request for more information still needs the owner's eye; a discussion does not.
+    should(mixed).deepEqual({ open: 3, first: 'A3', ask: 'Which region?', latestAt: AT, discussing: 1 });
+    should(onlyTalk).deepEqual({ open: 1, first: 'A2', ask: 'Ask A2?', latestAt: AT, discussing: 1 });
+  });
+
+  it('should never take a chat message as the answer to an item in discussion: talking it through is the discussion', () => {
+    // Arrange
+    const discussing = item('A2', {
+      ask: { kind: 'open-question' },
+      waitingOn: 'ferret',
+      askedAt: AT,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+    });
+
+    // Act
+    const turn = conversationTurn('!A2 why does it need the prod key? and !A3 eu-west-1', [discussing, OPEN]);
+
+    // Assert — the open question is answered; the one in discussion is only talked about.
+    should(turn.answers.map(each => each.id)).deepEqual(['A3']);
+    should(turn.message).startWith('[answer to !A3 «Which region?»] ');
+  });
 });
 
 describe('needsInfoMessage', () => {
@@ -237,5 +365,48 @@ describe('needsInfoMessage', () => {
     should(needsInfoMessage(asked('Which account?'))).equal('[needs more info !A5 «Ask A5?»] Which account?');
     should(needsInfoMessage(asked())).equal('[needs more info !A5 «Ask A5?»] The owner needs more information.');
     should(needsInfoMessage(item('A5'))).equal('[needs more info !A5 «Ask A5?»] The owner needs more information.');
+  });
+});
+
+describe('discussMessage', () => {
+  const discussing = (note?: string, overrides: Partial<AttentionItem> = {}) =>
+    item('A14', {
+      waitingOn: 'ferret',
+      askedAt: AT,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+      history: [{ at: AT, kind: 'discuss', ...(note === undefined ? {} : { note }) }],
+      ...overrides,
+    });
+
+  it('should name the item by its title, carry the note and say what to run, with the binary it was given', () => {
+    // Arrange
+    const titled = discussing('I do not understand the premise', { title: 'Release window' });
+
+    // Act
+    const message = discussMessage(titled, 'ferret');
+
+    // Assert
+    should(message).equal(
+      '[discuss !A14 «Release window»] The owner wants to talk this through before answering: I do not understand the premise. Reply in chat to clear it up; then update the item (`ferret attention edit A14`) or close it if the premise was wrong (`ferret attention done A14`).',
+    );
+  });
+
+  it('should fall back to the subject and to "no note", and use the latest discuss note', () => {
+    // Arrange
+    const noNote = discussing();
+    const latest = discussing('second', {
+      history: [
+        { at: AT, kind: 'discuss', note: 'first' },
+        { at: AT, kind: 'updated' },
+        { at: AT, kind: 'discuss', note: 'second' },
+      ],
+    });
+
+    // Act + Assert
+    should(discussMessage(noNote, 'fy')).startWith(
+      '[discuss !A14 «Ask A14?»] The owner wants to talk this through before answering: no note. ',
+    );
+    should(discussMessage(latest, 'fy')).containEql('before answering: second. ');
   });
 });

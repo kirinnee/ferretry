@@ -157,6 +157,34 @@ describe('FyRenderChart', () => {
     should(view.container.querySelector('table caption')?.textContent).equal('Data: Spend — After');
   });
 
+  test('should key a pie’s legend by slice, each with the palette colour its slice is drawn in, and hide by slice', async () => {
+    // Arrange
+    const fake = recorder();
+    const view = await show(
+      <FyRenderChart
+        alt="Share of spend"
+        fullscreen={false}
+        load={async () => fake.modules}
+        onFailed={() => {}}
+        payload={'kind: pie\nx: [Agents, Wardens, Relays]\nseries: [{name: Share, data: [3, 2, 1]}]'}
+        theme={theme('light')}
+        visible
+      />,
+    );
+    await settle(() => fake.calls.includes('mount'), 'the chart to mount');
+
+    // Act
+    const keys = [...view.container.querySelectorAll<HTMLButtonElement>('.fy-render-chart-key')];
+    await interact(() => keys[2]?.click());
+
+    // Assert — one key per slice, not one for the single series, each swatch a distinct palette colour.
+    should(keys.map(key => key.textContent)).eql(['Agents', 'Wardens', 'Relays']);
+    const swatches = keys.map(key => key.querySelector<HTMLElement>('.fy-render-chart-swatch')?.style.background);
+    should(swatches.every(colour => colour !== undefined && colour !== '')).be.true();
+    should(new Set(swatches).size).equal(3);
+    should(fake.calls).eql(['mount', 'hidden:2']);
+  });
+
   test('should repaint for a new theme only while on screen, carrying the frame and hidden series across', async () => {
     // Arrange
     const fake = recorder();

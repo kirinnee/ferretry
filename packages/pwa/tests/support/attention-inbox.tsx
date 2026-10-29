@@ -13,6 +13,7 @@ import {
   type InboxAction,
   type InboxCard,
   inboxCardKey,
+  isInDiscussion,
 } from '../../src/lib/attention-inbox.ts';
 import { type DaemonId, daemonId } from '../../src/lib/daemon-connection.ts';
 import { interact, must } from './dom.ts';
@@ -120,20 +121,32 @@ export function InboxHarness({
   fake,
   cards,
   reading = false,
+  resolved = [],
+  resolvedReading = false,
+  loadResolved = () => undefined,
   render,
 }: {
   readonly fake: FakeInbox;
   readonly cards: readonly InboxCard[];
   readonly reading?: boolean;
+  readonly resolved?: AttentionInbox['resolved'];
+  readonly resolvedReading?: boolean;
+  readonly loadResolved?: () => void;
   readonly render: (inbox: AttentionInbox) => ReactElement;
 }) {
   const state = useSyncExternalStore(fake.deferred.subscribe, fake.deferred.getSnapshot);
   const hidden = new Set([...state.pending.map(entry => entry.key), ...state.sending]);
+  const shown = cards.filter(card => !hidden.has(card.key));
   const inbox: AttentionInbox = {
     unread: [],
-    total: cards.length,
-    cards: cards.filter(card => !hidden.has(card.key)),
+    total: cards.filter(card => !isInDiscussion(card.item)).length,
+    // Split as the shell splits them: an item in discussion waits on its ferret, not in the list.
+    discussing: shown.filter(card => isInDiscussion(card.item)),
+    cards: shown.filter(card => !isInDiscussion(card.item)),
     reading,
+    resolved,
+    resolvedReading,
+    loadResolved,
     deferred: fake.deferred,
     deferredState: state,
     connectionFor: () => undefined,

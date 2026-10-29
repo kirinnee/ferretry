@@ -169,6 +169,18 @@ describe('readBrowserRecognitionSupport', () => {
     should(support.reason).match(/Open Ferretry in Safari/u);
   });
 
+  it('treats a standalone check that throws as not installed, so dictation stays available', () => {
+    const support = readBrowserRecognitionSupport({
+      isSecureContext: true,
+      webkitSpeechRecognition: Recognition,
+      navigator: { userAgent: 'Mozilla/5.0 (iPhone) AppleWebKit/605.1.15 Version/18.0 Mobile Safari/604.1' },
+      matchMedia: () => {
+        throw new Error('matchMedia unavailable');
+      },
+    });
+    should(support).deepEqual({ available: true, availability: 'available', implementation: 'webkit' });
+  });
+
   it('names an insecure page before constructor absence', () => {
     const support = readBrowserRecognitionSupport({ isSecureContext: false });
     should(support.availability).equal('insecure-context');
@@ -233,6 +245,27 @@ describe('browserRecognitionProvider', () => {
     callbacks.timer?.();
     provider.clearTimeout(timer);
     should(cleared).equal(17);
+  });
+
+  it('falls back to the page-wide timer functions when the global offers none of its own', () => {
+    const provider = browserRecognitionProvider({ isSecureContext: true, webkitSpeechRecognition: Recognition });
+    const original = globalThis.clearTimeout;
+    const cleared: unknown[] = [];
+    globalThis.clearTimeout = ((handle: Parameters<typeof original>[0]) => {
+      cleared.push(handle);
+      original(handle);
+    }) as typeof original;
+    try {
+      let fired = 0;
+      const handle = provider.setTimeout(() => {
+        fired += 1;
+      }, 60_000);
+      provider.clearTimeout(handle);
+      should(cleared).deepEqual([handle]);
+      should(fired).equal(0);
+    } finally {
+      globalThis.clearTimeout = original;
+    }
   });
 
   it('fails closed without an engine and treats an absent document as unwatched', () => {
@@ -482,6 +515,112 @@ describe('BrowserRecognitionSession', () => {
     await should(finished).be.rejectedWith({ code: 'recognition-failed' });
     should(failures[0]?.message).match(/did not finish/u);
     should(provider.recognition.aborts).equal(1);
+  });
+});
+
+describe('BrowserRecognitionSession when the engine misbehaves', () => {
+  const refuse = (): never => {
+    throw new Error('engine refused');
+  };
+
+  it('reports a start that throws, releases the hidden-page watch and stays failed', async () => {
+    const { provider, session, aborted } = sessionHarness();
+    provider.recognition.startFailure = { name: 'NotAllowedError' };
+
+    let thrown: unknown;
+    try {
+      session.start();
+    } catch (failure) {
+      thrown = failure;
+    }
+    should(thrown).have.property('code', 'permission-denied');
+
+    // The failed start gave the watch back, so a later hidden page is not this session's business.
+    provider.hidden();
+    should(aborted()).equal(0);
+    await should(session.finish()).be.rejectedWith({ code: 'recognition-failed', message: /already failed/u });
+  });
+
+  it('rejects finish after a cancel instead of waiting for an engine that was released', async () => {
+    const { provider, session } = sessionHarness();
+    session.start();
+    provider.recognition.onstart?.();
+    session.cancel();
+    await should(session.finish()).be.rejectedWith({ code: 'aborted', message: /was cancelled/u });
+  });
+
+  it('survives an engine that throws from stop() before it has started, and from abort() on cancel', async () => {
+    const { provider, session } = sessionHarness();
+    session.start();
+    provider.recognition.stop = refuse;
+    provider.recognition.abort = refuse;
+
+    const finished = session.finish();
+    session.cancel();
+    await should(finished).be.rejectedWith({ code: 'aborted' });
+  });
+
+  it('stops again at start when Stop was pressed before the engine had started', async () => {
+    const { provider, session, starts } = sessionHarness();
+    session.start();
+    const finished = session.finish();
+    should(provider.recognition.stops).equal(1);
+
+    provider.recognition.onstart?.();
+    should(provider.recognition.stops).equal(2);
+    should(starts).deepEqual([]);
+    provider.recognition.onend?.();
+    should(await finished).equal('');
+  });
+
+  it('fails the take when the deferred stop() throws once the engine has started', async () => {
+    const { provider, session, failures } = sessionHarness();
+    session.start();
+    provider.recognition.stop = refuse;
+    const finished = session.finish();
+
+    provider.recognition.onstart?.();
+    await should(finished).be.rejectedWith({ code: 'recognition-failed', message: 'engine refused' });
+    should(failures).deepEqual([{ code: 'recognition-failed', message: 'engine refused' }]);
+    should(provider.recognition.aborts).equal(1);
+  });
+
+  it('fails the take when the next mobile cycle cannot be started', () => {
+    const { provider, session, failures } = sessionHarness();
+    session.start();
+    provider.recognition.onstart?.();
+    provider.recognition.startFailure = new Error('microphone busy');
+
+    provider.recognition.onend?.();
+    should(failures).deepEqual([{ code: 'recognition-failed', message: 'microphone busy' }]);
+    should(provider.recognition.aborts).equal(1);
+  });
+
+  it('still fails and reports when abort() itself throws while releasing the engine', async () => {
+    const { provider, session, failures } = sessionHarness();
+    session.start();
+    provider.recognition.onstart?.();
+    provider.recognition.abort = refuse;
+    const finished = session.finish();
+
+    provider.fireTimers();
+    await should(finished).be.rejectedWith({ code: 'recognition-failed', message: /did not finish/u });
+    should(failures).have.length(1);
+  });
+
+  it('drops the late-result grace wait when the take is cancelled during it', async () => {
+    const { provider, session, failures } = sessionHarness({ android: true });
+    session.start();
+    provider.recognition.onstart?.();
+    provider.recognition.onspeechstart?.();
+    const finished = session.finish();
+    provider.recognition.onend?.();
+
+    session.cancel();
+    // Had the grace timer survived, it would now turn into a bad-audio failure.
+    provider.fireTimers();
+    await should(finished).be.rejectedWith({ code: 'aborted' });
+    should(failures).deepEqual([]);
   });
 });
 

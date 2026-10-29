@@ -99,7 +99,7 @@ class MemoryStore implements AnalyticsIndexStore {
     this.saved.clear();
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.closed += 1;
   }
 }

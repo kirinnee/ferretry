@@ -1,11 +1,17 @@
 /**
  * Screenshots of every Attention surface, at a 390px phone and a 1440px desktop, light and dark:
  *
- *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item chat
+ *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item’s card
  *   panel-phone / panel-desktop   the pinned item above the composer
- *   details-phone / -desktop      the same, Details open
+ *   rich-phone / -desktop         the pinned item with the whole brief: every section open, in order
+ *   details-phone / -desktop      a long card scrolled to its end (nothing is folded behind a button)
  *   task-*                       a step-by-step to-do: ticked partly / fully, waiting on the ferret, the
  *                                 phone deck mid-swipe right (Done) and left (Need more info), the desktop inbox
+ *   quiet-empty-*                a chat with nothing open: nothing above the composer, no badge
+ *   quiet-one-*                  a chat with one open item: the pinned card and the header count
+ *   quiet-menu-*                  the header Actions menu showing "7 resolved"
+ *   resolved-closed/open/expanded-*  the chat, then the list drawer it opens (a full screen on a phone), a long answer folded to two lines and unfolded
+ *   inbox-resolved-*             the inbox with its Resolved filter chosen
  *   sidebar / rail / drawer       unread rows, the Needs-you group, the Attention entry, the rail badges
  *
  *   bun scripts/build-fy-render-libs.ts      # once: the Mermaid sandbox the task scenes render
@@ -124,8 +130,17 @@ try {
         page = await open(context, theme, 'panel');
         await shot(page, scheme, `panel-${label}`);
         await page.close();
+        page = await open(context, theme, 'rich');
+        await shot(page, scheme, `rich-${label}`);
+        await page.close();
         page = await open(context, theme, 'long');
-        await page.locator('[data-attention-details]').first().click();
+        // Nothing is folded behind a button: the detail is all there, so scroll the card's own middle to its end.
+        await page
+          .locator('[data-attention-scroll]')
+          .first()
+          .evaluate(el => {
+            el.scrollTop = el.scrollHeight;
+          });
         await page.waitForTimeout(200);
         await shot(page, scheme, `details-${label}`);
         await page.close();
@@ -157,23 +172,121 @@ try {
       page = await open(desktop, theme, 'task-inbox-desktop');
       await shot(page, scheme, 'task-inbox-desktop', true);
       await page.close();
+      // An item the owner asked to discuss: the row says "In discussion"; the card stays answerable.
+      page = await open(phone, theme, 'discuss-inbox-phone');
+      await shot(page, scheme, 'discuss-inbox-phone');
+      await page.close();
+      page = await open(desktop, theme, 'discuss-inbox-desktop');
+      await shot(page, scheme, 'discuss-inbox-desktop', true);
+      await page.close();
       for (const [direction, sign] of [
         ['right', 1],
         ['left', -1],
       ] as const) {
         page = await open(phone, theme, 'task-inbox-phone');
-        const box = await page.locator('.fy-attn-deck__top').boundingBox();
-        if (box === null) fail('no deck card to swipe');
+        const title = await page.locator('.fy-attn-deck__top [data-attention-title]').boundingBox();
+        if (title === null) fail('no deck card title to swipe from');
         else {
-          const y = box.y + box.height - 14;
-          await page.mouse.move(box.x + box.width / 2, y);
+          const y = title.y + title.height / 2;
+          const x = title.x + Math.min(title.width / 2, 40);
+          await page.mouse.move(x, y);
           await page.mouse.down();
-          await page.mouse.move(box.x + box.width / 2 + sign * 60, y, { steps: 4 });
-          await page.mouse.move(box.x + box.width / 2 + sign * 110, y, { steps: 4 });
+          await page.mouse.move(x + sign * 60, y, { steps: 4 });
+          await page.mouse.move(x + sign * 110, y, { steps: 4 });
           await page.waitForTimeout(250);
           await shot(page, scheme, `task-swipe-${direction}-phone`);
           await page.mouse.up();
         }
+        await page.close();
+      }
+
+      for (const [label, context] of [
+        ['phone', phone],
+        ['desktop', desktop],
+      ] as const) {
+        page = await open(context, theme, 'quiet-empty');
+        if ((await page.locator('[data-attention-panel]').count()) > 0) fail('an empty chat drew the Attention panel');
+        if ((await page.locator('[data-attention-clear], [data-attention-resolved]').count()) > 0)
+          fail('an empty chat drew an empty-state or resolved line');
+        await shot(page, scheme, `quiet-empty-${label}`);
+        await page.close();
+        page = await open(context, theme, 'quiet-one');
+        await shot(page, scheme, `quiet-one-${label}`);
+        await page.close();
+        page = await open(context, theme, 'quiet-empty');
+        await page.locator('[data-session-actions-trigger]').click();
+        await page.locator('[data-session-action-item="attention-resolved"]').waitFor({ state: 'visible' });
+        await page.waitForTimeout(150);
+        await shot(page, scheme, `quiet-menu-${label}`);
+        const trigger = page.locator('[data-session-actions-trigger]');
+        const openResolved = async (): Promise<void> => {
+          await trigger.click();
+          await page.locator('[data-session-action-item="attention-resolved"]').click();
+          await page.locator('[data-attention-resolved-list]').waitFor({ state: 'visible' });
+          await page.waitForTimeout(200);
+        };
+        const drawerGone = async (how: string): Promise<void> => {
+          await page.locator('[data-session-action-drawer]').waitFor({ state: 'detached' });
+          if (!(await trigger.evaluate(el => el === document.activeElement)))
+            fail(`${label}: focus did not return to the Actions button after ${how}`);
+        };
+        await page.keyboard.press('Escape');
+        await page.locator('[data-session-actions-menu]').waitFor({ state: 'detached' });
+        await shot(page, scheme, `resolved-closed-${label}`);
+        await openResolved();
+        const viewport = page.viewportSize() ?? fail('no viewport');
+        const box = await page.locator('[data-session-action-drawer] [role="dialog"]').boundingBox();
+        if (box === null) fail(`${label}: the drawer has no box`);
+        const drawn = box ?? fail('unreachable');
+        const expectedWidth = label === 'phone' ? viewport.width : 420;
+        if (Math.abs(drawn.width - expectedWidth) > 1)
+          fail(`${label}: drawer is ${drawn.width}px wide, not ${expectedWidth}`);
+        if (Math.abs(drawn.x + drawn.width - viewport.width) > 1)
+          fail(`${label}: drawer is not flush with the right edge`);
+        if (Math.abs(drawn.y + drawn.height - viewport.height) > 1)
+          fail(`${label}: drawer does not reach the bottom edge`);
+        if (label === 'phone' ? drawn.y > 1 : drawn.y < 20) fail(`${label}: drawer starts at y=${drawn.y}`);
+        const scrollers = await page.locator('[data-session-action-drawer] [role="dialog"]').evaluate(
+          panel =>
+            [panel, ...panel.querySelectorAll('*')].filter(el => {
+              const overflow = getComputedStyle(el).overflowY;
+              return (overflow === 'auto' || overflow === 'scroll') && el.scrollHeight > el.clientHeight;
+            }).length,
+        );
+        if (scrollers > 1) fail(`${label}: the drawer has ${scrollers} scroll areas, not one`);
+        if ((await page.locator('[role="dialog"] h2').first().textContent())?.trim() !== 'Resolved · 7')
+          fail(`${label}: the drawer is not headed "Resolved · 7"`);
+        const more = page.locator('[data-attention-record-more]');
+        if ((await more.count()) === 0) fail(`${label}: the long answer has no "Show more"`);
+        const clamped = await page
+          .locator('.fy-attn-panel__record-answer[data-clamped]')
+          .first()
+          .evaluate(el => el.clientHeight);
+        const lineHeight = await page
+          .locator('.fy-attn-panel__record-answer[data-clamped]')
+          .first()
+          .evaluate(el => Number.parseFloat(getComputedStyle(el).lineHeight));
+        if (clamped > lineHeight * 2 + 2) fail(`${label}: a clamped answer is ${clamped}px tall, over two lines`);
+        await shot(page, scheme, `resolved-open-${label}`);
+        await more.first().click();
+        await page.waitForTimeout(100);
+        await shot(page, scheme, `resolved-expanded-${label}`);
+        await page.keyboard.press('Escape');
+        await drawerGone('Escape');
+        await openResolved();
+        await page.locator('[data-session-action-drawer-close]').click();
+        await drawerGone('the close button');
+        if (label === 'desktop') {
+          await openResolved();
+          await page.mouse.click(120, 450);
+          await drawerGone('a click on the backdrop');
+        }
+        await page.close();
+        page = await open(context, theme, 'inbox-resolved');
+        await page.locator('[data-attention-filter-option="resolved"]').click();
+        await page.locator('[data-attention-resolved-pane]').waitFor({ state: 'visible' });
+        await page.waitForTimeout(150);
+        await shot(page, scheme, `inbox-resolved-${label}`, label === 'desktop');
         await page.close();
       }
 

@@ -35,6 +35,7 @@ import {
   type HostedRelayDecision,
   initialRendezvousState,
   isClaimProbe,
+  HANDOVER_TOKEN_BYTES,
   NONCE_BYTES,
   parseRelayTenancy,
   parseRendezvousPath,
@@ -404,7 +405,7 @@ interface SocketAttachment {
    * hibernation and eviction, so it is the evidence {@link reconcileRendezvous} restores a claim from
    * when the stored state no longer names one.
    */
-  readonly claim?: { readonly features?: readonly RelayFeature[] };
+  readonly claim?: { readonly features?: readonly RelayFeature[]; readonly handover?: string };
 }
 
 /** Frames this rendezvous forwarded that the hosted meter has not been told about yet. */
@@ -467,6 +468,7 @@ export class RendezvousDurableObject {
     this.objectState.acceptWebSocket(server);
 
     const at = this.runtime.now();
+    const features = route.role === 'daemon' ? requestedRelayFeatures(url.searchParams) : [];
     const event: RendezvousEvent =
       route.role === 'daemon'
         ? {
@@ -474,7 +476,10 @@ export class RendezvousDurableObject {
             socketId,
             challenge: this.runtime.crypto.randomBytes(NONCE_BYTES),
             host: url.host,
-            features: requestedRelayFeatures(url.searchParams),
+            features,
+            ...(features.includes('claim-handover')
+              ? { handover: toBase64Url(this.runtime.crypto.randomBytes(HANDOVER_TOKEN_BYTES)) }
+              : {}),
             at,
           }
         : { kind: 'client-arrived', socketId, sessionId: this.newSessionId(), at };
@@ -817,7 +822,10 @@ export class RendezvousDurableObject {
     const holder = sockets.get(state.daemon.socketId);
     const attachment = holder === undefined ? null : attachmentOf(holder);
     if (holder === undefined || attachment === null || attachment.claim !== undefined) return;
-    markClaim(holder, attachment, state.daemon.features === undefined ? {} : { features: state.daemon.features });
+    markClaim(holder, attachment, {
+      ...(state.daemon.features === undefined ? {} : { features: state.daemon.features }),
+      ...(state.daemon.handover === undefined ? {} : { handover: state.daemon.handover }),
+    });
   }
 
   /**
@@ -942,10 +950,17 @@ function attachmentOf(socket: RelaySocket): SocketAttachment | null {
 
 /** A claim marker read back from storage the runtime owns: only features this version speaks survive. */
 function claimOf(value: unknown): NonNullable<SocketAttachment['claim']> {
-  const features = (value as { features?: unknown } | null)?.features;
+  const { features, handover } = (value ?? {}) as { features?: unknown; handover?: unknown };
   const known = Array.isArray(features) ? RELAY_FEATURES.filter(feature => features.includes(feature)) : [];
-  return known.length === 0 ? {} : { features: known };
+  const token = typeof handover === 'string' && HANDOVER_TOKEN_PATTERN.test(handover) ? handover : undefined;
+  return {
+    ...(known.length === 0 ? {} : { features: known }),
+    ...(token === undefined ? {} : { handover: token }),
+  };
 }
+
+/** The shape of a token this relay minted; anything else in a stored marker is dropped, not trusted. */
+const HANDOVER_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
 
 /** Rewrite one socket's claim marker. A socket the runtime already tore down may refuse; it holds nothing. */
 function markClaim(socket: RelaySocket, attachment: SocketAttachment, claim: SocketAttachment['claim']): void {

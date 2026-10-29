@@ -163,7 +163,7 @@ describe('session index symlink refusal', () => {
     // Act
     const index = await new BunSqliteIndexFactory().open(paths, new StateFileSystem(paths));
     const sessions = index.listSessions();
-    index.close();
+    await index.close();
 
     // Assert
     should(sessions).deepEqual([]);

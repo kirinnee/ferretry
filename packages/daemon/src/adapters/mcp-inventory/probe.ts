@@ -102,11 +102,7 @@ async function probeStdio(spec: Extract<McpProbeSpec, { transport: 'stdio' }>, s
   };
   const exited = child.exited.then(code => code);
   const kill = (): void => {
-    try {
-      child.kill();
-    } catch {
-      // already gone
-    }
+    child.kill();
   };
   signal.addEventListener('abort', kill, { once: true });
 

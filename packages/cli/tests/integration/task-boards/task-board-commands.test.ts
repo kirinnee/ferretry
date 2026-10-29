@@ -117,6 +117,17 @@ describe('the board gateway', () => {
     await should(gateway.send({ command: 'membership' }, {})).be.rejected();
   });
 
+  it('should refuse a command variant it has no route for, without dialling the daemon', async () => {
+    // Arrange
+    const { client, transport } = fakeClient([membership]);
+    const gateway = new FyTaskBoardGateway(await client);
+    const unknown = { command: 'teleport' } as unknown as TaskBoardCommand;
+
+    // Act + Assert
+    await should(gateway.send(unknown, {})).be.rejectedWith(/unhandled board command/);
+    should(transport.exchanges).have.length(0);
+  });
+
   it('should not touch the daemon until a command needs it', async () => {
     // Arrange
     const { client, transport } = fakeClient([membership]);

@@ -20,6 +20,7 @@ import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { agentToolWorld } from '../../agent-tools/support.ts';
+import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
@@ -346,7 +347,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   attention: attentionService(),
   attentionReplies: NO_HELD_REPLIES,
   notifications: {
-    notifyDirect: async sessionId => ({ ok: true, value: { sessionId, delivered: 0 } }),
+    attentionDelivered: async () => 0,
     enrolledDevices: async () => 0,
   },
   pins: pinService([]),
@@ -672,6 +673,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },
   secrets: secretSubsystem(),
   warden: new FakeWarden(),
+  transcriptImages: new MemoryTranscript([]).reader(),
   sessionReads: new OperatorReadService(
     {
       replay: async () => [
@@ -704,6 +706,15 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   ),
   sessionAttach: attachSubsystem(),
   sessionConsole: consoleSubsystem(),
+  sessionProcesses: {
+    list: async sessionId => ({ sessionId, observedAt: '2026-10-29T00:00:00.000Z', available: true, processes: [] }),
+    output: async () => {
+      throw new Error('not exercised by the surface table');
+    },
+    stop: async () => {
+      throw new Error('not exercised by the surface table');
+    },
+  },
   sessionPermission: permissionSubsystem(),
   sessionDialog: dialogSubsystem(),
   fleetEvents: fleetEventSubsystem(),
@@ -781,8 +792,10 @@ describe('the mounted daemon surface', () => {
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
       2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
+      1 + // one transcript image by its handle: the log's `[fy-image …]` marker, governed exactly like `logs` (docs/grants.md)
       1 + // handing a web address to this computer's own browser (loopback caller only)
-      3; // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
+      3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
+      3; // a ferret's processes: the list, one process's output, and Stop
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1112,10 +1125,14 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/snapshot',
       'GET /v1/sessions/:sessionId/logs',
       'GET /v1/sessions/:sessionId/messages',
+      'GET /v1/sessions/:sessionId/transcript-images/:handle',
       // The attach proof. It sits with the operator reads but authorizes a local process action
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
       'POST /v1/sessions/:sessionId/console/input',
+      'GET /v1/sessions/:sessionId/processes',
+      'GET /v1/sessions/:sessionId/processes/:processId/output',
+      'POST /v1/sessions/:sessionId/processes/:processId/stop',
       'POST /v1/sessions/:sessionId/permission',
       'POST /v1/sessions/:sessionId/dialog',
     ]);

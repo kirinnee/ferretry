@@ -470,6 +470,72 @@ describe('staging a change', () => {
     should(thrown).equal('not an error');
   });
 
+  it('should derive a login from a preset the machine offers, and refuse that preset on a machine offering none', async () => {
+    // Arrange
+    const change = {
+      kind: 'credential.add',
+      id: 'glm',
+      harness: 'claude',
+      store: 'environment',
+      preset: 'zai-glm',
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.z.ai/api/anthropic',
+        ANTHROPIC_AUTH_TOKEN: '${secret:ZAI_API_KEY}',
+        ANTHROPIC_DEFAULT_OPUS_MODEL: 'glm-5.3',
+        ANTHROPIC_DEFAULT_SONNET_MODEL: 'glm-5.3',
+        ANTHROPIC_DEFAULT_HAIKU_MODEL: 'glm-5.3-flash',
+      },
+    } as never;
+    const offering = world({ presets: async () => builtInPresets() });
+    const bare = world();
+
+    // Act
+    const staged = await offering.service.propose(change);
+    const error = await refusal(bare.service.propose(change), 'fleet_change_refused');
+
+    // Assert
+    should(staged.summary).equal('Add a Claude Code login glm from GLM / Z.ai');
+    should(error.message).equal('there is no preset zai-glm on studio');
+  });
+
+  it('should let a failure that is not a refusal escape the derivation as itself', async () => {
+    // Arrange
+    const failure = new Error('the machine name could not be read');
+    const { service } = world({
+      machineName: () => {
+        throw failure;
+      },
+    });
+
+    // Act
+    const staged = await service.propose(ADD_INSTRUCTIONS).then(
+      () => undefined,
+      (value: unknown) => value,
+    );
+
+    // Assert — the error arrives as itself, never rewritten as a refusal.
+    should(staged).equal(failure);
+  });
+
+  it('should let a failure that is not a proposal refusal escape staging as itself', async () => {
+    // Arrange
+    const failure = new Error('no id could be minted');
+    const { service } = world({
+      mintId: () => {
+        throw failure;
+      },
+    });
+
+    // Act
+    const thrown = await service.propose(ADD_INSTRUCTIONS).then(
+      () => undefined,
+      (value: unknown) => value,
+    );
+
+    // Assert
+    should(thrown).equal(failure);
+  });
+
   it('should read a staged change back, and refuse an id it never staged', async () => {
     // Arrange
     const { service } = world();

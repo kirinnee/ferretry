@@ -54,7 +54,9 @@ describe('ensurePrivateDirectory', () => {
 describe('CredentialEmailReader', () => {
   const readerOf = (deps: Partial<CredentialEmailReaderDeps> = {}): CredentialEmailReader =>
     new CredentialEmailReader({
-      codexFacts: async () => ({ shape: { kind: 'decided', reading: { state: 'missing' } } }),
+      codexFacts: async () => ({
+        shape: { kind: 'decided', reading: { state: 'missing' } },
+      }),
       stamp: credentialFileStamp,
       kept: new Map(),
       ...deps,
@@ -77,8 +79,42 @@ describe('CredentialEmailReader', () => {
     const reader = readerOf();
 
     // Act / Assert
-    should(await reader.email({ harness: 'claude', accountFile: join(root, 'missing.json') })).be.undefined();
+    should(
+      await reader.email({
+        harness: 'claude',
+        accountFile: join(root, 'missing.json'),
+      }),
+    ).be.undefined();
     should(await reader.email({ harness: 'claude', accountFile: damaged })).be.undefined();
+  });
+
+  it('should show no Claude email when the account file is not an object holding an account object', async () => {
+    // Arrange
+    const root = await scratch();
+    const reader = readerOf();
+    const accountFileHolding = async (name: string, content: unknown): Promise<string> => {
+      const accountFile = join(root, name);
+      await writeFile(accountFile, JSON.stringify(content));
+      return accountFile;
+    };
+
+    // Act
+    const reads = await Promise.all(
+      [
+        await accountFileHolding('array.json', []),
+        await accountFileHolding('null.json', null),
+        await accountFileHolding('no-account.json', {}),
+        await accountFileHolding('string-account.json', {
+          oauthAccount: 'person@example.com',
+        }),
+        await accountFileHolding('blank-email.json', {
+          oauthAccount: { emailAddress: '   ' },
+        }),
+      ].map(async accountFile => await reader.email({ harness: 'claude', accountFile })),
+    );
+
+    // Assert
+    should(reads).deepEqual([undefined, undefined, undefined, undefined, undefined]);
   });
 
   it('should parse a Claude account file again only once its stamp moved', async () => {
@@ -92,7 +128,10 @@ describe('CredentialEmailReader', () => {
 
     // Act
     const unchanged = await frozen.email({ harness: 'claude', accountFile });
-    const moved = await readerOf({ kept }).email({ harness: 'claude', accountFile });
+    const moved = await readerOf({ kept }).email({
+      harness: 'claude',
+      accountFile,
+    });
 
     // Assert
     should(unchanged).equal('first@example.com');
@@ -121,13 +160,21 @@ describe('CredentialEmailReader', () => {
         asked.push(resolution.canonicalFile);
         return {
           shape: { kind: 'tokens', hasAccess: true, hasRefresh: true },
-          codex: { state: 'tokens', hasAccess: true, hasRefresh: true, email: 'team@example.com' },
+          codex: {
+            state: 'tokens',
+            hasAccess: true,
+            hasRefresh: true,
+            email: 'team@example.com',
+          },
         };
       },
     });
 
     // Act
-    const actual = await reader.email({ harness: 'codex', resolution: CODEX_RESOLUTION });
+    const actual = await reader.email({
+      harness: 'codex',
+      resolution: CODEX_RESOLUTION,
+    });
 
     // Assert
     should(actual).equal('team@example.com');
@@ -144,7 +191,12 @@ describe('CredentialEmailReader', () => {
 
     // Act / Assert
     should(await failing.email({ harness: 'codex', resolution: CODEX_RESOLUTION })).be.undefined();
-    should(await readerOf().email({ harness: 'codex', resolution: CODEX_RESOLUTION })).be.undefined();
+    should(
+      await readerOf().email({
+        harness: 'codex',
+        resolution: CODEX_RESOLUTION,
+      }),
+    ).be.undefined();
   });
 });
 
@@ -175,7 +227,10 @@ describe('runCredentialHarness', () => {
   it('should answer the child exit code', async () => {
     // Act / Assert
     should(
-      await runCredentialHarness({ command: ['sh', '-c', 'exit 3'], environment: { PATH: process.env.PATH } }),
+      await runCredentialHarness({
+        command: ['sh', '-c', 'exit 3'],
+        environment: { PATH: process.env.PATH },
+      }),
     ).equal(3);
   });
 

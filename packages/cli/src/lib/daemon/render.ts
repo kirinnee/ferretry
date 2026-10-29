@@ -1,4 +1,13 @@
-import { describeSessionWorkerPool, type HealthView, type LivenessView } from '@ferretry/protocol';
+import {
+  describeDiskSaturation,
+  describeIoPressure,
+  describeSessionWorkerPool,
+  type HealthView,
+  type IoPressure,
+  type IoPressureView,
+  ioPressureView,
+  type LivenessView,
+} from '@ferretry/protocol';
 import type { DaemonSupervisorReport } from './ports.ts';
 import { launchdThrottled, servesOutsideSupervisor } from './probe.ts';
 import { LAUNCHD_PROCESS_TYPE } from './unit-file.ts';
@@ -26,6 +35,8 @@ export interface DaemonStatusView {
   readonly health?: HealthView | undefined;
   /** The daemon's liveness answer, when it gave one: its boot step and how late its loop has run. */
   readonly liveness?: LivenessView | undefined;
+  /** This host's disk pressure, read locally when the daemon answered nothing. */
+  readonly localIo?: IoPressureView | undefined;
   /** Serving, but not as the installed service manager's daemon. See `servesOutsideSupervisor`. */
   readonly orphan: boolean;
 }
@@ -42,6 +53,7 @@ export function decideDaemonStatus(
   supervisor: DaemonSupervisorReport,
   health: HealthView | undefined,
   liveness?: LivenessView,
+  localIo?: IoPressure,
 ): DaemonStatusView {
   const answered = liveness === undefined ? {} : { liveness };
   if (health !== undefined) {
@@ -63,7 +75,13 @@ export function decideDaemonStatus(
       orphan: false,
     };
   const alive = supervisor.state === 'running';
-  return { daemon, reachability: alive ? 'wedged' : 'stopped', supervisor, orphan: false };
+  return {
+    daemon,
+    reachability: alive ? 'wedged' : 'stopped',
+    supervisor,
+    ...(localIo === undefined ? {} : { localIo: ioPressureView(localIo) }),
+    orphan: false,
+  };
 }
 
 /**
@@ -107,6 +125,21 @@ function stallLine(liveness: LivenessView | undefined): string[] {
           `  worst stall ${(worst.durationMs / 1_000).toFixed(1)}s at ${worst.at}${stallSuspects(worst)}`,
           ...stallStackLine('worst', worst),
         ]),
+  ];
+}
+
+/**
+ * Whether the disk is why the daemon is slow, in plain words — said before any stall detail, because it
+ * changes what the reader should do: wait, rather than restart. The daemon's CURRENT reading wins; a
+ * reading that is calm now still names the stall it was saturated for.
+ */
+function diskLines(liveness: LivenessView | undefined): string[] {
+  const loop = liveness?.eventLoop;
+  if (loop?.io?.saturated === true) return [`  ${describeDiskSaturation(loop.io)}`];
+  const stall = [loop?.worstStall, loop?.lastStall].find(candidate => candidate?.cause === 'disk');
+  if (stall?.io === undefined) return [];
+  return [
+    `  disk was saturated during a stall (io pressure ${describeIoPressure(stall.io)}) — the daemon was slow, not dead`,
   ];
 }
 
@@ -166,7 +199,13 @@ export function renderDaemonStatus(view: DaemonStatusView, clientName: string): 
     const headline = view.orphan
       ? `${view.daemon} is serving, but OUTSIDE ${view.supervisor.manager} — nothing supervises it`
       : `${view.daemon} is serving`;
-    return [headline, ...healthLines(view.health), ...stallLine(view.liveness), supervised].join('\n');
+    return [
+      headline,
+      ...healthLines(view.health),
+      ...diskLines(view.liveness),
+      ...stallLine(view.liveness),
+      supervised,
+    ].join('\n');
   }
   if (view.reachability === 'starting') {
     const boot = view.liveness?.boot;
@@ -183,6 +222,7 @@ export function renderDaemonStatus(view: DaemonStatusView, clientName: string): 
     return [
       `${view.daemon} is starting${pidOf(view)} — ${step}`,
       ...stuck,
+      ...diskLines(view.liveness),
       ...stallLine(view.liveness),
       supervised,
     ].join('\n');
@@ -190,11 +230,19 @@ export function renderDaemonStatus(view: DaemonStatusView, clientName: string): 
   if (view.reachability === 'busy') {
     return [
       `${view.daemon} is up${pidOf(view)} but busy — it answered its liveness check, not its full health report, in time`,
+      ...diskLines(view.liveness),
       ...stallLine(view.liveness),
       supervised,
     ].join('\n');
   }
   if (view.reachability === 'wedged') {
+    if (view.localIo?.saturated === true) {
+      return [
+        `${view.daemon} process exists${pidOf(view)} but answered nothing in time — ${describeDiskSaturation(view.localIo)}`,
+        `  it answers once the disk frees up, so waiting is safer than restarting; \`${clientName} daemon logs\` shows any stall it reported`,
+        supervised,
+      ].join('\n');
+    }
     return [
       `${view.daemon} process exists${pidOf(view)} but answered nothing in time — its event loop looks stalled or wedged`,
       `  \`${clientName} daemon logs\` shows the last step and any stall it reported; \`${clientName} daemon restart\` replaces it`,

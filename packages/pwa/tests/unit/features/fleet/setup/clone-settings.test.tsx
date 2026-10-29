@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { ReactElement } from 'react';
 import {
   CloneItemsChoices,
+  CloneLoginsSection,
   CloneNeedsList,
   CloneOutcomes,
 } from '../../../../../src/features/fleet/setup/clone-settings.tsx';
@@ -10,6 +11,7 @@ import {
   type CloneItem,
   type CloneItemId,
   type CloneItemOutcome,
+  type CloneLogin,
   type CloneNeed,
 } from '../../../../../src/features/fleet/setup/clone-settings-model.ts';
 import { interact, type Mounted, mount, must } from '../../../../support/dom.ts';
@@ -339,5 +341,59 @@ describe('CloneOutcomes', () => {
     expect(q(view, '[data-clone-confirm="warden.yaml"]')).not.toBeNull();
     expect(must(q(view, '[data-clone-outcome="warden"]'), 'warden').getAttribute('data-outcome')).toBe('pending');
     expect(text(view)).not.toContain('Or run fy config confirm');
+  });
+});
+
+describe('CloneLoginsSection', () => {
+  const apiKey = (id: string, keys: Array<{ name: string; held: boolean }>): CloneLogin => ({
+    kind: 'api-key',
+    id,
+    harness: 'claude',
+    name: id,
+    keys,
+  });
+  const row = (view: Mounted, id: string): string =>
+    must(q(view, `[data-setup-row="login-${id}"]`), id).textContent ?? '';
+  const section = (logins: readonly CloneLogin[], keys: readonly string[] = [], copyKeys = false) => (
+    <CloneLoginsSection
+      logins={logins}
+      machineName="studio-mac"
+      sourceName="work-mac"
+      keys={keys}
+      copyKeys={copyKeys}
+      onCopyKeys={() => undefined}
+    />
+  );
+
+  it('draws nothing when the copy brings no login and no key', async () => {
+    const view = await show(section([]));
+    expect(q(view, '[data-setup-row]')).toBeNull();
+  });
+
+  it('says an API-key login with no secret just copies, and one whose keys are all here has its key already', async () => {
+    const view = await show(
+      section([apiKey('cloud-env', []), apiKey('glm-env', [{ name: 'ZAI_API_KEY', held: true }])]),
+    );
+    expect(row(view, 'cloud-env')).toContain('Copies');
+    expect(row(view, 'cloud-env')).toContain('Claude Code · API-key login with no secret to send');
+    expect(row(view, 'glm-env')).toContain('Key already here');
+    expect(row(view, 'glm-env')).toContain('Claude Code · API key ZAI_API_KEY (already on studio-mac)');
+  });
+
+  it('says whether the key travels with the copy, and that a sign-in never does', async () => {
+    const logins = [
+      apiKey('sealed', [{ name: 'SEALED_KEY', held: false }]),
+      {
+        kind: 'sign-in',
+        id: 'work',
+        harness: 'codex',
+        name: 'me@work.example',
+      } satisfies CloneLogin,
+    ];
+    const sending = await show(section(logins, ['SEALED_KEY'], true));
+    expect(row(sending, 'sealed')).toContain('Copies with its key');
+    expect(row(sending, 'work')).toContain('Sign in on studio-mac');
+    const holding = await show(section(logins, ['SEALED_KEY'], false));
+    expect(row(holding, 'sealed')).toContain('Copies, add its key');
   });
 });

@@ -49,10 +49,14 @@ describe('the attention client', () => {
     await client.progress(daemon, scope, 'A8', 2, true);
     await client.needsInfo(daemon, scope, 'A8', 'which key?');
     await client.needsInfo(daemon, scope, 'A8');
+    await client.discuss(daemon, scope, 'A8', 'is the premise right?');
+    await client.discuss(daemon, scope, 'A8');
     should(bodies).deepEqual([
       { action: 'progress', id: 'A8', step: 2, done: true },
       { action: 'needs-info', id: 'A8', note: 'which key?' },
       { action: 'needs-info', id: 'A8' },
+      { action: 'discuss', id: 'A8', note: 'is the premise right?' },
+      { action: 'discuss', id: 'A8' },
     ]);
   });
 });

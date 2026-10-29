@@ -508,3 +508,20 @@ describe('the audit read', () => {
     should(answered.status).equal(403);
   });
 });
+
+describe('the grant read reached without a presentation of its caller', () => {
+  it('should refuse rather than describe the caller by a guess', async () => {
+    // Arrange — the dispatcher always supplies a presentation, so the handler is asked directly.
+    const { subsystem } = await mount();
+    const read = grantRoutes(subsystem).find(route => route.method === 'GET' && route.path === '/v1/grants');
+    if (read === undefined) throw new Error('the grant read must be mounted');
+
+    // Act + Assert
+    await Promise.resolve(
+      read.handle({ request: request({ path: '/v1/grants' }), params: new Map() }),
+    ).should.be.rejectedWith({
+      status: 500,
+      code: 'internal_error',
+    });
+  });
+});

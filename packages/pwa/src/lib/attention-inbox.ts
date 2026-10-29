@@ -21,12 +21,14 @@ import {
   AttentionIdSchema,
   type AttentionItem,
   type AttentionQuestion,
-  type AttentionResponse,
   type AttentionSnapshot,
+  attentionInDiscussion,
   MAX_ATTENTION_DETAIL_LENGTH,
+  type ResolvedAttentionItem,
   type SessionAttentionSummary,
   type SessionView,
 } from '@ferretry/protocol';
+import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } from './attention-answers.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { daemonSessionPath } from './pages/routes.ts';
 
@@ -50,11 +52,31 @@ const instant = (value: string): number => {
   return Number.isNaN(at) ? 0 : at;
 };
 
-/** The session's open Attention, or `undefined` when nothing waits on the owner. */
-export const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => view.state.attention;
+/**
+ * How many of a summary's open items need the OWNER: an item in discussion waits on its ferret, so it is
+ * not counted. Every badge, row and tab reads this and never `open` alone.
+ */
+export const needsYouCount = (summary: Pick<SessionAttentionSummary, 'open' | 'discussing'>): number =>
+  Math.max(0, summary.open - (summary.discussing ?? 0));
 
-/** How many open items a row's badge shows. */
-export const unreadCount = (view: SessionView): number => view.state.attention?.open ?? 0;
+/**
+ * The session's Attention that waits on the owner, or `undefined` when nothing does — including a
+ * session whose only open items are in discussion: it reads as read, not as unread.
+ */
+export const sessionAttention = (view: SessionView): SessionAttentionSummary | undefined => {
+  const summary = view.state.attention;
+  return summary === undefined || needsYouCount(summary) === 0 ? undefined : summary;
+};
+
+/** How many open items a row's badge shows: the ones that need the owner. */
+export const unreadCount = (view: SessionView): number => {
+  const summary = view.state.attention;
+  return summary === undefined ? 0 : needsYouCount(summary);
+};
+
+/** How many of an open board's items need the owner: the pinned panel's header count. */
+export const needsYouItems = (items: readonly Pick<AttentionItem, 'waitingOn' | 'waitingFor'>[]): number =>
+  items.filter(item => !isInDiscussion(item)).length;
 
 /** The badge's text: a count, capped so it never widens a row. */
 export const badgeText = (count: number): string => (count > 99 ? '99+' : String(count));
@@ -87,7 +109,7 @@ export const unreadSessions = (sources: readonly AttentionInboxSource[]): readon
 
 /** The open items across every listed conversation: the number on the Attention tab. */
 export const unreadTotal = (entries: readonly UnreadSession[]): number =>
-  entries.reduce((total, entry) => total + entry.attention.open, 0);
+  entries.reduce((total, entry) => total + needsYouCount(entry.attention), 0);
 
 /**
  * Sorts sessions so the ones with open Attention lead, newest first, and the rest keep their order.
@@ -102,11 +124,26 @@ export const attentionFirst = <T>(rows: readonly T[], viewOf: (row: T) => Sessio
 };
 
 /**
+ * Every conversation with an item in discussion, in the order the sources list them: what the inbox reads
+ * boards for, so a discussion is on the machine's record and not on a card until it needs the owner again.
+ */
+export const discussingSessions = (sources: readonly AttentionInboxSource[]): readonly UnreadSession[] =>
+  sources.flatMap(source =>
+    (source.sessions ?? []).flatMap(view => {
+      const attention = view.state.attention;
+      return attention?.discussing === undefined
+        ? []
+        : [{ daemonId: source.daemonId, machineName: source.name, view, attention }];
+    }),
+  );
+
+/**
  * What a board read is keyed on: the summary's facts. When they move the board moved, so the inbox
- * re-reads exactly that session's board; when they hold still it reads nothing.
+ * re-reads exactly that session's board; when they hold still it reads nothing. `discussing` is one of
+ * them: a discussion starting or ending moves no other fact, and another device must still re-read.
  */
 export const attentionSummaryKey = (summary: SessionAttentionSummary): string =>
-  `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}`;
+  `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}`;
 
 /** Where a conversation opens AT an item: the session's page, naming the item as the protocol says. */
 export const attentionConversationPath = (daemonId: DaemonId, sessionId: string, id: AttentionId): string =>
@@ -132,21 +169,18 @@ export interface InboxCard {
 export const inboxCardKey = (daemonId: DaemonId, sessionId: string, id: AttentionId): string =>
   JSON.stringify([daemonId, sessionId, id]);
 
-/**
- * The deck: every open item of every unread conversation whose board has been read, newest first.
- * `hidden` holds the keys the reader already answered and may still undo — they leave the deck at once.
- */
-export const inboxCards = (
+const collectCards = (
   entries: readonly UnreadSession[],
   boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
-  hidden: ReadonlySet<string> = new Set(),
+  hidden: ReadonlySet<string>,
+  wanted: (item: AttentionItem) => boolean,
 ): readonly InboxCard[] => {
   const cards: InboxCard[] = [];
   for (const entry of entries) {
     const board = boardFor(entry.daemonId, entry.view.config.id);
     for (const item of board?.items ?? []) {
       const key = inboxCardKey(entry.daemonId, entry.view.config.id, item.id);
-      if (!hidden.has(key))
+      if (wanted(item) && !hidden.has(key))
         cards.push({ key, daemonId: entry.daemonId, machineName: entry.machineName, view: entry.view, item });
     }
   }
@@ -156,12 +190,85 @@ export const inboxCards = (
   );
 };
 
-/** What answering a card does, as the daemon is asked to do it. */
-export type InboxAction =
-  | { readonly kind: 'respond'; readonly label: string; readonly response: AttentionResponse }
-  | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'needs-info'; readonly label: string; readonly note?: string };
+/**
+ * The deck: every open item that needs the owner, of every unread conversation whose board has been read,
+ * newest first. An item in discussion is not in it — it waits on its ferret, and comes back as a card when
+ * the ferret updates it. `hidden` holds the keys the reader already answered and may still undo — they
+ * leave the deck at once.
+ */
+export const inboxCards = (
+  entries: readonly UnreadSession[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
+  hidden: ReadonlySet<string> = new Set(),
+): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => !isInDiscussion(item));
+
+/** The items in discussion, as cards of the same shape and order as the deck's: what a future "In discussion" group lists. */
+export const discussingCards = (
+  entries: readonly UnreadSession[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
+  hidden: ReadonlySet<string> = new Set(),
+): readonly InboxCard[] => collectCards(entries, boardFor, hidden, isInDiscussion);
+
+export type { InboxAction, SwipeDirection };
+
+/** One resolved item in the inbox's Resolved filter: the record, its conversation and its machine. */
+export interface InboxResolved {
+  readonly key: string;
+  readonly daemonId: DaemonId;
+  readonly machineName: string;
+  readonly view: SessionView;
+  readonly record: ResolvedAttentionItem;
+}
+
+/**
+ * The resolved records of every listed conversation whose board has been read, newest resolution first.
+ * A conversation whose board has not been read contributes nothing, never "nothing resolved".
+ */
+export const inboxResolved = (
+  sources: readonly AttentionInboxSource[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
+): readonly InboxResolved[] => {
+  const rows: InboxResolved[] = [];
+  for (const source of sources) {
+    for (const view of source.sessions ?? []) {
+      for (const record of boardFor(source.daemonId, view.config.id)?.resolved ?? []) {
+        rows.push({
+          key: inboxCardKey(source.daemonId, view.config.id, record.id),
+          daemonId: source.daemonId,
+          machineName: source.name,
+          view,
+          record,
+        });
+      }
+    }
+  }
+  return rows.sort(
+    (left, right) =>
+      instant(right.record.resolvedAt) - instant(left.record.resolvedAt) || left.key.localeCompare(right.key),
+  );
+};
+
+/** How many conversations the Resolved filter reads boards for: history is not worth a request per session. */
+export const RESOLVED_READ_LIMIT = 30;
+
+/**
+ * The conversations the Resolved filter should read: the most recently active ones whose board is not
+ * held yet, at most {@link RESOLVED_READ_LIMIT} counting those already held, across every machine.
+ */
+export const sessionsToReadForResolved = (
+  sources: readonly AttentionInboxSource[],
+  hasBoard: (daemonId: DaemonId, sessionId: string) => boolean,
+): readonly { readonly daemonId: DaemonId; readonly sessionId: string }[] => {
+  const recent = sources
+    .flatMap(source => (source.sessions ?? []).map(view => ({ daemonId: source.daemonId, view })))
+    .sort(
+      (left, right) => instant(right.view.state.lastActivityAt ?? '') - instant(left.view.state.lastActivityAt ?? ''),
+    )
+    .slice(0, RESOLVED_READ_LIMIT);
+  return recent
+    .filter(entry => !hasBoard(entry.daemonId, entry.view.config.id))
+    .map(entry => ({ daemonId: entry.daemonId, sessionId: entry.view.config.id }));
+};
 
 export const DONE_ACTION: InboxAction = { kind: 'resolve', label: 'Done' };
 export const DISMISS_ACTION: InboxAction = { kind: 'dismiss', label: 'Dismiss' };
@@ -171,19 +278,22 @@ export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
 };
 
 /** A to-do: the owner does something, nothing to choose. Its answers are Done and Need more info. */
-export const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
+const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
 
-/** The ferret was asked for more information and has not yet edited the item. */
+/** The ferret was asked for more information, or to discuss, and has not yet edited the item. */
 export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
 
-/** How many of an item's steps are ticked, out of how many; `complete` only when it has steps and all are. */
-export const stepsProgress = (
-  item: Pick<AttentionItem, 'steps' | 'stepsDone'>,
-): { readonly done: number; readonly total: number; readonly complete: boolean } => {
-  const total = item.steps?.length ?? 0;
-  const done = item.stepsDone?.length ?? 0;
-  return { done, total, complete: total > 0 && done >= total };
-};
+/** The owner asked to talk this item through and the ferret has not updated it: it reads "In discussion". */
+export const isInDiscussion = (item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>): boolean =>
+  attentionInDiscussion(item);
+
+/** What an item waiting on its ferret says, in a few words: "In discussion with Piper", "Waiting on Piper". */
+export const waitingSentence = (item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>, ferret?: string): string =>
+  isInDiscussion(item)
+    ? ferret === undefined
+      ? 'In discussion'
+      : `In discussion with ${ferret}`
+    : `Waiting on ${ferret ?? 'the ferret'}`;
 
 /** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
 export const tickedSteps = (
@@ -214,7 +324,9 @@ export const historyLine = (history: AttentionItem['history'], timeZone?: string
   const words = history.map(entry =>
     entry.kind === 'needs-info'
       ? `You asked for more info ${clock(entry.at, timeZone)}`
-      : `updated ${clock(entry.at, timeZone)}`,
+      : entry.kind === 'discuss'
+        ? `You asked to discuss ${clock(entry.at, timeZone)}`
+        : `updated ${clock(entry.at, timeZone)}`,
   );
   return words.join(' · ');
 };
@@ -229,34 +341,16 @@ export const updatedSinceAsked = (
 };
 
 /**
- * The item's answers in the order a swipe takes them: an affirmative answer first (Approve, "The answer
- * is good"), then the options as the agent listed them, then a negative one (Reject).
+ * The item's answers as actions, the recommended one first: the card's right, up and left answers, then
+ * an old choice's options past the third (buttons only). The answers are the card's own
+ * (`attentionCardAnswers`); see `attention-answers.ts`.
  */
-export const inboxOptions = (item: Pick<AttentionItem, 'ask'>): readonly InboxAction[] => {
-  const ask = item.ask;
-  if (ask === undefined) return [];
-  switch (ask.kind) {
-    case 'permission':
-      return [
-        { kind: 'respond', label: 'Approve', response: { kind: 'permission', decision: 'approve' } },
-        { kind: 'respond', label: 'Reject', response: { kind: 'permission', decision: 'reject' } },
-      ];
-    case 'multiple-choice':
-      return ask.options.map(option => ({
-        kind: 'respond' as const,
-        label: option.label,
-        response: { kind: 'multiple-choice' as const, choice: option.label },
-      }));
-    case 'answer-review':
-      return [{ kind: 'respond', label: 'Looks good', response: { kind: 'answer-review', verdict: 'good' } }];
-    case 'open-question':
-    case 'task':
-      return [];
-  }
-};
+export const inboxOptions = (item: Parameters<typeof answerActions>[0]): readonly InboxAction[] => answerActions(item);
 
 /** Whether an item carries any of the structured brief; an old item carries none. */
 export const hasAttentionBrief = (item: AttentionBrief): boolean =>
+  item.premise !== undefined ||
+  item.decided !== undefined ||
   item.terms !== undefined ||
   item.questions !== undefined ||
   item.recommendation !== undefined ||
@@ -329,26 +423,26 @@ export const questionAnswersAction = (
   return answer === null ? null : { kind: 'respond', label: 'Reply', response: { kind: 'open-question', answer } };
 };
 
-export type SwipeDirection = 'right' | 'left' | 'up';
-
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
 
 /**
- * What each swipe does to a card: right is Done, left is Dismiss — or, on a to-do, Need more info. A swipe
- * never picks between a card's options — those are buttons — and `up` stays free for a later gesture.
+ * What each swipe does to a card: the card's own answers by direction, carrying `reply` as their note.
+ * A direction with no answer is absent and never commits; a review's "Needs changes" is absent until
+ * the reply has text, because it IS that text (`swipeTargets` keeps it, for the stamp and the box).
  */
-export const swipeMap = (item: Pick<AttentionItem, 'ask' | 'questions' | 'waitingOn'>): SwipeMap => {
-  if (!isTask(item)) return { right: DONE_ACTION, left: DISMISS_ACTION };
-  // A to-do waiting on its ferret cannot be done yet, and asking again is the same request.
-  return isWaitingOnFerret(item) ? { left: DISMISS_ACTION } : { right: DONE_ACTION, left: NEEDS_INFO_ACTION };
-};
+export const swipeMap = (item: Parameters<typeof swipeTargets>[0], reply = ''): SwipeMap =>
+  Object.fromEntries(
+    Object.entries(swipeTargets(item, reply)).flatMap(([direction, target]) =>
+      target.action === null ? [] : [[direction, target.action]],
+    ),
+  );
 
 /**
  * Which swipe, if any, an answer sits on — matched by meaning, because `inboxOptions` builds its
  * answers afresh on every call: the button and the gesture must agree on the SAME option.
  */
 export const directionOfAction = (map: SwipeMap, action: InboxAction): SwipeDirection | null => {
-  for (const direction of ['right', 'left', 'up'] as const) {
+  for (const direction of ['right', 'left', 'up', 'down'] as const) {
     const mapped = map[direction];
     if (mapped !== undefined && mapped.kind === action.kind && mapped.label === action.label) return direction;
   }
@@ -365,7 +459,7 @@ export const swipeThreshold = (width: number): number =>
   Math.min(SWIPE_MAXIMUM_PX, Math.max(SWIPE_MINIMUM_PX, width * 0.35));
 
 export interface SwipeIntent {
-  /** The direction the drag is reading as, or `null` while it is too small or points down. */
+  /** The direction the drag is reading as, or `null` while it is too small. */
   readonly direction: SwipeDirection | null;
   /** 0 → 1 as the drag approaches the threshold; 1 at and beyond it. */
   readonly progress: number;
@@ -374,15 +468,21 @@ export interface SwipeIntent {
 }
 
 /**
- * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down means nothing,
- * because the deck scrolls that way. A direction with no action never commits.
+ * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down reads as Discuss,
+ * which commits only where the card takes it (the deck hands the browser every drag it must not read: see
+ * `attention-swipe-deck.tsx`). A direction with no action never commits.
  */
-export const swipeIntent = (dx: number, dy: number, width: number, map: SwipeMap): SwipeIntent => {
+export const swipeIntent = (
+  dx: number,
+  dy: number,
+  width: number,
+  map: Readonly<Partial<Record<SwipeDirection, unknown>>>,
+): SwipeIntent => {
   const threshold = swipeThreshold(width);
   const horizontal = Math.abs(dx) >= Math.abs(dy);
-  const distance = horizontal ? Math.abs(dx) : -dy;
+  const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
   if (distance < SWIPE_SLOP_PX) return { direction: null, progress: 0, committed: false };
-  const direction: SwipeDirection = horizontal ? (dx > 0 ? 'right' : 'left') : 'up';
+  const direction: SwipeDirection = horizontal ? (dx > 0 ? 'right' : 'left') : dy < 0 ? 'up' : 'down';
   const progress = Math.min(1, distance / threshold);
   return { direction, progress, committed: progress >= 1 && map[direction] !== undefined };
 };
@@ -410,6 +510,7 @@ export const replyAction = (item: Pick<AttentionItem, 'ask'>, text: string): Inb
 export const actionSentence = (action: InboxAction, id: AttentionId): string => {
   if (action.kind === 'dismiss') return `Dismissed !${id}`;
   if (action.kind === 'needs-info') return `Asked for more info on !${id}`;
+  if (action.kind === 'discuss') return `Asked to discuss !${id}`;
   if (action.label === 'Reply') return `Replied to !${id}`;
   if (action.kind === 'resolve') return `Marked !${id} done`;
   return `Answered !${id}: ${action.label}`;

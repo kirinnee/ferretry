@@ -38,9 +38,9 @@ async function open(paths: FoundationPaths): Promise<AnalyticsIndexStore> {
   return store;
 }
 
-function close(store: AnalyticsIndexStore): void {
+async function close(store: AnalyticsIndexStore): Promise<void> {
   live.delete(store);
-  store.close();
+  await store.close();
 }
 
 const candidate = (id: string, selectedModel: string): AnalyticsIngestCandidate => ({
@@ -105,7 +105,7 @@ function ingestion(
 }
 
 afterEach(async () => {
-  for (const store of [...live]) close(store);
+  for (const store of [...live]) await close(store);
   for (const directory of directories) await rm(directory, { recursive: true, force: true });
   directories.clear();
 });
@@ -120,7 +120,7 @@ describe('a session priced from the model catalog', () => {
     ];
     const first = await open(paths);
     const firstPass = await ingestion(first, sessions, builtInModelCatalogs).ingest();
-    close(first);
+    await close(first);
 
     // Act — a restarted daemon, the same file.
     const reopened = await open(paths);
@@ -188,7 +188,7 @@ describe('a session priced from the model catalog', () => {
     ] as const) {
       const store = await open(paths);
       await ingestion(store, [{ id: 'opus', model: 'claude-opus-5-5' }], builtInModelCatalogs).ingest();
-      close(store);
+      await close(store);
       const database = new Database(paths.analyticsIndex, { strict: true });
       database.query(`UPDATE analytics_sessions SET ${column} = ?`).run(value);
       database.close();
@@ -201,7 +201,7 @@ describe('a session priced from the model catalog', () => {
       should(row?.raw.id).equal('opus');
       should(row?.pricing).be.null();
       reopened.drop();
-      close(reopened);
+      await close(reopened);
     }
   });
 });

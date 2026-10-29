@@ -2273,3 +2273,186 @@ describe('current-session search control', () => {
     }
   });
 });
+
+describe('what a query read does when it cannot be trusted or has been overtaken', () => {
+  test('refuses a task list whose rows belong to another session even when the list names this one', async () => {
+    const stranger = { ...needleTask().summary, sessionId: 'session-b' };
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/fs/index')) return Response.json(fileIndexResponse({ files: [] }));
+      if (url.pathname.endsWith('/tasks')) return Response.json({ ...taskListResponse([]), tasks: [stranger] });
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+
+      const drawn = JSON.stringify(view.toJSON());
+      expect(drawn).toContain('Tasks are unavailable');
+      expect(drawn).not.toContain('Needle task');
+      expect(view.root.findAllByProps({ 'data-task-id': 'F6' })).toHaveLength(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('drops the failure of a query that a newer keystroke already replaced', async () => {
+    const pending = new Map<string, { resolve: (response: Response) => void; reject: (error: Error) => void }>();
+    const betaRow = boardTask({ id: 'F2', title: 'Beta row' }, { ask: 'about beta' });
+    globalThis.fetch = (async (input: string | URL | Request) => {
+      const url = new URL(String(input));
+      if (url.pathname.endsWith('/fs/index')) return Response.json(fileIndexResponse({ files: [] }));
+      const query = url.searchParams.get('q');
+      if (url.pathname.endsWith('/tasks') && query !== null)
+        return await new Promise<Response>((resolve, reject) => pending.set(query, { resolve, reject }));
+      if (url.pathname.endsWith('/tasks')) return Response.json(taskListResponse([betaRow]));
+      return new Response('not found', { status: 404 });
+    }) as typeof fetch;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const input = view.root.findByType('input');
+      run(() => input.props.onChange({ target: { value: 'alpha' } }));
+      await afterQuerySettles();
+      run(() => input.props.onChange({ target: { value: 'beta' } }));
+      await afterQuerySettles();
+
+      await runAsync(async () => {
+        pending.get('alpha')?.reject(new Error('alpha read failed'));
+        await settle();
+      });
+
+      const whileBetaPending = JSON.stringify(view.toJSON());
+      expect(whileBetaPending).not.toContain('alpha read failed');
+      expect(whileBetaPending).not.toContain('Task filtering failed');
+
+      await runAsync(async () => {
+        pending.get('beta')?.resolve(Response.json(taskListResponse([betaRow])));
+        await settle();
+      });
+
+      expect(view.root.findAllByProps({ 'data-task-id': 'F2' }).length).toBeGreaterThan(0);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('keeps a settled answer when an older control hands the query it already answers', async () => {
+    const controls: Array<ReturnType<typeof useSessionSearch>> = [];
+    function Probe() {
+      controls.push(useSessionSearch());
+      return null;
+    }
+    const seen = install();
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <Probe />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const beforeTyping = controls.at(-1);
+      run(() => beforeTyping?.setQuery('needle'));
+      await afterQuerySettles();
+      expect(controls.at(-1)?.matchState).toBe('ready');
+      expect(controls.at(-1)?.matchQuery).toBe('needle');
+      expect(queryTaskReads(seen)).toHaveLength(1);
+
+      run(() => beforeTyping?.setQuery('needle'));
+
+      expect(controls.at(-1)?.matchState).toBe('ready');
+      expect(controls.at(-1)?.matches.map(task => task.id)).toEqual(['F6']);
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('says an unreadable completion result is unreadable, and puts the live task back', async () => {
+    const live = needleTask({ phase: 'live', status: 'live' });
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === 'POST') return Promise.resolve(Response.json({ unexpected: true }));
+      if (url.pathname.endsWith('/fs/index')) return Promise.resolve(Response.json(fileIndexResponse({ files: [] })));
+      if (url.pathname.endsWith('/tasks')) return Promise.resolve(Response.json(taskListResponse([live])));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      const done = view.root.findByProps({ 'aria-label': 'Mark &F6 done' });
+      await runAsync(async () => {
+        done.props.onClick();
+        await settle();
+      });
+
+      expect(JSON.stringify(view.toJSON())).toContain('The daemon returned an unreadable completion result.');
+      expect(view.root.findByProps({ 'aria-label': 'Mark &F6 done' })).toBeDefined();
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+
+  test('keeps a pending completion alive while a new query hides the task it belongs to', async () => {
+    const live = needleTask({ phase: 'live', status: 'live' });
+    let answer: ((response: Response) => void) | undefined;
+    globalThis.fetch = ((input: string | URL | Request, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (init?.method === 'POST')
+        return new Promise<Response>(resolve => {
+          answer = resolve;
+        });
+      if (url.pathname.endsWith('/fs/index')) return Promise.resolve(Response.json(fileIndexResponse({ files: [] })));
+      if (url.pathname.endsWith('/tasks')) return Promise.resolve(Response.json(taskListResponse([live])));
+      return Promise.resolve(new Response('not found', { status: 404 }));
+    }) as typeof fetch;
+    const view = render(
+      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+        <SessionTasksSearchSurface />
+      </SessionSearchProvider>,
+    );
+    try {
+      await settle();
+      await runAsync(async () => {
+        view.root.findByProps({ 'aria-label': 'Mark &F6 done' }).props.onClick();
+        await Promise.resolve();
+      });
+      run(() => view.root.findByType('input').props.onChange({ target: { value: 'needle' } }));
+
+      expect(view.root.findAllByProps({ 'data-task-id': 'F6' })).toHaveLength(0);
+
+      await runAsync(async () => {
+        answer?.(
+          Response.json({
+            ...live.summary,
+            phase: 'done',
+            status: 'done',
+            statusReason: 'Confirmed by daemon.',
+            description: 'Search the current session quickly.',
+            ask: { text: 'Find the task I half remember', source: 'human-message' },
+            clarifications: [],
+            sessionId: 'session-a',
+          }),
+        );
+        await settle();
+      });
+      await afterQuerySettles();
+
+      expect(view.root.findAllByProps({ 'data-task-id': 'F6' }).length).toBeGreaterThan(0);
+      expect(JSON.stringify(view.toJSON())).toContain('Confirmed by daemon.');
+    } finally {
+      run(() => view.unmount());
+    }
+  });
+});

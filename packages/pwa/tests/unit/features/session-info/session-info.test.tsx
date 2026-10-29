@@ -369,3 +369,26 @@ describe('SessionInfo — runtimeControls and the phone sheet', () => {
     expect(sheet.querySelector('[data-info-size]')).not.toBeNull();
   });
 });
+
+describe('SessionInfo — a read that fails', () => {
+  it('says why the Warden’s verdicts could not be read, leaving the rest of the panel alone', async () => {
+    const ports = portsOf({ verdicts: async () => Promise.reject(new Error('warden offline')) });
+    const root = await show({ ports });
+
+    await interact(() => placement?.setTab('signals'));
+    await settle();
+
+    expect(root.textContent).toContain('Couldn’t read the Warden’s verdicts: warden offline');
+  });
+
+  it('says why the usage totals could not be read, leaving the quota alone', async () => {
+    const ports = portsOf({ analytics: async () => Promise.reject(new Error('analytics offline')) });
+    const root = await show({ ports, quota: { fiveHourPercent: 50, fiveHourResetAt: NOW + 47 * 60_000 } });
+
+    await interact(() => placement?.setTab('usage'));
+    await settle();
+
+    expect(root.textContent).toContain('Couldn’t read: analytics offline');
+    expect(root.textContent).toContain('resets in');
+  });
+});

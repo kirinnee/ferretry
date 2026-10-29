@@ -9,6 +9,7 @@ import {
   attentionLedgerIds,
   attentionPanelItemId,
   locateAttention,
+  shownAttentionItem,
 } from '../../../src/features/attention/attention-panel.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
@@ -67,7 +68,7 @@ const board = (
 });
 
 interface Call {
-  readonly method: 'respond' | 'resolve' | 'dismiss' | 'needs-info' | 'progress';
+  readonly method: 'respond' | 'resolve' | 'dismiss' | 'needs-info' | 'discuss' | 'progress';
   readonly id: string;
   readonly payload: unknown;
 }
@@ -101,6 +102,13 @@ const recordingClient = (settle: (call: Call) => Promise<void> = async () => und
       expect(at).toBe(daemon);
       expect(where).toBe(scope);
       const call: Call = { method: 'needs-info', id, payload: note };
+      calls.push(call);
+      await settle(call);
+    },
+    discuss: async (at, where, id, note) => {
+      expect(at).toBe(daemon);
+      expect(where).toBe(scope);
+      const call: Call = { method: 'discuss', id, payload: note };
       calls.push(call);
       await settle(call);
     },
@@ -161,6 +169,14 @@ afterEach(async () => {
 });
 
 describe('attention panel model', () => {
+  test('the item a message answers: the chosen one, the first while none is, and none once the chosen one left', () => {
+    const snapshot = board([item('A1'), item('A2')]);
+    expect(shownAttentionItem(snapshot, 'A2')?.id).toBe('A2');
+    expect(shownAttentionItem(snapshot, null)?.id).toBe('A1');
+    expect(shownAttentionItem(snapshot, 'A9')).toBeUndefined();
+    expect(shownAttentionItem(null, null)).toBeUndefined();
+  });
+
   test('locates an id as open, resolved, unknown — or pending while the board is unread', () => {
     const snapshot = board([item('A3')], [record('A2', '2026-07-31T11:00:00.000Z')]);
     expect(locateAttention(snapshot, 'A3')).toBe('open');
@@ -208,28 +224,69 @@ describe('AttentionPanel', () => {
     expect(c.querySelector('[data-attention-pager]')?.textContent).toContain('2 of 2');
   });
 
+  test('once the shown item is answered it moves FORWARD to the next one, not back to the first', async () => {
+    const picked: string[] = [];
+    view = await mount(panel({ snapshot: board([item('A1'), item('A2'), item('A3')]), selectedId: 'A2' }));
+    const c = must(view.container, 'view');
+    expect(cardOf(c, 'A2')).not.toBeNull();
+    await view.render(
+      panel({ snapshot: board([item('A1'), item('A3')]), selectedId: 'A2', onSelect: id => picked.push(id) }),
+    );
+    expect(cardOf(c, 'A3')).not.toBeNull();
+    expect(picked).toEqual(['A3']);
+  });
+
+  test('answering the last after skipping the rest offers "You skipped N", and never deals the first again', async () => {
+    const picked: string[] = [];
+    const onSelect = (id: string) => picked.push(id);
+    view = await mount(panel({ snapshot: board([item('A1'), item('A2'), item('A3')]), selectedId: 'A3', onSelect }));
+    const c = must(view.container, 'view');
+    await view.render(panel({ snapshot: board([item('A1'), item('A2')]), selectedId: 'A3', onSelect }));
+    expect(c.querySelector('[data-attention-card]')).toBeNull();
+    const end = must(c.querySelector('[data-attention-queue-end]'), 'the end of the queue');
+    expect(end.textContent).toContain('You skipped 2 — review them now?');
+    expect(picked).toEqual([]);
+    await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click());
+    expect(picked).toEqual(['A1']);
+    // The page has not moved yet: Later leaves the skipped items where they are.
+    await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-later]'), 'Later').click());
+    expect(c.querySelector('[data-attention-queue-end="later"]')?.textContent).toContain('All caught up for now');
+  });
+
   test('a single item has no pager', async () => {
     view = await mount(panel());
     expect(must(view.container, 'view').querySelector('[data-attention-pager]')).toBeNull();
   });
 
-  test('keeps the reply to the composer: no reply form on the pinned card', async () => {
+  test("the pinned card carries the deck's answer bar: arrows, Reply… and the ⋯ in the same row", async () => {
     view = await mount(panel());
-    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('textarea')).toBeNull();
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    const answers = [...card.querySelectorAll<HTMLElement>('[data-attention-answer]')];
+    expect(answers.map(answer => answer.getAttribute('data-attention-answer'))).toEqual(['left', 'right']);
+    for (const answer of answers) expect(answer.querySelector('svg')).not.toBeNull();
+    expect(card.textContent).not.toContain('or swipe');
+    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
+    expect(toggle.textContent).toContain('Reply…');
+    expect(toggle.closest('.fy-attn-actions__row')?.querySelector('[data-attention-more]')).not.toBeNull();
+    expect(card.querySelectorAll('.fy-attn-actions__row')).toHaveLength(1);
   });
 
-  test('Details unfolds the context and brief, and folds it again', async () => {
+  test('Reply… on the pinned card opens its box', async () => {
+    view = await mount(panel());
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    expect(card.querySelector('textarea')).toBeNull();
+    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
+    await interact(() => toggle.click());
+    expect(card.querySelector('textarea')).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  test('the context is open from the start: there is no Details fold to open', async () => {
     const rich = item('A3', { context: 'We need storage for the sessions.' });
     view = await mount(panel({ snapshot: board([rich]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
-    expect(card.textContent).not.toContain('We need storage');
-    const details = must(card.querySelector<HTMLButtonElement>('[data-attention-details]'), 'details');
-    expect(details.getAttribute('aria-expanded')).toBe('false');
-    await interact(() => details.click());
-    expect(card.textContent).toContain('We need storage');
-    expect(details.getAttribute('aria-expanded')).toBe('true');
-    await interact(() => details.click());
-    expect(card.textContent).not.toContain('We need storage');
+    expect(card.querySelector('[data-attention-details]')).toBeNull();
+    expect(card.querySelector('[data-attention-section="context"]')?.textContent).toContain('We need storage');
   });
 
   test('the answer chip names the item and reports its toggle', async () => {
@@ -253,59 +310,74 @@ describe('AttentionPanel', () => {
     expect(must(view.container, 'view').querySelector('#attn [data-slot]')).not.toBeNull();
   });
 
-  test('lists the resolved ones folded, newest resolution first', async () => {
+  test('draws no resolved history: the record lives in the header menu, not under the chat', async () => {
     view = await mount(
       panel({
         snapshot: board(
           [item('A3')],
-          [
-            record('A1', '2026-07-31T10:00:00.000Z'),
-            record('A2', '2026-07-31T11:00:00.000Z', {
-              disposition: 'dismissed',
-              response: null,
-              resolutionNote: 'Superseded by A3.',
-            }),
-          ],
+          [record('A1', '2026-07-31T10:00:00.000Z'), record('A2', '2026-07-31T11:00:00.000Z')],
         ),
       }),
     );
     const c = must(view.container, 'view');
-    const fold = must(c.querySelector<HTMLButtonElement>('[data-attention-resolved]'), 'the fold');
-    expect(fold.textContent).toContain('Resolved (2)');
-    expect(fold.getAttribute('aria-expanded')).toBe('false');
     expect(c.querySelector('[data-attention-record]')).toBeNull();
-    await interact(() => fold.click());
-    const records = [...c.querySelectorAll('[data-attention-record]')];
-    expect(records.map(row => row.getAttribute('data-attention-record'))).toEqual(['A2', 'A1']);
-    expect(records[0]?.textContent).toContain('dismissed by you');
-    expect(records[0]?.textContent).toContain('Superseded by A3.');
+    expect(c.querySelector('[data-attention-resolved]')).toBeNull();
+    expect(c.textContent).not.toContain('Resolved');
   });
 
-  test('with nothing waiting it says so and still keeps the record', async () => {
+  test('with nothing open it draws nothing but a silent live region, even when records exist', async () => {
     view = await mount(panel({ snapshot: board([], [record('A2', '2026-07-31T11:00:00.000Z')]) }));
     const c = must(view.container, 'view');
-    expect(c.querySelector('[data-attention-clear]')?.textContent).toContain('Nothing needs you');
-    expect(c.querySelector('[data-attention-resolved]')).not.toBeNull();
+    expect(c.querySelector('section')).toBeNull();
+    expect(c.querySelector('[data-attention-clear]')).toBeNull();
+    expect(c.textContent).not.toContain('Nothing needs you');
+    expect(c.querySelector('[role="status"][aria-live="polite"]')?.classList.contains('sr-only')).toBe(true);
+  });
+
+  test('the announcement of the last answer survives the card leaving', async () => {
+    const snapshot = board([item('A3')]);
+    view = await mount(panel({ snapshot }));
+    const c = must(view.container, 'view');
+    await interact(() => buttonNamed(cardOf(c, 'A3'), 'Allow').click());
+    await view.render(panel({ snapshot: board([], [record('A3', '2026-07-31T12:00:00.000Z')]) }));
+    expect(c.querySelector('section')).toBeNull();
+    expect(c.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe('Answered !A3: Allow');
   });
 
   test('an option answers at once, through respond, with that option', async () => {
     const recorded = recordingClient();
     view = await mount(panel({ client: recorded.client }));
-    await interact(() => buttonNamed(cardOf(must(view?.container, 'view'), 'A3'), 'Approve').click());
+    await interact(() => buttonNamed(cardOf(must(view?.container, 'view'), 'A3'), 'Allow').click());
     expect(recorded.calls).toEqual([
       { method: 'respond', id: 'A3', payload: { kind: 'permission', decision: 'approve' } },
     ]);
     expect(view.container.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe(
-      'Answered !A3: Approve',
+      'Answered !A3: Allow',
     );
+  });
+
+  test('Discuss asks to talk it through at once, through discuss, and says so', async () => {
+    const recorded = recordingClient();
+    view = await mount(panel({ client: recorded.client }));
+    await interact(() => buttonNamed(cardOf(must(view?.container, 'view'), 'A3'), 'Discuss').click());
+    expect(recorded.calls).toEqual([{ method: 'discuss', id: 'A3', payload: undefined }]);
+    expect(view.container.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe(
+      'Asked to discuss !A3',
+    );
+  });
+
+  test('an item the ferret did not raise offers no Discuss', async () => {
+    const human = item('A3', { raisedBy: 'human', raisedBySession: null, raisedByName: null } as never);
+    view = await mount(panel({ snapshot: board([human]) }));
+    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-discuss]')).toBeNull();
   });
 
   test('Done resolves and Dismiss dismisses, each with no note', async () => {
     const recorded = recordingClient();
-    const snapshot = board([item('A3'), item('A4')]);
+    const snapshot = board([item('A3', { ask: { kind: 'task' } }), item('A4')]);
     view = await mount(panel({ client: recorded.client, snapshot }));
     const c = must(view.container, 'view');
-    await interact(async () => (await menuAction(cardOf(c, 'A3'), 'done')).click());
+    await interact(() => buttonNamed(cardOf(c, 'A3'), 'Done').click());
     await view.render(panel({ client: recorded.client, snapshot, selectedId: 'A4' }));
     await interact(async () => (await menuAction(cardOf(c, 'A4'), 'dismiss')).click());
     expect(recorded.calls).toEqual([
@@ -324,8 +396,8 @@ describe('AttentionPanel', () => {
     );
     view = await mount(panel({ client: recorded.client }));
     const c = must(view.container, 'view');
-    await interact(() => buttonNamed(cardOf(c, 'A3'), 'Approve').click());
-    expect(buttonNamed(cardOf(c, 'A3'), 'Approve').disabled).toBe(true);
+    await interact(() => buttonNamed(cardOf(c, 'A3'), 'Allow').click());
+    expect(buttonNamed(cardOf(c, 'A3'), 'Allow').disabled).toBe(true);
     expect(recorded.calls).toHaveLength(1);
     await interact(async () => {
       refuse?.(new Error('the item was already resolved'));
@@ -333,7 +405,7 @@ describe('AttentionPanel', () => {
     expect(cardOf(c, 'A3').querySelector('[role="alert"]')?.textContent).toBe(
       'Not sent: the item was already resolved',
     );
-    expect(buttonNamed(cardOf(c, 'A3'), 'Approve').disabled).toBe(false);
+    expect(buttonNamed(cardOf(c, 'A3'), 'Allow').disabled).toBe(false);
   });
 
   test('a link to an open item that is not shown selects it, then rings and focuses it', async () => {
@@ -351,18 +423,25 @@ describe('AttentionPanel', () => {
     expect(scrolled).toHaveLength(1);
   });
 
-  test('a link to a resolved item unfolds the record and rings that entry', async () => {
+  test('a link to a resolved item asks the page to open the resolved list at it', async () => {
+    const opened: string[] = [];
     view = await mount(
       panel({
         focus: { target: 'A2', seq: 1 },
+        onOpenResolved: id => opened.push(id),
         snapshot: board([item('A3')], [record('A2', '2026-07-31T11:00:00.000Z')]),
       }),
     );
-    const c = must(view.container, 'view');
-    expect(c.querySelector('[data-attention-resolved]')?.getAttribute('aria-expanded')).toBe('true');
-    const entry = must(c.querySelector('[data-attention-record="A2"]'), 'the A2 record');
-    expect(entry.getAttribute('data-highlighted')).toBe('true');
-    expect(scrolled).toEqual([attentionPanelItemId('attn', 'A2')]);
+    expect(opened).toEqual(['A2']);
+    await view.render(
+      panel({
+        focus: { target: 'A2', seq: 1 },
+        onOpenResolved: id => opened.push(id),
+        snapshot: board([item('A3')], [record('A2', '2026-07-31T11:00:00.000Z')]),
+      }),
+    );
+    expect(opened).toEqual(['A2']);
+    expect(must(view.container, 'view').querySelector('[data-highlighted]')).toBeNull();
   });
 
   test('a link to an id the board does not hold says so, and rings nothing', async () => {
@@ -394,29 +473,29 @@ describe('AttentionPanel', () => {
     );
   });
 
-  test('Done and Dismiss live in the ⋯ menu, shut until it is opened, which Esc closes', async () => {
+  test('Dismiss lives in the ⋯ menu, shut until it is opened, which Esc closes', async () => {
     view = await mount(panel());
     const card = cardOf(must(view.container, 'view'), 'A3');
-    expect(card.querySelector('[data-attention-done]')).toBeNull();
+    expect(card.querySelector('[data-attention-dismiss]')).toBeNull();
     const more = must(card.querySelector<HTMLButtonElement>('[data-attention-more]'), 'more');
     await interact(() => more.click());
-    expect(card.querySelector('[role="menu"] [data-attention-done]')).not.toBeNull();
+    expect(card.querySelector('[role="menu"] [data-attention-dismiss]')).not.toBeNull();
     await interact(() => pressKey(must(card.querySelector<HTMLElement>('[role="menu"]'), 'menu'), 'Escape'));
     expect(card.querySelector('[role="menu"]')).toBeNull();
   });
 
-  test('an item with no options shows Done and Dismiss in one tap, and its age without "waiting"', async () => {
+  test('a text-only ask dismisses from its ⋯ menu, and its age is drawn without "waiting"', async () => {
     const { calls, client } = recordingClient();
     view = await mount(panel({ client, snapshot: board([item('A3', { ask: { kind: 'open-question' } })]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
-    expect(card.querySelector('[data-attention-more]')).toBeNull();
     expect(card.querySelector('.fy-attn-card__meta')?.textContent).toContain('30m');
     expect(card.querySelector('.fy-attn-card__meta')?.textContent).not.toContain('waiting');
+    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-more]'), 'more').click());
     await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-dismiss]'), 'dismiss').click());
     expect(calls.map(call => call.method)).toEqual(['dismiss']);
   });
 
-  test('Details on a rich item opens its brief with the first question open', async () => {
+  test('a rich item draws its brief open, with a lone question said once, under the ask', async () => {
     const rich = item('A3', {
       subject: 'Pick a database',
       why: 'Pick a database',
@@ -428,8 +507,96 @@ describe('AttentionPanel', () => {
     });
     view = await mount(panel({ snapshot: board([rich]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
-    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-details]'), 'details').click());
-    expect(card.querySelector('[data-attention-section="questions"]')?.hasAttribute('open')).toBe(true);
-    expect(card.querySelectorAll('[data-attention-recommended]').length).toBeGreaterThan(0);
+    expect(card.querySelector('[data-attention-section="context"]')?.textContent).toContain('We need storage.');
+    expect(card.querySelector('[data-attention-section="questions"]')).toBeNull();
+    expect(card.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite');
+  });
+});
+
+describe('AttentionPanel: delivery', () => {
+  const discussing = (id: string) => item(id, { waitingOn: 'ferret', waitingFor: 'discussion' } as never);
+  const withBoard = (base: AttentionSnapshot, extra: Partial<AttentionSnapshot>): AttentionSnapshot => ({
+    ...base,
+    ...extra,
+  });
+
+  test('should draw an item in discussion as a slim line, with no card and no answer chip', async () => {
+    view = await mount(panel({ snapshot: board([discussing('A3')]), chip: { on: false, onChange: () => undefined } }));
+    const c = must(view.container, 'view');
+    const line = must(c.querySelector<HTMLButtonElement>('[data-attention-discussing]'), 'the discussion line');
+    expect(line.textContent).toContain('In discussion');
+    expect(line.textContent).toContain('Ask A3');
+    expect(c.querySelector('[data-attention-card]')).toBeNull();
+    expect(c.querySelector('[data-attention-answer-chip]')).toBeNull();
+  });
+
+  test('should open the card when the discussion line is pressed', async () => {
+    view = await mount(panel({ snapshot: board([discussing('A3')]) }));
+    const c = must(view.container, 'view');
+    await interact(() => must(c.querySelector<HTMLButtonElement>('[data-attention-discussing]'), 'line').click());
+    expect(cardOf(c, 'A3')).not.toBeNull();
+    expect(c.querySelector('[data-attention-discussing]')).toBeNull();
+  });
+
+  test('should show an item that needs the owner before one in discussion', async () => {
+    view = await mount(panel({ snapshot: board([discussing('A3'), item('A5')]) }));
+    const c = must(view.container, 'view');
+    expect(cardOf(c, 'A5')).not.toBeNull();
+    expect(c.querySelector('[data-attention-discussing]')).toBeNull();
+  });
+
+  test('should say Sending… on a card whose answer the ferret has not yet received', async () => {
+    const snapshot = withBoard(board([item('A3')]), { delivery: { sending: ['A3'] } });
+    view = await mount(panel({ snapshot }));
+    const strip = must(cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-delivery]'), 'strip');
+    expect(strip.getAttribute('role')).toBe('status');
+    expect(strip.textContent).toBe('Sending…');
+  });
+
+  test('should say Sending… for an answer still in the settle window too', async () => {
+    const snapshot = withBoard(board([item('A3')]), {
+      replies: { pending: ['A3'], dueAt: '2026-07-31T12:00:08.000Z' },
+    });
+    view = await mount(panel({ snapshot }));
+    expect(
+      cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-delivery="sending"]'),
+    ).not.toBeNull();
+  });
+
+  test('should keep a slim Sending… line for an answered item until the daemon stops listing it', async () => {
+    const snapshot = withBoard(board([], [record('A3', '2026-07-31T11:59:00.000Z')]), {
+      delivery: { sending: ['A3'] },
+    });
+    view = await mount(panel({ snapshot }));
+    const line = must(must(view.container, 'view').querySelector('[data-attention-sending-line]'), 'the sending line');
+    expect(line.textContent).toContain('Sending…');
+    expect(line.textContent).toContain('Ask A3');
+    await view.render(panel({ snapshot: board([], [record('A3', '2026-07-31T11:59:00.000Z')]) }));
+    expect(view.container.querySelector('[data-attention-sending-line]')).toBeNull();
+  });
+
+  test("should say the answer didn't reach the ferret and Retry sends that same answer again", async () => {
+    const recorded = recordingClient();
+    const undelivered = item('A3', {
+      undelivered: {
+        at: '2026-07-31T11:59:00.000Z',
+        reply: { action: 'resolve', note: 'shipped' },
+        reason: 'Its box was busy.',
+      },
+    } as never);
+    view = await mount(panel({ client: recorded.client, ferret: 'zoe', snapshot: board([undelivered]) }));
+    const strip = must(
+      cardOf(must(view.container, 'view'), 'A3').querySelector<HTMLElement>('[data-attention-delivery="undelivered"]'),
+      'strip',
+    );
+    expect(strip.textContent).toContain("Your answer didn't reach zoe");
+    expect(strip.textContent).toContain('Its box was busy.');
+    await interact(() => must(strip.querySelector<HTMLButtonElement>('button[data-attention-retry]'), 'retry').click());
+    expect(recorded.calls).toEqual([{ method: 'resolve', id: 'A3', payload: 'shipped' }]);
+  });
+
+  test('should draw no strip on an item with nothing to say about delivery', async () => {
+    view = await mount(panel());
+    expect(must(view.container, 'view').querySelector('[data-attention-delivery]')).toBeNull();
   });
 });

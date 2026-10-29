@@ -1,7 +1,7 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, it } from 'bun:test';
+import { afterAll, describe, it, spyOn } from 'bun:test';
 import should from 'should';
 import { CodexAppServerCatalog } from '../../../../src/adapters/index.ts';
 
@@ -365,5 +365,84 @@ describe('the Codex app-server catalog probe', () => {
 
     // Assert
     should(choices.map(choice => choice.value)).deepEqual(['gpt-5.6-codex']);
+  });
+});
+
+/**
+ * A real child whose stderr stream and exit report fail the way a platform stream can.
+ *
+ * Neither failure can be provoked from a script — a pipe a process wrote and closed always ends
+ * cleanly, and a process always exits — so the real spawn is kept for stdin, stdout and signals and
+ * only the two reports are replaced. `Bun.spawn` is the one seam this class owns.
+ */
+function withFailingReports(options: {
+  readonly stderr: (() => ReadableStream<Uint8Array>) | undefined;
+  readonly exitReport: 'rejects' | 'resolves';
+}): { readonly children: ReturnType<typeof Bun.spawn>[]; readonly restore: () => void } {
+  const original = Bun.spawn.bind(Bun);
+  const children: ReturnType<typeof Bun.spawn>[] = [];
+  const spy = spyOn(Bun, 'spawn').mockImplementation(((...args: Parameters<typeof Bun.spawn>) => {
+    const real = original(...args);
+    children.push(real);
+    return {
+      stdin: real.stdin,
+      stdout: real.stdout,
+      stderr: options.stderr === undefined ? real.stderr : options.stderr(),
+      get exited() {
+        return options.exitReport === 'rejects' ? Promise.reject(new Error('the exit report failed')) : real.exited;
+      },
+      kill: (signal?: number | NodeJS.Signals) => real.kill(signal),
+    };
+  }) as unknown as typeof Bun.spawn);
+  return { children, restore: () => spy.mockRestore() };
+}
+
+describe('the Codex app-server catalog probe when the platform reports fail', () => {
+  it('should still quote what stderr said before its stream errored', async () => {
+    // Arrange — the child complains and exits; its stderr stream then errors instead of ending.
+    const { binary, cwd } = wrapper('echo "codex: auth expired" >&2; exit 1');
+    const failing = withFailingReports({
+      stderr: () =>
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new TextEncoder().encode('codex: auth expired\n'));
+          },
+          pull(controller) {
+            controller.error(new Error('the stderr pipe broke'));
+          },
+        }),
+      exitReport: 'resolves',
+    });
+
+    // Act
+    const failure = await subject()
+      .models(binary, cwd)
+      .catch(error => error)
+      .finally(failing.restore);
+
+    // Assert: a broken diagnostics stream costs nothing but the rest of the diagnostics.
+    should(failure).match({ message: /ended before the catalog was complete: codex: auth expired$/u });
+  });
+
+  it('should return the catalog and still signal the child when its exit report rejects', async () => {
+    // Arrange — the catalog arrives in full; the process then refuses to say how it exited.
+    const { binary, cwd } = wrapper(
+      [
+        `printf '%s\\n' '${JSON.stringify({ id: 1, result: {} })}'`,
+        `printf '%s\\n' '${MODEL_PAGE}'`,
+        'exec sleep 30',
+      ].join('\n'),
+    );
+    const failing = withFailingReports({ stderr: undefined, exitReport: 'rejects' });
+
+    // Act
+    const choices = await subject().models(binary, cwd).finally(failing.restore);
+
+    // Assert: the answer stands, and the reap did not wait out a grace period on a report that
+    // already failed — the child was terminated.
+    should(choices.map(choice => choice.value)).deepEqual(['gpt-5.6-codex']);
+    should(failing.children).have.length(1);
+    await failing.children[0]?.exited;
+    should(failing.children[0]?.signalCode).equal('SIGTERM');
   });
 });

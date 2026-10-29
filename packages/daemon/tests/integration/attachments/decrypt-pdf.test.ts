@@ -77,6 +77,23 @@ describe('decryptPdfInMemory', () => {
     });
   });
 
+  for (const failure of ['unreadable_document', 'too_large'] as const) {
+    it(`surfaces the worker's ${failure} failure as that named failure`, async () => {
+      await withWorker({ kind: 'message', data: { ok: false, failure } }, async (worker, spawn) => {
+        await decryptPdfInMemory(new Uint8Array([9]), 'use once', { spawn }).then(
+          () => {
+            throw new Error(`${failure} must refuse`);
+          },
+          error => {
+            should(error).be.instanceof(PdfDecryptError);
+            should((error as PdfDecryptError).failure).equal(failure);
+          },
+        );
+        should(worker().terminated).be.true();
+      });
+    });
+  }
+
   it('fails closed for malformed worker replies and worker errors', async () => {
     await withWorker({ kind: 'message', data: { ok: true, output: 'not bytes' } }, async (_worker, spawn) => {
       await decryptPdfInMemory(new Uint8Array([9]), 'use once', { spawn }).then(

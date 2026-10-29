@@ -48,6 +48,16 @@ const sections = (log: Log): SessionActionSection[] => [
         },
       },
       { kind: 'form', id: 'formA', label: 'Rename…', title: 'Rename Hadi', icon: Plug, render: form },
+      {
+        kind: 'form',
+        id: 'listB',
+        label: '7 resolved',
+        title: 'Resolved Attention',
+        heading: 'Resolved · 7',
+        presentation: 'drawer',
+        icon: Plug,
+        render: form,
+      },
     ],
   },
   {
@@ -274,5 +284,28 @@ describe('ContextActionsMenu — under a thumb', () => {
     expect(root.querySelector('button[aria-label="Close Rename Hadi"]')).not.toBeNull();
     await tap(must(root.querySelector<HTMLElement>('[data-done]'), 'done'));
     expect(log.closes).toEqual([true]);
+  });
+});
+
+describe('ContextActionsMenu — a list form', () => {
+  it('opens in the drawer on a desktop, with its heading, and closes from the ✕ with focus handed back', async () => {
+    const { root, log } = await show();
+    await interact(() => row(root, 'listB').click());
+    expect(root.querySelector('[data-session-action-popover]')).toBeNull();
+    const drawer = must(root.querySelector('[data-session-action-drawer]'), 'drawer');
+    expect(drawer.hasAttribute('data-compact')).toBe(false);
+    expect(drawer.textContent).toContain('Resolved · 7');
+    expect(drawer.textContent).toContain('Compact: false');
+    await interact(() => must(root.querySelector<HTMLElement>('[data-session-action-drawer-close]'), 'close').click());
+    expect(log.closes).toEqual([true]);
+  });
+
+  it('opens full screen under a thumb, told it is compact', async () => {
+    const { root } = await show({ touch: true });
+    await tap(row(root, 'listB'));
+    expect(root.querySelector('[data-session-action-sheet]')).toBeNull();
+    const drawer = must(root.querySelector('[data-session-action-drawer]'), 'drawer');
+    expect(drawer.hasAttribute('data-compact')).toBe(true);
+    expect(drawer.textContent).toContain('Compact: true');
   });
 });

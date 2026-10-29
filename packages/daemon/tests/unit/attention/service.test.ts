@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import should from 'should';
 import type {
   AttentionLedger,
   AttentionLedgerRepository,
@@ -6,7 +7,6 @@ import type {
   AttentionRaisedObserver,
 } from '../../../src/lib/attention/index.ts';
 import { AttentionService, isAttentionSessionId } from '../../../src/lib/attention/service.ts';
-import should from 'should';
 
 const SESSION = 'session-1';
 const NOW = '2026-07-31T10:00:00Z';
@@ -197,6 +197,32 @@ describe('Attention service', () => {
     should(refused).containDeep({ ok: false, error: { code: 'forbidden' } });
     should(observer.calls).deepEqual([{ sessionId: SESSION, itemId: 'A1', count: 1 }]);
     should(repository.ledgers.get(SESSION)?.entries).have.length(1);
+  });
+
+  it('should title an untitled daemon raise by its cause, and leave a worded or human title alone', async () => {
+    // Arrange
+    const { repository, service } = createService();
+    const daemon = (cause: 'warden-escalation' | 'system', ref: string, title?: string) =>
+      service.raise(
+        SESSION,
+        { ...request, source: 'task', sourceRef: ref, ask: undefined, ...(title === undefined ? {} : { title }) },
+        { kind: 'daemon', cause },
+      );
+
+    // Act
+    await daemon('warden-escalation', 'F1');
+    await daemon('system', 'F2');
+    await daemon('system', 'F3', 'Worded by the daemon');
+    await service.raise(SESSION, request, AGENT);
+
+    // Assert
+    const items = repository.ledgers.get(SESSION)?.entries.map(entry => entry.item);
+    should(items?.map(item => item.title)).deepEqual([
+      'A ferret needs a human',
+      'Needs your attention',
+      'Worded by the daemon',
+      undefined,
+    ]);
   });
 
   it('should not observe a stable-source refresh', async () => {

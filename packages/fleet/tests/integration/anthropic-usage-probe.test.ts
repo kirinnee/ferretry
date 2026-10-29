@@ -267,6 +267,109 @@ describe('AnthropicUsageProbe reading the read-only usage endpoint', () => {
     should(actual.responseFingerprint).not.have.property('json');
   });
 
+  it('should keep only the shape of a non-bearer challenge and fold an unknown error code to other', async () => {
+    // Arrange
+    const shapeOf = async (headers: Record<string, string>): Promise<unknown> => {
+      const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { status: 401, headers } });
+      const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+      return (actual.responseFingerprint as { headers?: Record<string, unknown> } | undefined)?.headers;
+    };
+
+    // Act
+    const basic = await shapeOf({ 'www-authenticate': 'Basic realm="usage"' });
+    const customCode = await shapeOf({ 'www-authenticate': 'Bearer error="custom_failure"' });
+    const reflectedAssignment = await shapeOf({
+      'www-authenticate': 'authorization=error=invalid_token',
+    });
+    const mixed = await shapeOf({
+      'www-authenticate': 'Bearer error="invalid_token", refresh_token=must-not-leave',
+    });
+
+    // Assert — a scheme without an error code carries none, an unfamiliar code is never echoed, and
+    // an authorization-shaped assignment is scrubbed before its inner text can be read as an error.
+    should(basic).deepEqual({ wwwAuthenticate: { scheme: 'other' } });
+    should(customCode).deepEqual({ wwwAuthenticate: { scheme: 'bearer', errorCode: 'other' } });
+    should(reflectedAssignment).deepEqual({ wwwAuthenticate: { scheme: 'other' } });
+    should(mixed).deepEqual({ wwwAuthenticate: { scheme: 'bearer', errorCode: 'invalid_token' } });
+    should(JSON.stringify([basic, customCode, reflectedAssignment, mixed])).not.containEql('must-not-leave');
+  });
+
+  it('should classify a retry-after header as seconds, an http-date or something else', async () => {
+    // Arrange
+    const retryAfterOf = async (value: string): Promise<unknown> => {
+      const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { status: 429, headers: { 'retry-after': value } } });
+      const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+      return (actual.responseFingerprint as { headers?: { retryAfter?: unknown } } | undefined)?.headers?.retryAfter;
+    };
+
+    // Act
+    const seconds = await retryAfterOf('120');
+    const httpDate = await retryAfterOf('Wed, 21 Oct 2026 07:28:00 GMT');
+    const other = await retryAfterOf('soon');
+
+    // Assert
+    should(seconds).equal('seconds');
+    should(httpDate).equal('http-date');
+    should(other).equal('other');
+  });
+
+  it('should cap the evidence itself when a custom transport hands back more than the limit', async () => {
+    // Arrange — the shipped fetch caps before returning; a custom one may not.
+    const oversized = new TextEncoder().encode(
+      JSON.stringify({
+        type: 'error',
+        error: { type: 'permission_error' },
+        padding: 'x'.repeat(MAX_RESPONSE_BODY_BYTES),
+      }),
+    );
+    const fetch: QuotaFetch = () =>
+      Promise.resolve({
+        status: 403,
+        ok: false,
+        headerNames: ['content-type'],
+        header: name => (name.toLowerCase() === 'content-type' ? 'application/json' : null),
+        body: { bytes: oversized, truncated: false },
+      });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(oversized.byteLength).be.above(MAX_RESPONSE_BODY_BYTES);
+    should(actual.credentialSignal).equal('inconclusive');
+    should(actual.responseFingerprint).containDeep({
+      status: 403,
+      bodyLength: MAX_RESPONSE_BODY_BYTES,
+      bodyTruncated: true,
+    });
+    should(actual.responseFingerprint).not.have.property('json');
+  });
+
+  it('should report an inconclusive check, with the reason scrubbed, when a response cannot be inspected', async () => {
+    // Arrange — a transport whose header reader throws is a response this probe cannot fingerprint.
+    const fetch: QuotaFetch = () =>
+      Promise.resolve({
+        status: 200,
+        ok: true,
+        headerNames: [],
+        header: () => {
+          throw new Error(`header table unreadable for Bearer ${TOKEN}`);
+        },
+        body: { bytes: new Uint8Array(), truncated: false },
+      });
+
+    // Act
+    const actual = await new AnthropicUsageProbe({ fetch, credentials: storedCredential }).probe(account());
+
+    // Assert
+    should(actual.ok).be.false();
+    should(actual.credentialSignal).equal('inconclusive');
+    should(actual.error).equal(
+      'the usage endpoint response could not be inspected: header table unreadable for Bearer [redacted]',
+    );
+    should(actual.error).not.containEql(TOKEN);
+  });
+
   it('should not condemn the credential on a 500, and not mark the account unavailable', async () => {
     // Arrange — a server error says nothing about this account.
     const { fetch } = transport({ [ANTHROPIC_USAGE_URL]: { status: 500 } });
@@ -718,6 +821,58 @@ describe('fetchQuota', () => {
     // Assert
     should(actual.body.bytes.byteLength).equal(MAX_RESPONSE_BODY_BYTES);
     should(actual.body.truncated).be.true();
+  });
+
+  it('should mark a body truncated when more bytes follow a chunk that exactly fills the limit', async () => {
+    // Arrange — the first chunk lands exactly on the limit, so only the NEXT chunk shows it overflowed.
+    const original = globalThis.fetch;
+    let cancelled: unknown;
+    const stream = new ReadableStream<Uint8Array>({
+      start: controller => {
+        controller.enqueue(new Uint8Array(MAX_RESPONSE_BODY_BYTES).fill(0x61));
+        controller.enqueue(new Uint8Array([0x62, 0x62]));
+      },
+      cancel: reason => {
+        cancelled = reason;
+      },
+    });
+    globalThis.fetch = (() => Promise.resolve(new Response(stream))) as unknown as typeof fetch;
+
+    try {
+      // Act
+      const actual = await fetchQuota({ url: 'http://usage.invalid', method: 'GET', headers: {}, timeoutMs: 5_000 });
+
+      // Assert
+      should(actual.body.truncated).be.true();
+      should(actual.body.bytes.byteLength).equal(MAX_RESPONSE_BODY_BYTES);
+      should(actual.body.bytes.every(byte => byte === 0x61)).be.true();
+      should(cancelled).equal('response body exceeded the diagnostic limit');
+    } finally {
+      globalThis.fetch = original;
+    }
+  });
+
+  it('should still return the bounded prefix when cancelling an oversized body fails', async () => {
+    // Arrange
+    const original = globalThis.fetch;
+    const stream = new ReadableStream<Uint8Array>({
+      start: controller => controller.enqueue(new Uint8Array(MAX_RESPONSE_BODY_BYTES + 10).fill(0x61)),
+      cancel: () => {
+        throw new Error('the connection is already gone');
+      },
+    });
+    globalThis.fetch = (() => Promise.resolve(new Response(stream))) as unknown as typeof fetch;
+
+    try {
+      // Act
+      const actual = await fetchQuota({ url: 'http://usage.invalid', method: 'GET', headers: {}, timeoutMs: 5_000 });
+
+      // Assert
+      should(actual.body.truncated).be.true();
+      should(actual.body.bytes.byteLength).equal(MAX_RESPONSE_BODY_BYTES);
+    } finally {
+      globalThis.fetch = original;
+    }
   });
 
   it('should send the headers it was given and no body at all', async () => {

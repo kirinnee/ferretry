@@ -3,6 +3,7 @@ export * from './background-lane.ts';
 export * from './boot.ts';
 export * from './carriers.ts';
 export * from './config.ts';
+export * from './io-pressure.ts';
 export * from './liveness.ts';
 export * from './mounts/analytics.ts';
 export * from './mounts/attention.ts';

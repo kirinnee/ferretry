@@ -812,3 +812,101 @@ describe('a tabbed four-question form (Claude Code 2.1.281)', () => {
     });
   });
 });
+
+describe('tmux structured-question driver, page by page without a tab strip', () => {
+  const pending: PendingQuestion = {
+    toolUseId: 'question-pages',
+    questions: [
+      { header: 'Deploy', question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] },
+      { header: 'Notify', question: 'Notify the team?', options: [{ label: 'Yes' }, { label: 'No' }] },
+    ],
+  };
+  const answers: readonly StructuredQuestionAnswer[] = [
+    { kind: 'selection', labels: ['Yes'] },
+    { kind: 'selection', labels: ['No'] },
+  ];
+  const first = frame(claude('Deploy?', ['Yes', 'No']));
+  const second = frame(claude('Notify the team?', ['Yes', 'No']));
+  const reviewOf = (notify: string, cursor: number | undefined = 0): PaneState => {
+    const rows = ['Submit answers', 'Cancel'].map(
+      (row, index) => `${index === cursor ? '❯' : ' '} ${index + 1}. ${row}`,
+    );
+    return frame(
+      [
+        RULE,
+        'Review your answers',
+        '',
+        ' ● Deploy?',
+        '   → Yes',
+        ' ● Notify the team?',
+        `   → ${notify}`,
+        '',
+        ...rows,
+      ].join('\n'),
+    );
+  };
+  const finished = frame('❯ ', { promptReady: true });
+
+  it('submits the closing review page once it lists exactly the requested answers', async () => {
+    const pane = new ScriptedPane([first, second, second, reviewOf('No'), reviewOf('No'), finished]);
+
+    const confirmation = await driver(pane).drive(ID, pending, answers);
+
+    should(pane.keys).deepEqual(['Enter', 'Down', 'Enter', 'Enter']);
+    should(confirmation).deepEqual({ confirmedBy: 'prompt-ready' });
+  });
+
+  it('walks the cursor onto Submit answers when the review page opens on another row', async () => {
+    const pane = new ScriptedPane([first, second, second, reviewOf('No', 1), reviewOf('No', 1), finished]);
+
+    await driver(pane).drive(ID, pending, answers);
+
+    should(pane.keys).deepEqual(['Enter', 'Down', 'Enter', 'Up', 'Enter']);
+  });
+
+  it('refuses to submit a review page that lists a different answer than the one requested', async () => {
+    const pane = new ScriptedPane([first, second, second, reviewOf('Yes'), reviewOf('Yes')]);
+
+    const failure = await failureOf(driver(pane).drive(ID, pending, answers));
+
+    should(failure.message).match(
+      /stopped at question 2 of 2 \(Notify\): the review page lists «.*Yes.*», not the requested/u,
+    );
+    should(failure.diagnostics).match({ phase: 'review', reason: 'review-mismatch', questionIndex: 1 });
+    should(pane.keys).deepEqual(['Enter', 'Down', 'Enter']);
+  });
+
+  it('refuses a review page whose cursor is not visible', async () => {
+    const pane = new ScriptedPane([first, second, second, reviewOf('No', -1), reviewOf('No', -1)]);
+
+    const failure = await failureOf(driver(pane).drive(ID, pending, answers));
+
+    should(failure.message).match(/review page whose cursor is not visible/u);
+    should(pane.keys).deepEqual(['Enter', 'Down', 'Enter']);
+  });
+
+  it('stops with proven non-acceptance when the pane is dead before the next question', async () => {
+    const dead = frame('', { alive: false, dead: true });
+    const pane = new ScriptedPane([first, second, dead]);
+
+    const failure = await failureOf(driver(pane).drive(ID, pending, answers));
+
+    should(failure.message).equal('session pane is dead; use resume');
+    should(failure.diagnostics).match({ phase: 'preflight', questionIndex: 1, paneAlive: false, paneDead: true });
+    should(pane.keys).deepEqual(['Enter']);
+  });
+
+  it('fails when the pane dies while a plain Other row is opening its free-form page', async () => {
+    const implicit: PendingQuestion = {
+      toolUseId: 'question-other',
+      questions: [{ question: 'Deploy?', options: [{ label: 'Yes' }, { label: 'No' }] }],
+    };
+    const form = frame(claude('Deploy?', ['Yes', 'No', 'Other…']));
+    const pane = new ScriptedPane([form, form, frame('', { alive: false, dead: true })]);
+
+    const failure = await failureOf(driver(pane).drive(ID, implicit, [{ kind: 'other', text: 'later' }]));
+
+    should(failure.message).equal('session pane died while opening free-form input');
+    should(pane.pasted).deepEqual([]);
+  });
+});

@@ -7,15 +7,29 @@
  * held by a real `DeferredAttentionActions` whose commit does nothing.
  */
 
-import type { AttentionId, AttentionItem, AttentionSnapshot, SessionView } from '@ferretry/protocol';
+import type {
+  AttentionId,
+  AttentionItem,
+  AttentionSnapshot,
+  ResolvedAttentionItem,
+  SessionView,
+} from '@ferretry/protocol';
+import { Pencil, RotateCw, Square } from 'lucide-react';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Markdown } from '../src/components/markdown.tsx';
+import { SessionTopBar } from '../src/components/session-top-bar.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { AttentionInboxPage } from '../src/features/attention/attention-inbox-page.tsx';
 import { AttentionPanel } from '../src/features/attention/attention-panel.tsx';
+import {
+  ATTENTION_RESOLVED_ACTION_ID,
+  resolvedActionContribution,
+} from '../src/features/attention/attention-resolved.tsx';
+import { ActionsMenu } from '../src/features/session-actions/actions-menu.tsx';
+import { type SessionActionContribution, sessionActionSections } from '../src/features/session-actions/registry.ts';
 import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
-import { DeferredAttentionActions, type InboxCard, inboxCardKey } from '../src/lib/attention-inbox.ts';
+import { DeferredAttentionActions, type InboxCard, inboxCardKey, isInDiscussion } from '../src/lib/attention-inbox.ts';
 import { daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { daemonAttentionPath } from '../src/lib/pages/routes.ts';
@@ -204,23 +218,172 @@ const CARDS: readonly InboxCard[] = [
   card(RICH, ferret('rc', 'ottilie', 'Ledger storage'), 'studio'),
 ];
 
+// THE ATTENTION PAGE AS THE OWNER MET IT: ten items in two conversations on two machines — seven from one
+// ferret working one project, so every row used to read "diene-migrate".
+const MIGRATE = ferret('dm', 'johnnie', 'diene-migrate');
+const RELAY = ferret('ra', 'hadi', 'Relay advertisement');
+const titled = (id: string, minutes: number, title: string, patch: Partial<AttentionItem>): AttentionItem =>
+  item(id, minutes, { title, raisedByName: 'johnnie', ...patch } as Partial<AttentionItem>);
+const ORG_SETUP = titled('A10', 420, 'Finish the ProtoDurian org setup', {
+  subject: 'Do the org settings only an owner should: invites, teams, 2FA',
+  why: 'Only an org owner can change these, and the migration is blocked on them.',
+  body: 'Each of these is a settings page on GitHub; none needs a terminal.',
+  steps: [
+    'Require two-factor login: https://github.com/organizations/ProtoDurian/settings/security',
+    'Invite ching-atomi and speedykrab',
+    'Create teams fleet-admin (admin), atomi and ketone (maintain)',
+    'Allow fine-grained tokens under Personal access tokens',
+    'Install the namespace-cloud app on ProtoDurian too (only namespace-managed-runners is installed)',
+  ],
+  ask: { kind: 'task' },
+});
+const MIGRATE_ITEMS: readonly AttentionItem[] = [
+  ORG_SETUP,
+  titled('A9', 421, 'Keep the required CI workflow?', {
+    subject: 'I set the engine to require the workflow named CI from ProtoDurian/diene.all. Keep it, or name another?',
+    ask: { kind: 'multiple-choice', options: [{ label: 'Keep CI' }, { label: 'Name another' }] },
+  }),
+  titled('A8', 425, 'Review the moved repos', {
+    subject:
+      "I moved 5 more repos, cancelled 159 Dependabot runs, and copied AtomiCloud's Actions settings. Anything look off?",
+    ask: { kind: 'answer-review' },
+  }),
+  titled('A7', 430, 'Pick a fix for the 16-core runner', {
+    subject: 'The 16-core runner size never starts on the Developer plan. Which fix?',
+    ask: {
+      kind: 'multiple-choice',
+      options: [{ label: 'Upgrade the plan' }, { label: 'Use 8-core' }, { label: 'Self-host' }],
+    },
+    waitingOn: 'ferret',
+    waitingFor: 'discussion',
+    askedAt: ago(60),
+  } as Partial<AttentionItem>),
+  titled('A6', 433, 'Create two read-only tokens', {
+    subject: 'Create two read-only tokens so the ratchet and corpus CI can read each other',
+    ask: { kind: 'task' },
+    steps: ['Create the ratchet token', 'Create the corpus token', 'Store both with fy secret set'],
+  }),
+  titled('A5', 436, 'Point Infisical at ProtoDurian?', {
+    subject: 'Does Infisical push secrets into GitHub? If yes, point it at ProtoDurian',
+    ask: { kind: 'permission' },
+  }),
+  // A legacy item from before titles: its row is headed by the start of its ask, never the project name.
+  item('A4', 440, {
+    subject:
+      'The old org still has 12 webhooks pointing at the staging relay; delete them now or leave them until the cut-over?',
+    why: 'They fire on every push and the relay logs each one as an error.',
+    ask: { kind: 'multiple-choice', options: [{ label: 'Delete now' }, { label: 'Leave them' }] },
+    raisedByName: 'johnnie',
+  }),
+];
+const RELAY_ITEMS: readonly AttentionItem[] = [
+  titled('A3', 18, 'Restart the staging relay?', {
+    subject: 'Can I restart the staging relay? It drops live sessions for ~10 seconds.',
+    why: 'The relay is serving a stale advertisement.',
+    ask: { kind: 'permission' },
+    raisedByName: 'hadi',
+  }),
+  titled('A2', 95, 'Which region for the relay?', {
+    subject: 'Pick the staging region for the relay: eu-west or us-east?',
+    ask: { kind: 'multiple-choice', options: [{ label: 'eu-west' }, { label: 'us-east' }] },
+    raisedByName: 'hadi',
+  }),
+  titled('A1', 600, 'Rotate the relay key', {
+    subject: 'Rotate the relay key on the laptop before the release cut',
+    ask: { kind: 'task' },
+    steps: ['Store the new key: `fy secret set RELAY_KEY`', 'Restart the relay: `fy daemon restart`'],
+    raisedByName: 'hadi',
+  }),
+];
+const PAGE_CARDS: readonly InboxCard[] = [
+  ...MIGRATE_ITEMS.map(entry => card(entry, MIGRATE, 'Liftoff EC2')),
+  ...RELAY_ITEMS.map(entry => card(entry, RELAY, 'laptop', LAPTOP)),
+].sort((left, right) => Date.parse(right.item.waitingSince) - Date.parse(left.item.waitingSince));
+const RECENT = [
+  {
+    text: 'Moved diene.ratchet and diene.corpus to ProtoDurian; both builds are green on the new org.',
+    timestamp: ago(440),
+  },
+  {
+    text: 'The 16-core runner never starts on the Developer plan — I raised !A7 with three ways out.',
+    timestamp: ago(430),
+  },
+  {
+    text: 'Everything left needs an org owner. I put the five owner-only settings in !A10, with links, and will pick up the CI ratchet as soon as two-factor is on.',
+    timestamp: ago(421),
+  },
+] as const;
+
+// THE CARD FORMAT THE OWNER APPROVED: a decision with every section (premise, context, options that say what
+// they do, a recommendation, terms), a to-do, and a one-line note — all dealt at the same height.
+const DECISION = titled('A21', 35, 'Keep the required CI workflow?', {
+  subject: 'Keep CI as the one required workflow, or rename it to build?',
+  why: 'Keep CI as the one required workflow, or rename it to build?',
+  premise: '- 58 repos are moving to the ProtoDurian org\n- The org can require one workflow to pass before a merge',
+  context:
+    '- 55 repos already have a workflow called CI\n- 3 call theirs build\n- The rule goes live for every repo at once',
+  decided: '- Branch protection is on for every repo (you said yes on Monday)',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Keep CI', description: '55 repos fine, 3 need a rename' },
+      { label: 'Rename to build', description: '3 repos fine, 55 need an edit' },
+    ],
+  },
+  answers: [
+    { direction: 'right', does: 'choose', label: 'Keep CI' },
+    { direction: 'left', does: 'choose', label: 'Rename to build' },
+  ],
+  recommendation: { decision: 'Keep CI', why: 'Matches 55 repos already; smallest change' },
+  body: '## Which repos call it build\n\n- diene.ratchet\n- diene.corpus\n- diene.docs\n\nEach is a one-line change to the workflow file name. Renaming the other 55 would touch every open pull request, because GitHub re-runs required checks by name, and every open pull request would show a missing check until it is pushed again.',
+  terms: [
+    { term: 'CI', meaning: 'the automatic tests that run on every change' },
+    { term: 'Required workflow', meaning: 'a check that must pass before anything merges' },
+  ],
+} as Partial<AttentionItem>);
+const SETUP_TASK = {
+  ...ORG_SETUP,
+  premise: '- The org was created yesterday\n- Only an owner can change its settings',
+} as AttentionItem;
+const NOTE = titled('A22', 4, 'Nightly benchmarks are green again', {
+  subject: 'The relay latency benchmark is back under 40 ms after the cache fix.',
+  why: 'The relay latency benchmark is back under 40 ms after the cache fix.',
+  kind: 'info',
+} as Partial<AttentionItem>);
+const FORMAT_CARDS: readonly InboxCard[] = [
+  card(DECISION, MIGRATE, 'Liftoff EC2'),
+  card(SETUP_TASK, MIGRATE, 'Liftoff EC2'),
+  card(NOTE, RELAY, 'laptop', LAPTOP),
+];
+
 // Answers are held for the real undo window, then "sent" nowhere.
 const deferred = new DeferredAttentionActions(async () => undefined);
 
 function Inbox({
   phone,
   cards = CARDS,
+  resolved = [],
+  recentOpen = false,
+  initialOpen,
 }: {
   readonly phone: boolean;
   readonly cards?: readonly InboxCard[];
+  readonly resolved?: AttentionInbox['resolved'];
+  readonly recentOpen?: boolean;
+  readonly initialOpen?: string;
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const hidden = deferred.hiddenKeys();
   const inbox: AttentionInbox = {
     unread: [],
-    total: cards.length,
-    cards: cards.filter(entry => !hidden.has(entry.key)),
+    total: cards.filter(entry => !isInDiscussion(entry.item)).length,
+    // Split as the shell splits them: an item in discussion is listed under "In discussion".
+    cards: cards.filter(entry => !hidden.has(entry.key) && !isInDiscussion(entry.item)),
+    discussing: cards.filter(entry => !hidden.has(entry.key) && isInDiscussion(entry.item)),
     reading: false,
+    resolved,
+    resolvedReading: false,
+    loadResolved: () => undefined,
     deferred,
     deferredState: state,
     connectionFor: () => undefined,
@@ -232,15 +395,11 @@ function Inbox({
           inbox={inbox}
           now={NOW}
           onNavigate={() => undefined}
+          onProgress={async () => undefined}
           phone={phone}
-          renderChat={selected => (
-            <div className="min-h-0 flex-1">
-              <ChatPane
-                board={boardOf(...(selected.item.id === 'A3' ? [selected.item] : [selected.item, REBASE]))}
-                target={selected.item.id}
-              />
-            </div>
-          )}
+          readRecent={async () => RECENT}
+          recentOpen={recentOpen}
+          {...(initialOpen === undefined ? {} : { initialOpen })}
         />
       </div>
       {phone ? (
@@ -260,6 +419,23 @@ const TASK_CARDS: readonly InboxCard[] = [
   card(taskWith([0, 1]), ferret('fr', 'ottilie', 'Attention inbox wiring'), 'studio'),
   card(WAITING, SESSIONS[1] as SessionView, 'studio'),
   card(REBASE, SESSIONS[0] as SessionView, 'studio'),
+];
+
+const DISCUSSING = item('A7', 6, {
+  subject: 'Which database should keep the board’s finished items across restarts?',
+  why: 'The board forgets every finished item when the app restarts.',
+  ask: { kind: 'multiple-choice', options: [{ label: 'SQLite' }, { label: 'Postgres' }, { label: 'Keep memory' }] },
+  kind: 'choice',
+  waitingOn: 'ferret',
+  waitingFor: 'discussion',
+  askedAt: ago(4),
+  history: [{ at: ago(4), kind: 'discuss', note: 'Why not just keep the board in memory?' }],
+} as Partial<AttentionItem>);
+
+const DISCUSS_CARDS: readonly InboxCard[] = [
+  card(DISCUSSING, SESSIONS[0] as SessionView, 'studio'),
+  card(REBASE, SESSIONS[1] as SessionView, 'studio'),
+  card(DEPLOY, SESSIONS[0] as SessionView, 'studio'),
 ];
 
 const BOARD: AttentionSnapshot = {
@@ -343,7 +519,7 @@ function ChatPane({
       <div className="p-panel">
         <AttentionPanel
           chip={{ on: chip, onChange: setChip }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
           connection={CONNECTION}
           focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
           id="attention-panel"
@@ -366,6 +542,171 @@ function Panel(props: { readonly board?: AttentionSnapshot; readonly target?: st
   return (
     <div className="mx-auto h-dvh max-w-3xl" data-fixture="">
       <ChatPane {...props} />
+    </div>
+  );
+}
+
+const resolvedItem = (
+  id: string,
+  minutes: number,
+  patch: Partial<AttentionItem>,
+  resolution: Record<string, unknown>,
+): ResolvedAttentionItem =>
+  ({
+    ...item(id, minutes + 60, patch),
+    resolvedAt: ago(minutes),
+    resolutionNote: null,
+    resolvedBy: 'human',
+    resolvedBySession: null,
+    resolvedByName: null,
+    disposition: 'done',
+    ...resolution,
+  }) as unknown as ResolvedAttentionItem;
+
+const PERMISSION = { kind: 'permission' } as const;
+const RESOLVED_SEVEN: readonly ResolvedAttentionItem[] = [
+  resolvedItem(
+    'A14',
+    6,
+    { subject: 'Can I delete the stale build cache?', ask: PERMISSION },
+    { response: { kind: 'permission', decision: 'approve' } },
+  ),
+  resolvedItem(
+    'A13',
+    55,
+    {
+      subject: 'Use the shared fixture for the inbox tests?',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
+    },
+    { response: { kind: 'multiple-choice', choice: 'Yes' } },
+  ),
+  resolvedItem(
+    'A12',
+    190,
+    { subject: 'Rotate the relay key on the studio machine', ask: { kind: 'task' } },
+    { response: undefined },
+  ),
+  resolvedItem(
+    'A11',
+    320,
+    { subject: 'Which login should the new runtime use?', ask: { kind: 'open-question' } },
+    {
+      response: {
+        kind: 'open-question',
+        answer:
+          'The team login, please — and keep the personal one for experiments only. If the team login hits its limit mid-run, fall back to the personal one rather than stopping, and tell me in the thread when you do.\n\nOne more thing: use the studio machine, not the laptop, so the long runs do not stop when the lid closes.',
+      },
+    },
+  ),
+  resolvedItem(
+    'A10',
+    700,
+    { subject: 'Restart the staging relay?', ask: PERMISSION },
+    { disposition: 'dismissed', resolutionNote: 'Superseded by A12.' },
+  ),
+  resolvedItem(
+    'A9',
+    1_500,
+    { subject: 'Squash the branch before merge?', ask: PERMISSION },
+    { response: { kind: 'permission', decision: 'deny' } },
+  ),
+  resolvedItem(
+    'A8',
+    2_900,
+    {
+      subject: 'Rebase onto main now, or wait?',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }] },
+    },
+    { response: { kind: 'multiple-choice', choice: 'Wait' } },
+  ),
+];
+
+const quietBoard = (open: readonly AttentionItem[]): AttentionSnapshot => ({
+  ...BOARD,
+  items: open.map(entry => ({ ...entry, raisedBySession: 'fr' })) as AttentionItem[],
+  resolved: [...RESOLVED_SEVEN],
+  count: open.length,
+});
+
+const QUIET_RESOLVED_ROWS: AttentionInbox['resolved'] = RESOLVED_SEVEN.map((record, index) => {
+  const view = SESSIONS[index % 4] as SessionView;
+  const daemon = index % 3 === 2 ? LAPTOP : STUDIO;
+  return {
+    key: inboxCardKey(daemon, view.config.id, record.id),
+    daemonId: daemon,
+    machineName: daemon === LAPTOP ? 'laptop' : 'studio',
+    view,
+    record,
+  };
+});
+
+const HARNESS_ACTIONS: readonly SessionActionContribution<unknown>[] = [
+  {
+    group: 'session',
+    order: 10,
+    build: () => ({ kind: 'run', id: 'rename', label: 'Rename', icon: Pencil, run: () => undefined }),
+  },
+  {
+    group: 'tools',
+    order: 10,
+    build: () => ({ kind: 'run', id: 'reload', label: 'Reload this ferret', icon: RotateCw, run: () => undefined }),
+  },
+  {
+    group: 'danger',
+    order: 10,
+    build: () => ({ kind: 'run', id: 'stop', label: 'Stop ferret', icon: Square, danger: true, run: () => undefined }),
+  },
+];
+
+/** A real chat page's top: header, Actions menu, the quiet panel and the composer. Nothing else is invented. */
+function QuietChat({ open }: { readonly open: readonly AttentionItem[] }): ReactElement {
+  const compact = window.innerWidth < 640;
+  const board = quietBoard(open);
+  const [form, setForm] = useState<string | null>(null);
+  const sections = sessionActionSections(
+    [...HARNESS_ACTIONS, resolvedActionContribution(board.resolved, 'attention-panel', null)],
+    undefined,
+  );
+  const noop = async (): Promise<void> => undefined;
+  const session = SESSIONS[0] as SessionView;
+  return (
+    <div className="mx-auto flex h-dvh max-w-3xl flex-col bg-bg" data-fixture="">
+      <SessionTopBar
+        actions={null}
+        attentionOpen={board.items.length}
+        compact={compact}
+        menu={<ActionsMenu compact={compact} form={form} name="Ottilie" onFormChange={setForm} sections={sections} />}
+        project="ferretry"
+        session={session}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-panel">
+        <article className="rounded-panel border border-border bg-surface p-panel text-cell" data-chat-line="">
+          <p className="m-0 mb-xs text-meta text-faint">ottilie · 2m</p>
+          <Markdown
+            attentionReferenceResolver={() => true}
+            text="Rebased and pushed. The inbox wiring is done; I am starting on the resolved filter now."
+          />
+        </article>
+      </div>
+      <div className="p-panel">
+        <AttentionPanel
+          chip={{ on: true, onChange: () => undefined }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
+          connection={CONNECTION}
+          focus={null}
+          id="attention-panel"
+          now={NOW}
+          onOpenResolved={() => setForm(ATTENTION_RESOLVED_ACTION_ID)}
+          onSelect={() => undefined}
+          scope={daemonSessionScope(CONNECTION, 'fr')}
+          selectedId={null}
+          snapshot={board}
+          status="ready"
+        />
+        <div className="rounded-panel border border-border bg-surface p-panel text-meta text-faint">
+          Message ottilie…
+        </div>
+      </div>
     </div>
   );
 }
@@ -401,7 +742,19 @@ const view = new URLSearchParams(location.search).get('view') ?? 'inbox-phone';
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  view === 'inbox-phone' ? (
+  view === 'format' ? (
+    <Inbox cards={FORMAT_CARDS} phone={window.innerWidth < 768} />
+  ) : view.startsWith('format-card-') ? (
+    <Inbox cards={FORMAT_CARDS} initialOpen={(FORMAT_CARDS[Number(view.slice(12))] as InboxCard).key} phone />
+  ) : view === 'page' ? (
+    <Inbox cards={PAGE_CARDS} phone={window.innerWidth < 768} />
+  ) : view === 'page-recent' ? (
+    <Inbox cards={PAGE_CARDS} phone={window.innerWidth < 768} recentOpen />
+  ) : view === 'page-card' ? (
+    <Inbox cards={PAGE_CARDS} initialOpen={(PAGE_CARDS[2] as InboxCard).key} phone />
+  ) : view === 'page-card-recent' ? (
+    <Inbox cards={PAGE_CARDS} initialOpen={(PAGE_CARDS[2] as InboxCard).key} phone recentOpen />
+  ) : view === 'inbox-phone' ? (
     <Inbox phone />
   ) : view === 'inbox-desktop' ? (
     <Inbox phone={false} />
@@ -414,9 +767,13 @@ createRoot(root).render(
   ) : view === 'task-waiting' ? (
     <Panel board={boardOf(WAITING)} target="A9" />
   ) : view === 'task-inbox-phone' ? (
-    <Inbox cards={TASK_CARDS} phone />
+    <Inbox cards={TASK_CARDS} initialOpen={(TASK_CARDS[0] as InboxCard).key} phone />
   ) : view === 'task-inbox-desktop' ? (
     <Inbox cards={TASK_CARDS} phone={false} />
+  ) : view === 'discuss-inbox-phone' ? (
+    <Inbox cards={DISCUSS_CARDS} initialOpen={(DISCUSS_CARDS[0] as InboxCard).key} phone />
+  ) : view === 'discuss-inbox-desktop' ? (
+    <Inbox cards={DISCUSS_CARDS} phone={false} />
   ) : view === 'overload' ? (
     <Panel board={OVERLOAD_BOARD} target={null} />
   ) : view === 'rich' ? (
@@ -425,6 +782,12 @@ createRoot(root).render(
     <Panel board={boardOf(LONG)} target="A1" />
   ) : view === 'several' ? (
     <Panel board={boardOf(RICH, SINGLE, OLD)} target={null} />
+  ) : view === 'quiet-empty' ? (
+    <QuietChat open={[]} />
+  ) : view === 'quiet-one' ? (
+    <QuietChat open={[REBASE]} />
+  ) : view === 'inbox-resolved' ? (
+    <Inbox phone={window.innerWidth < 640} resolved={QUIET_RESOLVED_ROWS} />
   ) : view === 'board' ? (
     <BoardPage />
   ) : view === 'rail' ? (

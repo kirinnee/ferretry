@@ -614,4 +614,42 @@ describe('SessionWorkerRuntime — hosting', () => {
     // Assert
     should(looks().length).be.aboveOrEqual(2);
   });
+
+  it('should say why a request failed when the transcript it was bound to has no reader', async () => {
+    // Arrange
+    const { attach, advance, ask, send, binding } = await rig();
+    await attach();
+    await advance(0);
+    const harness = 'gemini' as 'claude';
+    await send({
+      kind: 'bind',
+      session: 'a',
+      generation: 1,
+      binding: { tmux: binding.tmux, transcript: { file: binding.transcript?.file ?? '', harness } },
+    });
+
+    // Act
+    const answer = await ask({ kind: 'send-evidence', since: NOW });
+
+    // Assert
+    should(answer.failure).be.a.String().and.not.be.empty();
+    should(answer).not.have.property('value');
+  });
+
+  it('should look once more after a look that another look interrupted, and not before it finished', async () => {
+    // Arrange
+    const { attach, advance, ask, looks } = await rig();
+    await attach();
+
+    // Act — the barrier's look is running when the armed attach look comes due and finds it busy.
+    const barrier = ask({ kind: 'observe' });
+    await advance(0);
+    await barrier;
+    const lookedByThen = looks().length;
+    await advance(2_000);
+
+    // Assert
+    should(lookedByThen).equal(1);
+    should(looks().length).equal(2);
+  });
 });

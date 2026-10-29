@@ -133,6 +133,12 @@ function describeClose(event: unknown): string {
   return [typeof code === 'number' ? String(code) : 'no close code', said].filter(part => part !== '').join(' ');
 }
 
+/** The numeric close code a close event carried, or `undefined` when it had none. */
+function closeCode(event: unknown): number | undefined {
+  const { code } = (event ?? {}) as { code?: unknown };
+  return typeof code === 'number' ? code : undefined;
+}
+
 /** How recent an in-band message must be to be blamed for a close. */
 const IN_BAND_WINDOW_MS = 5_000;
 
@@ -182,6 +188,13 @@ export class BunRelayCarrier {
    *  THEN closes, so the close alone ("1006") would hide the relay's own words. */
   #inBand: { readonly text: string; readonly at: number } | undefined;
   #inbox: Promise<void> = Promise.resolve();
+  /**
+   * The `claim-handover` token (§5) the last socket that held this rendezvous was issued, kept only once
+   * that socket has ended: it is what the NEXT claim offers as `replaces`, so the rendezvous can supersede
+   * a socket it never heard close instead of refusing `4409` until its sweep. Cleared when the relay
+   * refuses a claim for any reason but `4409`, and replaced by the new token when a claim is accepted.
+   */
+  #handover: string | undefined;
   #detail: string | undefined;
   #stopped = false;
 
@@ -257,6 +270,7 @@ export class BunRelayCarrier {
       connections: this.deps.connections,
       scheduler: this.#scheduler,
       clock: { now: () => this.#now() },
+      ...(this.#handover === undefined ? {} : { replaces: this.#handover }),
       ...(this.deps.lease === undefined ? {} : { lease: this.deps.lease }),
     });
     this.#link = link;
@@ -280,7 +294,7 @@ export class BunRelayCarrier {
       this.#armKeepalive(socket, link);
     };
     socket.onmessage = event => this.#receive(socket, link, event.data);
-    socket.onclose = event => this.#ended(socket, link, describeClose(event));
+    socket.onclose = event => this.#ended(socket, link, describeClose(event), closeCode(event));
     socket.onerror = () => this.#ended(socket, link, 'connection error');
   }
 
@@ -416,8 +430,13 @@ export class BunRelayCarrier {
     this.#inBand = { text: `${message.t} ${message.code} ${printable(message.reason)}`, at: this.#now() };
   }
 
-  #ended(socket: RelayWebSocket, link: RelayLink, closed: string): void {
+  /**
+   * `code` is the close code the RENDEZVOUS sent, when it did: a socket this daemon condemned has none,
+   * and neither has a transport that failed, so neither says anything about the token.
+   */
+  #ended(socket: RelayWebSocket, link: RelayLink, closed: string, code?: number): void {
     if (!this.#live(socket, link)) return;
+    this.#keepHandover(link, code);
     this.#clearTimers();
     this.#detach(socket);
     this.#socket = undefined;
@@ -472,6 +491,17 @@ export class BunRelayCarrier {
       this.#say(`disconnected (${how}) — redial attempt ${this.#attempts} in ${formatDelay(delay)}`);
     }
     this.#redial = this.#scheduler.after(delay, () => this.#dial());
+  }
+
+  /**
+   * What the next claim may offer as `replaces`: this link's own token if the rendezvous issued one, else
+   * the one already held — unless the rendezvous itself refused the claim with something other than `4409`,
+   * which says the token is no use and must not be offered again.
+   */
+  #keepHandover(link: RelayLink, code: number | undefined): void {
+    const issued = link.report().handover;
+    const refused = code !== undefined && code >= 4000 && code <= 4999 && code !== RELAY_CLOSE_CODES.rendezvousClaimed;
+    this.#handover = issued ?? (refused ? undefined : this.#handover);
   }
 
   /** One log line, naming the relay's origin and never the path that carries the fingerprint. */

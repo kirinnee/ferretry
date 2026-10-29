@@ -35,15 +35,12 @@ export function sinceInstant(value: string, now: () => number): string {
 
 /** Resolves the one harness a `--select` adoption request may carry. */
 function inferHarness(rows: readonly ImportableConversation[]): Harness {
-  const first = rows[0];
-  if (first === undefined) {
-    throw new Error('cannot tell which harness: name a known conversation id, or pass --harness');
-  }
   const harnesses = new Set(rows.map(row => row.harness));
   if (harnesses.size > 1) {
     throw new Error('selected conversations span more than one harness; pass --harness to pick one');
   }
-  return first.harness;
+  // Both callers adopt only a non-empty selection, so there is always exactly one harness here.
+  return [...harnesses][0] as Harness;
 }
 
 /** Collaborators and facts shared by both commands in this domain. */

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { IMPORT_NAMES, importedRuntimeName } from '@ferretry/fleet';
 import type { SessionView, StartSessionRequest, UsageFeedView } from '@ferretry/protocol';
+import { renderToStaticMarkup } from 'react-dom/server';
 import type { ReactTestInstance } from 'react-test-renderer';
 
 import { NewSessionPage, type NewSessionPageProps } from '../../src/components/new-session-page.tsx';
@@ -956,6 +957,26 @@ describe('NewSessionPage with the daemon pickers', () => {
     // Nobody has checked, and the button does not pretend either way.
     expect(chipText('claude-auto-studio')).not.toMatch(/never checked|ready/iu);
     expect(recorder.probes).toBe(0);
+  });
+
+  it('renders its form from the stored snapshot without a browser, and asks nothing while doing so', () => {
+    const { props, recorder } = wire();
+    const markup = renderToStaticMarkup(<NewSessionPage {...props} />);
+    expect(markup).toContain('fy-new-session-cwd');
+    expect(recorder.probes).toBe(0);
+  });
+
+  it('renders the machine’s continue list without a browser too', () => {
+    const { props } = wire();
+    const markup = renderToStaticMarkup(
+      <NewSessionPage
+        {...props}
+        continuing
+        createFleetClient={async () => ({}) as never}
+        resumeSession={async () => undefined}
+      />,
+    );
+    expect(markup).toContain('data-continue-conversation');
   });
 
   it('prints a login’s stored verdict on its button once the host has one', async () => {

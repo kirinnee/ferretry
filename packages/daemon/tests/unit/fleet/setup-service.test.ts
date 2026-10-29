@@ -327,6 +327,37 @@ describe('scan', () => {
     should(scan.importing).deepEqual({ available: true });
   });
 
+  it('should say whether the two tools hold the same instructions when both have some', async () => {
+    // Arrange
+    const same = world();
+    same.state.scans = [
+      claudeScan(),
+      codexScan({
+        command: '/usr/bin/codex',
+        instructions: { kind: 'text', source: '/person/.codex/AGENTS.md', text: 'Be kind.\n', bytes: 9 },
+      }),
+    ];
+    const different = world();
+    different.state.scans = [
+      claudeScan(),
+      codexScan({
+        command: '/usr/bin/codex',
+        instructions: { kind: 'text', source: '/person/.codex/AGENTS.md', text: 'Be brief.\n', bytes: 10 },
+      }),
+    ];
+    const lonely = world();
+
+    // Act
+    const identical = await same.service.scan();
+    const differing = await different.service.scan();
+    const single = await lonely.service.scan();
+
+    // Assert
+    should(identical.instructionsIdentical).equal(true);
+    should(differing.instructionsIdentical).equal(false);
+    should(single).not.have.property('instructionsIdentical');
+  });
+
   it('should show a tool with no package manager with the command to run by hand', async () => {
     const { service, state } = world();
     state.plans = [
@@ -654,6 +685,27 @@ describe('the setup.import executor', () => {
     should(description).containEql('a new Codex login that needs sign-in');
   });
 
+  it('should say it only imported, naming no runtime, when an accepted update adds none', async () => {
+    // Arrange: one import is on disk, and the host's CLAUDE.md has since changed.
+    const { service, state, applied } = world();
+    await importOnce(service);
+    const written = applied[0]?.documents ?? [];
+    for (const document of written) state.assets[document.path] = document.content;
+    state.reading = configReading(modelOfWrites(written), 'rev-2');
+    state.scans = [
+      claudeScan({
+        instructions: { kind: 'text', source: '/person/.claude/CLAUDE.md', text: 'Be kinder.\n', bytes: 11 },
+      }),
+      codexScan(),
+    ];
+
+    // Act — the twin runtime is not added again, so only the update lands.
+    const { summary } = await importOnce(service, IMPORT({ acceptedUpdates: ['instructions/main'] }));
+
+    // Assert
+    should(summary).equal('Imported into studio.');
+  });
+
   it('should refuse when the secret store cannot be read, and fail when it cannot take a value', async () => {
     const unreadable = world();
     unreadable.state.secretNames = async () => {
@@ -672,6 +724,17 @@ describe('the setup.import executor', () => {
     const failure = await catalogRefusal(full.service.executors.setup.execute(change), 'fleet_change_failed');
     should(failure.message).equal('the secret store could not take GITHUB_TOKEN, so nothing was changed: full');
     should(full.applied).have.length(0);
+  });
+
+  it('should report an apply that failed for any other reason in its own words', async () => {
+    const { service, state } = world();
+    state.apply = async () => {
+      throw new Error('the manifest could not be written');
+    };
+    const change = IMPORT();
+    await service.executors.setup.describe(change);
+    const failure = await catalogRefusal(service.executors.setup.execute(change), 'fleet_change_failed');
+    should(failure.message).equal('the manifest could not be written');
   });
 
   it('should refuse an import that would leave a configuration this machine cannot read', async () => {

@@ -12,16 +12,30 @@
  */
 
 import type { SessionView } from '@ferretry/protocol';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from 'react';
 import type { DaemonAttentionClient } from '../lib/attention-client.ts';
 import {
   attentionSummaryKey,
   DeferredAttentionActions,
   type DeferredAttentionState,
   type DeferredTimers,
+  discussingCards,
+  discussingSessions,
   type InboxAction,
   type InboxCard,
+  type InboxResolved,
   inboxCards,
+  inboxResolved,
+  sessionsToReadForResolved,
   type UnreadSession,
   unreadSessions,
   unreadTotal,
@@ -40,12 +54,20 @@ export interface AttentionInboxMachine {
 export interface AttentionInbox {
   /** Conversations with open Attention, newest needing you first. */
   readonly unread: readonly UnreadSession[];
-  /** Open items across them: the number every Attention badge shows. */
+  /** Open items that need the owner across them (items in discussion excluded): the number every Attention badge shows. */
   readonly total: number;
   /** The deck: every read open item, newest first, minus the answers still undoable or in flight. */
   readonly cards: readonly InboxCard[];
+  /** Items in discussion: waiting on their ferret, so not in the deck and not in `total`. */
+  readonly discussing: readonly InboxCard[];
   /** True while an unread conversation's board has not been read yet. */
   readonly reading: boolean;
+  /** Resolved items of every conversation whose board is held, newest first: the Resolved filter's list. */
+  readonly resolved: readonly InboxResolved[];
+  /** True while `loadResolved` is reading boards. */
+  readonly resolvedReading: boolean;
+  /** Reads the recent conversations' boards that are not held yet, once per call that finds any. */
+  readonly loadResolved: () => void;
   readonly deferred: DeferredAttentionActions;
   readonly deferredState: DeferredAttentionState;
   readonly connectionFor: (daemonId: DaemonId) => DaemonConnection | undefined;
@@ -82,15 +104,16 @@ export const useInboxMachines = (
 
 /** Sends one inbox answer through the ONE attention client, to the machine the card came from. */
 const runInboxAction = async (
-  client: Pick<DaemonAttentionClient, 'respond' | 'resolve' | 'dismiss' | 'needsInfo'>,
+  client: Pick<DaemonAttentionClient, 'respond' | 'resolve' | 'dismiss' | 'needsInfo' | 'discuss'>,
   connection: DaemonConnection,
   card: InboxCard,
   action: InboxAction,
 ): Promise<void> => {
   const scope = daemonSessionScope(connection, card.view.config.id);
-  if (action.kind === 'respond') await client.respond(connection, scope, card.item.id, action.response);
+  if (action.kind === 'respond') await client.respond(connection, scope, card.item.id, action.response, action.note);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, card.item.id, action.note);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, card.item.id, action.note);
+  else if (action.kind === 'discuss') await client.discuss(connection, scope, card.item.id, action.note);
   else await client.resolve(connection, scope, card.item.id, action.note);
 };
 
@@ -146,13 +169,20 @@ export function useAttentionInboxModel(
       }, timers),
     [client, connectionFor, timers],
   );
-  // An answer the reader gave is sent, not dropped, when the page goes away.
+  // An answer the reader gave is sent, not dropped, when the page goes away. A phone does not always fire
+  // `pagehide` when the reader swipes to another app — it hides the page and may kill it later — so the page
+  // going hidden flushes too: otherwise an answer still inside its undo window dies with the process.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const flush = (): void => deferred.flush();
+    const flushWhenHidden = (): void => {
+      if (document.visibilityState === 'hidden') deferred.flush();
+    };
     window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', flushWhenHidden);
     return () => {
       window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', flushWhenHidden);
       deferred.flush();
     };
   }, [deferred]);
@@ -170,12 +200,25 @@ export function useAttentionInboxModel(
     [machines],
   );
   const unread = useStable(freshUnread, unreadKey(freshUnread));
+  const freshDiscussing = useMemo(
+    () =>
+      discussingSessions(
+        machines.map(machine => ({
+          daemonId: machine.connection.daemonId,
+          name: machine.name,
+          sessions: machine.sessions,
+        })),
+      ),
+    [machines],
+  );
+  const discussingEntries = useStable(freshDiscussing, unreadKey(freshDiscussing));
 
-  // Read each unread conversation's board when its summary moved since the last read.
+  // Read each conversation's board — one that needs the owner, or one with a discussion open — when its
+  // summary moved since the last read.
   const readKeys = useRef(new Map<string, string>());
   useEffect(() => {
     const seen = new Set<string>();
-    for (const entry of unread) {
+    for (const entry of [...unread, ...discussingEntries]) {
       const connection = connectionFor(entry.daemonId);
       if (connection === undefined) continue;
       const scope = daemonSessionScope(connection, entry.view.config.id);
@@ -187,7 +230,7 @@ export function useAttentionInboxModel(
       void client.revalidate(connection, scope).catch(() => undefined);
     }
     for (const id of [...readKeys.current.keys()]) if (!seen.has(id)) readKeys.current.delete(id);
-  }, [client, connectionFor, unread]);
+  }, [client, connectionFor, unread, discussingEntries]);
 
   const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
   const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
@@ -202,13 +245,80 @@ export function useAttentionInboxModel(
     [unread, boards, deferredState],
   );
   const cards = useStable(freshCards, cardsKey(freshCards));
+  const freshDiscussingCards = useMemo(
+    () =>
+      discussingCards(discussingEntries, (daemonId, sessionId) =>
+        boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
+      ),
+    [discussingEntries, boards],
+  );
+  const discussing = useStable(freshDiscussingCards, cardsKey(freshDiscussingCards));
   const reading = unread.some(
     entry => !boards.snapshots.has(daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id })),
   );
 
+  const sources = useMemo(
+    () =>
+      machines.map(machine => ({
+        daemonId: machine.connection.daemonId,
+        name: machine.name,
+        sessions: machine.sessions,
+      })),
+    [machines],
+  );
+  const resolved = useMemo(
+    () =>
+      inboxResolved(sources, (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))),
+    [sources, boards],
+  );
+  const [resolvedReading, setResolvedReading] = useState(false);
+  const resolvedBusy = useRef(false);
+  const loadResolved = useCallback((): void => {
+    if (resolvedBusy.current) return;
+    const wanted = sessionsToReadForResolved(sources, (daemonId, sessionId) =>
+      boards.snapshots.has(daemonSessionKey({ daemonId, sessionId })),
+    );
+    if (wanted.length === 0) return;
+    resolvedBusy.current = true;
+    setResolvedReading(true);
+    const reads = wanted.flatMap(({ daemonId, sessionId }) => {
+      const connection = connectionFor(daemonId);
+      return connection === undefined
+        ? []
+        : [client.revalidate(connection, daemonSessionScope(connection, sessionId)).catch(() => undefined)];
+    });
+    void Promise.all(reads).finally(() => {
+      resolvedBusy.current = false;
+      setResolvedReading(false);
+    });
+  }, [client, connectionFor, sources, boards]);
+
   return useMemo(
-    () => ({ unread, total: unreadTotal(unread), cards, reading, deferred, deferredState, connectionFor }),
-    [unread, cards, reading, deferred, deferredState, connectionFor],
+    () => ({
+      unread,
+      total: unreadTotal(unread),
+      cards,
+      discussing,
+      reading,
+      resolved,
+      resolvedReading,
+      loadResolved,
+      deferred,
+      deferredState,
+      connectionFor,
+    }),
+    [
+      unread,
+      cards,
+      discussing,
+      reading,
+      resolved,
+      resolvedReading,
+      loadResolved,
+      deferred,
+      deferredState,
+      connectionFor,
+    ],
   );
 }
 

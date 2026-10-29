@@ -3,8 +3,6 @@ import { MAX_ATTENTION_DETAIL_LENGTH } from '@ferretry/protocol';
 import {
   answersPerQuestion,
   composeQuestionAnswers,
-  DISMISS_ACTION,
-  DONE_ACTION,
   hasAttentionBrief,
   hasSeveralQuestions,
   questionAnswersAction,
@@ -65,6 +63,8 @@ describe('structured-item rules', () => {
   test('knows a rich item from an old one', () => {
     expect(hasAttentionBrief({})).toBe(false);
     expect(hasAttentionBrief({ impact: 'it stalls' })).toBe(true);
+    expect(hasAttentionBrief({ premise: '- a fact' })).toBe(true);
+    expect(hasAttentionBrief({ decided: '- a decision' })).toBe(true);
   });
 
   test('answers per question only for several questions with an open-question ask', () => {
@@ -75,12 +75,12 @@ describe('structured-item rules', () => {
     expect(answersPerQuestion({ questions: [{ question: 'a' }], ask: { kind: 'open-question' } })).toBe(false);
   });
 
-  test('swipes Done/Dismiss on any item, however many questions or options it has', () => {
+  test('swipes the own answers of a card however many questions or options it has', () => {
     const ask = { kind: 'multiple-choice' as const, options: [{ label: 'One' }, { label: 'Two' }] };
-    expect(swipeMap({ ask, questions: [{ question: 'a' }, { question: 'b' }] })).toEqual({
-      right: DONE_ACTION,
-      left: DISMISS_ACTION,
-    });
-    expect(swipeMap({ ask, questions: [{ question: 'a' }] })).toEqual({ right: DONE_ACTION, left: DISMISS_ACTION });
+    const several = swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }, { question: 'b' }] });
+    expect(Object.keys(several).sort()).toEqual(['left', 'right']);
+    expect(several.right).toMatchObject({ kind: 'respond', label: 'One' });
+    expect(several.left).toMatchObject({ kind: 'respond', label: 'Two' });
+    expect(swipeMap({ subject: 'Pick', ask, questions: [{ question: 'a' }] })).toEqual(several);
   });
 });

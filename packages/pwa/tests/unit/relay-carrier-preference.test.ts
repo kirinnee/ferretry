@@ -41,6 +41,13 @@ const TUNNEL: ConnectionMethod = { kind: 'tunnel', tunnelUrl: TUNNEL_URL };
 const DIRECT: ConnectionMethod = { kind: 'direct', daemonUrl: DAEMON_URL };
 const DEVICE_ID = 'fy_device_id_preferenceTestDevice0001';
 const device = await testDevice(DEVICE_ID);
+/**
+ * The network a router reads a daemon's liveness route over, offline. A router given none uses the real
+ * `fetch`, and a walk whose direct socket failed then dialled `studio.example` from the test runner.
+ */
+const offline = async (): Promise<Response> => {
+  throw new TypeError('Failed to fetch');
+};
 
 type Reach = 'live' | 'refuse' | 'silent';
 
@@ -115,9 +122,7 @@ const setup = async (options: Setup = {}) => {
     deviceKey: async () => device.claim.key,
     dial,
     heartbeat: options.heartbeat ?? (() => () => undefined),
-    network: async () => {
-      throw new TypeError('Failed to fetch');
-    },
+    network: offline,
     preference: typeof preference === 'function' ? preference : () => preference,
     ...(options.dialers === undefined ? {} : { dialers: options.dialers }),
     ...(options.tunnelService === undefined
@@ -369,6 +374,24 @@ describe('Tunnel only', () => {
     await settle(5);
   });
 
+  it('should say what failed when the tunnel the daemon revealed did not answer either', async () => {
+    const { router, daemon, hosts, paths } = await setup({
+      published: [RELAY],
+      reach: { 'relay.example': 'live' },
+      preference: 'tunnel',
+      publishes: [TUNNEL, RELAY],
+    });
+
+    await should(fetchProjects(router, daemon)).be.rejectedWith(
+      /^No configured connection worked: Cloudflare tunnel was not reachable/u,
+    );
+
+    // The daemon was asked over its relay, the tunnel it named was dialled, and nothing else was tried.
+    should(hosts()).eql([DIRECT_HOST, 'relay.example', TUNNEL_HOST]);
+    should(paths()).eql(['/v1/carriers']);
+    await settle(5);
+  });
+
   it('should follow a re-provisioned hostname when the one it kept no longer answers', async () => {
     const moved: ConnectionMethod = { kind: 'tunnel', tunnelUrl: 'https://n3w.tunnels.example.com' };
     const { router, daemon, hosts, paths } = await setup({
@@ -545,6 +568,7 @@ describe('WebRTC', () => {
         return refused;
       },
       heartbeat: () => () => undefined,
+      network: offline,
       dialers: { webrtc: webrtc.dialer },
       preference: () => 'auto',
       hostedRelay: async () => HOSTED.relayUrl,
@@ -673,6 +697,7 @@ describe('signalling over the introducers', () => {
       deviceKey: async () => device.claim.key,
       dial: () => new ScriptedSocket(),
       heartbeat: () => () => undefined,
+      network: offline,
       preference: () => 'webrtc',
       dialers: {
         webrtc: async context => {
@@ -772,6 +797,7 @@ describe('changing the preference', () => {
       dial: () => rejecting.dial(),
       preference: () => 'auto',
       heartbeat: () => () => undefined,
+      network: offline,
     });
     router2.resolvePaired(() => [refused.daemon]);
     await should(router2.send(refused.daemon, `${DAEMON_URL}/v1/projects`)).be.rejected();
@@ -921,6 +947,7 @@ describe('carrier control (GET/PUT /v1/tunnel, §15)', () => {
       dial: () => rejecting.dial(),
       preference: () => 'auto',
       heartbeat: () => () => undefined,
+      network: offline,
     });
     router.resolvePaired(() => [refused.daemon]);
     await should(router.send(refused.daemon, `${DAEMON_URL}/v1/projects`)).be.rejected();

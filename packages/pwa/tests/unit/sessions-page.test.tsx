@@ -2,6 +2,7 @@ import '../support/dom.ts';
 
 import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
 import type { SessionView, WardenStatusView } from '@ferretry/protocol';
+import type { FyApiClient } from '@ferretry/protocol/client';
 import type { ComponentType } from 'react';
 
 import { SessionsPage, type SessionsPageProps } from '../../src/components/sessions-page.tsx';
@@ -17,6 +18,7 @@ import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
 import type { DaemonFleetPort } from '../../src/lib/fleet-store.ts';
 import { DaemonFleetStore } from '../../src/lib/fleet-store.ts';
 import { PageHost } from '../../src/lib/pages/page-host.tsx';
+import { DaemonClientProvider } from '../../src/lib/store.tsx';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../src/lib/projects-store.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../../src/lib/usage-store.ts';
 import {
@@ -28,7 +30,9 @@ import {
   inboxCard,
 } from '../support/attention-inbox.tsx';
 import { interact, mount, must } from '../support/dom.ts';
+import { healthOf } from '../support/health.ts';
 import { sessionView } from '../support/sessions.ts';
+import { settleUntil } from '../support/settle.ts';
 import { wardenConfig, wardenStatus } from '../support/warden.ts';
 
 const alpha = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.invalid', deviceId: 'alpha-token' });
@@ -780,5 +784,58 @@ describe('SessionsPage Needs you', () => {
     expect(bare.container.querySelector('[data-attention-needs-you]')).toBeNull();
     expect(bare.container.querySelector('[data-attention-undo]')).toBeNull();
     await bare.unmount();
+  });
+});
+
+describe('SessionsPage on a saturated disk', () => {
+  const machineAnswering = (io?: unknown) =>
+    ({
+      request: async (_path: string, schema: { parse: (value: unknown) => unknown }) =>
+        schema.parse({ ...healthOf('4.101.0'), ...(io === undefined ? {} : { io }) }),
+    }) as unknown as FyApiClient;
+
+  it('says the daemon is slow, not dead, above the sessions it still lists', async () => {
+    // Arrange
+    const client = machineAnswering({ someAvg10: 52, fullAvg10: 46, saturated: true });
+    const page = await mount(
+      <DaemonClientProvider client={async () => client}>
+        <SessionsPage {...pageProps()} />
+      </DaemonClientProvider>,
+    );
+    try {
+      // Act
+      await settleUntil(
+        () => page.container.querySelector('[data-disk-pressure]') !== null,
+        'the disk note to appear',
+        interact,
+      );
+
+      // Assert
+      expect(page.container.querySelector('[data-disk-pressure]')?.textContent).toBe(
+        'Disk is saturated (io pressure 46% full) — the daemon is slow, not dead',
+      );
+      expect(page.container.textContent).toContain('Alpha-Team');
+    } finally {
+      await page.unmount();
+    }
+  });
+
+  it('says nothing about the disk when the machine reports none', async () => {
+    // Arrange
+    const client = machineAnswering();
+    const page = await mount(
+      <DaemonClientProvider client={async () => client}>
+        <SessionsPage {...pageProps()} />
+      </DaemonClientProvider>,
+    );
+    try {
+      // Act
+      await settle();
+
+      // Assert
+      expect(page.container.querySelector('[data-disk-pressure]')).toBeNull();
+    } finally {
+      await page.unmount();
+    }
   });
 });

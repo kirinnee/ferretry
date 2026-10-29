@@ -214,6 +214,7 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
+import { RECENT_MESSAGE_COUNT, type RecentMessagesMemory, readRecentMessages } from './lib/recent-messages.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
@@ -1552,9 +1553,7 @@ function SessionRoute({
           // Only THIS daemon's slice, and only once it has actually been read:
           // `sessions === null` is "not read yet", which must not reach the
           // reference surface as a fleet with nobody in it.
-          {...(fleetSlice?.sessions === null || fleetSlice?.sessions === undefined
-            ? {}
-            : { daemonSessions: fleetSlice.sessions })}
+          daemonSessions={fleetSlice?.sessions ?? undefined}
           entries={placedEntries}
           onRetry={retrySend}
           onCancel={cancelSend}
@@ -1674,10 +1673,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     },
     [store.clients],
   );
-  const readWardenStatus = useCallback(
-    async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
-    [store.clients],
-  );
   const createDaemonClient = useCallback(
     async (daemon: DaemonConnection) => await store.clients.client(daemon),
     [store.clients],
@@ -1734,7 +1729,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       controls={store.controls}
       dictation={dictation}
       probeDaemon={probeDaemon}
-      readWardenStatus={readWardenStatus}
       // Through the app's client pool, so a grant read travels the same carrier — direct first, relay
       // as the automatic fallback — as every other daemon call. The surface's own default would dial
       // the daemon address directly, which is how a screen ends up reporting a limit it could not read
@@ -1910,7 +1904,10 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
  */
 function AttentionRoute(_: DaemonPageProps) {
   const { navigate } = useRouter();
+  const store = useAppStore();
   const inbox = useAttentionInbox();
+  // Each conversation's walk to its last messages, kept while the page is open so a re-read is one page.
+  const recentWalks = useRef<RecentMessagesMemory>(new Map()).current;
   const phone = useLayoutMode() === 'drawer';
   const machineNotifications = usePairedMachineNotifications();
   return inbox === null ? null : (
@@ -1926,15 +1923,27 @@ function AttentionRoute(_: DaemonPageProps) {
       inbox={inbox}
       onNavigate={navigate}
       phone={phone}
-      renderChat={card => {
+      onProgress={async (card, step, done) => {
         const target = inbox.connectionFor(card.daemonId);
-        return target === undefined ? null : (
-          <SessionRoute
-            attentionOverride={card.item.id}
-            connection={target}
-            key={card.key}
-            scope={daemonSessionScope(target, card.view.config.id)}
-          />
+        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
+        await store.attention.progress(
+          target,
+          daemonSessionScope(target, card.view.config.id),
+          card.item.id,
+          step,
+          done,
+        );
+      }}
+      readRecent={async card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
+        const scope = daemonSessionScope(target, card.view.config.id);
+        return await readRecentMessages(
+          await store.clients.client(target),
+          card.view.config.id,
+          RECENT_MESSAGE_COUNT,
+          recentWalks,
+          daemonSessionKey(scope),
         );
       }}
     />
@@ -2488,11 +2497,7 @@ export function AppShell() {
       daemonId: record.daemonId,
       name: distinctDaemonName(record, connectionSnapshot.connections),
     }));
-    const machineRecord = connectionSnapshot.connections.find(candidate => candidate.daemonId === connection.daemonId);
-    const machineName =
-      machineRecord === undefined
-        ? daemonDisplayName(connection)
-        : distinctDaemonName(machineRecord, connectionSnapshot.connections);
+    const machineName = distinctDaemonName(connection, connectionSnapshot.connections);
     const sessionsBar = (presentation: SessionsBarPresentation, onClose?: () => void) => (
       <ShellSessionsBar
         connection={connection}

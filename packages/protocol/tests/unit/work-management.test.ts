@@ -330,6 +330,14 @@ const resolvedAttention = {
 
 const attentionCases: SchemaCase[] = [
   { name: 'attention source', schema: attention.AttentionSourceSchema, value: 'agent-raised' },
+  { name: 'card kind', schema: attention.AttentionKindSchema, value: 'yesno' },
+  { name: 'swipe direction', schema: attention.AttentionDirectionSchema, value: 'up' },
+  { name: 'answer effect', schema: attention.AttentionAnswerEffectSchema, value: 'needs-info' },
+  {
+    name: 'card answer',
+    schema: attention.AttentionCardAnswerSchema,
+    value: { direction: 'up', does: 'approve', label: 'Always allow', description: 'Stop asking for this command' },
+  },
   {
     name: 'ask option',
     schema: attention.AttentionAskOptionSchema,
@@ -404,6 +412,25 @@ const attentionCases: SchemaCase[] = [
     name: 'held attention replies',
     schema: attention.AttentionRepliesSchema,
     value: { pending: ['A1', 'A3'], dueAt: INSTANT },
+  },
+  {
+    name: 'attention answers on their way',
+    schema: attention.AttentionDeliverySchema,
+    value: { sending: ['A2'], heldForComposer: true },
+  },
+  {
+    name: 'an undelivered retry',
+    schema: attention.AttentionUndeliveredReplySchema,
+    value: { action: 'discuss', note: 'The premise is wrong' },
+  },
+  {
+    name: 'an undelivered answer',
+    schema: attention.AttentionUndeliveredSchema,
+    value: {
+      at: INSTANT,
+      reply: { action: 'resolve', response: { kind: 'permission', decision: 'approve' } },
+      reason: 'it never appeared in the ferret’s transcript',
+    },
   },
   {
     name: 'attention snapshot',
@@ -1176,6 +1203,8 @@ describe('attention schemas', () => {
     // Act + Assert
     // A waiting mark needs its time, and the history is bounded.
     should(attention.AttentionItemSchema.safeParse({ ...attentionItem, waitingOn: 'ferret' }).success).be.false();
+    // What the owner waits FOR exists only while they wait.
+    should(attention.AttentionItemSchema.safeParse({ ...attentionItem, waitingFor: 'discussion' }).success).be.false();
     should(
       attention.AttentionItemSchema.safeParse({
         ...attentionItem,

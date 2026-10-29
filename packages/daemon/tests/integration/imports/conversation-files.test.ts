@@ -27,7 +27,12 @@ import {
   SystemClock,
 } from '../../../src/adapters/index.ts';
 import { ConversationImportService, conversationKey, parseSessionId } from '../../../src/lib/index.ts';
-import { ClaudeTranscriptParser, CodexTranscriptParser } from '../../../src/lib/transcript/index.ts';
+import { LOOP_PARSE_PACING } from '../../../src/adapters/transcript/index.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  PacedTranscriptParser,
+} from '../../../src/lib/transcript/index.ts';
 
 const NOW = '2026-10-18T10:00:00.000Z';
 const CLAUDE_ID = '11111111-1111-4111-8111-111111111111';
@@ -109,7 +114,10 @@ describe('discovering conversations on disk', () => {
         { harness: 'codex', home: join(home, '.codex'), source: 'computer' },
         { harness: 'codex', home: join(home, 'absent'), source: 'ferretry' },
       ],
-      { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() },
+      {
+        claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), LOOP_PARSE_PACING),
+        codex: new PacedTranscriptParser(new CodexTranscriptParser(), LOOP_PARSE_PACING),
+      },
       { owners: async () => new Map() },
       { adopt: async () => ({ kind: 'refused', code: 'failed', reason: 'not under test' }) },
     );

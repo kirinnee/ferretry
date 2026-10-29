@@ -173,6 +173,11 @@ describe('ordering and words', () => {
     expect(MCP_SCOPE_LABEL.component).toBe('Ferretry');
   });
 
+  it('orders skills of the same scope by name, ignoring case', () => {
+    const skills = sortedSkills([skill({ name: 'beta' }), skill({ name: 'Alpha' }), skill({ name: 'alpha-two' })]);
+    expect(skills.map(entry => entry.name)).toEqual(['Alpha', 'alpha-two', 'beta']);
+  });
+
   it('sorts skills winners first, Project before User before Ferretry, and names what overrides one', () => {
     const skills = sortedSkills([
       skill({ name: 'b', scope: 'ferretry' }),

@@ -1,7 +1,13 @@
 import { describe, expect, it } from 'bun:test';
 import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { healthOf } from '../support/health.ts';
-import { type DaemonHealthRead, machineLacks, machineOffers } from '../../src/lib/daemon-health.ts';
+import {
+  type DaemonHealthRead,
+  diskPressureOf,
+  diskPressureSentence,
+  machineLacks,
+  machineOffers,
+} from '../../src/lib/daemon-health.ts';
 
 const read = (features?: string[]): DaemonHealthRead => ({
   kind: 'read',
@@ -27,5 +33,32 @@ describe('what a machine’s health says it can do', () => {
       expect(machineOffers(machine, FEATURE)).toBe(false);
       expect(machineLacks(machine, FEATURE)).toBe(false);
     }
+  });
+});
+
+describe('what a machine’s health says about its disk', () => {
+  const saturated = { someAvg10: 52, fullAvg10: 46, saturated: true };
+  const calm = { someAvg10: 1, saturated: false };
+  const withIo = (io: typeof saturated | typeof calm): DaemonHealthRead => ({
+    kind: 'read',
+    health: { ...healthOf('4.101.0'), io },
+  });
+
+  it('keeps a saturated reading and drops a calm one or an absent one', () => {
+    expect(diskPressureOf(withIo(saturated), undefined)).toEqual(saturated);
+    expect(diskPressureOf(withIo(calm), saturated)).toBeUndefined();
+    expect(diskPressureOf({ kind: 'read', health: healthOf('4.84.0') }, saturated)).toBeUndefined();
+  });
+
+  it('keeps the last report while a read is going or has failed, because the failing read is the symptom', () => {
+    expect(diskPressureOf({ kind: 'loading' }, saturated)).toEqual(saturated);
+    expect(diskPressureOf({ kind: 'failed' }, saturated)).toEqual(saturated);
+    expect(diskPressureOf({ kind: 'failed' }, undefined)).toBeUndefined();
+  });
+
+  it('says slow, not dead, capitalised for a line', () => {
+    expect(diskPressureSentence(saturated)).toBe(
+      'Disk is saturated (io pressure 46% full) — the daemon is slow, not dead',
+    );
   });
 });

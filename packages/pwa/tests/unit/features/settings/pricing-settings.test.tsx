@@ -897,3 +897,75 @@ describe('PricingSettings', () => {
     expect(api.calls.map(call => call.connectionId)).toEqual(['gamma']);
   });
 });
+
+describe('PricingSettings — what the daemon says and what goes wrong', () => {
+  it('says what a daemon that applies image rates but not reasoning rates reports', async () => {
+    const api = pricingApi(
+      pricingView({
+        rateApplicability: {
+          ...ANALYTICS_PRICING_RATE_APPLICABILITY,
+          image: 'applied_when_evidenced',
+          reasoning: 'stored_not_applied',
+        },
+      }),
+    );
+
+    const renderer = await renderPricing(api);
+
+    const rendered = text(renderer);
+    expect(rendered).toContain('Image and tool applicability follows the daemon record shown for this catalog.');
+    expect(rendered).not.toContain('Image and tool rates can be recorded');
+    expect(rendered).toContain('Reasoning rates are recorded but this daemon does not currently apply them.');
+    expect(rendered).not.toContain('Reasoning rates are applied when transcript evidence exists.');
+    expect(marked(renderer, 'data-reasoning-applicability')[0]?.props['data-reasoning-applicability']).toBe(
+      'stored_not_applied',
+    );
+  });
+
+  it('shows the daemon failure, and does not mark the catalog moved, when a removal fails for another reason', async () => {
+    const api = pricingApi(pricingView(), new Error('the daemon is unreachable'));
+    const renderer = await renderPricing(api);
+
+    press(renderer, 'data-pricing-remove', manualRate().pricingKey);
+    run(() => buttonNamed(renderer, 'Confirm removal').props.onClick());
+    await settle();
+
+    const rendered = text(renderer);
+    expect(rendered.split('the daemon is unreachable')).toHaveLength(2);
+    expect(rendered).not.toContain('changed before this removal');
+    expect(marked(renderer, 'data-pricing-stale')).toHaveLength(0);
+    expect(marked(renderer, 'data-pricing-row', manualRate().pricingKey)).toHaveLength(1);
+  });
+
+  it('shows the daemon failure, and does not mark the catalog moved, when a preview fails for another reason', async () => {
+    const api = pricingApi(pricingView(), new Error('the feed timed out'));
+    const renderer = await renderPricing(api);
+
+    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    press(renderer, 'data-pricing-preview');
+    await settle();
+
+    const rendered = text(renderer);
+    expect(rendered.split('the feed timed out')).toHaveLength(2);
+    expect(rendered).not.toContain('changed before this preview completed');
+    expect(marked(renderer, 'data-pricing-stale')).toHaveLength(0);
+    expect(marked(renderer, 'data-pricing-preview-id')).toHaveLength(0);
+  });
+
+  it('lets the operator take a ticked change back out of the selection', async () => {
+    const api = pricingApi(pricingView(), preview());
+    const renderer = await renderPricing(api);
+
+    change(renderer, 'data-pricing-source-select', '', 'openai-feed');
+    press(renderer, 'data-pricing-preview');
+    await settle();
+    toggle(renderer, manualRate().pricingKey, true);
+    expect(marked(renderer, 'data-pricing-select', manualRate().pricingKey)[0]?.props.checked).toBe(true);
+    expect(marked(renderer, 'data-pricing-apply')[0]?.props.disabled).toBe(false);
+
+    toggle(renderer, manualRate().pricingKey, false);
+
+    expect(marked(renderer, 'data-pricing-select', manualRate().pricingKey)[0]?.props.checked).toBe(false);
+    expect(marked(renderer, 'data-pricing-apply')[0]?.props.disabled).toBe(true);
+  });
+});

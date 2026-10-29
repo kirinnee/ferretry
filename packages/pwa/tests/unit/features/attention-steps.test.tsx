@@ -7,13 +7,11 @@ import { attentionKindMeta } from '../../../src/features/attention/attention-boa
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import type { ClipboardWriter } from '../../../src/features/onboarding/copy-button.tsx';
 import {
-  DISMISS_ACTION,
   DONE_ACTION,
   historyLine,
   type InboxAction,
   NEEDS_INFO_ACTION,
   replyAction,
-  stepsProgress,
   swipeMap,
   tickedSteps,
   updatedSinceAsked,
@@ -26,6 +24,8 @@ afterEach(async () => {
   await view?.unmount();
   view = null;
 });
+
+const nativeTextarea = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
 
 const SQUARE_SVG = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10"/></svg>';
 
@@ -40,6 +40,9 @@ const chatProse =
 
 const tick = (root: ParentNode, step: number): HTMLElement =>
   must(root.querySelector<HTMLElement>(`[data-attention-tick="${step}"]`), `tick ${step}`);
+
+const done = (root: ParentNode): HTMLButtonElement =>
+  must(root.querySelector<HTMLButtonElement>('[data-attention-answer="right"]'), 'the Done answer');
 
 const checked = (root: ParentNode, step: number): boolean => (tick(root, step) as HTMLInputElement).checked;
 
@@ -104,13 +107,13 @@ describe('attention card Markdown and hypermedia', () => {
     expect(written).toEqual(['echo one', 'echo two']);
   });
 
-  test('folds a long body behind Show all, and says how to get the rest', async () => {
+  test('previews a long body behind Show more, and says how to get the rest', async () => {
     const item = todo({ body: Array.from({ length: 40 }, (_, line) => `line ${line}`).join('\n\n') });
     view = await mount(<AttentionCard item={item} onAct={() => {}} renderProse={chatProse()} />);
     const body = must(view.container.querySelector('[data-attention-body]'), 'body');
     const toggle = must(body.querySelector<HTMLButtonElement>('[data-attention-body-toggle]'), 'toggle');
     expect(body.hasAttribute('data-folded')).toBe(true);
-    expect(toggle.textContent).toBe('Show all');
+    expect(toggle.textContent).toBe('Show more');
     await interact(() => toggle.click());
     expect(body.hasAttribute('data-folded')).toBe(false);
     expect(toggle.textContent).toBe('Show less');
@@ -183,23 +186,24 @@ describe('attention checklist', () => {
     expect(tick(view.container, 0).hasAttribute('disabled')).toBe(true);
   });
 
-  test('makes Done the primary action once every step is ticked, and not before', async () => {
+  test('Done is the primary answer, on the right, whether or not every step is ticked', async () => {
     view = await mount(<AttentionCard item={todo({ steps, stepsDone: [0, 1] })} onAct={() => {}} />);
-    expect(view.container.querySelector('[data-attention-done]')?.getAttribute('data-variant')).toBeNull();
+    expect(done(view.container).getAttribute('data-variant')).toBe('primary');
     await view.render(<AttentionCard item={todo({ steps, stepsDone: [0, 1, 2] })} onAct={() => {}} />);
-    expect(view.container.querySelector('[data-attention-done]')?.getAttribute('data-variant')).toBe('primary');
+    expect(done(view.container).getAttribute('data-variant')).toBe('primary');
   });
 });
 
 describe('a to-do item', () => {
-  test('offers Done and Need more info, and no reply box or option list', async () => {
+  test('offers Need more info left and Done right, and keeps the reply box shut', async () => {
     const acts: InboxAction[] = [];
     view = await mount(<AttentionCard item={todo()} onAct={action => acts.push(action)} />);
-    expect(view.container.querySelector('textarea[placeholder="Reply…"]')).toBeNull();
-    expect(view.container.querySelector('[data-attention-option]')).toBeNull();
-    await interact(() =>
-      must(view?.container.querySelector<HTMLButtonElement>('[data-attention-done]'), 'done').click(),
-    );
+    expect(view.container.querySelector('textarea')).toBeNull();
+    expect(view.container.querySelector('[data-attention-option]')?.getAttribute('data-attention-answer')).toBe('left');
+    expect(
+      [...view.container.querySelectorAll('[data-attention-answer]')].map(node => node.textContent?.trim()),
+    ).toEqual(['Need more info', 'Done']);
+    await interact(() => done(must(view?.container, 'view')).click());
     expect(acts).toEqual([DONE_ACTION]);
   });
 
@@ -207,11 +211,18 @@ describe('a to-do item', () => {
     const acts: InboxAction[] = [];
     view = await mount(<AttentionCard item={todo()} onAct={action => acts.push(action)} />);
     const root = view.container;
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-attention-needs-info]'), 'ask').click());
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('[data-attention-needs-info-send]'), 'send').form?.requestSubmit(),
-    );
+    const ask = (): HTMLButtonElement =>
+      must(root.querySelector<HTMLButtonElement>('[data-attention-answer="left"]'), 'ask');
+    await interact(() => ask().click());
     expect(acts).toEqual([NEEDS_INFO_ACTION]);
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply').click());
+    const box = must(root.querySelector<HTMLTextAreaElement>('textarea[data-attention-reply]'), 'box');
+    await interact(() => {
+      nativeTextarea?.call(box, 'which environment?');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await interact(() => ask().click());
+    expect(acts[1]).toEqual({ ...NEEDS_INFO_ACTION, note: 'which environment?' });
   });
 
   test('a waiting item says who it waits on and offers no Done', async () => {
@@ -223,8 +234,29 @@ describe('a to-do item', () => {
       />,
     );
     expect(view.container.querySelector('[data-attention-waiting]')?.textContent).toContain('Waiting on ottilie');
-    expect(view.container.querySelector('[data-attention-done]')).toBeNull();
-    expect(view.container.querySelector('[data-attention-needs-info]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-answer]')).toBeNull();
+  });
+
+  test('an item in discussion says so, and stays answerable', async () => {
+    const item = todo({
+      waitingOn: 'ferret',
+      askedAt: '2026-07-31T10:42:00.000Z',
+      waitingFor: 'discussion',
+      history: [{ at: '2026-07-31T10:42:00.000Z', kind: 'discuss' }],
+    });
+    view = await mount(
+      <AttentionCard
+        item={item}
+        onAct={() => {}}
+        origin={{ ferret: 'ottilie', machine: 'workshop', href: '/x', onNavigate: () => {} }}
+      />,
+    );
+    expect(view.container.querySelector('[data-attention-waiting]')?.textContent).toContain(
+      'In discussion with ottilie',
+    );
+    expect(view.container.querySelector('[data-attention-answer="right"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-attention-discuss]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-history]')?.textContent).toMatch(/^You asked to discuss /u);
   });
 
   test('shows its history, and marks an item the ferret just updated as new', async () => {
@@ -243,15 +275,14 @@ describe('a to-do item', () => {
 });
 
 describe('to-do helpers', () => {
-  test('swipe: Done right and Need more info left; a waiting item only dismisses; other items are unchanged', () => {
-    expect(swipeMap(todo())).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
-    expect(swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z' }))).toEqual({
-      left: DISMISS_ACTION,
-    });
-    expect(swipeMap(attentionItem('A1', { ask: { kind: 'open-question' } }))).toEqual({
-      right: DONE_ACTION,
-      left: DISMISS_ACTION,
-    });
+  test('swipe: Done right and Need more info left; a waiting item and a text-only ask swipe nowhere', () => {
+    const DISCUSS = { kind: 'discuss', label: 'Discuss' } as const;
+    expect(swipeMap(todo())).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION, down: DISCUSS });
+    expect(swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z' }))).toEqual({ down: DISCUSS });
+    expect(swipeMap(attentionItem('A1', { ask: { kind: 'open-question' } }))).toEqual({ down: DISCUSS });
+    expect(
+      swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z', waitingFor: 'discussion' })),
+    ).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
   });
 
   test('a to-do takes no typed reply', () => {
@@ -277,9 +308,7 @@ describe('to-do helpers', () => {
     expect(updatedSinceAsked({ history: [updated], waitingOn: 'ferret' })).toBeNull();
   });
 
-  test('step progress counts ticks and layers pending ones', () => {
-    expect(stepsProgress({ steps: ['a', 'b'], stepsDone: [0, 1] })).toEqual({ done: 2, total: 2, complete: true });
-    expect(stepsProgress({})).toEqual({ done: 0, total: 0, complete: false });
+  test('ticked steps layer the pending ticks over the stored ones', () => {
     expect([
       ...tickedSteps(
         { steps: ['a', 'b'], stepsDone: [0] },
@@ -305,8 +334,7 @@ describe('a pinned to-do keeps its header and actions in view', () => {
     const scroll = must(view.container.querySelector('[data-attention-scroll]'), 'scroll region');
     expect(scroll.querySelector('[data-attention-steps-count]')).not.toBeNull();
     expect(scroll.querySelector('header')).toBeNull();
-    const done = must(view.container.querySelector('[data-attention-done]'), 'done');
-    expect(scroll.contains(done)).toBe(false);
-    expect(view.container.querySelector('header')?.textContent).toContain('To do');
+    expect(scroll.contains(done(view.container))).toBe(false);
+    expect(view.container.querySelector('header')?.textContent).toContain('Task');
   });
 });

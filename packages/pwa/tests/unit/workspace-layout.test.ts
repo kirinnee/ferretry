@@ -4,18 +4,17 @@ import {
   activateWorkspaceTab,
   adoptAgentSurface,
   bringAskedSurfaceForward,
-  hasAnnounced,
-  markAnnounced,
-  WORKSPACE_ANNOUNCED_LIMIT,
   canSplitWorkspacePane,
   clampWorkspaceRatio,
   closeWorkspaceTab,
   defaultWorkspaceLayout,
   focusedWorkspaceTab,
   focusWorkspacePane,
+  hasAnnounced,
   isAgentTabId,
   isWorkspaceVisible,
   jumpToWorkspaceReference,
+  markAnnounced,
   moveWorkspaceTab,
   openWorkspaceTab,
   parseWorkspaceLayout,
@@ -26,6 +25,7 @@ import {
   splitWorkspacePane,
   toggleWorkspacePane,
   visibleTabsInOrder,
+  WORKSPACE_ANNOUNCED_LIMIT,
   WORKSPACE_CHAT_TAB_ID,
   WORKSPACE_CONSOLE_TAB_ID,
   WORKSPACE_MIN_RATIO,
@@ -76,9 +76,14 @@ describe('workspace tab identity', () => {
 describe('default layout', () => {
   it('is the agent pane alone with Chat selected', () => {
     const layout = defaultWorkspaceLayout();
-    expect(layout.root).toEqual({ type: 'pane', id: AGENT_PANE_ID, tabs: ['chat', 'console'], active: 'chat' });
+    expect(layout.root).toEqual({
+      type: 'pane',
+      id: AGENT_PANE_ID,
+      tabs: ['chat', 'console', 'processes'],
+      active: 'chat',
+    });
     expect(isWorkspaceVisible(layout)).toBe(false);
-    expect(ids(layout)).toEqual(['chat', 'console']);
+    expect(ids(layout)).toEqual(['chat', 'console', 'processes']);
     expect(focusedWorkspaceTab(layout)).toBe(WORKSPACE_CHAT_TAB_ID);
   });
 });
@@ -91,7 +96,7 @@ describe('openWorkspaceTab', () => {
     const [paneId] = workspaceIds(layout);
     expect(workspacePane(layout, paneId as string)).toMatchObject({ tabs: ['terminal:dev'], active: 'terminal:dev' });
     expect(layout.focused).toBe(paneId as string);
-    expect(workspacePane(layout, AGENT_PANE_ID)?.tabs).toEqual(['chat', 'console']);
+    expect(workspacePane(layout, AGENT_PANE_ID)?.tabs).toEqual(['chat', 'console', 'processes']);
     expect(focusedWorkspaceTab(layout)).toBe('terminal:dev');
   });
 
@@ -198,11 +203,25 @@ describe('closeWorkspaceTab', () => {
     expect(isWorkspaceVisible(collapsed)).toBe(true);
   });
 
+  it('collapses a nested pane and keeps its sibling and the pane beside them in place', () => {
+    const cap = { maxPanes: 4 };
+    const two = twoWorkspacePanes();
+    const [first, beside] = workspaceIds(two);
+    const three = splitWorkspacePane(two, first as string, 'row', app.id, cap);
+    expect(workspaceIds(three)).toHaveLength(3);
+    const collapsed = closeWorkspaceTab(three, dev.id);
+    const remaining = workspaceIds(collapsed);
+    expect(remaining).toHaveLength(2);
+    expect(remaining).toContain(beside as string);
+    expect(workspacePane(collapsed, beside as string)).toMatchObject({ tabs: [login.id] });
+    expect(ids(collapsed)).toEqual(['chat', 'console', 'processes', app.id, login.id]);
+  });
+
   it('closes a parked tab without revealing the workspace', () => {
     const hidden = toggleWorkspacePane(withThree());
     const next = closeWorkspaceTab(hidden, dev.id);
     expect(isWorkspaceVisible(next)).toBe(false);
-    expect(ids(next)).toEqual(['chat', 'console', app.id, login.id]);
+    expect(ids(next)).toEqual(['chat', 'console', 'processes', app.id, login.id]);
     const emptied = [app, login].reduce((layout, tab) => closeWorkspaceTab(layout, tab.id), next);
     expect(emptied.parked).toBeNull();
   });
@@ -213,9 +232,9 @@ describe('moveWorkspaceTab', () => {
     const layout = withThree();
     const [paneId] = workspaceIds(layout);
     const next = moveWorkspaceTab(layout, login.id, paneId as string, 0);
-    expect(ids(next)).toEqual(['chat', 'console', login.id, dev.id, app.id]);
+    expect(ids(next)).toEqual(['chat', 'console', 'processes', login.id, dev.id, app.id]);
     const end = moveWorkspaceTab(layout, dev.id, paneId as string);
-    expect(ids(end)).toEqual(['chat', 'console', app.id, login.id, dev.id]);
+    expect(ids(end)).toEqual(['chat', 'console', 'processes', app.id, login.id, dev.id]);
     expect(moveWorkspaceTab(layout, login.id, paneId as string)).toBe(layout);
     const clamped = moveWorkspaceTab(layout, dev.id, paneId as string, 99);
     expect(ids(clamped)).toEqual(ids(end));
@@ -359,7 +378,7 @@ describe('ratios and direction', () => {
 describe('visibleTabsInOrder / focusedWorkspaceTab', () => {
   it('lists chat, console, then every workspace tab in pane order, parked ones too', () => {
     const layout = twoWorkspacePanes();
-    expect(ids(layout)).toEqual(['chat', 'console', dev.id, app.id, login.id]);
+    expect(ids(layout)).toEqual(['chat', 'console', 'processes', dev.id, app.id, login.id]);
     expect(ids(toggleWorkspacePane(layout))).toEqual(ids(layout));
   });
 
@@ -373,7 +392,7 @@ describe('visibleTabsInOrder / focusedWorkspaceTab', () => {
   it('skips a tab id with no record', () => {
     const layout = withThree();
     const { [dev.id]: _gone, ...tabs } = layout.tabs;
-    expect(ids({ ...layout, tabs })).toEqual(['chat', 'console', app.id, login.id]);
+    expect(ids({ ...layout, tabs })).toEqual(['chat', 'console', 'processes', app.id, login.id]);
   });
 });
 
@@ -411,6 +430,27 @@ describe('parse / serialize', () => {
     const hidden = toggleWorkspacePane(layout);
     expect(parseWorkspaceLayout(serializeWorkspaceLayout(hidden))).toEqual(hidden);
     expect(parseWorkspaceLayout(JSON.parse(serializeWorkspaceLayout(hidden)))).toEqual(hidden);
+  });
+
+  it('adds the Processes tab to a layout saved with only Chat and Console, keeping its splits and tabs', () => {
+    const saved = JSON.parse(serializeWorkspaceLayout(twoWorkspacePanes()));
+    const legacyAgent = (node: { type: string; children?: unknown[]; tabs?: string[] }): void => {
+      if (node.type === 'pane') node.tabs = ['chat', 'console'];
+      else legacyAgent(node.children?.[0] as typeof node);
+    };
+    legacyAgent(saved.root);
+    delete saved.tabs.processes;
+    const parsed = parseWorkspaceLayout(saved);
+    expect(parsed).toEqual(twoWorkspacePanes());
+    expect(workspacePane(parsed, AGENT_PANE_ID)?.tabs).toEqual(['chat', 'console', 'processes']);
+    expect(parsed.tabs.processes).toMatchObject({ kind: 'processes', label: 'Processes' });
+  });
+
+  it('migrates a legacy layout whose agent pane stands alone', () => {
+    const alone = JSON.parse(serializeWorkspaceLayout(defaultWorkspaceLayout()));
+    alone.root.tabs = ['chat', 'console'];
+    delete alone.tabs.processes;
+    expect(parseWorkspaceLayout(alone)).toEqual(defaultWorkspaceLayout());
   });
 
   it('raises seq above every restored id so new panes never collide', () => {

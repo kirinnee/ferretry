@@ -58,6 +58,14 @@ describe('the tunnel session log', () => {
     should(line).startWith('no code by this daemon (“the daemon released this socket”)');
   });
 
+  it('should print a transfer under a kilobyte in plain bytes', () => {
+    // Act
+    const line = describeTunnelSessionEnd({ ...END, bytesIn: 512, bytesOut: 0 });
+
+    // Assert
+    should(line).containEql('512 B in, 0 B out');
+  });
+
   it('should print a duration at the precision that matters for it', () => {
     // Assert
     should(describeDuration(-5)).equal('0ms');

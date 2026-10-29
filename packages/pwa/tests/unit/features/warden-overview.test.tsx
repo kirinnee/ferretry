@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'bun:test';
 import type { WardenAttentionView, WardenStatusView } from '@ferretry/protocol';
 
-import { WardenOverview, type WardenOverviewProps } from '../../../src/features/warden/warden-overview.tsx';
+import {
+  WardenChipBadge,
+  WardenOverview,
+  type WardenOverviewProps,
+} from '../../../src/features/warden/warden-overview.tsx';
 import type { WardenReadState } from '../../../src/hooks/use-warden-poll.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { interact, mount, must } from '../../support/dom.ts';
@@ -356,6 +360,22 @@ describe('WardenOverview', () => {
       expect(row.textContent).toContain('Session sess-bare');
     } finally {
       await view.unmount();
+    }
+  });
+});
+
+describe('WardenChipBadge', () => {
+  it('spins beside the label only while the chip is busy', async () => {
+    const busy = await mount(<WardenChipBadge chip={{ label: 'investigating', tone: 'accent', busy: true }} />);
+    const idle = await mount(<WardenChipBadge chip={{ label: 'flagged', tone: 'accent' }} />);
+    try {
+      expect(busy.container.textContent).toBe('investigating');
+      expect(busy.container.querySelector('svg.animate-spin') === null).toBe(false);
+      expect(idle.container.textContent).toBe('flagged');
+      expect(idle.container.querySelector('svg')).toBeNull();
+    } finally {
+      await busy.unmount();
+      await idle.unmount();
     }
   });
 });

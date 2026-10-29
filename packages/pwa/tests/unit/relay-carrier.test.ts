@@ -34,6 +34,7 @@ import {
   openRelaySession,
   relayResponse,
   relayTunnelRequest,
+  requestLane,
 } from '../../src/lib/relay-carrier.ts';
 import { RelaySessionError, RelayStreamRefusedError } from '../../src/lib/relay-session.ts';
 import type { PromptOrigin } from '../../src/lib/step-up-gate.ts';
@@ -259,6 +260,17 @@ describe('the browser WebSocket adapter', () => {
       // in a sentence a reader may paste into an issue.
       should(ends[0]?.reason).not.containEql('fy_daemon_x');
     });
+  });
+
+  it('should name the configured rendezvous when the address it dialled cannot be parsed', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onerror?.();
+      socket.onclose?.({ code: 1006, reason: '' });
+
+      should(ends).have.length(1);
+      should(ends[0]?.code).equal(1006);
+      should(ends[0]?.reason).containEql('could not open a connection to the configured rendezvous');
+    }, 'not a url at all');
   });
 
   it('should distinguish a socket that died mid-session from one that never opened', () => {
@@ -517,6 +529,17 @@ describe('the carrier router', () => {
     should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/projects', query: [['page', '2']] }]);
   });
 
+  it('should carry an upload on a session of its own, so the polls beside it never wait behind it', async () => {
+    const { router, carriers } = await routerFor({ answer: { body: 'ok' } });
+    const upload = JSON.stringify({ base64: 'a'.repeat(40_000) });
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+    await router.fetch(`${DAEMON_URL}/v1/sessions/s1/attachments`, { method: 'POST', body: upload });
+    await router.fetch(`${DAEMON_URL}/v1/sessions/s1/attachments`, { method: 'POST', body: upload });
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+    // One request session and one upload session, each reused: two dials, not four.
+    should(carriers.dialled).have.length(2);
+  });
+
   it('should route by the daemon a request was built for, never by the address two machines share', async () => {
     // Arrange — a second machine paired at the very same address, listed first as the newest pairing is.
     const { router, daemon, auto } = await routerFor({ answer: { body: 'this machine' } });
@@ -614,6 +637,22 @@ describe('the carrier router', () => {
     // One request session, shared: every call above rode the one socket.
     should(carriers.dialled).have.length(1);
     stop();
+  });
+
+  it('should still serve the request when a connection observer throws, and tell the observers after it', async () => {
+    const connected: string[] = [];
+    const { router, daemon } = await routerFor({ answer: { body: 'served' } });
+    const stopThrowing = router.onConnected(() => {
+      throw new Error('a disclosure observer broke');
+    });
+    const stopRecording = router.onConnected(connection => connected.push(connection.daemonId));
+
+    const response = await router.fetch(`${DAEMON_URL}/v1/projects`);
+
+    should(await response.text()).equal('served');
+    should(connected).eql([daemon.daemonId]);
+    stopThrowing();
+    stopRecording();
   });
 
   it('should dial the published direct address rather than the address the pairing was made on', async () => {
@@ -878,26 +917,29 @@ describe('the carrier router', () => {
 
   it('should give up on a relayed request at its deadline and carry the next one on a fresh session', async () => {
     // Arrange — a relay whose daemon end has gone quiet: its first request is never answered, while the
-    // rendezvous keeps the socket open. This is how a phone's send and ledger reads hung for good.
+    // rendezvous keeps the socket open. This is how a phone's send and ledger reads hung for good. The
+    // deadline passes once the daemon HOLDS the request, which is the silence this case is about; a
+    // wall-clock deadline could pass during the handshake instead, which is the next case.
     let asked = 0;
+    const deadline = new AbortController();
     const { router, daemon, carriers } = await routerFor({
       relay: RELAY,
       reach: relayOnly,
       answer: {
         respond: () => {
           asked += 1;
-          return asked === 1 ? new Promise<never>(() => undefined) : { status: 200, body: 'fresh' };
+          if (asked > 1) return { status: 200, body: 'fresh' };
+          queueMicrotask(() => deadline.abort(new DOMException('the deadline passed', 'TimeoutError')));
+          return new Promise<never>(() => undefined);
         },
       },
     });
 
     // Act
-    const reason = await router
-      .send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`, { signal: AbortSignal.timeout(30) })
-      .then(
-        () => undefined,
-        (thrown: unknown) => thrown,
-      );
+    const reason = await router.send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`, { signal: deadline.signal }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
     const next = await router.send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`);
 
     // Assert
@@ -905,6 +947,40 @@ describe('the carrier router', () => {
     should(await next.text()).equal('fresh');
     // The silent session was retired, so the next request walked the set again and opened a new one.
     should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example', DIRECT_HOST, 'relay.example']);
+  });
+
+  it('should keep the session when the deadline passed before the request ever left', async () => {
+    // Arrange — the walk and the handshake took the caller's whole budget, so the daemon was never asked.
+    let asked = 0;
+    const { router, daemon, carriers } = await routerFor({
+      relay: RELAY,
+      reach: relayOnly,
+      answer: {
+        respond: () => {
+          asked += 1;
+          return { status: 200, body: 'kept' };
+        },
+      },
+    });
+
+    // Act
+    const reason = await router
+      .send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`, {
+        signal: AbortSignal.abort(new DOMException('the deadline passed', 'TimeoutError')),
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    const next = await router.send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`);
+
+    // Assert — the caller is told its own deadline, and the session it opened carries the next request.
+    should((reason as Error).name).equal('TimeoutError');
+    should(await next.text()).equal('kept');
+    should(asked).equal(1);
+    // Nothing answered the first walk, so no winner was chosen and the next one tries direct again — but
+    // the relay is not dialled a second time: the session it opened is still the one held for it.
+    should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example', DIRECT_HOST]);
   });
 
   it('should keep the session when its caller cancels a request rather than running out of time', async () => {
@@ -971,6 +1047,53 @@ describe('the carrier router', () => {
 
     should(router.choice(daemon.daemonId)?.ok).be.false();
     should(socket?.closed).be.ok();
+  });
+
+  it('should let a rendezvous that was still opening fail quietly once the daemon withdrew it', async () => {
+    // Arrange — the relay's socket is dialled and never answers, so its session is still opening.
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const carriers = carriersFor(identity, url => (url.hostname === DIRECT_HOST ? 'refuse' : 'silent'));
+    const sockets: ScriptedSocket[] = [];
+    const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
+      crypto: relayCrypto,
+      deviceKey,
+      dial: url => {
+        const socket = carriers.dial(url);
+        if (new URL(url).hostname !== DIRECT_HOST) sockets.push(socket);
+        return socket;
+      },
+      heartbeat: () => () => undefined,
+      network: unreachable,
+    });
+    router.resolvePaired(() => [daemon]);
+    const opening = router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await settle(5);
+    should(sockets).have.length(1);
+
+    // Act — a republish withdraws the relay while it opens, then the dial fails.
+    const withdrawn = daemonConnection({ ...daemon, carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }] });
+    const walked = router.send(withdrawn, `${DAEMON_URL}/v1/usage`).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await settle(5);
+    sockets[0]?.onClose?.(1006, 'the address did not answer');
+    const reasons = await Promise.all([opening, walked]);
+    await settle(5);
+
+    // Assert — both requests ended with an error, and nothing was left unhandled by the withdrawn session.
+    should(reasons.every(reason => reason instanceof Error)).be.true();
+    should(router.choice(daemon.daemonId)?.ok).not.be.true();
   });
 
   it('should dial the current hosted address for a daemon that published no rendezvous', async () => {
@@ -2094,6 +2217,26 @@ describe('the carrier router meeting a presence requirement', () => {
     should(attempts()).equal(1);
   });
 
+  it('should not ask for an unlock when the 401 body is not JSON', async () => {
+    // Arrange
+    let asked = 0;
+    const { router, attempts } = await unlockRouter(() => ({ status: 401, body: 'Unauthorized, plain text' }), {
+      unlockRequired: async () => {
+        asked += 1;
+        return true;
+      },
+    });
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet`);
+
+    // Assert
+    should(response.status).equal(401);
+    should(await response.text()).equal('Unauthorized, plain text');
+    should(asked).equal(0);
+    should(attempts()).equal(1);
+  });
+
   it('should hand the refusal back when nothing is able to ask, or when it is some other 401', async () => {
     // Arrange
     let asked = 0;
@@ -2170,5 +2313,13 @@ describe('the carrier router meeting a presence requirement', () => {
 
     // Assert
     should(origins).eql(['background', 'background', 'explicit', 'explicit']);
+  });
+});
+
+describe('which session a relayed request rides', () => {
+  it('should send a body that needs parts on its own lane, so polls never wait behind an upload', () => {
+    should(requestLane(undefined)).equal('request');
+    should(requestLane('{"message":"hi"}')).equal('request');
+    should(requestLane(JSON.stringify({ base64: 'a'.repeat(4 * 1024 * 1024) }))).equal('bulk');
   });
 });

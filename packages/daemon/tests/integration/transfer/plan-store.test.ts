@@ -965,3 +965,102 @@ describe('FileSessionTransferTargetPlanStore capability boundary', () => {
     should(subject.targetPlanPath(target)).equal(join(home, 'sessions', 'target-session', TARGET_PLAN_FILE));
   });
 });
+
+describe('FileSessionTransferPlanStore refusals and outcomes', () => {
+  afterEach(async () => await cleanupTempDirectories());
+
+  it('refuses a plan whose id does not derive from its source session and request, writing nothing', async () => {
+    // Arrange
+    const { subject } = await harness('transfer-receipt-plan-id-mismatch');
+    const forged = makePlan({ planId: '0'.repeat(64) });
+
+    // Act
+    const error = await reject(
+      subject.record(forged, { requestId: REQUEST, targetId: 'target-session', phase: 'requested' }),
+    );
+
+    // Assert
+    should(error).be.instanceOf(SessionTransferPlanConflictError);
+    should((error as SessionTransferPlanConflictError).message).match(/the plan id must match the composite key/u);
+    should(existsSync(subject.receiptPath(PLAN_ID))).be.false();
+    should(await subject.load(PLAN_ID)).equal(undefined);
+  });
+
+  it('stamps a terminal outcome with its detail when one is recorded, and keeps it across a later phase', async () => {
+    // Arrange
+    const { subject } = await harness('transfer-receipt-outcome-detail');
+
+    // Act
+    const created = await subject.record(makePlan({}), {
+      requestId: REQUEST,
+      targetId: 'target-session',
+      phase: 'requested',
+      outcome: { status: 'failed', detail: 'the target refused to launch' },
+    });
+    const advanced = await subject.record(makePlan({}), {
+      requestId: REQUEST,
+      targetId: 'target-session',
+      phase: 'imported',
+    });
+
+    // Assert
+    should(created.receipt.outcome).eql({
+      status: 'failed',
+      detail: 'the target refused to launch',
+      at: '2025-01-01T00:00:00+00:00',
+    });
+    should(advanced.receipt.outcome).eql(created.receipt.outcome);
+    should((await subject.load(PLAN_ID))?.outcome).eql(created.receipt.outcome);
+  });
+
+  it('stamps an outcome with no detail as exactly its status, leaving no detail key behind', async () => {
+    // Arrange
+    const { subject } = await harness('transfer-receipt-outcome-bare');
+    await subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' });
+
+    // Act
+    const settled = await subject.record(makePlan({}), {
+      requestId: REQUEST,
+      targetId: 'target-session',
+      phase: 'requested',
+      outcome: { status: 'done' },
+    });
+
+    // Assert
+    should(settled.status).equal('replayed');
+    should(settled.receipt.outcome).eql({ status: 'done', at: '2025-01-02T00:00:00+00:00' });
+    should(Object.hasOwn(settled.receipt.outcome ?? {}, 'detail')).be.false();
+  });
+
+  it('reports an unreadable receipt location as itself, not as a transfer that was never recorded', async () => {
+    // Arrange — the receipt directory's parent is a file, so no receipt can even be looked up.
+    const { subject, home } = await harness('transfer-receipt-unreadable-location');
+    await mkdir(join(home, 'state'), { recursive: true });
+    await writeFile(join(home, 'state', 'forks'), 'not a directory');
+
+    // Act
+    const recorded = await reject(
+      subject.record(makePlan({}), { requestId: REQUEST, targetId: 'target-session', phase: 'requested' }),
+    );
+    const replayed = await reject(subject.replay(PLAN_ID));
+    const loaded = await reject(subject.load(PLAN_ID));
+
+    // Assert
+    should((recorded as NodeJS.ErrnoException).code).equal('ENOTDIR');
+    should((replayed as NodeJS.ErrnoException).code).equal('ENOTDIR');
+    should((loaded as NodeJS.ErrnoException).code).equal('ENOTDIR');
+  });
+
+  it('reports a target plan location that cannot be read as itself, not as an absent plan', async () => {
+    // Arrange — the plan file's name is held by a directory.
+    const { subject, home } = await harness('transfer-target-plan-unreadable');
+    const target = parseSessionId('20260806-target');
+    await mkdir(join(home, 'sessions', target, TARGET_PLAN_FILE), { recursive: true });
+
+    // Act
+    const error = await reject(subject.loadTargetPlan(target));
+
+    // Assert
+    should((error as NodeJS.ErrnoException).code).equal('EISDIR');
+  });
+});

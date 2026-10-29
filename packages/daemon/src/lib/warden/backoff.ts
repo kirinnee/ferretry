@@ -20,9 +20,12 @@
  * The owner's own request and a manual forced run are never held: those people already decided.
  *
  * JEV'S ONE TRY. When Jev acts on a subject (`triage.ts`), that is remembered on the same entry and
- * counted as a look, so the act gets the rung's wait to land. It is never forgotten while the subject
- * stands — not by a later investigation either — so once that wait is over a subject Jev already acted
- * on goes past Jev ({@link jevActStanding}): one act per situation, then someone stronger looks.
+ * counted as a look, so the act gets that rung's wait to land ({@link recordJevAct}). While it lands,
+ * nothing else on that FERRET is acted on or looked at, whatever its kind. After that, the same kind of
+ * trouble on that ferret goes past Jev ({@link jevActStanding}) — on the same subject, and on a NEW
+ * subject too for a day: an act starts a new turn or a new episode by its own effect, and a ferret that
+ * stalls again soon after Jev's act needs someone stronger, not the same act again. One act per
+ * situation, then someone stronger looks. The memory is kept for as long as the ferret lives.
  *
  * Pure: no IO, no clock, no globals.
  */
@@ -40,8 +43,18 @@ export interface InvestigationBackoff {
   readonly lastAt: string;
   /** The last look cleared it: left alone until the subject changes. */
   readonly cleared?: true;
-  /** Jev already acted on this subject: what, and when. Kept for as long as the subject stands. */
-  readonly jevActed?: { readonly action: WardenJevAct; readonly at: string };
+  /** Jev's last act on this (ferret, kind): what, when, on which subject, and until when it is landing. */
+  readonly jevActed?: JevActMemory;
+}
+
+/** What the Warden remembers of Jev's last act on one (ferret, kind). */
+export interface JevActMemory {
+  readonly action: WardenJevAct;
+  readonly at: string;
+  /** The subject it acted on ({@link jevSubject}). */
+  readonly subject: string;
+  /** Until when the act is given time to land: nothing is acted on or looked at meanwhile. */
+  readonly landsBy: string;
 }
 
 /** Keyed by {@link backoffKey}. */
@@ -77,7 +90,8 @@ export function recordLook(store: BackoffStore, look: BackoffSubject, nowMs: num
   const previous = store[key];
   const same = previous?.subject === look.subject;
   const count = same ? previous.count + 1 : 1;
-  const jevActed = same ? previous.jevActed : undefined;
+  // Jev's act outlives a change of subject: its own effect is often what changed it.
+  const jevActed = previous?.jevActed;
   return {
     ...store,
     [key]: {
@@ -101,37 +115,61 @@ export function jevSubject(anomaly: Pick<WardenAnomaly, 'subject' | 'status' | '
   return anomaly.subject ?? `${anomaly.status}@${anomaly.since ?? 'unanchored'}`;
 }
 
-/** Count Jev's act on a subject as a look, and remember the act for as long as the subject stands. */
+/** How long after Jev acted the same kind of trouble on the same ferret still goes past Jev. */
+const JEV_REPEAT_WINDOW_MS = BACKOFF_CEILING_MS;
+
+/**
+ * Count Jev's act on a subject as a look and remember it. It lands for as long as that look's rung holds
+ * the subject — so the hold and the landing end together — and never less than {@link JEV_ACT_GRACE_FLOOR_MS}.
+ */
 export function recordJevAct(
   store: BackoffStore,
   look: Pick<WardenAnomaly, 'sessionId' | 'kind' | 'subject' | 'status' | 'since'>,
   nowMs: number,
   action: WardenJevAct,
+  baseMs: number,
 ): BackoffStore {
   const subject = jevSubject(look);
   const recorded = recordLook(store, { sessionId: look.sessionId, kind: look.kind, subject }, nowMs, false);
   const key = backoffKey(look.sessionId, look.kind);
   const entry = recorded[key] as InvestigationBackoff;
-  return { ...recorded, [key]: { ...entry, jevActed: { action, at: isoFromMs(nowMs) } } };
+  const landsMs = nowMs + Math.max(JEV_ACT_GRACE_FLOOR_MS, investigationBackoffMs(entry.count, baseMs));
+  return {
+    ...recorded,
+    [key]: { ...entry, jevActed: { action, at: isoFromMs(nowMs), subject, landsBy: isoFromMs(landsMs) } },
+  };
+}
+
+/** Whether any act of Jev's on this ferret, of any kind, is still landing. */
+export function jevActLandingOn(store: BackoffStore, sessionId: string, nowMs: number): boolean {
+  return Object.entries(store).some(([key, entry]) => {
+    if (key.slice(0, key.lastIndexOf('|')) !== sessionId || entry.jevActed === undefined) return false;
+    const landsMs = instantMs(entry.jevActed.landsBy);
+    return landsMs !== undefined && nowMs < landsMs;
+  });
 }
 
 /**
- * Where a flag stands after Jev acted on its subject: `landing` while the act still has time to work
- * (nobody looks, nobody is asked), `escalate` once that time is over and the same subject is still
- * flagged (Jev is not asked again), or `undefined` when Jev never acted on this subject.
+ * Where a flag stands after Jev acted on its ferret:
+ *
+ * - `landing` while ANY act of Jev's on this ferret still has time to work — nobody looks, nobody is
+ *   asked, whatever the flag's kind;
+ * - `escalate` once that time is over, when Jev already acted on this kind of trouble here — on this
+ *   subject, or on another within a day ({@link BACKOFF_CEILING_MS}): Jev is not asked again;
+ * - `undefined` otherwise: Jev may answer it.
  */
 export function jevActStanding(
   store: BackoffStore,
   anomaly: Pick<WardenAnomaly, 'sessionId' | 'kind' | 'subject' | 'status' | 'since'>,
   nowMs: number,
-  baseMs: number,
-): { readonly standing: 'landing' | 'escalate'; readonly action: WardenJevAct } | undefined {
-  const entry = store[backoffKey(anomaly.sessionId, anomaly.kind)];
-  if (entry?.jevActed === undefined || entry.subject !== jevSubject(anomaly)) return undefined;
-  const actedMs = instantMs(entry.jevActed.at);
-  if (actedMs === undefined) return { standing: 'escalate', action: entry.jevActed.action };
-  const graceMs = Math.max(JEV_ACT_GRACE_FLOOR_MS, investigationBackoffMs(1, baseMs));
-  return { standing: nowMs < actedMs + graceMs ? 'landing' : 'escalate', action: entry.jevActed.action };
+): { readonly standing: 'landing' | 'escalate'; readonly action?: WardenJevAct } | undefined {
+  const acted = store[backoffKey(anomaly.sessionId, anomaly.kind)]?.jevActed;
+  if (jevActLandingOn(store, anomaly.sessionId, nowMs))
+    return { standing: 'landing', ...(acted === undefined ? {} : { action: acted.action }) };
+  if (acted === undefined) return undefined;
+  const actedMs = instantMs(acted.at);
+  const recent = actedMs === undefined || nowMs - actedMs < JEV_REPEAT_WINDOW_MS;
+  return acted.subject === jevSubject(anomaly) || recent ? { standing: 'escalate', action: acted.action } : undefined;
 }
 
 export interface BackoffHold {
@@ -160,7 +198,8 @@ export function backoffHold(
 
 /**
  * Sweep housekeeping: forget ferrets that are gone or finished, and anything older than twice the
- * ceiling — by then no rung can still hold it, so it is only weight.
+ * ceiling — by then no rung can still hold it, so it is only weight — except Jev's acts, kept while the
+ * ferret lives.
  */
 export function reconcileBackoff(
   store: BackoffStore,
@@ -171,7 +210,9 @@ export function reconcileBackoff(
   for (const [key, entry] of Object.entries(store)) {
     const sessionId = key.slice(0, key.lastIndexOf('|'));
     const lastMs = instantMs(entry.lastAt);
-    if (!liveSessionIds.has(sessionId) || lastMs === undefined || nowMs - lastMs > 2 * BACKOFF_CEILING_MS) continue;
+    if (!liveSessionIds.has(sessionId) || lastMs === undefined) continue;
+    // Jev's act is remembered for as long as the ferret lives: one try means one, however long it stands.
+    if (entry.jevActed === undefined && nowMs - lastMs > 2 * BACKOFF_CEILING_MS) continue;
     next[key] = entry;
   }
   return next;

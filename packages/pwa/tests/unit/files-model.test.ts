@@ -61,6 +61,11 @@ describe('files model', () => {
     expect(statusChip('AA')).toMatchObject({ code: 'U', detail: 'unmerged' });
   });
 
+  it('shows a status letter git has no name for as a neutral change, keeping the staged detail', () => {
+    expect(statusChip('Z ')).toEqual({ code: 'Z', label: 'Changed', tone: 'neutral', detail: 'staged' });
+    expect(statusChip('ZY')).toEqual({ code: 'ZY', label: 'Changed', tone: 'neutral', detail: 'staged and unstaged' });
+  });
+
   it('parses hunk content that resembles file headers and hides plumbing only', () => {
     const parsed = parseUnifiedDiff(
       'diff --git a/a b/a\nindex abcd..ef01 100644\n--- a/a\n+++ b/a\n@@ -1,2 +1,2 @@\n---\n+++\n',

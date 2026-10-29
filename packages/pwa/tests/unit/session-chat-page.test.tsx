@@ -2331,6 +2331,23 @@ describe('SessionChatPage', () => {
       }
     });
 
+    test('keeps the resolved history in the header menu as "N resolved", and shows no row when there is none', () => {
+      const withHistory = renderSessionChatPage(chatPage({ attention: attentionModel([], [resolvedItem]) }));
+      try {
+        expect(actionLabels(withHistory.root)).toContain('1 resolved');
+        expect(withHistory.root.findAllByType(AttentionPanel)).toHaveLength(1);
+        expect(withHistory.root.findAll(node => node.props?.['data-attention-record'] !== undefined)).toHaveLength(0);
+      } finally {
+        run(() => withHistory.unmount());
+      }
+      const without = renderSessionChatPage(chatPage({ attention: attentionModel([], []) }));
+      try {
+        expect(actionLabels(without.root).some(label => label.endsWith('resolved'))).toBe(false);
+      } finally {
+        run(() => without.unmount());
+      }
+    });
+
     test('renders no Attention surface at all for a host that has not subscribed', () => {
       const page = renderSessionChatPage(chatPage());
 
@@ -2425,7 +2442,10 @@ describe('SessionChatPage', () => {
     });
 
     test('a new navigation to the SAME item re-targets it', () => {
-      const props = { attention: attentionModel([attentionItem], [resolvedItem]), attentionTarget: 'A3' as const };
+      const props = {
+        attention: attentionModel([attentionItem, { ...attentionItem, id: 'A2' as const }], [resolvedItem]),
+        attentionTarget: 'A3' as const,
+      };
       const page = renderSessionChatPage(chatPage({ ...props, attentionTargetKey: 'entry-1' }));
       try {
         run(() => panel(page.root).props.onSelect('A2'));
@@ -2521,7 +2541,14 @@ describe('SessionChatPage', () => {
     });
 
     test('counts a held answer down above the composer when the host passes attentionReplies', () => {
-      const replies = { secondsLeft: 8, pending: ['A3'], sending: false, sendNow: () => undefined };
+      const replies = {
+        secondsLeft: 8,
+        pending: ['A3'],
+        heldForTurn: false,
+        heldForComposer: false,
+        sending: false,
+        sendNow: () => undefined,
+      };
       const page = renderSessionChatPage(chatPage({ attention: attentionModel(), attentionReplies: replies }));
       try {
         const slot = panel(page.root).props.repliesSlot;

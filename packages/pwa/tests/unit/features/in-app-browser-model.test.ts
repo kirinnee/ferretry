@@ -59,8 +59,7 @@ describe('classifying a link', () => {
 
   it('refuses everything once the caller’s base is malformed', () => {
     // `new URL(href, base)` parses the base first, so even an absolute target
-    // is rejected. The classifier's second, defensive parse of the base can
-    // therefore never be the thing that fails.
+    // is rejected.
     expect(browserDestination('https://example.test/a', 'not a base')).toBeNull();
   });
 

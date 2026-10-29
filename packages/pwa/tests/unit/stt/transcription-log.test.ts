@@ -366,6 +366,42 @@ describe('TranscriptionLog', () => {
     should(log.snapshot().entries[0]?.id).equal(id);
   });
 
+  it('should read a browser whose storage lacks the read and write methods as having no storage', () => {
+    // Arrange + Act + Assert
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: {} });
+    try {
+      const log = new TranscriptionLog(undefined, { now: () => NOW, newId: counter() });
+      should(log.snapshot().enabled).be.true();
+      log.setEnabled(false);
+      should(log.snapshot().enabled).be.false();
+      should(Object.keys(globalThis.localStorage)).deepEqual([]);
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', original);
+    }
+  });
+
+  it('should read a browser whose storage getter throws as having no storage', () => {
+    // Arrange + Act + Assert
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('storage access refused');
+      },
+    });
+    try {
+      const log = new TranscriptionLog(undefined, { now: () => NOW, newId: counter() });
+      should(log.snapshot().enabled).be.true();
+      log.setEnabled(false);
+      should(log.snapshot().enabled).be.false();
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', original);
+    }
+  });
+
   it('should hold only text: an entry has no field for audio', () => {
     // Arrange
     const log = build();

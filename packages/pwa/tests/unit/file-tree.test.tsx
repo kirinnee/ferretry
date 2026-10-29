@@ -58,6 +58,30 @@ describe('file tree rows', () => {
     expect(actions).toEqual(['toggle:src', 'enter:src', 'open:src/a.ts', 'retry:src']);
   });
 
+  it('shows an entry that leaves the session root with its own icon, apart from other refusals', () => {
+    const rows: TreeRow[] = [
+      {
+        kind: 'file',
+        path: 'escape',
+        name: 'escape',
+        depth: 0,
+        refusal: 'symlink leaves the session root',
+        expanded: false,
+        selected: false,
+      },
+      { kind: 'dir', path: 'vault', name: 'vault', depth: 0, refusal: 'not served', expanded: false, selected: false },
+    ];
+    const tree = render(
+      <FileTreeRows rows={rows} onToggle={() => {}} onEnter={() => {}} onOpenFile={() => {}} onRetry={() => {}} />,
+    ).root;
+    const iconOf = (title: string): string =>
+      String(tree.findByProps({ title }).findByType('svg').props.className).match(/lucide-[a-z0-9-]+/u)?.[0] ?? '';
+
+    expect(iconOf('symlink leaves the session root')).toContain('link');
+    expect(iconOf('not served')).toContain('lock');
+    expect(tree.findAllByProps({ 'data-inert': 'true' })).toHaveLength(2);
+  });
+
   it('loads, refreshes, hides and tears down a daemon-scoped listing', async () => {
     const original = globalThis.fetch;
     let calls = 0;

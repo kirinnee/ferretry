@@ -291,6 +291,25 @@ describe('AnalyticsPricingService view and manual patch', () => {
     ).rejects.toMatchObject({ failure: 'invalid_catalog' });
   });
 
+  it('should let an unexpected defect while applying escape instead of relabelling it as a selection refusal', async () => {
+    // Arrange
+    const defect = new RangeError('selection could not be walked');
+    const subject = harness();
+    const preview = await previewWith(subject, { entries: [feedEntry('add')] });
+    const request = {
+      ...applyRequest(preview, []),
+      selectedPricingKeys: {
+        [Symbol.iterator]: () => {
+          throw defect;
+        },
+      } as unknown as readonly string[],
+    };
+
+    // Act + Assert
+    await expect(subject.service.apply(request)).rejects.toBe(defect);
+    expect(subject.document.writes).toEqual([]);
+  });
+
   it.each([
     { kind: 'stale_catalog', failure: 'stale_catalog' },
     { kind: 'unavailable', failure: 'configuration_unavailable' },
@@ -438,6 +457,22 @@ describe('AnalyticsPricingService preview', () => {
     await expect(previewWith(subject, { entries: [feedEntry('other-key', 'same-model')] })).rejects.toMatchObject({
       failure: 'invalid_catalog',
     });
+  });
+
+  it('should let an unexpected defect while diffing escape instead of relabelling it as a catalog refusal', async () => {
+    // Arrange — a feed whose rows cannot even be walked is a bug in the reader, not an invalid catalog.
+    const defect = new RangeError('feed rows could not be walked');
+    const feed = {
+      entries: {
+        [Symbol.iterator]: () => {
+          throw defect;
+        },
+      },
+    } as unknown as AnalyticsPricingFeed;
+    const subject = harness();
+
+    // Act + Assert
+    await expect(previewWith(subject, feed)).rejects.toBe(defect);
   });
 });
 

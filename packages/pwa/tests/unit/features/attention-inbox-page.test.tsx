@@ -1,14 +1,16 @@
 import { describe, expect, it } from 'bun:test';
-import { secondsLeft } from '../../../src/features/attention/attention-undo-toast.tsx';
+import type { ResolvedAttentionItem } from '@ferretry/protocol';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import {
   AttentionInboxPage,
   type AttentionInboxPageProps,
   AttentionNeedsYou,
   inboxCardOrigin,
+  swipeHintFor,
   waitingWords,
 } from '../../../src/features/attention/attention-inbox-page.tsx';
-import { type InboxCard } from '../../../src/lib/attention-inbox.ts';
+import { secondsLeft } from '../../../src/features/attention/attention-undo-toast.tsx';
+import { type InboxCard, type InboxResolved, inboxCardKey } from '../../../src/lib/attention-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   attentionItem,
@@ -17,7 +19,6 @@ import {
   fakeInbox,
   InboxHarness,
   inboxCard,
-  menuAction,
 } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -125,46 +126,500 @@ describe('AttentionInboxPage states', () => {
   });
 });
 
-describe('AttentionInboxPage two panes', () => {
-  const chat = (card: InboxCard) => <div data-fake-chat={card.item.id}>chat for {card.item.id}</div>;
+describe('AttentionInboxPage list and card', () => {
   const rows = (mounted: Mounted) => [...mounted.container.querySelectorAll('[data-attention-row]')];
+  const rowTitles = (mounted: Mounted) =>
+    [...mounted.container.querySelectorAll('[data-attention-row-title]')].map(title => title.textContent);
+  const paneItem = (mounted: Mounted) =>
+    mounted.container.querySelector('[data-attention-pane] [data-attention-card]')?.getAttribute('data-attention-card');
+  const key = (target: string) => window.dispatchEvent(new KeyboardEvent('keydown', { key: target, bubbles: true }));
 
-  it('lists every open item newest first with ferret, machine and age, and shows the first one chat', async () => {
-    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], { renderChat: chat }));
-    expect(rows(mounted).map(row => row.querySelector('.fy-attn-row__summary')?.textContent)).toEqual([
-      'Rebase onto main?',
-      'Ship it?',
-      'Have a look',
+  it('groups the open items by conversation, each row headed by its item, and shows the first one’s card', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const groups = [...mounted.container.querySelectorAll('[data-attention-group]')];
+    expect(groups.map(group => group.querySelector('.fy-attn-group__name')?.textContent)).toEqual([
+      'Fix the build · Zoe · Workshop',
+      'Release train · Kai · Laptop',
+      'Moe · Workshop',
     ]);
-    expect(rows(mounted)[1]?.textContent).toContain('Kai · Laptop');
+    expect(rowTitles(mounted)).toEqual(['Rebase onto main?', 'Ship it?', 'Have a look']);
+    expect(rows(mounted)[1]?.textContent).toContain('!A2');
     expect(mounted.container.querySelector('[data-attention-inbox]')?.getAttribute('data-attention-inbox')).toBe(
       'panes',
     );
-    expect(mounted.container.querySelector('[data-fake-chat]')?.getAttribute('data-fake-chat')).toBe('A3');
-    expect(mounted.container.querySelector('[data-attention-card]')).toBeNull();
-    expect(mounted.container.textContent).toContain('3 waiting on you');
+    expect(paneItem(mounted)).toBe('A3');
+    // The card alone: no chat header, tabs or composer around it.
+    expect(mounted.container.querySelector('[data-attention-pane] [data-attention-open]')).not.toBeNull();
     await mounted.unmount();
   });
 
-  it('opens the chat of the row that is chosen, and marks it', async () => {
-    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], { renderChat: chat }));
+  it('never heads two rows of one conversation with its name', async () => {
+    const view = sessionView('dm', { config: { teammate: 'johnnie', label: 'diene-migrate' } });
+    const cards = [
+      inboxCard(attentionItem('A10', { title: 'Finish the org setup', subject: 'Owner-only settings' } as never), view),
+      inboxCard(attentionItem('A9', { subject: 'Keep the CI workflow?' }), view),
+    ];
+    const mounted = await mount(page(fakeInbox(), cards));
+    expect(rowTitles(mounted)).toEqual(['Finish the org setup', 'Keep the CI workflow?']);
+    expect(mounted.container.querySelectorAll('[data-attention-group]')).toHaveLength(1);
+    expect(mounted.container.querySelector('[data-attention-group-count]')?.textContent).toBe('2');
+    await mounted.unmount();
+  });
+
+  it('shows the card of the row that is chosen, and marks it', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
     await interact(() => (rows(mounted)[1] as HTMLElement).click());
-    expect(mounted.container.querySelector('[data-fake-chat]')?.getAttribute('data-fake-chat')).toBe('A2');
+    expect(paneItem(mounted)).toBe('A2');
     expect(rows(mounted)[1]?.getAttribute('aria-current')).toBe('true');
     expect(rows(mounted)[0]?.getAttribute('aria-current')).toBeNull();
     await mounted.unmount();
   });
 
-  it('on a phone deals the newest item as a row linking into the chat at the item', async () => {
+  it('walks the rows with ↑ / ↓ and j / k, skipping folded groups, but not while the reader types', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    await interact(() => key('ArrowDown'));
+    expect(paneItem(mounted)).toBe('A2');
+    await interact(() => key('j'));
+    expect(paneItem(mounted)).toBe('A1');
+    await interact(() => key('j'));
+    expect(paneItem(mounted)).toBe('A1');
+    await interact(() => key('k'));
+    expect(paneItem(mounted)).toBe('A2');
+    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
+    await interact(() => find.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(paneItem(mounted)).toBe('A2');
+    // Fold the middle conversation: ↓ from the top goes straight past it.
+    await interact(() => (rows(mounted)[0] as HTMLElement).click());
+    const toggles = [...mounted.container.querySelectorAll<HTMLButtonElement>('[data-attention-group-toggle]')];
+    await interact(() => (toggles[1] as HTMLButtonElement).click());
+    expect(toggles[1]?.getAttribute('aria-expanded')).toBe('false');
+    expect(rows(mounted)).toHaveLength(2);
+    await interact(() => key('ArrowDown'));
+    expect(paneItem(mounted)).toBe('A1');
+    await mounted.unmount();
+  });
+
+  it('selects the NEXT item once the selected one is answered, and the undo brings it back', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(page(fake, [threeWay, twoWay, bare]));
+    await interact(() => (rows(mounted)[1] as HTMLElement).click());
+    const ship = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-answer="right"]'),
+      'Ship',
+    );
+    await interact(() => ship.click());
+    expect(paneItem(mounted)).toBe('A1');
+    expect(rowTitles(mounted)).toEqual(['Rebase onto main?', 'Have a look']);
+    await interact(() => undoButton(mounted).click());
+    expect(rowTitles(mounted)).toEqual(['Rebase onto main?', 'Ship it?', 'Have a look']);
+    await mounted.unmount();
+  });
+
+  it('skips forward, several in a row, and past the last says "You skipped N" — Review starts over', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const skip = () =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-skip]'), 'Skip');
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBe('A2');
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBe('A1');
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBeUndefined();
+    const end = must(mounted.container.querySelector('[data-attention-queue-end]'), 'the end of the queue');
+    expect(end.textContent).toContain('You skipped 3 — review them now?');
+    expect(mounted.container.querySelector('[data-attention-row][aria-current]')).toBeNull();
+    await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click());
+    expect(paneItem(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('answering the last item after skipping the others ends the queue instead of jumping back to the first', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const skip = () =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-skip]'), 'Skip');
+    await interact(() => skip().click());
+    await interact(() => skip().click());
+    expect(paneItem(mounted)).toBe('A1');
+    const done = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-answer="right"]'),
+      'Got it',
+    );
+    await interact(() => done.click());
+    expect(paneItem(mounted)).toBeUndefined();
+    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain(
+      'You skipped 2 — review them now?',
+    );
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-later]'), 'Later').click(),
+    );
+    const later = must(mounted.container.querySelector('[data-attention-queue-end="later"]'), 'caught up');
+    expect(later.textContent).toContain('All caught up for now');
+    expect(later.textContent).toContain('2 are still open');
+    expect(rowTitles(mounted)).toHaveLength(2);
+    await mounted.unmount();
+  });
+
+  it('narrows to one machine and to what Find matches, and offers the way back when nothing does', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const machine = must(mounted.container.querySelector<HTMLSelectElement>('[data-attention-machine]'), 'machines');
+    expect([...machine.options].map(option => option.textContent)).toEqual(['All machines', 'Workshop', 'Laptop']);
+    await interact(() => {
+      machine.value = 'laptop';
+      machine.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    expect(rowTitles(mounted)).toEqual(['Ship it?']);
+    expect(paneItem(mounted)).toBe('A2');
+    await interact(() => {
+      machine.value = '';
+      machine.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+      setter?.call(find, 'zzz');
+      find.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rows(mounted)).toHaveLength(0);
+    const back = must(mounted.container.querySelector('[data-attention-no-match] button'), 'Show everything');
+    await interact(() => (back as HTMLButtonElement).click());
+    expect(rows(mounted)).toHaveLength(3);
+    await mounted.unmount();
+  });
+
+  it('leaves the arrow keys to the card pane when a key press starts inside it', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const pane = must(mounted.container.querySelector<HTMLElement>('[data-attention-pane]'), 'the card pane');
+    expect(paneItem(mounted)).toBe('A3');
+    await interact(() => pane.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(paneItem(mounted)).toBe('A3');
+    await interact(() => key('ArrowDown'));
+    expect(paneItem(mounted)).toBe('A2');
+    await mounted.unmount();
+  });
+
+  it('clears Find on Escape, and leaves Escape alone while Find is empty', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'ship');
+      find.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rowTitles(mounted)).toEqual(['Ship it?']);
+    const escapeKey = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    const first = escapeKey();
+    await interact(() => find.dispatchEvent(first));
+    expect(first.defaultPrevented).toBe(true);
+    expect(rowTitles(mounted)).toHaveLength(3);
+    const second = escapeKey();
+    await interact(() => find.dispatchEvent(second));
+    expect(second.defaultPrevented).toBe(false);
+    await mounted.unmount();
+  });
+
+  it('says how long ago each of the ferret’s last messages was written', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [twoWay], {
+        readRecent: async () => [
+          { text: 'Cut the branch.', timestamp: '2026-08-01T10:00:00.000Z' },
+          { text: 'Raised it.', timestamp: '2026-08-01T12:00:00.000Z' },
+        ],
+      }),
+    );
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'fold').click(),
+    );
+    await flush();
+    expect([...mounted.container.querySelectorAll('.fy-attn-recent__when')].map(when => when.textContent)).toEqual([
+      '2h ago',
+      'just now',
+    ]);
+    await mounted.unmount();
+  });
+
+  it('on a phone card says "Updating" in its bar while boards are read', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [threeWay], { phone: true, initialOpen: threeWay.key, reading: true }),
+    );
+    expect(
+      must(mounted.container.querySelector('[data-attention-updating]'), 'Updating').closest('.fy-attn-inbox__cardbar'),
+    ).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('draws no machine filter while every item is on one machine', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, bare]));
+    expect(mounted.container.querySelector('[data-attention-machine]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says "Updating" in the header while boards are read, instead of over the content', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay], { reading: true }));
+    const mark = must(mounted.container.querySelector('[data-attention-updating]'), 'the Updating mark');
+    expect(mark.closest('.fy-attn-inbox__head')).not.toBeNull();
+    expect(mounted.container.querySelector('[data-attention-reading]')).toBeNull();
+    await mounted.unmount();
+  });
+
+  it('reads the ferret’s last messages only when the fold is opened, and shows them', async () => {
+    const reads: string[] = [];
+    const mounted = await mount(
+      page(fakeInbox(), [twoWay], {
+        readRecent: async card => {
+          reads.push(card.item.id);
+          return [{ text: 'Cut the release branch.' }, { text: 'Raised !A2 about shipping.' }];
+        },
+      }),
+    );
+    const toggle = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-attention-pane] [data-attention-recent-toggle]'),
+      'the fold',
+    );
+    expect(toggle.textContent).toBe('Last messages from Kai');
+    expect(reads).toEqual([]);
+    await interact(() => toggle.click());
+    await flush();
+    expect(reads).toEqual(['A2']);
+    expect(
+      [...mounted.container.querySelectorAll('[data-attention-recent-message]')].map(message => message.textContent),
+    ).toEqual(['Cut the release branch.', 'Raised !A2 about shipping.']);
+    // Inside the scrolling detail, so the answer bar stays pinned under it.
+    expect(toggle.closest('[data-attention-scroll]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says the ferret has written nothing yet when the conversation has no messages', async () => {
+    const mounted = await mount(page(fakeInbox(), [twoWay], { readRecent: async () => [] }));
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'fold').click(),
+    );
+    await flush();
+    expect(mounted.container.querySelector('[data-attention-recent-list]')).toBeNull();
+    expect(mounted.container.querySelector('.fy-attn-recent__note')?.textContent).toBe(
+      'Kai hasn’t written anything yet.',
+    );
+    await mounted.unmount();
+  });
+
+  it('says a failed read in the fold, and draws no fold when the host cannot read', async () => {
+    const failing = await mount(
+      page(fakeInbox(), [twoWay], {
+        readRecent: async () => {
+          throw new Error('machine offline');
+        },
+      }),
+    );
+    await interact(() =>
+      must(failing.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'fold').click(),
+    );
+    await flush();
+    expect(failing.container.querySelector('[data-attention-recent] [role="alert"]')?.textContent).toContain(
+      'machine offline',
+    );
+    await failing.unmount();
+    const none = await mount(page(fakeInbox(), [twoWay]));
+    expect(none.container.querySelector('[data-attention-recent]')).toBeNull();
+    await none.unmount();
+  });
+
+  it('ticks a to-do step through the host', async () => {
+    const ticks: [string, number, boolean][] = [];
+    const todo = inboxCard(
+      attentionItem('A5', { subject: 'Do the steps', steps: ['one', 'two'], ask: { kind: 'task' } }),
+    );
+    const mounted = await mount(
+      page(fakeInbox(), [todo], {
+        onProgress: async (card, step, done) => {
+          ticks.push([card.item.id, step, done]);
+        },
+      }),
+    );
+    const box = must(
+      mounted.container.querySelector<HTMLInputElement>('[data-attention-pane] input[type="checkbox"]'),
+      'the first step',
+    );
+    await interact(() => box.click());
+    await flush();
+    expect(ticks).toEqual([['A5', 0, true]]);
+    await mounted.unmount();
+  });
+
+  it('on a phone lists the items, opens a tapped one full screen as the whole card, and goes back', async () => {
     const navigated: string[] = [];
-    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, renderChat: chat }, navigated));
-    expect(mounted.container.querySelector('[data-fake-chat]')).toBeNull();
-    expect(mounted.container.querySelector('[data-attention-deck]')).not.toBeNull();
-    const row = rows(mounted)[0] as HTMLAnchorElement;
-    const href = row.getAttribute('href') ?? '';
-    expect(href).toContain('?attention=');
-    await interact(() => row.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true }, navigated));
+    const inbox = () => mounted.container.querySelector('[data-attention-inbox]')?.getAttribute('data-attention-inbox');
+    expect(inbox()).toBe('list');
+    expect(mounted.container.querySelector('.fy-attn-deck__top')).toBeNull();
+    await interact(() => (rows(mounted)[1] as HTMLElement).click());
+    expect(inbox()).toBe('card');
+    const top = mounted.container.querySelector('.fy-attn-deck__top');
+    expect(top?.querySelector('[data-attention-title]')?.textContent).toBe('Ship it?');
+    // Only what comes AFTER the tapped item is dealt, and it was the last one.
+    expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe(
+      'Swipe ← Hold · → Ship · ↓ Discuss',
+    );
+    const link = top?.querySelector<HTMLAnchorElement>('a[href*="?attention="]');
+    const href = link?.getAttribute('href') ?? '';
+    expect(href).toContain('?attention=A2');
+    await interact(() => link?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
     expect(navigated).toEqual([href]);
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-back]'), 'Back').click(),
+    );
+    expect(inbox()).toBe('list');
+    await mounted.unmount();
+  });
+
+  it('on a phone deals only the items AFTER the tapped one, skips forward, and ends with "You skipped N"', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], { phone: true, initialOpen: twoWay.key }));
+    const top = () => mounted.container.querySelector('.fy-attn-deck__top [data-attention-card]');
+    expect(top()?.getAttribute('data-attention-card')).toBe('A2');
+    expect(mounted.container.querySelectorAll('.fy-attn-deck__peek')).toHaveLength(1);
+    expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toContain('1 more after this one');
+    const skip = () =>
+      must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [data-attention-skip]'), 'Skip');
+    await interact(() => skip().click());
+    expect(top()?.getAttribute('data-attention-card')).toBe('A1');
+    await interact(() => skip().click());
+    expect(top()).toBeNull();
+    expect(mounted.container.querySelector('[data-attention-queue-end]')?.textContent).toContain(
+      'You skipped 3 — review them now?',
+    );
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click(),
+    );
+    expect(top()?.getAttribute('data-attention-card')).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('on a phone deals the three-way card’s answers left · up · right', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, initialOpen: threeWay.key }));
+    const top = mounted.container.querySelector('.fy-attn-deck__top');
+    const answers = [...(top?.querySelectorAll('[data-attention-answer]') ?? [])].map(button =>
+      button.getAttribute('data-attention-option'),
+    );
+    expect(answers).toEqual(['Skip', 'Wait', 'Rebase now']);
+    expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe(
+      '1 more after this one · Swipe ← Skip · ↑ Wait · → Rebase now · ↓ Discuss',
+    );
+    await mounted.unmount();
+  });
+
+  it('names the swipes of the card on top, and says a text-only card is answered in words', () => {
+    expect(swipeHintFor(undefined)).toBe('');
+    expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · → Ship · ↓ Discuss');
+    const words = inboxCard(
+      attentionItem('A9', { subject: 'What should the invite say?', ask: { kind: 'open-question' } }),
+    );
+    expect(swipeHintFor(words)).toBe('Reply in words, or open the chat · ↓ Discuss');
+  });
+
+  it('leaves ↓ Discuss out of the hint where nobody can discuss the item', () => {
+    const human = inboxCard(
+      attentionItem('A9', {
+        subject: 'Mine',
+        ask: choices('Ship', 'Hold'),
+        raisedBy: 'human',
+        raisedBySession: null,
+        raisedByName: null,
+      } as never),
+    );
+    expect(swipeHintFor(human)).toBe('Swipe ← Hold · → Ship');
+    const humanWords = inboxCard(
+      attentionItem('A8', {
+        ask: { kind: 'open-question' },
+        raisedBy: 'human',
+        raisedBySession: null,
+        raisedByName: null,
+      } as never),
+    );
+    expect(swipeHintFor(humanWords)).toBe('Reply in words, or open the chat');
+  });
+
+  it('marks a row "In discussion" in the list, and not one that is not', async () => {
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        ask: choices('Yes', 'No'),
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing, twoWay]));
+    const marks = [...mounted.container.querySelectorAll('[data-attention-row-discussion]')];
+    expect(marks.map(mark => mark.textContent)).toEqual(['In discussion']);
+    expect(marks[0]?.closest('[data-attention-row]')?.textContent).toContain('Premise check');
+    await mounted.unmount();
+  });
+
+  it('lists an item in discussion under its own "In discussion" group, out of the count', async () => {
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        ask: choices('Yes', 'No'),
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing, twoWay]));
+    const waiting = must(mounted.container.querySelector('[data-attention-list]'), 'the list');
+    const talking = must(mounted.container.querySelector('[data-attention-discussion-list]'), 'the discussion group');
+    expect(waiting.textContent).not.toContain('Premise check');
+    expect(talking.textContent).toContain('In discussion');
+    expect(talking.querySelector('[data-attention-group-count]')?.textContent).toBe('1');
+    expect(talking.querySelector('[data-attention-row-title]')?.textContent).toBe('Premise check');
+    expect(mounted.container.querySelector('.fy-attn-inbox__title')?.textContent).toContain('1');
+    await interact(() => (talking.querySelector('[data-attention-row]') as HTMLElement).click());
+    expect(mounted.container.querySelector('[data-attention-pane]')?.textContent).toContain('Premise check');
+    await mounted.unmount();
+  });
+
+  it('folds its "In discussion" group away with its header, and brings the rows back', async () => {
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        ask: choices('Yes', 'No'),
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing, twoWay]));
+    const talking = must(mounted.container.querySelector('[data-attention-discussion-list]'), 'the discussion group');
+    const toggle = must(talking.querySelector<HTMLButtonElement>('[data-attention-group-toggle]'), 'the group header');
+    await interact(() => toggle.click());
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(talking.querySelector('[data-attention-row]')).toBeNull();
+    expect(talking.querySelector('[data-attention-group-count]')?.textContent).toBe('1');
+    await interact(() => toggle.click());
+    expect(talking.querySelector('[data-attention-row-title]')?.textContent).toBe('Premise check');
+    await mounted.unmount();
+  });
+
+  it('is not "nothing waiting" while a discussion is open, and on a phone opens its conversation', async () => {
+    const navigated: string[] = [];
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing], { phone: true }, navigated));
+    expect(mounted.container.querySelector('[data-attention-list]')).toBeNull();
+    await interact(() =>
+      must(
+        mounted.container.querySelector<HTMLElement>('[data-attention-discussion-list] [data-attention-row]'),
+        'the discussion row',
+      ).click(),
+    );
+    expect(mounted.container.querySelector('[data-attention-inbox]')?.getAttribute('data-attention-inbox')).toBe(
+      'list',
+    );
+    expect(navigated).toHaveLength(1);
+    expect(navigated[0]).toContain('?attention=A6');
     await mounted.unmount();
   });
 
@@ -178,14 +633,14 @@ describe('AttentionInboxPage two panes', () => {
       }),
       sessionView('sess-4', { config: { teammate: 'ottilie', name: undefined } }),
     );
-    const mounted = await mount(page(fakeInbox(), [waiting], { phone: true, renderChat: chat }));
+    const mounted = await mount(page(fakeInbox(), [waiting], { phone: true, initialOpen: waiting.key }));
     expect(mounted.container.querySelector('[data-attention-waiting]')?.textContent).toContain('Waiting on');
     await mounted.unmount();
   });
 
   it('says a refusal whose card has gone once, until it is dismissed', async () => {
     const fake = fakeInbox();
-    const mounted = await mount(page(fake, [threeWay], { renderChat: chat }));
+    const mounted = await mount(page(fake, [threeWay]));
     expect(mounted.container.querySelector('[data-attention-failures]')).toBeNull();
     await mounted.unmount();
   });
@@ -236,10 +691,34 @@ describe('AttentionNeedsYou', () => {
     await mounted.unmount();
   });
 
+  it('keeps the answer bar outside the scrolling detail, and opens the reply box three lines tall', async () => {
+    const long = inboxCard(
+      attentionItem('A5', {
+        subject: 'Point the sync at the new org',
+        steps: ['one', 'two', 'three', 'four', 'five'],
+      }),
+    );
+    const mounted = await mount(needsYou(fakeInbox(), [long]));
+    const card = must(mounted.container.querySelector<HTMLElement>('[data-attention-card="A5"]'), 'the card');
+    const scroll = must(card.querySelector<HTMLElement>('[data-attention-scroll]'), 'the detail scroller');
+    expect(scroll.parentElement).toBe(card);
+    expect(scroll.textContent).toContain('five');
+    const bar = must(card.querySelector<HTMLElement>('[data-attention-answer="right"]'), 'the answer bar');
+    expect(scroll.contains(bar)).toBe(false);
+    await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'Reply').click());
+    expect(
+      must(card.querySelector<HTMLTextAreaElement>('[data-attention-reply]'), 'the reply box').getAttribute('rows'),
+    ).toBe('3');
+    await mounted.unmount();
+  });
+
   it('answers undoably, and the toast outlives the last card it took', async () => {
     const fake = fakeInbox();
     const mounted = await mount(needsYou(fake, [bare]));
-    const done = await menuAction(mounted.container, 'done');
+    const done = must(
+      mounted.container.querySelector<HTMLButtonElement>('[data-attention-answer="right"]'),
+      'the Got it answer',
+    );
     await interact(() => done.click());
     expect(mounted.container.querySelector('[data-attention-needs-you]')).toBeNull();
     expect(toast(mounted).textContent).toContain('Marked !A1 done');
@@ -252,9 +731,11 @@ describe('AttentionNeedsYou', () => {
 });
 
 describe('AttentionCard swipe hints', () => {
-  it('marks Done and Dismiss with their swipe, and never an option', async () => {
+  it('marks each swiped answer with its direction, and never an extra option', async () => {
     const hinted = (mounted: Mounted): (string | null)[] =>
-      [...mounted.container.querySelectorAll('.fy-attn-card__swipe')].map(hint => hint.getAttribute('title'));
+      [...mounted.container.querySelectorAll('[data-attention-answer], [data-attention-option]')].map(
+        button => /swipe (left|up|right)/.exec(button.textContent ?? '')?.[0] ?? null,
+      );
     const options = await mount(
       <AttentionCard
         item={attentionItem('A9', { ask: choices('One', 'Two', 'Three', 'Four') })}
@@ -262,44 +743,44 @@ describe('AttentionCard swipe hints', () => {
         swipeHints
       />,
     );
-    expect(hinted(options)).toEqual([]);
+    expect(hinted(options)).toEqual(['swipe left', 'swipe up', 'swipe right', null]);
     await options.unmount();
 
     const bare = await mount(<AttentionCard item={attentionItem('A8')} onAct={() => {}} swipeHints />);
-    await menuAction(bare.container, 'done');
-    expect(hinted(bare)).toEqual(['swipe right', 'swipe left']);
+    expect(hinted(bare)).toEqual(['swipe right']);
     await bare.unmount();
+
+    const plain = await mount(<AttentionCard item={attentionItem('A7')} onAct={() => {}} />);
+    expect(hinted(plain)).toEqual([null]);
+    await plain.unmount();
   });
 });
 
 describe('AttentionCard context', () => {
-  it('shows a short context whole, and folds a long one behind Show more / Show less', async () => {
+  it('draws the context open and whole, however long, and nothing for a blank one', async () => {
     const short = await mount(
       <AttentionCard item={attentionItem('A7', { context: 'Halfway through.' })} onAct={() => {}} />,
     );
-    const shortContext = must(short.container.querySelector('.fy-attn-card__context'), 'the context');
-    expect(shortContext.textContent).toBe('Halfway through.');
-    expect(shortContext.hasAttribute('data-open')).toBe(true);
-    expect(short.container.querySelector('.fy-attn-card__more')).toBeNull();
+    const shortContext = must(short.container.querySelector('[data-attention-section="context"]'), 'the context');
+    expect(shortContext.textContent).toContain('Halfway through.');
+    expect(short.container.querySelector('[data-attention-body-toggle]')).toBeNull();
     await short.unmount();
 
     const long = await mount(
       <AttentionCard item={attentionItem('A6', { context: 'word '.repeat(80) })} onAct={() => {}} />,
     );
-    const context = (): Element => must(long.container.querySelector('.fy-attn-card__context'), 'the long context');
-    const more = (): HTMLButtonElement =>
-      must(long.container.querySelector<HTMLButtonElement>('.fy-attn-card__more'), 'the fold toggle');
-    expect(context().hasAttribute('data-open')).toBe(false);
-    expect(more().textContent).toBe('Show more');
-    await interact(() => more().click());
-    expect(context().hasAttribute('data-open')).toBe(true);
-    expect(more().getAttribute('aria-expanded')).toBe('true');
-    expect(more().textContent).toBe('Show less');
+    const longContext = must(
+      long.container.querySelector('[data-attention-section="context"] .fy-attn-sec__body'),
+      'the long context',
+    );
+    expect(longContext.textContent?.match(/word/gu)).toHaveLength(80);
+    expect(long.container.querySelector('[data-attention-body-toggle]')).toBeNull();
     await long.unmount();
 
-    // Blank context is no context at all.
-    const blank = await mount(<AttentionCard item={attentionItem('A5', { context: '   ' })} onAct={() => {}} />);
-    expect(blank.container.querySelector('.fy-attn-card__context')).toBeNull();
+    const blank = await mount(
+      <AttentionCard item={attentionItem('A5', { context: '   ', subject: 'Same', why: 'Same' })} onAct={() => {}} />,
+    );
+    expect(blank.container.querySelector('[data-attention-section="context"]')).toBeNull();
     await blank.unmount();
   });
 });
@@ -311,7 +792,7 @@ describe('AttentionInboxPage banner slot', () => {
     );
     const root = withBanner.container;
     const banner = must(root.querySelector('[data-test-banner]'), 'the banner');
-    const first = must(root.querySelector('[data-attention-inbox] > :nth-child(3)'), 'the child after the head');
+    const first = must(root.querySelector('[data-attention-inbox] > :nth-child(3)'), 'the filter after the banner');
     expect(root.querySelector('[data-attention-inbox]')?.children[1]).toBe(banner);
     expect(first).not.toBe(banner);
     await withBanner.unmount();
@@ -335,5 +816,119 @@ describe('AttentionInboxPage refusals whose card has gone', () => {
     await interact(() => clear.click());
     expect(mounted.container.querySelector('[data-attention-failures]')).toBeNull();
     await mounted.unmount();
+  });
+});
+
+describe('AttentionInboxPage Resolved filter', () => {
+  const record = (id: string, resolvedAt: string): ResolvedAttentionItem =>
+    ({
+      ...attentionItem(id),
+      resolvedAt,
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      resolutionNote: null,
+      disposition: 'done',
+    }) as unknown as ResolvedAttentionItem;
+  const row = (id: string, resolvedAt: string): InboxResolved => {
+    const view = sessionView('sess-1', { config: { teammate: 'zoe', name: 'Fix the build' } });
+    return {
+      key: inboxCardKey(daemonId('studio'), view.config.id, id),
+      daemonId: daemonId('studio'),
+      machineName: 'Workshop',
+      view,
+      record: record(id, resolvedAt),
+    };
+  };
+  const mountFilter = (extra: { resolved?: readonly InboxResolved[]; resolvedReading?: boolean } = {}) => {
+    const fake = fakeInbox();
+    const navigated: string[] = [];
+    let loads = 0;
+    const mounted = mount(
+      <InboxHarness
+        cards={[threeWay]}
+        fake={fake}
+        loadResolved={() => {
+          loads += 1;
+        }}
+        render={inbox => (
+          <AttentionInboxPage
+            clock={fake.clock.now}
+            inbox={inbox}
+            now={NOW}
+            onNavigate={to => navigated.push(to)}
+            phone={false}
+          />
+        )}
+        {...extra}
+      />,
+    );
+    return { mounted, navigated, loads: () => loads };
+  };
+  const option = (root: ParentNode, which: 'open' | 'resolved') =>
+    must(root.querySelector<HTMLButtonElement>(`[data-attention-filter-option="${which}"]`), which);
+
+  it('starts on Open, and choosing Resolved reads the history and swaps the list', async () => {
+    const { mounted, loads } = mountFilter({
+      resolved: [row('A1', '2026-08-01T09:00:00.000Z'), row('A2', '2026-08-01T10:00:00.000Z')],
+    });
+    const view = await mounted;
+    const root = view.container;
+    expect(option(root, 'open').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-attention-resolved-pane]')).toBeNull();
+    await interact(() => option(root, 'resolved').click());
+    expect(loads()).toBe(1);
+    expect(option(root, 'resolved').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-attention-resolved-pane]')).not.toBeNull();
+    expect(
+      [...root.querySelectorAll('[data-attention-record]')].map(r => r.getAttribute('data-attention-record')),
+    ).toEqual(['A1', 'A2']);
+    expect(root.querySelector('[data-attention-record-origin]')?.textContent).toContain('Workshop');
+    await interact(() => option(root, 'open').click());
+    expect(root.querySelector('[data-attention-resolved-pane]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('a record links to its conversation', async () => {
+    const { mounted, navigated } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
+    const view = await mounted;
+    await interact(() => option(view.container, 'resolved').click());
+    await interact(() =>
+      must(view.container.querySelector<HTMLElement>('.fy-attn-panel__record-link'), 'link').click(),
+    );
+    expect(navigated).toHaveLength(1);
+    expect(navigated[0]).toContain('A1');
+    await view.unmount();
+  });
+
+  it('says nothing matches when Find hides every resolved item, and Show everything brings them back', async () => {
+    const { mounted } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
+    const view = await mounted;
+    const root = view.container;
+    await interact(() => option(root, 'resolved').click());
+    expect(root.querySelectorAll('[data-attention-record]')).toHaveLength(1);
+    const find = must(root.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'zzz-no-such-thing');
+      find.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(root.querySelectorAll('[data-attention-record]')).toHaveLength(0);
+    expect(root.querySelector('[data-attention-resolved-empty]')).toBeNull();
+    const back = must(root.querySelector<HTMLButtonElement>('[data-attention-no-match] button'), 'Show everything');
+    await interact(() => back.click());
+    expect(root.querySelectorAll('[data-attention-record]')).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('says it is reading, then says nothing is resolved', async () => {
+    const reading = await mountFilter({ resolvedReading: true }).mounted;
+    await interact(() => option(reading.container, 'resolved').click());
+    expect(reading.container.textContent).toContain('Reading resolved items');
+    await reading.unmount();
+
+    const none = await mountFilter().mounted;
+    await interact(() => option(none.container, 'resolved').click());
+    expect(none.container.querySelector('[data-attention-resolved-empty]')?.textContent).toContain('Nothing resolved');
+    await none.unmount();
   });
 });

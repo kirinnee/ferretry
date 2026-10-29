@@ -80,6 +80,7 @@ unserved GET /v1/tunnel-service # CORRECT: dialled against the same relay DISCOV
 # Machine feeds. Their callers are an orchestrator, a scraper and a human, none of which live here.
 unreached GET /usage # CORRECT: public usage feed for external readers
 unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
+unreached POST /v1/sessions/:sessionId/notify # CORRECT: kept for older CLIs; the current CLI raises an info item through the attention route instead, so only items notify
 
 # Surfaces with no shipped client yet. Each is a route somebody built and nobody wired.
 unreached GET /v1/sessions/:sessionId/attachments/:attachmentId # no client asks for attachment metadata alone; list and content paths are the shipped surface

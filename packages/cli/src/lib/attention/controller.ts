@@ -1,4 +1,10 @@
-import { type AttentionId, type AttentionSnapshot, MAX_NOTIFICATION_BODY_LENGTH } from '@ferretry/protocol';
+import {
+  ATTENTION_PUSH_TITLE_LENGTH,
+  type AttentionId,
+  type AttentionSnapshot,
+  clipAtWord,
+  MAX_ATTENTION_SUBJECT_LENGTH,
+} from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
 import {
   type BriefFile,
@@ -15,7 +21,6 @@ import {
   renderAttentionItem,
   renderAttentionList,
   renderAttentionMutation,
-  renderNotification,
   renderRepliesSent,
 } from './render.ts';
 
@@ -51,7 +56,7 @@ export interface AttentionResolveOptions extends AttentionCommandOptions, Answer
   readonly note?: string;
 }
 
-/** Flags that shape a direct notification. */
+/** Flags that shape an info card raised from a message. */
 export interface AttentionNotifyOptions extends AttentionCommandOptions {
   readonly title?: string;
   readonly kind?: string;
@@ -175,6 +180,20 @@ export class AttentionController {
     );
   }
 
+  /** The owner asks to talk an item through before answering. The item stays open, in discussion. */
+  async discuss(reference: string, options: AttentionResolveOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const note = text(options.note);
+    const snapshot = await this.gateway.apply(this.#target(options), {
+      action: 'discuss',
+      id,
+      ...(note === undefined ? {} : { note }),
+    });
+    this.#report(snapshot, options, () =>
+      renderAttentionMutation('asked to discuss', attentionReference(id), snapshot),
+    );
+  }
+
   async dismiss(reference: string, options: AttentionResolveOptions): Promise<void> {
     const id = parseAttentionReference(reference);
     const note = text(options.note);
@@ -186,20 +205,33 @@ export class AttentionController {
     this.#report(snapshot, options, () => renderAttentionMutation('dismissed', attentionReference(id), snapshot));
   }
 
+  /**
+   * Only an attention item notifies the owner, so `notify` raises an `info` card: the title is `--title` or
+   * the start of the text, the ask is the text as one line, and a text that does not fit one line goes
+   * whole into the context.
+   */
   async notify(words: readonly string[], options: AttentionNotifyOptions): Promise<void> {
-    const body = words.join(' ').trim();
-    if (body === '') throw new Error('notify needs the notification text');
-    if (body.length > MAX_NOTIFICATION_BODY_LENGTH) {
-      throw new Error(`a notification may not exceed ${MAX_NOTIFICATION_BODY_LENGTH} characters (got ${body.length})`);
-    }
-    const title = text(options.title);
-    const kind = notificationKind(options.kind);
-    const result = await this.gateway.notify(this.#target(options), {
-      body,
-      ...(title === undefined ? {} : { title }),
-      ...(kind === undefined ? {} : { kind }),
-    });
-    this.out.success(options.json === true ? JSON.stringify(result, null, 2) : renderNotification(result.delivered));
+    refuseProgressKind(options.kind);
+    const message = words.join(' ').trim();
+    if (message === '') throw new Error('notify needs the notification text');
+    const line = message.replaceAll(/\s+/gu, ' ');
+    const fits = line.length <= MAX_ATTENTION_SUBJECT_LENGTH;
+    const request = composeAddRequest(
+      [fits ? line : clipAtWord(line, MAX_ATTENTION_SUBJECT_LENGTH)],
+      {
+        kind: 'info',
+        title: text(options.title) ?? clipAtWord(line, ATTENTION_PUSH_TITLE_LENGTH),
+        resolve: 'Acknowledge it on the attention board (Got it).',
+        ...(fits ? {} : { context: message }),
+      },
+      {},
+    );
+    const sessionId = this.#target(options);
+    const before = await this.gateway.snapshot(sessionId);
+    const after = await this.gateway.apply(sessionId, request);
+    const raised = onlyNewId(before, after);
+    const verb = raised === undefined ? 'info raised' : `info ${attentionReference(raised)} raised`;
+    this.#report(after, options, () => renderAttentionMutation(verb, undefined, after, raised));
   }
 
   /** The JSON body and the Markdown body the flags name, each read once: standard input serves only one. */
@@ -245,13 +277,16 @@ function text(value: string | undefined): string | undefined {
   return trimmed === '' ? undefined : trimmed;
 }
 
-function notificationKind(value: string | undefined): 'completed' | 'failed' | undefined {
+/** Progress and finishing never notify the owner; `--kind` once chose between them and now only says no. */
+function refuseProgressKind(value: string | undefined): void {
   const kind = text(value);
-  if (kind === undefined) return undefined;
-  if (kind !== 'completed' && kind !== 'failed') {
-    throw new Error(`notify --kind must be completed or failed, not "${kind}"`);
+  if (kind === undefined) return;
+  if (kind === 'completed' || kind === 'failed') {
+    throw new Error(
+      'progress and finishing never notify the owner — raise an item (fy attention add) only when they must decide or do something',
+    );
   }
-  return kind;
+  throw new Error(`notify takes no --kind (it raises an info card), not "${kind}"`);
 }
 
 /** The single id present after a write and absent before it, if the write produced exactly one. */

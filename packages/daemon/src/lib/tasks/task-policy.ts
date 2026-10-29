@@ -52,11 +52,9 @@ export const sameTaskDoneRequestFingerprint = (
   left: TaskDoneRequestFingerprint,
   right: TaskDoneRequestFingerprint,
 ): boolean => {
-  if (left.action !== right.action || left.reason !== right.reason) return false;
-  if (left.action === 'phase' && right.action === 'phase') return left.phase === right.phase;
-  if (left.action === 'status' && right.action === 'status')
-    return left.status === right.status && left.note === right.note;
-  return false;
+  if (left.reason !== right.reason) return false;
+  if (left.action === 'phase') return right.action === 'phase' && left.phase === right.phase;
+  return right.action === 'status' && left.status === right.status && left.note === right.note;
 };
 
 /**

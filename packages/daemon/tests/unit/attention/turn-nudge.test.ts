@@ -198,7 +198,7 @@ describe('attentionNudgeMessage', () => {
 
     // Assert
     should(actual).startWith(`${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n- approve the deploy\n`);
-    should(actual).containEql('`zz attention add "<summary>" --step …`');
+    should(actual).containEql('`zz attention add --title "<what>" "<the ask>" --step …`');
     should(actual).containEql('say why not in one line');
     should(actual).not.containEql('question tool');
     should(actual).not.containEql('You raised');

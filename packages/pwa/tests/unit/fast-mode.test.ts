@@ -160,3 +160,25 @@ describe('a browser whose storage accessor itself throws', () => {
     }
   });
 });
+
+describe('a browser whose storage is absent or not a store', () => {
+  test('should read as unseen and never throw', () => {
+    // Arrange
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    const under = (value: unknown, check: () => void): void => {
+      Object.defineProperty(globalThis, 'localStorage', { configurable: true, value });
+      check();
+    };
+    try {
+      // Act / Assert
+      for (const value of [undefined, {}, { getItem: () => '1' }, { getItem: () => '1', setItem: 'no' }])
+        under(value, () => {
+          expect(fastCostNoteSeen()).toBeFalse();
+          expect(() => markFastCostNoteSeen()).not.toThrow();
+        });
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', original);
+    }
+  });
+});

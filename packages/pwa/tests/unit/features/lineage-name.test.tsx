@@ -25,4 +25,16 @@ describe('LineageName', () => {
 
     expect(JSON.stringify(rendered.toJSON())).toContain('abcdefgh…');
   });
+
+  it('shows only the callsign, with no task and no id text, when the session has a callsign but no task', () => {
+    const label = lineageLabel(sessionView('abcdefghijk', { config: { teammate: 'molly', name: '' } }));
+    const renderer = render(<LineageName label={label} />);
+    const rendered = renderer.root.findByType('span');
+
+    const spans = rendered.findAllByType('span');
+    expect(spans.some(span => span.children.includes('Molly'))).toBeTrue();
+    expect(spans.some(span => String(span.props.className).includes('truncate'))).toBeFalse();
+    expect(rendered.props.title).toBe(label.full);
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('abcdefgh…');
+  });
 });

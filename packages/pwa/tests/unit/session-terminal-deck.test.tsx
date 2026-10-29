@@ -4,6 +4,8 @@ import { browserTerminalDeckDependencies, SessionTerminalDeck } from '../../src/
 import { RECONNECTING_GRACE_MS } from '../../src/lib/connection-health.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
+import { grantRefusalNotice } from '../../src/lib/grants.ts';
+import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 import { TERMINAL_REOPEN_BASE_MS } from '../../src/lib/terminal-co-control.ts';
 import { TerminalStreamRefused } from '../../src/lib/web-terminals.ts';
 import '../support/dom.ts';
@@ -304,6 +306,65 @@ describe('SessionTerminalDeck', () => {
     await settle();
 
     expect(json(page)).toContain('daemon unreachable');
+    run(() => page.unmount());
+  });
+
+  test('words a refused listing as the grant refusal it is, not as a bare HTTP status', async () => {
+    const refusal = new DaemonResponseError(403, '', 'grant_not_granted');
+    const explanation = grantRefusalNotice(refusal)?.guidance.explanation ?? '';
+    expect(explanation).not.toBe('');
+    const deck = fakeDeck(async () => {
+      throw refusal;
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    expect(json(page)).toContain(explanation);
+    run(() => page.unmount());
+  });
+
+  test('keeps the shell the reader is on when a fresh listing still holds it', async () => {
+    const listing = async () =>
+      terminalListing([terminalView(FIRST, { title: 'first' }), terminalView(SECOND, { title: 'second' })]);
+    const first = fakeDeck(listing);
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={first.dependencies} scope={scopeAlpha} />);
+    await settle();
+    const tab = page.root.findAll(
+      node => node.type === 'button' && String(node.props.title ?? '').startsWith('second'),
+    )[0];
+    if (tab === undefined) throw new Error('no second tab');
+    run(() => (tab.props as { onClick: () => void }).onClick());
+    await settle();
+
+    const second = fakeDeck(listing);
+    run(() =>
+      page.update(<SessionTerminalDeck connection={alpha} dependencies={second.dependencies} scope={scopeAlpha} />),
+    );
+    await settle();
+
+    expect(second.urls.every(url => url.includes(SECOND))).toBe(true);
+    expect(second.urls).not.toHaveLength(0);
+    run(() => page.unmount());
+  });
+
+  test('opens the first shell from the empty state even when the listing has not arrived', async () => {
+    const deck = fakeDeck(async () => {
+      throw new Error('daemon unreachable');
+    });
+    const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
+    await settle();
+
+    const start = page.root.findAll(
+      node => node.props.variant === 'primary' && typeof node.props.onClick === 'function',
+    )[0];
+    if (start === undefined) throw new Error('no New terminal button');
+    await runAsync(async () => {
+      (start.props as { onClick: () => void }).onClick();
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(json(page)).not.toContain('daemon unreachable');
     run(() => page.unmount());
   });
 

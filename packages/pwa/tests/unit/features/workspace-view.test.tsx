@@ -103,13 +103,13 @@ describe('WorkspaceView', () => {
 
   it('keeps live bodies mounted across tab switches and hide/show, but not file bodies', async () => {
     const view = await host(withTabs(dev, app, login, readme));
-    expect(view.recorder.mounts).toEqual(['chat', 'console', dev.id, app.id, readme.id]);
+    expect(view.recorder.mounts).toEqual(['chat', 'console', 'processes', dev.id, app.id, readme.id]);
     expect(view.container.querySelector(`[data-body="${login.id}"]`)).toBeNull();
     await interact(() => view.q(`[data-tab-id="${dev.id}"]`).click());
     expect(view.container.querySelector(`[data-body="${readme.id}"]`)).toBeNull();
     await interact(() => view.q('[aria-label="Hide workspace pane"]').click());
     await interact(() => view.q('[aria-label="Show workspace pane"]').click());
-    expect(view.recorder.mounts).toEqual(['chat', 'console', dev.id, app.id, readme.id]);
+    expect(view.recorder.mounts).toEqual(['chat', 'console', 'processes', dev.id, app.id, readme.id]);
     await view.unmount();
   });
 

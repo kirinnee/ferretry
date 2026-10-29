@@ -236,8 +236,6 @@ export function forkOpeningTurn(plan: SessionTransferPlan): string {
  */
 export function forkOpeningTurnRefusal(plan: SessionTransferPlan): string | undefined {
   const opening = forkOpeningTurn(plan);
-  if (opening.length === 0)
-    return `plan ${plan.planId} renders an empty opening turn, so the forked session would be handed no context at all`;
   if (opening.length > MAX_ASSIGNED_TASK_LENGTH)
     return (
       `plan ${plan.planId} renders an opening turn of ${opening.length} characters, and a session's first turn is ` +
@@ -658,10 +656,6 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
   /** The record hash and the private environment must prove the same fresh credential. */
   private async assertCredential(id: SessionId, record: SessionLifecycleRecord): Promise<void> {
     const expected = record.config.sessionCapabilityHash;
-    if (expected === undefined)
-      throw new SessionForkTargetBindingError(
-        `target ${id} holds no credential hash of its own, so it is not the fresh session this fork reserved`,
-      );
     let environment: Readonly<Record<string, string>>;
     try {
       environment = await this.ports.environment.read(id);
@@ -672,7 +666,7 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
     }
     const capability = environment[SESSION_BOARD_CAPABILITY_VARIABLE];
     const actual = capability === undefined ? undefined : createHash('sha256').update(capability, 'utf8').digest('hex');
-    if (actual !== expected)
+    if (expected === undefined || actual !== expected)
       throw new SessionForkTargetBindingError(
         `target ${id}'s private credential does not match the hash in its session record; refusing to launch a ` +
           'target whose identity was torn during creation',

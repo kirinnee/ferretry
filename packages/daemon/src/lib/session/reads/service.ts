@@ -41,7 +41,8 @@ import type {
   SessionTranscriptMessage,
   SessionTranscriptPage,
 } from '@ferretry/protocol';
-import { ExactConversationMessagePointSchema } from '@ferretry/protocol';
+import { ExactConversationMessagePointSchema, formatTranscriptImageMarker } from '@ferretry/protocol';
+import { markerMediaType, numberRecordImages, type RecordImage } from '../../transcript/images.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import type { LastSnapshotReader } from '../snapshot/index.ts';
 import { type PortableConversationRow, sameConversationMessagePoint } from '../transcript/digest.ts';
@@ -222,14 +223,15 @@ export type OperatorMessageReadResult =
   /**
    * The exact file was proved, but it could not be read COMPLETELY as evidence.
    *
-   * It covers a file that vanished or would not parse and, deliberately, one that is simply too big:
-   * a complete read is bounded at 32 MiB (`DEFAULT_MAX_READ_BYTES` in the file transcript source), and
-   * a read that stops there reports `source-truncated`, which the digest owner counts as an incomplete
-   * transcript and refuses on. That fail-closed chain is why this is one variant rather than three —
-   * a shorter-looking conversation is LOST HISTORY, not a valid prefix, and serving its rows would
-   * offer a fork cut at a coordinate whose prefix the daemon never actually saw.
+   * It covers a file that vanished, would not parse, or held a record past the per-record bound. A
+   * transcript's SIZE is no longer one of them: the conversation index folds a long transcript a bounded
+   * read at a time, and leaves a live writer's unterminated last line for the next read. It stays one
+   * variant because a shorter-looking conversation is LOST HISTORY, not a valid prefix, and serving its
+   * rows would offer a fork cut at a coordinate whose prefix the daemon never actually saw.
+   *
+   * `reason` is the refusal's own words, for the human reading the error: which of those it was.
    */
-  | { readonly kind: 'unreadable' }
+  | { readonly kind: 'unreadable'; readonly reason?: string }
   /** A completed read. `rows` may legitimately be empty — nothing portable has been said yet. */
   | {
       readonly kind: 'read';
@@ -309,18 +311,60 @@ function stamp(value: string | undefined): string | undefined {
   return `${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}:${pad(at.getUTCSeconds())}`;
 }
 
-/** The body of one transcript event, as a human reads it. */
-function body(event: TranscriptEvent): string {
+/** Whether a window beginning at `start` would begin inside a record: the event before it shares its bytes. */
+function cutsRecord(events: readonly TranscriptEvent[], start: number): boolean {
+  const before = events[start - 1];
+  const first = events[start];
+  if (first === undefined) return false;
+  if (before === undefined) return false;
+  return (
+    before.byteOffset !== undefined && before.byteOffset === first.byteOffset && before.byteLength === first.byteLength
+  );
+}
+
+/** A number as letters a-j, so the stand-in for a marker holds no digit a masking redactor could eat. */
+const spell = (index: number): string =>
+  String(index).replace(/\d/gu, digit => String.fromCharCode(97 + Number(digit)));
+const unspell = (letters: string): number =>
+  Number(letters.replace(/[a-j]/gu, letter => String(letter.charCodeAt(0) - 97)));
+
+/** The NUL that fences a lifted marker: no secret a redactor masks can contain it. */
+const NUL = String.fromCharCode(0);
+const LIFTED_MARKER = new RegExp(`${NUL}fy-image-([a-j]+)${NUL}`, 'gu');
+
+/** How a rendered log spells the marker for one image. */
+type MarkImage = (image: RecordImage) => string;
+
+const imageMarker: MarkImage = image =>
+  formatTranscriptImageMarker({ handle: image.handle, mediaType: markerMediaType(image) });
+
+/**
+ * The body of one transcript event, as a human reads it.
+ *
+ * `images` are the ones this event holds that a chat can ask for (`numberRecordImages`). An image
+ * attachment keeps its kind word and gains the marker after it; a tool result keeps its text and gains
+ * one marker line per image, in place of the JSON dump that an image-only result used to print — which
+ * was the image's base64 whenever it was small enough to be parsed.
+ */
+function body(event: TranscriptEvent, images: readonly RecordImage[] = [], mark: MarkImage = imageMarker): string {
   switch (event.kind) {
     case 'message':
     case 'reasoning':
       return event.text;
     case 'tool-call':
       return `${event.call.name}(${JSON.stringify(event.call.input)})`;
-    case 'tool-result':
-      return `${event.result.isError ? 'error ' : ''}${event.result.text ?? JSON.stringify(event.result.content)}`;
-    case 'attachment':
+    case 'tool-result': {
+      const prefix = event.result.isError ? 'error ' : '';
+      if (images.length === 0) return `${prefix}${event.result.text ?? JSON.stringify(event.result.content)}`;
+      return [`${prefix}${event.result.text ?? ''}`.trimEnd(), ...images.map(mark)]
+        .filter(line => line !== '')
+        .join('\n');
+    }
+    case 'attachment': {
+      const marker = images[0];
+      if (marker !== undefined) return `${event.attachment.kind} ${mark(marker)}`;
       return `${event.attachment.kind}${event.attachment.kind === 'remote-control' ? ` ${event.attachment.url}` : ''}`;
+    }
     case 'error':
       return `${event.error.code === undefined ? '' : `${event.error.code}: `}${event.error.message}`;
     case 'usage':
@@ -339,13 +383,21 @@ function body(event: TranscriptEvent): string {
  *
  * Multi-line bodies are indented under their own header rather than flattened, so a code block an
  * agent wrote is still readable and a reader can still tell where one event ends and the next begins.
+ *
+ * An image a chat can ask for carries a `[fy-image <handle> <type>]` marker (see
+ * `@ferretry/protocol`'s `transcript-images.ts`). `partialFirstRecord` says the first record may have
+ * lost its leading events to a window cut, so its images cannot be numbered and stay unmarked.
  */
-export function renderTranscript(events: readonly TranscriptEvent[]): string {
+export function renderTranscript(
+  events: readonly TranscriptEvent[],
+  options: { readonly partialFirstRecord?: boolean; readonly mark?: MarkImage } = {},
+): string {
+  const images = numberRecordImages(events, options);
   return events
-    .map(event => {
+    .map((event, index) => {
       const when = stamp(event.timestamp);
       const header = `${when === undefined ? '' : `[${when}] `}${event.role}/${event.kind}`;
-      const [first = '', ...rest] = body(event).split('\n');
+      const [first = '', ...rest] = body(event, images[index], options.mark).split('\n');
       return [`${header}: ${first}`, ...rest.map(line => `    ${line}`)].join('\n');
     })
     .join('\n');
@@ -501,7 +553,10 @@ export class OperatorReadService {
         'transcript_unreadable',
         `session ${sessionId} has a proved transcript, but this daemon could not read it`,
       );
-    if (turn === undefined) return await this.redactor.redact(renderTranscript(result.events));
+    // A tail of exactly `tail` events may have been cut inside its first record, and a record's images are
+    // numbered from its first event — so that first record stays unmarked rather than named wrongly.
+    if (turn === undefined)
+      return await this.renderRedacted(result.events, { partialFirstRecord: result.events.length >= tail });
     if (!Number.isSafeInteger(turn) || turn < 0)
       throw new OperatorReadError('invalid_query', 'turn must be a non-negative integer');
     const starts = result.events.flatMap((event, index) =>
@@ -514,7 +569,37 @@ export class OperatorReadService {
         `session ${sessionId}'s transcript has no discernible boundary for turn ${turn}`,
       );
     const end = starts[turn + 1] ?? result.events.length;
-    return await this.redactor.redact(renderTranscript(result.events.slice(start, end).slice(-tail)));
+    const turnEvents = result.events.slice(start, end);
+    return await this.renderRedacted(turnEvents.slice(-tail), {
+      partialFirstRecord:
+        turnEvents.length > tail || (start === 0 ? result.events.length >= tail : cutsRecord(result.events, start)),
+    });
+  }
+
+  /**
+   * `events` rendered and scrubbed, with every image marker the RENDERER wrote carried through untouched.
+   *
+   * A marker is digits and a media type this daemon wrote, not content, but a masked value that happens
+   * to be a run of digits would still reach into it and leave a handle that names nothing. So the renderer
+   * writes a token no secret can equal in each marker's place, and the markers go back after the scrub.
+   * Only markers rendered here are lifted: text that merely LOOKS like one — a model can write anything —
+   * is scrubbed like every other word, or wrapping a secret in marker syntax would walk it past redaction.
+   */
+  private async renderRedacted(
+    events: readonly TranscriptEvent[],
+    options: { readonly partialFirstRecord: boolean },
+  ): Promise<string> {
+    const markers: string[] = [];
+    const lifted = renderTranscript(events, {
+      ...options,
+      mark: image => {
+        markers.push(imageMarker(image));
+        return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
+      },
+    });
+    if (markers.length === 0) return await this.redactor.redact(lifted);
+    const scrubbed = await this.redactor.redact(lifted);
+    return scrubbed.replace(LIFTED_MARKER, (whole, index: string) => markers[unspell(index)] ?? whole);
   }
 
   /**
@@ -535,10 +620,11 @@ export class OperatorReadService {
    * the conversation this page already claimed, and continuing past it would stitch one page of a
    * conversation onto another.
    *
-   * WHAT IT COSTS. One complete read per page — the source's own O(n) pass — plus one fixed-size MAC
-   * per served row and one for the cursor, and ONE vault open for the page's scrub. There is
-   * deliberately no second incremental parser and no re-hashing of whole prefixes per row, which is
-   * what a chained commitment buys.
+   * WHAT IT COSTS. The bytes appended since the session's last read — the conversation index folds a
+   * transcript once and extends it, so a page of a long session no longer re-reads it from byte zero —
+   * plus one fixed-size MAC per served row and one for the cursor, and ONE vault open for the page's
+   * scrub. The index is the source's own window and the digest owner's own fold, not a second parser,
+   * and nothing re-hashes a whole prefix per row, which is what a chained commitment buys.
    */
   async messages(
     sessionId: string,
@@ -555,19 +641,20 @@ export class OperatorReadService {
         'no_transcript',
         `session ${sessionId} has no transcript this daemon can prove is its own`,
       );
-    // "COULD NOT READ COMPLETELY", and that last word is load-bearing. One public code answers three
-    // things: a file that vanished, a file that would not parse, and a file whose complete read stopped
-    // at the 32 MiB v1 bound and reported `source-truncated` — which the digest owner counts as an
-    // incomplete transcript and refuses on rather than returning the rows it did manage to read. An
-    // operator told merely that the transcript could not be read will reasonably retry; told it could
-    // not be read COMPLETELY, they know a partial page existed and was deliberately withheld, because
-    // paging a prefix this daemon cannot prove is whole would offer a fork cut against history that may
-    // already be missing. The CODE is unchanged — clients still match `transcript_unreadable` — and this
-    // distinction is for the human reading the message.
+    // "COULD NOT READ COMPLETELY", and that last word is load-bearing. One public code answers a file
+    // that vanished, a file that would not parse and a record past the per-record bound — each of which
+    // the digest owner counts as an incomplete transcript and refuses on rather than returning the rows
+    // it did manage to read. An operator told merely that the transcript could not be read will
+    // reasonably retry; told it could not be read COMPLETELY, they know a partial page existed and was
+    // deliberately withheld, because paging a prefix this daemon cannot prove is whole would offer a fork
+    // cut against history that may already be missing. The CODE is unchanged — clients still match
+    // `transcript_unreadable` — and the distinction, with the refusal's own reason, is for the human.
     if (read.kind === 'unreadable')
       throw new OperatorReadError(
         'transcript_unreadable',
-        `session ${sessionId} has a proved transcript this daemon could not read completely`,
+        `session ${sessionId} has a proved transcript this daemon could not read completely${
+          read.reason === undefined ? '' : `: ${read.reason}`
+        }`,
       );
     // A token framed over an undiscovered provenance would be evidence about a snapshot the daemon has
     // since replaced, and it would stop verifying the moment the identity was established. So an

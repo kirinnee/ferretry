@@ -8,6 +8,7 @@ import {
   type ConversionPreview,
   type CreateTerminalRequest,
   DAEMON_CAPABILITIES,
+  type IoPressureView,
   type LearningConfig,
   PIN_SCHEMA_VERSION,
   type Pin,
@@ -1229,6 +1230,8 @@ export interface HealthWorld {
   readonly ticks?: number;
   readonly scratch?: ScratchReclamation;
   readonly pid?: number;
+  /** The disk pressure the daemon would report, where the host has any. */
+  readonly io?: IoPressureView;
 }
 
 /**
@@ -1308,6 +1311,7 @@ export function healthSubsystem(world: HealthWorld = {}): DaemonHealthSubsystem 
     },
     pid: world.pid ?? 4321,
     scratch: world.scratch ?? { enabled: false, reclaimedSessions: 0, reclaimedBytes: 0 },
+    ...(world.io === undefined ? {} : { io: () => world.io }),
   };
 }
 
@@ -2368,5 +2372,6 @@ export function configChangeSubsystem(announced: (readonly ConfigChangeKind[])[]
 /** An outbox that holds nothing: for routes whose test is not about batched answers. */
 export const NO_HELD_REPLIES: AttentionRepliesSubsystem = {
   pending: async () => undefined,
+  delivery: async () => undefined,
   sendNow: async () => undefined,
 };

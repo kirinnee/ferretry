@@ -391,9 +391,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
             ? `Dictate — ${dictationShortcutLabel(settings.shortcut)}. ${
                 isOnDeviceEngine(dictation.engine)
                   ? `${onDeviceModel(dictation.engine)?.shortName ?? 'The model'} transcribes on this device`
-                  : dictation.engine === 'browser'
-                    ? 'Your browser’s speech service transcribes it'
-                    : 'Choose a voice engine in Settings › Voice first'
+                  : 'Your browser’s speech service transcribes it'
               }; ${
                 settings.afterDictation === 'insert'
                   ? 'the text goes into your draft when it is ready, with Undo'

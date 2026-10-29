@@ -62,6 +62,7 @@ import {
   connectionSocketUrl,
   describeConnectionMethod,
   HEARTBEAT_GRACE_SECONDS,
+  MAX_PLAINTEXT_BYTES,
   type PrivateKeyHandle,
   parseDaemonId,
   publishedConnectionMethods,
@@ -1053,6 +1054,12 @@ export interface DaemonCarrierRouterOptions {
    * Absent means nobody is keeping score, which is every router built before it existed.
    */
   readonly health?: ConnectionHealthReporter;
+  /**
+   * How many request ids in doubt are remembered — {@link UNKNOWN_FATES_REMEMBERED} by default. It is a
+   * parameter for the same reason a session's `maxRequestId` is: every id put in doubt costs a session
+   * that died under it, and proving the oldest is forgotten at the real bound took hundreds of handshakes.
+   */
+  readonly unknownFatesRemembered?: number;
 }
 
 /**
@@ -1181,6 +1188,24 @@ export interface RelayStreamRequest {
 
 /** The request session's key. One per rendezvous, because §14 gives a request session no identity. */
 const requestSessionKey = (address: string): string => `request ${address}`;
+
+/**
+ * Which request session carries a request: `bulk` for a body that has to travel in parts, `request`
+ * for everything else.
+ *
+ * A SESSION IS ONE CREDIT WINDOW AND ONE QUEUE, so a request waits behind every record queued ahead of
+ * it. A phone photo is about eighty records; a few of them queued ahead of the fleet list's poll held
+ * it past its deadline, and a request that misses its deadline retires the session it was on — the
+ * one carrying the uploads. Bodies that need parts therefore share a session of their own, and the
+ * reads every panel polls never wait behind one.
+ */
+export type RequestLane = 'request' | 'bulk';
+
+export const requestLane = (body: string | undefined): RequestLane =>
+  body !== undefined && body.length > MAX_PLAINTEXT_BYTES / 2 ? 'bulk' : 'request';
+
+const laneSessionKey = (lane: RequestLane, address: string): string =>
+  lane === 'request' ? requestSessionKey(address) : `bulk ${address}`;
 
 /**
  * A stream session's key: one per CALL, because §14 gives each stream its own session.
@@ -1325,6 +1350,7 @@ export class DaemonCarrierRouter {
   readonly #health: ConnectionHealthReporter | undefined;
   /** Request ids a session died under after they left — see {@link CarrierUnavailableError}'s `delivery`. */
   readonly #unknownFates = new Set<string>();
+  readonly #unknownFatesRemembered: number;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #paired: () => readonly DaemonConnection[] = () => [];
@@ -1370,6 +1396,7 @@ export class DaemonCarrierRouter {
     this.#presence = options.presence ?? (() => false);
     this.#rotation = options.rotation;
     this.#health = options.health;
+    this.#unknownFatesRemembered = options.unknownFatesRemembered ?? UNKNOWN_FATES_REMEMBERED;
   }
 
   /**
@@ -1802,7 +1829,7 @@ export class DaemonCarrierRouter {
     if (doubted && requestId !== null) {
       this.#unknownFates.delete(requestId);
       this.#unknownFates.add(requestId);
-      if (this.#unknownFates.size > UNKNOWN_FATES_REMEMBERED) {
+      if (this.#unknownFates.size > this.#unknownFatesRemembered) {
         const [oldest] = this.#unknownFates;
         this.#unknownFates.delete(oldest as string);
       }
@@ -2105,7 +2132,8 @@ export class DaemonCarrierRouter {
     init: RequestInit,
     dial: DialPolicy,
   ): Promise<Response> {
-    const session = await this.#session(entry, method, dial).catch((reason: unknown) => {
+    const lane = requestLane(typeof init.body === 'string' ? init.body : undefined);
+    const session = await this.#session(entry, method, dial, lane).catch((reason: unknown) => {
       throw new RelayUnsentError(reason);
     });
     // AMENDED HERE, on the session that will carry the request, because the rotation proof signs THAT
@@ -2117,6 +2145,15 @@ export class DaemonCarrierRouter {
       ...(this.#presence() ? { presence: true as const } : {}),
     };
     const signal = init.signal ?? undefined;
+    // A DEADLINE THAT PASSED BEFORE THE REQUEST LEFT says nothing about this session: the time went on the
+    // walk and the handshake, and the daemon was never asked. Retiring the session for it threw away a
+    // working one — and on a link whose handshake outlasts the deadline, every request opened a session
+    // only to close it unused. The caller still gets its own abort, and nothing was sent anywhere.
+    try {
+      signal?.throwIfAborted();
+    } catch (reason) {
+      throw new RelayAnswerError(reason);
+    }
     try {
       const response = relayResponse(await session.request(record, signal));
       // Only an ANSWER settles the pending key. A request that died without one leaves it pending,
@@ -2141,7 +2178,7 @@ export class DaemonCarrierRouter {
         reason.code === RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE &&
         replaySafe(init)
       ) {
-        const fresh = await this.#session(entry, method, dial);
+        const fresh = await this.#session(entry, method, dial, lane);
         return relayResponse(await fresh.request(record, signal));
       }
       // The carrier failed under this request, so another carrier may be tried — and
@@ -2171,11 +2208,16 @@ export class DaemonCarrierRouter {
    * ever close. A refresh that carried this exact opening promise across is the one case
    * where the entry moved and the session did not, and that session is tracked and fine.
    */
-  async #session(entry: CarrierEntry, method: ConnectionMethod, dial: DialPolicy): Promise<RelayClientSession> {
+  async #session(
+    entry: CarrierEntry,
+    method: ConnectionMethod,
+    dial: DialPolicy,
+    lane: RequestLane = 'request',
+  ): Promise<RelayClientSession> {
     const address = carrierAddress(method);
     return await this.#hold(
       entry,
-      requestSessionKey(address),
+      laneSessionKey(lane, address),
       address,
       async () => this.#openKeyed(entry, method, device => ({ kind: 'auth', device })),
       dial,

@@ -229,8 +229,14 @@ export class DaemonAttentionClient {
     return this.#mutate(daemon, scope, { action: 'resolve', id, ...(note === undefined ? {} : { note }) });
   }
 
-  respond(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, response: AttentionResponse): Promise<void> {
-    return this.#mutate(daemon, scope, { action: 'resolve', id, response });
+  respond(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    response: AttentionResponse,
+    note?: string,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'resolve', id, response, ...(note === undefined ? {} : { note }) });
   }
 
   dismiss(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
@@ -251,6 +257,11 @@ export class DaemonAttentionClient {
   /** Tells the ferret a to-do needs more information; the item stays open, waiting on it. */
   needsInfo(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
     return this.#mutate(daemon, scope, { action: 'needs-info', id, ...(note === undefined ? {} : { note }) });
+  }
+
+  /** Asks the ferret to talk an item through before the owner answers; the item stays open, "in discussion". */
+  discuss(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'discuss', id, ...(note === undefined ? {} : { note }) });
   }
 
   /** Unpair one daemon without perturbing any other daemon's cache or work. */

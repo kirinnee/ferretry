@@ -17,8 +17,8 @@ import {
   encodeCreditPayload,
   encodeFrame,
   FRAME_KINDS,
-  MAX_PLAINTEXT_BYTES,
   HOSTED_RELAY_BANDWIDTH_REASONS,
+  MAX_PLAINTEXT_BYTES,
   RELAY_CLOSE_CODES,
   RELAY_LIMITS,
   SESSION_PROTOCOL_ID,
@@ -668,6 +668,28 @@ describe('a relay session carrying a body larger than one record', () => {
     should((await answer).status).equal(204);
   });
 
+  it('should keep the session when requests queue behind a body of more parts than one window', async () => {
+    // The phone-photo case: one upload is far more parts than the window, nothing has been credited
+    // yet, and a second upload and a poll arrive behind it. Counting the parts against the window
+    // used to end the session here and fail every request on it.
+    const { session, socket, daemon } = await serving();
+    const photo = 'p'.repeat(MAX_PLAINTEXT_BYTES * (CREDIT_WINDOW_FRAMES + 8));
+    const first = session.request({ method: 'POST', path: '/v1/one', body: photo });
+    const second = session.request({ method: 'POST', path: '/v1/two', body: photo });
+    const poll = session.request({ method: 'GET', path: '/v1/sessions' });
+    await drain();
+    should(session.live()).be.true();
+    // The window still bounds the wire: no credit came back, so no more than one window left.
+    should(socket.sent.length - 2).be.belowOrEqual(CREDIT_WINDOW_FRAMES);
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 3, status: 200, body: '[]' }));
+    should((await poll).status).equal(200);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 201 }));
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 2, status: 201 }));
+    should((await first).status).equal(201);
+    should((await second).status).equal(201);
+  });
+
   it('should send a request without a body as one record with no body field', async () => {
     const { session, socket, daemon } = await serving();
     const answer = session.request({ method: 'GET', path: '/v1/small' });
@@ -689,6 +711,36 @@ describe('a relay session carrying a body larger than one record', () => {
     should(socket.sent.length).equal(before);
     // Refused, not failed: the session is still good for the next request.
     should(session.live()).be.true();
+  });
+
+  it('should end a stream whose text frame cannot fit in one sealed record, and say why', async () => {
+    const { session, socket } = await streaming();
+    const closed: { code: number; reason: string }[] = [];
+    session.onStreamClosed(end => closed.push(end));
+    const before = socket.sent.length;
+
+    session.sendStream({ kind: 'text', text: 'x'.repeat(MAX_PLAINTEXT_BYTES) });
+    await drain();
+
+    // The seal refused it, so nothing of it left; the stream ended abnormally with the seal's own reason.
+    should(socket.sent.length).equal(before);
+    should(socket.closed?.code).equal(RELAY_CLOSE_CODES.frameTooLarge);
+    should(socket.closed?.reason).match(/payload exceeds one record/u);
+    should(closed).eql([{ code: 1006, reason: 'payload exceeds one record' }]);
+    should(session.streaming()).be.false();
+  });
+
+  it('should end a stream session whose daemon answers with a record that does not open the stream', async () => {
+    const harness = await opened({ mode: { kind: 'stream', device: device.claim, path: '/v1/events' } });
+    await harness.session.receiveBinary(await harness.daemon.answer(harness.socket.sent[0] as Uint8Array));
+    const ready = failure(harness.session.ready());
+
+    await harness.session.receiveBinary(await harness.daemon.record(ACCEPTED));
+
+    const refusal = await ready;
+    should(refusal.code).equal(RELAY_CLOSE_CODES.protocolError);
+    should(refusal.message).match(/did not open this stream before answering/u);
+    should(harness.session.streaming()).be.false();
   });
 
   it('should refuse an answer part that arrives with no answer to continue, or a second start', async () => {

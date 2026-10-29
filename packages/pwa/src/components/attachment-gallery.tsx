@@ -49,6 +49,12 @@ import { cn } from '../lib/class-names.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionScope } from '../lib/daemon-scope.ts';
 import { useDaemonFetch } from '../lib/store.tsx';
+import {
+  loadTranscriptImageBlob,
+  transcriptImageCacheId,
+  transcriptImageErrorMessage,
+  transcriptImageHandleOf,
+} from '../lib/transcript-image-source.ts';
 import { ImageViewer, type ViewerImage } from './image-viewer.tsx';
 
 /** The browser's own object-URL pair, isolated so tests never touch it. */
@@ -114,7 +120,12 @@ const useAttachmentCache = (): { cache: DaemonAttachmentBlobCache; load: Attachm
   const environment = useContext(AttachmentGalleryContext);
   const fetcher = useDaemonFetch();
   const routed = useMemo<AttachmentBlobLoader>(
-    () => (daemon, scope) => loadAttachmentBlob(daemon, scope, scope.attachmentId, undefined, fetcher),
+    () => (daemon, scope) => {
+      const handle = transcriptImageHandleOf(scope.attachmentId);
+      return handle === undefined
+        ? loadAttachmentBlob(daemon, scope, scope.attachmentId, undefined, fetcher)
+        : loadTranscriptImageBlob(daemon, scope.sessionId, handle, undefined, fetcher);
+    },
     [fetcher],
   );
   const local = useRef<DaemonAttachmentBlobCache | null>(null);
@@ -155,7 +166,7 @@ const useNearViewport = (ref: RefObject<HTMLElement | null>, eager: boolean): bo
 
 /** An attachment renders as an image when it says so, or when only its name does. */
 export const isImageAttachment = (image: TranscriptImage): boolean =>
-  image.kind === 'inline' ||
+  image.kind !== 'attachment' ||
   isImageMime(image.mime) ||
   (!image.mime && /\.(?:png|jpe?g|gif|webp)$/i.test(image.filename));
 
@@ -286,11 +297,21 @@ const acquireImage = (
     return blob;
   });
 
-/** The cache slot of a stored image, or null for an inline one that carries its own bytes. */
-const imageScope = (daemon: DaemonConnection, image: TranscriptImage): DaemonAttachmentScope | null =>
+/**
+ * The cache slot of a stored or transcript image; an inline one carries its own bytes and has none.
+ * A transcript image's slot is named by its handle behind a prefix no stored attachment id can wear, and
+ * like every slot it carries the daemon and the session.
+ */
+const imageScope = (
+  daemon: DaemonConnection,
+  image: Exclude<TranscriptImage, { readonly kind: 'inline' }>,
+): DaemonAttachmentScope =>
   image.kind === 'attachment'
     ? daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), image.attachmentId)
-    : null;
+    : daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), transcriptImageCacheId(image.handle));
+
+/** The placeholder a transcript image holds its place with: no size is known until the bytes arrive. */
+const TRANSCRIPT_PLACEHOLDER = 'aspect-[16/10] w-[min(100%,320px)]';
 
 interface AttachmentThumbnailProps {
   daemon: DaemonConnection;
@@ -303,7 +324,8 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
   const host = useRef<HTMLDivElement | null>(null);
   const visible = useNearViewport(host, image.kind === 'inline');
   const [src, setSrc] = useState(image.kind === 'inline' ? image.src : '');
-  const [failed, setFailed] = useState(false);
+  /** Why the picture is not there, or null while it is. Empty for a kind that states no reason. */
+  const [failed, setFailed] = useState<string | null>(null);
 
   // The effect is keyed on WHAT the image is, never on the object that describes it: a parent that
   // rebuilds its attachment objects on every render (the hand-off message does) would otherwise reset
@@ -313,27 +335,28 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
   const imageRef = useRef(image);
   imageRef.current = image;
   const inlineSrc = image.kind === 'inline' ? image.src : '';
-  const sessionId = image.kind === 'attachment' ? image.sessionId : '';
-  const attachmentId = image.kind === 'attachment' ? image.attachmentId : '';
+  const sessionId = image.kind === 'inline' ? '' : image.sessionId;
+  const attachmentId =
+    image.kind === 'attachment' ? image.attachmentId : image.kind === 'transcript' ? image.handle : '';
   const kind = image.kind;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `kind`, `sessionId`, `attachmentId` and `inlineSrc` ARE the image's identity; the refs carry the rest.
   useEffect(() => {
-    setFailed(false);
-    if (kind === 'inline') {
+    setFailed(null);
+    const current = imageRef.current;
+    if (current.kind === 'inline') {
       setSrc(inlineSrc);
       return;
     }
     setSrc('');
     if (!visible) return;
-    const scope = imageScope(daemonRef.current, imageRef.current);
-    if (!scope) return;
+    const scope = imageScope(daemonRef.current, current);
     let active = true;
     void acquireImage(cache, load, daemonRef.current, scope)
       .then(url => {
         if (active) setSrc(url);
       })
-      .catch(() => {
-        if (active) setFailed(true);
+      .catch((error: unknown) => {
+        if (active) setFailed(imageRef.current.kind === 'transcript' ? transcriptImageErrorMessage(error) : '');
       });
     return () => {
       active = false;
@@ -344,10 +367,19 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
   const filename = image.kind === 'attachment' ? image.filename : image.alt;
   const alt = image.kind === 'attachment' ? (image.alt ?? image.filename) : image.alt;
   const size = image.kind === 'attachment' ? formatAttachmentSize(image.size) : '';
+  const transcript = image.kind === 'transcript';
 
   return (
-    <div ref={host} className="min-w-0">
-      {failed ? (
+    <div ref={host} className="min-w-0 max-w-full" data-transcript-image={transcript ? 'present' : undefined}>
+      {failed !== null && transcript ? (
+        <div
+          className="flex min-h-[44px] max-w-full items-center gap-2 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-left text-meta text-muted"
+          data-transcript-image-state="failed"
+        >
+          <ImageOff size={18} className="shrink-0" aria-hidden="true" />
+          <span className="min-w-0">Image unavailable — {failed}</span>
+        </div>
+      ) : failed !== null ? (
         <div className="flex min-h-[72px] min-w-[160px] items-center gap-2 rounded-control border border-border-soft bg-surface-2 px-3 py-2 text-left text-meta text-muted">
           <ImageOff size={18} className="shrink-0" aria-hidden="true" />
           <span className="min-w-0">
@@ -359,23 +391,28 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
       ) : src ? (
         <button
           type="button"
-          className="block min-h-[44px] min-w-[44px] overflow-hidden rounded-control border border-border-soft bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+          className="block min-h-[44px] min-w-[44px] max-w-full overflow-hidden rounded-control border border-border-soft bg-surface-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent"
           onClick={onOpen}
           aria-label={`Expand ${alt}`}
+          data-transcript-image-state={transcript ? 'loaded' : undefined}
         >
           <img
             src={src}
             alt={alt}
             loading="lazy"
-            className="max-h-[280px] max-w-full object-contain"
-            onError={() => setFailed(true)}
+            className={cn('max-w-full object-contain', transcript ? 'max-h-[360px]' : 'max-h-[280px]')}
+            onError={() => setFailed(transcript ? transcriptImageErrorMessage(undefined) : '')}
           />
         </button>
       ) : (
         <div
-          className="min-h-[72px] min-w-[160px] animate-pulse rounded-control border border-border-soft bg-surface-2 motion-reduce:animate-none"
+          className={cn(
+            'animate-pulse rounded-control border border-border-soft bg-surface-2 motion-reduce:animate-none',
+            transcript ? TRANSCRIPT_PLACEHOLDER : 'min-h-[72px] min-w-[160px]',
+          )}
           role="status"
           aria-label={`Loading ${alt}`}
+          data-transcript-image-state={transcript ? 'loading' : undefined}
         />
       )}
     </div>
@@ -421,7 +458,6 @@ const GalleryViewer = ({ daemon, entries, index, onIndexChange, onClose }: Galle
         continue;
       }
       const scope = imageScope(daemonRef.current, entry.image);
-      if (!scope) continue;
       held.push(scope);
       void acquireImage(cache, load, daemonRef.current, scope)
         .then(url => {
@@ -475,7 +511,9 @@ const galleryKeys = (images: readonly TranscriptImage[]): string[] => {
     const identity =
       image.kind === 'attachment'
         ? `${image.sessionId}/${image.attachmentId}`
-        : `inline/${image.alt}/${image.src.length}`;
+        : image.kind === 'transcript'
+          ? `${image.sessionId}/${transcriptImageCacheId(image.handle)}`
+          : `inline/${image.alt}/${image.src.length}`;
     const repeat = seen.get(identity) ?? 0;
     seen.set(identity, repeat + 1);
     return repeat === 0 ? identity : `${identity}#${repeat}`;

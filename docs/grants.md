@@ -143,6 +143,15 @@ capability. It acts only while the composer holds exactly the quoted draft, and 
 `terminal.input` with `detail.mode: 'composer'`, never with the text. See
 [docs/message-delivery.md](message-delivery.md).
 
+**So is a ferret's Processes tab.** `GET /v1/sessions/:sessionId/processes`, a process's
+`/output` and its `/stop` are all declared `terminal` / `use`. The list is every command line under that
+ferret's pane — what `ps` shows somebody with a shell there — an output read is what those commands print,
+exactly what a terminal shows, and Stop is SIGTERM to a command the agent started, which is less than typing
+Ctrl-C into the Console. None of the three can do anything a session terminal cannot, so none needs more; and
+a device trusted only to read the Chat should not read every command's output, so none needs less. Stop
+re-proves the process belongs to that pane with the same start time before signalling, and is audited as
+`terminal.input` with `detail.mode: 'process-stop'`. See [docs/processes.md](processes.md).
+
 Each has two axes, and they are different questions:
 
 - **use** — may the caller exercise the capability at all?
@@ -633,6 +642,14 @@ command says so at the moment somebody might be tempted to do that instead.
   Its `live` frames (`?live=1`, a working turn's verb, clock start and token counts) are read off
   the same pane and transcript `GET /v1/sessions/:id/snapshot` and `/logs` already return at the same
   `operator` minimum, so they widen nothing.
+- **The transcript image route (`GET /v1/sessions/:id/transcript-images/:handle`) reads the same
+  transcript as `/logs`, at the same `operator` minimum, and widens nothing.** It carries no
+  capability of its own and is not `noStore`, exactly like `/logs` — an image is bytes of that
+  transcript the log already summarises as a marker, so whoever may read the log may fetch the image.
+  A handle only names a record the daemon re-parses with the session's own harness parser; it can
+  never address arbitrary bytes of the file, and a handle outside that transcript is a 4xx with a
+  code. The image is served as `private, max-age=31536000, immutable` with a strong etag, so a
+  browser keeps it per device.
 - ~~Web Push enrolment is governed by `pairing`.~~ **Closed by B5.** A device enrolling **itself** — reading
   the key, enrolling, listing and un-enrolling its own enrolments — needs no capability and no step-up,
   because it grants nothing: it lets this daemon reach the device that asked, and only it. A default

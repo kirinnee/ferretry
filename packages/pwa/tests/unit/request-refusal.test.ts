@@ -56,6 +56,14 @@ describe('invalidRequestWords', () => {
     expect(invalidRequestWords(refused(unknown, '4.84.0'), '4.85.0')?.sentence).toStartWith(`${unknown}. Your machine`);
   });
 
+  it('keeps the daemon’s words when a named field fails for a reason it has no sentence for', () => {
+    const unfamiliar = 'the request body is invalid — idea: Invalid input';
+    expect(invalidRequestWords(refused(unfamiliar), '4.85.0')).toBeUndefined();
+    expect(invalidRequestWords(refused(unfamiliar, '4.84.0'), '4.85.0')?.sentence).toStartWith(
+      `${unfamiliar}. Your machine`,
+    );
+  });
+
   it('leaves every other failure alone', () => {
     expect(invalidRequestWords(new FyHttpError(RAW, 500, 'invalid_request'), '4.85.0')).toBeUndefined();
     expect(invalidRequestWords(new FyHttpError(RAW, 400, 'something_else'), '4.85.0')).toBeUndefined();

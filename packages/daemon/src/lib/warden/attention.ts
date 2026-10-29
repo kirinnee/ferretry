@@ -373,11 +373,11 @@ export function buildWardenAttentionView(input: WardenAttentionInput): WardenAtt
   const { exhaustedSince } = wardenState;
 
   const matchingVerdict = (sessionId: string, match: WardenVerdictSourceIdentity): WardenVerdict | undefined => {
-    if (match.reportPath !== undefined && match.anomalyKind !== undefined)
-      return byReportBlock.get(reportBlockKey(sessionId, match.reportPath, match.anomalyKind));
-    if (match.anomalyKind !== undefined) return byAnomaly.get(anomalyKey(sessionId, match.anomalyKind));
-    if (match.reportPath !== undefined) return byReport.get(reportKey(sessionId, match.reportPath));
-    return undefined;
+    if (match.reportPath !== undefined)
+      return match.anomalyKind === undefined
+        ? byReport.get(reportKey(sessionId, match.reportPath))
+        : byReportBlock.get(reportBlockKey(sessionId, match.reportPath, match.anomalyKind));
+    return match.anomalyKind === undefined ? undefined : byAnomaly.get(anomalyKey(sessionId, match.anomalyKind));
   };
 
   const isAssigned = (sessionId: string, match: WardenVerdictSourceIdentity): boolean => {

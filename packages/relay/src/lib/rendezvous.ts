@@ -14,6 +14,13 @@
  * chosen deliberately: the other resolution, letting the newer socket win, hands the rendezvous to
  * whoever connected most recently, which is the wrong answer whenever it matters.
  *
+ * **The one exception is a handover.** A daemon that asked for `claim-handover` is given a random
+ * token in `claimed`, over its own socket and nowhere else. A VERIFIED claim that names the
+ * incumbent's token in `replaces` supersedes the incumbent at once: the old socket is closed `4410`,
+ * its sessions end as a departure ends them, and the new socket holds the slot under a NEW token. A
+ * claim with no token, a wrong one, or no feature still meets "the incumbent wins" — a second copy of
+ * the same key never saw the token, so it can neither steal the rendezvous nor flap it.
+ *
  * **Many clients, each in its own session.** A phone and a laptop can both be connected. There is
  * no shared "the client" slot to be ambiguous about, and a client may only ever address the one
  * session identifier the rendezvous assigned it.
@@ -64,12 +71,18 @@ export interface PendingDaemonSocket {
   readonly verifying: boolean;
   /** What the daemon asked for on its route that this rendezvous speaks. Absent is none. */
   readonly features?: readonly RelayFeature[];
+  /** `claim-handover` only: the token this socket is given if its claim is accepted. Minted by the adapter. */
+  readonly handover?: string;
+  /** `claim-handover` only: the token its claim named in `replaces`, held until the verdict. */
+  readonly replaces?: string;
 }
 
 export interface DaemonSlot {
   readonly socketId: string;
   readonly since: number;
   readonly features?: readonly RelayFeature[];
+  /** `claim-handover` only: what a claim must name in `replaces` to supersede this socket. Secret. */
+  readonly handover?: string;
   /**
    * The stored state had lost this claim and {@link reconcileRendezvous} restored it from the socket's
    * own claim marker. Nothing about the sessions it was serving survived, so a frame it sends for one
@@ -151,6 +164,8 @@ export type RendezvousEvent =
       readonly host: string;
       readonly at: number;
       readonly features?: readonly RelayFeature[];
+      /** Random bytes, minted by the adapter so this machine stays pure; used only with `claim-handover`. */
+      readonly handover?: string;
     }
   | { readonly kind: 'client-arrived'; readonly socketId: string; readonly sessionId: SessionId; readonly at: number }
   | { readonly kind: 'claim-verdict'; readonly socketId: string; readonly verdict: ClaimVerdict; readonly at: number }
@@ -299,7 +314,9 @@ function onDaemonArrived(
       effects: refuse(event.socketId, RELAY_CLOSE_CODES.rendezvousBusy, 'too many connections'),
     };
   }
-  if (limited.state.daemon !== null) {
+  // A socket that asked for `claim-handover` may be holding the token that supersedes the incumbent, and
+  // only its claim says so. It is challenged like any other, and refused `4409` at the verdict if it is not.
+  if (limited.state.daemon !== null && !asksForHandover(event.features)) {
     return {
       state: limited.state,
       effects: refuse(event.socketId, RELAY_CLOSE_CODES.rendezvousClaimed, 'a daemon already holds this rendezvous'),
@@ -318,6 +335,7 @@ function onDaemonArrived(
     deadlineAt: event.at + CLAIM_DEADLINE_SECONDS * 1000,
     verifying: false,
     ...(event.features === undefined || event.features.length === 0 ? {} : { features: event.features }),
+    ...(asksForHandover(event.features) && event.handover !== undefined ? { handover: event.handover } : {}),
   };
   const next = { ...limited.state, pending: [...limited.state.pending, pending] };
   return {
@@ -399,29 +417,71 @@ function onClaimVerdict(
       effects: refuse(event.socketId, RELAY_CLOSE_CODES.claimRejected, event.verdict.reason),
     };
   }
-  if (withoutPending.daemon !== null) {
+  const incumbent = withoutPending.daemon;
+  if (incumbent !== null && !supersedes(pending, incumbent)) {
     return {
       state: withoutPending,
       effects: refuse(event.socketId, RELAY_CLOSE_CODES.rendezvousClaimed, 'a daemon already holds this rendezvous'),
     };
   }
+  // The incumbent's departure, said once: its sessions end exactly as `dropDaemon` ends them, and its
+  // socket is closed `4410`. No frame is sent on it first — it is the socket the daemon found dead.
+  const superseded =
+    incumbent === null ? null : dropDaemon(withoutPending, RELAY_CLOSE_CODES.daemonAbsent, 'the daemon reconnected');
   const features = pending.features === undefined ? {} : { features: [...pending.features] };
+  const handover = pending.handover === undefined ? {} : { handover: pending.handover };
   const next: RendezvousState = {
-    ...withoutPending,
-    daemon: { socketId: event.socketId, since: event.at, ...features },
+    ...(superseded?.state ?? withoutPending),
+    daemon: { socketId: event.socketId, since: event.at, ...features, ...handover },
   };
   return {
     state: next,
     effects: [
+      ...(superseded?.effects ?? []),
+      ...(incumbent === null
+        ? []
+        : [
+            {
+              kind: 'close',
+              socketId: incumbent.socketId,
+              code: RELAY_CLOSE_CODES.claimLost,
+              reason: 'replaced by a fresh claim from the same daemon',
+            } satisfies RendezvousEffect,
+          ]),
       sendControl(event.socketId, RENDEZVOUS_SESSION_ID, {
         t: 'claimed',
         protocol: RELAY_PROTOCOL_ID,
         limits: RELAY_LIMITS,
         ...features,
+        ...handover,
       }),
       ...nextAlarm(next, event.at),
     ],
   };
+}
+
+function asksForHandover(features: readonly RelayFeature[] | undefined): boolean {
+  return features?.includes('claim-handover') === true;
+}
+
+/**
+ * Compare two tokens without stopping at the first difference, so how long a guess takes says nothing
+ * about how much of it was right. A length mismatch is folded into the same pass rather than returned early.
+ */
+export function handoverTokensMatch(a: string, b: string): boolean {
+  let difference = a.length ^ b.length;
+  const length = Math.max(a.length, b.length);
+  for (let index = 0; index < length; index += 1) {
+    difference |= (a.charCodeAt(index) || 0) ^ (b.charCodeAt(index) || 0);
+  }
+  return difference === 0;
+}
+
+/** Whether a verified claim holds the token its incumbent issued — which is the only way to displace one. */
+function supersedes(pending: PendingDaemonSocket, incumbent: DaemonSlot): boolean {
+  if (!asksForHandover(pending.features)) return false;
+  if (pending.replaces === undefined || incumbent.handover === undefined) return false;
+  return handoverTokensMatch(pending.replaces, incumbent.handover);
 }
 
 function onPendingFrame(state: RendezvousState, pending: PendingDaemonSocket, frame: RelayFrame): RendezvousStep {
@@ -433,11 +493,16 @@ function onPendingFrame(state: RendezvousState, pending: PendingDaemonSocket, fr
   const message = decodeControlMessage(frame.payload);
   if (message === null || message.t !== 'claim') return reject('expected a claim');
   if (pending.verifying) return reject('a claim from this socket is already being verified');
+  if (message.replaces !== undefined && !asksForHandover(pending.features)) {
+    return reject('replaces needs the claim-handover feature');
+  }
   return {
     state: {
       ...state,
       pending: state.pending.map(entry =>
-        entry.socketId === pending.socketId ? { ...entry, verifying: true } : entry,
+        entry.socketId === pending.socketId
+          ? { ...entry, verifying: true, ...(message.replaces === undefined ? {} : { replaces: message.replaces }) }
+          : entry,
       ),
     },
     effects: [
@@ -716,7 +781,7 @@ export function isClaimProbe(frame: RelayFrame): boolean {
  */
 export interface AttachedSocket {
   readonly socketId: string;
-  readonly claim?: { readonly features?: readonly RelayFeature[] };
+  readonly claim?: { readonly features?: readonly RelayFeature[]; readonly handover?: string };
 }
 
 /**
@@ -764,6 +829,7 @@ export function reconcileRendezvous(
   const restored = claimants[0];
   if (next.daemon === null && restored !== undefined) {
     const features = restored.claim?.features;
+    const handover = restored.claim?.handover;
     next = {
       ...next,
       daemon: {
@@ -771,6 +837,7 @@ export function reconcileRendezvous(
         since: at,
         restored: true,
         ...(features === undefined || features.length === 0 ? {} : { features: [...features] }),
+        ...(handover === undefined ? {} : { handover }),
       },
     };
     changed = true;

@@ -97,3 +97,50 @@ describe('loading the bundled face', () => {
     await loadTerminalFont();
   });
 });
+
+describe('loading the bundled face in a browser', () => {
+  it('builds each face from the page’s own FontFace and adds the loaded face to the document', async () => {
+    const constructed: Array<{ readonly family: string; readonly source: string; readonly descriptors: unknown }> = [];
+    const added: unknown[] = [];
+    const scope = globalThis as unknown as { FontFace?: unknown };
+    const realFontFace = scope.FontFace;
+    const realFonts = Object.getOwnPropertyDescriptor(document, 'fonts');
+    class FakeFontFace {
+      constructor(
+        readonly family: string,
+        readonly source: string,
+        readonly descriptors: unknown,
+      ) {
+        constructed.push({ family, source, descriptors });
+      }
+      async load(): Promise<FakeFontFace> {
+        return this;
+      }
+    }
+    scope.FontFace = FakeFontFace;
+    Object.defineProperty(document, 'fonts', {
+      configurable: true,
+      value: { add: (face: unknown) => added.push(face) },
+    });
+    try {
+      // A fresh copy of the module: the shipped loader is one load per page and may already have run.
+      const freshModule = '../../src/components/terminal-font-loader.ts?browser-face';
+      const fresh = (await import(freshModule)) as {
+        loadTerminalFont: () => Promise<void>;
+      };
+      await fresh.loadTerminalFont();
+    } finally {
+      scope.FontFace = realFontFace;
+      if (realFonts) Object.defineProperty(document, 'fonts', realFonts);
+      else Reflect.deleteProperty(document, 'fonts');
+    }
+
+    expect(constructed.map(face => face.family)).toEqual([TERMINAL_FONT_FACE, TERMINAL_FONT_FACE]);
+    expect(constructed.map(face => face.descriptors)).toEqual([
+      { weight: '400', style: 'normal' },
+      { weight: '700', style: 'normal' },
+    ]);
+    expect(constructed.every(face => /^url\(".+\.woff2"\)$/u.test(face.source))).toBe(true);
+    expect(added).toHaveLength(2);
+  });
+});

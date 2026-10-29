@@ -336,6 +336,22 @@ describe('durable terminal pane reap adapters', () => {
     should(asked).deepEqual(['list-panes', 'display-message']);
   });
 
+  it('should withhold the observation of a live pane whose process start cannot be read, and never kill it', async () => {
+    // Arrange -- the pane is real and listed, but its incarnation cannot be proved.
+    const subject = await fixture();
+    await subject.registrar.register(subject.record);
+    const original = await registration(subject);
+    const unreadable = new ExactTmuxPaneReaper(subject.controller, { startOf: async () => undefined });
+
+    // Act
+    const observed = await unreadable.observe(original);
+    await unreadable.reap(original);
+
+    // Assert -- no identity means no authority: nothing is observed and the pane is left running.
+    should(observed).be.undefined();
+    should(await subject.controller.alive(subject.record.config.tmuxSession)).be.true();
+  });
+
   it('should not ask tmux to kill anything when this daemon has no registrations', async () => {
     // Arrange
     const subject = await fixture();
@@ -463,6 +479,9 @@ describe('a registration ledger with one damaged document', () => {
     // Arrange -- each of these is a distinct way a document stops being authority for a pane.
     const shapes: readonly { readonly text: string; readonly reported: RegExp }[] = [
       { text: JSON.stringify({ daemonId: 7 }), reported: /malformed/u },
+      { text: JSON.stringify('a registration'), reported: /malformed/u },
+      { text: JSON.stringify([DAEMON]), reported: /malformed/u },
+      { text: 'null', reported: /malformed/u },
       { text: JSON.stringify({ daemonId: DAEMON, sessionId: DAMAGED }), reported: /incomplete/u },
       {
         text: JSON.stringify({

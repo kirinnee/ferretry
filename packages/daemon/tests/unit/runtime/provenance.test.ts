@@ -93,6 +93,30 @@ describe('effective configuration with provenance', () => {
     should(row(rows, 'log level')).deepEqual({ value: 'warn', origin: 'flag' });
   });
 
+  it('should say which axis of a grant was written down when the file names only one', () => {
+    // Arrange: an operator who wrote `{"use": false}` chose one of the two axes and left the other alone.
+    const document = { grants: { terminal: { use: false } } };
+
+    // Act
+    const rows = describeConfiguration({
+      document,
+      config: parseDaemonConfig(document),
+      overrides: {},
+      configFile: CONFIG_FILE,
+      stateHome: STATE_HOME,
+      stateHomeFromEnvironment: false,
+    });
+    const terminal = rows.find(candidate => candidate.name === 'grants.terminal');
+    const fleet = rows.find(candidate => candidate.name === 'grants.fleet');
+
+    // Assert
+    should(terminal?.origin).equal('config file');
+    should(terminal?.note).equal('use was written down; the other is the default');
+    should(terminal?.value).match(/^use=off /u);
+    should(fleet?.origin).equal('default');
+    should(fleet?.note).be.undefined();
+  });
+
   it('should keep the origin readable however long a value is', () => {
     // Arrange: a state home path far wider than the terminal, which is the common case on a Mac.
     const stateHome = `/Users/somebody/${'directory/'.repeat(12)}.ferretry`;

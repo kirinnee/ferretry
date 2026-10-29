@@ -5,7 +5,6 @@ import {
   type AttentionItem,
   AttentionItemSchema,
   AttentionSnapshotSchema,
-  type DirectNotificationRequest,
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
 import should from 'should';
@@ -14,69 +13,13 @@ import {
   attentionNotificationAttribution,
   attentionNotificationPayload,
   attentionNotificationTitle,
-  decideNotificationReplay,
-  directNotificationFingerprint,
-  directNotificationPayload,
   moreInfoNotificationPayload,
-  notificationFingerprintMatches,
   notificationKey,
 } from '../../../src/lib/notifications/policy.ts';
-import {
-  AttentionNotificationRequestedRecordSchema,
-  type DirectNotificationRequestedRecord,
-  type NotificationLedgerEntry,
-  NotificationOutcomeRecordSchema,
-  NotificationRecordSchema,
-} from '../../../src/lib/notifications/types.ts';
 
 const AT = '2026-08-06T09:00:00.000Z';
-const REQUEST: DirectNotificationRequest = { body: 'The release needs review.' };
 
-function directRequested(
-  overrides: Partial<DirectNotificationRequestedRecord> = {},
-): DirectNotificationRequestedRecord {
-  return NotificationRecordSchema.parse({
-    v: 1,
-    phase: 'requested',
-    key: 'direct:req-1',
-    at: AT,
-    origin: 'direct',
-    attribution: 'peer:session-1',
-    sessionId: 'session-1',
-    request: { body: REQUEST.body, title: null, kind: null },
-    sent: {
-      kind: 'question',
-      interactive: true,
-      title: 'Release agent',
-      body: REQUEST.body,
-    },
-    enrolled: 2,
-    ...overrides,
-  }) as DirectNotificationRequestedRecord;
-}
-
-function entry(
-  outcome?: { readonly delivered: number; readonly failed?: number; readonly error?: string },
-  requested = directRequested(),
-): NotificationLedgerEntry {
-  return {
-    requested,
-    ...(outcome === undefined
-      ? {}
-      : {
-          outcome: NotificationOutcomeRecordSchema.parse({
-            v: 1,
-            phase: 'outcome',
-            key: requested.key,
-            at: AT,
-            delivered: outcome.delivered,
-            failed: outcome.failed ?? 0,
-            ...(outcome.error === undefined ? {} : { error: outcome.error }),
-          }),
-        }),
-  };
-}
-
+/** An item from before cards: no title, no kind, no answers. */
 const item = AttentionItemSchema.parse({
   id: 'A1',
   source: 'agent-raised',
@@ -91,6 +34,14 @@ const item = AttentionItemSchema.parse({
   raisedByName: 'Ada',
 });
 
+const titled = AttentionItemSchema.parse({
+  ...item,
+  id: 'A7',
+  title: 'Release window',
+  kind: 'reply',
+  subject: 'Which window should the release use?',
+});
+
 const snapshot = AttentionSnapshotSchema.parse({
   v: 1,
   sessionId: 'session-1',
@@ -102,247 +53,116 @@ const snapshot = AttentionSnapshotSchema.parse({
 });
 
 describe('notification policy', () => {
-  it('should namespace caller identities and include the session in attention identities', () => {
+  it('should include the session and the request in an attention identity', () => {
     // Arrange / Act
-    const direct = notificationKey({ origin: 'direct', requestId: 'attention:session-1:A1' });
-    const firstA1 = notificationKey({ origin: 'attention', sessionId: 'session-1', attentionId: 'A1' });
-    const secondA1 = notificationKey({ origin: 'attention', sessionId: 'session-2', attentionId: 'A1' });
+    const first = notificationKey({ sessionId: 'session-1', attentionId: 'A1' });
+    const second = notificationKey({ sessionId: 'session-2', attentionId: 'A1' });
+    const info = notificationKey({ sessionId: 'session-1', attentionId: 'A1', infoRequest: 2 });
 
     // Assert
-    should(direct).equal('direct:attention:session-1:A1');
-    should(firstA1).equal('attention:session-1:A1');
-    should(secondA1).equal('attention:session-2:A1');
-    should(direct).not.equal(firstA1);
-    should(firstA1).not.equal(secondA1);
+    should(first).equal('attention:session-1:A1');
+    should(second).equal('attention:session-2:A1');
+    should(info).equal('attention:session-1:A1:info-2');
   });
 
-  it('should fingerprint all five accepted caller facts and ignore derived delivery facts', () => {
-    // Arrange
-    const incoming = directNotificationFingerprint('session-1', REQUEST, 'peer:session-1', 'req-1');
-    const base = directRequested();
-    const variants: readonly DirectNotificationRequestedRecord[] = [
-      { ...base, request: { ...base.request, body: 'different' } },
-      { ...base, request: { ...base.request, title: 'Different title' } },
-      { ...base, request: { ...base.request, kind: 'failed' } },
-      { ...base, attribution: 'admin-cli' },
-      { ...base, sessionId: 'session-2' },
-    ];
-    const derivedChanged = {
-      ...base,
-      sent: { ...base.sent, interactive: false, title: 'Renamed session' },
-      enrolled: 99,
-    };
-
-    // Act + Assert
-    should(notificationFingerprintMatches(base, incoming)).be.true();
-    for (const variant of variants) should(notificationFingerprintMatches(variant, incoming)).be.false();
-    should(notificationFingerprintMatches(derivedChanged, incoming)).be.true();
-  });
-
-  it('should decide every durable replay state without treating zero delivery as new', () => {
-    // Arrange
-    const incoming = directNotificationFingerprint('session-1', REQUEST, 'peer:session-1', 'req-1');
-    const mismatch = entry(undefined, directRequested({ sessionId: 'session-2' }));
-
-    // Act
-    const fresh = decideNotificationReplay(undefined, incoming);
-    const different = decideNotificationReplay(mismatch, incoming);
-    const settled = decideNotificationReplay(entry({ delivered: 2, failed: 1 }), incoming);
-    const zero = decideNotificationReplay(entry({ delivered: 0 }), incoming);
-    const errored = decideNotificationReplay(entry({ delivered: 0, error: 'transport unavailable' }), incoming);
-    const dangling = decideNotificationReplay(entry(), incoming);
-
-    // Assert
-    should(fresh).deepEqual({ decision: 'deliver' });
-    should(different).containDeep({ decision: 'refuse', result: { ok: false, error: { code: 'invalid' } } });
-    should(settled).deepEqual({ decision: 'replay', delivered: 2, sessionId: 'session-1' });
-    should(zero).deepEqual({ decision: 'replay', delivered: 0, sessionId: 'session-1' });
-    should(errored).containDeep({ decision: 'refuse', result: { ok: false, error: { code: 'corrupt' } } });
-    should(dangling).containDeep({ decision: 'refuse', result: { ok: false, error: { code: 'corrupt' } } });
-  });
-
-  it('should refuse a differently originated record even when its key is hand-planted', () => {
-    // Arrange
-    const incoming = directNotificationFingerprint('session-1', REQUEST, 'peer:session-1', 'req-1');
-    const attention = AttentionNotificationRequestedRecordSchema.parse({
-      v: 1,
-      phase: 'requested',
-      key: 'attention:session-1:A1',
-      at: AT,
-      origin: 'attention',
-      attribution: 'attention:agent:session-1',
-      sessionId: 'session-1',
-      attentionId: 'A1',
-      sent: { kind: 'attention', interactive: true, title: item.subject, body: item.why },
-      enrolled: 1,
-    });
-
-    // Act
-    const actual = decideNotificationReplay({ requested: attention }, incoming);
-
-    // Assert
-    should(actual).containDeep({ decision: 'refuse', result: { error: { code: 'invalid' } } });
-  });
-
-  it('should compose schema-valid direct and attention payloads with honest defaults and tags', () => {
+  it('should push a titled item as its title and its ask, and open the item', () => {
     // Arrange / Act
-    const generic = directNotificationPayload('session-1', 'Release agent', REQUEST);
-    const explicit = directNotificationPayload('session-1', 'Release agent', {
-      body: 'The deployment failed.',
-      title: 'Deploy failed',
-      kind: 'failed',
-    });
-    const automatic = attentionNotificationPayload('session-1', { name: 'Ada', title: 'Ship v4.87' }, item, snapshot);
-
-    // Assert
-    should(generic).containDeep({
-      kind: 'question',
-      title: 'Agent “Release agent”',
-      tag: 'notify-session-1',
-      // The conversation the agent spoke from, never the app root.
-      url: '/session/session-1',
-    });
-    should(explicit).containDeep({
-      kind: 'failed',
-      title: 'Agent “Release agent”: Deploy failed',
-      tag: 'notify-session-1',
-    });
-    should(automatic).containDeep({
-      eventKey: 'attention-raised:A1',
-      kind: 'attention',
-      title: 'Ship v4.87',
-      body: 'Choose a release window',
-      tag: 'attention-session-1',
-      url: '/session/session-1?attention=A1',
-      count: 1,
-    });
-    for (const payload of [generic, explicit, automatic]) {
-      should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
-    }
-  });
-
-  it('should title an attention push with its conversation, say only the summary, and open the item', () => {
-    // Arrange
-    const rich = AttentionItemSchema.parse({
-      ...item,
-      id: 'A7',
-      subject: 'Rebase onto main now?',
-      context: 'I am finishing the relay PR; main moved under it and CI will fail until it is rebased.',
-      ask: { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }, { label: 'Skip' }] },
-    });
-    const forged = AttentionItemSchema.parse({ ...item, id: 'A8', subject: DEVICE_PAIRED_TITLE });
-    const long = AttentionItemSchema.parse({ ...item, id: 'A9', subject: 'x'.repeat(240) });
-    const session = { name: 'Ada', title: 'Relay carrier fallback' };
-
-    // Act
-    const payload = attentionNotificationPayload('session 1', session, rich, snapshot);
-    const alert = attentionNotificationPayload(
-      'session-1',
-      { name: 'Ada', title: DEVICE_PAIRED_TITLE },
-      forged,
-      snapshot,
-    );
-    const clipped = attentionNotificationPayload('session-1', { name: 'Ada', title: 'y'.repeat(200) }, long, snapshot);
+    const payload = attentionNotificationPayload('session 1', titled, snapshot);
 
     // Assert
     should(payload).containDeep({
       eventKey: 'attention-raised:A7',
-      title: 'Relay carrier fallback',
-      body: 'Rebase onto main now?',
+      kind: 'attention',
+      title: 'Release window',
+      body: 'Which window should the release use?',
+      tag: 'attention-session 1',
       url: '/session/session%201?attention=A7',
+      count: 1,
     });
-    should(alert.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
-    should(alert.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
-    should(clipped.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
-    should(clipped.title.endsWith('…')).be.true();
-    should(clipped.body.length).be.lessThanOrEqual(ATTENTION_PUSH_BODY_LENGTH);
-    should(clipped.body.endsWith('…')).be.true();
-    for (const each of [payload, alert, clipped])
-      should(PushNotificationPayloadSchema.safeParse(each).success).be.true();
+    should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
   });
 
-  it('should keep the body to the summary, never the context, the choices or the recommendation', () => {
+  it('should fall back to the start of the ask for an item raised before titles', () => {
+    // Arrange / Act
+    const payload = attentionNotificationPayload('session-1', item, snapshot);
+
+    // Assert
+    should(payload).containDeep({
+      eventKey: 'attention-raised:A1',
+      title: 'Choose a release window',
+      body: 'Choose a release window',
+      tag: 'attention-session-1',
+      url: '/session/session-1?attention=A1',
+    });
+  });
+
+  it('should keep the body to the ask, never the context, the choices or the recommendation', () => {
     // Arrange
     const rich = AttentionItemSchema.parse({
       ...item,
       id: 'A2',
+      title: 'Login plan',
       subject: 'Pick the login plan',
       context: 'A long story about OCI and tickets.',
       ask: { kind: 'multiple-choice', options: [{ label: 'Go with the defaults' }, { label: 'Reply with changes' }] },
-      questions: [
-        {
-          question: 'Which plan should I build?',
-          options: [{ label: 'Go with the defaults' }, { label: 'Reply with changes' }],
-          recommended: 'Go with the defaults',
-          why: 'They match what you approved last week.',
-        },
-      ],
       recommendation: { decision: 'Ship on Thursday', why: 'Nobody is on call on Friday.' },
     });
 
     // Act
-    const payload = attentionNotificationPayload('session-1', { name: 'Ada', title: 'Login work' }, rich, snapshot);
+    const payload = attentionNotificationPayload('session-1', rich, snapshot);
 
     // Assert
+    should(payload.title).equal('Login plan');
     should(payload.body).equal('Pick the login plan');
   });
 
-  it('should trim a long summary at a word boundary with an ellipsis, and a long title likewise', () => {
+  it('should trim an over-long ask at a word boundary with an ellipsis, and a long title likewise', () => {
     // Arrange
     const words =
-      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused for the week';
-    const long = AttentionItemSchema.parse({ ...item, id: 'A5', subject: words });
-    const session = { name: 'Ada', title: 'Nightly backup storage migration plan review' };
+      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused for the whole week';
+    const long = AttentionItemSchema.parse({
+      ...item,
+      id: 'A5',
+      title: 'Nightly backup storage migration plan review',
+      subject: words,
+    });
+    const huge = AttentionItemSchema.parse({ ...item, id: 'A9', title: 'y'.repeat(60), subject: 'x'.repeat(240) });
 
     // Act
-    const payload = attentionNotificationPayload('session-1', session, long, snapshot);
+    const payload = attentionNotificationPayload('session-1', long, snapshot);
+    const clipped = attentionNotificationPayload('session-1', huge, snapshot);
 
     // Assert
     should(payload.body).equal(
-      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused…',
+      'Decide whether the nightly backup job should keep running while the storage migration is underway or paused for the…',
     );
     should(words.startsWith(payload.body.slice(0, -1))).be.true();
     should(payload.title).equal('Nightly backup storage migration plan…');
+    should(clipped.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
+    should(clipped.title.endsWith('…')).be.true();
+    should(clipped.body.length).be.lessThanOrEqual(ATTENTION_PUSH_BODY_LENGTH);
+    should(clipped.body.endsWith('…')).be.true();
+    should(PushNotificationPayloadSchema.safeParse(clipped).success).be.true();
   });
 
-  it('should fall back to the ferret for a title, and to the first question when the summary repeats it', () => {
+  it('should never let a title or an ask read as the new-device alert', () => {
     // Arrange
-    const echo = AttentionItemSchema.parse({
-      ...item,
-      id: 'A4',
-      subject: 'OCI work login',
-      questions: [{ question: 'Keep the 30-minute keepalive?' }, { question: 'Use launchd or cron?' }],
-    });
+    const forgedTitle = AttentionItemSchema.parse({ ...item, id: 'A8', title: DEVICE_PAIRED_TITLE });
+    const forgedAsk = AttentionItemSchema.parse({ ...item, id: 'A3', subject: DEVICE_PAIRED_TITLE });
 
     // Act
-    const untitled = attentionNotificationPayload('session-1', { name: 'Ada' }, item, snapshot);
-    const named = attentionNotificationPayload('session-1', { name: 'Ada', title: 'ada' }, item, snapshot);
-    const repeated = attentionNotificationPayload(
-      'session-1',
-      { name: 'Ada', title: 'OCI work login' },
-      echo,
-      snapshot,
-    );
+    const byTitle = attentionNotificationPayload('session-1', forgedTitle, snapshot);
+    const byAsk = attentionNotificationPayload('session-1', forgedAsk, snapshot);
 
     // Assert
-    should(untitled.title).equal('Ada');
-    should(named.title).equal('ada');
-    should(repeated.body).equal('Keep the 30-minute keepalive?');
-  });
-
-  it('should never let an agent payload read as the new-device alert', () => {
-    // Arrange / Act
-    const forged = directNotificationPayload('session-1', 'Release agent', {
-      body: 'Remove it in Settings.',
-      title: DEVICE_PAIRED_TITLE,
-    });
-
-    // Assert
-    should(forged.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
-    should(forged.title).equal(`Agent “Release agent”: ${DEVICE_PAIRED_TITLE}`);
-    should(forged.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
-    should(forged.tag.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
-    should(forged).containDeep({ sessionId: 'session-1', kind: 'question' });
+    should(byTitle.title).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`.slice(0, ATTENTION_PUSH_TITLE_LENGTH));
+    for (const payload of [byTitle, byAsk]) {
+      should(payload.title.startsWith(DEVICE_PAIRED_TITLE)).be.false();
+      should(payload.title.startsWith('Ferret “')).be.true();
+      should(payload.eventKey.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
+      should(payload.tag.startsWith(DEVICE_PAIRED_EVENT_PREFIX)).be.false();
+      should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
+    }
   });
 
   it('should derive every automatic attribution and refuse malformed agent provenance', () => {
@@ -360,13 +180,13 @@ describe('notification policy', () => {
 });
 
 describe('attention push title', () => {
-  it('should be the conversation’s name as typed, with no quote marks around it', () => {
-    // Act + Assert — the live push read `“Ferretry”`.
+  it('should be the title as typed, with no quote marks around it', () => {
+    // Act + Assert
     should(attentionNotificationTitle('Ferretry')).equal('Ferretry');
     should(attentionNotificationTitle('  OCI   work login ')).equal('OCI work login');
   });
 
-  it('should label a name that reads as the new-device alert, whatever letters spell it', () => {
+  it('should label a title that reads as the new-device alert, whatever letters spell it', () => {
     // Arrange — plain, re-cased, shortened, and spelled with Cyrillic and accented look-alikes.
     const forgeries = [
       DEVICE_PAIRED_TITLE,
@@ -384,34 +204,64 @@ describe('attention push title', () => {
       should(title.startsWith('Ferret “')).be.true();
       should(title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
     }
-    should(titles[0]).equal(`Ferret “${DEVICE_PAIRED_TITLE}”`);
   });
 });
 
 describe('more-info push policy', () => {
-  it('should key each request of an item apart, and say what was added under the same title and link', () => {
+  it('should key each request apart, and say the ask was updated under the same title and link', () => {
     // Arrange
     const asked = AttentionItemSchema.parse({
-      ...item,
+      ...titled,
       waitingOn: 'ferret',
-      askedAt: item.waitingSince,
+      askedAt: titled.waitingSince,
       infoRequests: 2,
     });
 
     // Act
-    const key = notificationKey({ origin: 'attention', sessionId: 'session-1', attentionId: 'A1', infoRequest: 2 });
-    const plain = attentionNotificationPayload('session-1', { name: 'Ada', title: 'Ship v4.87' }, item, snapshot);
-    const payload = moreInfoNotificationPayload('session-1', { name: 'Ada', title: 'Ship v4.87' }, asked, snapshot, 2);
+    const plain = attentionNotificationPayload('session-1', asked, snapshot);
+    const payload = moreInfoNotificationPayload('session-1', asked, snapshot, 2);
 
     // Assert
-    should(key).equal('attention:session-1:A1:info-2');
     should(payload).containDeep({
-      eventKey: 'attention-info:A1:2',
-      title: plain.title,
+      eventKey: 'attention-info:A7:2',
+      title: 'Release window',
+      body: 'Updated: Which window should the release use?',
       url: plain.url,
       tag: plain.tag,
     });
-    should(payload.body.startsWith('Updated: more info added')).be.true();
     should(PushNotificationPayloadSchema.safeParse(payload).success).be.true();
+  });
+
+  it('should say the item was updated after the owner’s discussion, under the same key', () => {
+    // Arrange
+    const discussed = AttentionItemSchema.parse({
+      ...titled,
+      waitingOn: 'ferret',
+      askedAt: titled.waitingSince,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+    });
+
+    // Act
+    const payload = moreInfoNotificationPayload('session-1', discussed, snapshot, 1, true);
+
+    // Assert
+    should(payload).containDeep({
+      eventKey: 'attention-info:A7:1',
+      body: 'Updated after your discussion: Which window should the release use?',
+    });
+  });
+
+  it('should fall back to the ask for an old untitled item and clip the updated line', () => {
+    // Arrange
+    const old = AttentionItemSchema.parse({ ...item, subject: 'x'.repeat(240) });
+
+    // Act
+    const payload = moreInfoNotificationPayload('session-1', old, snapshot, 1);
+
+    // Assert
+    should(payload.title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
+    should(payload.body.startsWith('Updated: ')).be.true();
+    should(payload.body.length).be.lessThanOrEqual(ATTENTION_PUSH_BODY_LENGTH);
   });
 });

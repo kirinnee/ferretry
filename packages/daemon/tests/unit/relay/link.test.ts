@@ -239,6 +239,8 @@ function harness(
     /** When this device's key is due for replacement; absent means the directory has no opinion at all. */
     readonly rotateBy?: (deviceId: string) => number | undefined;
     readonly lease?: AccessLeasePolicy;
+    /** The `claim-handover` token (§5) a previous socket of this daemon was issued, offered as `replaces`. */
+    readonly replaces?: string;
   } = {},
 ): Harness {
   const sent = wire();
@@ -284,6 +286,7 @@ function harness(
     },
     clock: extra.now === undefined ? TEST_CLOCK : { now: extra.now },
     ...(extra.lease === undefined ? {} : { lease: extra.lease }),
+    ...(extra.replaces === undefined ? {} : { replaces: extra.replaces }),
     scheduler: {
       after: (milliseconds, action) => {
         const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
@@ -487,6 +490,40 @@ describe('claiming a rendezvous', () => {
     should(sent.frames.map(controlOf)).deepEqual([{ t: 'probe' }]);
     should(sent.frames[0]?.sessionId.text).equal(RENDEZVOUS_SESSION_ID.text);
     should(link.report()).containDeep({ claimed: true, claimProbe: true, held: 2 });
+  });
+
+  it('should report the handover token only from a rendezvous that echoed claim-handover', async () => {
+    const token = 'A'.repeat(43);
+    const limits = { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 } as const;
+    const handing = harness();
+    await handing.link.receiveBinary(
+      control({ t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits, features: ['claim-handover'], handover: token }),
+    );
+    const silent = harness();
+    await silent.link.receiveBinary(
+      control({ t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits, features: ['claim-probe'], handover: token }),
+    );
+    const plain = harness();
+    await plain.link.receiveBinary(claimed());
+
+    should(handing.link.report().handover).equal(token);
+    should(silent.link.report().handover).be.undefined();
+    should(plain.link.report().handover).be.undefined();
+  });
+
+  it('should offer the token it was given as `replaces` in the claim, and claim plainly without one', async () => {
+    const token = 'B'.repeat(43);
+    const offering = harness(undefined, undefined, undefined, undefined, { replaces: token });
+    const plain = harness();
+
+    await offering.link.receiveBinary(challenge());
+    await plain.link.receiveBinary(challenge());
+
+    const offered = controlOf(offering.wire.frames[0]);
+    const unoffered = controlOf(plain.wire.frames[0]);
+    if (offered?.t !== 'claim' || unoffered?.t !== 'claim') throw new Error('the daemon did not claim');
+    should(offered.replaces).equal(token);
+    should('replaces' in unoffered).be.false();
   });
 
   it('should sign the challenge for the host it dialled, and say what it claimed', async () => {
@@ -3740,5 +3777,62 @@ describe('requests that run side by side', () => {
     });
     for (const path of [...routes.gates.keys()]) routes.open(path);
     await Promise.all(receipts);
+  });
+});
+
+describe('a session that cannot carry its own answer', () => {
+  it('should end the session when a peer that never returns credit lets the answer queue outgrow a window', async () => {
+    // Arrange — a peer ignoring credit: the daemon's answers pile up behind a window that never reopens.
+    const { link, wire: sent } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Act — the window carries what it can, a second window's worth queues, and one request more has nowhere to wait.
+    for (let id = 1; id <= CREDIT_WINDOW_FRAMES * 2 + 1; id += 1) {
+      channel = await clientSend(link, channel, { t: 'req', id, method: 'GET', path: '/v1/health' });
+    }
+
+    // Assert
+    should(controlOf(sent.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'this session cannot carry its own answer',
+    });
+    should(link.report().sessions).equal(0);
+  });
+});
+
+describe('a record the channel refuses to seal', () => {
+  it('should end the session with the seal refusal when a handler closes with a reason too long for one record', async () => {
+    // Arrange — a stream whose close reason is the handler's to choose, and is not bounded on the way in.
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+
+    // Act
+    downstream.close(1000, 'x'.repeat(MAX_PLAINTEXT_BYTES));
+    await settle(harnessed.link);
+
+    // Assert — the channel's own refusal, said once, and nothing sealed behind it
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.frameTooLarge,
+      reason: 'payload exceeds one record',
+    });
+    should(harnessed.link.report().sessions).equal(0);
   });
 });

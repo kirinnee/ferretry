@@ -1,3 +1,109 @@
+## [4.105.2](https://github.com/kirinnee/ferretry/compare/v4.105.1...v4.105.2) (2026-10-29)
+
+### Fixes
+
+* **daemon:** page long and live transcripts through an incremental conversation index ([#881](https://github.com/kirinnee/ferretry/issues/881)) ([143ef45](https://github.com/kirinnee/ferretry/commit/143ef45d8248ead1ec0021fc006d350a842cbece))
+* **pwa:** open resolved Attention in a drawer with a header and close ([#882](https://github.com/kirinnee/ferretry/issues/882)) ([e1fc73c](https://github.com/kirinnee/ferretry/commit/e1fc73cf408c5ea443776a652e2cb1596b2991fe))
+* **transcript:** skip subtrees the parser never reads in large records ([#885](https://github.com/kirinnee/ferretry/issues/885)) ([4740e4f](https://github.com/kirinnee/ferretry/commit/4740e4fad9c4d2bb62ad718170792c4ca5170a9a)), closes [#875](https://github.com/kirinnee/ferretry/issues/875)
+
+## [4.105.1](https://github.com/kirinnee/ferretry/compare/v4.105.0...v4.105.1) (2026-10-29)
+
+### Fixes
+
+* **attention:** deliver card answers on receipt, and give Discuss its own state ([#880](https://github.com/kirinnee/ferretry/issues/880)) ([9ba2770](https://github.com/kirinnee/ferretry/commit/9ba2770dbb9442496c49f6e5a767eae79502c0de))
+
+## [4.105.0](https://github.com/kirinnee/ferretry/compare/v4.104.0...v4.105.0) (2026-10-29)
+
+### Features
+
+* **attention:** premise vs context cards, fixed height, forward-only skipping ([#878](https://github.com/kirinnee/ferretry/issues/878)) ([db8fa62](https://github.com/kirinnee/ferretry/commit/db8fa621eca0952af11966b57141c69525f913e2))
+
+## [4.104.0](https://github.com/kirinnee/ferretry/compare/v4.103.2...v4.104.0) (2026-10-29)
+
+### Features
+
+* **pwa:** redesign the Attention page around the item card ([#876](https://github.com/kirinnee/ferretry/issues/876)) ([3a62c3a](https://github.com/kirinnee/ferretry/commit/3a62c3a7bb18cecb4909d67c5cef2a91ac740e52))
+* show shared images in chats ([#877](https://github.com/kirinnee/ferretry/issues/877)) ([4c45222](https://github.com/kirinnee/ferretry/commit/4c452226cdeaa5a5104e83f18f7112c2a1edd67d))
+
+## [4.103.2](https://github.com/kirinnee/ferretry/compare/v4.103.1...v4.103.2) (2026-10-29)
+
+### Fixes
+
+* **transcript:** reference large base64 payloads instead of parsing them ([#875](https://github.com/kirinnee/ferretry/issues/875)) ([01d54c0](https://github.com/kirinnee/ferretry/commit/01d54c0dbecf22bc5729cf95d1b7e38317f53827))
+
+## [4.103.1](https://github.com/kirinnee/ferretry/compare/v4.103.0...v4.103.1) (2026-10-29)
+
+### Fixes
+
+* **daemon:** close live sockets before storage on shutdown ([#874](https://github.com/kirinnee/ferretry/issues/874)) ([95a99a9](https://github.com/kirinnee/ferretry/commit/95a99a9b93c73caf3f89111dbdfe7b561ac04587))
+* **daemon:** open the session index on its writer thread ([#870](https://github.com/kirinnee/ferretry/issues/870)) ([9e8078d](https://github.com/kirinnee/ferretry/commit/9e8078da96651f1c96e6131baf5cb15b6640bfe1)), closes [#857](https://github.com/kirinnee/ferretry/issues/857) [#866](https://github.com/kirinnee/ferretry/issues/866)
+
+## [4.103.0](https://github.com/kirinnee/ferretry/compare/v4.102.0...v4.103.0) (2026-10-29)
+
+### Features
+
+* **attention:** Discuss on every card, and batch what the ferret hears instead of footering every message ([#871](https://github.com/kirinnee/ferretry/issues/871)) ([01f1782](https://github.com/kirinnee/ferretry/commit/01f1782e1a33d92acd6ef5dbaa92ec6b417ce260))
+
+### Fixes
+
+* **daemon:** keep analytics index writes off the event loop ([#872](https://github.com/kirinnee/ferretry/issues/872)) ([3b5e41f](https://github.com/kirinnee/ferretry/commit/3b5e41f5ca44276083fb50ae3dac8143a66ef840))
+* **transcript:** count record bytes without copying them ([#873](https://github.com/kirinnee/ferretry/issues/873)) ([d7ec75e](https://github.com/kirinnee/ferretry/commit/d7ec75e8e90b452ace435da7e9c2ea69c9332dfb)), closes [#870](https://github.com/kirinnee/ferretry/issues/870)
+
+## [4.102.0](https://github.com/kirinnee/ferretry/compare/v4.101.3...v4.102.0) (2026-10-29)
+
+### Features
+
+* **daemon:** say the disk is saturated when it stalls the event loop ([#866](https://github.com/kirinnee/ferretry/issues/866)) ([f892976](https://github.com/kirinnee/ferretry/commit/f892976e64ab4ce77b2f235ee8a3d0fb5445162d))
+* **pwa:** fold the pinned Attention card to one line ([#864](https://github.com/kirinnee/ferretry/issues/864)) ([f159622](https://github.com/kirinnee/ferretry/commit/f159622dd3fcd95be6d5f12312110d281e1683dd))
+
+### Fixes
+
+* **daemon:** stop transcript reads holding the event loop under memory pressure ([#869](https://github.com/kirinnee/ferretry/issues/869)) ([c0ef697](https://github.com/kirinnee/ferretry/commit/c0ef69778f1197da6b8a7ea8fc1345188e389383))
+* **pwa:** give the pinned Attention card the deck's answer bar ([#867](https://github.com/kirinnee/ferretry/issues/867)) ([d83e0c7](https://github.com/kirinnee/ferretry/commit/d83e0c79892087d0d92e81131c6fe0bc5756a670))
+
+## [4.101.3](https://github.com/kirinnee/ferretry/compare/v4.101.2...v4.101.3) (2026-10-29)
+
+### Fixes
+
+* **daemon:** keep session index writes off the event loop ([#868](https://github.com/kirinnee/ferretry/issues/868)) ([2664d71](https://github.com/kirinnee/ferretry/commit/2664d71b19ac25f1cd13d829a3d5c2aae31e18dd))
+* **pwa:** fit the Sessions Needs-you card to the phone screen ([#865](https://github.com/kirinnee/ferretry/issues/865)) ([a7f93d8](https://github.com/kirinnee/ferretry/commit/a7f93d8e09c0cb529e1b81684d63de6463d27fce))
+
+## [4.101.2](https://github.com/kirinnee/ferretry/compare/v4.101.1...v4.101.2) (2026-10-29)
+
+### Fixes
+
+* **warden:** give Jev one act per ferret and per situation, not per subject ([#863](https://github.com/kirinnee/ferretry/issues/863)) ([7ea7bff](https://github.com/kirinnee/ferretry/commit/7ea7bff2fe404c4f241447d7d765ffd6e5887cbf))
+
+## [4.101.1](https://github.com/kirinnee/ferretry/compare/v4.101.0...v4.101.1) (2026-10-29)
+
+### Fixes
+
+* **pwa:** say a lone attention question once, and fade the detail into the answer bar ([#861](https://github.com/kirinnee/ferretry/issues/861)) ([dff62dd](https://github.com/kirinnee/ferretry/commit/dff62dda6b608368f4f6d4bc5752a38c38356e50))
+
+## [4.101.0](https://github.com/kirinnee/ferretry/compare/v4.100.0...v4.101.0) (2026-10-29)
+
+### Features
+
+* **attention:** cards v2 — title and ask, up to three swipe answers plus reply, only Attention notifies ([#860](https://github.com/kirinnee/ferretry/issues/860)) ([8ec884e](https://github.com/kirinnee/ferretry/commit/8ec884e0ca40467fb8c95cb196f7b8b521c699b7))
+* **processes:** show every subprocess a ferret runs, with live output ([#859](https://github.com/kirinnee/ferretry/issues/859)) ([bdf63de](https://github.com/kirinnee/ferretry/commit/bdf63de7c239a8708d4c75140129df77a5a1a582))
+
+### Fixes
+
+* **pwa:** keep a relay session whose request never left before its deadline ([#857](https://github.com/kirinnee/ferretry/issues/857)) ([887083b](https://github.com/kirinnee/ferretry/commit/887083b39cd65832220586aea0a670a089242aec))
+
+## [4.100.0](https://github.com/kirinnee/ferretry/compare/v4.99.1...v4.100.0) (2026-10-29)
+
+### Features
+
+* **pwa:** draw nothing for empty Attention, move resolved out of chat ([#854](https://github.com/kirinnee/ferretry/issues/854)) ([2a9bd89](https://github.com/kirinnee/ferretry/commit/2a9bd89f7968bee5a0219cbd1d4a56a825fe9450))
+
+## [4.99.1](https://github.com/kirinnee/ferretry/compare/v4.99.0...v4.99.1) (2026-10-29)
+
+### Fixes
+
+* **fleet:** trim the Mermaid hint so the whole prompt fits its 7.1 KB cap ([#858](https://github.com/kirinnee/ferretry/issues/858)) ([7fc0f3e](https://github.com/kirinnee/ferretry/commit/7fc0f3e946c068e68afd4e9a3520c22595c9b6bb)), closes [#845](https://github.com/kirinnee/ferretry/issues/845) [#853](https://github.com/kirinnee/ferretry/issues/853)
+* **pwa:** let the gallery's theme flips land before the next click ([#856](https://github.com/kirinnee/ferretry/issues/856)) ([93e5344](https://github.com/kirinnee/ferretry/commit/93e534489312366e27de6fbb88c2071491a4777e))
+
 ## [4.99.0](https://github.com/kirinnee/ferretry/compare/v4.98.0...v4.99.0) (2026-10-29)
 
 ### Features

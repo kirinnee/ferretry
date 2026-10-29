@@ -20,6 +20,8 @@ import {
   type SessionTranscriptMessageTokenContext,
 } from '../../../../src/lib/session/transcript/message-token.ts';
 import { jsonBody, request } from '../../api/support.ts';
+import type { TranscriptImageReader } from '../../../../src/lib/session/transcript/image-reader.ts';
+import { claudeText, claudeUserImage, MemoryTranscript, pngBase64 } from '../../../support/transcript-images.ts';
 import { CREDENTIALS, human, sessionDirectory, sessionView } from './support.ts';
 
 /**
@@ -78,6 +80,7 @@ function fixture(
     readonly rows?: readonly PortableConversationRow[];
     readonly noTranscript?: true;
     readonly redactor?: OperatorReadRedactor;
+    readonly images?: TranscriptImageReader;
   } = {},
 ) {
   const reads = new OperatorReadService(
@@ -102,7 +105,13 @@ function fixture(
     options.redactor,
   );
   const dispatcher = new ApiDispatcher(
-    new ApiRouter([...sessionReadRoutes(reads, sessionDirectory([sessionView('s1')]))]),
+    new ApiRouter([
+      ...sessionReadRoutes(
+        reads,
+        sessionDirectory([sessionView('s1')]),
+        options.images ?? new MemoryTranscript([]).reader(),
+      ),
+    ]),
     CREDENTIALS,
     NO_GOVERNED_ROUTES_GUARD,
   );
@@ -687,5 +696,218 @@ describe('the session addressable-message route', () => {
     // Assert
     should(response.status).equal(400);
     should(jsonBody(response)).have.property('code', 'invalid_session_id');
+  });
+});
+
+describe('the transcript image route', () => {
+  const transcript = new MemoryTranscript([claudeText(1), claudeUserImage(2, [pngBase64(), pngBase64(40)])]);
+  const images = (): TranscriptImageReader => transcript.reader();
+  const at = (handle: string): string => `/v1/sessions/s1/transcript-images/${handle}`;
+
+  it('should serve the image the handle names, as JSON a tunnel can carry', async () => {
+    // Arrange
+    const dispatch = fixture({ images: images() });
+
+    // Act
+    const response = await dispatch({ path: at(transcript.handle(1, 1)), headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+    should(response.headers.get('content-type')).match(/^application\/json/u);
+    should(jsonBody(response)).eql({
+      image: { handle: transcript.handle(1, 1), mediaType: 'image/png', byteLength: 48 },
+      base64: pngBase64(40),
+    });
+  });
+
+  it('should be cacheable for good, never no-store, with a strong validator', async () => {
+    // Arrange
+    const dispatch = fixture({ images: images() });
+
+    // Act
+    const response = await dispatch({ path: at(transcript.handle(1, 0)), headers: human });
+
+    // Assert
+    should(response.headers.get('cache-control')).equal('private, max-age=31536000, immutable');
+    should(response.headers.get('etag')).match(/^"[A-Za-z0-9_-]+"$/u);
+  });
+
+  it('should answer 304 with no body to a matching validator, and a body to a different one', async () => {
+    // Arrange
+    const dispatch = fixture({ images: images() });
+    const path = at(transcript.handle(1, 0));
+    const first = await dispatch({ path, headers: human });
+    const etag = first.headers.get('etag') ?? '';
+
+    // Act
+    const same = await dispatch({ path, headers: { ...human, 'if-none-match': etag } });
+    const list = await dispatch({ path, headers: { ...human, 'if-none-match': `"other", ${etag}` } });
+    const other = await dispatch({ path, headers: { ...human, 'if-none-match': '"other"' } });
+
+    // Assert
+    should(same.status).equal(304);
+    should(same.body).equal('');
+    should(same.headers.get('etag')).equal(etag);
+    should(list.status).equal(304);
+    should(other.status).equal(200);
+  });
+
+  it('should take a handle spelled as a percent-encoded path segment', async () => {
+    // Arrange
+    const dispatch = fixture({ images: images() });
+    const encoded = encodeURIComponent(transcript.handle(1, 0));
+
+    // Act
+    const response = await dispatch({ path: at(encoded), headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should serve a base64url image as the standard alphabet', async () => {
+    // Arrange
+    const raw = Buffer.concat([
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+      Buffer.from([0xfb, 0xff, 0xfe, 0xfb, 0xff, 0xfe, 0xfb, 0xff, 0xfe]),
+    ]);
+    const urlSafe = new MemoryTranscript([claudeUserImage(1, [raw.toString('base64url')])]);
+    const dispatch = fixture({ images: urlSafe.reader() });
+
+    // Act
+    const response = await dispatch({ path: at(urlSafe.handle(0)), headers: human });
+
+    // Assert
+    should(response.status).equal(200);
+    should(jsonBody(response).base64).equal(raw.toString('base64'));
+  });
+
+  it('should answer 404 for a session that does not exist, before it reads any transcript', async () => {
+    // Arrange
+    const dispatch = fixture({ images: images() });
+
+    // Act
+    const response = await dispatch({ path: '/v1/sessions/nobody/transcript-images/0.10.0', headers: human });
+
+    // Assert
+    should(response.status).equal(404);
+    should(jsonBody(response)).have.property('code', 'not-found');
+  });
+
+  it.each([
+    ['a handle that is not one', 'nonsense', 400, 'invalid_image_handle'],
+    ['an offset in the middle of a record', '5.30.0', 404, 'image_not_found'],
+    [
+      'an ordinal past the end',
+      `${String(transcript.offsets[1])}.${String(transcript.lengths[1])}.9`,
+      404,
+      'image_not_found',
+    ],
+    ['a range past the end of the file', '99999999.10.0', 404, 'image_not_found'],
+  ])('should refuse %s with a code and no daemon path', async (_name, handle, status, code) => {
+    // Arrange
+    const dispatch = fixture({ images: images() });
+
+    // Act
+    const response = await dispatch({ path: at(handle), headers: human });
+
+    // Assert
+    should(response.status).equal(status);
+    should(jsonBody(response)).have.property('code', code);
+    should(response.body).not.match(/transcripts|\.jsonl|\/home/u);
+    should(response.headers.get('cache-control')).not.equal('private, max-age=31536000, immutable');
+  });
+
+  it('should refuse bytes that are not an image with 415', async () => {
+    // Arrange
+    const html = Buffer.from('<html><body>not an image, merely labelled one</body></html>').toString('base64');
+    const forged = new MemoryTranscript([claudeUserImage(1, [html])]);
+    const dispatch = fixture({ images: forged.reader() });
+
+    // Act
+    const response = await dispatch({ path: at(forged.handle(0)), headers: human });
+
+    // Assert
+    should(response.status).equal(415);
+    should(jsonBody(response)).have.property('code', 'unsupported_image');
+  });
+
+  it('should answer 409 for a session whose transcript there is none of', async () => {
+    // Arrange
+    const none = new MemoryTranscript([claudeUserImage(1, [pngBase64()])], 'claude', false);
+    const dispatch = fixture({ images: none.reader() });
+
+    // Act
+    const response = await dispatch({ path: at(none.handle(0)), headers: human });
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).have.property('code', 'no_transcript');
+  });
+
+  it('should answer 500 without leaking the cause when the reader fails for a reason that is no refusal', async () => {
+    // Arrange
+    const broken = {
+      lookup: async () => {
+        throw new Error('disk /var/secret-transcripts is on fire');
+      },
+    } as unknown as TranscriptImageReader;
+    const dispatch = fixture({ images: broken });
+
+    // Act
+    const response = await dispatch({ path: at(transcript.handle(1, 0)), headers: human });
+
+    // Assert
+    should(response.status).equal(500);
+    should(jsonBody(response)).have.property('code', 'internal_error');
+    should(JSON.stringify(jsonBody(response))).not.containEql('secret-transcripts');
+  });
+
+  it('should refuse the warden and an anonymous caller exactly as it refuses them for /logs', async () => {
+    // Arrange
+    const dispatch = fixture({ images: images() });
+    const handle = transcript.handle(1, 0);
+
+    // Act
+    const [logsWarden, imageWarden, logsAnonymous, imageAnonymous] = await Promise.all([
+      dispatch({ path: '/v1/sessions/s1/logs', headers: wardenToken }),
+      dispatch({ path: at(handle), headers: wardenToken }),
+      dispatch({ path: '/v1/sessions/s1/logs' }),
+      dispatch({ path: at(handle) }),
+    ]);
+
+    // Assert
+    should(imageWarden.status).equal(logsWarden.status);
+    should(jsonBody(imageWarden).code).equal(jsonBody(logsWarden).code);
+    should(imageAnonymous.status).equal(logsAnonymous.status);
+    should(jsonBody(imageAnonymous).code).equal(jsonBody(logsAnonymous).code);
+    should(imageWarden.status).equal(403);
+    should(imageAnonymous.status).equal(401);
+  });
+
+  it('should be governed exactly like /logs: same minimum, same capability, and never no-store', () => {
+    // Arrange
+    const reads = new OperatorReadService(
+      { replay: async () => [] },
+      { capture: async () => ({ alive: true, dead: false, text: '' }) },
+      { tail: async () => ({ kind: 'read', events: [] }) },
+      { read: async () => ({ kind: 'unresolved' }) },
+      CODEC,
+      { read: async () => ({ kind: 'absent' }) },
+    );
+    const routes = sessionReadRoutes(reads, sessionDirectory([sessionView('s1')]), images());
+    const logs = routes.find(route => route.path === '/v1/sessions/:sessionId/logs');
+    const image = routes.find(route => route.path === '/v1/sessions/:sessionId/transcript-images/:handle');
+
+    // Assert
+    should(logs).not.equal(undefined);
+    should(image).not.equal(undefined);
+    should(image?.method).equal(logs?.method);
+    should(image?.minimum).equal(logs?.minimum);
+    should(image?.minimum).equal('operator');
+    should(image?.capability).equal(logs?.capability);
+    should(image?.capability).equal(undefined);
+    should(image?.privilegedOnly).equal(logs?.privilegedOnly);
+    should(logs?.noStore).equal(true);
+    should(image?.noStore).not.equal(true);
   });
 });

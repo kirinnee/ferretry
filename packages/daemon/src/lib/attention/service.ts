@@ -15,10 +15,19 @@ import {
   agentConfinedTo,
   applyAttentionCommandToSession,
   attentionSnapshot,
+  type DaemonAttentionCause,
   type EditAttentionPatch,
   emptyAttentionLedger,
   type RaiseAttentionRequest,
 } from './state-machine.ts';
+
+/** The heading of an item the daemon raised without wording one: plain words, never an id. */
+const DAEMON_TITLES: Readonly<Record<DaemonAttentionCause, string>> = {
+  'source-reconciliation': 'Needs your attention',
+  'warden-escalation': 'A ferret needs a human',
+  system: 'Needs your attention',
+  'harness-prompt': 'The ferret is waiting on you',
+};
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 
@@ -107,7 +116,11 @@ export class AttentionService {
   }
 
   async raise(sessionId: string, request: RaiseAttentionRequest, actor: AttentionActor): Promise<AttentionMutation> {
-    return this.apply(sessionId, { action: 'raise', actor, request, at: this.clock.now() });
+    const titled =
+      actor.kind === 'daemon' && request.title === undefined
+        ? { ...request, title: DAEMON_TITLES[actor.cause] }
+        : request;
+    return this.apply(sessionId, { action: 'raise', actor, request: titled, at: this.clock.now() });
   }
 
   async answer(
@@ -151,6 +164,16 @@ export class AttentionService {
     return this.apply(sessionId, { action: 'needs-info', actor, id, note, at: this.clock.now() });
   }
 
+  /** The owner wants to talk an item through before answering: it stays open, in discussion with the ferret. */
+  async discuss(
+    sessionId: string,
+    id: AttentionId,
+    actor: AttentionActor,
+    note?: string | null,
+  ): Promise<AttentionMutation> {
+    return this.apply(sessionId, { action: 'discuss', actor, id, note, at: this.clock.now() });
+  }
+
   async resolve(
     sessionId: string,
     id: AttentionId,
@@ -168,6 +191,22 @@ export class AttentionService {
     note?: string | null,
   ): Promise<AttentionMutation> {
     return this.apply(sessionId, { action: 'dismiss', actor, id, note, at: this.clock.now() });
+  }
+
+  /**
+   * The owner's action on an item never reached its ferret: the item is the owner's again, as an open card
+   * saying so (docs/attention.md § Delivery). `request` names the request for more information or to discuss
+   * it that was not delivered; absent for an answer. Daemon-only: the delivery path is the one witness.
+   */
+  async undelivered(sessionId: string, id: AttentionId, reason: string, request?: number): Promise<AttentionMutation> {
+    return this.apply(sessionId, {
+      action: 'undelivered',
+      actor: { kind: 'daemon', cause: 'system' },
+      id,
+      reason,
+      ...(request === undefined ? {} : { request }),
+      at: this.clock.now(),
+    });
   }
 
   /** Trusted source reconciliation; transport-facing composition must never expose this directly. */

@@ -4,10 +4,17 @@ import {
   boardReplyMessage,
   conversationResponse,
   conversationTurn,
+  discussMessage,
   needsInfoMessage,
   sessionAttentionSummary,
 } from './conversation.ts';
-import { type AttentionReplyQueue, needsInfoReplyKey } from './reply-batch.ts';
+import {
+  type AttentionReplyQueue,
+  type AttentionUndeliveredSink,
+  itemOfKey,
+  needsInfoReplyKey,
+  type ReplyKey,
+} from './reply-batch.ts';
 import type {
   AttentionBoardChange,
   AttentionChangeObserver,
@@ -80,24 +87,34 @@ export class SessionAttentionProjection implements AttentionChangeObserver {
  * Tells a ferret the owner's answer to an item IT raised, as an ordinary message naming the item.
  *
  * Every closing the owner makes on the board of an agent-raised item is told — an answer, a done or a
- * dismiss (`boardReplyMessage`). Nothing else is: an answer given in the conversation already reached
+ * dismiss (`boardReplyMessage`) — and so is a request for more information or to discuss it, which leave
+ * the item open. Nothing else is: an answer given in the conversation already reached
  * the ferret in the owner's words, the ferret's own `done` needs no echo, and the warden's or a
  * source's reconciliation is not an answer. Each goes to the ferret's outbox (`AttentionReplyBatcher`), which
  * delivers a burst of answers as one message and never the same item twice.
  */
 export class AttentionReplyDelivery implements AttentionChangeObserver {
-  constructor(private readonly replies: AttentionReplyQueue) {}
+  /** `binary` names the CLI in the words a discussion tells the ferret to run. */
+  constructor(
+    private readonly replies: AttentionReplyQueue,
+    private readonly binary: string,
+  ) {}
 
   async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
     const { addressed, item } = change;
     if (
-      change.change === 'needs-info' &&
+      (change.change === 'needs-info' || change.change === 'discussing') &&
       change.actor.kind === 'human' &&
       item?.raisedBy === 'agent' &&
       item.raisedBySession === sessionId &&
       item.infoRequests !== undefined
     ) {
-      await this.replies.add(sessionId, needsInfoReplyKey(item.id, item.infoRequests), needsInfoMessage(item));
+      // One counter for both: a request for information and a request to discuss are each told once.
+      await this.replies.add(
+        sessionId,
+        needsInfoReplyKey(item.id, item.infoRequests),
+        change.change === 'discussing' ? discussMessage(item, this.binary) : needsInfoMessage(item),
+      );
       return;
     }
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
@@ -106,23 +123,48 @@ export class AttentionReplyDelivery implements AttentionChangeObserver {
   }
 }
 
+/**
+ * Hands an answer that never reached its ferret back to the owner: the item reopens on its board as a card
+ * saying so (`AttentionService.undelivered`). A key that is about no item (the instructions note) has no
+ * card to reopen. Total: a board that cannot take it is left as it is.
+ */
+export class AttentionBoardUndelivered implements AttentionUndeliveredSink {
+  constructor(private readonly attention: Pick<AttentionService, 'undelivered'>) {}
+
+  async undelivered(sessionId: string, key: ReplyKey, reason: string): Promise<void> {
+    const id = itemOfKey(key);
+    if (id === undefined) return;
+    const counter = key.split('~')[1];
+    const request = counter === undefined ? undefined : Number(counter);
+    await this.attention.undelivered(sessionId, id, reason, request).catch(() => undefined);
+  }
+}
+
 /** Announces that a ferret added the information the owner asked for: the one push an edit ever makes. */
 export interface MoreInfoAnnouncer {
-  moreInfoAdded(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
+  /** `discussion`: the wait the edit cleared was the owner's request to talk the item through. */
+  moreInfoAdded(
+    sessionId: string,
+    item: AttentionItem,
+    snapshot: AttentionSnapshot,
+    discussion: boolean,
+  ): Promise<void>;
 }
 
 /**
  * The ONE exception to "an edit never pushes": the raising ferret's edit that answers an open request for
- * more information (`info-added`) pushes once more. The state machine clears the request in the same
- * commit, so a retried edit is no change and pushes nothing, and the announcer keys the push on the item
- * and its request counter.
+ * more information or to discuss the item (`info-added`) pushes once more. The state machine clears the
+ * request in the same commit, so a retried edit is no change and pushes nothing, and the announcer keys the
+ * push on the item and its request counter. The cleared wait is read from the history: the edit appends
+ * `updated` after the entry that opened the wait, so that entry is the one before the last.
  */
 export class AttentionMoreInfoPush implements AttentionChangeObserver {
   constructor(private readonly announcer: MoreInfoAnnouncer) {}
 
   async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
     if (change.change !== 'info-added' || change.item === undefined) return;
-    await this.announcer.moreInfoAdded(sessionId, change.item, change.snapshot);
+    const history = change.item.history ?? [];
+    await this.announcer.moreInfoAdded(sessionId, change.item, change.snapshot, history.at(-2)?.kind === 'discuss');
   }
 }
 
@@ -134,15 +176,12 @@ export class AttentionMoreInfoPush implements AttentionChangeObserver {
  * person's words must never be refused for the sake of a decoration.
  */
 export class AttentionConversation {
-  constructor(
-    private readonly attention: Pick<AttentionService, 'list' | 'answer' | 'resolve'>,
-    private readonly binary: string,
-  ) {}
+  constructor(private readonly attention: Pick<AttentionService, 'list' | 'answer' | 'resolve'>) {}
 
   async prepare(sessionId: string, message: string): Promise<ReturnType<typeof conversationTurn>> {
     const listed = await this.attention.list(sessionId).catch(() => undefined);
     if (listed === undefined || !listed.ok) return { message, answers: [] };
-    return conversationTurn(message, listed.value.items, this.binary);
+    return conversationTurn(message, listed.value.items);
   }
 
   /** Resolves every item the accepted message answered; each on its own, none able to fail the send. */

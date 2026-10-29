@@ -9,8 +9,8 @@ import {
 } from '@ferretry/protocol';
 import { RoutingPromptCard, type RoutingPromptCardProps } from '../../../../src/features/pack/routing-prompt-card.tsx';
 import { ideaLimitFor } from '../../../../src/lib/pack/routing-prompt.ts';
-import { healthOf } from '../../../support/health.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
+import { healthOf } from '../../../support/health.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
 import {
   IDLE_ROUTING_API,
@@ -232,6 +232,25 @@ describe('the routing prompt card', () => {
       { readJob: () => new Promise(() => undefined) },
     );
     await waitFor(() => root.querySelector('[data-clean-up-job="running"]') !== null, 'the adopted run');
+  });
+
+  it('says a read of the run failed, keeps polling, and clears the message once a read succeeds', async () => {
+    let reads = 0;
+    const root = await card(
+      { ...OWNER_VIEW, cleanUp: { ...OWNER_VIEW.cleanUp, job: RUNNING_JOB } },
+      {
+        readJob: async () => {
+          reads += 1;
+          return reads === 1
+            ? { kind: 'failed', message: 'offline' }
+            : { kind: 'read', result: { job: { ...RUNNING_JOB, status: 'suggested' }, suggestion: SUGGESTION } };
+        },
+      },
+    );
+    await waitForText(root, 'Could not read the clean-up just now (offline) — trying again.');
+    await waitFor(() => root.querySelector('[data-clean-up-review]') !== null, 'the review');
+    expect(reads).toBe(2);
+    expect(textOf(root)).not.toContain('trying again');
   });
 
   it('shows a failed run with why', async () => {

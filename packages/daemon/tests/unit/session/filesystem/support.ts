@@ -48,6 +48,8 @@ export interface FakeNode {
   readonly identities?: readonly ComponentIdentity[];
   readonly entries?: readonly PinnedDirectoryEntry[];
   readonly truncated?: boolean;
+  /** Raised when the directory is enumerated rather than when it is opened, so an open can succeed and a listing fail. */
+  readonly listError?: Error;
   /** Raised instead of opening, so a test can stage any refusal the real walk can produce. */
   readonly error?: Error;
 }
@@ -75,6 +77,7 @@ class FakePinnedTarget implements PinnedTarget {
     readonly identities: readonly ComponentIdentity[],
     private readonly bytes: Uint8Array,
     private readonly listing: PinnedListing,
+    private readonly listError?: Error,
   ) {}
 
   async read(maxBytes: number): Promise<Uint8Array | undefined> {
@@ -89,6 +92,7 @@ class FakePinnedTarget implements PinnedTarget {
    * children is abandoned from the INSIDE rather than after every one of them has been classified.
    */
   async list(maxEntries: number, budget?: WorkBudget): Promise<PinnedListing> {
+    if (this.listError) throw this.listError;
     const entries: PinnedDirectoryEntry[] = [];
     for (const entry of this.listing.entries.slice(0, maxEntries)) {
       if (budget?.expired() === true) return { entries, truncated: true };
@@ -158,6 +162,7 @@ class FakePinnedRoot implements PinnedRoot {
       node.identities ?? identitiesFor(rel),
       bytes,
       { entries: node.entries ?? [], truncated: node.truncated ?? false },
+      node.listError,
     );
     this.targets.push(target);
     return target;

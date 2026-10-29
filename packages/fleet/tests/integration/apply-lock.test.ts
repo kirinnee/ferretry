@@ -392,6 +392,24 @@ describe('FleetApplyLock', () => {
     should(await readdir(lockPath)).deepEqual(['occupied']);
   });
 
+  it('should name the lock as residue rather than throw when its tidy-up fails unexpectedly', async () => {
+    // Arrange — release runs after the protected work, so even a fault no filesystem call predicted
+    // (here, the directory removal itself blowing up) must travel back as a value, never replace the
+    // apply's own outcome.
+    const root = await temporaryDirectory();
+    const lockPath = path.join(root, '.fy-fleet-apply.lock');
+    const subject = new FleetApplyLock(lockPath, { pollMs: 1 });
+    const token = await subject.acquire();
+    (subject as unknown as { removeIfEmpty: () => Promise<boolean> }).removeIfEmpty = () =>
+      Promise.reject(new Error('the directory could not be inspected'));
+
+    // Act
+    const residue = await subject.release(token);
+
+    // Assert
+    should(residue).equal(lockPath);
+  });
+
   it('should read liveness from the running task when no check is injected', async () => {
     // Arrange — this task's own leaked claim, one that cannot exist, and one it may not signal.
     const root = await temporaryDirectory();

@@ -25,7 +25,12 @@ import {
   conversationLinkFailure,
   conversationResumeArguments,
 } from '../../../src/lib/imports/index.ts';
-import { ClaudeTranscriptParser, CodexTranscriptParser } from '../../../src/lib/transcript/index.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  PacedTranscriptParser,
+  type TranscriptParsePacing,
+} from '../../../src/lib/transcript/index.ts';
 
 const CLAUDE_ID = '11111111-1111-4111-8111-111111111111';
 const CLAUDE_OLD = '22222222-2222-4222-8222-222222222222';
@@ -129,7 +134,12 @@ class FakeFiles implements ConversationFiles {
 
 const CODEX_NAMED = '44444444-4444-4444-8444-444444444444';
 
-const parsers = { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() };
+/** A clock that never advances, so a parse never yields and every test stays one deterministic step. */
+const UNPACED: TranscriptParsePacing = { now: () => 0, yieldToLoop: async () => undefined };
+const parsers = {
+  claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), UNPACED),
+  codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED),
+};
 
 const tree: Tree = {
   host: {
@@ -313,6 +323,17 @@ describe('conversation discovery', () => {
     should(conversationHead('codex', JSON.stringify({ type: 'response_item', payload: { cwd: '/x' } }))).be.undefined();
     should(conversationHead('codex', JSON.stringify({ type: 'session_meta', payload: null }))).be.undefined();
     should(conversationHead('claude', '\n{"cwd":"relative"}\n')).be.undefined();
+  });
+});
+
+describe('conversation head', () => {
+  it('should skip a line of the head that is not JSON and read the next one that is', () => {
+    // Arrange — a transcript whose first record was cut off or scribbled over
+    const text = `this is not json\n${claude('x', '2026-10-17T08:00:00.000Z')}`;
+
+    // Act & Assert
+    should(conversationHead('claude', text)).deepEqual({ project: '/work/shop', id: undefined });
+    should(conversationHead('claude', 'still not json\n')).be.undefined();
   });
 });
 

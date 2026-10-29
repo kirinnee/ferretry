@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import type { AttentionItem, AttentionSnapshot, SessionAttentionSummary } from '@ferretry/protocol';
+import type {
+  AttentionItem,
+  AttentionSnapshot,
+  ResolvedAttentionItem,
+  SessionAttentionSummary,
+} from '@ferretry/protocol';
 import {
   actionSentence,
   attentionConversationPath,
@@ -12,12 +17,23 @@ import {
   DISMISS_ACTION,
   DONE_ACTION,
   directionOfAction,
+  discussingCards,
+  discussingSessions,
+  historyLine,
   type InboxCard,
   inboxCardKey,
   inboxCards,
   inboxOptions,
+  inboxResolved,
+  isInDiscussion,
+  NEEDS_INFO_ACTION,
+  needsYouCount,
+  needsYouItems,
+  RESOLVED_READ_LIMIT,
   replyAction,
   SWIPE_SLOP_PX,
+  sessionAttention,
+  sessionsToReadForResolved,
   swipeIntent,
   swipeMap,
   swipeThreshold,
@@ -25,6 +41,8 @@ import {
   unreadCount,
   unreadSessions,
   unreadTotal,
+  updatedSinceAsked,
+  waitingSentence,
 } from '../../src/lib/attention-inbox.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -157,25 +175,45 @@ describe('inbox cards', () => {
   });
 });
 
+/** An item as the answer helpers read it: the ask line is its subject. */
+const card = (extra: Partial<AttentionItem> = {}) => ({ subject: 'Rebase the branch?', ...extra });
+
 describe('swipes', () => {
-  test('every card swipes right to Done and left to Dismiss — never between its options', () => {
-    for (const ask of [
-      undefined,
-      { kind: 'open-question' } as const,
-      { kind: 'permission' } as const,
-      choice('A', 'B', 'C', 'D'),
-    ]) {
-      const map = swipeMap({ ask });
-      expect(map.right).toBe(DONE_ACTION);
-      expect(map.left).toBe(DISMISS_ACTION);
-      expect(map.up).toBeUndefined();
+  test('a card swipes the answers it has: its right answer, its left, and an up only when it was given one', () => {
+    const yesNo = swipeMap(card({ ask: choice('Yes', 'No') }));
+    expect(yesNo.right).toMatchObject({ kind: 'respond', label: 'Yes' });
+    expect(yesNo.left).toMatchObject({ kind: 'respond', label: 'No' });
+    expect(yesNo.up).toBeUndefined();
+    const task = swipeMap(card({ ask: { kind: 'task' } }));
+    expect(task.right).toMatchObject({ kind: 'resolve', label: 'Done' });
+    expect(task.left).toMatchObject({ kind: 'needs-info' });
+    expect(task.up).toBeUndefined();
+    const three = swipeMap(card({ ask: choice('A', 'B', 'C') }));
+    expect(Object.keys(three).sort()).toEqual(['left', 'right', 'up']);
+  });
+
+  test('dismissing is no longer a swipe, and a card with no answers swipes nowhere', () => {
+    for (const ask of [undefined, { kind: 'open-question' } as const, { kind: 'permission' } as const]) {
+      expect(Object.values(swipeMap(card({ ask }))).some(action => action?.kind === 'dismiss')).toBe(false);
     }
+    expect(swipeMap(card({ ask: { kind: 'open-question' } }))).toEqual({});
+  });
+
+  test('an old choice swipes only its first three options; the rest are plain buttons', () => {
+    const map = swipeMap(card({ ask: choice('A', 'B', 'C', 'D') }));
+    expect(Object.values(map)).toHaveLength(3);
+    expect(inboxOptions(card({ ask: choice('A', 'B', 'C', 'D') })).map(option => option.label)).toEqual([
+      'A',
+      'B',
+      'C',
+      'D',
+    ]);
   });
 
   test('only a clear distance commits, and only toward a mapped direction', () => {
     const width = 360;
     const threshold = swipeThreshold(width);
-    const two = swipeMap({ ask: choice('Yes', 'No') });
+    const two = swipeMap(card({ ask: choice('Yes', 'No') }));
     expect(swipeIntent(SWIPE_SLOP_PX - 1, 0, width, two)).toEqual({ direction: null, progress: 0, committed: false });
     expect(swipeIntent(threshold - 1, 0, width, two)).toMatchObject({ direction: 'right', committed: false });
     expect(swipeIntent(threshold, 4, width, two)).toMatchObject({ direction: 'right', progress: 1, committed: true });
@@ -183,6 +221,8 @@ describe('swipes', () => {
     // Up has no action on a two-option card, so it never commits; down means nothing at all.
     expect(swipeIntent(0, -threshold * 2, width, two)).toMatchObject({ direction: 'up', committed: false });
     expect(swipeIntent(0, threshold * 2, width, two).committed).toBe(false);
+    // A card with no answer in a direction never commits that way.
+    expect(swipeIntent(threshold * 2, 0, width, {}).committed).toBe(false);
   });
 
   test('the threshold is bounded for narrow and wide cards', () => {
@@ -191,15 +231,15 @@ describe('swipes', () => {
   });
 
   test('finds the swipe an answer sits on by meaning, not by identity', () => {
-    const map = swipeMap({});
+    const map = swipeMap(card({ ask: { kind: 'task' } }));
     expect(directionOfAction(map, { ...DONE_ACTION })).toBe('right');
-    expect(directionOfAction(map, { ...DISMISS_ACTION })).toBe('left');
-    expect(directionOfAction(map, inboxOptions({ ask: choice('Rebase now', 'Wait') })[0] ?? DONE_ACTION)).toBeNull();
+    expect(directionOfAction(map, { ...NEEDS_INFO_ACTION, label: 'Need more info' })).toBe('left');
+    expect(directionOfAction(map, { ...DISMISS_ACTION })).toBeNull();
   });
 
-  test('options follow the swipe order', () => {
-    expect(inboxOptions({ ask: { kind: 'permission' } }).map(option => option.label)).toEqual(['Approve', 'Reject']);
-    expect(inboxOptions({})).toEqual([]);
+  test('options follow the swipe order, recommended first', () => {
+    expect(inboxOptions(card({ ask: { kind: 'permission' } })).map(option => option.label)).toEqual(['Allow', 'Deny']);
+    expect(inboxOptions(card()).map(option => option.label)).toEqual(['Got it']);
   });
 });
 
@@ -227,9 +267,83 @@ describe('replies', () => {
     expect(actionSentence(DISMISS_ACTION, 'A3')).toBe('Dismissed !A3');
     expect(actionSentence(DONE_ACTION, 'A3')).toBe('Marked !A3 done');
     expect(actionSentence({ kind: 'resolve', label: 'Reply', note: 'x' }, 'A3')).toBe('Replied to !A3');
-    expect(actionSentence(inboxOptions({ ask: choice('Wait', 'Go') })[0] ?? DONE_ACTION, 'A3')).toBe(
+    expect(actionSentence(inboxOptions(card({ ask: choice('Wait', 'Go') }))[0] ?? DONE_ACTION, 'A3')).toBe(
       'Answered !A3: Wait',
     );
+  });
+});
+
+describe('an item the ferret edited after being asked', () => {
+  test('needs the owner again with its note, and says nothing unless the last thing was an update', () => {
+    const at = '2026-10-29T10:00:00Z';
+    expect(updatedSinceAsked({ history: [{ at, kind: 'updated', note: 'Added the log' }] })).toEqual({
+      at,
+      note: 'Added the log',
+    });
+    expect(updatedSinceAsked({ history: [{ at, kind: 'updated' }] })).toEqual({ at });
+    expect(
+      updatedSinceAsked({
+        history: [
+          { at, kind: 'updated' },
+          { at, kind: 'needs-info' },
+        ],
+      }),
+    ).toBeNull();
+    expect(updatedSinceAsked({ history: [{ at, kind: 'updated' }], waitingOn: 'ferret' })).toBeNull();
+    expect(updatedSinceAsked({})).toBeNull();
+  });
+});
+
+describe('Discuss', () => {
+  const agent = { raisedBy: 'agent' as const };
+
+  test('is the fixed down swipe of a ferret-raised card, never one of its three answers', () => {
+    const map = swipeMap(card({ ...agent, ask: choice('A', 'B', 'C') }));
+    expect(Object.keys(map).sort()).toEqual(['down', 'left', 'right', 'up']);
+    expect(map.down).toEqual({ kind: 'discuss', label: 'Discuss' });
+    expect(swipeMap(card({ ...agent, ask: { kind: 'open-question' } }))).toEqual({
+      down: { kind: 'discuss', label: 'Discuss' },
+    });
+    expect(swipeMap(card({ raisedBy: 'human', ask: choice('A', 'B') })).down).toBeUndefined();
+  });
+
+  test('commits a deliberate downward drag, and only where the card can discuss', () => {
+    expect(swipeIntent(0, 200, 360, swipeMap(card({ ...agent })))).toMatchObject({
+      direction: 'down',
+      committed: true,
+    });
+    expect(swipeIntent(0, 200, 360, swipeMap(card({ raisedBy: 'human' })))).toMatchObject({
+      direction: 'down',
+      committed: false,
+    });
+    expect(swipeIntent(0, 5, 360, swipeMap(card({ ...agent }))).direction).toBeNull();
+  });
+
+  test('finds the discuss action in the map, and says what is being held', () => {
+    const map = swipeMap(card({ ...agent }));
+    expect(directionOfAction(map, { kind: 'discuss', label: 'Discuss', note: 'why?' })).toBe('down');
+    expect(actionSentence({ kind: 'discuss', label: 'Discuss' }, 'A3')).toBe('Asked to discuss !A3');
+  });
+
+  test('reads "In discussion" with or without the ferret, and "Waiting on" otherwise', () => {
+    const discussing = { waitingOn: 'ferret', waitingFor: 'discussion' } as const;
+    expect(isInDiscussion(discussing)).toBe(true);
+    expect(isInDiscussion({ waitingOn: 'ferret', waitingFor: 'info' })).toBe(false);
+    expect(waitingSentence(discussing)).toBe('In discussion');
+    expect(waitingSentence(discussing, 'Piper')).toBe('In discussion with Piper');
+    expect(waitingSentence({ waitingOn: 'ferret', waitingFor: 'info' }, 'Piper')).toBe('Waiting on Piper');
+    expect(waitingSentence({ waitingOn: 'ferret' })).toBe('Waiting on the ferret');
+  });
+
+  test('puts "You asked to discuss" in the history line', () => {
+    const line = historyLine(
+      [
+        { at: '2026-07-31T10:42:00.000Z', kind: 'discuss' },
+        { at: '2026-07-31T10:44:00.000Z', kind: 'updated' },
+      ],
+      'UTC',
+    );
+    expect(line).toMatch(/^You asked to discuss .+ · updated .+$/u);
   });
 });
 
@@ -343,5 +457,140 @@ describe('the undo window', () => {
     deferred.schedule(card('A1'), DONE_ACTION);
     expect(deferred.getSnapshot().failed).toEqual([]);
     deferred.clearFailure(card('A1').key);
+  });
+});
+
+const resolvedRecord = (id: string, minutes: number): ResolvedAttentionItem =>
+  ({
+    ...item(id, 0),
+    resolvedAt: at(minutes),
+    resolvedBy: 'human',
+    disposition: 'done',
+  }) as unknown as ResolvedAttentionItem;
+
+const withResolved = (sessionId: string, records: readonly ResolvedAttentionItem[]): AttentionSnapshot => ({
+  ...board(sessionId, []),
+  resolved: [...records],
+});
+
+describe('inboxResolved', () => {
+  test('gathers every held board’s resolved records newest first, skipping boards not read', () => {
+    const boards = new Map<string, AttentionSnapshot>([
+      ['studio/a', withResolved('a', [resolvedRecord('A1', 5), resolvedRecord('A2', 9)])],
+      ['laptop/b', withResolved('b', [resolvedRecord('A1', 7)])],
+    ]);
+    const rows = inboxResolved(
+      [
+        { daemonId: STUDIO, name: 'Studio', sessions: [waiting('a'), waiting('unread')] },
+        { daemonId: LAPTOP, name: 'Laptop', sessions: [waiting('b')] },
+        { daemonId: 'idle' as DaemonId, name: 'Idle', sessions: null },
+      ],
+      (daemonId, sessionId) => boards.get(`${daemonId}/${sessionId}`),
+    );
+    expect(rows.map(row => [row.machineName, row.view.config.id, row.record.id])).toEqual([
+      ['Studio', 'a', 'A2'],
+      ['Laptop', 'b', 'A1'],
+      ['Studio', 'a', 'A1'],
+    ]);
+  });
+
+  test('breaks a tie on the key so the order is stable', () => {
+    const boards = new Map<string, AttentionSnapshot>([
+      ['studio/a', withResolved('a', [resolvedRecord('A1', 5)])],
+      ['studio/b', withResolved('b', [resolvedRecord('A1', 5)])],
+    ]);
+    const rows = inboxResolved(
+      [{ daemonId: STUDIO, name: 'Studio', sessions: [waiting('b'), waiting('a')] }],
+      (daemonId, sessionId) => boards.get(`${daemonId}/${sessionId}`),
+    );
+    expect(rows.map(row => row.view.config.id)).toEqual(['a', 'b']);
+  });
+});
+
+describe('sessionsToReadForResolved', () => {
+  const active = (id: string, minutes: number) => sessionView(id, { state: { lastActivityAt: at(minutes) } });
+
+  test('reads the most recent conversations whose board is not held, at most the limit', () => {
+    const sessions = Array.from({ length: RESOLVED_READ_LIMIT + 5 }, (_, index) => active(`s${index}`, index));
+    const wanted = sessionsToReadForResolved([{ daemonId: STUDIO, name: 'Studio', sessions }], () => false);
+    expect(wanted).toHaveLength(RESOLVED_READ_LIMIT);
+    expect(wanted[0]).toEqual({ daemonId: STUDIO, sessionId: `s${RESOLVED_READ_LIMIT + 4}` });
+    expect(wanted.some(entry => entry.sessionId === 's0')).toBe(false);
+  });
+
+  test('skips boards already held, which still count toward the limit, and tolerates a machine with no list', () => {
+    const wanted = sessionsToReadForResolved(
+      [
+        { daemonId: STUDIO, name: 'Studio', sessions: [active('new', 9), active('held', 8), sessionView('quiet')] },
+        { daemonId: LAPTOP, name: 'Laptop', sessions: null },
+      ],
+      (_daemonId, sessionId) => sessionId === 'held',
+    );
+    expect(wanted).toEqual([
+      { daemonId: STUDIO, sessionId: 'new' },
+      { daemonId: STUDIO, sessionId: 'quiet' },
+    ]);
+  });
+});
+
+describe('items in discussion', () => {
+  const discussed = (id: string, minutes: number): AttentionItem =>
+    ({ ...item(id, minutes), waitingOn: 'ferret', waitingFor: 'discussion' }) as AttentionItem;
+  const withDiscussing = (open: number, discussing: number): SessionAttentionSummary => ({
+    ...summary(open, 5),
+    discussing,
+  });
+  const sources = [
+    {
+      daemonId: STUDIO,
+      name: 'Studio',
+      sessions: [waiting('s', withDiscussing(2, 1)), waiting('only', withDiscussing(1, 1))],
+    },
+  ];
+  const boards = new Map([
+    [`${STUDIO}/s`, board('s', [item('A1', 2), discussed('A2', 9)])],
+    [`${STUDIO}/only`, board('only', [discussed('A1', 4)])],
+  ]);
+  const boardFor = (daemonId: DaemonId, sessionId: string) => boards.get(`${daemonId}/${sessionId}`);
+
+  test('should deal discussing items to the discussing list and keep them out of the deck', () => {
+    expect(inboxCards(unreadSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id])).toEqual([
+      ['s', 'A1'],
+    ]);
+    expect(
+      discussingCards(discussingSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
+    ).toEqual([
+      ['s', 'A2'],
+      ['only', 'A1'],
+    ]);
+  });
+
+  test('should count what needs the owner as open minus discussing', () => {
+    expect(needsYouCount({ open: 3, discussing: 1 })).toBe(2);
+    expect(needsYouCount({ open: 3 })).toBe(3);
+    expect(needsYouCount({ open: 1, discussing: 4 })).toBe(0);
+    expect(needsYouItems([item('A1', 1), discussed('A2', 2)])).toBe(1);
+  });
+
+  test('should count and badge only the needs-you part of a session', () => {
+    expect(unreadCount(waiting('s', withDiscussing(3, 1)))).toBe(2);
+    expect(unreadTotal(unreadSessions(sources))).toBe(1);
+  });
+
+  test('should not call a session with only discussing items unread', () => {
+    const only = waiting('only', withDiscussing(1, 1));
+    expect(sessionAttention(only)).toBeUndefined();
+    expect(unreadCount(only)).toBe(0);
+    expect(unreadSessions(sources).map(entry => entry.view.config.id)).toEqual(['s']);
+  });
+
+  test('should list the sessions that hold a discussion, whether or not they also need the owner', () => {
+    expect(discussingSessions(sources).map(entry => entry.view.config.id)).toEqual(['s', 'only']);
+  });
+
+  test('should move the summary key when a discussion starts or ends', () => {
+    expect(attentionSummaryKey(withDiscussing(2, 1))).not.toBe(attentionSummaryKey(summary(2, 5)));
+    expect(attentionSummaryKey(withDiscussing(2, 1))).not.toBe(attentionSummaryKey(withDiscussing(2, 2)));
+    expect(attentionSummaryKey(withDiscussing(2, 0))).toBe(attentionSummaryKey(summary(2, 5)));
   });
 });

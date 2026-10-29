@@ -56,7 +56,7 @@ const board = (sessionId: string, items: readonly AttentionItem[]): AttentionSna
 });
 
 interface Call {
-  readonly method: 'revalidate' | 'respond' | 'resolve' | 'dismiss';
+  readonly method: 'revalidate' | 'respond' | 'resolve' | 'dismiss' | 'discuss';
   readonly daemonId: string;
   readonly sessionId: string;
   readonly detail?: unknown;
@@ -81,6 +81,7 @@ const fakeClient = (boards: Map<string, AttentionSnapshot>) => {
     respond: record('respond'),
     resolve: record('resolve'),
     dismiss: record('dismiss'),
+    discuss: record('discuss'),
   } as unknown as DaemonAttentionClient;
   return { client, calls };
 };
@@ -176,9 +177,34 @@ describe('useAttentionInboxModel', () => {
     expect(reads().filter(entry => entry === 'studio/a')).toHaveLength(3);
   });
 
+  test('reads the board of a conversation whose only open item is in discussion, and deals it apart', async () => {
+    const talking = {
+      ...item('A1', 1),
+      waitingOn: 'ferret',
+      askedAt: at(2),
+      waitingFor: 'discussion',
+    } as AttentionItem;
+    const { client, calls } = fakeClient(new Map([['studio/a', board('a', [talking])]]));
+    const { timers } = manualTimers();
+    let inbox: AttentionInbox | null = null;
+    const machines: readonly AttentionInboxMachine[] = [
+      { connection: studio, name: 'Studio', sessions: [waiting('a', { ...summary(1, 1), discussing: 1 })] },
+    ];
+    view = await mount(
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+    );
+    await settle();
+
+    const read = inbox as unknown as AttentionInbox;
+    expect(calls.filter(call => call.method === 'revalidate').map(call => call.sessionId)).toEqual(['a']);
+    expect(read.total).toBe(0);
+    expect(read.cards).toEqual([]);
+    expect(read.discussing.map(card => `${card.daemonId}/${card.item.id}`)).toEqual(['studio/A1']);
+  });
+
   test('sends a held answer to the right machine, by kind, when the window closes', async () => {
     const boards = new Map([
-      ['studio/a', board('a', [item('A1', 1, { kind: 'permission' }), item('A2', 2), item('A3', 3)])],
+      ['studio/a', board('a', [item('A1', 1, { kind: 'permission' }), item('A2', 2), item('A3', 3), item('A4', 4)])],
     ]);
     const { client, calls } = fakeClient(boards);
     const { timers, fire } = manualTimers();
@@ -201,6 +227,8 @@ describe('useAttentionInboxModel', () => {
       if (second !== undefined) read().deferred.schedule(second, DISMISS_ACTION);
       const third = card('A3');
       if (third !== undefined) read().deferred.schedule(third, { kind: 'resolve', label: 'Done', note: 'shipped' });
+      const fourth = card('A4');
+      if (fourth !== undefined) read().deferred.schedule(fourth, { kind: 'discuss', label: 'Discuss', note: 'why?' });
     });
     // Held: nothing sent, and the held cards are off the deck.
     expect(calls.filter(call => call.method !== 'revalidate')).toEqual([]);
@@ -212,6 +240,7 @@ describe('useAttentionInboxModel', () => {
       ['respond', ['A1', { kind: 'permission', decision: 'approve' }]],
       ['dismiss', ['A2', undefined]],
       ['resolve', ['A3', 'shipped']],
+      ['discuss', ['A4', 'why?']],
     ]);
   });
 
@@ -280,6 +309,48 @@ describe('useAttentionInboxModel', () => {
     expect(read().connectionFor(studio.daemonId)).toBe(studio);
   });
 
+  describe('when the page goes to the background', () => {
+    const setVisibility = (state: DocumentVisibilityState) =>
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+    afterEach(() => setVisibility('visible'));
+
+    const heldDismiss = async (client: DaemonAttentionClient) => {
+      const { timers } = manualTimers();
+      let inbox: AttentionInbox | null = null;
+      const machines: readonly AttentionInboxMachine[] = [
+        { connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 1))] },
+      ];
+      view = await mount(
+        <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+      );
+      await settle();
+      const [only] = (inbox as unknown as AttentionInbox).cards;
+      await interact(() => {
+        if (only !== undefined) (inbox as unknown as AttentionInbox).deferred.schedule(only, DISMISS_ACTION);
+      });
+    };
+
+    test('should send what is held when the page becomes hidden, as a phone does when the app is left', async () => {
+      const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+      const { client, calls } = fakeClient(boards);
+      await heldDismiss(client);
+      setVisibility('hidden');
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle();
+      expect(calls.filter(call => call.method === 'dismiss')).toHaveLength(1);
+    });
+
+    test('should keep holding while the page is visible, so the undo window stays open', async () => {
+      const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+      const { client, calls } = fakeClient(boards);
+      await heldDismiss(client);
+      setVisibility('visible');
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle();
+      expect(calls.filter(call => call.method === 'dismiss')).toHaveLength(0);
+    });
+  });
+
   test('says it is reading while an unread board has not arrived', async () => {
     const { client } = fakeClient(new Map());
     const { timers } = manualTimers();
@@ -295,6 +366,89 @@ describe('useAttentionInboxModel', () => {
     await settle();
     expect((inbox as unknown as AttentionInbox).reading).toBe(true);
     expect((inbox as unknown as AttentionInbox).cards).toEqual([]);
+  });
+});
+
+describe('the Resolved filter reads', () => {
+  const resolvedBoard = (sessionId: string): AttentionSnapshot => ({
+    ...board(sessionId, []),
+    resolved: [
+      {
+        ...item('A1', 0),
+        resolvedAt: at(3),
+        resolvedBy: 'human',
+        resolvedBySession: null,
+        resolvedByName: null,
+        resolutionNote: null,
+        disposition: 'done',
+      } as never,
+    ],
+  });
+
+  test('loadResolved reads the boards not yet held, once at a time, and then lists their records', async () => {
+    const { client, calls } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
+    const { timers } = manualTimers();
+    let inbox: AttentionInbox | null = null;
+    const latest = (): AttentionInbox => inbox as unknown as AttentionInbox;
+    view = await mount(
+      <Probe
+        client={client}
+        machines={[
+          { connection: studio, name: 'Studio', sessions: [waiting('a')] },
+          { connection: laptop, name: 'Laptop', sessions: [waiting('b')] },
+        ]}
+        onInbox={value => (inbox = value)}
+        timers={timers}
+      />,
+    );
+    await settle();
+    expect(latest().resolved).toEqual([]);
+    await interact(async () => {
+      latest().loadResolved();
+      latest().loadResolved();
+    });
+    await settle();
+    expect(
+      calls
+        .filter(call => call.method === 'revalidate')
+        .map(call => call.sessionId)
+        .sort(),
+    ).toEqual(['a', 'b']);
+    expect(latest().resolvedReading).toBe(false);
+    expect(latest().resolved.map(row => [row.view.config.id, row.record.id])).toEqual([['a', 'A1']]);
+    const before = calls.length;
+    await interact(async () => latest().loadResolved());
+    await settle();
+    expect(calls.length).toBe(before + 1);
+  });
+  test('skips a board whose machine was unpaired after the read was asked for', async () => {
+    const { client, calls } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
+    const { timers } = manualTimers();
+    let inbox: AttentionInbox | null = null;
+    const latest = (): AttentionInbox => inbox as unknown as AttentionInbox;
+    const element = (machines: readonly AttentionInboxMachine[]) => (
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />
+    );
+    view = await mount(
+      element([
+        { connection: studio, name: 'Studio', sessions: [waiting('a')] },
+        { connection: laptop, name: 'Laptop', sessions: [waiting('b')] },
+      ]),
+    );
+    await settle();
+    const askedBeforeUnpairing = latest().loadResolved;
+    await view.render(element([{ connection: studio, name: 'Studio', sessions: [waiting('a')] }]));
+    await settle();
+
+    await interact(async () => askedBeforeUnpairing());
+    await settle();
+    expect(
+      calls
+        .filter(call => call.method === 'revalidate')
+        .map(call => call.daemonId)
+        .sort(),
+    ).toEqual(['studio']);
+    expect(latest().resolvedReading).toBe(false);
   });
 });
 

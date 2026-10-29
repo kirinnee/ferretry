@@ -16,9 +16,6 @@ import type { PushDispatch } from '../../../src/lib/push/types.ts';
 const AT = '2026-08-06T10:00:00.000Z';
 const SESSION = 'session-1';
 const OTHER = 'session-2';
-const HUMAN = { kind: 'human' as const };
-const AGENT = { kind: 'agent' as const, sessionId: SESSION, name: 'Ada' };
-const REQUEST = { body: 'The release is ready for review.' };
 
 class MemoryLedger implements NotificationDeliveryLedger {
   readonly records: NotificationRecord[] = [];
@@ -143,311 +140,6 @@ const snapshot = AttentionSnapshotSchema.parse({
   updatedAt: AT,
 });
 
-async function notify(world: ReturnType<typeof fixture>, requestId = 'req-1') {
-  return await world.service.notifyDirect(SESSION, REQUEST, AGENT, `peer:${SESSION}`, requestId);
-}
-
-describe('NotificationService direct delivery', () => {
-  it('should write ahead, push once, then settle with the actual counts', async () => {
-    // Arrange
-    const callLog: string[] = [];
-    const world = fixture({ callLog });
-    world.push.result = { delivered: 1, failed: 1 };
-
-    // Act
-    const actual = await notify(world);
-
-    // Assert
-    should(actual).deepEqual({ ok: true, value: { sessionId: SESSION, delivered: 1 } });
-    should(callLog).deepEqual(['append:requested', 'push', 'append:outcome']);
-    should(world.ledger.records).have.length(2);
-    should(world.ledger.records[0]).containDeep({
-      phase: 'requested',
-      origin: 'direct',
-      attribution: `peer:${SESSION}`,
-      sessionId: SESSION,
-      request: { body: REQUEST.body, title: null, kind: null },
-      sent: { kind: 'question', interactive: true, title: 'Agent “Release agent”', body: REQUEST.body },
-      enrolled: 2,
-    });
-    should(world.ledger.records[1]).containDeep({ phase: 'outcome', delivered: 1, failed: 1 });
-  });
-
-  it('should replay a settled call without another push', async () => {
-    // Arrange
-    const world = fixture();
-    const first = await notify(world);
-
-    // Act
-    const replay = await notify(world);
-
-    // Assert
-    should(replay).deepEqual(first);
-    should(world.push.calls).equal(1);
-    should(world.sessions.calls).deepEqual([SESSION]);
-  });
-
-  it('should serialize concurrent duplicates across the complete delivery', async () => {
-    // Arrange
-    const world = fixture();
-    let release!: () => void;
-    let started!: () => void;
-    const entered = new Promise<void>(resolve => {
-      started = resolve;
-    });
-    const held = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    world.push.notifyHook = async () => {
-      started();
-      await held;
-      return { delivered: 1, failed: 0 };
-    };
-
-    // Act
-    const first = notify(world);
-    await entered;
-    const second = notify(world);
-    release();
-    const [one, two] = await Promise.all([first, second]);
-
-    // Assert
-    should(one).deepEqual(two);
-    should(world.push.calls).equal(1);
-    should(world.ledger.records).have.length(2);
-  });
-
-  it('should replay after a fresh service is constructed over the same durable records', async () => {
-    // Arrange
-    const firstWorld = fixture();
-    const first = await notify(firstWorld);
-    const ledger = new MemoryLedger([], firstWorld.ledger.records);
-    const secondWorld = fixture({ ledger });
-
-    // Act
-    const replay = await notify(secondWorld);
-
-    // Assert
-    should(replay).deepEqual(first);
-    should(secondWorld.push.calls).equal(0);
-    should(secondWorld.sessions.calls).be.empty();
-  });
-
-  it('should refuse one id reused with a different body, actor, or session', async () => {
-    // Arrange
-    const variants = [
-      async (world: ReturnType<typeof fixture>) =>
-        await world.service.notifyDirect(SESSION, { body: 'Different body' }, AGENT, `peer:${SESSION}`, 'req-1'),
-      async (world: ReturnType<typeof fixture>) =>
-        await world.service.notifyDirect(SESSION, REQUEST, HUMAN, 'admin-cli', 'req-1'),
-      async (world: ReturnType<typeof fixture>) =>
-        await world.service.notifyDirect(OTHER, REQUEST, HUMAN, 'admin-cli', 'req-1'),
-    ];
-
-    // Act + Assert
-    for (const variant of variants) {
-      const world = fixture();
-      await notify(world);
-      world.sessions.calls.length = 0;
-      const actual = await variant(world);
-      should(actual).containDeep({ ok: false, error: { code: 'invalid' } });
-      should(world.push.calls).equal(1);
-      should(world.sessions.calls).be.empty();
-    }
-  });
-
-  it('should block delivery when requested evidence cannot be appended', async () => {
-    // Arrange
-    const world = fixture();
-    world.ledger.failRequested = true;
-
-    // Act
-    const actual = await notify(world);
-
-    // Assert
-    should(actual).containDeep({ ok: false, error: { code: 'corrupt' } });
-    should(world.push.calls).equal(0);
-    should(world.ledger.records).be.empty();
-    should(world.ledger.appends.map(record => record.phase)).deepEqual(['requested']);
-  });
-
-  it('should answer true counts when outcome append fails and block every later retry', async () => {
-    // Arrange
-    const world = fixture();
-    world.ledger.failOutcome = true;
-    world.push.result = { delivered: 1, failed: 1 };
-
-    // Act
-    const first = await notify(world);
-    const replay = await notify(world);
-
-    // Assert
-    should(first).deepEqual({ ok: true, value: { sessionId: SESSION, delivered: 1 } });
-    should(replay).containDeep({ ok: false, error: { code: 'corrupt' } });
-    should(world.push.calls).equal(1);
-    should(world.ledger.records.map(record => record.phase)).deepEqual(['requested']);
-  });
-
-  it('should record a thrown delivery and re-raise it without another push', async () => {
-    // Arrange
-    const world = fixture();
-    world.push.notifyHook = async () => {
-      throw new Error('push transport unavailable');
-    };
-
-    // Act
-    const first = await notify(world);
-    const replay = await notify(world);
-
-    // Assert
-    should(first).containDeep({ ok: false, error: { code: 'corrupt' } });
-    should(replay).deepEqual(first);
-    should(world.push.calls).equal(1);
-    should(world.ledger.records[1]).containDeep({ phase: 'outcome', error: 'push transport unavailable' });
-  });
-
-  it('should remain corrupt when recording a delivery error also fails', async () => {
-    // Arrange
-    const world = fixture();
-    world.ledger.failOutcome = true;
-    world.push.notifyHook = async () => {
-      throw '';
-    };
-
-    // Act
-    const actual = await notify(world);
-
-    // Assert
-    should(actual).containDeep({ ok: false, error: { code: 'corrupt' } });
-    should(actual.ok ? '' : actual.error.message).match(/unknown notification delivery error/u);
-    should(world.ledger.records.map(record => record.phase)).deepEqual(['requested']);
-  });
-
-  it('should fail closed when the ledger cannot be read', async () => {
-    // Arrange
-    const world = fixture();
-    world.ledger.failFind = true;
-
-    // Act
-    const actual = await notify(world);
-
-    // Assert
-    should(actual).containDeep({ ok: false, error: { code: 'corrupt' } });
-    should(world.push.calls).equal(0);
-    should(world.sessions.calls).be.empty();
-  });
-
-  it('should settle and replay zero delivery without trying again', async () => {
-    // Arrange
-    const world = fixture();
-    world.push.enrolled = 4;
-    world.push.result = { delivered: 0, failed: 0 };
-
-    // Act
-    const first = await notify(world);
-    const replay = await notify(world);
-
-    // Assert
-    should(first).deepEqual({ ok: true, value: { sessionId: SESSION, delivered: 0 } });
-    should(replay).deepEqual(first);
-    should(world.push.calls).equal(1);
-    should(world.ledger.records[0]).containDeep({ phase: 'requested', enrolled: 4 });
-  });
-
-  it('should authorize confinement before any ledger or session access', async () => {
-    // Arrange
-    const world = fixture();
-
-    // Act
-    const invalid = await world.service.notifyDirect('../escape', REQUEST, HUMAN, 'admin-cli', 'invalid');
-    const empty = await world.service.notifyDirect(SESSION, REQUEST, HUMAN, 'admin-cli', '   ');
-    const forbidden = await world.service.notifyDirect(
-      SESSION,
-      REQUEST,
-      { kind: 'agent', sessionId: OTHER, name: 'Mallory' },
-      `peer:${OTHER}`,
-      'forbidden',
-    );
-
-    // Assert
-    should(invalid).containDeep({ ok: false, error: { code: 'invalid' } });
-    should(empty).containDeep({ ok: false, error: { code: 'invalid' } });
-    should(forbidden).containDeep({ ok: false, error: { code: 'forbidden' } });
-    should(world.ledger.finds).be.empty();
-    should(world.ledger.appends).be.empty();
-    should(world.sessions.calls).be.empty();
-  });
-
-  it('should refuse an unknown session only for a new notification', async () => {
-    // Arrange
-    const world = fixture();
-    world.sessions.values.delete(SESSION);
-
-    // Act
-    const actual = await notify(world);
-
-    // Assert
-    should(actual).containDeep({ ok: false, error: { code: 'not-found' } });
-    should(world.ledger.records).be.empty();
-    should(world.push.calls).equal(0);
-  });
-
-  it('should replay without reading a deleted, renamed, or mode-flipped session', async () => {
-    // Arrange / Act + Assert
-    for (const mutate of [
-      (sessions: Sessions) => sessions.values.delete(SESSION),
-      (sessions: Sessions) => sessions.values.set(SESSION, { name: 'Renamed', interactive: true }),
-      (sessions: Sessions) => sessions.values.set(SESSION, { name: 'Release agent', interactive: false }),
-    ]) {
-      const world = fixture();
-      const first = await notify(world);
-      mutate(world.sessions);
-      world.sessions.calls.length = 0;
-      const replay = await notify(world);
-      should(replay).deepEqual(first);
-      should(world.sessions.calls).be.empty();
-      should(world.push.calls).equal(1);
-    }
-  });
-
-  it('should refuse a dangling request without consulting mutable session state', async () => {
-    // Arrange
-    const world = fixture();
-    world.ledger.failOutcome = true;
-    await notify(world);
-    world.sessions.calls.length = 0;
-    world.sessions.failure = new Error('session directory must not be read');
-
-    // Act
-    const actual = await notify(world);
-
-    // Assert
-    should(actual).containDeep({ ok: false, error: { code: 'corrupt' } });
-    should(world.sessions.calls).be.empty();
-    should(world.push.calls).equal(1);
-  });
-
-  it('should record the authoritative auto and interactive modes in the ledger, and dispatch no filter', async () => {
-    // Arrange
-    const world = fixture();
-
-    // Act
-    await world.service.notifyDirect(SESSION, REQUEST, HUMAN, 'admin-cli', 'interactive');
-    await world.service.notifyDirect(OTHER, REQUEST, HUMAN, 'admin-cli', 'auto');
-
-    // Assert — the ledger still testifies to whether a human was sitting with the session; the push
-    // dispatch itself carries only the payload, because every enrolled device is sent every event now.
-    const requested = world.ledger.appends.filter(record => record.phase === 'requested');
-    should(requested.map(record => (record.phase === 'requested' ? record.sent.interactive : undefined))).deepEqual([
-      true,
-      false,
-    ]);
-    should(
-      world.push.dispatches.every(dispatch => Object.keys(dispatch).length === 1 && 'payload' in dispatch),
-    ).be.true();
-  });
-});
-
 describe('NotificationService attention presentation', () => {
   it('should deliver different item ids, and replay the same item id', async () => {
     // Arrange
@@ -474,7 +166,7 @@ describe('NotificationService attention presentation', () => {
       origin: 'attention',
       attentionId: 'A1',
       attribution: `attention:agent:${SESSION}`,
-      sent: { title: 'Ship the release', body: item.subject, interactive: true },
+      sent: { title: 'Choose a release window', body: item.subject, interactive: true },
     });
   });
 
@@ -503,6 +195,31 @@ describe('NotificationService attention presentation', () => {
     should(requestedFailure.push.calls).equal(0);
     should(pushFailure.push.calls).equal(1);
     should(outcomeFailure.push.calls).equal(1);
+  });
+});
+
+describe('NotificationService delivered count', () => {
+  it('should report the devices the raise reached, and zero for an unpushed item, an error or an unreadable ledger', async () => {
+    // Arrange
+    const world = fixture();
+    world.push.result = { delivered: 2, failed: 1 };
+    const failing = fixture();
+    failing.push.notifyHook = async () => {
+      throw new Error('push failed');
+    };
+    const unreadable = fixture();
+    await unreadable.service.attentionRaised(SESSION, item, snapshot);
+    unreadable.ledger.failFind = true;
+
+    // Act
+    await world.service.attentionRaised(SESSION, item, snapshot);
+    await failing.service.attentionRaised(SESSION, item, snapshot);
+
+    // Assert
+    should(await world.service.attentionDelivered(SESSION, 'A1')).equal(2);
+    should(await world.service.attentionDelivered(SESSION, 'A9')).equal(0);
+    should(await failing.service.attentionDelivered(SESSION, 'A1')).equal(0);
+    should(await unreadable.service.attentionDelivered(SESSION, 'A1')).equal(0);
   });
 });
 
@@ -542,7 +259,30 @@ describe('NotificationService more-info push', () => {
     ]);
     should(world.ledger.records.filter(record => record.phase === 'requested')[1]).containDeep({
       infoRequest: 1,
-      sent: { title: 'Ship the release' },
+      sent: { title: 'Choose a release window', body: 'Updated: Choose a release window' },
+    });
+  });
+
+  it('should word the push for a discussion that ended, and keep the one-per-request key', async () => {
+    // Arrange
+    const world = fixture();
+    const discussed = AttentionItemSchema.parse({
+      ...item,
+      waitingOn: 'ferret',
+      askedAt: item.waitingSince,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+    });
+
+    // Act
+    await world.service.moreInfoAdded(SESSION, discussed, snapshot, true);
+    await world.service.moreInfoAdded(SESSION, discussed, snapshot, true);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(world.ledger.records.filter(record => record.phase === 'requested')[0]).containDeep({
+      key: `attention:${SESSION}:A1:info-1`,
+      sent: { body: 'Updated after your discussion: Choose a release window' },
     });
   });
 });

@@ -1,5 +1,12 @@
 import { describe, it } from 'bun:test';
-import type { AttentionAsk, AttentionId, AttentionItem, AttentionResponse } from '@ferretry/protocol';
+import type {
+  AttentionAsk,
+  AttentionCardAnswer,
+  AttentionId,
+  AttentionItem,
+  AttentionResponse,
+} from '@ferretry/protocol';
+import { MAX_ATTENTION_PER_SESSION } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -688,6 +695,31 @@ describe('Attention state machine', () => {
     should(parseAttentionLedger(unknownLifecycle, SESSION_ID)).be.null();
   });
 
+  it.each(['source-reconciliation', 'warden-escalation', 'system', 'harness-prompt'] as const)(
+    'should decode a stored item raised by the %s daemon cause with that cause intact',
+    cause => {
+      // Arrange
+      const origin: AttentionActor = { kind: 'daemon', cause };
+      const stored = raised(origin, { source: 'task', sourceRef: 'F12', ask: undefined }).ledger;
+
+      // Act
+      const decoded = parseAttentionLedger(JSON.parse(JSON.stringify(stored)), SESSION_ID);
+
+      // Assert
+      should(decoded?.entries.map(entry => entry.origin)).deepEqual([origin]);
+    },
+  );
+
+  it('should refuse a stored item whose daemon cause is one this daemon does not know', () => {
+    // Arrange
+    const stored = raised(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined }).ledger;
+    const unknownCause = JSON.parse(JSON.stringify(stored)) as { entries: { origin: { cause: string } }[] };
+    unknownCause.entries[0]!.origin.cause = 'poltergeist';
+
+    // Act + Assert
+    should(parseAttentionLedger(unknownCause, SESSION_ID)).be.null();
+  });
+
   it('should bound newest-first resolution history without reusing ids', () => {
     // Arrange
     let ledger = emptyAttentionLedger(SESSION_ID, FIRST);
@@ -1155,5 +1187,353 @@ describe('Attention state machine needs-info', () => {
     // Assert
     should(resolved.addressed?.waitingOn).be.undefined();
     should(resolved.addressed?.askedAt).be.undefined();
+  });
+});
+
+describe('Attention state machine discuss', () => {
+  const discuss = (ledger: AttentionLedger, note?: string, at = SECOND, actor: AttentionActor = HUMAN) =>
+    applyAttentionCommand(ledger, { action: 'discuss', actor, id: 'A1', ...(note === undefined ? {} : { note }), at });
+
+  it('should keep the item open, mark it in discussion and count the request on the shared counter', () => {
+    // Arrange
+    const created = raised();
+
+    // Act
+    const asked = succeeded(discuss(created.ledger, 'The premise is wrong'));
+
+    // Assert
+    should(asked.change).equal('discussing');
+    should(asked.item).containDeep({ waitingOn: 'ferret', askedAt: SECOND, waitingFor: 'discussion', infoRequests: 1 });
+    should(asked.item?.history).deepEqual([{ at: SECOND, kind: 'discuss', note: 'The premise is wrong' }]);
+  });
+
+  it('should treat a second ask as the same request, and turn an open request for information into a new one', () => {
+    // Arrange
+    const asked = succeeded(discuss(raised().ledger));
+    const info = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const again = succeeded(discuss(asked.ledger, 'again', THIRD));
+    const turned = succeeded(discuss(info.ledger, undefined, THIRD));
+
+    // Assert
+    should(again.change).equal('unchanged');
+    should(turned.change).equal('discussing');
+    should(turned.item).containDeep({ waitingFor: 'discussion', infoRequests: 2 });
+  });
+
+  it('should refuse an agent, a missing item, and an item no ferret raised', () => {
+    // Arrange
+    const created = raised();
+
+    // Act
+    const byAgent = failed(discuss(created.ledger, undefined, SECOND, AGENT));
+    const unknown = failed(
+      applyAttentionCommand(created.ledger, { action: 'discuss', actor: HUMAN, id: 'A9', at: SECOND }),
+    );
+    const unraised = failed(discuss(raised(HUMAN).ledger));
+
+    // Assert
+    should(byAgent.error.code).equal('forbidden');
+    should(unknown.error.code).equal('not-found');
+    should(unraised.error.code).equal('invalid');
+  });
+
+  it('should end the discussion when the ferret edits the item, and drop the mark when it is closed', () => {
+    // Arrange
+    const asked = succeeded(discuss(raised().ledger));
+
+    // Act
+    const edited = succeeded(
+      applyAttentionCommand(asked.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Use SQLite for the board?' },
+        at: THIRD,
+      }),
+    );
+    const closed = succeeded(
+      applyAttentionCommand(asked.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', note: null, at: THIRD }),
+    );
+
+    // Assert
+    should(edited.change).equal('info-added');
+    should(edited.item?.waitingFor).be.undefined();
+    should(edited.item?.history?.map(entry => entry.kind)).deepEqual(['discuss', 'updated']);
+    should(closed.ledger.entries[0]?.item.waitingFor).be.undefined();
+  });
+});
+
+describe('Attention state machine card fields', () => {
+  const answers: AttentionCardAnswer[] = [
+    { direction: 'left', does: 'reject', label: 'Deny' },
+    { direction: 'up', does: 'approve', label: 'Always allow', description: 'for this repo' },
+    { direction: 'right', does: 'approve', label: 'Allow' },
+  ];
+  const card: Partial<RaiseAttentionRequest> = { title: 'Deploy approval', kind: 'permission', answers };
+
+  it('should carry the title, kind and answers onto the raised item, and into its snapshot', () => {
+    // Arrange / Act
+    const created = raised(AGENT, card);
+
+    // Assert
+    should(created.item).containDeep({ title: 'Deploy approval', kind: 'permission', answers });
+    should(created.snapshot.items[0]).containDeep({ title: 'Deploy approval', kind: 'permission' });
+  });
+
+  it('should treat an identical re-raise as unchanged and a different card as a new item', () => {
+    // Arrange
+    const first = raised(AGENT, card);
+
+    // Act
+    const same = succeeded(applyAttentionCommand(first.ledger, raiseCommand(AGENT, card, SECOND)));
+    const retitled = succeeded(
+      applyAttentionCommand(first.ledger, raiseCommand(AGENT, { ...card, title: 'Another title' }, SECOND)),
+    );
+    const reanswered = succeeded(
+      applyAttentionCommand(first.ledger, raiseCommand(AGENT, { ...card, answers: answers.slice(0, 2) }, SECOND)),
+    );
+
+    // Assert
+    should(same.change).equal('unchanged');
+    should(same.snapshot.count).equal(1);
+    should(retitled.change).equal('created');
+    should(retitled.snapshot.count).equal(2);
+    should(reanswered.snapshot.count).equal(2);
+  });
+
+  it('should let an edit reword the title only, never the kind or the answers', () => {
+    // Arrange
+    const created = raised(AGENT, card);
+
+    // Act
+    const edited = succeeded(
+      applyAttentionCommand(created.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { title: 'Deploy to production' },
+        at: SECOND,
+      }),
+    );
+    const same = succeeded(
+      applyAttentionCommand(edited.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { title: 'Deploy to production' },
+        at: THIRD,
+      }),
+    );
+
+    // Assert
+    should(edited.change).equal('refreshed');
+    should(edited.item).containDeep({ title: 'Deploy to production', kind: 'permission', answers });
+    should(edited.item?.waitingSince).equal(FIRST);
+    should(same.change).equal('unchanged');
+  });
+
+  it('should refresh the title of a stable daemon source with the rest of its words', () => {
+    // Arrange
+    const source = { source: 'task', sourceRef: 'F12', ask: undefined, kind: 'info', waitingSince: FIRST } as const;
+    const first = raised(DAEMON, { ...source, title: 'Task needs you' });
+
+    // Act
+    const next = succeeded(
+      applyAttentionCommand(
+        first.ledger,
+        raiseCommand(DAEMON, { ...source, title: 'Task F needs you', waitingSince: THIRD }, SECOND),
+      ),
+    );
+
+    // Assert
+    should(next.change).equal('refreshed');
+    should(next.item).containDeep({ id: 'A1', title: 'Task F needs you', kind: 'info' });
+  });
+
+  it('should load and answer an item stored before cards, which has no title, kind or answers', () => {
+    // Arrange
+    const old = raised(AGENT);
+
+    // Act
+    const decoded = parseAttentionLedger(JSON.parse(JSON.stringify(old.ledger)), SESSION_ID);
+    const answered = succeeded(
+      applyAttentionCommand(old.ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        at: SECOND,
+      }),
+    );
+
+    // Assert
+    should(old.item).not.have.property('title');
+    should(old.item).not.have.property('kind');
+    should(old.item).not.have.property('answers');
+    should(decoded).deepEqual(old.ledger);
+    should(answered.change).equal('answered');
+  });
+
+  it('should let an agent raise an info item with no ask, and still refuse any other kind without one', () => {
+    // Arrange
+    const info = { kind: 'info', title: 'Release ready', ask: undefined } as const;
+
+    // Act
+    const created = raised(AGENT, info);
+    const missing = failed(
+      applyAttentionCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(AGENT, { kind: 'permission', title: 'Deploy approval', ask: undefined }),
+      ),
+    );
+
+    // Assert
+    should(created.item).containDeep({ kind: 'info', title: 'Release ready' });
+    should(created.item).not.have.property('ask');
+    should(missing.error.code).equal('invalid');
+  });
+});
+
+describe('Attention state machine undelivered', () => {
+  const SYSTEM: AttentionActor = { kind: 'daemon', cause: 'system' };
+  const REASON = 'it never appeared in the ferret’s transcript';
+  const undelivered = (ledger: AttentionLedger, request?: number, actor: AttentionActor = SYSTEM) =>
+    applyAttentionCommand(ledger, {
+      action: 'undelivered',
+      actor,
+      id: 'A1',
+      reason: REASON,
+      ...(request === undefined ? {} : { request }),
+      at: THIRD,
+    });
+
+  it('should reopen an answered item as a card, keeping the answer for a retry', () => {
+    // Arrange
+    const answered = succeeded(
+      applyAttentionCommand(raised().ledger, {
+        action: 'answer',
+        actor: HUMAN,
+        id: 'A1',
+        response: { kind: 'permission', decision: 'approve' },
+        note: 'ship it',
+        at: SECOND,
+      }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(answered.ledger));
+    const snapshot = attentionSnapshot(reopened.ledger);
+
+    // Assert — open again, out of the resolved history, and the retry is the same answer.
+    should(reopened.change).equal('reopened');
+    should(snapshot.items.map(item => item.id)).deepEqual(['A1']);
+    should(snapshot.resolved).be.empty();
+    should(snapshot.items[0]).not.have.properties(['resolvedAt', 'disposition', 'response']);
+    should(snapshot.items[0]?.undelivered).deepEqual({
+      at: THIRD,
+      reply: { action: 'resolve', note: 'ship it', response: { kind: 'permission', decision: 'approve' } },
+      reason: REASON,
+    });
+  });
+
+  it('should reopen a dismissed item with a dismiss to retry, and clear the mark when the owner acts again', () => {
+    // Arrange
+    const dismissed = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(dismissed.ledger));
+    const retried = succeeded(
+      applyAttentionCommand(reopened.ledger, { action: 'dismiss', actor: HUMAN, id: 'A1', at: THIRD }),
+    );
+
+    // Assert
+    should(reopened.item?.undelivered?.reply).deepEqual({ action: 'dismiss' });
+    should(retried.addressed).not.have.property('undelivered');
+  });
+
+  it('should end an undelivered discussion: back to the owner, waiting on nobody, with the discussion to retry', () => {
+    // Arrange
+    const discussing = succeeded(
+      applyAttentionCommand(raised().ledger, {
+        action: 'discuss',
+        actor: HUMAN,
+        id: 'A1',
+        note: 'premise is off',
+        at: SECOND,
+      }),
+    );
+
+    // Act
+    const reopened = succeeded(undelivered(discussing.ledger, 1));
+    const again = succeeded(
+      applyAttentionCommand(reopened.ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: THIRD }),
+    );
+
+    // Assert
+    should(reopened.change).equal('reopened');
+    should(reopened.item).not.have.properties(['waitingOn', 'askedAt', 'waitingFor']);
+    should(reopened.item?.undelivered?.reply).deepEqual({ action: 'discuss', note: 'premise is off' });
+    should(again.item).containDeep({ waitingFor: 'discussion', infoRequests: 2 });
+    should(again.item).not.have.property('undelivered');
+  });
+
+  it('should leave an item alone that moved on since: a newer request, the ferret’s update, an item still open', () => {
+    // Arrange
+    const discussing = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const updated = succeeded(
+      applyAttentionCommand(discussing.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: { subject: 'Approve the deployment of v2?' },
+        at: THIRD,
+      }),
+    );
+
+    // Act + Assert
+    should(succeeded(undelivered(discussing.ledger, 2)).changed).be.false();
+    should(succeeded(undelivered(updated.ledger, 1)).changed).be.false();
+    should(succeeded(undelivered(raised().ledger)).changed).be.false();
+  });
+
+  it('should keep an undelivered answer closed, and say so, when the board has no room to reopen it', () => {
+    // Arrange — one answered item, then the board filled to its limit with open ones.
+    let ledger = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    ).ledger;
+    for (let index = 0; index < MAX_ATTENTION_PER_SESSION; index += 1)
+      ledger = succeeded(
+        applyAttentionCommand(
+          ledger,
+          raiseCommand(DAEMON, { subject: `Full ${index}?`, sourceRef: `full-${index}` }, SECOND),
+        ),
+      ).ledger;
+
+    // Act
+    const refused = failed(undelivered(ledger));
+
+    // Assert
+    should(refused.error.code).equal('full');
+    should(refused.error.message).match(/A1 cannot reopen/);
+  });
+
+  it('should be the daemon’s word alone, and only about an item a ferret raised', () => {
+    // Arrange
+    const owners = succeeded(
+      applyAttentionCommand(raised(HUMAN).ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act + Assert
+    should(failed(undelivered(raised().ledger, undefined, HUMAN)).error.code).equal('forbidden');
+    should(succeeded(undelivered(owners.ledger)).changed).be.false();
   });
 });

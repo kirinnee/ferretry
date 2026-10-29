@@ -16,7 +16,9 @@ const tabs = phoneTabOrder([
 ]);
 
 /** The same row as the host draws it: every workspace tab closable. */
-const closable = tabs.map(tab => (tab.kind === 'chat' || tab.kind === 'console' ? tab : { ...tab, closable: true }));
+const closable = tabs.map(tab =>
+  tab.kind === 'chat' || tab.kind === 'console' || tab.kind === 'processes' ? tab : { ...tab, closable: true },
+);
 
 const scrolls: ScrollToOptions[] = [];
 const originalScrollTo = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTo');
@@ -91,7 +93,13 @@ describe('phoneNewTabItems', () => {
 describe('phoneCloseItems', () => {
   const noop = () => {};
   const labels = (...args: Parameters<typeof phoneCloseItems>) => phoneCloseItems(...args).map(item => item.label);
-  const [chat, , terminal, browser] = closable as [never, never, (typeof closable)[number], (typeof closable)[number]];
+  const [chat, , , terminal, browser] = closable as [
+    never,
+    never,
+    never,
+    (typeof closable)[number],
+    (typeof closable)[number],
+  ];
 
   it('offers nothing for a tab that cannot close, or a host that offers no close', () => {
     expect(labels(chat, closable, { onCloseTab: noop }, true)).toEqual([]);
@@ -134,6 +142,7 @@ describe('PhoneChipRow', () => {
     expect(all.map(node => node.textContent)).toEqual([
       'Chat',
       'Console',
+      'Processes',
       'devAGENT, driven by hadi',
       'app',
       'login.tsx',

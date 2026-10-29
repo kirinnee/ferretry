@@ -1,11 +1,12 @@
 import { describe, it } from 'bun:test';
-import { chmod, lutimes, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, lstat, lutimes, mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
   defaultScratchCollectorConfig,
   FileScratchCollector,
+  reclaimScratch,
 } from '../../../src/adapters/scratch/file-scratch-collector.ts';
 import { sessionView } from '../../unit/runtime/mounts/support.ts';
 
@@ -138,6 +139,100 @@ describe('FileScratchCollector', () => {
       // The link died with its directory; its target did not, and kept the mode it arrived with.
       should(await readFile(outside, 'utf8')).equal('not the collector-s business');
       should((await Bun.file(outside).stat()).mode & 0o777).equal(0o644);
+    });
+  });
+});
+
+describe('FileScratchCollector refusals', () => {
+  it('should refuse an eligible session while a live warden is assigned to it', async () => {
+    await withTempRoot(async root => {
+      // Arrange — the target is terminal and aged, and the only thing keeping it is the warden that
+      // names it as parent and has not finished.
+      const target = 'warded-session';
+      const directory = join(root, target);
+      const record = sessionView(target, {}, { status: 'completed', finishedAt: OLD.toISOString() });
+      const warden = sessionView('warden-session', { label: 'warden', parent: target }, { status: 'running' });
+      await mkdir(directory, { recursive: true });
+      await writeFile(join(directory, 'checkout'), 'output');
+      await utimes(join(directory, 'checkout'), OLD, OLD);
+      const subject = new FileScratchCollector(
+        {
+          list: () => [{ id: target }, { id: 'warden-session' }],
+          config: async id => (id === target ? record.config : warden.config),
+          state: async id => (id === target ? record.state : warden.state),
+          directory: id => join(root, id),
+        },
+        { alive: async () => false },
+        { enabled: true, ttlHours: 24, perSweep: 20 },
+        () => NOW,
+      );
+
+      // Act
+      const [plan] = await subject.plan();
+
+      // Assert
+      should(plan).match({ sessionId: target, eligible: false, reason: 'a live warden is assigned to it' });
+      should(await Bun.file(join(directory, 'checkout')).exists()).be.true();
+    });
+  });
+});
+
+describe('reclaimScratch', () => {
+  it('should remove a symlink itself and report where it pointed', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const outside = join(root, 'outside.txt');
+      const scratch = join(root, 'scratch');
+      await mkdir(scratch);
+      await writeFile(outside, 'kept');
+      await symlink(outside, join(scratch, 'link'));
+
+      // Act
+      const result = await reclaimScratch(scratch, [{ name: 'link', bytes: 0, kind: 'symlink' }]);
+
+      // Assert
+      should(result).deepEqual({ removed: [`link -> ${outside}`], bytes: 0, failures: 0 });
+      should(await lstat(join(scratch, 'link')).catch(() => undefined)).be.undefined();
+      should(await readFile(outside, 'utf8')).equal('kept');
+    });
+  });
+
+  it('should refuse a name that escapes the directory and a name the daemon owns', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const scratch = join(root, 'scratch');
+      await mkdir(scratch);
+      await writeFile(join(root, 'neighbour.txt'), 'kept');
+      await writeFile(join(scratch, 'config.json'), '{}');
+
+      // Act
+      const result = await reclaimScratch(scratch, [
+        { name: '../neighbour.txt', bytes: 4, kind: 'file' },
+        { name: 'config.json', bytes: 2, kind: 'file' },
+      ]);
+
+      // Assert
+      should(result).deepEqual({ removed: [], bytes: 0, failures: 2 });
+      should(await readFile(join(root, 'neighbour.txt'), 'utf8')).equal('kept');
+      should(await readFile(join(scratch, 'config.json'), 'utf8')).equal('{}');
+    });
+  });
+
+  it('should count an entry that vanished before deletion as a failure and carry on', async () => {
+    await withTempRoot(async root => {
+      // Arrange
+      const scratch = join(root, 'scratch');
+      await mkdir(scratch);
+      await writeFile(join(scratch, 'present.txt'), 'bytes');
+
+      // Act
+      const result = await reclaimScratch(scratch, [
+        { name: 'vanished.txt', bytes: 9, kind: 'file' },
+        { name: 'present.txt', bytes: 5, kind: 'file' },
+      ]);
+
+      // Assert
+      should(result).deepEqual({ removed: ['present.txt'], bytes: 5, failures: 1 });
     });
   });
 });

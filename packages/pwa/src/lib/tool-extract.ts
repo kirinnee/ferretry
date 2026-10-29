@@ -1,3 +1,5 @@
+import type { TranscriptImageMarker } from '@ferretry/protocol';
+
 /**
  * Pure tool-call parsing — the reading the transcript's tool group is built on.
  *
@@ -22,6 +24,8 @@ export interface ToolResultData {
   readonly content?: unknown;
   readonly text?: string;
   readonly isError?: boolean;
+  /** The images the daemon's log named under this result, in order (`transcript-images.ts`). */
+  readonly images?: readonly TranscriptImageMarker[];
   readonly [key: string]: unknown;
 }
 

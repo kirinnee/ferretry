@@ -19,6 +19,8 @@ export interface FakeProviderOptions {
   readonly noPkce?: boolean;
   /** Serve no registration endpoint. */
   readonly noRegistration?: boolean;
+  /** Advertise no RFC 7009 revocation endpoint. */
+  readonly noRevocation?: boolean;
   /** Serve no protected-resource metadata, so the MCP server is its own authorization server. */
   readonly legacy?: boolean;
   /** Return a client secret on registration. */
@@ -126,7 +128,7 @@ export class FakeProvider {
         authorization_endpoint: `${this.origin}${prefix}/authorize`,
         token_endpoint: `${this.origin}${prefix}/token`,
         ...(this.options.noRegistration === true ? {} : { registration_endpoint: `${this.origin}${prefix}/register` }),
-        revocation_endpoint: `${this.origin}${prefix}/revoke`,
+        ...(this.options.noRevocation === true ? {} : { revocation_endpoint: `${this.origin}${prefix}/revoke` }),
         ...(this.options.noPkce === true ? {} : { code_challenge_methods_supported: ['S256'] }),
         ...(this.options.issParameterSupported === true
           ? { authorization_response_iss_parameter_supported: true }

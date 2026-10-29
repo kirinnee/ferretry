@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   claudeApproval,
+  claudeApprovalKeys,
   claudeServers,
   codexServers,
   codexTrusted,
@@ -91,6 +92,36 @@ describe('MCP declarations', () => {
     should(read.problems).deepEqual(['“bad” is not a table']);
   });
 
+  it('should say a Codex table that names neither a command nor an address cannot be run', () => {
+    // Act
+    const read = codexServers({ mcp_servers: { hollow: { enabled: true }, blank: { command: '   ' } } });
+
+    // Assert
+    should(read.servers).deepEqual([]);
+    should(read.problems).deepEqual([
+      '“hollow” has neither a command nor a url',
+      '“blank” has neither a command nor a url',
+    ]);
+  });
+
+  it('should read the approval keys of a document, and its allow-all switch only when it is a boolean', () => {
+    // Act / Assert
+    should(
+      claudeApprovalKeys({
+        enableAllProjectMcpServers: true,
+        enabledMcpjsonServers: ['a'],
+        disabledMcpjsonServers: ['b'],
+      }),
+    ).deepEqual({ enableAll: true, enabled: ['a'], disabled: ['b'] });
+    should(claudeApprovalKeys({ enableAllProjectMcpServers: false })).deepEqual({
+      enableAll: false,
+      enabled: [],
+      disabled: [],
+    });
+    should(claudeApprovalKeys({ enableAllProjectMcpServers: 'yes' })).deepEqual({ enabled: [], disabled: [] });
+    should(claudeApprovalKeys(null)).deepEqual({ enabled: [], disabled: [] });
+  });
+
   it('should approve a .mcp.json server only when it is allowed AND the folder is trusted, and let a deny win', () => {
     // Arrange
     const trusted = { hasTrustDialogAccepted: true, enabledMcpjsonServers: ['a'], disabledMcpjsonServers: ['b'] };
@@ -143,6 +174,7 @@ describe('MCP JSON-RPC', () => {
       next: 'c2',
     });
     should(toolsPage({ tools: [], nextCursor: '' })).deepEqual({ names: [] });
+    should(toolsPage({ tools: 'not a list', nextCursor: 'c3' })).deepEqual({ names: [], next: 'c3' });
   });
 
   it('should split an event stream into whole events and keep the unfinished one', () => {

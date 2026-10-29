@@ -183,6 +183,29 @@ describe('analytics session activity fold', () => {
     should(actual).deepEqual({ activeDurationMs: null, turns: null });
   });
 
+  it('should count the model thinking as work that keeps a turn open', () => {
+    // Arrange — the only record after the prompt is a thinking block, so it alone sets the turn's end
+    const transcript = [
+      CLAUDE_SESSION[0]!,
+      {
+        type: 'assistant',
+        uuid: 'a1',
+        timestamp: at('10:00:20'),
+        message: {
+          role: 'assistant',
+          model: 'claude-opus-5-5',
+          content: [{ type: 'thinking', thinking: 'Weighing the options', signature: 'sig' }],
+        },
+      },
+    ];
+
+    // Act
+    const actual = foldAnalyticsSessionActivity(claude(transcript));
+
+    // Assert
+    should(actual).deepEqual({ activeDurationMs: 20_000, turns: 1 });
+  });
+
   it('should refuse active time when a prompt carries no readable timestamp, and still count turns', () => {
     // Arrange
     const untimed = [{ ...CLAUDE_SESSION[0]!, timestamp: 'not an instant' }, ...CLAUDE_SESSION.slice(1)];

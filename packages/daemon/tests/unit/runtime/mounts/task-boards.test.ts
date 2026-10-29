@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { describe, it, spyOn } from 'bun:test';
 import {
   TaskBoardCreateResponseSchema,
   TaskBoardGrantRequestViewSchema,
@@ -18,6 +18,7 @@ import {
   taskBoardRoutes,
   taskBoardTaskActionAuthorizer,
 } from '../../../../src/lib/runtime/mounts/task-boards.ts';
+import { TaskBoardChildGrantService } from '../../../../src/lib/task-boards/child-grant-service.ts';
 import { isTaskBoardError, TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { boardSession, CREDENTIALS, FakeTaskBoards, human } from './support.ts';
@@ -483,6 +484,45 @@ describe('the task board membership mount', () => {
 
     // Assert
     should(response.status).be.oneOf([403, 404]);
+  });
+
+  it('should answer unavailable, committing and delivering nothing, when the approved intent cannot be read back', async () => {
+    // Arrange
+    const world = await withBoard();
+    const pending = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'grandchild', role: 'worker' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+    const before = world.state;
+    const deliveries = world.delivered.length;
+    const lostIntent = spyOn(TaskBoardChildGrantService.prototype, 'approve').mockImplementation(() => ({
+      state: { ...before, boards: before.boards.map(board => ({ ...board, childGrantIntents: [] })) },
+      result: { approved: false, request: pending },
+    }));
+
+    try {
+      // Act
+      const response = await post(
+        world,
+        '/child-grants/approve',
+        { grantRequestId: pending.requestId },
+        peer(world.capabilityFor('coordinator') ?? ''),
+      );
+
+      // Assert
+      should(response.status).equal(503);
+      should(jsonBody(response).error).match(/the approved child grant intent is no longer readable/u);
+      should(world.state).equal(before);
+      should(world.delivered).have.length(deliveries);
+    } finally {
+      lostIntent.mockRestore();
+    }
   });
 
   it('should carry an outside session onto the board through invite, approve and accept', async () => {
@@ -1198,5 +1238,75 @@ describe('the task board membership mount, at its edges', () => {
 
     // Assert
     should(response.status).equal(500);
+  });
+});
+
+describe('the task board membership mount, replaying a promoted coordinator replacement', () => {
+  it('should recognise the promoted child grant on retry and deliver the same key without minting another', async () => {
+    // Arrange — the invitation flow gives the board a second membership root, and that root asks for a
+    // coordinator child grant for a session that has not launched yet; the operator then promotes it.
+    const world = await withBoard();
+    const invited = TaskBoardInvitationViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/invitations/request',
+          { targetSessionId: 'outsider' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+    await post(
+      world,
+      '/invitations/approve',
+      { invitationRequestId: invited.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    await post(
+      world,
+      '/invitations/accept',
+      {},
+      {
+        'x-fy-session-board-capability': 'session:outsider',
+        'x-fy-board-invitation-capability': world.delivered.at(-1)?.[1][BOARD_INVITATION_CAPABILITY_VARIABLE] ?? '',
+      },
+    );
+    const outsiderCapability = world.capabilityFor('outsider') ?? '';
+    await post(world, '/invitations/verify', {}, peer(outsiderCapability));
+    const coordinatorGrant = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'successor', role: 'coordinator' },
+          peer(outsiderCapability),
+        ),
+      ),
+    );
+    await post(
+      world,
+      '/child-grants/approve',
+      { grantRequestId: coordinatorGrant.requestId },
+      peer(world.capabilityFor('coordinator') ?? ''),
+    );
+    const prelaunchCapability = world.delivered.at(-1)?.[1][BOARD_CAPABILITY_VARIABLE] ?? '';
+    const body = {
+      requestId: 'route-promoted-replay',
+      sessionId: 'root',
+      replacementSessionId: 'successor',
+      replacementRootSessionId: 'outsider',
+    };
+    const first = await post(world, '/coordinator/replace', body, operator(world));
+    should(first.status).equal(200);
+    const grantsAfterFirst = world.state.boards[0]?.grants.length;
+
+    // Act — the same request again, as a client retrying after a lost response would send it.
+    const replay = await post(world, '/coordinator/replace', body, operator(world));
+
+    // Assert — the promotion is recognised by the grant it revoked, so the retry reuses the delivered
+    // key instead of deriving a fresh one and stranding the session that already holds the first.
+    should(replay.status).equal(200);
+    should(world.delivered.at(-1)).eql(['successor', { [BOARD_CAPABILITY_VARIABLE]: prelaunchCapability }]);
+    should(world.state.boards[0]?.grants.length).equal(grantsAfterFirst);
   });
 });

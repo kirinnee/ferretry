@@ -112,6 +112,9 @@ class FakeAttentionDaemon {
           waitingSince: EPOCH,
           howToResolve: request.howToResolve,
           ask: request.ask,
+          ...(request.title === undefined ? {} : { title: request.title }),
+          ...(request.kind === undefined ? {} : { kind: request.kind }),
+          ...(request.answers === undefined ? {} : { answers: request.answers }),
           ...attentionBriefOf(request),
           raisedBy: 'agent',
           raisedBySession: SESSION,
@@ -165,7 +168,7 @@ afterAll(() => {
 describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled binary'})`, () => {
   it('carries a permission ask through raise, list, answer, and history', async () => {
     // Act
-    const added = await cli(['add', 'approve the deploy', '--kind', 'permission']);
+    const added = await cli(['add', 'approve the deploy', '--title', 'Deploy approval', '--kind', 'permission']);
     const listedAfterAdd = await cli(['ls']);
     const answered = await cli(['done', '!A1', '--approve']);
     const listedAfterAnswer = await cli(['ls']);
@@ -186,7 +189,18 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
   it('carries a multiple-choice ask through raise, list, answer, and history', async () => {
     // Act
-    const added = await cli(['add', 'pick a cluster', '--kind', 'choice', '--option', 'staging', '--option', 'prod']);
+    const added = await cli([
+      'add',
+      'pick a cluster',
+      '--title',
+      'Cluster',
+      '--kind',
+      'choice',
+      '--option',
+      'staging',
+      '--option',
+      'prod',
+    ]);
     const listedAfterAdd = await cli(['ls']);
     const answered = await cli(['done', '!A2', '--choice', 'staging']);
     const listedAfterAnswer = await cli(['ls']);
@@ -203,7 +217,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
   it('carries an answer-review ask through raise, list, answer, and history', async () => {
     // Act
-    const added = await cli(['add', 'review the migration plan', '--kind', 'review']);
+    const added = await cli(['add', 'review the migration plan', '--title', 'Migration plan', '--kind', 'review']);
     const listedAfterAdd = await cli(['ls']);
     const answered = await cli(['done', '!A3', '--clarify', 'which table does this touch?']);
     const listedAfterAnswer = await cli(['ls']);
@@ -220,7 +234,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
   it('carries an open-question ask through raise, list, dismiss, and history', async () => {
     // Act — dismissed rather than answered, to exercise the other clearing path across every kind.
-    const added = await cli(['add', 'name the release', '--kind', 'open']);
+    const added = await cli(['add', 'name the release', '--title', 'Release name', '--kind', 'open']);
     const listedAfterAdd = await cli(['ls']);
     const dismissed = await cli(['dismiss', '!A4', '--note', 'superseded by the next release']);
     const listedAfterDismiss = await cli(['ls']);
@@ -243,6 +257,7 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
     writeFileSync(
       body,
       JSON.stringify({
+        title: 'Work login plan',
         summary: 'Approve the OCI work-login plan',
         context: 'The work login expires every day.',
         terms: [{ term: 'OCI', meaning: 'Oracle Cloud Infrastructure' }],
@@ -260,7 +275,8 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
       should(added.code).equal(0, added.err);
       should(added.out).containEql('attention !A5 recorded');
       should(listed.out).containEql('Approve the OCI work-login plan');
-      should(listed.out).containEql('answer: pick one of "Defaults" | "Changes"');
+      should(listed.out).containEql('Work login plan');
+      should(listed.out).containEql('answers: ← Changes · → Defaults');
       should(listed.out).containEql('recommended: Defaults');
       should(listed.out).containEql('impact: You stay logged out — by today');
       should(listed.out).containEql('terms: OCI = Oracle Cloud Infrastructure');
@@ -272,10 +288,59 @@ describe(`attention lifecycle (SIT, ${useInProcess ? 'in-process' : 'compiled bi
 
   it('names the field a limit refused, before anything is sent', async () => {
     // Act
-    const refused = await cli(['add', 'too urgent', '--urgency', 'u'.repeat(200)]);
+    const refused = await cli(['add', 'too urgent', '--title', 'Urgent', '--urgency', 'u'.repeat(200)]);
 
     // Assert
     should(refused.code).not.equal(0);
     should(refused.err).containEql('urgency');
+  });
+
+  it('refuses a card with no title before anything is sent', async () => {
+    // Act
+    const refused = await cli(['add', 'approve the deploy']);
+
+    // Assert
+    should(refused.code).not.equal(0);
+    should(refused.err).containEql('give the card a title: --title');
+  });
+
+  it('lists a titled yes or no card as a heading, the ask and its swipe answers, and answers it with --yes', async () => {
+    // Act
+    const added = await cli(['add', 'Ship the release now?', '--title', 'Release', '--kind', 'yesno']);
+    const listed = await cli(['ls']);
+    const answered = await cli(['done', '!A6', '--yes']);
+    const history = await cli(['history']);
+
+    // Assert
+    should(added.code).equal(0, added.err);
+    should(listed.out).containEql('!A6  [agent-raised]  Release');
+    should(listed.out).containEql('ask: Ship the release now?');
+    should(listed.out).containEql('answers: ← No · → Yes');
+    should(answered.code).equal(0, answered.err);
+    should(history.out).containEql('chose "Yes"');
+  });
+
+  it('refuses more than three options with the advice to split the item', async () => {
+    // Act
+    const refused = await cli(['add', 'which', '--title', 'Which', '-o', 'a', '-o', 'b', '-o', 'c', '-o', 'd']);
+
+    // Assert
+    should(refused.code).not.equal(0);
+    should(refused.err).containEql('a card offers at most 3 answers');
+  });
+
+  it('raises an info card for a notification and refuses to notify progress', async () => {
+    // Act
+    const notified = await cli(['notify', 'the build is green', '--title', 'CI']);
+    const listed = await cli(['ls']);
+    const refused = await cli(['notify', 'all done', '--kind', 'completed']);
+
+    // Assert
+    should(notified.code).equal(0, notified.err);
+    should(notified.out).containEql('!A7');
+    should(listed.out).containEql('!A7  [agent-raised]  CI');
+    should(listed.out).containEql('answers: → Got it');
+    should(refused.code).not.equal(0);
+    should(refused.err).containEql('progress and finishing never notify the owner');
   });
 });

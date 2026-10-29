@@ -212,6 +212,44 @@ describe('NodeCodexRolloutIndex cost', () => {
     should([...seen].sort()).eql([uuid(1), uuid(2)]);
   });
 
+  it('should name a rollout by the id its first record carries when that record is not the session header', async () => {
+    // Arrange: a rollout whose head opens with another record kind that still names the session.
+    const home = await temporaryHome();
+    const directory = join(home, 'sessions/2026/10/20');
+    await fs.mkdir(directory, { recursive: true });
+    const named = uuid(7);
+    const file = join(directory, `rollout-2026-10-20-${uuid(8)}.jsonl`);
+    await fs.writeFile(file, `${JSON.stringify({ type: 'turn_context', payload: { id: named } })}\n`, 'utf8');
+    const index = new NodeCodexRolloutIndex();
+
+    // Act
+    const ids = await index.ids(home);
+
+    // Assert: the record's id wins over the one the filename carries.
+    should(ids).eql([named]);
+  });
+
+  it('should still report by its filename a rollout that vanished after its directory was listed', async () => {
+    // Arrange: a settled listing that names a rollout, then the rollout removed with the directory's time put back.
+    const home = await temporaryHome();
+    const file = await writeRollout(home, '2026/10/20', uuid(1));
+    await settle(home);
+    const index = new NodeCodexRolloutIndex();
+    await index.ids(home);
+    const day = join(home, 'sessions/2026/10/20');
+    const { mtime } = await fs.stat(day);
+    await fs.rm(file);
+    await fs.utimes(day, mtime, mtime);
+
+    // Act
+    const ids = await index.ids(home);
+    const candidates = await index.candidates(home, '/state/sessions/any');
+
+    // Assert: the cached listing still names it; it is reported by the uuid its filename carries, with nothing to read.
+    should(ids).eql([uuid(1)]);
+    should(candidates).eql([{ id: uuid(1), file, correlated: false }]);
+  });
+
   it('should count no change for a directory it has never walked into', () => {
     // Arrange
     const index = new NodeCodexRolloutIndex();

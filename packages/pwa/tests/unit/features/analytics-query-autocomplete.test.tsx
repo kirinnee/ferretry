@@ -69,6 +69,16 @@ describe('analytics query autocomplete', () => {
     });
   });
 
+  it('ignores arrows with no list to move in and keys that mean nothing here', () => {
+    expect(analyticsAutocompleteKeyAction('ArrowDown', { open: false, count: 3, activeIndex: 0 })).toEqual({
+      type: 'ignore',
+    });
+    expect(analyticsAutocompleteKeyAction('ArrowUp', { open: true, count: 0, activeIndex: -1 })).toEqual({
+      type: 'ignore',
+    });
+    expect(analyticsAutocompleteKeyAction('x', { open: true, count: 3, activeIndex: 0 })).toEqual({ type: 'ignore' });
+  });
+
   it('caches one daemon-scoped value load and keeps an error honest', async () => {
     const snapshots: Array<ReadonlyMap<string, ValueCacheEntry>> = [];
     let calls = 0;

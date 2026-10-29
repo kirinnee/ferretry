@@ -7,13 +7,9 @@
  * set may travel to any caller with `fleet.use`.
  */
 import type { LocalModels } from '@ferretry/protocol';
-import {
-  builtInModelCatalogs,
-  type ModelCatalog,
-  type ModelCatalogSources,
-  modelCatalogs,
-  type ProviderPreset,
-} from '@ferretry/fleet';
+import { type ModelCatalog, type ModelCatalogSources, modelCatalogs, type ProviderPreset } from '@ferretry/fleet';
+// Parsed when this build is made, never at boot: `@ferretry/fleet/built-ins` says why.
+import { checkedBuiltInModelCatalogs } from '@ferretry/fleet/built-ins' with { type: 'macro' };
 
 export interface ModelCatalogServiceDeps {
   /** This machine's own catalog files that check, by id. */
@@ -31,7 +27,7 @@ export class ModelCatalogService {
 
   constructor(
     private readonly deps: ModelCatalogServiceDeps,
-    builtIn: Readonly<Record<string, ModelCatalog>> = builtInModelCatalogs(),
+    builtIn: Readonly<Record<string, ModelCatalog>> = checkedBuiltInModelCatalogs(),
   ) {
     this.#builtIn = builtIn;
   }

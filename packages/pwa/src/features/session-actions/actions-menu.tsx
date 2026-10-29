@@ -18,10 +18,11 @@
  */
 
 import { ChevronDown, LoaderCircle } from 'lucide-react';
-import { type ReactNode, useCallback, useId, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import { cn } from '../../lib/class-names.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
+import { ActionDrawer } from './action-drawer.tsx';
 import {
   findSessionAction,
   type SessionActionEntry,
@@ -101,6 +102,15 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
     compact,
   };
 
+  // The menu button is what opened a drawer, and the menu that held it closed on the way: hand focus back
+  // to the button once the drawer is gone, so a keyboard reader lands where they started.
+  const drawerOpen = shownForm?.presentation === 'drawer';
+  const wasDrawerOpen = useRef(false);
+  useEffect(() => {
+    if (wasDrawerOpen.current && !drawerOpen) buttonRef.current?.focus();
+    wasDrawerOpen.current = drawerOpen;
+  }, [drawerOpen]);
+
   return (
     <>
       <button
@@ -139,7 +149,17 @@ export function ActionsMenu({ sections, compact, name, form, onFormChange, onFai
           />
         </div>
       ) : null}
-      {shownForm === undefined ? null : compact ? (
+      {shownForm === undefined ? null : shownForm.presentation === 'drawer' ? (
+        <ActionDrawer
+          compact={compact}
+          heading={shownForm.heading}
+          onClose={formHost.close}
+          title={shownForm.title}
+          top={placement.top - 6}
+        >
+          {shownForm.render(formHost)}
+        </ActionDrawer>
+      ) : compact ? (
         <BottomSheet
           ariaLabel={shownForm.title}
           closeLabel={`Close ${shownForm.title}`}

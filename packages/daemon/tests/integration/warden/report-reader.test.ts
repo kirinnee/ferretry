@@ -60,6 +60,23 @@ describe('NodeWardenReportFileSystem', () => {
     should(files).be.empty();
   });
 
+  it('should refuse a listing of a path that is not a directory rather than reading it as empty', async () => {
+    // Arrange — only a missing directory is "nothing yet"; a file in its place is a fault to surface.
+    const home = await tempDirectory('warden-not-a-directory');
+    const blocker = path.join(home, 'reports');
+    await writeFile(blocker, 'not a directory', 'utf8');
+    const subject = new NodeWardenReportFileSystem();
+
+    // Act
+    const failure = await subject.listFiles(blocker).then(
+      () => undefined,
+      (error: unknown) => error as NodeJS.ErrnoException,
+    );
+
+    // Assert
+    should(failure?.code).equal('ENOTDIR');
+  });
+
   it('should atomically write a first report beneath an owner-only reports directory', async () => {
     const home = await tempDirectory('warden-write');
     const report = path.join(home, 'state', 'warden', 'reports', 'sweep.md');

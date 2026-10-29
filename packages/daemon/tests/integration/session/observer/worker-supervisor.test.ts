@@ -475,6 +475,30 @@ describe('WorkerSupervisor', () => {
     should(workers.length).equal(1);
   });
 
+  it('should still end a thread whose termination throws because it is already gone', async () => {
+    // Arrange — a thread that crashes and then cannot be terminated, as one that has already exited.
+    const { subject, workers, advance } = rig();
+    subject.reconcile([wanted(A)]);
+    const worker = workers[0] as ScriptedWorker;
+    worker.ready();
+    worker.terminate = () => {
+      throw new Error('the thread is already gone');
+    };
+    const looking = subject.request(A, { kind: 'pane' });
+
+    // Act
+    worker.fail('crashed before it could be terminated');
+    advance(1_000);
+    subject.reconcile([wanted(A)]);
+
+    // Assert — the failed termination changes nothing: the look is refused, the thread is gone from
+    // the pool, and the session gets a fresh thread once its back-off is over.
+    await should(looking).be.rejectedWith(/crashed before it could be terminated/);
+    should(workers.length).equal(2);
+    workers[1]?.ready();
+    should(subject.hosts(A)).be.true();
+  });
+
   it('should treat a thread it cannot post to as crashed', () => {
     // Arrange
     const { subject, workers } = rig();

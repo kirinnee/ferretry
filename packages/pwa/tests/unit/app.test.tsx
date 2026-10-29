@@ -36,6 +36,8 @@ import {
   type SessionLiveActivity,
   type SessionStatus,
   type SessionView,
+  TUNNEL_OFF_SENTENCE,
+  type TunnelStatusView,
   type WardenAttentionView,
   type WardenStatusView,
 } from '@ferretry/protocol';
@@ -414,6 +416,17 @@ interface ShellOptions {
   readonly transcript?: string | ((daemonId: DaemonId, sessionId: string) => string);
   /** Complete Attention board returned by this daemon/session route. */
   readonly attention?: (sessionId: string) => AttentionSnapshot;
+  /**
+   * What this daemon answers `/v1/tunnel` with: told `undefined` on a read and the requested switch on a
+   * change. Absent, the path answers an empty document and no machine says anything about its tunnel.
+   */
+  readonly tunnelSwitch?: (change: boolean | undefined) => TunnelStatusView;
+  /** Replaces the store's WebRTC round-trip read, which is the only thing a suite without a dialer lacks. */
+  readonly webrtcRttMs?: (daemonId: DaemonId) => Promise<number | undefined>;
+  /** Attention actions a daemon was sent (POSTs to a session's board), as `sessionId:body`. */
+  readonly attentionPosts?: string[];
+  /** Each session's conversation as the messages route serves it, in one page; absent: an empty one. */
+  readonly messages?: (sessionId: string) => readonly { readonly role: 'user' | 'assistant'; readonly text: string }[];
   /** The Warden status this daemon answers; the default is a quiet, freshly swept one. */
   readonly wardenStatus?: () => Promise<WardenStatusView>;
   /** The "who needs you" feed this daemon answers; the default is a clean sweep. */
@@ -505,7 +518,7 @@ const appStore = async (
   for (const id of [ALPHA, BETA, GAMMA_ID, alphaRelayed.daemonId]) await deviceKeys.save(id, DEVICE_KEY);
   // The one fixture every daemon route below is answered by — over a real session on each daemon's
   // own address, and over the plain network for everything that is not a daemon.
-  const daemonFetch = async (input: RequestInfo | URL): Promise<Response> => {
+  const daemonFetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const url = String(input);
     carrierRequests.push(url);
     // Every carrier this daemon publishes fails at transport, which is what a walk needs to see
@@ -517,9 +530,24 @@ const appStore = async (
     const attentionRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
     if (attentionRoute?.[1] !== undefined) {
       const sessionId = decodeURIComponent(attentionRoute[1]);
+      if (init?.method === 'POST') options.attentionPosts?.push(`${sessionId}:${String(init.body)}`);
       return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
     }
+    // The Processes tab's list, which the open session reads for the count on its tab: nothing runs.
+    const processesRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/processes$/u);
+    if (processesRoute?.[1] !== undefined) {
+      return Response.json({
+        sessionId: decodeURIComponent(processesRoute[1]),
+        observedAt: new Date().toISOString(),
+        available: true,
+        processes: [],
+      });
+    }
     if (url.endsWith('/terminals')) return Response.json(terminalListing);
+    if (options.tunnelSwitch !== undefined && new URL(url).pathname === '/v1/tunnel') {
+      const change = init?.method === 'PUT' ? (JSON.parse(String(init.body)) as { enabled: boolean }) : undefined;
+      return Response.json(options.tunnelSwitch(change?.enabled));
+    }
     // The durable registry, and ONLY when a test supplies one. The default
     // stays the empty document every other page gets, because the registry's
     // own failure path is what the projects-route test asserts on.
@@ -600,6 +628,18 @@ const appStore = async (
             ? options.transcript(connection.daemonId, sessionId)
             : (options.transcript ?? '');
         },
+        // A conversation's durable rows, in one page — what the Attention page's "Last messages" fold reads.
+        messages: async (sessionId: string) => ({
+          v: 1 as const,
+          sessionId,
+          messages: (options.messages?.(sessionId) ?? []).map((message, index) => ({
+            point: { v: 1 as const, byteOffset: index * 100, blockIndex: 0 },
+            role: message.role,
+            text: message.text,
+            selectionBinding: `binding-${index}`,
+          })),
+          nextCursor: null,
+        }),
         interrupt: async (sessionId: string) => sessionView(sessionId),
         start: async () => sessionView('started'),
         // The configuration stream the shell keeps open for the machine on screen: like the live feed
@@ -782,7 +822,13 @@ const renderShell = async (
   // away exactly the receiver mistake `DaemonCarrierRouter`'s constructor comment exists for, so
   // every other test in this file keeps the raw router.
   const store: AppStore =
-    options.carrierSeam === undefined ? built : { ...built, carrier: options.carrierSeam.wrap(built.carrier) };
+    options.carrierSeam === undefined && options.webrtcRttMs === undefined
+      ? built
+      : {
+          ...built,
+          ...(options.carrierSeam === undefined ? {} : { carrier: options.carrierSeam.wrap(built.carrier) }),
+          ...(options.webrtcRttMs === undefined ? {} : { webrtcRttMs: options.webrtcRttMs }),
+        };
   if (options.sessionsMode !== null) store.controls.setDeviceControls({ sessionsMode: options.sessionsMode ?? 'all' });
   // Paired one millisecond apart, in the order listed: the all-machines list shows them in pairing order.
   const pairedFrom = Date.now();
@@ -2260,6 +2306,8 @@ describe('AppShell', () => {
         await settle();
         expect(refresh).toBeDefined();
         const scope = daemonSessionScope(alpha, 'shared');
+        // The first board read is a fetch through the mounted shell: wait for it, not for a fixed number of turns.
+        await settleUntil(() => store.attention.store.status(scope) === 'ready', 'the first board read', interact);
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
         // Nothing waiting: no pinned "Needs you" block.
@@ -2292,17 +2340,40 @@ describe('AppShell', () => {
     }
   });
 
-  it('mounts the selected Needs-you item as a real chat beside the inbox', async () => {
+  it('mounts the selected item as its card beside the inbox, with no chat around it', async () => {
+    const posts: string[] = [];
+    const todo = { ...externalAttentionItem, ask: { kind: 'task' }, steps: ['Plug the key in', 'Approve it'] };
     const { view } = await renderShell(`/d/${ALPHA}/attention`, [alpha.daemonId], {
       sessions: ['shared'],
-      listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
-      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
-      attention: sessionId => attentionSnapshot(sessionId, [externalAttentionItem]),
+      listedAttention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => attentionSnapshot(sessionId, [todo as typeof externalAttentionItem]),
+      attentionPosts: posts,
+      messages: () => [
+        { role: 'assistant', text: 'Paired the laptop.' },
+        { role: 'user', text: 'ok' },
+        { role: 'assistant', text: 'Raised !A3 for the key.' },
+      ],
     });
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
-      const chat = must(view.container.querySelector<HTMLElement>('[data-attention-chat]'), 'the conversation pane');
-      expect(chat.textContent).not.toBe('');
+      const pane = must(view.container.querySelector<HTMLElement>('[data-attention-pane]'), 'the card pane');
+      expect(pane.querySelector('[data-attention-card]')?.getAttribute('data-attention-card')).toBe('A3');
+      expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
+      // The fold reads the ferret's own words through the session messages route.
+      await interact(() =>
+        must(pane.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'the fold').click(),
+      );
+      for (let turn = 0; turn < 4; turn += 1) await settle();
+      expect([...pane.querySelectorAll('[data-attention-recent-message]')].map(message => message.textContent)).toEqual(
+        ['Paired the laptop.', 'Raised !A3 for the key.'],
+      );
+      // A step ticks on the machine the card came from.
+      await interact(() =>
+        must(pane.querySelector<HTMLInputElement>('input[type="checkbox"]'), 'the first step').click(),
+      );
+      for (let turn = 0; turn < 4; turn += 1) await settle();
+      expect(posts.some(post => post.startsWith('shared:') && post.includes('"progress"'))).toBe(true);
     } finally {
       await view.unmount();
     }
@@ -3537,6 +3608,87 @@ describe('the settings route composition', () => {
     await device.view.unmount();
   });
 
+  /**
+   * A tunnel is opt-in (§15), so a preference that walks one is OFFERED a switch under the group — and the
+   * machine, not this browser, is what is switched: the request is the daemon's own `PUT /v1/tunnel`.
+   */
+  it('turns the machine’s tunnel on from the offer under its Connection preference', async () => {
+    let enabled = false;
+    const changes: boolean[] = [];
+    const tunnelSwitch = (change: boolean | undefined): TunnelStatusView => {
+      if (change !== undefined) {
+        changes.push(change);
+        enabled = change;
+      }
+      return enabled
+        ? {
+            enabled,
+            explicit: true,
+            state: 'up',
+            tunnelUrl: 'https://alpha-tunnel.example.test',
+            sentence: 'Tunnel: up',
+          }
+        : { enabled, explicit: false, state: 'off', tunnelUrl: null, sentence: TUNNEL_OFF_SENTENCE };
+    };
+    const { view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId], {
+      ...SET_UP_SHELL,
+      tunnelSwitch,
+    });
+    try {
+      await settle();
+      await openPanel(view, 'carrier', 'the Connection panel tab');
+      const tunnelOnly = must(
+        view.container.querySelector<HTMLInputElement>('[data-carrier-preference-control] input[value="tunnel"]'),
+        'Tunnel only on the Connection panel',
+      );
+      await interact(() => tunnelOnly.click());
+      await settle();
+      const offer = must(view.container.querySelector<HTMLElement>('[data-tunnel-offer]'), 'the tunnel offer');
+      expect(offer.textContent).toContain('Turn on a Cloudflare tunnel for this machine?');
+      expect(changes).toEqual([]);
+
+      await interact(() =>
+        must(
+          [...offer.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Turn on'),
+          'the offer’s Turn on button',
+        ).click(),
+      );
+      await settle();
+
+      expect(changes).toEqual([true]);
+      expect(view.container.querySelector('[data-tunnel-offer]')).toBeNull();
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  /**
+   * Only WebRTC measures its own path, and the number is read from THIS machine's pairing: the panel
+   * asks the store for the round trip of the daemon it is showing and prints what comes back.
+   */
+  it('shows the round trip the store measures for this machine when a WebRTC carrier is live', async () => {
+    const carrierSeam = measuredCarrierSeam();
+    const asked: DaemonId[] = [];
+    const { view } = await renderShell(`/d/${ALPHA}/settings#daemons`, [alpha.daemonId], {
+      ...SET_UP_SHELL,
+      carrierSeam,
+      webrtcRttMs: async daemonId => {
+        asked.push(daemonId);
+        return daemonId === alpha.daemonId ? 23 : undefined;
+      },
+    });
+    try {
+      await settle();
+      await interact(() => carrierSeam.publish(chooseCarrier([{ method: { kind: 'webrtc' }, reachable: true }])));
+      await openPanel(view, 'carrier', 'the Connection panel tab');
+
+      expect(asked).toContain(alpha.daemonId);
+      expect(view.container.querySelector('[data-carrier-rtt]')?.textContent).toBe('Round trip: 23 ms');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('names the missing fallback when the router would strip this pairing’s relay', async () => {
     expect(await carrierPanelText(alphaRelayed)).toContain(CARRIER_NO_FALLBACK);
   });
@@ -3949,7 +4101,7 @@ describe('the fleet notification watch', () => {
     // through the subscription the shell handed over.
     expect(store.fleet.getSnapshot().daemons.get(alpha.daemonId)?.sessions?.length).toBe(1);
 
-    await moveTo('awaiting_question');
+    await moveTo('failed');
 
     // Delivered, and named after the session rather than the daemon: this is the
     // only assertion in the file that proves the whole chain — fleet diff, the
@@ -3962,7 +4114,7 @@ describe('the fleet notification watch', () => {
   it('stays silent on the same transition while the reader is looking at the page', async () => {
     const { moveTo, view } = await watchingShell(false);
 
-    await moveTo('awaiting_question');
+    await moveTo('failed');
 
     // Nothing about the transition changed — only `document.hidden`. So a
     // notification here would mean the watch is reading some other visibility,

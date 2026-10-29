@@ -59,20 +59,19 @@ type Page =
   | { readonly kind: 'edit'; readonly reference: string }
   | { readonly kind: 'new'; readonly of: FleetComponentKind };
 
-/** Where Back goes from each page. */
+/** Where Back goes from each page; the kinds page has no Back, so only a list reaches the fallback. */
 const parentOf = (page: Page, catalog: AccountCatalog): Page => {
   switch (page.kind) {
-    case 'kinds':
-    case 'list':
-      return { kind: 'kinds' };
     case 'detail': {
       const component = allComponents(catalog).find(candidate => candidate.reference === page.reference);
       return component === undefined ? { kind: 'kinds' } : { kind: 'list', of: component.kind };
     }
     case 'edit':
       return { kind: 'detail', reference: page.reference };
-    default:
+    case 'new':
       return { kind: 'list', of: page.of };
+    default:
+      return { kind: 'kinds' };
   }
 };
 

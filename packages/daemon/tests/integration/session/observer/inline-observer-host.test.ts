@@ -245,6 +245,25 @@ describe('InlineObserverHost — facts', () => {
     should(await turnStateOf(subject, A)).be.undefined();
   });
 
+  it('should tell every listener what it learned even when one of them throws', async () => {
+    // Arrange — the first listener is a worker forwarder that fails; the second must still hear.
+    const subject = await world();
+    const observer = host(subject);
+    const heard: string[] = [];
+    observer.onFacts(() => {
+      throw new Error('the worker went away');
+    });
+    observer.onFacts((id, facts) => heard.push(`${id}:${facts === undefined ? 'forgotten' : 'learned'}`));
+
+    // Act — storage tells of a write; the facts reach the listeners, and the write itself is unharmed.
+    await subject.storage.writeState(A, { id: A, status: 'running', turn: 1 });
+    await subject.storage.writeState(B, { id: B, status: 'not-a-status' });
+
+    // Assert
+    should(heard).deepEqual([`${A}:learned`, `${B}:forgotten`]);
+    should(await turnStateOf(subject, A)).be.undefined();
+  });
+
   it('should count the sessions it last saw mid-turn', async () => {
     // Arrange
     const subject = await world();

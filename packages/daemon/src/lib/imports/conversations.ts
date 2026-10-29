@@ -14,7 +14,7 @@ import {
   ImportConversationIdSchema,
   type SessionStatus,
 } from '@ferretry/protocol';
-import type { TranscriptEvent, TranscriptParser } from '../transcript/index.ts';
+import type { PacedTranscriptParser, TranscriptEvent } from '../transcript/index.ts';
 import { codexIndexNames, transcriptNames } from './conversation-name.ts';
 import {
   HANDOFF_READ_MAX_BYTES,
@@ -296,7 +296,8 @@ export class ConversationImportService {
     private readonly files: ConversationFiles,
     /** In preference order: when two homes hold one conversation, the first one's file is used. */
     private readonly roots: readonly ConversationRoot[],
-    private readonly parsers: Readonly<Record<Harness, TranscriptParser>>,
+    /** Paced, because a conversation is read up to 8 MiB whole and would otherwise hold the loop through it. */
+    private readonly parsers: Readonly<Record<Harness, PacedTranscriptParser>>,
     private readonly owners: ConversationOwners,
     private readonly adopter: ConversationAdopter,
     /** Where a hand-off pointer's document may be read from; a pointer anywhere else says nothing. */
@@ -336,7 +337,11 @@ export class ConversationImportService {
     const info = await this.files.info(conversation.source);
     const read = info === undefined ? undefined : await boundedTranscript(this.files, conversation.source, info.size);
     if (read === undefined) return undefined;
-    const { events } = this.parsers[harness].parse({ text: read.text, source: conversation.source, endOfInput: true });
+    const { events } = await this.parsers[harness].parse({
+      text: read.text,
+      source: conversation.source,
+      endOfInput: true,
+    });
     return { id, harness, messages: [...recentExchanges(events, await this.handoffDocuments(events))] };
   }
 
@@ -446,7 +451,8 @@ export class ConversationImportService {
     const events =
       read === undefined
         ? undefined
-        : this.parsers[candidate.harness].parse({ text: read.text, source: candidate.source, endOfInput: true }).events;
+        : (await this.parsers[candidate.harness].parse({ text: read.text, source: candidate.source, endOfInput: true }))
+            .events;
     const described =
       read === undefined || events === undefined
         ? undefined

@@ -960,6 +960,23 @@ describe('session handover protocol', () => {
     ).be.false();
   });
 
+  it('should name the disagreeing source session id and harness when they differ from the plan', () => {
+    // Arrange
+    const issuesFor = (override: Record<string, unknown>): readonly string[] => {
+      const result = handover.SessionHandoverReceiptSchema.safeParse({ ...receipt, ...override });
+      return result.success ? [] : result.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`);
+    };
+
+    // Act + Assert
+    should(issuesFor({ sourceSessionId: 'session-other' })).containEql(
+      'sourceSessionId: sourceSessionId must agree with plan.source.sessionId',
+    );
+    should(issuesFor({ sourceHarness: 'codex' })).containEql(
+      'sourceHarness: sourceHarness must agree with plan.source.harness',
+    );
+    should(issuesFor({})).be.empty();
+  });
+
   it('should require the written-ahead ids and board invitation/grant ids on the ladder', () => {
     // Act + Assert
     assertRejects([

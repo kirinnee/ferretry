@@ -452,6 +452,20 @@ describe('hosted relay refusal counter semantics', () => {
     should(stopped.daemon).match({ disabledRefusals: 1, bandwidthRefusals: 0 });
   });
 
+  it('should count a switched-off connection against a daemon row that already exists', () => {
+    const base = admitted();
+    const refused = admitHostedRelayConnection(
+      initialHostedRelayConfiguration(at),
+      base.global,
+      base.daemon,
+      daemonId,
+      at + 2,
+    );
+    should(refused.decision).match({ ok: false, code: RELAY_CLOSE_CODES.hostedDisabled });
+    should(refused.global).match({ disabledRefusals: 1, connectionRefusals: 1, bandwidthRefusals: 0 });
+    should(refused.daemon).match({ daemonId, disabledRefusals: 1, connectionRefusals: 1, bandwidthRefusals: 0 });
+  });
+
   it('should keep a real byte ceiling on the bandwidth counter alone', () => {
     const base = admitted();
     const capped = meterHostedRelayRequest(

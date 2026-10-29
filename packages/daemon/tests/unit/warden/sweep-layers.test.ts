@@ -270,6 +270,27 @@ describe('an investigation that fails to start', () => {
     should(subject.state().failover).not.have.property('exhaustedSince');
   });
 
+  it('should stop quietly when the only other login is not installed on this host', async () => {
+    // Arrange — claude-b is configured but missing, so once claude-a has failed there is nothing left to try
+    const subject = harness({
+      config: enabled(two),
+      fleet: [triageable('s1')],
+      installed: async () => ['claude-a'],
+      spawn: async request => {
+        throw new Error(`launch of ${request.agent} failed`);
+      },
+    });
+
+    // Act
+    const actual = await subject.service.run({ force: false });
+
+    // Assert — a failed start is not exhaustion, so nothing is journalled or raised as one
+    should(subject.spawns.map(spawn => spawn.agent)).deepEqual(['claude-a']);
+    should(actual.message).equal('warden spawn failed: launch of claude-a failed');
+    should(journalTypes(subject)).not.containEql('fleet.warden_exhausted');
+    should(subject.state().failover).not.have.property('exhaustedSince');
+  });
+
   it('should try at most three logins in one sweep', async () => {
     // Arrange
     const many = { accounts: ['a', 'b', 'c', 'd'].map(agent => ({ agent: `claude-${agent}` })) };

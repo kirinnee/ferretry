@@ -18,6 +18,7 @@ import type {
   GitInvocation,
   GitRunner,
   WorktreeDirectoryPinner,
+  WorktreeFileSystem,
 } from '../../../src/lib/worktrees/ports.ts';
 import type {
   CheckManagedWorktreeRemovalInput,
@@ -1384,5 +1385,253 @@ describe('ManagedWorktreeAdapter recovery from an interrupted creation', () => {
 
     // Assert
     should(actual).match({ kind: 'unverified', reason: /symlink/u });
+  });
+});
+
+/** Wraps the real file system, letting one test bend what it reports about named paths. */
+class BentFileSystem extends NodeWorktreeFileSystem implements WorktreeFileSystem {
+  readonly made = new Set<string>();
+
+  constructor(
+    private readonly bend: {
+      readonly type?: (target: string, made: ReadonlySet<string>) => 'symlink' | undefined;
+      readonly realPath?: (target: string, made: ReadonlySet<string>) => string | undefined;
+    },
+  ) {
+    super();
+  }
+
+  override async makeDirectory(target: string, mode: number): Promise<void> {
+    await super.makeDirectory(target, mode);
+    this.made.add(target);
+  }
+
+  override async type(target: string) {
+    return this.bend.type?.(target, this.made) ?? (await super.type(target));
+  }
+
+  override async realPath(target: string): Promise<string> {
+    return this.bend.realPath?.(target, this.made) ?? (await super.realPath(target));
+  }
+}
+
+const adapterOver = (fileSystem: WorktreeFileSystem): ManagedWorktreeAdapter =>
+  new ManagedWorktreeAdapter(
+    new GitWorktreeGateway(new BunGitRunner(), files, clock),
+    fileSystem,
+    clock,
+    new WorktreeOperationQueue(),
+    directoryPinner(),
+  );
+
+describe('ManagedWorktreeAdapter defaults, guarded directories and checkout identity', () => {
+  afterAll(async () => {
+    await cleanupTempDirectories();
+  });
+
+  const withOrigin = async (label: string): Promise<Scenario> => {
+    const base = await scenario(label);
+    await tempRemote(base.sourceCwd, 'origin', 'main');
+    await setupGit(base.sourceCwd, 'remote', 'set-head', 'origin', 'main');
+    await setupGit(base.sourceCwd, 'fetch', '--quiet', 'origin');
+    return base;
+  };
+
+  const removal = (base: Scenario, managed: ManagedWorktree) => ({
+    managed,
+    managedRoot: base.managedRoot,
+    ownerActive: false,
+    overrides: [] as readonly WorktreeRemovalOverride[],
+    deleteBranch: true,
+    confirmations: ['delete_unmerged_branch'] as const,
+  });
+
+  it('should start a new branch from the repository default branch when asked to', async () => {
+    // Arrange
+    const base = await withOrigin('svc-default-base');
+    await setupGit(base.sourceCwd, 'commit', '--quiet', '--allow-empty', '-m', 'feat: local only');
+
+    // Act
+    const actual = await adapter().create(request(base, { base: { kind: 'default-branch' } }));
+
+    // Assert — the origin default, not the source checkout's newer local commit
+    should(actual.managed.initialHead).equal(base.head);
+    should(actual.checkout.branch).equal('feature/managed');
+  });
+
+  it('should refuse a default-branch base when the repository records no origin/HEAD', async () => {
+    // Arrange
+    const base = await scenario('svc-default-base-unset');
+
+    // Act
+    const actual = await error(adapter().create(request(base, { base: { kind: 'default-branch' } })));
+
+    // Assert
+    should(code(actual)).equal('unresolved_base');
+    should((actual as WorktreeError).message).containEql('origin/HEAD');
+  });
+
+  it('should refuse a repository directory that was replaced while it was being made', async () => {
+    // Arrange
+    const base = await scenario('svc-create-replaced-dir');
+    const subject = adapterOver(
+      new BentFileSystem({
+        type: (target, made) =>
+          made.has(target) && path.basename(path.dirname(target)) === 'worktrees' ? 'symlink' : undefined,
+      }),
+    );
+
+    // Act
+    const actual = await error(subject.create(request(base)));
+
+    // Assert
+    should(code(actual)).equal('destination_exists');
+    should((actual as WorktreeError).message).containEql('replaced during creation');
+  });
+
+  it('should refuse a repository directory that resolves somewhere other than where it was made', async () => {
+    // Arrange
+    const base = await scenario('svc-create-redirected-dir');
+    const elsewhere = await tempDirectory('svc-create-redirected-target');
+    const subject = adapterOver(
+      new BentFileSystem({
+        realPath: (target, made) =>
+          made.has(target) && path.basename(path.dirname(target)) === 'worktrees' ? elsewhere : undefined,
+      }),
+    );
+
+    // Act
+    const actual = await error(subject.create(request(base)));
+
+    // Assert
+    should(code(actual)).equal('destination_exists');
+    should((actual as WorktreeError).message).containEql('resolves unexpectedly');
+  });
+
+  it('should refuse a source cwd that resolves outside its detected checkout', async () => {
+    // Arrange
+    const base = await scenario('svc-create-cwd-outside');
+    const outside = await tempDirectory('svc-create-cwd-outside-target');
+    const subject = adapterOver(
+      new BentFileSystem({ realPath: target => (target === base.sourceCwd ? outside : undefined) }),
+    );
+
+    // Act
+    const actual = await error(subject.create(request(base)));
+
+    // Assert
+    should(code(actual)).equal('not_git_repository');
+    should((actual as WorktreeError).message).containEql('outside its detected checkout root');
+  });
+
+  it('should not recognise a checkout whose recorded branch is not the one on disk', async () => {
+    // Arrange
+    const base = await scenario('svc-presence-branch');
+    const created = await adapter().create(request(base));
+
+    // Act
+    const actual = await adapter().presence({ ...created.managed, branch: 'feature/other' });
+
+    // Assert
+    should(actual).match({ kind: 'unverified', reason: /not the linked-worktree incarnation on record/u });
+  });
+
+  it('should report a different ownership token as a different incarnation', async () => {
+    // Arrange
+    const base = await scenario('svc-presence-token');
+    const created = await adapter().create(request(base));
+
+    // Act
+    const actual = await adapter().presence({ ...created.managed, ownershipToken: 'a-different-token-0002' });
+
+    // Assert
+    should(actual).match({ kind: 'unverified', reason: /carries a different ownership token/u });
+  });
+
+  it('should contain an unreadable ownership marker as unverified rather than let it escape', async () => {
+    // Arrange
+    const base = await scenario('svc-presence-no-marker');
+    const created = await adapter().create(request(base));
+    await rm(path.join(created.managed.gitDir, 'worktree-owner'));
+
+    // Act
+    const actual = await adapter().presence(created.managed);
+
+    // Assert
+    should(actual).match({ kind: 'unverified', reason: /could not be verified/u });
+  });
+
+  it('should keep the branch and say so when the repository identity changed before its deletion', async () => {
+    // Arrange
+    const base = await withOrigin('svc-branch-identity');
+    const created = await adapter().create(request(base));
+    const delegate = directoryPinner();
+    const pinner: WorktreeDirectoryPinner = {
+      pin: async cwd => {
+        const pinned = await delegate.pin(cwd);
+        return path.resolve(cwd) === path.resolve(created.managed.repositoryRoot)
+          ? {
+              rootReal: `${pinned.rootReal}-replaced`,
+              policyCwd: pinned.policyCwd,
+              close: async () => await pinned.close(),
+            }
+          : pinned;
+      },
+    };
+
+    // Act
+    const removed = await adapter(new BunGitRunner(), pinner).remove(removal(base, created.managed));
+
+    // Assert
+    should(removed.branchRetained).be.true();
+    should(removed.branchBlockers).match([{ code: 'git_error', message: /repository identity changed/u }]);
+    should(await setupGit(base.sourceCwd, 'branch', '--list', 'feature/managed')).containEql('feature/managed');
+  });
+
+  it('should keep the branch and say so when Git claims a deletion that left the ref in place', async () => {
+    // Arrange
+    const base = await withOrigin('svc-branch-phantom-delete');
+    const created = await adapter().create(request(base));
+    const success = {
+      exitCode: 0,
+      stdout: new Uint8Array(),
+      stderr: '',
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      timedOut: false,
+    };
+    const runner = new ScriptedGitRunner(invocation =>
+      invocation.args[0] === 'branch' && (invocation.args[1] === '-d' || invocation.args[1] === '-D')
+        ? success
+        : undefined,
+    );
+
+    // Act
+    const removed = await adapter(runner).remove(removal(base, created.managed));
+
+    // Assert
+    should(removed.branchRetained).be.true();
+    should(removed.branchBlockers).match([{ code: 'git_error', message: /still exists/u }]);
+  });
+
+  it('should keep the branch when the repository cannot even be held for its deletion', async () => {
+    // Arrange
+    const base = await withOrigin('svc-branch-pin-fails');
+    const created = await adapter().create(request(base));
+    const delegate = directoryPinner();
+    const pinner: WorktreeDirectoryPinner = {
+      pin: async cwd => {
+        if (path.resolve(cwd) === path.resolve(created.managed.repositoryRoot)) throw new Error('repository vanished');
+        return await delegate.pin(cwd);
+      },
+    };
+
+    // Act
+    const removed = await adapter(new BunGitRunner(), pinner).remove(removal(base, created.managed));
+
+    // Assert
+    should(removed.branchRetained).be.true();
+    should(removed.branchBlockers).match([{ code: 'git_error', message: /could not start: repository vanished/u }]);
+    should(await files.type(created.managed.path)).equal('missing');
   });
 });

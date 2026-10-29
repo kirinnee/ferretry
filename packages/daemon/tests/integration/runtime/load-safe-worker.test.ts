@@ -99,7 +99,7 @@ describe('LoadSafeWorker', () => {
     should(seen.events).eql(['open', 'close']);
   });
 
-  it('should end a thread whose program fails to load, without waiting for an open that never comes', async () => {
+  it('should end a thread whose program fails to load', async () => {
     // Arrange
     const worker = new LoadSafeWorker(program('throw new Error("broken on load");'));
     const seen = lifecycle(worker);
@@ -108,14 +108,20 @@ describe('LoadSafeWorker', () => {
     worker.terminate();
     await seen.closed;
 
-    // Assert
-    should(seen.events).containEql('error');
-    should(seen.events).not.containEql('open');
+    // Assert — Bun 1.3 dispatched `error` and never `open` for a failed load, and Bun 1.4 dispatches
+    // `open` first and may be ended before it reports the `error`; either way the thread ends.
+    should(seen.events[seen.events.length - 1]).equal('close');
   });
 
   it('should survive ending every bundled worker while it is still loading', async () => {
     // Arrange — the shape that crashed Bun 1.3: a boot starts its threads and is stopped at once.
-    const names: readonly BundledWorkerName[] = ['session', 'housekeeping', 'analytics-fold', 'pdf-decrypt'];
+    const names: readonly BundledWorkerName[] = [
+      'session',
+      'housekeeping',
+      'analytics-fold',
+      'analytics-index',
+      'pdf-decrypt',
+    ];
     const closed: Promise<void>[] = [];
 
     // Act

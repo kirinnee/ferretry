@@ -679,32 +679,38 @@ describe('ATTENTION_INSTRUCTION', () => {
 
     // Assert
     // Why first: the owner reads the board, so an ask left in a reply reaches nobody.
-    should(text).startWith('Attention: the owner reads the board, not your replies.');
-    should(text).containEql('`zz attention add "<summary>"`');
+    should(text).startWith('Attention: the owner reads the board, not your replies');
+    // Every notification is an item, and progress is never one.
+    should(text).containEql('every notification is an Attention item (never progress)');
     // Every human action is its own item, raised before the reply ends — never prose alone.
     should(text).containEql(
-      'Before ending a reply that asks them to decide or DO anything ("Next steps: You: …", "Waiting on you"), raise each ask as its OWN item',
+      'Before ending a reply that asks them to decide or DO anything, raise each ask as its OWN item',
     );
-    should(text).containEql('prose alone reaches nobody');
-    // Self-contained, in point form: the reader has not followed the conversation.
-    should(text).containEql('They read it cold: short bullets, one idea each');
-    should(text).containEql('no ticket/PR numbers, codenames, paths or unexplained acronyms');
+    // A card: a title that is the push heading, and a one-line ask that is its text.
+    should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
+    should(text).containEql('Title ≤40 chars (push heading); ask ≤120.');
+    // Isolated: the reader has not followed the conversation, and the test is whether they could answer cold.
+    should(text).containEql('Isolation test: could the owner answer with nothing else open?');
+    should(text).containEql('No "as above"');
+    // Point form: the situation, why now and earlier answers are separate flags; charts ride in the body.
+    should(text).containEql('Point form (ADHD-friendly)');
+    should(text).containEql('`--premise` = situation, `--context` = why now, `--decided` = earlier answers');
+    should(text).containEql('fy-render fence in `--body`');
+    should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
-    should(text).containEql('one plain sentence under 90 chars, answer first');
-    should(text).containEql('`--context` repeats');
-    should(text).containEql('every step in order via `--step "<markdown>"`');
-    should(text).containEql('never a secret value');
-    should(text).containEql('so the item alone is enough');
-    should(text).containEql('`--question` each decision with 2–4 short `--option`s');
+    // Kinds, at most three directional answers, the recommendation on the right.
+    should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
+    should(text).containEql('Choice: 2–3 `--option`s (what each does)');
     should(text).containEql('`--recommend <pick> --recommend-why <line>`');
-    // A tiny bad/good example.
-    should(text).containEql('Bad: "Need call on KT-412 re OCI cron"');
-    should(text).containEql('Good: "Keep the work login alive every 30 minutes?"');
-    should(text).containEql('Never for progress or finishing.');
+    should(text).containEql('`--up "<label>"`: 3rd answer (task, permission)');
+    should(text).containEql('`--step "<md>"` each');
+    should(text).containEql('no secrets');
     should(text).containEql('"[answer to !A3 …]"');
     // The need-more-info loop: expand the same item.
-    should(text).containEql('On "[needs more info !A3 …]", add what is missing with `zz attention edit <id>`');
-    should(text).containEql('say in the item why not');
+    should(text).containEql('"[needs more info !A3 …]" → `zz attention edit <id>`');
+    // The discussion loop: talk first, then update or close; open items are read on demand.
+    should(text).containEql('"[discuss !A3 …]" reply in chat, then edit/done');
+    should(text).containEql('Open: `zz attention ls`');
     should(text).containEql('Moot? `zz attention done <id>`');
     should(text).not.containEql('notify');
     should(text).not.containEql('fy ');
