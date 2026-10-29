@@ -2287,6 +2287,8 @@ describe('AppShell', () => {
         await settle();
         expect(refresh).toBeDefined();
         const scope = daemonSessionScope(alpha, 'shared');
+        // The first board read is a fetch through the mounted shell: wait for it, not for a fixed number of turns.
+        await settleUntil(() => store.attention.store.status(scope) === 'ready', 'the first board read', interact);
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
         // Nothing waiting: no pinned "Needs you" block.

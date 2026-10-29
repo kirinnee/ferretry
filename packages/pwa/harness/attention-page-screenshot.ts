@@ -153,7 +153,10 @@ try {
         try {
           let page = await open(context, theme, 'page');
           await rowsHeadedByItems(page, `desktop ${width}`);
-          if ((await page.locator('[data-attention-group]').count()) !== 2) fail('expected two groups');
+          if ((await page.locator('[data-attention-list] [data-attention-group]').count()) !== 2)
+            fail('expected two conversation groups');
+          if ((await page.locator('[data-attention-discussion-list] [data-attention-row]').count()) !== 1)
+            fail('expected the item in discussion under its own group');
           await row(page, 'A10').click();
           await page.waitForTimeout(150);
           if ((await selectedId(page)) !== 'A10') fail('clicking a row did not select it');
@@ -265,6 +268,9 @@ try {
       let page = await open(phone, theme, 'page');
       await rowsHeadedByItems(page, 'phone');
       await shot(page, scheme, 'page-phone-list');
+      await page.locator('[data-attention-discussion-list]').scrollIntoViewIfNeeded();
+      await shot(page, scheme, 'page-phone-discussion');
+      await page.evaluate(() => window.scrollTo(0, 0));
       await row(page, 'A10').click();
       await page.locator('[data-attention-inbox="card"]').waitFor({ state: 'visible' });
       await page.close();

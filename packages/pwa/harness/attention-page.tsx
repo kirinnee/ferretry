@@ -29,7 +29,7 @@ import {
 import { ActionsMenu } from '../src/features/session-actions/actions-menu.tsx';
 import { type SessionActionContribution, sessionActionSections } from '../src/features/session-actions/registry.ts';
 import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
-import { DeferredAttentionActions, type InboxCard, inboxCardKey } from '../src/lib/attention-inbox.ts';
+import { DeferredAttentionActions, type InboxCard, inboxCardKey, isInDiscussion } from '../src/lib/attention-inbox.ts';
 import { daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { daemonAttentionPath } from '../src/lib/pages/routes.ts';
@@ -376,9 +376,10 @@ function Inbox({
   const hidden = deferred.hiddenKeys();
   const inbox: AttentionInbox = {
     unread: [],
-    total: cards.length,
-    cards: cards.filter(entry => !hidden.has(entry.key)),
-    discussing: [],
+    total: cards.filter(entry => !isInDiscussion(entry.item)).length,
+    // Split as the shell splits them: an item in discussion is listed under "In discussion".
+    cards: cards.filter(entry => !hidden.has(entry.key) && !isInDiscussion(entry.item)),
+    discussing: cards.filter(entry => !hidden.has(entry.key) && isInDiscussion(entry.item)),
     reading: false,
     resolved,
     resolvedReading: false,
