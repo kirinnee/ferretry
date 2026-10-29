@@ -3,10 +3,13 @@ import { SessionStatusSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   EMPTY_WARDEN_STATE,
+  jevHandoffKey,
   parseWardenRuntimeState,
+  recordJevHandoff,
   recordSweepFingerprint,
   spawnSuppressionKey,
   WARDEN_ANOMALY_KINDS,
+  WARDEN_JEV_HANDOFF_LIMIT,
   wardenMayStop,
   type WardenRuntimeState,
 } from '../../../src/lib/warden/index.ts';
@@ -252,5 +255,52 @@ describe('what a warden capability authorizes', () => {
 
     // Act / Assert
     should(wardenMayStop(blank, '', 's1')).be.false();
+  });
+});
+
+describe('why Jev handed each flag on', () => {
+  const handoff = (at: string) => ({ at, status: 'thinking' as const, why: 'unsure', confidence: 0.4 });
+
+  it('should replace the earlier hand-on of the same flag and keep the others', () => {
+    // Arrange
+    const store = recordJevHandoff({}, { sessionId: 's1', kind: 'sus_thinking' }, handoff('2026-10-29T10:00:00.000Z'));
+
+    // Act
+    const actual = recordJevHandoff(
+      recordJevHandoff(store, { sessionId: 's2', kind: 'sus_thinking' }, handoff('2026-10-29T10:05:00.000Z')),
+      { sessionId: 's1', kind: 'sus_thinking' },
+      handoff('2026-10-29T11:00:00.000Z'),
+    );
+
+    // Assert
+    should(Object.keys(actual)).deepEqual([jevHandoffKey('s1', 'sus_thinking'), jevHandoffKey('s2', 'sus_thinking')]);
+    should(actual[jevHandoffKey('s1', 'sus_thinking')]?.at).equal('2026-10-29T11:00:00.000Z');
+  });
+
+  it('should keep only the newest, bounded', () => {
+    // Arrange
+    let store = {};
+    for (let index = 0; index < WARDEN_JEV_HANDOFF_LIMIT + 5; index += 1)
+      store = recordJevHandoff(
+        store,
+        { sessionId: `s${index}`, kind: 'sus_thinking' },
+        handoff(new Date(Date.UTC(2026, 9, 29, 0, index)).toISOString()),
+      );
+
+    // Assert
+    should(Object.keys(store)).have.length(WARDEN_JEV_HANDOFF_LIMIT);
+    should(store).not.have.property(jevHandoffKey('s0', 'sus_thinking'));
+    should(store).have.property(jevHandoffKey(`s${WARDEN_JEV_HANDOFF_LIMIT + 4}`, 'sus_thinking'));
+  });
+
+  it('should read them back from the state document, and drop a malformed one with its section', () => {
+    // Act
+    const good = parseWardenRuntimeState({ jevHandoffs: { 's1|sus_thinking': handoff('2026-10-29T10:00:00.000Z') } });
+    const bad = parseWardenRuntimeState({ jevHandoffs: { 's1|sus_thinking': { why: 'unsure' } }, lastSweepAt: 'x' });
+
+    // Assert
+    should(good.jevHandoffs?.['s1|sus_thinking']?.confidence).equal(0.4);
+    should(bad.jevHandoffs).be.undefined();
+    should(bad.lastSweepAt).equal('x');
   });
 });

@@ -1325,32 +1325,36 @@ describe('escalating to a human, and clearing it again', () => {
     should(subject.journal.find(entry => entry.type === 'fleet.warden_escalated')?.data.change).eql('refreshed');
   });
 
-  it('should not resurrect an escalation a person already addressed', async () => {
+  it('should not notify again about a subject the person was already told, once they read it', async () => {
     // Arrange
     const subject = escalating();
-    subject.seedResolved('s1', [
-      { source: 'agent-raised', sourceRef: wardenEscalationSourceRef('unattended_question'), resolvedAt: at(-1) },
-    ]);
-
-    // Act
     await subject.service.run({ force: false });
-
-    // Assert
-    should(subject.raises).be.empty();
-  });
-
-  it('should let a newer verdict raise again after a person addressed the last one', async () => {
-    // Arrange
-    const subject = escalating({ verdicts: async () => [needsHuman({ at: at(-1) })] });
-    subject.seedResolved('s1', [
-      { source: 'agent-raised', sourceRef: wardenEscalationSourceRef('unattended_question'), resolvedAt: at(-10) },
-    ]);
+    // Reading the notification resolves it.
+    subject.seedBoard('s1', []);
 
     // Act
     await subject.service.run({ force: false });
 
     // Assert
     should(subject.raises).have.length(1);
+    should(subject.state().notified).deepEqual({ ['s1|' + wardenEscalationSourceRef('unattended_question')]: at(0) });
+  });
+
+  it('should notify again once the subject cleared and came back', async () => {
+    // Arrange
+    const subject = escalating();
+    await subject.service.run({ force: false });
+    subject.seedBoard('s1', []);
+    subject.setFleet([session({ id: 's1', status: 'running' })]);
+    await subject.service.run({ force: false });
+    should(subject.state().notified).deepEqual({});
+    subject.setFleet([unattended('s1')]);
+
+    // Act
+    await subject.service.run({ force: false });
+
+    // Assert
+    should(subject.raises).have.length(2);
   });
 
   it('should tell a person the prohibition that stopped a repair being tried', async () => {

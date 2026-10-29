@@ -686,7 +686,8 @@ export const WardenActionSchema = z.object({
   outcome: WardenActionOutcomeSchema,
   /**
    * `warden` is an investigation's verdict or a rule; `jev` is Jev acting as first responder (a
-   * bless, or an act it was sure enough about); `owner` only ever blesses (Leave it longer).
+   * bless, or an act it was sure enough about); `owner` is the owner — Leave it longer, or an answer on
+   * a Warden card carried out by the Warden.
    */
   by: WardenClearedBySchema,
   anomalyKind: WardenAnomalyKindSchema.optional(),
@@ -860,9 +861,11 @@ export const WardenAttentionOutcomeSchema = z.enum(['items', 'clean-sweep', 'deg
 export type WardenAttentionOutcome = z.infer<typeof WardenAttentionOutcomeSchema>;
 
 /**
- * Every ferret that needs the owner, and why: the session attention boards joined with the Warden's
- * verdicts, the flags nothing has judged, and the actions a verdict asked for that wait on the owner.
- * The four outcomes never collapse: an unreadable board is `degraded`, not an all-clear.
+ * What the Warden needs the owner for: its own open Attention cards (`raisedBy: daemon`, a `warden:`
+ * source reference), read back from every live ferret's board — the same items the unified Attention
+ * inbox shows, never a second list. `warden-anomaly` and `warden-action` rows are no longer sent; the
+ * enum keeps them so an app reads an older machine. The four outcomes never collapse: an unreadable
+ * board is `degraded`, not an all-clear.
  */
 export const WardenAttentionViewSchema = z.object({
   generatedAt: InstantSchema,
