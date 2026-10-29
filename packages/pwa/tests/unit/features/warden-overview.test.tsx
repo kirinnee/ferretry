@@ -792,16 +792,28 @@ describe('WardenOverview investigations and watching', () => {
     try {
       // Act
       const row = must(withLeave.container.querySelector('[data-warden-row="watch:sess-a"]'), 'watch row');
-      const select = must(row.querySelector<HTMLSelectElement>('select[aria-label="Leave it longer"]'), 'select');
-      select.value = '4h';
-      await interact(() => select.dispatchEvent(new Event('change', { bubbles: true })));
+      const toggle = must(
+        [...row.querySelectorAll('button')].find(item => item.textContent === 'Leave it longer…'),
+        'leave toggle',
+      );
+      const closedBefore = toggle.getAttribute('aria-expanded');
+      await interact(() => toggle.click());
+      const openAfter = toggle.getAttribute('aria-expanded');
+      const choice = must(
+        [...withLeave.container.querySelectorAll('fieldset button')].find(item => item.textContent === 'For 4 hours'),
+        'choice',
+      ) as HTMLButtonElement;
+      await interact(() => choice.click());
       const text = withLeave.container.textContent ?? '';
 
       // Assert
       expect(row.textContent).toContain('Maryah');
       expect(row.textContent).toContain('pane lost');
+      expect(closedBefore).toBe('false');
+      expect(openAfter).toBe('true');
       expect(withLeaveCalls).toEqual(['sess-a:4h']);
-      expect(withoutLeave.container.querySelector('select')).toBeNull();
+      expect(withLeave.container.querySelector('fieldset')).toBeNull();
+      expect(withoutLeave.container.textContent).not.toContain('Leave it longer');
       expect(text).toContain('claude-default · in use');
       expect(text).toContain('codex-default · at limit');
     } finally {

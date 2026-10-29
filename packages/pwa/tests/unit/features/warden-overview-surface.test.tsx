@@ -206,19 +206,17 @@ describe('WardenOverviewSurface', () => {
     );
     try {
       await settle();
-      const choose = (container: HTMLElement, value: string) => {
-        const select = must(
-          container.querySelector<HTMLSelectElement>('select[aria-label="Leave it longer"]'),
-          'leave',
-        );
-        select.value = value;
-        select.dispatchEvent(new Event('change', { bubbles: true }));
-      };
+      const press = (container: HTMLElement, label: string) =>
+        must(
+          [...container.querySelectorAll('button')].find(item => item.textContent === label),
+          label,
+        ).click();
 
       // Act
-      await interact(() => choose(ok.container, ''));
-      await interact(() => choose(ok.container, 'until_change'));
-      await interact(() => choose(no.container, '1h'));
+      await interact(() => press(ok.container, 'Leave it longer…'));
+      await interact(() => press(ok.container, 'Until it changes'));
+      await interact(() => press(no.container, 'Leave it longer…'));
+      await interact(() => press(no.container, 'For 1 hour'));
       await settle();
 
       // Assert

@@ -80,7 +80,10 @@ export function FerretLink({
     <RouteLink
       to={daemonSessionPath(connection.daemonId, sessionId)}
       {...(onNavigate === undefined ? {} : { onNavigate })}
-      className={cn('min-w-0 truncate text-cell font-semibold text-fg no-underline hover:underline', className)}
+      className={cn(
+        'flex min-w-0 items-center !min-h-0 !min-w-0 text-cell font-semibold leading-base text-fg no-underline hover:underline',
+        className,
+      )}
     >
       <span className="truncate">{name}</span>
     </RouteLink>
@@ -95,7 +98,7 @@ export function ReportButton({ onClick, className }: { readonly onClick: () => v
       aria-label="Open report"
       title="Open report"
       className={cn(
-        'inline-flex min-h-[36px] min-w-[36px] shrink-0 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-fg sm:min-h-0 sm:min-w-0 sm:p-1',
+        'inline-flex !min-h-7 min-w-11 shrink-0 items-center justify-center rounded-control text-muted hover:bg-surface-2 hover:text-fg sm:!min-h-0 sm:min-w-0 sm:p-1',
         className,
       )}
       onClick={onClick}

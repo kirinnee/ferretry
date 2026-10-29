@@ -223,7 +223,7 @@ function InboxLine({
         // TODO(inbox-filter): switch to `/inbox?from=warden` once the Inbox filters by sender.
         to={daemonAttentionPath(connection.daemonId)}
         {...(onNavigate === undefined ? {} : { onNavigate })}
-        className="inline-flex min-h-[44px] items-center font-semibold text-accent no-underline sm:min-h-0"
+        className="inline-flex !min-h-8 !min-w-0 items-center font-semibold text-accent no-underline sm:!min-h-0"
       >
         {line.text} ›
       </RouteLink>

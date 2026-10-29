@@ -49,7 +49,7 @@ function FilterGroup<K extends string>({
             key={option.key}
             type="button"
             aria-pressed={value === option.key}
-            className="kt-tab !px-xs min-h-[44px] sm:min-h-0"
+            className="kt-tab !px-xs !min-h-8 !min-w-0 sm:!min-h-0"
             onClick={() => onChange(option.key)}
           >
             {option.label}
@@ -103,8 +103,20 @@ function ActionRow({
   const { reportPath } = row;
   return (
     <li className="flex min-w-0 flex-col" data-warden-action={row.key}>
-      <div className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs px-cell-x py-row-y sm:flex-nowrap">
-        <span className="w-8 shrink-0 text-meta text-faint [font-variant-numeric:tabular-nums]" title={newest?.full}>
+      {/* The whole row is the phone's tap target (any spot outside the link and buttons toggles the detail);
+          the reason button is the same toggle for a keyboard and a screen reader. */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the reason button inside is the accessible toggle */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: the reason button inside is the keyboard toggle */}
+      <div
+        className="flex min-h-[44px] min-w-0 flex-wrap items-center gap-x-sm gap-y-0 px-cell-x py-xs sm:min-h-0 sm:flex-nowrap sm:py-row-y"
+        onClick={event => {
+          if (!(event.target instanceof Element && event.target.closest('a, button'))) setOpen(current => !current);
+        }}
+      >
+        <span
+          className="w-8 shrink-0 text-meta leading-base text-faint [font-variant-numeric:tabular-nums]"
+          title={newest?.full}
+        >
           {newest?.compact}
         </span>
         <FerretLink
@@ -124,32 +136,33 @@ function ActionRow({
             ×{row.count}
           </span>
         )}
-        <button
-          type="button"
-          aria-expanded={open}
-          title={open ? 'Hide detail' : 'Show detail'}
-          className="order-last flex min-h-[32px] min-w-0 basis-full items-center gap-xs bg-transparent p-0 text-left sm:order-none text-cell text-fg-soft sm:min-h-0 sm:flex-1 sm:basis-0"
-          onClick={() => setOpen(current => !current)}
-        >
-          <span className={cn('min-w-0 flex-1', open ? 'sr-only' : 'truncate')}>{row.reason}</span>
-          {open ? (
-            <ChevronDown size={14} aria-hidden="true" className="ml-auto shrink-0 text-faint" />
-          ) : (
-            <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-faint" />
+        <span className="order-last flex min-w-0 basis-full items-center gap-xs sm:contents">
+          <button
+            type="button"
+            aria-expanded={open}
+            title={open ? 'Hide detail' : 'Show detail'}
+            className="flex min-w-0 flex-1 items-center gap-xs bg-transparent !p-0 !min-h-0 !min-w-0 text-left text-cell leading-base text-fg-soft"
+            onClick={() => setOpen(current => !current)}
+          >
+            <span className={cn('min-w-0 flex-1', open ? 'sr-only' : 'truncate')}>{row.reason}</span>
+            {open ? (
+              <ChevronDown size={14} aria-hidden="true" className="ml-auto shrink-0 text-faint" />
+            ) : (
+              <ChevronRight size={14} aria-hidden="true" className="shrink-0 text-faint" />
+            )}
+          </button>
+          {reportPath !== undefined && (
+            <ReportButton
+              onClick={() =>
+                onOpenReport({
+                  sessionId: row.sessionId,
+                  reportPath,
+                  ...(newest === undefined ? {} : { at: newest.full }),
+                })
+              }
+            />
           )}
-        </button>
-        {reportPath !== undefined && (
-          <ReportButton
-            className="ml-auto sm:ml-0"
-            onClick={() =>
-              onOpenReport({
-                sessionId: row.sessionId,
-                reportPath,
-                ...(newest === undefined ? {} : { at: newest.full }),
-              })
-            }
-          />
-        )}
+        </span>
       </div>
       {open && <Detail row={row} />}
     </li>

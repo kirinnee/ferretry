@@ -5,9 +5,8 @@
 
 import type { WardenStatusView } from '@ferretry/protocol';
 import { useState } from 'react';
-
-import { AnalyticsMetricChart } from '../analytics/analytics-metric-chart.tsx';
 import { cn } from '../../lib/class-names.ts';
+import { AnalyticsMetricChart } from '../analytics/analytics-metric-chart.tsx';
 import { ActorMark } from './warden-chips.tsx';
 import {
   CHART_SERIES,
@@ -70,7 +69,7 @@ export function WardenStatsPanel({ status, now }: { readonly status: WardenStatu
                 key={key}
                 type="button"
                 aria-pressed={period === key}
-                className="kt-tab !px-sm min-h-[44px] sm:min-h-0"
+                className="kt-tab !px-sm !min-h-8 !min-w-0 sm:!min-h-0"
                 onClick={() => setPeriod(key)}
               >
                 {PERIOD_LABEL[key]}
@@ -127,6 +126,8 @@ export function WardenStatsPanel({ status, now }: { readonly status: WardenStatu
             format={value => String(value)}
             axisTicks={wholeNumberTicks}
             emptyText="No actions this week."
+            plotClassName="h-28 sm:h-32"
+            resting="last"
           />
           {chart.missing > 0 && (
             <p className="m-0 text-meta text-faint">

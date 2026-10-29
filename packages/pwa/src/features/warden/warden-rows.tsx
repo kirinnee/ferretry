@@ -1,5 +1,8 @@
 /**
  * Investigations and Watching, in the same one-line style as Recent actions. Render-only.
+ *
+ * Wide: one line. On a phone: line 1 is the time and the name, line 2 is the chips (and whatever acts on
+ * the row), so a row is two short lines and never a card. The 44px touch floor is the row, not each line.
  */
 
 import {
@@ -8,6 +11,7 @@ import {
   type WardenLeaveDuration,
   type WardenStatusView,
 } from '@ferretry/protocol';
+import { useId, useState } from 'react';
 
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { FerretLink, ferretName, ReportButton, SectionTitle, WardenChipBadge } from './warden-chips.tsx';
@@ -26,7 +30,11 @@ interface ListProps {
   readonly onNavigate: ((to: string) => void) | undefined;
 }
 
-const TIME_CLASS = 'w-8 shrink-0 text-meta text-faint [font-variant-numeric:tabular-nums]';
+const TIME_CLASS = 'w-8 shrink-0 text-meta leading-base text-faint [font-variant-numeric:tabular-nums]';
+const ROW_CLASS =
+  'flex min-h-[44px] min-w-0 flex-wrap items-center gap-x-sm gap-y-0 px-cell-x py-xs sm:min-h-0 sm:flex-nowrap sm:py-row-y';
+/** The second phone line: it stays one line, and dissolves into the row's own line from `sm` up. */
+const SECOND_LINE_CLASS = 'order-last flex min-w-0 basis-full items-center gap-xs sm:contents';
 
 export function InvestigationList({
   connection,
@@ -50,16 +58,11 @@ export function InvestigationList({
           {rows.map(row => {
             const { reportPath } = row;
             return (
-              <li
-                key={row.key}
-                className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs px-cell-x py-row-y sm:flex-nowrap"
-                data-warden-investigation={row.key}
-                title={row.title}
-              >
+              <li key={row.key} className={ROW_CLASS} data-warden-investigation={row.key} title={row.title}>
                 <span className={TIME_CLASS} title={row.at === undefined ? undefined : fullTime(row.at)}>
                   {compactAgo(row.at, now)}
                 </span>
-                <span className="inline-flex min-w-[12rem] flex-1 items-baseline gap-xs text-cell sm:min-w-0">
+                <span className="inline-flex min-w-0 flex-1 items-baseline gap-xs text-cell leading-base">
                   <span className={row.named ? 'mono shrink-0 text-fg-soft' : 'shrink-0 text-muted'}>
                     {row.investigator}
                   </span>
@@ -77,23 +80,28 @@ export function InvestigationList({
                     </>
                   )}
                 </span>
-                <WardenChipBadge chip={row.chip} />
-                {row.anomaly !== undefined && <WardenChipBadge chip={row.anomaly} />}
-                {row.cost !== undefined && (
-                  <span className="shrink-0 text-meta text-muted [font-variant-numeric:tabular-nums]">{row.cost}</span>
-                )}
-                {reportPath !== undefined && row.sessionId !== undefined && (
-                  <ReportButton
-                    onClick={() =>
-                      onOpenReport({
-                        sessionId: row.sessionId!,
-                        reportPath,
-                        ...(row.at === undefined ? {} : { at: row.at }),
-                        ...(row.verdict === undefined ? {} : { verdict: row.verdict }),
-                      })
-                    }
-                  />
-                )}
+                <span className={`${SECOND_LINE_CLASS} pt-xs sm:pt-0`}>
+                  <WardenChipBadge chip={row.chip} />
+                  {row.anomaly !== undefined && <WardenChipBadge chip={row.anomaly} />}
+                  {row.cost !== undefined && (
+                    <span className="shrink-0 text-meta text-muted [font-variant-numeric:tabular-nums]">
+                      {row.cost}
+                    </span>
+                  )}
+                  {reportPath !== undefined && row.sessionId !== undefined && (
+                    <ReportButton
+                      className="ml-auto sm:ml-0"
+                      onClick={() =>
+                        onOpenReport({
+                          sessionId: row.sessionId!,
+                          reportPath,
+                          ...(row.at === undefined ? {} : { at: row.at }),
+                          ...(row.verdict === undefined ? {} : { verdict: row.verdict }),
+                        })
+                      }
+                    />
+                  )}
+                </span>
               </li>
             );
           })}
@@ -109,34 +117,107 @@ const LEAVE_LABELS: Readonly<Record<WardenLeaveDuration, string>> = {
   until_change: 'Until it changes',
 };
 
-/** "Leave it longer": a native select, so a keyboard reaches every choice and picking one sends it. */
+/**
+ * "Leave it longer": a small button that opens the three choices under the row. Buttons rather than a
+ * `<select>` because a phone draws a field at 16px or more, which is too big for a row this small.
+ */
 function LeaveLonger({
-  sessionId,
   busy,
-  onLeave,
+  open,
+  controls,
+  onToggle,
 }: {
-  readonly sessionId: string;
   readonly busy: boolean;
-  readonly onLeave: (sessionId: string, duration: WardenLeaveDuration) => void;
+  readonly open: boolean;
+  readonly controls: string;
+  readonly onToggle: () => void;
 }) {
   return (
-    <select
-      aria-label="Leave it longer"
-      className="kt-input !min-h-[44px] !w-auto max-w-[10rem] shrink-0 !py-0 !px-xs sm:!text-meta sm:!min-h-0"
-      value=""
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={controls}
       disabled={busy}
-      onChange={event => {
-        const choice = WARDEN_LEAVE_DURATIONS.find(duration => duration === event.target.value);
-        if (choice !== undefined) onLeave(sessionId, choice);
-      }}
+      className="ml-auto shrink-0 whitespace-nowrap rounded-control bg-transparent px-xs text-meta leading-base text-accent !min-h-7 !min-w-0 sm:!min-h-0"
+      onClick={onToggle}
     >
-      <option value="">{busy ? 'Leaving it…' : 'Leave it longer…'}</option>
+      {busy ? 'Leaving it…' : 'Leave it longer…'}
+    </button>
+  );
+}
+
+function LeaveChoices({
+  id,
+  onPick,
+}: {
+  readonly id: string;
+  readonly onPick: (duration: WardenLeaveDuration) => void;
+}) {
+  return (
+    <fieldset id={id} className="m-0 flex min-w-0 flex-wrap items-center gap-xs border-0 px-cell-x pb-xs pt-0">
+      <legend className="sr-only">Leave it longer</legend>
       {WARDEN_LEAVE_DURATIONS.map(duration => (
-        <option key={duration} value={duration}>
+        <button
+          key={duration}
+          type="button"
+          className="kt-btn kt-btn--sm !min-h-8 !min-w-0 sm:!min-h-0"
+          onClick={() => onPick(duration)}
+        >
           {LEAVE_LABELS[duration]}
-        </option>
+        </button>
       ))}
-    </select>
+    </fieldset>
+  );
+}
+
+function WatchingItem({
+  row,
+  connection,
+  sessions,
+  now,
+  onNavigate,
+  onLeave,
+  busy,
+}: ListProps & {
+  readonly row: WardenRow;
+  readonly onLeave: ((sessionId: string, duration: WardenLeaveDuration) => void) | undefined;
+  readonly busy: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const choicesId = useId();
+  const canLeave = row.leave === true && onLeave !== undefined;
+  return (
+    <li className="flex min-w-0 flex-col" data-warden-row={row.key} title={row.reason}>
+      <div className={ROW_CLASS}>
+        <span className={TIME_CLASS} title={row.at === undefined ? undefined : fullTime(row.at)}>
+          {compactAgo(row.at, now)}
+        </span>
+        <FerretLink
+          connection={connection}
+          sessionId={row.sessionId}
+          name={ferretName(sessions.get(row.sessionId), row)}
+          onNavigate={onNavigate}
+          className="max-w-[12rem] flex-1"
+        />
+        <span className={`${SECOND_LINE_CLASS} flex-wrap pt-xs sm:pt-0`}>
+          {row.chips.map(entry => (
+            <WardenChipBadge key={entry.label} chip={entry} />
+          ))}
+          {canLeave && (
+            <LeaveLonger busy={busy} open={open} controls={choicesId} onToggle={() => setOpen(current => !current)} />
+          )}
+        </span>
+      </div>
+      {canLeave && open && (
+        <LeaveChoices
+          id={choicesId}
+          onPick={duration => {
+            setOpen(false);
+            onLeave(row.sessionId, duration);
+          }}
+        />
+      )}
+    </li>
   );
 }
 
@@ -161,31 +242,16 @@ export function WatchingList({
       ) : (
         <ul className="m-0 flex list-none flex-col divide-y divide-border-soft p-0">
           {rows.map(row => (
-            <li
+            <WatchingItem
               key={row.key}
-              className="flex min-w-0 flex-wrap items-center gap-x-sm gap-y-xs px-cell-x py-row-y sm:flex-nowrap"
-              data-warden-row={row.key}
-              title={row.reason}
-            >
-              <span className={TIME_CLASS} title={row.at === undefined ? undefined : fullTime(row.at)}>
-                {compactAgo(row.at, now)}
-              </span>
-              <FerretLink
-                connection={connection}
-                sessionId={row.sessionId}
-                name={ferretName(sessions.get(row.sessionId), row)}
-                onNavigate={onNavigate}
-                className="max-w-[12rem] sm:flex-1"
-              />
-              <span className="flex min-w-0 flex-wrap items-center gap-xs">
-                {row.chips.map(entry => (
-                  <WardenChipBadge key={entry.label} chip={entry} />
-                ))}
-              </span>
-              {row.leave === true && onLeave !== undefined && (
-                <LeaveLonger sessionId={row.sessionId} busy={leaving.has(row.sessionId)} onLeave={onLeave} />
-              )}
-            </li>
+              row={row}
+              connection={connection}
+              sessions={sessions}
+              now={now}
+              onNavigate={onNavigate}
+              onLeave={onLeave}
+              busy={leaving.has(row.sessionId)}
+            />
           ))}
         </ul>
       )}
