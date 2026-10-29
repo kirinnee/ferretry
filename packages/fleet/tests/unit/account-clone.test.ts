@@ -1379,6 +1379,32 @@ describe('planClone default runtime for new agents', () => {
     should(plan.defaultRuntime).deepEqual({ kind: 'unset' });
   });
 
+  it('should say the default is unset, and what to do, when the person asked for none', () => {
+    // Arrange
+    const plan = planClone(targetWithDefault(), agentBundle(), options({ mode: 'replace', defaultRuntime: null }));
+
+    // Act
+    const lines = describeClone(plan, agentBundle(), 'Liftoff MBP', 'Liftoff EC2');
+
+    // Assert
+    should(lines).containEql(
+      'Default runtime for new agents on Liftoff MBP: none. Pick one in Settings › Machine before starting an agent without naming a runtime.',
+    );
+  });
+
+  it('should say the default is left unset when the copy has no agent runtime to take its place', () => {
+    // Arrange
+    const plan = planClone(targetWithDefault(), bundleWith(), options({ mode: 'replace' }));
+
+    // Act
+    const lines = describeClone(plan, bundleWith(), 'Liftoff MBP', 'Liftoff EC2');
+
+    // Assert
+    should(lines).containEql(
+      "Liftoff MBP's default runtime for new agents (claude-kirin) is replaced by this copy and the copy has no agent runtime to take its place, so it is left unset.",
+    );
+  });
+
   it('should refuse a chosen default that is not an agent runtime in the copy, and say what to do', () => {
     // Act
     const refusal = refusalOf(() =>
