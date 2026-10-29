@@ -208,6 +208,20 @@ describe('harness readiness', () => {
     should(rendered).match(/the claude command resolves, but this daemon launches published wrappers/u);
   });
 
+  it('should say why a harness is not usable when its published account cannot be launched', () => {
+    // Arrange: the manifest publishes a Claude account, but this host cannot run its wrapper.
+    const preflight = readHarnessPreflight([account()], hostWith(), NO_HARNESS_DECLARATIONS);
+
+    // Act
+    const rendered = renderHarnessPreflight(preflight, 'fy');
+    const claudeLine = rendered.find(line => line.startsWith('harness      claude'));
+
+    // Assert — the line carries the account's own reason, not the plain "no account published".
+    should(preflight.harnesses[0]?.blocked).have.length(1);
+    should(claudeLine).equal(`harness      claude  not usable — ${preflight.harnesses[0]?.blocked.join('; ')}`);
+    should(claudeLine).not.match(/no account published/u);
+  });
+
   it('should state the limit of what it verified every single time', () => {
     // Act
     const ready = renderHarnessPreflight(

@@ -442,6 +442,22 @@ describe('the machine agent browser — a person and an agent at once', () => {
     ).match({ code: 'not_running' });
   });
 
+  it('should move a person’s view to the session’s newest page when the page they viewed vanished from the browser', async () => {
+    // Arrange — the person's tab is closed inside Chrome itself, not through this service.
+    const { tabs, service } = harness();
+    const viewed = await service.openPage('s1', 'viewed');
+    const survivor = await service.openPage('s1', 'survivor');
+    tabs.pages = tabs.pages.filter(page => page.id !== viewed.id);
+
+    // Act
+    const status = await service.status('s1');
+    await service.act('s1', { action: 'screenshot' });
+
+    // Assert — the session is shown, and next acts on, the page that is still there.
+    should(activeOf(status)).equal(survivor.id);
+    should(tabs.calls.at(-1)).equal(`screenshot:${survivor.id}`);
+  });
+
   it('should describe a page it last saw in error, and only the page it last described', async () => {
     const { tabs, service } = harness();
     await service.act('s1', { action: 'new-page' });

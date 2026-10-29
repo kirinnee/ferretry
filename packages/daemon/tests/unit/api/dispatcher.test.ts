@@ -572,6 +572,26 @@ describe('the operator grant layer', () => {
     should(answered.body).match(/has not granted the UI the use of the agent fleet/u);
   });
 
+  it('should name the capability it refused when the guard has no sentence of its own', async () => {
+    // A refusal with no explanation is the dead end the guard exists to remove, so the dispatcher
+    // states the one fact it does know: which capability it will not serve.
+    // Arrange
+    const silent: CapabilityGuard = { ...guard(false), explain: () => undefined };
+    const dispatcher = new ApiDispatcher(new ApiRouter([governed()]), credentials, silent);
+
+    // Act
+    const answered = await dispatcher.dispatch(
+      request({ path: '/v1/fleet/plan', headers: { authorization: 'Bearer admin-secret' } }),
+    );
+
+    // Assert
+    should(answered.status).equal(403);
+    should(JSON.parse(answered.body)).containDeep({
+      code: 'grant_not_granted',
+      error: 'this daemon cannot say whether the UI may use fleet, so it is refusing',
+    });
+  });
+
   it('should leave an ungoverned route untouched by the grant layer', async () => {
     // Most of the daemon's surface lives inside its own state home and is not one of the five things
     // an operator is asked about. A grant list that grew to cover every route would be a second copy

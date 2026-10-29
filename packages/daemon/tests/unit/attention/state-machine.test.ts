@@ -694,6 +694,31 @@ describe('Attention state machine', () => {
     should(parseAttentionLedger(unknownLifecycle, SESSION_ID)).be.null();
   });
 
+  it.each(['source-reconciliation', 'warden-escalation', 'system', 'harness-prompt'] as const)(
+    'should decode a stored item raised by the %s daemon cause with that cause intact',
+    cause => {
+      // Arrange
+      const origin: AttentionActor = { kind: 'daemon', cause };
+      const stored = raised(origin, { source: 'task', sourceRef: 'F12', ask: undefined }).ledger;
+
+      // Act
+      const decoded = parseAttentionLedger(JSON.parse(JSON.stringify(stored)), SESSION_ID);
+
+      // Assert
+      should(decoded?.entries.map(entry => entry.origin)).deepEqual([origin]);
+    },
+  );
+
+  it('should refuse a stored item whose daemon cause is one this daemon does not know', () => {
+    // Arrange
+    const stored = raised(DAEMON, { source: 'task', sourceRef: 'F12', ask: undefined }).ledger;
+    const unknownCause = JSON.parse(JSON.stringify(stored)) as { entries: { origin: { cause: string } }[] };
+    unknownCause.entries[0]!.origin.cause = 'poltergeist';
+
+    // Act + Assert
+    should(parseAttentionLedger(unknownCause, SESSION_ID)).be.null();
+  });
+
   it('should bound newest-first resolution history without reusing ids', () => {
     // Arrange
     let ledger = emptyAttentionLedger(SESSION_ID, FIRST);

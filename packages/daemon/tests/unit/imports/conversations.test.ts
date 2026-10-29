@@ -316,6 +316,17 @@ describe('conversation discovery', () => {
   });
 });
 
+describe('conversation head', () => {
+  it('should skip a line of the head that is not JSON and read the next one that is', () => {
+    // Arrange — a transcript whose first record was cut off or scribbled over
+    const text = `this is not json\n${claude('x', '2026-10-17T08:00:00.000Z')}`;
+
+    // Act & Assert
+    should(conversationHead('claude', text)).deepEqual({ project: '/work/shop', id: undefined });
+    should(conversationHead('claude', 'still not json\n')).be.undefined();
+  });
+});
+
 describe('conversation adoption', () => {
   it('should adopt each chosen conversation with its file, folder and start choice', async () => {
     // Arrange
