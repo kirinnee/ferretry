@@ -7,6 +7,8 @@ import {
   type StartSessionRequest,
 } from '@ferretry/protocol';
 import should from 'should';
+import { withSystemCallsign } from '../../../../src/lib/runtime/mounts/system-session-control.ts';
+import type { SystemCallsignIssuer } from '../../../../src/lib/names/index.ts';
 import {
   CLEAN_UP_NAME,
   type CleanUpRun,
@@ -16,6 +18,7 @@ import {
   KEPT_RUNS,
 } from '../../../../src/lib/pack/cleanup/service.ts';
 import type { PackProbeOutcome, PackProbeRequest } from '../../../../src/lib/pack/probe.ts';
+import { issuerOver } from '../../names/system-callsigns-support.ts';
 import { sessionView } from '../../runtime/mounts/support.ts';
 
 const NOW = '2026-10-22T12:00:00.000Z';
@@ -90,6 +93,7 @@ function build(
     readonly unknownRuntime?: string;
     readonly stopFails?: boolean;
     readonly routingSource?: 'file' | 'default';
+    readonly issuer?: SystemCallsignIssuer;
   } = {},
 ) {
   const runs = new MemoryRuns();
@@ -99,6 +103,23 @@ function build(
   const statuses = new Map<string, string>();
   let ids = 0;
   let clock = 0;
+  const record = async (request: StartSessionRequest): Promise<SessionView> => {
+    starts.push(request);
+    const id = `cleanup-${String(starts.length)}`;
+    statuses.set(id, 'running');
+    return {
+      ...sessionView(id),
+      config: { ...sessionView(id).config, teammate: request.teammate ?? 'gonzalo' },
+    } as SessionView;
+  };
+  const startThrough = async (request: StartSessionRequest): Promise<SessionView> =>
+    options.issuer === undefined
+      ? await record(request)
+      : await withSystemCallsign(
+          { start: record, stop: async () => ({}) as SessionView, recover: async () => undefined },
+          options.issuer,
+          'pack',
+        ).start(request, 'run', JSON.stringify(request));
   const service = new CleanUpService({
     inventory: async () =>
       inventory(
@@ -114,12 +135,7 @@ function build(
       probes.push(request);
       return { outcome: options.probes?.[request.wrapper] ?? { ok: true, ms: 640 }, cached: false };
     },
-    start: async request => {
-      starts.push(request);
-      const id = `cleanup-${String(starts.length)}`;
-      statuses.set(id, 'running');
-      return { ...sessionView(id), config: { ...sessionView(id).config, teammate: 'gonzalo' } } as SessionView;
-    },
+    start: async request => await startThrough(request),
     status: async session => statuses.get(session),
     stop: async (session, reason) => {
       if (options.stopFails === true) throw new Error('the pane is gone');
@@ -590,5 +606,31 @@ describe('CleanUpService.status', () => {
       runtimes: [],
       reason: 'There is no agent runtime on this machine to clean up with.',
     });
+  });
+});
+
+describe('the callsign of a clean-up session', () => {
+  it('should start under a pack id, and record that id as the job name', async () => {
+    // Arrange
+    const { service, starts } = build({ issuer: issuerOver() });
+
+    // Act
+    const started = await service.start({ prompt: 'rough: opus, i guess' });
+
+    // Assert
+    should(starts[0]?.teammate).equal('pack-000001');
+    should(started.outcome === 'started' && started.job.name).equal('pack-000001');
+  });
+
+  it('should keep one counter across clean-ups', async () => {
+    // Arrange
+    const { service, starts } = build({ issuer: issuerOver() });
+
+    // Act
+    await service.start({ prompt: 'one' });
+    await service.start({ prompt: 'two' });
+
+    // Assert
+    should(starts.map(start => start.teammate)).deepEqual(['pack-000001', 'pack-000002']);
   });
 });

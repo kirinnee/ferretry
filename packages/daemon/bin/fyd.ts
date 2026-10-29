@@ -306,7 +306,8 @@ import {
 } from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
-import { FileNameClaimStore } from '../src/adapters/names/index.ts';
+import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
+import { FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import {
   bunProbeSpawn,
@@ -770,6 +771,7 @@ import {
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
+  SystemCallsignIssuer,
   type NameClaim,
   type NameSubsystem,
   type IoPressurePort,
@@ -1017,6 +1019,7 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  WardenCallsignTakenError,
   type WardenFleetSession,
   WardenLivenessMonitor,
   type WardenSubsystem,
@@ -4055,6 +4058,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             agent: request.agent,
             ...(request.model === undefined ? {} : { model: request.model }),
             name: request.name,
+            // Its own callsign, with no fallback: one would draw a first name from the pool, which is for real ferrets.
+            ...(request.teammate === undefined ? {} : { teammate: request.teammate }),
             // The label is what the detector's lineage shield reads: a warden that was not labelled
             // would be swept, flagged and investigated by the next warden, forever.
             label: WARDEN_LABEL,
@@ -4065,7 +4070,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             boardAccess: 'none' as const,
           };
           const payload = JSON.stringify(start);
-          const view = await parts.control.start(start, crypto.randomUUID(), payload);
+          const view = await parts.control.start(start, crypto.randomUUID(), payload).catch((error: unknown) => {
+            if (error instanceof SessionControlError && error.failure === 'callsign_taken')
+              throw new WardenCallsignTakenError(request.teammate ?? '');
+            throw error;
+          });
           return {
             sessionId: view.config.id,
             createdAt: view.config.createdAt,
@@ -8726,6 +8735,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
+      // System sessions (the Learning miner, Pack clean-up) take ids of their own, never a pool name.
+      const systemCallsigns = new SystemCallsignIssuer({
+        counters: new FileSystemCallsignCounters(join(paths.state, 'system-callsigns.json'), stateFiles),
+        held: async () => (await liveCallsigns(storage)).map(claim => claim.callsign),
+        serial: callsignClaims,
+      });
       const sessionControl = releasingAttachmentsOnStop(
         releasingAttachmentsOnStop(
           createSessionControlSubsystem(
@@ -9478,7 +9493,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: learningBoard,
         sessions,
         transcripts: createTranscriptReader(storage),
-        sessionControl,
+        sessionControl: withSystemCallsign(sessionControl, systemCallsigns, 'learning'),
         config: () => configFiles.current().evaluation.effective.learning,
         configFiles,
         identities: agentIdentities(storage),
@@ -9667,7 +9682,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         probeSettings: async () => (await configFiles.load()).evaluation.effective.pack.probe,
         probe: packProbe,
-        start: async request => await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request)),
+        start: async request =>
+          await withSystemCallsign(sessionControl, systemCallsigns, 'pack').start(
+            request,
+            crypto.randomUUID(),
+            JSON.stringify(request),
+          ),
         status: async reference => {
           const id = tryParseSessionId(reference);
           return id === undefined ? undefined : (await sessions.get(id))?.state.status;

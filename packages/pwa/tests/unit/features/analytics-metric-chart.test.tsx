@@ -61,6 +61,19 @@ describe('AnalyticsMetricChart', () => {
     expect(readout()).toBe('10-13 · $109.40');
   });
 
+  it('rests on the newest bar with none dimmed when asked, and takes its own plot height', () => {
+    const renderer = render(<AnalyticsMetricChart {...COST} points={POINTS} resting="last" plotClassName="h-28" />);
+    const readout = () => renderer.root.findByProps({ 'data-chart-readout': '' }).children.join('');
+    const dimmed = () => renderer.root.findAll(node => String(node.props.className ?? '').includes('opacity-75'));
+    expect(readout()).toBe('10-14 · $20.00');
+    expect(dimmed()).toHaveLength(0);
+    expect(renderer.root.findByProps({ 'data-chart-axis': '' }).props.className).toContain('h-28');
+    expect(renderer.root.findByProps({ 'data-chart-axis': '' }).props.className).not.toContain('h-40');
+    run(() => renderer.root.findByProps({ 'data-chart-point': '2026-10-13' }).props.onPointerEnter());
+    expect(readout()).toBe('10-13 · $109.40');
+    expect(dimmed().length).toBeGreaterThan(0);
+  });
+
   it('stacks several series with a legend, on caller ticks', () => {
     const renderer = render(
       <AnalyticsMetricChart

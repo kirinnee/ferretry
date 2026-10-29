@@ -1,15 +1,13 @@
 /**
- * The daemon-bound host of the Warden page: it reads the status and the "who needs you" feed, runs the
- * owner's sweep and investigate requests, and opens reports — all through the ONE paired connection it
+ * The daemon-bound host of the Warden page: it reads the status and the Warden's notification count, runs the
+ * owner's sweep and leave requests, and opens reports — all through the ONE paired connection it
  * was given, so nothing read from one daemon is shown or acted on through another.
  *
  * Everything below is keyed by the daemon id, so a switch to another paired daemon mounts a fresh body:
  * a late answer, a notice or an in-flight request from the previous one cannot reach the screen.
  *
  * SWEEP NOW is the free deterministic sweep (`spawn: false`): it flags, and whatever the triage then does
- * is the configured triage's business. INVESTIGATE skips Jev and the blessing, waits for a slot and counts
- * against today's cap; the daemon refuses it (409) when the Warden is off or the cap is hit, and its own
- * sentence is shown, because it is the one that knows which. LEAVE IT LONGER keeps the Warden off a
+ * is the configured triage's business. LEAVE IT LONGER keeps the Warden off a
  * flagged or cleared ferret for a while; the daemon's sentence says for how long.
  */
 
@@ -20,13 +18,13 @@ import { useWardenPoll, type WardenPollOptions } from '../../hooks/use-warden-po
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { daemonSettingsPath } from '../../lib/pages/routes.ts';
 import { useDaemonClient } from '../../lib/store.tsx';
-import type { WardenRow } from './warden-overview-model.ts';
+import type { WardenReportTarget } from './warden-overview-model.ts';
 import { type WardenNotice, WardenOverview } from './warden-overview.tsx';
 import { WardenReportDialog, type WardenReportDialogRequest } from './warden-report-dialog.tsx';
 
 export type WardenOverviewClient = Pick<
   IFyApiClient,
-  'wardenStatus' | 'wardenAttention' | 'wardenRun' | 'wardenInvestigate' | 'wardenLeave' | 'wardenReport'
+  'wardenStatus' | 'wardenAttention' | 'wardenRun' | 'wardenLeave' | 'wardenReport'
 >;
 export type WardenOverviewClientFactory = (connection: DaemonConnection) => Promise<WardenOverviewClient>;
 
@@ -63,7 +61,6 @@ function WardenOverviewBody({
   const [revision, setRevision] = useState(0);
   const [sweeping, setSweeping] = useState(false);
   const [notice, setNotice] = useState<WardenNotice | null>(null);
-  const [investigating, setInvestigating] = useState<ReadonlySet<string>>(new Set());
   const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set());
   const [report, setReport] = useState<WardenReportDialogRequest | null>(null);
 
@@ -100,20 +97,6 @@ function WardenOverviewBody({
     }
   };
 
-  const investigate = async (sessionId: string): Promise<void> => {
-    setInvestigating(current => new Set([...current, sessionId]));
-    setNotice(null);
-    try {
-      const answer = await (await createClient(connection)).wardenInvestigate({ sessionId });
-      setNotice({ tone: 'ok', text: answer.message });
-    } catch (cause) {
-      setNotice({ tone: 'err', text: `No investigation: ${reasonOf(cause)}` });
-    } finally {
-      setInvestigating(current => new Set([...current].filter(id => id !== sessionId)));
-      setRevision(current => current + 1);
-    }
-  };
-
   const leave = async (sessionId: string, duration: WardenLeaveDuration): Promise<void> => {
     setLeaving(current => new Set([...current, sessionId]));
     setNotice(null);
@@ -128,7 +111,7 @@ function WardenOverviewBody({
     }
   };
 
-  const openReport = (row: WardenRow & { readonly reportPath: string }): void => {
+  const openReport = (row: WardenReportTarget): void => {
     setReport({
       connection,
       verdict: {
@@ -150,11 +133,9 @@ function WardenOverviewBody({
         now={now()}
         sweeping={sweeping}
         notice={notice}
-        investigating={investigating}
         settingsHref={wardenSettingsHref(connection)}
         {...(onNavigate === undefined ? {} : { onNavigate })}
         onSweep={() => void sweep()}
-        onInvestigate={sessionId => void investigate(sessionId)}
         onLeave={(sessionId, duration) => void leave(sessionId, duration)}
         leaving={leaving}
         onOpenReport={openReport}
