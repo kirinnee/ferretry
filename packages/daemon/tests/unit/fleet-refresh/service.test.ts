@@ -141,6 +141,32 @@ describe('the fleet refresh loop', () => {
     should(told).deepEqual([['idle-login']]);
   });
 
+  it('should contain a failing schedule read and still run the next tick', async () => {
+    // Arrange
+    let reads = 0;
+    const told: (readonly string[])[] = [];
+    const service = new FleetRefreshService({
+      usage: { accounts: async () => [], snapshotAt: () => undefined, hasSnapshot: () => false },
+      schedule: {
+        start: async () => undefined,
+        due: () => {
+          reads += 1;
+          if (reads === 1) throw new Error('the schedule could not be read');
+          return ['idle-login'];
+        },
+        observed: ids => told.push(ids),
+        close: () => undefined,
+      },
+    });
+
+    // Act
+    await service.run();
+    await service.run();
+
+    // Assert — the first tick's failure was contained, and did not poison the tail for the next.
+    should(told).deepEqual([['idle-login']]);
+  });
+
   it('should arm its schedule, and close it with what arming answered', async () => {
     // Arrange
     const events: string[] = [];

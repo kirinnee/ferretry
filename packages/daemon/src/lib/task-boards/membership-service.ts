@@ -165,12 +165,6 @@ export class TaskBoardMembershipService {
       authorization.grantId,
       authorization.runtimeGeneration,
     ]);
-    const replay = board.appliedOperations.find(operation => operation.requestId === requestId);
-    if (replay !== undefined) {
-      if (grant === undefined || !isExactRelinquishReplay(replay, grant, command.member))
-        throw new TaskBoardError('conflict', 'the membership relinquish request id was reused');
-      return { state, result: { relinquished: true, sessionId: authorization.sessionId, sessionStopped: false } };
-    }
     const verifiedReplacement = board.invitations.find(
       invitation =>
         invitation.status === 'accepted' &&

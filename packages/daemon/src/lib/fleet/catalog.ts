@@ -550,18 +550,12 @@ export function profileCatalog(model: AccountModel, facts: CatalogFacts): FleetL
 function modelSetView(resolved: ResolvedProfile | undefined): FleetRuntimeModelSet {
   const set = resolved?.modelSet;
   if (set === undefined || set.source === 'harness-default') return { source: 'harness-default' };
-  const note = set.noneAvailable
-    ? 'None of these models is available on this login, so the tool picks its own.'
-    : set.fellBack
-      ? `${set.declaredDefault} is not available on this login, so ${set.default as string} is the default.`
-      : undefined;
   return {
     source: 'model-set',
     name: set.layer.name,
     models: set.models.map(model => ({ id: model.id, available: model.available })),
     declaredDefault: set.declaredDefault,
     ...(set.default === undefined ? {} : { default: set.default }),
-    ...(note === undefined ? {} : { note }),
   };
 }
 
