@@ -52,6 +52,18 @@ export async function parseInSlices(
 export const DEFAULT_MAX_READ_BYTES = 32 * 1024 * 1024;
 
 /**
+ * The most bytes one STEP of a follower or a window reads, under {@link DEFAULT_MAX_READ_BYTES}.
+ *
+ * A step is held in memory several times over while it is parsed — the bytes, each record's text, the
+ * events made of them — and a follower gains nothing from a big one: it reads on until the file ends.
+ * At 32 MiB a step held the daemon's memory ~75 MB above where it started; on a machine short of
+ * memory the kernel throttles every allocation past its limit, and that is where the loop stalled
+ * (CI's memory-capped budget, 273 ms in a window of a 100 MB transcript). 8 MiB costs a few more
+ * reads and no data: a record longer than a step is carried across steps as before.
+ */
+const DEFAULT_MAX_STEP_BYTES = 8 * 1024 * 1024;
+
+/**
  * The most bytes retained for one unterminated record while waiting for its newline.
  *
  * A record larger than this is discarded and reported rather than buffered until the process dies. It
@@ -681,7 +693,7 @@ async function reconcileFollow(
 
   let read: BoundedTranscriptRead;
   try {
-    read = await runtime.readFrom(file, base.byteOffset, limits.maxReadBytes);
+    read = await runtime.readFrom(file, base.byteOffset, Math.min(limits.maxReadBytes, DEFAULT_MAX_STEP_BYTES));
   } catch (error) {
     if (errorCode(error) === 'ENOENT') return missingResult(parser, file, state, observer);
     const next = { ...base, availability: 'error' as const };

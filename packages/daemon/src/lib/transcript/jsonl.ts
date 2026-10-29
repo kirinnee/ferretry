@@ -162,9 +162,10 @@ function byteRecords(
       body: decoder.decode(parsed),
       terminated,
       ...(parsed === whole ? {} : { referenced: true }),
-      // Copied, not viewed: evidence must not change meaning if the read buffer is reused, and a
-      // terminal record is retained exactly as long as it is, with no terminator invented for it.
-      bytes: bytes.slice(index, sliceEnd),
+      // A view, not a copy: every read hands the parser a buffer of its own that nothing writes to
+      // again, and copying each record doubled what a read held in memory. A terminal record is
+      // retained exactly as long as it is, with no terminator invented for it.
+      bytes: bytes.subarray(index, sliceEnd),
     });
     index = sliceEnd;
   }
