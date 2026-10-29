@@ -1,4 +1,5 @@
 import { afterAll, describe, it } from 'bun:test';
+import { unlinkSync } from 'node:fs';
 import { chmod, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import should from 'should';
@@ -294,6 +295,36 @@ describe.if(process.platform === 'linux')(
       should(asked.length).equal(1);
       should(asked[0]).match(/\/a\.ts$/);
       should((error as FsError).code).equal('not_a_directory');
+    });
+
+    it('should list an entry without its size when it vanished between the listing and its description', async () => {
+      // Arrange: the directory's names are read in one batch, so a name removed before it is described is
+      // still listed by the kernel's answer but no longer there to describe. The budget is asked before
+      // each entry is described, which is the moment a concurrent deletion would land.
+      const root = await fixture('fault-vanished-procfs');
+      const pinned = await new ProcfsSessionRootPinner().pin(root);
+      const directory = await pinned.open('src', { wantDirectory: true });
+      let removed = false;
+      const budget: WorkBudget = {
+        expired: () => {
+          if (!removed) {
+            removed = true;
+            unlinkSync(path.join(root, 'src', 'a.ts'));
+            unlinkSync(path.join(root, 'src', 'b.ts'));
+          }
+          return false;
+        },
+      };
+
+      // Act
+      const listing = await directory.list(10, budget);
+      await directory.close();
+      await pinned.close();
+
+      // Assert: nothing is invented about what is gone, and nothing is dropped or refused for it.
+      should(listing.truncated).be.false();
+      should(listing.entries.map(entry => entry.name).sort()).eql(['a.ts', 'b.ts']);
+      for (const entry of listing.entries) should(entry).eql({ name: entry.name, type: 'file' });
     });
 
     it.skipIf(process.getuid?.() === 0)(

@@ -215,6 +215,47 @@ describe('the analytics store on disk', () => {
     });
   });
 
+  it('should round-trip an unpriced session with its stated reason, with or without a model identity', async () => {
+    // "Unpriced" is a result an operator can act on, so the reason has to survive a restart rather than
+    // collapse into a free session or a lost price.
+    // Arrange
+    const paths = await temporaryPaths();
+    const first = await open(paths);
+    const base = storedSession();
+    const named: AnalyticsStoredSession = {
+      ...base,
+      raw: { ...base.raw, id: 'named', equivalentApiCostUsdMicros: null },
+      pricing: {
+        kind: 'unpriced',
+        identity: {
+          raw: 'claude-opus-5',
+          modelId: 'claude-opus-5',
+          variant: null,
+          contextWindow: null,
+          revision: null,
+        },
+        reason: 'unknown_pricing_model',
+      },
+      signature: 'signature-named',
+    };
+    const anonymous: AnalyticsStoredSession = {
+      ...base,
+      raw: { ...base.raw, id: 'anonymous', pricingModel: null, equivalentApiCostUsdMicros: null },
+      pricing: { kind: 'unpriced', identity: null, reason: 'missing_pricing_model' },
+      signature: 'signature-anonymous',
+    };
+    first.store.upsert([named, anonymous]);
+    closeStore(first.store);
+
+    // Act — a restarted daemon reads the file back.
+    const second = await open(paths);
+
+    // Assert
+    const byId = new Map(second.store.rows().map(row => [row.raw.id, row.pricing]));
+    should(byId.get('named')).deepEqual(named.pricing);
+    should(byId.get('anonymous')).deepEqual(anonymous.pricing);
+  });
+
   it('should refuse at the schema to hold a token count beside a refusal', async () => {
     // The one row this table must never contain is a session reported as having spent nothing when its
     // evidence could not be read. That is a CHECK constraint, not a convention the writer remembers.
@@ -453,6 +494,26 @@ describe('the analytics store on disk', () => {
     // Assert
     should(opened.rebuildRequired).be.true();
     should(opened.store.rows()).be.empty();
+  });
+
+  it('should discard a database whose state-home record cannot be read rather than fail to open', async () => {
+    // A file with tables but no `analytics_meta` at all cannot say whose it is; that is a file to discard,
+    // not an error that takes the daemon down.
+    // Arrange
+    const paths = await temporaryPaths();
+    const first = await open(paths);
+    first.store.upsert([storedSession()]);
+    closeStore(first.store);
+    const database = new Database(paths.analyticsIndex, { strict: true });
+    database.exec('DROP TABLE analytics_meta');
+    database.close();
+
+    // Act
+    const second = await open(paths);
+
+    // Assert
+    should(second.rebuildRequired).be.true();
+    should(second.store.rows()).be.empty();
   });
 
   it('should refuse a symlinked index file rather than following it out of the state home', async () => {

@@ -793,6 +793,41 @@ describe('hosted rendezvous enforcement', () => {
     should(harness.objectState.storage.alarms.length).be.above(alarmsBefore);
   });
 
+  it('should refuse every socket and still report an alarm that could not be re-armed after the kill switch', async () => {
+    const hosted = hostedEnvironment(path =>
+      path === '/internal/inspect'
+        ? { ok: false, code: RELAY_CLOSE_CODES.hostedDisabled, reason: 'hosted relay is disabled' }
+        : { ok: true },
+    );
+    const harness = makeObject({}, hosted.environment);
+    const { daemonSocket } = await claimRendezvous(harness, 'daemon_reservation');
+    daemonSocket.drain();
+    harness.objectState.storage.setAlarm = async () => {
+      throw new Error('alarm storage is down');
+    };
+
+    await should(harness.object.alarm()).be.rejectedWith(/alarm storage is down/u);
+
+    should(daemonSocket.closed?.code).equal(RELAY_CLOSE_CODES.hostedDisabled);
+    should(releasedBy(hosted.calls)).deepEqual(['daemon_reservation']);
+  });
+
+  it('should still apply a departure when the runtime refuses to rewrite the departing socket', async () => {
+    // A socket the runtime already tore down rejects serializeAttachment; it holds nothing to mark.
+    const hosted = hostedEnvironment();
+    const harness = makeObject({}, hosted.environment);
+    const { daemonSocket } = await claimRendezvous(harness, 'daemon_reservation', '?features=claim-probe');
+    daemonSocket.serializeAttachment = () => {
+      throw new Error('socket is already gone');
+    };
+
+    await harness.object.webSocketClose(daemonSocket);
+
+    should(releasedBy(hosted.calls)).deepEqual(['daemon_reservation']);
+    const stored = harness.objectState.storage.values.get('rendezvous') as RendezvousState;
+    should(stored.daemon).be.null();
+  });
+
   it('should still close and release when a state-machine refusal cannot be explained', async () => {
     // The reducer refuses with two effects, "say why" then "close", and the close is the one that
     // gives the slot back. An undeliverable explanation must not abandon the rest of the transition.
