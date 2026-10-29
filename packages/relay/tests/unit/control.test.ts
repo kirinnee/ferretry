@@ -75,7 +75,25 @@ describe('relay features', () => {
     should(ControlMessageSchema.safeParse({ t: 'held', extra: true }).success).be.false();
   });
 
+  it('should accept replaces and handover only as tokens of the exact width, and nothing extra', () => {
+    const token = 'T'.repeat(43);
+    const claim = { t: 'claim', protocol: RELAY_PROTOCOL_ID, publicKey, signature };
+    const claimed = { t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits: RELAY_LIMITS };
+    should(ControlMessageSchema.safeParse({ ...claim, replaces: token }).success).be.true();
+    should(ControlMessageSchema.safeParse({ ...claim, replaces: 'short' }).success).be.false();
+    should(ControlMessageSchema.safeParse({ ...claim, replaces: `${token}=` }).success).be.false();
+    should(
+      ControlMessageSchema.safeParse({ ...claimed, features: ['claim-handover'], handover: token }).success,
+    ).be.true();
+    should(ControlMessageSchema.safeParse({ ...claimed, handover: 'short' }).success).be.false();
+    should(ControlMessageSchema.safeParse({ ...claimed, other: token }).success).be.false();
+  });
+
   it('should read only the features this version speaks from a daemon route query', () => {
+    should(requestedRelayFeatures(new URLSearchParams('features=claim-probe,claim-handover'))).deepEqual([
+      'claim-probe',
+      'claim-handover',
+    ]);
     should(requestedRelayFeatures(new URLSearchParams('features=claim-probe'))).deepEqual(['claim-probe']);
     should(requestedRelayFeatures(new URLSearchParams('features=time-travel,claim-probe'))).deepEqual(['claim-probe']);
     should(requestedRelayFeatures(new URLSearchParams('features=time-travel'))).deepEqual([]);
