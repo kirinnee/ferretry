@@ -433,7 +433,7 @@ const RESOLVED_SEVEN: readonly ResolvedAttentionItem[] = [
     'A11',
     320,
     { subject: 'Which login should the new runtime use?', ask: { kind: 'open-question' } },
-    { response: { kind: 'open-question', text: 'The team login, please.' } },
+    { response: { kind: 'open-question', answer: 'The team login, please.' } },
   ),
   resolvedItem(
     'A10',

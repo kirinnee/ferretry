@@ -5,6 +5,7 @@ import {
   AttentionResolvedList,
   byNewestResolution,
   resolvedActionContribution,
+  resolvedWhen,
   resolvedWords,
 } from '../../../src/features/attention/attention-resolved.tsx';
 import '../../support/dom.ts';
@@ -49,6 +50,28 @@ describe('the resolved records', () => {
     const older = record('A1', '2026-07-31T10:00:00.000Z');
     const newer = record('A2', '2026-07-31T11:00:00.000Z');
     expect([older, newer].sort(byNewestResolution).map(r => r.id)).toEqual(['A2', 'A1']);
+  });
+
+  test('the time reads short, without a year or seconds', () => {
+    const stamp = resolvedWhen('2026-10-23T08:54:30.000Z', 'UTC');
+    expect(stamp).toContain('Oct');
+    expect(stamp).toContain('23');
+    expect(stamp).not.toContain('2026');
+    expect(stamp).not.toMatch(/:\d\d:\d\d/);
+  });
+
+  test('an open-question answer reads as its own words, never "undefined"', async () => {
+    view = await mount(
+      <AttentionResolvedList
+        panelId="attn"
+        records={[
+          record('A1', '2026-07-31T10:00:00.000Z', { response: { kind: 'open-question', answer: 'The team login.' } }),
+        ]}
+      />,
+    );
+    const text = must(view.container, 'view').textContent ?? '';
+    expect(text).toContain('Answered: The team login.');
+    expect(text).not.toContain('undefined');
   });
 
   test('the list shows each record newest first with how it was cleared, and rings the linked one', async () => {

@@ -27,6 +27,16 @@ export const byNewestResolution = (left: ResolvedAttentionItem, right: ResolvedA
 /** "7 resolved" — the words the menu entry and the inbox filter use. */
 export const resolvedWords = (count: number): string => `${count} resolved`;
 
+/** When it was cleared, short and in the reader's own time: "Oct 23, 8:54 AM" — no year, no seconds. */
+export const resolvedWhen = (instant: string, timeZone?: string): string =>
+  new Date(instant).toLocaleString(undefined, {
+    day: 'numeric',
+    month: 'short',
+    hour: 'numeric',
+    minute: '2-digit',
+    ...(timeZone === undefined ? {} : { timeZone }),
+  });
+
 /** Where a record lives when it is read across conversations: the ferret and machine, and a link to it. */
 export interface ResolvedOrigin {
   readonly ferret: string;
@@ -83,7 +93,7 @@ export function ResolvedRow({
         </span>
         <span className="mono">{attentionReference(record.id)}</span>
         {highlighted ? <span className="fy-attn-card__pointer">linked</span> : null}
-        <span>{new Date(record.resolvedAt).toLocaleString()}</span>
+        <span>{resolvedWhen(record.resolvedAt)}</span>
       </p>
       {record.response ? <p className="fy-attn-panel__record-answer">{describeResponse(record.response)}</p> : null}
       {record.resolutionNote ? <p className="fy-attn-panel__record-note">{record.resolutionNote}</p> : null}
