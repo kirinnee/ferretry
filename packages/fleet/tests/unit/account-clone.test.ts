@@ -1379,6 +1379,21 @@ describe('planClone default runtime for new agents', () => {
     should(plan.defaultRuntime).deepEqual({ kind: 'unset' });
   });
 
+  it('should say which runtime the person chose as the default', () => {
+    // Arrange
+    const plan = planClone(
+      targetWithDefault(),
+      agentBundle(),
+      options({ mode: 'replace', defaultRuntime: 'claude-liftoff' }),
+    );
+
+    // Act
+    const lines = describeClone(plan, agentBundle(), 'Liftoff MBP', 'Liftoff EC2');
+
+    // Assert
+    should(lines).containEql('Default runtime for new agents on Liftoff MBP: claude-liftoff.');
+  });
+
   it('should say the default is unset, and what to do, when the person asked for none', () => {
     // Arrange
     const plan = planClone(targetWithDefault(), agentBundle(), options({ mode: 'replace', defaultRuntime: null }));
