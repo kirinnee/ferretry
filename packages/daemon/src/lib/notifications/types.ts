@@ -1,7 +1,6 @@
 import {
   AttentionIdSchema,
   DirectNotificationRequestSchema,
-  type DirectNotificationResponse,
   InstantSchema,
   NonNegativeIntegerSchema,
   PositiveIntegerSchema,
@@ -9,7 +8,6 @@ import {
   PushNotificationKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
-import type { AttentionFailure } from '../attention/index.ts';
 import type { SerialExecutor } from '../ports.ts';
 import type { PushDispatch } from '../push/types.ts';
 
@@ -134,7 +132,3 @@ export interface NotificationClock {
 }
 
 export type NotificationSerialExecutor = Pick<SerialExecutor, 'run'>;
-
-export type NotificationResult<T = DirectNotificationResponse> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: AttentionFailure };

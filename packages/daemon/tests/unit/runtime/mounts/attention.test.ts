@@ -1,15 +1,12 @@
 import { describe, it } from 'bun:test';
-import { type DirectNotificationRequest, FY_REQUEST_ID_HEADER } from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { type ApiCredentials, ApiDispatcher, type ApiResponse, ApiRouter } from '../../../../src/lib/api/index.ts';
 import type {
-  AttentionActor,
   AttentionLedger,
   AttentionLedgerRepository,
   AttentionMutation,
 } from '../../../../src/lib/attention/index.ts';
-import type { NotificationResult } from '../../../../src/lib/notifications/index.ts';
 import {
   attentionActor,
   attentionRoutes,
@@ -30,14 +27,8 @@ class BrokenLedgerRepository implements AttentionLedgerRepository {
 }
 
 class FakeNotifications implements DirectNotificationSubsystem {
-  readonly calls: Array<{
-    readonly sessionId: string;
-    readonly request: DirectNotificationRequest;
-    readonly actor: AttentionActor;
-    readonly attribution: string;
-    readonly requestId: string;
-  }> = [];
-  result: NotificationResult = { ok: true, value: { sessionId: 's1', delivered: 0 } };
+  readonly asked: Array<{ readonly sessionId: string; readonly attentionId: string }> = [];
+  delivered = 0;
   enrolled: number | Error = 2;
 
   async enrolledDevices(): Promise<number> {
@@ -45,15 +36,9 @@ class FakeNotifications implements DirectNotificationSubsystem {
     return this.enrolled;
   }
 
-  async notifyDirect(
-    sessionId: string,
-    request: DirectNotificationRequest,
-    actor: AttentionActor,
-    attribution: string,
-    requestId: string,
-  ): Promise<NotificationResult> {
-    this.calls.push({ sessionId, request, actor, attribution, requestId });
-    return this.result;
+  async attentionDelivered(sessionId: string, attentionId: string): Promise<number> {
+    this.asked.push({ sessionId, attentionId });
+    return this.delivered;
   }
 }
 
@@ -79,6 +64,7 @@ const post = (body: unknown, headers: Readonly<Record<string, string>> = human) 
  *  without an `ask` is a refusal rather than an open-ended "please look at this". */
 const raise = {
   action: 'add',
+  title: 'Release unblock',
   subject: 'which base branch?',
   why: 'the ticket names two',
   howToResolve: 'name the branch to target',
@@ -405,131 +391,141 @@ describe('attention routes', () => {
     should(response.status).equal(401);
   });
 
-  it('should serve a direct notification with the request id and server-derived human actor', async () => {
+  it('should turn a notify into an info item the calling ferret raised, and answer how many devices it reached', async () => {
     // Arrange
     const notifications = new FakeNotifications();
-    notifications.result = { ok: true, value: { sessionId: 's1', delivered: 2 } };
+    notifications.delivered = 2;
     const dispatch = fixture(undefined, notifications);
 
     // Act
     const response = await dispatch({
       method: 'POST',
       path: '/v1/sessions/s1/notify',
-      headers: { ...human, [FY_REQUEST_ID_HEADER]: 'request-1' },
-      body: JSON.stringify({ body: 'done' }),
+      headers: agentIn('s1'),
+      body: JSON.stringify({ body: 'The release is ready for review.', title: 'Release ready' }),
     });
+    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
 
     // Assert
     should(response.status).equal(200);
     should(jsonBody(response)).deepEqual({ sessionId: 's1', delivered: 2 });
     should(response.headers.get('cache-control')).equal('no-store');
-    should(notifications.calls).deepEqual([
+    should(jsonBody(board).items).containDeep([
       {
-        sessionId: 's1',
-        request: { body: 'done' },
-        actor: { kind: 'human' },
-        attribution: 'admin-cli',
-        requestId: 'request-1',
+        kind: 'info',
+        title: 'Release ready',
+        subject: 'The release is ready for review.',
+        source: 'agent-raised',
+        raisedBy: 'agent',
+        raisedBySession: 's1',
       },
     ]);
+    should(notifications.asked).deepEqual([{ sessionId: 's1', attentionId: 'A1' }]);
   });
 
-  it('should require a request id before parsing the body', async () => {
+  it('should title a notify from the start of its text, and keep a long text whole in the context', async () => {
+    // Arrange
+    const dispatch = fixture();
+    const long = `The nightly backup finished and every table was verified against the copy. ${'More detail. '.repeat(30)}`;
+
+    // Act
+    await dispatch({
+      method: 'POST',
+      path: '/v1/sessions/s1/notify',
+      headers: human,
+      body: JSON.stringify({ body: long }),
+    });
+    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
+
+    // Assert
+    const [item] = jsonBody(board).items as readonly { title: string; subject: string; context: string }[];
+    should(item?.title.length).be.lessThanOrEqual(40);
+    should(item?.title.endsWith('…')).be.true();
+    should(item?.subject.length).be.lessThanOrEqual(240);
+    should(item?.context).equal(long.trim());
+  });
+
+  it('should not raise the same notify twice while its item is still open, and report no devices', async () => {
+    // Arrange
+    const notifications = new FakeNotifications();
+    notifications.delivered = 1;
+    const dispatch = fixture(undefined, notifications);
+    const send = async () =>
+      await dispatch({
+        method: 'POST',
+        path: '/v1/sessions/s1/notify',
+        headers: agentIn('s1'),
+        body: JSON.stringify({ body: 'done' }),
+      });
+
+    // Act
+    const first = await send();
+    const retry = await send();
+    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
+
+    // Assert
+    should(jsonBody(first)).have.property('delivered', 1);
+    should(jsonBody(retry)).have.property('delivered', 0);
+    should(jsonBody(board)).have.property('count', 1);
+  });
+
+  it('should refuse a notify that says it is progress or finishing, raising nothing', async () => {
     // Arrange
     const notifications = new FakeNotifications();
     const dispatch = fixture(undefined, notifications);
+
+    // Act + Assert
+    for (const kind of ['completed', 'failed']) {
+      const response = await dispatch({
+        method: 'POST',
+        path: '/v1/sessions/s1/notify',
+        headers: agentIn('s1'),
+        body: JSON.stringify({ body: 'all done', kind }),
+      });
+      should(response.status).equal(400);
+      should(jsonBody(response)).have.property('code', 'invalid');
+      should(String(jsonBody(response).error)).match(/progress and finishing never notify the owner/u);
+    }
+    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
+    should(jsonBody(board)).have.property('count', 0);
+    should(notifications.asked).be.empty();
+  });
+
+  it('should reject a malformed notify body before raising anything', async () => {
+    // Arrange
+    const dispatch = fixture();
 
     // Act
     const response = await dispatch({
       method: 'POST',
       path: '/v1/sessions/s1/notify',
       headers: human,
-      body: '{not json',
-    });
-
-    // Assert
-    should(response.status).equal(400);
-    should(jsonBody(response)).have.property('code', 'missing_request_id');
-    should(notifications.calls).be.empty();
-  });
-
-  it('should reject a malformed direct body before calling the domain', async () => {
-    // Arrange
-    const notifications = new FakeNotifications();
-    const dispatch = fixture(undefined, notifications);
-
-    // Act
-    const response = await dispatch({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      headers: { ...human, [FY_REQUEST_ID_HEADER]: 'request-1' },
       body: JSON.stringify({ body: '' }),
     });
 
     // Assert
     should(response.status).equal(400);
-    should(notifications.calls).be.empty();
   });
 
-  it('should preserve peer and paired-device attribution from the authorization boundary', async () => {
+  it('should keep a ferret to its own session and say so for an unknown one', async () => {
     // Arrange
-    const peerNotifications = new FakeNotifications();
-    const deviceNotifications = new FakeNotifications();
-    const peer = fixture(undefined, peerNotifications);
-    const device = fixture(undefined, deviceNotifications);
+    const dispatch = fixture();
     const body = JSON.stringify({ body: 'done' });
 
     // Act
-    const peerResponse = await peer({
+    const other = await dispatch({ method: 'POST', path: '/v1/sessions/s1/notify', headers: agentIn('s2'), body });
+    const unknown = await dispatch({ method: 'POST', path: '/v1/sessions/s9/notify', headers: human, body });
+    const device = await dispatch({
       method: 'POST',
       path: '/v1/sessions/s1/notify',
-      headers: { ...agentIn('s1'), [FY_REQUEST_ID_HEADER]: 'peer-request' },
-      body,
-    });
-    const deviceResponse = await device({
-      method: 'POST',
-      path: '/v1/sessions/s1/notify',
-      headers: { [FY_REQUEST_ID_HEADER]: 'device-request' },
       device: { deviceId: 'browser-1', appSession: 'app-one' },
       body,
     });
 
     // Assert
-    should(peerResponse.status).equal(200);
-    should(deviceResponse.status).equal(200);
-    should(peerNotifications.calls[0]).containDeep({
-      actor: { kind: 'agent', sessionId: 's1', name: null },
-      attribution: 'peer:s1',
-    });
-    should(deviceNotifications.calls[0]).containDeep({
-      actor: { kind: 'human' },
-      attribution: 'device:browser-1',
-    });
-  });
-
-  it('should map every direct domain refusal through the attention taxonomy', async () => {
-    // Arrange
-    const cases = [
-      { code: 'invalid' as const, status: 400 },
-      { code: 'forbidden' as const, status: 403 },
-      { code: 'not-found' as const, status: 404 },
-      { code: 'corrupt' as const, status: 500 },
-    ];
-
-    // Act + Assert
-    for (const { code, status } of cases) {
-      const notifications = new FakeNotifications();
-      notifications.result = { ok: false, error: { code, message: `${code} notification` } };
-      const dispatch = fixture(undefined, notifications);
-      const response = await dispatch({
-        method: 'POST',
-        path: '/v1/sessions/s1/notify',
-        headers: { ...human, [FY_REQUEST_ID_HEADER]: `request-${code}` },
-        body: JSON.stringify({ body: 'done' }),
-      });
-      should(response.status).equal(status);
-      should(jsonBody(response)).have.property('code', code);
-    }
+    should(other.status).equal(403);
+    should(unknown.status).equal(404);
+    should(device.status).equal(200);
   });
 });
 

@@ -103,7 +103,7 @@ function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
     new TwiceTold(new AttentionReplyDelivery(batcher)),
   );
   const notifications: DirectNotificationSubsystem = {
-    notifyDirect: async sessionId => ({ ok: true, value: { sessionId, delivered: 0 } }),
+    attentionDelivered: async () => 0,
     enrolledDevices: async () => 1,
   };
   const dispatcher = new ApiDispatcher(
@@ -189,13 +189,59 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
           message: [
             `[answer to !${named} «What should I call the next test item?»] gaytem`,
             `[done !${doneInApp} «First?»] The owner marked this done.`,
-            `[answer to !${doneAtShell} «Second?»] Handled it myself`,
+            `[answer to !${doneAtShell} «Second?»] Done.\n\nNote: Handled it myself`,
             `[dismissed !${dismissed} «Third?»] The owner dismissed this without an answer.`,
           ].join('\n\n'),
         },
       ],
     ]);
     should(sends.attempts).equal(1);
+  });
+
+  it('should accept a reply with every action and deliver the answer and the reply together', async () => {
+    // Arrange
+    const { sends, post, raise, settle } = loop();
+    const choice = { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }] };
+    const chosen = await raise('Rebase?', choice);
+    const approved = await raise('Deploy?', { kind: 'permission' });
+    const done = await raise('Look?', { kind: 'task' });
+    const asked = await raise('Which account?');
+    const dismissed = await raise('Still needed?', { kind: 'task' });
+
+    // Act
+    const results = [
+      await post(
+        { action: 'resolve', id: chosen, response: { kind: 'multiple-choice', choice: 'Wait' }, note: 'after lunch' },
+        browser,
+      ),
+      await post(
+        {
+          action: 'resolve',
+          id: approved,
+          response: { kind: 'permission', decision: 'approve' },
+          note: 'Always allow — same repo',
+        },
+        browser,
+      ),
+      await post({ action: 'resolve', id: done, note: 'Done — thanks' }, browser),
+      await post({ action: 'needs-info', id: asked, note: 'the work one, please' }, browser),
+      await post({ action: 'dismiss', id: dismissed, note: 'Skip — not this week' }, browser),
+    ];
+    await settle();
+
+    // Assert
+    should(results.map(each => each.status)).deepEqual([200, 200, 200, 200, 200]);
+    const [sent] = [...sends.sent.values()];
+    should(sent?.message.split('\n\n')).deepEqual([
+      `[answer to !${chosen} «Rebase?»] Wait`,
+      'Note: after lunch',
+      `[answer to !${approved} «Deploy?»] Approved.`,
+      'Note: Always allow — same repo',
+      `[answer to !${done} «Look?»] Done.`,
+      'Note: Done — thanks',
+      `[needs more info !${asked} «Which account?»] the work one, please`,
+      `[dismissed !${dismissed} «Still needed?»] Skip — not this week`,
+    ]);
   });
 
   it('should restart the window on each answer, but never hold the first past the cap', async () => {
