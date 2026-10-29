@@ -1,3 +1,10 @@
+## [4.104.0](https://github.com/kirinnee/ferretry/compare/v4.103.2...v4.104.0) (2026-10-29)
+
+### Features
+
+* **pwa:** redesign the Attention page around the item card ([#876](https://github.com/kirinnee/ferretry/issues/876)) ([3a62c3a](https://github.com/kirinnee/ferretry/commit/3a62c3a7bb18cecb4909d67c5cef2a91ac740e52))
+* show shared images in chats ([#877](https://github.com/kirinnee/ferretry/issues/877)) ([4c45222](https://github.com/kirinnee/ferretry/commit/4c452226cdeaa5a5104e83f18f7112c2a1edd67d))
+
 ## [4.103.2](https://github.com/kirinnee/ferretry/compare/v4.103.1...v4.103.2) (2026-10-29)
 
 ### Fixes
