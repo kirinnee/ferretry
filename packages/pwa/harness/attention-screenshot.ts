@@ -204,7 +204,7 @@ try {
         ['desktop', desktop],
       ] as const) {
         page = await open(context, theme, 'quiet-empty');
-        if ((await page.locator('[data-attention-panel]').count()) > 0) fail('an empty chat drew the Attention panel');
+        if ((await page.locator('[data-agenda-line]').count()) > 0) fail('an empty chat drew the agenda line');
         if ((await page.locator('[data-attention-clear], [data-attention-resolved]').count()) > 0)
           fail('an empty chat drew an empty-state or resolved line');
         await shot(page, scheme, `quiet-empty-${label}`);

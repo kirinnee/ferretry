@@ -23,7 +23,13 @@ import type { RuntimeModelControls } from '../../src/components/runtime-controls
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
-import { AttentionPanel } from '../../src/features/attention/attention-panel.tsx';
+import { AttentionAgendaRow } from '../../src/features/attention/attention-agenda-row.tsx';
+import {
+  AttentionAgendaDrawer,
+  AttentionAgendaLine,
+  AttentionReferenceChips,
+} from '../../src/features/attention/attention-agenda-line.tsx';
+import { AttentionFullCard } from '../../src/features/attention/attention-full-card.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
@@ -2287,6 +2293,9 @@ describe('SessionChatPage', () => {
           respond: async () => undefined,
           resolve: async () => undefined,
           dismiss: async () => undefined,
+          needsInfo: async () => undefined,
+          discuss: async () => undefined,
+          progress: async () => undefined,
         },
         snapshot: {
           v: 1,
@@ -2300,6 +2309,9 @@ describe('SessionChatPage', () => {
         status: 'ready',
       }) as unknown as SessionAttentionModel;
 
+    /** A session whose ferret works in agenda mode: only then does its chat draw an agenda. */
+    const agendaSession = (id = 'shared') => sessionView(id, { state: { attention: { agendaMode: true } as never } });
+
     const chatPage = (props: Partial<ComponentProps<typeof SessionChatPage>> = {}) => (
       <SessionChatPage
         client={client([], sessionView('shared'))}
@@ -2311,36 +2323,88 @@ describe('SessionChatPage', () => {
         {...props}
       />
     );
-    const panel = (root: ReactTestInstance) => root.findByType(AttentionPanel);
+    const agendaPage = (props: Partial<ComponentProps<typeof SessionChatPage>> = {}) =>
+      chatPage({ session: agendaSession(), attention: attentionModel(), ...props });
+    const update = (page: ReturnType<typeof renderSessionChatPage>, element: ReactElement) =>
+      run(() => page.update(withSessionSearch(element as ReactElement<ComponentProps<typeof SessionChatPage>>)));
 
-    test('pins the open item above the composer: always there, no sheet, strip or dialog', () => {
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+    const lines = (root: ReactTestInstance) =>
+      root.findAll(node => node.type === 'div' && node.props['data-agenda-line'] !== undefined);
+    const drawers = (root: ReactTestInstance) =>
+      root.findAll(node => node.type === 'section' && node.props['data-agenda-drawer'] !== undefined);
+    const cards = (root: ReactTestInstance) =>
+      root.findAll(node => node.type === 'div' && node.props['data-agenda-card'] !== undefined);
+    const column = (root: ReactTestInstance) =>
+      root.find(node => node.type === 'div' && node.props.className === 'fy-chat-input__column');
+    const log = (root: ReactTestInstance) =>
+      root.find(node => node.type === 'div' && node.props.className === 'fy-chat-log');
+    const names = (parent: ReactTestInstance): readonly string[] =>
+      parent.children.flatMap(child => (typeof child === 'string' ? [] : [String(child.type)]));
+    const press = (root: ReactTestInstance) =>
+      run(() =>
+        root
+          .find(node => node.type === 'button' && node.props['data-agenda-line-toggle'] !== undefined)
+          .props.onClick(),
+      );
 
+    test('draws the agenda as one line above the composer — no sheet, strip or dialog — when the ferret works in agenda mode', () => {
+      const page = renderSessionChatPage(agendaPage());
       try {
         expect(needsYouButtons(page.root)).toHaveLength(0);
-        expect(panel(page.root).props.selectedId).toBeNull();
-        expect(panel(page.root).props.expanded).toBeUndefined();
-        expect(panel(page.root).props.focus).toBeNull();
+        expect(lines(page.root)).toHaveLength(1);
+        expect(page.root.findByType(AttentionAgendaLine).props.counts).toEqual({
+          blocking: 0,
+          needYou: 1,
+          withFerret: 0,
+        });
         expect(page.root.findAll(node => node.props?.role === 'dialog')).toHaveLength(0);
-        // The block sits in the input column, ahead of the composer.
-        const column = page.root.find(node => node.props?.className === 'fy-chat-input__column');
-        expect(column.findAllByType(AttentionPanel)).toHaveLength(1);
-        expect(column.findAllByType(Composer)).toHaveLength(1);
+        // The line sits in the input column, ahead of the composer; nothing else is under it.
+        const col = column(page.root);
+        expect(col.findAllByType(AttentionAgendaLine)).toHaveLength(1);
+        expect(col.findAllByType(Composer)).toHaveLength(1);
+        expect(drawers(page.root)).toHaveLength(0);
+        expect(cards(page.root)).toHaveLength(0);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('draws no agenda for a ferret that is not in agenda mode, whatever its board holds', () => {
+      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+      try {
+        expect(lines(page.root)).toHaveLength(0);
+        expect(page.root.findAllByType(AttentionAgendaLine)).toHaveLength(0);
+        expect(drawers(page.root)).toHaveLength(0);
+        expect(cards(page.root)).toHaveLength(0);
+        // The ledger still proves a `!A3`, so a link in older chat stays a link.
+        const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
+        expect(surface.attentionReferenceResolver('A3')).toBe(true);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('keeps plain notifications out of the agenda', () => {
+      const page = renderSessionChatPage(
+        agendaPage({ attention: attentionModel([{ ...attentionItem, notice: true }]) }),
+      );
+      try {
+        expect(lines(page.root)).toHaveLength(0);
       } finally {
         run(() => page.unmount());
       }
     });
 
     test('keeps the resolved history in the header menu as "N resolved", and shows no row when there is none', () => {
-      const withHistory = renderSessionChatPage(chatPage({ attention: attentionModel([], [resolvedItem]) }));
+      const withHistory = renderSessionChatPage(agendaPage({ attention: attentionModel([], [resolvedItem]) }));
       try {
         expect(actionLabels(withHistory.root)).toContain('1 resolved');
-        expect(withHistory.root.findAllByType(AttentionPanel)).toHaveLength(1);
+        expect(lines(withHistory.root)).toHaveLength(0);
         expect(withHistory.root.findAll(node => node.props?.['data-attention-record'] !== undefined)).toHaveLength(0);
       } finally {
         run(() => withHistory.unmount());
       }
-      const without = renderSessionChatPage(chatPage({ attention: attentionModel([], []) }));
+      const without = renderSessionChatPage(agendaPage({ attention: attentionModel([], []) }));
       try {
         expect(actionLabels(without.root).some(label => label.endsWith('resolved'))).toBe(false);
       } finally {
@@ -2348,15 +2412,14 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('renders no Attention surface at all for a host that has not subscribed', () => {
-      const page = renderSessionChatPage(chatPage());
-
+    test('renders no agenda surface at all for a host that has not subscribed', () => {
+      const page = renderSessionChatPage(chatPage({ session: agendaSession() }));
       try {
         // Absence, not an empty badge: a "0" here would be a claim this build
         // cannot make, because nothing has read the ledger.
         expect(needsYouButtons(page.root)).toHaveLength(0);
         expect(actionLabels(page.root)).not.toContain('Attention');
-        expect(page.root.findAllByType(AttentionPanel)).toHaveLength(0);
+        expect(lines(page.root)).toHaveLength(0);
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
         expect(surface.attentionReferenceResolver).toBeUndefined();
         expect(surface.onAttentionOpen).toBeUndefined();
@@ -2365,26 +2428,26 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('proves every id on this session’s ledger — open and resolved — and opens the panel at it', () => {
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel([attentionItem], [resolvedItem]) }));
-
+    test('proves every id on this session’s ledger and opens an open one as its card, a resolved one in the list', () => {
+      const page = renderSessionChatPage(agendaPage({ attention: attentionModel([attentionItem], [resolvedItem]) }));
       try {
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
-        // Proved: open, and on THIS board.
         expect(surface.attentionReferenceResolver('A3')).toBe(true);
-        // Proved too: answered, but still on the record — older chat keeps its link.
+        // Answered, but still on the record — older chat keeps its link.
         expect(surface.attentionReferenceResolver('A2')).toBe(true);
-        // Unproved: on no ledger here. Markdown leaves it as prose.
+        // On no ledger here: Markdown leaves it as prose.
         expect(surface.attentionReferenceResolver('A9')).toBe(false);
 
-        run(() => surface.onAttentionOpen('A2', null));
+        run(() => surface.onAttentionOpen('A3', null));
+        expect(cards(page.root)).toHaveLength(1);
+        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
 
-        expect(panel(page.root).props.focus?.target).toBe('A2');
-        expect(panel(page.root).props.focus).toEqual({ target: 'A2', seq: 1 });
+        run(() => page.root.findByType(AttentionFullCard).props.onClose());
+        expect(cards(page.root)).toHaveLength(0);
 
-        // The same reference pressed again is a NEW request, so it scrolls back to the item.
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A2', null));
-        expect(panel(page.root).props.focus).toEqual({ target: 'A2', seq: 2 });
+        expect(actionLabels(page.root)).toContain('1 resolved');
+        expect(cards(page.root)).toHaveLength(0);
       } finally {
         run(() => page.unmount());
       }
@@ -2392,155 +2455,156 @@ describe('SessionChatPage', () => {
 
     test('proves nothing while the board is unread: unread is not empty', () => {
       const unread = { ...attentionModel(), snapshot: null, status: 'loading' } as unknown as SessionAttentionModel;
-      const page = renderSessionChatPage(chatPage({ attention: unread }));
+      const page = renderSessionChatPage(agendaPage({ attention: unread }));
       try {
         const surface = page.root.findByType(ReferenceSurfaceProvider).props.surface;
         expect(surface.attentionReferenceResolver).toBeUndefined();
         expect(surface.onAttentionOpen).toBeUndefined();
+        expect(lines(page.root)).toHaveLength(0);
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('hands the panel the page’s one attention client, bound to this session', () => {
-      const model = attentionModel();
-      const page = renderSessionChatPage(chatPage({ attention: model }));
+    test('lands in the chat AT the item a link names, and re-targets when the link changes', () => {
+      const board = attentionModel([attentionItem, { ...attentionItem, id: 'A5' }], [resolvedItem]);
+      const page = renderSessionChatPage(agendaPage({ attention: board, attentionTarget: 'A3' }));
       try {
-        const props = panel(page.root).props;
-        expect(props.client).toBe(model.client);
-        expect(props.connection).toBe(alpha);
-        expect(props.scope).toEqual(daemonSessionScope(alpha, 'shared'));
-        expect(props.snapshot).toBe(model.snapshot);
-      } finally {
-        run(() => page.unmount());
-      }
-    });
-
-    test('lands in the chat AT the item a link names, with no sheet, and re-targets when the link changes', () => {
-      const page = renderSessionChatPage(
-        chatPage({ attention: attentionModel([attentionItem], [resolvedItem]), attentionTarget: 'A3' }),
-      );
-      try {
-        expect(panel(page.root).props.selectedId).toBe('A3');
-        expect(panel(page.root).props.focus?.target).toBe('A3');
+        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
         expect(page.root.findAll(node => node.props?.role === 'dialog')).toHaveLength(0);
 
-        run(() =>
-          page.update(
-            withSessionSearch(
-              chatPage({
-                attention: attentionModel([attentionItem], [resolvedItem]),
-                attentionTarget: 'A2',
-              }) as ReactElement<ComponentProps<typeof SessionChatPage>>,
-            ),
-          ),
-        );
-        expect(panel(page.root).props.focus?.target).toBe('A2');
+        update(page, agendaPage({ attention: board, attentionTarget: 'A5' }));
+        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A5');
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('a new navigation to the SAME item re-targets it', () => {
+    test('a new navigation to the SAME item re-opens its card after it was closed', () => {
       const props = {
-        attention: attentionModel([attentionItem, { ...attentionItem, id: 'A2' as const }], [resolvedItem]),
+        attention: attentionModel([attentionItem, { ...attentionItem, id: 'A5' }]),
         attentionTarget: 'A3' as const,
       };
-      const page = renderSessionChatPage(chatPage({ ...props, attentionTargetKey: 'entry-1' }));
+      const page = renderSessionChatPage(agendaPage({ ...props, attentionTargetKey: 'entry-1' }));
       try {
-        run(() => panel(page.root).props.onSelect('A2'));
-        expect(panel(page.root).props.selectedId).toBe('A2');
+        run(() => page.root.findByType(AttentionFullCard).props.onClose());
+        expect(cards(page.root)).toHaveLength(0);
 
-        // The same notification is tapped again: the same `?attention=A3`, a new history entry.
-        run(() =>
-          page.update(
-            withSessionSearch(
-              chatPage({ ...props, attentionTargetKey: 'entry-2' }) as ReactElement<
-                ComponentProps<typeof SessionChatPage>
-              >,
-            ),
-          ),
-        );
-
-        expect(panel(page.root).props.selectedId).toBe('A3');
-        expect(panel(page.root).props.focus?.target).toBe('A3');
+        update(page, agendaPage({ ...props, attentionTargetKey: 'entry-2' }));
+        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('never carries one session’s open Attention into another session', () => {
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
-
+    test('never carries one session’s open card into another session', () => {
+      const page = renderSessionChatPage(agendaPage());
       try {
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', null));
-        expect(panel(page.root).props.selectedId).toBe('A3');
+        expect(cards(page.root)).toHaveLength(1);
 
-        // Navigate. The ask belongs to the session that raised it, so ringing
-        // its id on another session's board would point at the wrong decision.
-        run(() =>
-          page.update(
-            withSessionSearch(
-              chatPage({ attention: attentionModel(), session: sessionView('other') }) as ReactElement<
-                ComponentProps<typeof SessionChatPage>
-              >,
-            ),
-          ),
-        );
-
-        expect(panel(page.root).props.selectedId).toBeNull();
-        expect(panel(page.root).props.focus).toBeNull();
+        update(page, agendaPage({ session: agendaSession('other') }));
+        expect(cards(page.root)).toHaveLength(0);
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('a link into another session opens that session’s panel at its item', () => {
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+    test('a link into another session opens that session’s card at its item', () => {
+      const page = renderSessionChatPage(agendaPage());
       try {
-        run(() =>
-          page.update(
-            withSessionSearch(
-              chatPage({
-                attention: attentionModel(),
-                attentionTarget: 'A3',
-                session: sessionView('other'),
-              }) as ReactElement<ComponentProps<typeof SessionChatPage>>,
-            ),
-          ),
-        );
+        update(page, agendaPage({ attentionTarget: 'A3', session: agendaSession('other') }));
         // The reset for the new session runs first; the link's target wins.
-        expect(panel(page.root).props.selectedId).toBe('A3');
-        expect(panel(page.root).props.focus?.target).toBe('A3');
+        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('sends the next message as the answer to the shown item while the chip is on, plain when off', async () => {
+    test('opens the drawer upward from the line, and a row title swaps it for the card over the transcript only', () => {
+      const page = renderSessionChatPage(agendaPage());
+      try {
+        const composerBefore = names(column(page.root)).at(-1);
+        press(page.root);
+        expect(drawers(page.root)).toHaveLength(1);
+        // Siblings of the composer, drawn before it: the drawer and the line never wrap it.
+        expect(column(page.root).findAllByType(AttentionAgendaDrawer)).toHaveLength(1);
+        expect(page.root.findByType(AttentionAgendaLine).props.open).toBe(true);
+
+        run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
+        expect(drawers(page.root)).toHaveLength(0);
+        expect(cards(page.root)).toHaveLength(1);
+        // The card is a layer inside the transcript's own box; the input column holds none of it.
+        expect(log(page.root).findAllByType(AttentionFullCard)).toHaveLength(1);
+        expect(column(page.root).findAllByType(AttentionFullCard)).toHaveLength(0);
+        // The line and the composer stay.
+        expect(lines(page.root)).toHaveLength(1);
+        expect(column(page.root).findAllByType(Composer)).toHaveLength(1);
+        expect(names(column(page.root)).at(-1)).toBe(composerBefore);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('never moves the composer: it stays the input column’s last child whether the line, drawer or card is open', () => {
+      const closedBoard = attentionModel([], []);
+      const page = renderSessionChatPage(agendaPage({ attention: closedBoard }));
+      try {
+        const lastChildIsComposer = () => {
+          const last = column(page.root).children.at(-1);
+          return typeof last !== 'string' && last?.type === Composer;
+        };
+        expect(lastChildIsComposer()).toBe(true);
+        expect(column(page.root).findAllByType(Composer)).toHaveLength(1);
+
+        update(page, agendaPage());
+        expect(lines(page.root)).toHaveLength(1);
+        expect(lastChildIsComposer()).toBe(true);
+
+        press(page.root);
+        expect(drawers(page.root)).toHaveLength(1);
+        expect(lastChildIsComposer()).toBe(true);
+
+        run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
+        expect(cards(page.root)).toHaveLength(1);
+        expect(lastChildIsComposer()).toBe(true);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('sends the next message about the items chipped to it, then clears the chips', async () => {
       const sent: string[] = [];
       const spy = {
-        ...client([], sessionView('shared')),
+        ...client([], agendaSession()),
         send: async (_id: string, body: { message: string }) => {
           sent.push(body.message);
         },
       };
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel(), client: spy as never }));
+      const page = renderSessionChatPage(agendaPage({ client: spy as never }));
       try {
-        expect(panel(page.root).props.chip.on).toBe(true);
         const send = (text: string) =>
           page.root.findByType(Composer).props.api.send('shared', { message: text, now: false });
-        await send('ship it');
-        run(() => panel(page.root).props.chip.onChange(false));
-        expect(panel(page.root).props.chip.on).toBe(false);
+        // No chip: the message goes out exactly as typed.
         await send('plain');
-        expect(sent).toEqual(['!A3 ship it', 'plain']);
+        press(page.root);
+        run(() => page.root.findByType(AttentionAgendaRow).props.onAddReply());
+        expect(
+          page.root.findByType(AttentionReferenceChips).props.items.map((item: { id: string }) => item.id),
+        ).toEqual(['A3']);
+        await send('ship it');
+        run(() => page.root.findByType(Composer).props.onSent());
+        expect(page.root.findAllByType(AttentionReferenceChips).every(chips => chips.props.items.length === 0)).toBe(
+          true,
+        );
+        await send('later');
+        expect(sent).toEqual(['plain', '!A3 ship it', 'later']);
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('counts a held answer down above the composer when the host passes attentionReplies', () => {
+    test('counts a held answer down on the line when the host passes attentionReplies', () => {
       const replies = {
         secondsLeft: 8,
         pending: ['A3'],
@@ -2549,9 +2613,9 @@ describe('SessionChatPage', () => {
         sending: false,
         sendNow: () => undefined,
       };
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel(), attentionReplies: replies }));
+      const page = renderSessionChatPage(agendaPage({ attentionReplies: replies }));
       try {
-        const slot = panel(page.root).props.repliesSlot;
+        const slot = page.root.findByType(AttentionAgendaLine).props.repliesSlot;
         expect(slot.props.secondsLeft).toBe(8);
         expect(slot.props.onSendNow).toBe(replies.sendNow);
       } finally {
@@ -2560,7 +2624,7 @@ describe('SessionChatPage', () => {
     });
 
     test('the `!` menu reads the live board, so a newly raised item is offered without a reload', () => {
-      const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
+      const page = renderSessionChatPage(agendaPage());
       try {
         const offered = () =>
           (page.root.findByType(Composer).props.autocompleteAttention as readonly { id: string }[]).map(
@@ -2568,15 +2632,7 @@ describe('SessionChatPage', () => {
           );
         expect(offered()).toEqual(['A3']);
 
-        run(() =>
-          page.update(
-            withSessionSearch(
-              chatPage({ attention: attentionModel([attentionItem, { ...attentionItem, id: 'A7' }]) }) as ReactElement<
-                ComponentProps<typeof SessionChatPage>
-              >,
-            ),
-          ),
-        );
+        update(page, agendaPage({ attention: attentionModel([attentionItem, { ...attentionItem, id: 'A7' }]) }));
         expect(offered()).toEqual(['A3', 'A7']);
       } finally {
         run(() => page.unmount());

@@ -17,11 +17,10 @@ import type {
 import { Pencil, RotateCw, Square } from 'lucide-react';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Markdown } from '../src/components/markdown.tsx';
+import { AgendaChatHarness } from './agenda-chat.tsx';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { AttentionInboxPage } from '../src/features/attention/attention-inbox-page.tsx';
-import { AttentionPanel } from '../src/features/attention/attention-panel.tsx';
 import {
   ATTENTION_RESOLVED_ACTION_ID,
   resolvedActionContribution,
@@ -31,7 +30,6 @@ import { type SessionActionContribution, sessionActionSections } from '../src/fe
 import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
 import { DeferredAttentionActions, type InboxCard, inboxCardKey, isInDiscussion } from '../src/lib/attention-inbox.ts';
 import { daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
-import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { daemonAttentionPath } from '../src/lib/pages/routes.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { SessionsBar } from '../src/shell/sessions-bar.tsx';
@@ -502,40 +500,7 @@ function ChatPane({
   readonly board?: AttentionSnapshot;
   readonly target?: string | null;
 }): ReactElement {
-  const [selected, setSelected] = useState<AttentionId | null>((target as AttentionId | null) ?? null);
-  const [chip, setChip] = useState(true);
-  const noop = async (): Promise<void> => undefined;
-  return (
-    <div className="flex h-full min-h-0 flex-col bg-bg">
-      <div className="min-h-0 flex-1 overflow-y-auto p-panel">
-        <article className="rounded-panel border border-border bg-surface p-panel text-cell" data-chat-line="">
-          <p className="m-0 mb-xs text-meta text-faint">ottilie · 2m</p>
-          <Markdown
-            attentionReferenceResolver={id => board.items.some(entry => entry.id === id)}
-            text="I raised !A3 about the rebase — pick an option when you can. Meanwhile I will keep going on the inbox."
-          />
-        </article>
-      </div>
-      <div className="p-panel">
-        <AttentionPanel
-          chip={{ on: chip, onChange: setChip }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
-          connection={CONNECTION}
-          focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
-          id="attention-panel"
-          now={NOW}
-          onSelect={setSelected}
-          scope={daemonSessionScope(CONNECTION, 'fr')}
-          selectedId={selected}
-          snapshot={board}
-          status="ready"
-        />
-        <div className="rounded-panel border border-border bg-surface p-panel text-meta text-faint">
-          Message ottilie…
-        </div>
-      </div>
-    </div>
-  );
+  return <AgendaChatHarness board={board} now={NOW} target={target as AttentionId | null} />;
 }
 
 function Panel(props: { readonly board?: AttentionSnapshot; readonly target?: string | null }): ReactElement {
@@ -661,7 +626,6 @@ function QuietChat({ open }: { readonly open: readonly AttentionItem[] }): React
     [...HARNESS_ACTIONS, resolvedActionContribution(board.resolved, 'attention-panel', null)],
     undefined,
   );
-  const noop = async (): Promise<void> => undefined;
   const session = SESSIONS[0] as SessionView;
   return (
     <div className="mx-auto flex h-dvh max-w-3xl flex-col bg-bg" data-fixture="">
@@ -673,33 +637,8 @@ function QuietChat({ open }: { readonly open: readonly AttentionItem[] }): React
         project="ferretry"
         session={session}
       />
-      <div className="min-h-0 flex-1 overflow-y-auto p-panel">
-        <article className="rounded-panel border border-border bg-surface p-panel text-cell" data-chat-line="">
-          <p className="m-0 mb-xs text-meta text-faint">ottilie · 2m</p>
-          <Markdown
-            attentionReferenceResolver={() => true}
-            text="Rebased and pushed. The inbox wiring is done; I am starting on the resolved filter now."
-          />
-        </article>
-      </div>
-      <div className="p-panel">
-        <AttentionPanel
-          chip={{ on: true, onChange: () => undefined }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
-          connection={CONNECTION}
-          focus={null}
-          id="attention-panel"
-          now={NOW}
-          onOpenResolved={() => setForm(ATTENTION_RESOLVED_ACTION_ID)}
-          onSelect={() => undefined}
-          scope={daemonSessionScope(CONNECTION, 'fr')}
-          selectedId={null}
-          snapshot={board}
-          status="ready"
-        />
-        <div className="rounded-panel border border-border bg-surface p-panel text-meta text-faint">
-          Message ottilie…
-        </div>
+      <div className="flex min-h-0 flex-1 flex-col">
+        <AgendaChatHarness board={board} now={NOW} onOpenResolved={() => setForm(ATTENTION_RESOLVED_ACTION_ID)} />
       </div>
     </div>
   );

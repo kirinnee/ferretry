@@ -1,0 +1,302 @@
+/* A ferret's agenda inside its chat (attention-agenda.tsx): one line above the composer, a bounded drawer that
+   opens upward from it, "re:" chips, the full card over the transcript and a docked side panel. Everything
+   above the composer is a sibling of it, so the composer's own box never moves. Role tokens only, so light and
+   dark read the same; calm rules: no stripes, no tinted boxes, sentence case. */
+.fy-agenda-line {
+  display: flex;
+  min-height: 44px;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-md);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-agenda-line__fill {
+  flex: 1 1 auto;
+}
+.fy-agenda-line__main {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 44px;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: 0 var(--gap-xs);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+}
+button.fy-agenda-line__main {
+  cursor: pointer;
+}
+button.fy-agenda-line__main:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+button.fy-agenda-line__main:active {
+  background: var(--accent-soft);
+}
+button.fy-agenda-line__main:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+.fy-agenda-line__dot {
+  width: 8px;
+  height: 8px;
+  flex-shrink: 0;
+  border-radius: var(--radius-dot);
+  background: var(--faint);
+}
+.fy-agenda-line__dot[data-urgent] {
+  background: var(--accent);
+}
+.fy-agenda-line__words {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--gap-sm);
+}
+.fy-agenda-line__name {
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+}
+.fy-agenda-line__segment::before {
+  content: '·';
+  margin-right: var(--gap-sm);
+  color: var(--faint);
+}
+.fy-agenda-line__chevron {
+  flex-shrink: 0;
+  color: var(--faint);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-agenda-line__chevron {
+    transition: transform 160ms ease;
+  }
+}
+.fy-agenda-line__chevron[data-open] {
+  transform: rotate(180deg);
+}
+.fy-agenda-line__status {
+  display: inline-flex;
+  min-width: 0;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: var(--gap-xs);
+  margin-left: auto;
+}
+.fy-agenda-note {
+  display: flex;
+  margin: 0;
+  padding: var(--gap-xs) 0;
+  align-items: center;
+  gap: var(--gap-xs);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-agenda-note[data-tone='err'] {
+  color: var(--err);
+}
+
+/* THE DRAWER: between the chat and the line, never over the composer. */
+.fy-agenda-drawer {
+  max-height: 48vh;
+  max-height: 48dvh;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: var(--gap-sm);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-agenda-drawer {
+    animation: fy-agenda-open 160ms ease-out;
+  }
+}
+@keyframes fy-agenda-open {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+.fy-agenda-rows {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+  list-style: none;
+}
+.fy-agenda-rows__item {
+  min-width: 0;
+}
+
+/* THE CHIPS: "re: <title> ✕", directly above the composer. */
+.fy-agenda-chips {
+  display: flex;
+  margin: 0;
+  padding: 0 0 var(--gap-xs);
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  list-style: none;
+}
+.fy-agenda-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 32px;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 0 0 var(--gap-md);
+  border: 1px solid var(--divider-color);
+  border-radius: var(--radius-badge);
+  background: var(--surface);
+  color: var(--fg);
+  font-size: var(--text-sm);
+}
+.fy-agenda-chip__lead {
+  color: var(--muted);
+}
+.fy-agenda-chip__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-strong);
+}
+.fy-agenda-chip__clear {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-badge);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-agenda-chip__clear:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.fy-agenda-chip__clear:active {
+  background: var(--accent-soft);
+}
+.fy-agenda-chip__clear:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+
+/* THE FULL CARD: over the transcript's own grid cell only; the header, the line and the composer stay. */
+.fy-chat-log > .fy-agenda-card {
+  z-index: 2;
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  grid-area: 1 / 1;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.fy-agenda-card > * {
+  min-height: 0;
+  flex: 1 1 auto;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-agenda-card {
+    animation: fy-agenda-open 160ms ease-out;
+  }
+}
+
+/* THE DOCKED PANEL: a wide screen with a mouse keeps the agenda beside the chat. */
+.fy-agenda-split {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 0;
+}
+.fy-agenda-split > .kt-chat-surface {
+  min-width: 0;
+}
+.fy-agenda-panel {
+  display: flex;
+  width: min(22rem, 34%);
+  min-width: 16rem;
+  min-height: 0;
+  flex-shrink: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+  overflow-y: auto;
+  padding: var(--gap-md);
+  border-left: 1px solid var(--divider-color);
+}
+.fy-agenda-panel__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.fy-agenda-panel__title {
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+}
+.fy-agenda-panel__empty {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-agenda-panel__close {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-agenda-panel__close:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.fy-agenda-panel__close:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+.fy-agenda-dock {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-md);
+  border: 1px solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.fy-agenda-dock:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+.fy-agenda-dock[aria-pressed='true'] {
+  border-color: var(--divider-color);
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-agenda-dock:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
