@@ -169,6 +169,28 @@ describe('the terminal mount', () => {
       should(refused.status).equal(403);
     });
 
+    it('should open a shell with its ownership left blank when a device id cannot be put on the wire', async () => {
+      // A device id the protocol cannot represent is no reason to refuse the shell, but it is a reason
+      // not to print an owner nobody could render: the terminal opens unrecorded.
+      // Arrange
+      const dispatch = dispatcher();
+
+      // Act
+      const created = await dispatch.dispatch(
+        request({
+          method: 'POST',
+          path: '/v1/sessions/s1/terminals',
+          headers: { 'content-type': 'application/json' },
+          body: '',
+          device: { deviceId: 'device with spaces', appSession: 'app-one' },
+        }),
+      );
+
+      // Assert
+      should(created.status).equal(201);
+      should(TerminalViewSchema.parse(jsonBody(created)).openedBy).be.undefined();
+    });
+
     it('should refuse a size the protocol does not allow', async () => {
       // Arrange
       const dispatch = dispatcher();

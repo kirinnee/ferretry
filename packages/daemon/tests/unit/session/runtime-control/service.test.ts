@@ -201,6 +201,30 @@ describe('restating dependency failures', () => {
     should(repository.calls).be.empty();
   });
 
+  it.each(['conflict', 'unsettled'] as const)(
+    'should refuse a request id another caller claimed after the replay check (%s)',
+    async standing => {
+      // Arrange: the replay inspection saw nothing, then the durable admission lost the race.
+      const effects = new FakeSessionEffectLedger();
+      effects.begin = async () => standing;
+      const { subject, injector, repository } = subjectWith({ effects });
+
+      // Act
+      const failure = await refusal(subject.control('s1', COMPACT, 'req-1'));
+
+      // Assert
+      should(failure).match({
+        failure: standing,
+        message:
+          standing === 'conflict'
+            ? /was already spent on a different runtime control/u
+            : /already began a runtime control on this session/u,
+      });
+      should(injector.delivered).be.empty();
+      should(repository.calls).be.empty();
+    },
+  );
+
   it('should restate an effect settlement failure without repeating the completed input', async () => {
     // Arrange
     const effects = new FakeSessionEffectLedger();

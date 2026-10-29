@@ -611,3 +611,42 @@ describe('attention route needs-info', () => {
     should(jsonBody(edited)).have.property('warnings');
   });
 });
+
+describe('attention route progress', () => {
+  const task = {
+    action: 'add',
+    subject: 'Log in to the cloud',
+    why: 'The deploy needs it',
+    howToResolve: 'Follow the steps',
+    ask: { kind: 'task' },
+    steps: ['Run the login', 'Confirm the account'],
+  } as const;
+
+  it('should tick and untick a step on the open item without closing it', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+
+    // Act
+    const ticked = await dispatch(post({ action: 'progress', id: 'A1', step: 1, done: true }));
+    const unticked = await dispatch(post({ action: 'progress', id: 'A1', step: 1, done: false }));
+
+    // Assert
+    should(ticked.status).equal(200);
+    should((jsonBody(ticked).items as readonly unknown[])[0]).containDeep({ id: 'A1', stepsDone: [1] });
+    should(unticked.status).equal(200);
+    should((jsonBody(unticked).items as readonly Record<string, unknown>[])[0]).not.have.property('stepsDone');
+  });
+
+  it('should refuse a step the item does not have', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(task, agentIn('s1')));
+
+    // Act
+    const response = await dispatch(post({ action: 'progress', id: 'A1', step: 5, done: true }));
+
+    // Assert
+    should(response.status).equal(400);
+  });
+});

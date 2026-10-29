@@ -345,4 +345,23 @@ describe('the skills inventory mounts', () => {
     should((await ask('/v1/skills/file', [['path', '/etc/passwd']])).status).equal(404);
     should((await ask('/v1/skills/file')).status).equal(400);
   });
+
+  it('refuses a skill file asked on behalf of a session that does not exist', async () => {
+    const response = await ask('/v1/skills/file', [
+      ['path', '/home/skills/a/SKILL.md'],
+      ['sessionId', 'nope'],
+    ]);
+
+    should(response.status).equal(404);
+    should(jsonBody(response)).deepEqual({ error: 'no session nope', code: 'not-found' });
+  });
+
+  it('refuses a session id in the path that cannot be one', async () => {
+    for (const path of ['/v1/sessions/%2Fetc/skills', '/v1/sessions/%2Fetc/skills/inventory']) {
+      const response = await ask(path);
+
+      should(response.status).equal(400);
+      should(jsonBody(response)).have.property('code', 'invalid_session_id');
+    }
+  });
 });

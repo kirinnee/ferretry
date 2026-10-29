@@ -1461,6 +1461,23 @@ describe('a pointer of ours left typed in the composer — the owner’s stuck t
     should(refused).be.instanceof(SendDraftRefused);
     should(own.terminal.calls).not.containEql('submitComposer');
   });
+
+  it('refuses a retry, typing nothing, when finishing another send’s pointer shows the agent has gone', async () => {
+    const built = stuck([pane({ draft: POINTER }), pane({ alive: false })]);
+    built.ledger.records.set('send-1', {
+      ...stranded({ sendId: 'send-1', fate: 'timed_out', retryable: true }),
+      path: 'direct',
+      matchText: 'ship it',
+      message: 'ship it',
+    });
+
+    const refused = await built.service.reattempt(ID, 'send-1', { by: 'person' }).catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendRefused);
+    should((refused as Error).message).match(/session .* has no live agent to retype send-1 into; revive it first/);
+    should(built.terminal.calls.filter(call => call === 'submitComposer')).have.length(1);
+    should(built.terminal.typed).be.empty();
+  });
 });
 
 describe('the tracker nudging a pointer of ours with one more Enter', () => {

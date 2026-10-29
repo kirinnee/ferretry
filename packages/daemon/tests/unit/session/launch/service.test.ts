@@ -271,6 +271,27 @@ describe('SessionLaunchService.relaunch, with fast mode', () => {
     should(corrupt.recorded).be.empty();
   });
 
+  it('should surface any other failure while building the argv instead of reading it as an unreadable overlay', async () => {
+    // Arrange: only an overlay that cannot be read leaves a session to its record; a port that breaks
+    // is a real fault, and swallowing it would restart the pane on a stale argv without saying so.
+    const ports = new Ports();
+    ports.subjectValue = legacySubject({ config: launchConfig({ launchFast: true }) });
+    ports.readableFolders = () => {
+      throw new Error('the state directory is gone');
+    };
+
+    // Act
+    const failure = await new SessionLaunchService(ports).relaunch(ID).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(failure).be.instanceOf(Error);
+    should((failure as Error).message).equal('the state directory is gone');
+    should(ports.recorded).be.empty();
+  });
+
   it('should treat the fast-mode argument as part of the run, so a live /fast is not a stale setting', async () => {
     // Arrange: the process runs with the fast overlay it launched with; the owner then typed /fast off.
     const ports = new Ports();
