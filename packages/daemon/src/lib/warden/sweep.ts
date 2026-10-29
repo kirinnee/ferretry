@@ -1518,6 +1518,7 @@ export class WardenSweepService {
         },
       );
       next = done.state;
+      if (done.refused) return { state: next, outcome, decided, settled: true };
       if (!done.done) return { state: next, outcome, decided, settled: false };
       next = {
         ...next,
@@ -1762,7 +1763,11 @@ export class WardenSweepService {
       readonly nudge: string;
       readonly stopReason: string;
     },
-  ): Promise<{ readonly state: WardenRuntimeState; readonly done: boolean }> {
+  ): Promise<{ readonly state: WardenRuntimeState; readonly done: boolean; readonly refused?: true }> {
+    // Read the fleet afresh: the sweep's snapshot is older than the verdict, and nothing else stands in
+    // front of these remedies, so a ferret gone or finished since is never restarted, resumed or stopped.
+    const target = (await this.ports.fleet.fleet()).find(session => session.config.id === targetId);
+    if (target === undefined || isTerminalStatus(target.state.status)) return { state, done: false, refused: true };
     try {
       if (act.action === 'failover') await this.ports.remedies.failover(targetId, act.agent);
       else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
