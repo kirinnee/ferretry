@@ -414,6 +414,25 @@ const attentionCases: SchemaCase[] = [
     value: { pending: ['A1', 'A3'], dueAt: INSTANT },
   },
   {
+    name: 'attention answers on their way',
+    schema: attention.AttentionDeliverySchema,
+    value: { sending: ['A2'], heldForComposer: true },
+  },
+  {
+    name: 'an undelivered retry',
+    schema: attention.AttentionUndeliveredReplySchema,
+    value: { action: 'discuss', note: 'The premise is wrong' },
+  },
+  {
+    name: 'an undelivered answer',
+    schema: attention.AttentionUndeliveredSchema,
+    value: {
+      at: INSTANT,
+      reply: { action: 'resolve', response: { kind: 'permission', decision: 'approve' } },
+      reason: 'it never appeared in the ferret’s transcript',
+    },
+  },
+  {
     name: 'attention snapshot',
     schema: attention.AttentionSnapshotSchema,
     value: {

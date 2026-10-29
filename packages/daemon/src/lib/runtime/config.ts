@@ -228,16 +228,23 @@ export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FI
  * recomputed on every read, which makes disagreement between the two unrepresentable.
  */
 /**
- * HOW LONG THE OWNER'S ATTENTION ANSWERS ARE HELD before they reach the ferret (docs/attention.md § The loop).
+ * HOW LONG THE OWNER'S ATTENTION ANSWERS ARE HELD before they reach the ferret (docs/attention.md § Delivery).
  * An answer wakes the ferret and every message is re-read on every later turn, so answers are batched:
- * delivered `replySettleSeconds` after the owner's LAST action, and never more than `replyMaxWaitSeconds`
- * after the FIRST. A settle longer than the max wait could never apply, so it is REFUSED, not clamped —
- * an operator who typed it believed it would. Read at start; a change needs a restart.
+ * delivered `replySettleSeconds` after the owner's LAST action (each further card action restarts it), and
+ * never more than `replyMaxWaitSeconds` after the FIRST. A settle longer than the max wait could never
+ * apply, so it is REFUSED, not clamped — an operator who typed it believed it would.
+ *
+ * Past that window an answer is typed only into an EMPTY composer, waiting up to `replyComposerWaitSeconds`
+ * for a person's draft to clear, and it counts as delivered only once the ferret's transcript proves it,
+ * within `replyReceiptSeconds`. Either wait running out reopens the item as a card for the owner. Read at
+ * start; a change needs a restart.
  */
 export const DaemonAttentionConfigSchema = z
   .strictObject({
-    replySettleSeconds: z.number().int().min(1).max(3_600).default(60),
-    replyMaxWaitSeconds: z.number().int().min(1).max(3_600).default(180),
+    replySettleSeconds: z.number().int().min(1).max(3_600).default(10),
+    replyMaxWaitSeconds: z.number().int().min(1).max(3_600).default(120),
+    replyComposerWaitSeconds: z.number().int().min(10).max(86_400).default(600),
+    replyReceiptSeconds: z.number().int().min(30).max(86_400).default(900),
   })
   .refine(window => window.replySettleSeconds <= window.replyMaxWaitSeconds, {
     message: 'attention.replySettleSeconds must not exceed attention.replyMaxWaitSeconds',

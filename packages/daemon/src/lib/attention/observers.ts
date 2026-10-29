@@ -8,7 +8,13 @@ import {
   needsInfoMessage,
   sessionAttentionSummary,
 } from './conversation.ts';
-import { type AttentionReplyQueue, needsInfoReplyKey } from './reply-batch.ts';
+import {
+  type AttentionReplyQueue,
+  type AttentionUndeliveredSink,
+  itemOfKey,
+  needsInfoReplyKey,
+  type ReplyKey,
+} from './reply-batch.ts';
 import type {
   AttentionBoardChange,
   AttentionChangeObserver,
@@ -114,6 +120,23 @@ export class AttentionReplyDelivery implements AttentionChangeObserver {
     if (change.via !== 'board' || change.actor.kind !== 'human' || addressed === undefined) return;
     if (addressed.raisedBy !== 'agent' || addressed.raisedBySession !== sessionId) return;
     await this.replies.add(sessionId, addressed.id, boardReplyMessage(addressed));
+  }
+}
+
+/**
+ * Hands an answer that never reached its ferret back to the owner: the item reopens on its board as a card
+ * saying so (`AttentionService.undelivered`). A key that is about no item (the instructions note) has no
+ * card to reopen. Total: a board that cannot take it is left as it is.
+ */
+export class AttentionBoardUndelivered implements AttentionUndeliveredSink {
+  constructor(private readonly attention: Pick<AttentionService, 'undelivered'>) {}
+
+  async undelivered(sessionId: string, key: ReplyKey, reason: string): Promise<void> {
+    const id = itemOfKey(key);
+    if (id === undefined) return;
+    const counter = key.split('~')[1];
+    const request = counter === undefined ? undefined : Number(counter);
+    await this.attention.undelivered(sessionId, id, reason, request).catch(() => undefined);
   }
 }
 

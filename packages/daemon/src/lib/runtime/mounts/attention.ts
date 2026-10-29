@@ -106,19 +106,27 @@ function pathSessionId(context: RouteContext): string {
   return decoded;
 }
 
-type HeldReplies = Pick<AttentionRepliesSubsystem, 'pending'>;
+type HeldReplies = Pick<AttentionRepliesSubsystem, 'pending' | 'delivery'>;
 
 /**
- * The board with the answers this machine is holding for the ferret (`replies`), so the owner's screen
- * can say they are on their way. A held outbox that cannot be read is left off: the board is the answer.
+ * The board with the answers this machine is holding for the ferret (`replies`) and the ones on their way
+ * but not yet proven to arrive (`delivery`), so the owner's screen can say "Sending…". An outbox that
+ * cannot be read is left off: the board is the answer.
  */
 async function withReplies(
   replies: HeldReplies,
   sessionId: string,
   snapshot: AttentionSnapshot,
 ): Promise<AttentionSnapshot> {
-  const held = await replies.pending(sessionId).catch(() => undefined);
-  return held === undefined ? snapshot : { ...snapshot, replies: held };
+  const [held, delivery] = await Promise.all([
+    replies.pending(sessionId).catch(() => undefined),
+    replies.delivery(sessionId).catch(() => undefined),
+  ]);
+  return {
+    ...snapshot,
+    ...(held === undefined ? {} : { replies: held }),
+    ...(delivery === undefined ? {} : { delivery }),
+  };
 }
 
 async function list(attention: AttentionService, replies: HeldReplies, context: RouteContext): Promise<ApiResponse> {
