@@ -5,7 +5,11 @@ import {
   type ProcessesSurfaceProps,
   type ProcessStopper,
 } from '../../../src/features/workspace/processes-surface.tsx';
-import type { ProcessListState, ProcessOutputReader } from '../../../src/features/workspace/use-session-processes.ts';
+import {
+  type ProcessListState,
+  type ProcessOutputReader,
+  useSessionProcesses,
+} from '../../../src/features/workspace/use-session-processes.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../../src/lib/runtime-models.ts';
@@ -502,5 +506,135 @@ describe('a process that leaves the list', () => {
     );
     expect(WATCH_TESTS.id).toBe('100.1');
     expect(ctx.view.container.querySelector('[data-process-detail="100.1"]')).toBeNull();
+  });
+});
+
+describe('following the output', () => {
+  const scrollTo = async (body: HTMLElement, top: number): Promise<void> => {
+    Object.defineProperty(body, 'scrollHeight', { configurable: true, value: 1000 });
+    Object.defineProperty(body, 'clientHeight', { configurable: true, value: 200 });
+    body.scrollTop = top;
+    await interact(() => {
+      body.dispatchEvent(new Event('scroll'));
+    });
+  };
+
+  it('stops following when the reader scrolls up, offers Jump to latest, and follows again once back at the end', async () => {
+    const { reader } = readerOf({ '100.1': [outputAnswer('100.1', 'a\nb\nc\n')] });
+    const { view, q, rowFor, click } = await setup({ readOutput: reader });
+    await click(rowFor('100.1'));
+    await turns();
+    const body = q<HTMLElement>('.fy-proc-body', 'the body');
+    expect(view.container.querySelector('.fy-proc-jump')).toBeNull();
+
+    await scrollTo(body, 0);
+    await click(q('.fy-proc-jump', 'Jump to latest'));
+    expect(view.container.querySelector('.fy-proc-jump')).toBeNull();
+
+    await scrollTo(body, 0);
+    expect(view.container.querySelector('.fy-proc-jump')).not.toBeNull();
+    await scrollTo(body, 790);
+    expect(view.container.querySelector('.fy-proc-jump')).toBeNull();
+  });
+
+  it('says why the output cannot be read when the daemon fails before anything arrived', async () => {
+    const reader: ProcessOutputReader = async () => {
+      throw new Error('daemon down');
+    };
+    const { q, rowFor, click } = await setup({ readOutput: reader });
+    await click(rowFor('100.1'));
+    await turns();
+    expect(q('.fy-proc-body [role="alert"]', 'the alert').textContent).toBe('daemon down');
+  });
+
+  it('keeps what it has and says it is not up to date when a later read fails', async () => {
+    let reads = 0;
+    const reader: ProcessOutputReader = async () => {
+      reads += 1;
+      if (reads > 1) throw new Error('daemon down');
+      return outputAnswer('100.1', 'first\n');
+    };
+    const { q, rowFor, click } = await setup({ readOutput: reader, outputPollMs: 5 });
+    await click(rowFor('100.1'));
+    await wait(60);
+    expect(q('.fy-proc-note--warn', 'the note').textContent).toBe('Not up to date — daemon down');
+    expect(q('.fy-proc-body', 'the body').textContent).toContain('first');
+  });
+
+  it('reads again the moment the page is shown again', async () => {
+    const { reader, calls } = readerOf({ '100.1': [outputAnswer('100.1', 'x\n')] });
+    const { rowFor, click } = await setup({ readOutput: reader, outputPollMs: 60_000 });
+    await click(rowFor('100.1'));
+    await turns();
+    expect(calls).toHaveLength(1);
+    await interact(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await turns();
+    expect(calls).toHaveLength(2);
+  });
+});
+
+describe('the process list while the page is hidden', () => {
+  const Probe = ({ reads }: { readonly reads: number[] }) => {
+    const { state } = useSessionProcesses({
+      connection: daemon,
+      scope,
+      visible: true,
+      pollMs: 60_000,
+      reader: async () => {
+        reads.push(reads.length);
+        return ALL_PROCESSES;
+      },
+    });
+    return <span data-status={state.status} />;
+  };
+
+  it('reads again the moment the page is shown again', async () => {
+    const reads: number[] = [];
+    const view = await mount(<Probe reads={reads} />);
+    mounted.push(view);
+    await turns();
+    expect(reads).toHaveLength(1);
+    await interact(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await turns();
+    expect(reads).toHaveLength(2);
+  });
+});
+
+describe('opening a child process', () => {
+  it('shows it under its parent even though the parent was collapsed', async () => {
+    const { reader } = readerOf({ '201.3': [outputAnswer('201.3', 'ready\n', { complete: true })] });
+    const { view } = await setup({ readOutput: reader, openId: '201.3' });
+    await turns();
+    expect(view.container.querySelector('[data-process-id="201.3"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-process-detail="201.3"]')).not.toBeNull();
+  });
+});
+
+describe('inverse colours in the output', () => {
+  it('swaps foreground and background, falling back to the code theme for the side with no colour', async () => {
+    const text = '\u001b[7mA\u001b[0m \u001b[7;31mB\u001b[0m \u001b[7;42mC\u001b[0m \u001b[7;31;42mD\u001b[0m\n';
+    const { reader } = readerOf({ '100.1': [outputAnswer('100.1', text, { complete: true })] });
+    const { view, rowFor, click } = await setup({ readOutput: reader });
+    await click(rowFor('100.1'));
+    await turns();
+    const styled = new Map(
+      [...view.container.querySelectorAll<HTMLElement>('.fy-proc-body span[style]')].map(span => [
+        span.textContent,
+        span.getAttribute('style') ?? '',
+      ]),
+    );
+    const has = (letter: string, color: string, background: string): void => {
+      const style = styled.get(letter) ?? '';
+      expect(style).toContain(`color: ${color}`);
+      expect(style).toContain(`background-color: ${background}`);
+    };
+    has('A', 'var(--code-bg)', 'var(--code-fg)');
+    has('B', 'var(--code-bg)', 'var(--fy-ansi-1)');
+    has('C', 'var(--fy-ansi-2)', 'var(--code-fg)');
+    has('D', 'var(--fy-ansi-2)', 'var(--fy-ansi-1)');
   });
 });

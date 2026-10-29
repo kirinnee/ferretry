@@ -17,6 +17,7 @@ import { AgentControlMarker } from '../../../src/features/workspace/agent-contro
 import { ConsoleSurface } from '../../../src/features/workspace/console-surface.tsx';
 import type { WorkspaceFormFactor } from '../../../src/features/workspace/phone/phone-tab.ts';
 import { PhoneWorkspace } from '../../../src/features/workspace/phone/phone-workspace.tsx';
+import { ProcessesSurface } from '../../../src/features/workspace/processes-surface.tsx';
 import {
   type SessionInfoSlot,
   SessionWorkspace,
@@ -52,6 +53,7 @@ import { BottomSheet } from '../../../src/shell/bottom-sheet.tsx';
 import { ContextMenu } from '../../../src/shell/context-menu.tsx';
 import '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
+import { ALL_PROCESSES } from '../../support/session-processes.ts';
 import { sessionView } from '../../support/sessions.ts';
 import { fakeDeck, terminalListing, terminalView } from '../../support/terminal-deck.ts';
 
@@ -860,6 +862,34 @@ describe('closing workspace tabs', () => {
     const { page } = mountWorkspace('phone', {}, store);
     try {
       expect(page.root.findByType(PhoneWorkspace).props.onEndTerminal).toBeUndefined();
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+});
+
+describe('SessionWorkspace — the Processes tab', () => {
+  test('draws the process list only while its tab is on screen, and its Console button opens the Console', async () => {
+    globalThis.fetch = (async (input: RequestInfo | URL) =>
+      String(input instanceof Request ? input.url : input).endsWith('/processes')
+        ? Response.json(ALL_PROCESSES)
+        : Response.json({ entries: [] })) as unknown as typeof fetch;
+    const { page, captured } = mountWorkspace('desktop');
+    try {
+      await settle();
+      expect(page.root.findAllByType(ProcessesSurface)).toHaveLength(0);
+
+      run(() => captured.workspace.showAgentTab('processes'));
+      await settle();
+      expect(page.root.findByType(ProcessesSurface).props.compact).toBe(false);
+
+      run(() => page.root.findByType(ProcessesSurface).props.onOpenChange('500.6'));
+      expect(page.root.findByType(ProcessesSurface).props.openId).toBe('500.6');
+
+      run(() => page.root.findByType(ProcessesSurface).props.onShowConsole());
+      await settle();
+      expect(page.root.findAllByType(ProcessesSurface)).toHaveLength(0);
+      expect(page.root.findAllByProps({ 'data-workspace-console': '' })).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }

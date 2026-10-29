@@ -25,6 +25,15 @@ describe('parsing ANSI output', () => {
     expect(lines[2]?.[1]?.style.bg).toEqual({ rgb: 'rgb(1,2,3)' });
   });
 
+  it('maps the 256-colour greyscale ramp and ignores an unknown extended-colour mode', () => {
+    const [grey] = parseAnsi('\u001b[38;5;232mdark\u001b[48;5;255mlight');
+    expect(grey?.[0]?.style.fg).toEqual({ rgb: 'rgb(8,8,8)' });
+    expect(grey?.[1]?.style.bg).toEqual({ rgb: 'rgb(238,238,238)' });
+    const [odd] = parseAnsi('\u001b[31m\u001b[38;9mstill red');
+    expect(odd?.[0]?.text).toBe('still red');
+    expect(odd?.[0]?.style.fg).toEqual({ palette: 1 });
+  });
+
   it('drops every other escape instead of showing it', () => {
     const text = 'a\u001b[2K\u001b[1Ab\u001b]0;title\u0007c\u001b]8;;http://x\u001b\\d\u001b(Be\u0007\u0001f';
     expect(parseAnsi(text).map(lineText)).toEqual(['abcdef']);
