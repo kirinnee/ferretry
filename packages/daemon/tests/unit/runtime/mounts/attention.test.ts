@@ -549,6 +549,40 @@ describe('attention routes and held answers', () => {
   });
 });
 
+describe('attention route discuss', () => {
+  it('should let the owner ask to discuss an item, keeping it open and marking it waiting on the ferret', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+
+    // Act
+    const discussed = await dispatch(post({ action: 'discuss', id: 'A1', note: 'Let us talk it through' }));
+
+    // Assert
+    should(discussed.status).equal(200);
+    should((jsonBody(discussed).items as readonly unknown[])[0]).containDeep({
+      id: 'A1',
+      waitingOn: 'ferret',
+      waitingFor: 'discussion',
+      infoRequests: 1,
+    });
+  });
+
+  it('should refuse the ferret discussing its own item and an unknown item', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+
+    // Act
+    const byAgent = await dispatch(post({ action: 'discuss', id: 'A1' }, agentIn('s1')));
+    const unknown = await dispatch(post({ action: 'discuss', id: 'A9' }));
+
+    // Assert
+    should(byAgent.status).equal(403);
+    should(unknown.status).equal(404);
+  });
+});
+
 describe('attention route needs-info', () => {
   const task = {
     action: 'add',

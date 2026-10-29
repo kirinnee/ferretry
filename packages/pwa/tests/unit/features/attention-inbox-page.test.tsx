@@ -242,6 +242,17 @@ describe('AttentionInboxPage list and card', () => {
     await mounted.unmount();
   });
 
+  it('leaves the arrow keys to the card pane when a key press starts inside it', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const pane = must(mounted.container.querySelector<HTMLElement>('[data-attention-pane]'), 'the card pane');
+    expect(paneItem(mounted)).toBe('A3');
+    await interact(() => pane.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })));
+    expect(paneItem(mounted)).toBe('A3');
+    await interact(() => key('ArrowDown'));
+    expect(paneItem(mounted)).toBe('A2');
+    await mounted.unmount();
+  });
+
   it('clears Find on Escape, and leaves Escape alone while Find is empty', async () => {
     const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
     const find = must(mounted.container.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
@@ -329,6 +340,19 @@ describe('AttentionInboxPage list and card', () => {
     ).toEqual(['Cut the release branch.', 'Raised !A2 about shipping.']);
     // Inside the scrolling detail, so the answer bar stays pinned under it.
     expect(toggle.closest('[data-attention-scroll]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says the ferret has written nothing yet when the conversation has no messages', async () => {
+    const mounted = await mount(page(fakeInbox(), [twoWay], { readRecent: async () => [] }));
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'fold').click(),
+    );
+    await flush();
+    expect(mounted.container.querySelector('[data-attention-recent-list]')).toBeNull();
+    expect(mounted.container.querySelector('.fy-attn-recent__note')?.textContent).toBe(
+      'Kai hasn’t written anything yet.',
+    );
     await mounted.unmount();
   });
 
@@ -739,6 +763,25 @@ describe('AttentionInboxPage Resolved filter', () => {
     );
     expect(navigated).toHaveLength(1);
     expect(navigated[0]).toContain('A1');
+    await view.unmount();
+  });
+
+  it('says nothing matches when Find hides every resolved item, and Show everything brings them back', async () => {
+    const { mounted } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
+    const view = await mounted;
+    const root = view.container;
+    await interact(() => option(root, 'resolved').click());
+    expect(root.querySelectorAll('[data-attention-record]')).toHaveLength(1);
+    const find = must(root.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'zzz-no-such-thing');
+      find.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(root.querySelectorAll('[data-attention-record]')).toHaveLength(0);
+    expect(root.querySelector('[data-attention-resolved-empty]')).toBeNull();
+    const back = must(root.querySelector<HTMLButtonElement>('[data-attention-no-match] button'), 'Show everything');
+    await interact(() => back.click());
+    expect(root.querySelectorAll('[data-attention-record]')).toHaveLength(1);
     await view.unmount();
   });
 

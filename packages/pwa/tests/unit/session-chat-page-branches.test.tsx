@@ -3,6 +3,12 @@ import type { SessionView } from '@ferretry/protocol';
 import { type ComponentProps, cloneElement, type ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import {
+  SessionSearchProvider,
+  type SessionSearchResult,
+  SessionTasksSearchSurface,
+  useSessionSearch,
+} from '../../src/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
@@ -12,7 +18,6 @@ import {
 } from '../../src/lib/pages/session-chat-page.tsx';
 import { WorkspaceLayoutStore } from '../../src/lib/workspace-layout-store.ts';
 import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-preferences.ts';
-import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -119,6 +124,56 @@ describe('SessionChatPage branches', () => {
       });
       expect(published).toEqual([answer]);
       expect(refreshes).toBe(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+});
+
+describe('SessionChatPage search destinations', () => {
+  const taskResult = { kind: 'task' } as unknown as SessionSearchResult;
+
+  const renderSearching = (searched: string) => {
+    let openResult: (result: SessionSearchResult) => void = () => undefined;
+    const Probe = () => {
+      openResult = useSessionSearch().openResult;
+      return null;
+    };
+    const page = render(
+      <SessionSearchProvider connection={alpha} focusSignal={0} scope={daemonSessionScope(alpha, searched)}>
+        <Probe />
+        <SessionChatPage
+          client={{} as unknown as SessionChatClient}
+          connection={alpha}
+          entries={[]}
+          formFactor="desktop"
+          onSessionChange={() => undefined}
+          presentation="pane"
+          session={sessionView('shared')}
+          workspaceLayouts={new WorkspaceLayoutStore(NO_STORAGE)}
+          workspaceRails={new WorkspaceRailPreferenceStore(NO_STORAGE)}
+        />
+      </SessionSearchProvider>,
+    );
+    return { page, open: () => run(() => openResult(taskResult)) };
+  };
+
+  test('a search result opens this session’s tasks when the search is scoped to this session', () => {
+    const { page, open } = renderSearching('shared');
+    try {
+      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(0);
+      open();
+      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('registers no destinations while the search is scoped to another session', () => {
+    const { page, open } = renderSearching('other');
+    try {
+      open();
+      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }
