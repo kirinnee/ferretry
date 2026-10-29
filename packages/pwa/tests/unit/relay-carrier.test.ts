@@ -261,6 +261,17 @@ describe('the browser WebSocket adapter', () => {
     });
   });
 
+  it('should name the configured rendezvous when the address it dialled cannot be parsed', () => {
+    dialFake((socket, _adapted, ends) => {
+      socket.onerror?.();
+      socket.onclose?.({ code: 1006, reason: '' });
+
+      should(ends).have.length(1);
+      should(ends[0]?.code).equal(1006);
+      should(ends[0]?.reason).containEql('could not open a connection to the configured rendezvous');
+    }, 'not a url at all');
+  });
+
   it('should distinguish a socket that died mid-session from one that never opened', () => {
     dialFake((socket, _adapted, ends) => {
       socket.onopen?.();
@@ -614,6 +625,22 @@ describe('the carrier router', () => {
     // One request session, shared: every call above rode the one socket.
     should(carriers.dialled).have.length(1);
     stop();
+  });
+
+  it('should still serve the request when a connection observer throws, and tell the observers after it', async () => {
+    const connected: string[] = [];
+    const { router, daemon } = await routerFor({ answer: { body: 'served' } });
+    const stopThrowing = router.onConnected(() => {
+      throw new Error('a disclosure observer broke');
+    });
+    const stopRecording = router.onConnected(connection => connected.push(connection.daemonId));
+
+    const response = await router.fetch(`${DAEMON_URL}/v1/projects`);
+
+    should(await response.text()).equal('served');
+    should(connected).eql([daemon.daemonId]);
+    stopThrowing();
+    stopRecording();
   });
 
   it('should dial the published direct address rather than the address the pairing was made on', async () => {
@@ -1008,6 +1035,53 @@ describe('the carrier router', () => {
 
     should(router.choice(daemon.daemonId)?.ok).be.false();
     should(socket?.closed).be.ok();
+  });
+
+  it('should let a rendezvous that was still opening fail quietly once the daemon withdrew it', async () => {
+    // Arrange — the relay's socket is dialled and never answers, so its session is still opening.
+    const identity = await newDaemonIdentity();
+    const daemon = daemonConnection({
+      daemonId: identity.daemonId,
+      baseUrl: DAEMON_URL,
+      deviceId: DEVICE_ID,
+      carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }, RELAY],
+    });
+    const carriers = carriersFor(identity, url => (url.hostname === DIRECT_HOST ? 'refuse' : 'silent'));
+    const sockets: ScriptedSocket[] = [];
+    const router = new DaemonCarrierRouter({
+      preference: () => 'auto',
+      crypto: relayCrypto,
+      deviceKey,
+      dial: url => {
+        const socket = carriers.dial(url);
+        if (new URL(url).hostname !== DIRECT_HOST) sockets.push(socket);
+        return socket;
+      },
+      heartbeat: () => () => undefined,
+      network: unreachable,
+    });
+    router.resolvePaired(() => [daemon]);
+    const opening = router.send(daemon, `${DAEMON_URL}/v1/projects`).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await settle(5);
+    should(sockets).have.length(1);
+
+    // Act — a republish withdraws the relay while it opens, then the dial fails.
+    const withdrawn = daemonConnection({ ...daemon, carriers: [{ kind: 'direct', daemonUrl: DAEMON_URL }] });
+    const walked = router.send(withdrawn, `${DAEMON_URL}/v1/usage`).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
+    await settle(5);
+    sockets[0]?.onClose?.(1006, 'the address did not answer');
+    const reasons = await Promise.all([opening, walked]);
+    await settle(5);
+
+    // Assert — both requests ended with an error, and nothing was left unhandled by the withdrawn session.
+    should(reasons.every(reason => reason instanceof Error)).be.true();
+    should(router.choice(daemon.daemonId)?.ok).not.be.true();
   });
 
   it('should dial the current hosted address for a daemon that published no rendezvous', async () => {
@@ -2128,6 +2202,26 @@ describe('the carrier router meeting a presence requirement', () => {
     // Assert
     should(response.status).equal(401);
     should(await response.json()).eql(PRESENCE);
+    should(attempts()).equal(1);
+  });
+
+  it('should not ask for an unlock when the 401 body is not JSON', async () => {
+    // Arrange
+    let asked = 0;
+    const { router, attempts } = await unlockRouter(() => ({ status: 401, body: 'Unauthorized, plain text' }), {
+      unlockRequired: async () => {
+        asked += 1;
+        return true;
+      },
+    });
+
+    // Act
+    const response = await router.fetch(`${DAEMON_URL}/v1/fleet`);
+
+    // Assert
+    should(response.status).equal(401);
+    should(await response.text()).equal('Unauthorized, plain text');
+    should(asked).equal(0);
     should(attempts()).equal(1);
   });
 

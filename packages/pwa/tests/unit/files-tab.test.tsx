@@ -183,6 +183,52 @@ describe('the Files tab', () => {
     }
   });
 
+  it('moves focus to the opened file on a pointer that hovers, and leaves it alone on touch', async () => {
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file', size: 12 }] } };
+    const paneOf = (container: HTMLElement): HTMLElement =>
+      must(container.querySelector<HTMLElement>('.kt-fs-scroll'), 'the file pane');
+    // The input policy is one tab-wide store other suites also steer: state it outright rather than inherit it.
+    const queries = Object.getPrototypeOf(window.matchMedia('(pointer: fine)')) as object;
+    const original = Object.getOwnPropertyDescriptor(queries, 'matches');
+    Object.defineProperty(queries, 'matches', {
+      configurable: true,
+      get(this: { readonly media: string }) {
+        return this.media === '(pointer: fine)' || this.media === '(hover: hover)';
+      },
+    });
+    const pointer = (type: string): Promise<void> =>
+      interact(() => {
+        window.dispatchEvent(Object.assign(new Event('pointerdown'), { pointerType: type }));
+      });
+    try {
+      await pointer('touch');
+      const touch = await open(<FilesTab daemon={daemon} scope={scope} />);
+      try {
+        await click(touch.container, 'Open file a.ts, 12 B');
+        await settle();
+        expect(touch.container.textContent).toContain('contents of a.ts');
+        expect(document.activeElement).not.toBe(paneOf(touch.container));
+      } finally {
+        await touch.unmount();
+      }
+
+      resetFilesTabStates();
+      await pointer('mouse');
+      const mouse = await open(<FilesTab daemon={daemon} scope={scope} />);
+      try {
+        await click(mouse.container, 'Open file a.ts, 12 B');
+        await settle();
+        expect(mouse.container.textContent).toContain('contents of a.ts');
+        expect(document.activeElement).toBe(paneOf(mouse.container));
+      } finally {
+        await mouse.unmount();
+      }
+    } finally {
+      if (original) Object.defineProperty(queries, 'matches', original);
+      await pointer('touch');
+    }
+  });
+
   it('never shows one daemon’s open files under another daemon’s connection', async () => {
     fixture.listings = { '': { entries: [{ name: 'secrets.md', type: 'file' }] } };
     const view = await open(<FilesTab daemon={daemon} scope={scope} />);

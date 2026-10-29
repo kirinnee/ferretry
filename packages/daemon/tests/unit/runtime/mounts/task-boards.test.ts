@@ -1,4 +1,4 @@
-import { describe, it } from 'bun:test';
+import { describe, it, spyOn } from 'bun:test';
 import {
   TaskBoardCreateResponseSchema,
   TaskBoardGrantRequestViewSchema,
@@ -18,6 +18,7 @@ import {
   taskBoardRoutes,
   taskBoardTaskActionAuthorizer,
 } from '../../../../src/lib/runtime/mounts/task-boards.ts';
+import { TaskBoardChildGrantService } from '../../../../src/lib/task-boards/child-grant-service.ts';
 import { isTaskBoardError, TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { boardSession, CREDENTIALS, FakeTaskBoards, human } from './support.ts';
@@ -483,6 +484,45 @@ describe('the task board membership mount', () => {
 
     // Assert
     should(response.status).be.oneOf([403, 404]);
+  });
+
+  it('should answer unavailable, committing and delivering nothing, when the approved intent cannot be read back', async () => {
+    // Arrange
+    const world = await withBoard();
+    const pending = TaskBoardGrantRequestViewSchema.parse(
+      jsonBody(
+        await post(
+          world,
+          '/child-grants/request',
+          { targetSessionId: 'grandchild', role: 'worker' },
+          peer(world.capabilityFor('root') ?? ''),
+        ),
+      ),
+    );
+    const before = world.state;
+    const deliveries = world.delivered.length;
+    const lostIntent = spyOn(TaskBoardChildGrantService.prototype, 'approve').mockImplementation(() => ({
+      state: { ...before, boards: before.boards.map(board => ({ ...board, childGrantIntents: [] })) },
+      result: { approved: false, request: pending },
+    }));
+
+    try {
+      // Act
+      const response = await post(
+        world,
+        '/child-grants/approve',
+        { grantRequestId: pending.requestId },
+        peer(world.capabilityFor('coordinator') ?? ''),
+      );
+
+      // Assert
+      should(response.status).equal(503);
+      should(jsonBody(response).error).match(/the approved child grant intent is no longer readable/u);
+      should(world.state).equal(before);
+      should(world.delivered).have.length(deliveries);
+    } finally {
+      lostIntent.mockRestore();
+    }
   });
 
   it('should carry an outside session onto the board through invite, approve and accept', async () => {

@@ -84,6 +84,7 @@ class FakePeer implements WebRtcPeerLike {
   readonly channels: FakeChannel[] = [];
   readonly remote: string[] = [];
   closed = false;
+  opensAtOnce = false;
   stats: Array<[string, unknown]> = [];
   onicecandidate: ((event: { readonly candidate: { readonly type?: string | null } | null }) => void) | null = null;
   onicegatheringstatechange: (() => void) | null = null;
@@ -93,6 +94,7 @@ class FakePeer implements WebRtcPeerLike {
 
   createDataChannel(): WebRtcDataChannelLike {
     const channel = new FakeChannel();
+    if (this.opensAtOnce) channel.readyState = 'open';
     this.channels.push(channel);
     return channel;
   }
@@ -223,6 +225,26 @@ describe('the WebRTC carrier, browser side', () => {
     // Assert
     should([beforeGrace, viaGrace.offers.length]).deepEqual([0, 1]);
     should([beforeCap, viaCap.offers.length]).deepEqual([0, 1]);
+  });
+
+  it('should hand back a channel that is already open on a connected peer without waiting for it to open', async () => {
+    // Arrange
+    const built = harness();
+    await connected(built);
+    const peer = built.peers[0];
+    if (peer === undefined) throw new Error('no peer was negotiated');
+    peer.opensAtOnce = true;
+
+    // Act
+    const second = await built.subject.dial(new AbortController().signal);
+
+    // Assert
+    should(built.peers).have.length(1);
+    should(peer.channels).have.length(2);
+    should(peer.channels[1]?.readyState).equal('open');
+    should(peer.channels[1]?.onopen).be.null();
+    should(peer.closed).be.false();
+    should(second.onOpen).be.null();
   });
 
   it('should treat the end-of-candidates event as gathering complete', async () => {

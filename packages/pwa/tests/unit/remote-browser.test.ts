@@ -366,6 +366,21 @@ describe('remote browser frame and geometry helpers', () => {
     expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 1, 0, 1, 0xff, 1]).buffer)).toBeNull();
   });
 
+  it('refuses a page id that is only a byte-order mark, over-long, or whose length disagrees with its bytes', () => {
+    const magic = [0x46, 0x59, 0x42, 0x46];
+    // The decoder drops a leading byte-order mark, so these bytes name no page at all.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 1, 0, 3, 0xef, 0xbb, 0xbf, 1]).buffer)).toBeNull();
+    // The mark is dropped from the text but still counted in the declared length: the two disagree.
+    expect(decodeRemoteBrowserFrame(new Uint8Array([...magic, 1, 0, 4, 0xef, 0xbb, 0xbf, 97, 1]).buffer)).toBeNull();
+    // One character past the page-id limit, though still inside the byte allowance.
+    expect(decodeRemoteBrowserFrame(daemonFrameEnvelope('a'.repeat(129), [1]))).toBeNull();
+    expect(decodeRemoteBrowserFrame(daemonFrameEnvelope('a'.repeat(128), [1]))).toEqual({
+      kind: 'tagged',
+      pageId: 'a'.repeat(128),
+      jpegBytes: new Uint8Array([1]).buffer,
+    });
+  });
+
   it('maps responsive and desktop viewports plus edge canvas points', () => {
     expect(remoteViewportForContainer(12.4, 900.7, 'responsive')).toEqual({ width: 320, height: 901 });
     expect(remoteViewportForContainer(3000, 3000, 'responsive')).toEqual({ width: 1920, height: 1200 });
