@@ -3,6 +3,7 @@ export * from './backoff.ts';
 export * from './bless.ts';
 export * from './concurrency.ts';
 export * from './config.ts';
+export * from './daily.ts';
 export * from './detect.ts';
 export * from './escalation.ts';
 export * from './failover.ts';

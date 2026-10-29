@@ -8,6 +8,7 @@
  * from it.
  */
 
+import { displaySystemCallsign } from '@ferretry/protocol';
 import { z } from 'zod';
 
 /** How the daemon chooses between candidate accounts. */
@@ -43,6 +44,8 @@ export const WardenSpawnProvenanceSchema = WardenSelectionProvenanceSchema.exten
   wardenSessionId: z.string().min(1),
   /** Assigned-warden target. A fleet sweep has no single target. */
   target: z.string().min(1).optional(),
+  /** The investigator's name, `warden-00002a`. Absent from a sidecar written before investigators were numbered. */
+  investigator: z.string().min(1).optional(),
   /** The account that actually ran, not the one that was requested. */
   agent: z.string().min(1),
   model: z.string().min(1),
@@ -85,12 +88,14 @@ export function buildWardenSpawnProvenance(
   facts: WardenSpawnFacts,
   selection: WardenSelectionProvenance,
   target?: string,
+  investigator?: string,
 ): WardenSpawnProvenance {
   return {
     v: 1,
     at: facts.createdAt,
     wardenSessionId: facts.sessionId,
     ...(target === undefined ? {} : { target }),
+    ...(investigator === undefined ? {} : { investigator }),
     agent: facts.agent,
     model: facts.model,
     modelSource: facts.modelSource,
@@ -141,6 +146,9 @@ export function renderProvenanceMarkdown(meta: WardenSpawnProvenance): string {
     `- Model source: **${MODEL_SOURCE_LABEL[meta.modelSource]}**`,
     `- Harness: **${codeValue(meta.harness)}**`,
     `- Warden: **${codeValue(meta.wardenSessionId)}**`,
+    ...(meta.investigator === undefined
+      ? []
+      : [`- Investigator: **${codeValue(displaySystemCallsign(meta.investigator))}**`]),
     `- Failover: **${meta.failedOver ? 'Yes' : 'No'}**`,
   ];
   if (meta.failedOver) {

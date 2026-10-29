@@ -1,3 +1,4 @@
+import { displaySystemCallsign, isSystemCallsign } from '@ferretry/protocol';
 import { formatSessionTitle, normalizeCallsign } from './policy.ts';
 import {
   CALLSIGN_WINDOW_MS,
@@ -108,8 +109,12 @@ export async function claimStartName(
   return requested.ok ? { ok: true, callsign: requested.claim.callsign } : { ok: false, error: requested.error };
 }
 
-/** Title-case a callsign for display: `hadi` → `Hadi`, `mary-jane` → `Mary-Jane`. */
+/**
+ * Title-case a callsign for display: `hadi` → `Hadi`, `mary-jane` → `Mary-Jane`. A system callsign
+ * is no first name and keeps its own shape: `warden-00002a` → `warden-00002A`.
+ */
 export function displayAgentName(callsign: string): string {
+  if (isSystemCallsign(callsign)) return displaySystemCallsign(callsign);
   return callsign
     .split('-')
     .map(part => part.charAt(0).toUpperCase() + part.slice(1))

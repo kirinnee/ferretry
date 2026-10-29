@@ -120,6 +120,8 @@ export interface WardenInvestigationRecord {
   readonly costUsd?: number;
   readonly agent?: string;
   readonly model?: string;
+  /** The investigator's own name, `warden-00002a` (stored lowercase). */
+  readonly wardenName?: string;
 }
 
 /** Every priced investigation ever, as a running total, so the savings line can say what one costs. */

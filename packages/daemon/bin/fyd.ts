@@ -1017,6 +1017,7 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  WardenCallsignTakenError,
   type WardenFleetSession,
   WardenLivenessMonitor,
   type WardenSubsystem,
@@ -4055,6 +4056,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             agent: request.agent,
             ...(request.model === undefined ? {} : { model: request.model }),
             name: request.name,
+            // Its own callsign, with no fallback: one would draw a first name from the pool, which is for real ferrets.
+            ...(request.teammate === undefined ? {} : { teammate: request.teammate }),
             // The label is what the detector's lineage shield reads: a warden that was not labelled
             // would be swept, flagged and investigated by the next warden, forever.
             label: WARDEN_LABEL,
@@ -4065,7 +4068,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             boardAccess: 'none' as const,
           };
           const payload = JSON.stringify(start);
-          const view = await parts.control.start(start, crypto.randomUUID(), payload);
+          const view = await parts.control.start(start, crypto.randomUUID(), payload).catch((error: unknown) => {
+            if (error instanceof SessionControlError && error.failure === 'callsign_taken')
+              throw new WardenCallsignTakenError(request.teammate ?? '');
+            throw error;
+          });
           return {
             sessionId: view.config.id,
             createdAt: view.config.createdAt,

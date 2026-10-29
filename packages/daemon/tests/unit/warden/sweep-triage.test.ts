@@ -270,7 +270,7 @@ describe('the Jev guard', () => {
 
     // Assert
     should(subject.guarded).have.length(1);
-    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['warden:s1']);
+    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['Investigate s1']);
     should(subject.state().assignedQueue?.map(anomaly => anomaly.sessionId)).deepEqual(['s2']);
     should(status.triage.jev).deepEqual({ configured: true, active: false, reason: 'jev_cap' });
     should(status.triage.llm).deepEqual({ configured: true, active: true, reason: 'configured' });
@@ -326,7 +326,7 @@ describe('the Jev guard', () => {
 
     // Assert
     should(subject.guarded).be.empty();
-    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['warden:s1']);
+    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['Investigate s1']);
   });
 });
 
