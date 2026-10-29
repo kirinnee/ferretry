@@ -350,6 +350,35 @@ describe('the Resolved filter reads', () => {
     await settle();
     expect(calls.length).toBe(before + 1);
   });
+  test('skips a board whose machine was unpaired after the read was asked for', async () => {
+    const { client, calls } = fakeClient(new Map([['studio/a', resolvedBoard('a')]]));
+    const { timers } = manualTimers();
+    let inbox: AttentionInbox | null = null;
+    const latest = (): AttentionInbox => inbox as unknown as AttentionInbox;
+    const element = (machines: readonly AttentionInboxMachine[]) => (
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />
+    );
+    view = await mount(
+      element([
+        { connection: studio, name: 'Studio', sessions: [waiting('a')] },
+        { connection: laptop, name: 'Laptop', sessions: [waiting('b')] },
+      ]),
+    );
+    await settle();
+    const askedBeforeUnpairing = latest().loadResolved;
+    await view.render(element([{ connection: studio, name: 'Studio', sessions: [waiting('a')] }]));
+    await settle();
+
+    await interact(async () => askedBeforeUnpairing());
+    await settle();
+    expect(
+      calls
+        .filter(call => call.method === 'revalidate')
+        .map(call => call.daemonId)
+        .sort(),
+    ).toEqual(['studio']);
+    expect(latest().resolvedReading).toBe(false);
+  });
 });
 
 describe('useInboxMachines', () => {

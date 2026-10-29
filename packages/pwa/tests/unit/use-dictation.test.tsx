@@ -893,7 +893,7 @@ describe('useDictation with the engine the person chose', () => {
     reject(error: unknown): void;
   }
 
-  const fakeVoice = (available = true) => {
+  const fakeVoice = (available = true, cancel: () => void = () => undefined) => {
     const sessions: FakeSession[] = [];
     const voice = {
       support: available ? { available: true } : { available: false, reason: 'No WebAssembly here.' },
@@ -918,7 +918,7 @@ describe('useDictation with the engine the person chose', () => {
             session.started += 1;
           },
           finish: () => finished,
-          cancel: () => undefined,
+          cancel,
         };
       },
     };
@@ -964,6 +964,43 @@ describe('useDictation with the engine the person chose', () => {
     expect(view.handle().review?.cleaned).toBe('words from this device');
     await interact(() => view.handle().insert('words from this device'));
     expect(view.drafts.map(draft => draft.text)).toEqual(['words from this device']);
+    await view.unmount();
+  });
+
+  it('cancels cleanly while recording even if the engine refuses to be cancelled', async () => {
+    const refusals: string[] = [];
+    const { voice, sessions } = fakeVoice(true, () => {
+      refusals.push('cancel');
+      throw new Error('the engine already ended');
+    });
+    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet' }) });
+    await interact(() => view.handle().start());
+    await interact(() => sessions[0]?.options.onStart());
+    expect(view.handle().phase).toBe('recording');
+
+    await interact(() => view.handle().cancel());
+    expect(refusals).toEqual(['cancel']);
+    expect(view.handle().phase).toBe('idle');
+    expect(view.drafts).toEqual([]);
+    await view.unmount();
+  });
+
+  it('cancels a take that is still being transcribed even if the engine refuses to be cancelled', async () => {
+    const refusals: string[] = [];
+    const { voice, sessions } = fakeVoice(true, () => {
+      refusals.push('cancel');
+      throw new Error('the engine already ended');
+    });
+    const view = await harness({ parakeet: voice, settings: settingsWith({ engine: 'parakeet' }) });
+    await interact(() => view.handle().start());
+    await interact(() => sessions[0]?.options.onStart());
+    await interact(() => view.handle().stop());
+    expect(view.handle().phase).toBe('transcribing');
+
+    await interact(() => view.handle().cancel());
+    expect(refusals).toEqual(['cancel']);
+    expect(view.handle().phase).toBe('idle');
+    expect(view.drafts).toEqual([]);
     await view.unmount();
   });
 
