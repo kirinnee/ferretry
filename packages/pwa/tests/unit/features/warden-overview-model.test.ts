@@ -594,6 +594,29 @@ describe('investigationRows', () => {
     expect(rows[2]).toMatchObject({ investigator: 'Investigation', named: false });
   });
 
+  it('should name a fleet triage by its investigator and say a queued one has not started', () => {
+    // Arrange
+    const status = wardenStatus({
+      investigations: [
+        untargeted({ id: 'fleet', state: 'done', scope: 'fleet', wardenName: 'warden-00002c' }),
+        wardenInvestigation({ id: 'queued:sess-1', state: 'queued', queuedAt: ago(1) }),
+      ],
+    });
+
+    // Act
+    const rows = investigationRows(status);
+
+    // Assert
+    expect(rows.find(row => row.key === 'investigation:fleet')).toMatchObject({
+      investigator: 'warden-00002C · Fleet triage',
+      named: true,
+    });
+    expect(rows.find(row => row.key === 'investigation:queued:sess-1')).toMatchObject({
+      investigator: 'Not started',
+      named: false,
+    });
+  });
+
   it('should carry the verdict, report, anomaly, cost and the time it finished', () => {
     // Arrange
     const status = wardenStatus({

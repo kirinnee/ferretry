@@ -390,7 +390,10 @@ export interface WardenInvestigationRow {
   readonly key: string;
   /** The ferret investigated; empty for a fleet-wide triage. */
   readonly sessionId?: string;
-  /** `warden-00002A`, or the old label (`Fleet triage`, `Sweep`…) for an investigation with no name. */
+  /**
+   * `warden-00002A` (`warden-00002C · Fleet triage` for a fleet-wide one); `Not started` while queued, since an
+   * id is issued only when a slot frees; and the old label for one an older daemon never named.
+   */
   readonly investigator: string;
   /** The investigator has a real name on the wire. */
   readonly named: boolean;
@@ -404,6 +407,16 @@ export interface WardenInvestigationRow {
   readonly verdict?: WardenVerdictKind;
 }
 
+const investigationName = (entry: WardenInvestigation): string => {
+  const fleet = entry.scope === 'fleet';
+  if (entry.wardenName !== undefined) {
+    const name = displaySystemCallsign(entry.wardenName);
+    return fleet ? `${name} · Fleet triage` : name;
+  }
+  if (entry.state === 'queued') return 'Not started';
+  return fleet ? 'Fleet triage' : 'Investigation';
+};
+
 /** Running first, then the queue in order, then finished ones newest first. */
 export const investigationRows = (status: WardenStatusView): readonly WardenInvestigationRow[] =>
   [...status.investigations]
@@ -411,12 +424,7 @@ export const investigationRows = (status: WardenStatusView): readonly WardenInve
     .map(entry => {
       const named = entry.wardenName !== undefined;
       const fleet = entry.scope === 'fleet';
-      const investigator =
-        entry.wardenName === undefined
-          ? fleet
-            ? 'Fleet triage'
-            : 'Investigation'
-          : displaySystemCallsign(entry.wardenName);
+      const investigator = investigationName(entry);
       const who = [entry.agent, entry.model].filter(part => part !== undefined).join(' · ');
       const stateChip =
         entry.state === 'done'
