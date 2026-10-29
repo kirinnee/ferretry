@@ -190,6 +190,9 @@ const collectCards = (
   );
 };
 
+/** An open item that waits on the owner, or a notification (it has no turn: it is read, not answered, and a cleared one is no longer open). */
+export const isOnOwner = (item: AttentionItem): boolean => item.notice === true || attentionTurn(item) === 'owner';
+
 /**
  * The deck: every open item on the OWNER's turn (a plain notification included), of every unread
  * conversation whose board has been read, newest first. An item on the ferret's turn is not in it — it
@@ -200,7 +203,7 @@ export const inboxCards = (
   entries: readonly UnreadSession[],
   boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
   hidden: ReadonlySet<string> = new Set(),
-): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => attentionTurn(item) === 'owner');
+): readonly InboxCard[] => collectCards(entries, boardFor, hidden, isOnOwner);
 
 /** The items on the FERRET's turn, as cards of the same shape and order as the deck's: the "With ferrets" section. */
 export const withFerretCards = (

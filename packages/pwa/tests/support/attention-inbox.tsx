@@ -13,6 +13,7 @@ import {
   type InboxAction,
   type InboxCard,
   inboxCardKey,
+  isOnOwner,
 } from '../../src/lib/attention-inbox.ts';
 import { type DaemonId, daemonId } from '../../src/lib/daemon-connection.ts';
 import { interact, must } from './dom.ts';
@@ -138,10 +139,10 @@ export function InboxHarness({
   const shown = cards.filter(card => !hidden.has(card.key));
   const inbox: AttentionInbox = {
     unread: [],
-    total: cards.filter(card => attentionTurn(card.item) === 'owner').length,
+    total: cards.filter(card => isOnOwner(card.item)).length,
     // Split as the shell splits them: by whose turn the item is on.
     withFerret: shown.filter(card => attentionTurn(card.item) === 'ferret'),
-    cards: shown.filter(card => attentionTurn(card.item) === 'owner'),
+    cards: shown.filter(card => isOnOwner(card.item)),
     reading,
     resolved,
     resolvedReading,
