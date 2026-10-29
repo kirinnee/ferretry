@@ -54,6 +54,8 @@ export function responseWords(response: AttentionResponse): string {
       return response.verdict === 'good' ? 'Your answer is good.' : `Please clarify: ${response.clarification}`;
     case 'open-question':
       return response.answer;
+    case 'other':
+      return `Other answer (none of the options): ${response.answer}`;
   }
 }
 

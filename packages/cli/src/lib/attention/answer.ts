@@ -61,6 +61,8 @@ export function describeAnswer(response: AttentionResponse): string {
       return response.verdict === 'good' ? 'answer accepted' : `clarification requested: ${response.clarification}`;
     case 'open-question':
       return `answered: ${response.answer}`;
+    case 'other':
+      return `answered with none of the options: ${response.answer}`;
   }
 }
 

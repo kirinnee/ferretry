@@ -198,6 +198,14 @@ export const AttentionResponseSchema = z.union([
     kind: z.literal('open-question'),
     answer: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   }),
+  /**
+   * The owner's own words INSTEAD of the item's options — "none of these". Any ask with options takes it
+   * (a choice, a permission, a review), so the ferret reads it apart from a picked option and its note.
+   */
+  z.strictObject({
+    kind: z.literal('other'),
+    answer: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
+  }),
 ]);
 export type AttentionResponse = z.infer<typeof AttentionResponseSchema>;
 

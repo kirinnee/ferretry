@@ -93,6 +93,11 @@ export interface AttentionCardProps {
   readonly detailEnd?: ReactNode;
   /** Skips the card without answering it; draws a quiet "Skip" in the answer bar's second row. Absent: no Skip. */
   readonly onSkip?: () => void;
+  /**
+   * Drawn FLAT, not as a card: no frame or shadow, no swipe arrows, the text held to a readable width. A
+   * wide pointer screen, where nothing swipes, draws the item this way.
+   */
+  readonly flat?: boolean;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
