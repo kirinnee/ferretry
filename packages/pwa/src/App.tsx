@@ -1111,10 +1111,8 @@ function SessionRoute({
     transcriptIsCurrent(store.sessionCache.peekTranscript(scope), store.fleet.session(scope)),
   );
   /** A background read of this very chat is still in flight: a tiny dot, not "Updating…". */
-  const catchingUp = useSyncExternalStore(
-    store.backgroundFresh.subscribe,
-    () => store.backgroundFresh.isCatchingUp(scope),
-    () => false,
+  const catchingUp = useSyncExternalStore(store.backgroundFresh.subscribe, () =>
+    store.backgroundFresh.isCatchingUp(scope),
   );
   // Per session, not per history entry: coming back to a conversation by any route finds the reading position.
   const readingPosition = useMemo(

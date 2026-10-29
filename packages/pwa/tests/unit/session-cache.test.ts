@@ -675,3 +675,27 @@ describe('seedFleetFromCache', () => {
     should(seeded).be.false();
   });
 });
+
+describe('SessionCache markOpened', () => {
+  it('ranks a background-read chat as opened, in storage too, and ignores a chat never saved', async () => {
+    // Arrange
+    const backend = new FakeBackend();
+    const { cache, time } = subject(backend);
+    const scope = scopeOf(alpha, 's-1');
+    cache.saveBackgroundTranscript(scope, { log: 'tail' }, 3, cache.generation(alpha));
+    await drain();
+
+    // Act
+    time.advance(5);
+    cache.markOpened(scope);
+    cache.markOpened(scopeOf(alpha, 'never-saved'));
+    await drain();
+    const reloaded = new SessionCache(backend, { now: time.now, limits: SESSION_CACHE_LIMITS });
+    await reloaded.warm();
+
+    // Assert
+    should(cache.isRecentlyOpened(scope)).be.true();
+    should(cache.isRecentlyOpened(scopeOf(alpha, 'never-saved'))).be.false();
+    should(reloaded.isRecentlyOpened(scope)).be.true();
+  });
+});

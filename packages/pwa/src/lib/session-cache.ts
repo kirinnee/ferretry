@@ -262,7 +262,9 @@ export class SessionCache {
     const before = this.#memory.get(key);
     if (before?.kind !== 'transcript') return;
     const { background: _background, ...kept } = before;
-    const record: TranscriptRecord = { ...kept, openedAt: this.#now() };
+    const openedAt = this.#now();
+    const record: TranscriptRecord = { ...kept, openedAt };
+    this.#opened.set(key, openedAt);
     this.#store(key, record);
     this.#enqueue(async backend => {
       (await this.#transcriptIndex(backend)).set(key, stamp(record));
