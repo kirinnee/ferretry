@@ -458,6 +458,34 @@ describe('attention routes', () => {
     should(item?.context).equal(long.trim());
   });
 
+  it('should raise a notify as a notice, for a ferret and for a human operator alike', async () => {
+    // Arrange
+    const dispatch = fixture();
+
+    // Act
+    const byFerret = await dispatch({
+      method: 'POST',
+      path: '/v1/sessions/s1/notify',
+      headers: agentIn('s1'),
+      body: JSON.stringify({ body: 'The backup finished.' }),
+    });
+    const byOperator = await dispatch({
+      method: 'POST',
+      path: '/v1/sessions/s1/notify',
+      headers: human,
+      body: JSON.stringify({ body: 'A different note.' }),
+    });
+    const board = await dispatch({ path: '/v1/sessions/s1/attention', headers: human });
+
+    // Assert
+    should(byFerret.status).equal(200);
+    should(byOperator.status).equal(200);
+    const items = jsonBody(board).items as readonly { notice?: boolean; kind: string; ask?: unknown }[];
+    should(items.length).equal(2);
+    for (const item of items) should(item).containDeep({ notice: true, kind: 'info' });
+    for (const item of items) should(item.ask).be.undefined();
+  });
+
   it('should not raise the same notify twice while its item is still open, and report no devices', async () => {
     // Arrange
     const notifications = new FakeNotifications();
