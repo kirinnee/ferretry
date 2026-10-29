@@ -27,3 +27,12 @@ export const defaultReplyTarget = (open: readonly AttentionItem[]): AttentionIte
     (newest, item) => (newest === null || item.waitingSince > newest.waitingSince ? item : newest),
     null,
   );
+
+/**
+ * A message with the items its "re:" chips name: each as a `!A5` reference at the front, in chip order, each once
+ * (one already typed is not repeated). Nothing is guessed — only the chips the owner added.
+ */
+export const withReferences = (text: string, ids: readonly AttentionItem['id'][]): string => {
+  const missing = [...new Set(ids)].filter(id => !new RegExp(`(?:^|\\s)!${id}(?=$|[\\s.,;:!?)])`, 'u').test(text));
+  return missing.length === 0 ? text : `${missing.map(id => `!${id}`).join(' ')} ${text}`;
+};

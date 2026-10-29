@@ -314,6 +314,12 @@ export const AttentionBriefShape = {
   impact: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** By when it matters, in words: "before the 14:00 deploy", "no rush". */
   urgency: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
+  /** It stops the ferret NOW: nothing else can move until the owner answers ("Blocking now"). */
+  blockingNow: z.literal(true).optional(),
+  /** What it WILL block when the ferret gets there, in a few words ("Will block: the deploy"). */
+  willBlock: singleLine(MAX_ATTENTION_URGENCY_LENGTH).optional(),
+  /** When the owner's answer is needed by (`--by`): a few hours before, the owner is pinged once. */
+  neededBy: InstantSchema.optional(),
   /** PRs, files and references worth opening. */
   links: z.array(AttentionLinkSchema).min(1).max(MAX_ATTENTION_LINKS).optional(),
   /** Ordered Markdown steps the owner follows, one thing to do each: complete instructions, never a secret. */
@@ -401,6 +407,9 @@ export const AttentionRevisableFieldSchema = z.enum([
   'recommendation',
   'impact',
   'urgency',
+  'blockingNow',
+  'willBlock',
+  'neededBy',
   'links',
   'steps',
   'body',

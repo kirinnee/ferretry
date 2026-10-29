@@ -277,3 +277,16 @@ export const attentionTitle = (item: Pick<AttentionCardSource, 'title' | 'subjec
 /** Whether the card has a title of its own, rather than one cut from its ask. */
 export const hasOwnTitle = (item: Pick<AttentionCardSource, 'title' | 'subject'>): boolean =>
   (item.title?.trim() ?? '') !== '';
+
+/**
+ * WHOSE TURN an item is on the ferret's agenda: the OWNER's (it waits on them — the only turn that can stop a
+ * ferret on the owner), the FERRET's (the owner replied, asked for more, or wants to talk it through, and the
+ * ferret has not updated it yet), or DONE (resolved or dismissed). The internal discussion state is the ferret's
+ * turn; the app shows no separate "in discussion" mode.
+ */
+export type AttentionTurn = 'owner' | 'ferret' | 'done';
+
+export const attentionTurn = (item: {
+  readonly waitingOn?: 'ferret' | undefined;
+  readonly resolvedAt?: string | undefined;
+}): AttentionTurn => (item.resolvedAt !== undefined ? 'done' : item.waitingOn === 'ferret' ? 'ferret' : 'owner');
