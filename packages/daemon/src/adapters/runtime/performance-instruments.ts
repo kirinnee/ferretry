@@ -3,6 +3,7 @@ import { commandLabel, type PathRoots, pathShape } from '@ferretry/protocol';
 import type { ProcessGaugePort, ProcessReading } from '../../lib/performance/profiler.ts';
 import type { PerformanceProbe } from '../../lib/performance/recorder.ts';
 import type { MillisecondClockPort } from '../../lib/runtime/boot.ts';
+import { memoryUsage } from './memory-usage.ts';
 
 /**
  * The instruments a performance profile reads, at the edges only the runtime can see.
@@ -24,7 +25,7 @@ export class ProcessGauges implements ProcessGaugePort {
 
   async read(): Promise<ProcessReading> {
     const cpu = process.cpuUsage();
-    const memory = process.memoryUsage();
+    const memory = memoryUsage();
     const usage = process.resourceUsage();
     const linux = this.platform === 'linux' ? await this.#linux() : {};
     return {
