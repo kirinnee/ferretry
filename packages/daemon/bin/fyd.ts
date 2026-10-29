@@ -101,6 +101,8 @@ import pkg from '../package.json' with { type: 'json' };
 import {
   BunSqliteAnalyticsStoreFactory,
   HttpAnalyticsPricingFeed,
+  InlineAnalyticsPersister,
+  WorkerAnalyticsPersister,
   readAnalyticsTranscriptEvidence,
   WorkerTranscriptFolds,
 } from '../src/adapters/analytics/index.ts';
@@ -7654,7 +7656,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // is watched live and quiet it is answered without the identity `stat` each read cost.
       { subscribe: (path, listener) => fileEvents.subscribe(path, () => listener()) },
     ),
-    analyticsIndexes: new BunSqliteAnalyticsStoreFactory(),
+    // Read from memory, written by its own thread, like the session index above: the boot sweep's one
+    // upsert no longer commits — or checkpoints — on the event loop.
+    analyticsIndexes: new BunSqliteAnalyticsStoreFactory(
+      {
+        create: (file, connection) =>
+          new WorkerAnalyticsPersister(file, new InlineAnalyticsPersister(connection), {
+            retired: () =>
+              bootNotices.state(
+                'the analytics store writer kept failing, so the analytics file is written on the main thread until the daemon restarts',
+              ),
+          }),
+      },
+      { persistFailed: error => bootNotices.state(`the analytics file is behind: ${error.message}; retrying`) },
+    ),
     worktrees: new ManagedWorktreeAdapter(
       gateway,
       files,
@@ -8100,6 +8115,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       await probeBundledWorker('session'),
       await probeBundledWorker('housekeeping'),
       await probeBundledWorker('session-index'),
+      await probeBundledWorker('analytics-index'),
       { name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) },
     ],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
