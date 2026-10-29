@@ -85,6 +85,10 @@ page works offline and always matches the build). The parser depends on the form
 (`packages/pwa/tests/unit/changelog.test.ts` parses the whole real file and fails on an unreadable
 heading).
 
+The page is written for people using the app, so it reads the file with two small rules: every line starts
+with a capital, and a line scoped `test`, `ci` or `build` is left out (`Changelog.md` and the GitHub
+release keep it).
+
 ### Rebuilding history
 
 `bun scripts/release/backfill-changelog.ts --write` re-renders every section of `Changelog.md` from the
