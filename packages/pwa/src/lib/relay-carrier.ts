@@ -62,6 +62,7 @@ import {
   connectionSocketUrl,
   describeConnectionMethod,
   HEARTBEAT_GRACE_SECONDS,
+  MAX_PLAINTEXT_BYTES,
   type PrivateKeyHandle,
   parseDaemonId,
   publishedConnectionMethods,
@@ -1189,6 +1190,24 @@ export interface RelayStreamRequest {
 const requestSessionKey = (address: string): string => `request ${address}`;
 
 /**
+ * Which request session carries a request: `bulk` for a body that has to travel in parts, `request`
+ * for everything else.
+ *
+ * A SESSION IS ONE CREDIT WINDOW AND ONE QUEUE, so a request waits behind every record queued ahead of
+ * it. A phone photo is about eighty records; a few of them queued ahead of the fleet list's poll held
+ * it past its deadline, and a request that misses its deadline retires the session it was on — the
+ * one carrying the uploads. Bodies that need parts therefore share a session of their own, and the
+ * reads every panel polls never wait behind one.
+ */
+export type RequestLane = 'request' | 'bulk';
+
+export const requestLane = (body: string | undefined): RequestLane =>
+  body !== undefined && body.length > MAX_PLAINTEXT_BYTES / 2 ? 'bulk' : 'request';
+
+const laneSessionKey = (lane: RequestLane, address: string): string =>
+  lane === 'request' ? requestSessionKey(address) : `bulk ${address}`;
+
+/**
  * A stream session's key: one per CALL, because §14 gives each stream its own session.
  *
  * The ordinal is what stops two callers of the same route sharing one session — `openStream` names
@@ -2113,7 +2132,8 @@ export class DaemonCarrierRouter {
     init: RequestInit,
     dial: DialPolicy,
   ): Promise<Response> {
-    const session = await this.#session(entry, method, dial).catch((reason: unknown) => {
+    const lane = requestLane(typeof init.body === 'string' ? init.body : undefined);
+    const session = await this.#session(entry, method, dial, lane).catch((reason: unknown) => {
       throw new RelayUnsentError(reason);
     });
     // AMENDED HERE, on the session that will carry the request, because the rotation proof signs THAT
@@ -2158,7 +2178,7 @@ export class DaemonCarrierRouter {
         reason.code === RELAY_ACCESS_LEASE_ENDED_CLOSE_CODE &&
         replaySafe(init)
       ) {
-        const fresh = await this.#session(entry, method, dial);
+        const fresh = await this.#session(entry, method, dial, lane);
         return relayResponse(await fresh.request(record, signal));
       }
       // The carrier failed under this request, so another carrier may be tried — and
@@ -2188,11 +2208,16 @@ export class DaemonCarrierRouter {
    * ever close. A refresh that carried this exact opening promise across is the one case
    * where the entry moved and the session did not, and that session is tracked and fine.
    */
-  async #session(entry: CarrierEntry, method: ConnectionMethod, dial: DialPolicy): Promise<RelayClientSession> {
+  async #session(
+    entry: CarrierEntry,
+    method: ConnectionMethod,
+    dial: DialPolicy,
+    lane: RequestLane = 'request',
+  ): Promise<RelayClientSession> {
     const address = carrierAddress(method);
     return await this.#hold(
       entry,
-      requestSessionKey(address),
+      laneSessionKey(lane, address),
       address,
       async () => this.#openKeyed(entry, method, device => ({ kind: 'auth', device })),
       dial,
