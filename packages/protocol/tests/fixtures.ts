@@ -168,7 +168,7 @@ export const healthView = {
 export const wardenConfig = {
   enabled: true,
   layers: { jev: true, llm: true },
-  guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 2 },
+  guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 0.042 },
   caps: { jevUsdPerDay: 0.5, investigationUsdPerDay: 2, maxInvestigationsPerHour: 6 },
   mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: false, closeLeftovers: true },
   jevActs: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 },

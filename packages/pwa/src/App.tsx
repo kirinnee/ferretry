@@ -224,6 +224,7 @@ import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
+import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
   createAppStore,
@@ -1106,6 +1107,17 @@ function SessionRoute({
   const [transcriptCached, setTranscriptCached] = useState(
     () => store.sessionCache.peekTranscript(scope) !== undefined,
   );
+  /**
+   * The drawn copy already holds everything the session's journal does (`lib/background-fresh.ts` kept
+   * it so): switching here is instant and says nothing while the live read confirms it.
+   */
+  const [cacheCurrent, setCacheCurrent] = useState(() =>
+    transcriptIsCurrent(store.sessionCache.peekTranscript(scope), store.fleet.session(scope)),
+  );
+  /** A background read of this very chat is still in flight: a tiny dot, not "Updating…". */
+  const catchingUp = useSyncExternalStore(store.backgroundFresh.subscribe, () =>
+    store.backgroundFresh.isCatchingUp(scope),
+  );
   // Per session, not per history entry: coming back to a conversation by any route finds the reading position.
   const readingPosition = useMemo(
     () => chatScrollSlot(store.scrollMemory, daemonSessionKey(scope)),
@@ -1239,7 +1251,10 @@ function SessionRoute({
       setEntries(cached == null ? [] : transcriptEntriesFromLog(cached.log));
       setSends(cached == null ? [] : parseLedgerSendsResponse(cached.sends));
       setTranscriptCached(cached != null);
+      setCacheCurrent(cached != null && transcriptIsCurrent(cached, store.fleet.session(cacheScope)));
     };
+    store.sessionCache.markOpened(cacheScope);
+    store.backgroundFresh.setOpen(cacheScope);
     setError(null);
     setTranscriptUnbound(false);
     const inMemory = store.sessionCache.peekTranscript(cacheScope);
@@ -1298,10 +1313,21 @@ function SessionRoute({
       });
     return () => {
       current = false;
+      store.backgroundFresh.setOpen(null);
       control?.stop();
       if (refreshControl.current === control) refreshControl.current = null;
     };
-  }, [clientAttempt, connection, daemonId, sessionId, store.attention, store.clients, store.fleet, store.sessionCache]);
+  }, [
+    clientAttempt,
+    connection,
+    daemonId,
+    sessionId,
+    store.attention,
+    store.backgroundFresh,
+    store.clients,
+    store.fleet,
+    store.sessionCache,
+  ]);
 
   /**
    * THE LIVE FEED, AND THE FIRST THING IN THIS APP THAT CONSUMES ONE.
@@ -1579,7 +1605,8 @@ function SessionRoute({
           pins={store.pins}
           refreshError={sessionIssue}
           transcriptUnbound={transcriptUnbound}
-          updating={transcriptCached}
+          updating={transcriptCached && !cacheCurrent && !catchingUp}
+          catchingUp={transcriptCached && catchingUp}
           readingPosition={readingPosition}
           session={session}
           surfaceEvents={surfaceEvents}

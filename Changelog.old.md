@@ -1,3 +1,19 @@
+## [4.107.0](https://github.com/kirinnee/ferretry/compare/v4.106.1...v4.107.0) (2026-10-29)
+
+### Features
+
+* **warden:** stats-first Warden page, compact actions by actor, and warden-NNNNNN investigators ([#894](https://github.com/kirinnee/ferretry/issues/894)) ([ae3f81a](https://github.com/kirinnee/ferretry/commit/ae3f81a6d72dd4cb3e1a42ecde6a09be662c1394))
+
+### Fixes
+
+* keep tests and daemon stops away from the live tmux server ([#896](https://github.com/kirinnee/ferretry/issues/896)) ([447d3f2](https://github.com/kirinnee/ferretry/commit/447d3f23bed0d5937095343f9bd43185ea7d9f37))
+* **pwa:** name the fleet triage's investigator, say queued ones have not started, and open its report ([#898](https://github.com/kirinnee/ferretry/issues/898)) ([b8e2fc8](https://github.com/kirinnee/ferretry/commit/b8e2fc8d21665eba744407238df0228dc3b7189e))
+* **session:** show Claude Code's real compaction progress ([#893](https://github.com/kirinnee/ferretry/issues/893)) ([d33ac60](https://github.com/kirinnee/ferretry/commit/d33ac608c944a57074f22a9a40ea2fa67e38898c))
+
+### Performance
+
+* **daemon:** parse transcripts on a lean worker thread ([#895](https://github.com/kirinnee/ferretry/issues/895)) ([81b9dd8](https://github.com/kirinnee/ferretry/commit/81b9dd8857f45efbafc47a9560b3b9e91ca81b02))
+
 ## [4.106.1](https://github.com/kirinnee/ferretry/compare/v4.106.0...v4.106.1) (2026-10-29)
 
 ### Fixes

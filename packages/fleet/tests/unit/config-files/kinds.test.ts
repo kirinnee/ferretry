@@ -304,8 +304,8 @@ describe('configLoosening: warden', () => {
       ['the investigations allowed per hour goes up from 6 to 9'],
     ],
     [
-      { guard: { ...DEFAULT_WARDEN_CONFIG.guard, usdPerMillionInputTokens: 0.5 } },
-      ['the Jev price the cap counts with goes down from 2 to 0.5'],
+      { guard: { ...DEFAULT_WARDEN_CONFIG.guard, usdPerMillionInputTokens: 0.01 } },
+      ['the Jev price the cap counts with goes down from 0.042 to 0.01'],
     ],
     [{ maxAssignedWardens: 3 }, ['the number of wardens that may run at once goes up from 1 to 3']],
     [{ intervalMinutes: 1 }, ['the minutes between Warden sweeps goes down from 2 to 1']],

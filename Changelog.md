@@ -1,3 +1,14 @@
+## [4.108.0](https://github.com/kirinnee/ferretry/compare/v4.107.0...v4.108.0) (2026-10-29)
+
+### Features
+
+* **pwa:** keep recent chats fresh in the background ([#899](https://github.com/kirinnee/ferretry/issues/899)) ([b4f9835](https://github.com/kirinnee/ferretry/commit/b4f98356c3161023147e48233b22cb113a738564))
+
+### Fixes
+
+* **daemon:** say a harness exited when tmux 3.8 prints no pid for its dead pane ([#901](https://github.com/kirinnee/ferretry/issues/901)) ([bc87d8c](https://github.com/kirinnee/ferretry/commit/bc87d8c60de52f8d5c33d6f92718e22f89276f5f))
+* **warden:** price Jev at its real $0.042 per million input tokens ([#900](https://github.com/kirinnee/ferretry/issues/900)) ([d93ee9a](https://github.com/kirinnee/ferretry/commit/d93ee9a0cea95489621a727794ba8428caa3e32c))
+
 ## [4.107.0](https://github.com/kirinnee/ferretry/compare/v4.106.1...v4.107.0) (2026-10-29)
 
 ### Features

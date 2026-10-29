@@ -381,6 +381,40 @@ describe('registering a pane whose harness has already exited', () => {
     );
   });
 
+  it('should report the exit even when tmux answers the dead pane with no pid at all', async () => {
+    // Arrange -- tmux 3.8 prints an empty `#{pane_pid}` for a pane it has reaped: `%0 ` and nothing else.
+    const subject = await fixture(`echo 'ferretry: DEEPSEEK_TOKEN is not set' >&2; exit 2`);
+    const real = new BunTmuxProcess(subject.tmuxExecutable, join(subject.home, 'throwaway-tmux.sock'));
+    const blank = new TmuxController({
+      execute: async (arguments_, stdin) =>
+        arguments_.at(-1) === '#{pane_id} #{pane_pid}'
+          ? { code: 0, stdout: '%0 \n', stderr: '' }
+          : await real.execute(arguments_, stdin),
+    });
+    const registrar = new DurableTerminalPaneRegistrar(DAEMON, blank, subject.files, subject.storage.paths);
+
+    // Act / Assert
+    await should(registrar.register(subject.record)).be.rejectedWith(
+      'the interactive harness exited (2): its last output was "ferretry: DEEPSEEK_TOKEN is not set"',
+    );
+  });
+
+  it('should still refuse a live pane whose pid tmux does not answer', async () => {
+    // Arrange
+    const subject = await fixture();
+    const real = new BunTmuxProcess(subject.tmuxExecutable, join(subject.home, 'throwaway-tmux.sock'));
+    const blank = new TmuxController({
+      execute: async (arguments_, stdin) =>
+        arguments_.at(-1) === '#{pane_id} #{pane_pid}'
+          ? { code: 0, stdout: '%0 \n', stderr: '' }
+          : await real.execute(arguments_, stdin),
+    });
+    const registrar = new DurableTerminalPaneRegistrar(DAEMON, blank, subject.files, subject.storage.paths);
+
+    // Act / Assert -- a live pane is not an exit, so the identity refusal stands.
+    await should(registrar.register(subject.record)).be.rejectedWith('tmux did not prove the launched pane identity');
+  });
+
   it('should still refuse a live pane whose process start cannot be read', async () => {
     // Arrange
     const subject = await fixture();

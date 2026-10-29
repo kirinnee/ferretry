@@ -194,6 +194,8 @@ export interface SessionChatPageProps {
    * the page says "Updating…" over it until it does.
    */
   readonly updating?: boolean;
+  /** A background read of this chat is still in flight: a tiny dot instead of the "Updating…" pill. */
+  readonly catchingUp?: boolean;
   /** Where this session's reading position is kept, so Back and a reload return to it. */
   readonly readingPosition?: ChatScrollSlot;
   /**
@@ -414,6 +416,7 @@ export function SessionChatPage({
   refreshError = null,
   transcriptUnbound = false,
   updating = false,
+  catchingUp = false,
   readingPosition,
   connectionState,
   chatWidth = 'readable',
@@ -1369,6 +1372,15 @@ export function SessionChatPage({
       {updating ? (
         <div className="relative h-0">
           <CacheUpdating className="absolute left-1/2 top-2 z-10 -translate-x-1/2" />
+        </div>
+      ) : catchingUp ? (
+        <div className="relative h-0">
+          <span
+            aria-label="Catching up"
+            className="pointer-events-none absolute left-1/2 top-2 z-10 h-2 w-2 -translate-x-1/2 animate-pulse rounded-full bg-muted"
+            data-catching-up=""
+            role="status"
+          />
         </div>
       ) : null}
       <div className="fy-chat-log">

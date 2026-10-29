@@ -243,7 +243,7 @@ refusal (a failure of the command itself is 1).
   list from `fy recommend`, and names `--runtime/--model/--effort`. `--auto` takes the routing prompt's order.
 - **`jev`** — `fy new --auto` asks Jev (TypeSafe AI's System One model, the Warden's guard) to rank the ready
   models for the task, **guided by the same routing prompt**: one cheap question per start, only when a ferret asks, within `jev.usdPerDay`
-  (default $0.25 per UTC day, counted at the Warden's `guard.usdPerMillionInputTokens`, separate from the
+  (default $0.25 per UTC day, counted at the Warden's `guard.usdPerMillionInputTokens` (default $0.042 per million), separate from the
   Warden's own cap). Jev sees the task text (bounded), the routing prompt, and up to twelve ready models — the prompt's
   order first, then the most headroom — each with its runtime, label, tier, where the prompt names it and its
   login quota; nothing else. With one ready model Jev is not asked. When Jev cannot answer (no key, a refusal, a

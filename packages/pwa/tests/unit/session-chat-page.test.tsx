@@ -1145,6 +1145,36 @@ describe('SessionChatPage', () => {
     run(() => page.unmount());
   });
 
+  test.each([
+    { subject: 'a delta in flight', updating: false, catchingUp: true, dot: 1, pill: 0 },
+    { subject: 'a current cache', updating: false, catchingUp: false, dot: 0, pill: 0 },
+    { subject: 'a stale cache with nothing in flight', updating: true, catchingUp: false, dot: 0, pill: 1 },
+    { subject: 'the pill and the dot together', updating: true, catchingUp: true, dot: 0, pill: 1 },
+  ])('shows the tiny catching-up dot only for $subject', ({ updating, catchingUp, dot, pill }) => {
+    // Arrange
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], sessionView('shared'))}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        session={sessionView('shared')}
+        presentation="pane"
+        updating={updating}
+        catchingUp={catchingUp}
+      />,
+    );
+
+    // Act
+    const dots = page.root.findAllByProps({ 'data-catching-up': '' });
+    const pills = page.root.findAllByProps({ 'data-cache-updating': '' });
+
+    // Assert
+    expect(dots).toHaveLength(dot);
+    expect(pills).toHaveLength(pill);
+    run(() => page.unmount());
+  });
+
   test('hands the transcript the reading position it was given, and none when there is none', () => {
     // Arrange
     const readingPosition = { read: () => null, write: () => undefined };

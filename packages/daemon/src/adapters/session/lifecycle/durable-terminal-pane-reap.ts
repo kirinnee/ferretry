@@ -78,16 +78,10 @@ export class DurableTerminalPaneRegistrar {
   /** Replaces the durable identity after a resume launches a new incarnation of the same pane. */
   async registerSession(sessionId: SessionId, tmuxSession: string): Promise<void> {
     const identity = await this.tmux.paneIdentity(tmuxSession);
-    if (identity === undefined) throw new Error('tmux did not prove the launched pane identity');
+    if (identity === undefined) throw await this.refusal(tmuxSession, 'tmux did not prove the launched pane identity');
     const ticks = await this.incarnation.startOf(identity.pid);
-    if (ticks === undefined) {
-      // Almost always the harness having already exited: tmux keeps a dead pane — and its pid — on
-      // screen, while the process the pid named is gone. Saying so, with what it printed, is the
-      // reason a reader can act on; "no stable incarnation identity" described the symptom.
-      const pane = await this.tmux.state(tmuxSession);
-      if (!pane.alive || pane.dead) throw new Error(harnessExitReason(pane));
-      throw new Error('the launched pane process has no stable incarnation identity');
-    }
+    if (ticks === undefined)
+      throw await this.refusal(tmuxSession, 'the launched pane process has no stable incarnation identity');
     const registration: RegisteredTerminalPane = {
       daemonId: this.daemonId,
       sessionId,
@@ -100,6 +94,21 @@ export class DurableTerminalPaneRegistrar {
       createSessionPaths(this.paths, sessionId).terminalPane,
       `${JSON.stringify(registration)}\n`,
     );
+  }
+
+  /**
+   * Why a pane could not be registered, when the identity read is only the symptom.
+   *
+   * Almost always the harness having already exited. tmux keeps a dead pane on screen, but what it
+   * still answers about one differs by release: tmux 3.8 (macOS Homebrew) prints an EMPTY `#{pane_pid}`
+   * once it has reaped the process, so the pane id arrives with no pid at all; older releases keep the
+   * pid, and then the process start it names cannot be read. Either way the reason a reader can act on
+   * is the exit and what the process printed, so the pane is asked once more and its death outranks the
+   * identity read. `unproven` stands only for a pane that is still alive.
+   */
+  private async refusal(tmuxSession: string, unproven: string): Promise<Error> {
+    const pane = await this.tmux.state(tmuxSession);
+    return new Error(!pane.alive || pane.dead ? harnessExitReason(pane) : unproven);
   }
 }
 
