@@ -155,6 +155,16 @@ describe('the agenda line', () => {
     expect(lines(view.root)).toHaveLength(1);
   });
 
+  test('sets each count in bold, with its words after it', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    const counts = view.root.findAll(node => node.type === 'strong' && node.props.className === 'fy-agenda-line__n');
+    expect(counts.map(node => node.children.join(''))).toEqual(['1', '2', '1']);
+    const line = lines(view.root)[0];
+    expect(
+      line?.findAll(node => node.type === 'span' && node.props.className === 'fy-agenda-line__segment'),
+    ).toHaveLength(3);
+  });
+
   test('is absent when the agenda is empty and nothing is sending', () => {
     const view = mount({ snapshot: board([item('A4', { notice: true })]) });
     expect(lines(view.root)).toHaveLength(0);

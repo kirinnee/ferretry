@@ -10,13 +10,13 @@
 
 import type { AttentionId, AttentionItem } from '@ferretry/protocol';
 import { ChevronUp, LoaderCircle, X } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { agendaSegments, type AgendaCounts } from '../../lib/agenda-chat.ts';
 import type { InboxAction } from '../../lib/attention-answers.ts';
 import { AttentionAgendaRow } from './attention-agenda-row.tsx';
 import { attentionHeading } from './attention-delivery.tsx';
 
-export interface AgendaSending {
+interface AgendaSending {
   readonly count: number;
   /** What is on its way, for the tooltip. */
   readonly headings: readonly string[];
@@ -58,8 +58,13 @@ export function AttentionAgendaLine({
       <span className="fy-agenda-line__words">
         <strong className="fy-agenda-line__name">Agenda</strong>
         {segments.map(segment => (
-          <span className="fy-agenda-line__segment" key={segment}>
-            {segment}
+          <span className="fy-agenda-line__segment" key={segment.words}>
+            {segment.count === null ? null : (
+              <>
+                <strong className="fy-agenda-line__n">{segment.count}</strong>{' '}
+              </>
+            )}
+            {segment.words}
           </span>
         ))}
       </span>
@@ -107,7 +112,7 @@ export function AttentionAgendaLine({
   );
 }
 
-export interface AgendaRowsProps {
+interface AgendaRowsProps {
   readonly items: readonly AttentionItem[];
   readonly ferret: string;
   readonly now?: number;
@@ -143,10 +148,39 @@ export interface AttentionAgendaDrawerProps extends AgendaRowsProps {
   readonly id: string;
 }
 
-/** Opens upward from the line, between the chat and the composer; bounded, with its own scroll. */
+/** Whether a scroller has more below what it shows, so a fade can say so. */
+const useMoreBelow = () => {
+  const ref = useRef<HTMLElement | null>(null);
+  const [more, setMore] = useState(false);
+  const measure = useCallback(() => {
+    const box = ref.current;
+    if (box !== null) setMore(box.scrollHeight - box.scrollTop - box.clientHeight > 2);
+  }, []);
+  useEffect(() => {
+    measure();
+    const box = ref.current;
+    if (box === null || typeof ResizeObserver === 'undefined') return undefined;
+    const watch = new ResizeObserver(measure);
+    watch.observe(box);
+    if (box.firstElementChild !== null) watch.observe(box.firstElementChild);
+    return () => watch.disconnect();
+  }, [measure]);
+  return { ref, more, measure };
+};
+
+/** Opens upward from the line, between the chat and the composer; bounded, with its own scroll and a fade when more rows are below. */
 export function AttentionAgendaDrawer({ id, ...rows }: AttentionAgendaDrawerProps) {
+  const { ref, more, measure } = useMoreBelow();
   return (
-    <section aria-label={`${rows.ferret}’s agenda`} className="fy-agenda-drawer" data-agenda-drawer="" id={id}>
+    <section
+      aria-label={`${rows.ferret}’s agenda`}
+      className="fy-agenda-drawer"
+      data-agenda-drawer=""
+      data-more={more || undefined}
+      id={id}
+      onScroll={measure}
+      ref={ref}
+    >
       <AgendaRows {...rows} />
     </section>
   );

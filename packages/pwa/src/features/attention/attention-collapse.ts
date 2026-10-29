@@ -1,7 +1,6 @@
 /**
- * TWO LAYOUT CHOICES OF THIS DEVICE, kept in browser storage: whether the Inbox's list is folded to its slim
- * rail, and whether a ferret's agenda is docked beside its chat on a wide screen. Neither is an answer or
- * daemon state: they tell the ferret nothing and change no item.
+ * THE LAYOUT CHOICE OF THIS DEVICE, kept in browser storage: whether a ferret's agenda is docked beside its chat
+ * on a wide screen. It is not an answer or daemon state: it tells the ferret nothing and changes no item.
  *
  * Storage is an ordinary browser condition that may be absent or refuse writes (a private window, blocked
  * site data): every read and write is guarded, and the choice still holds for the rest of the tab.
@@ -50,13 +49,6 @@ const useStoredFlag = (key: string, storage: CollapseStorage | undefined): reado
   }, [on, key, storage]);
   return [on, toggle];
 };
-
-/** Whether the Inbox's list is folded to its slim rail. */
-const ATTENTION_LIST_RAIL_KEY = 'fy-attention-list-rail-v1';
-
-export const useAttentionListRail = (
-  storage: CollapseStorage | undefined = browserCollapseStorage(),
-): readonly [boolean, () => void] => useStoredFlag(ATTENTION_LIST_RAIL_KEY, storage);
 
 /** Whether the agenda is docked beside the chat (a wide screen with a mouse). */
 const AGENDA_DOCK_KEY = 'fy-agenda-dock-v1';

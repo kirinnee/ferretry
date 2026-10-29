@@ -42,7 +42,7 @@ import {
   attentionLedgerIds,
   useAttentionAgenda,
 } from '../../features/attention/attention-agenda.tsx';
-import { useFinePointer } from '../../hooks/use-attention-flat.ts';
+import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { AttentionRepliesNotice } from '../../features/attention/attention-replies-notice.tsx';
 import {
   ATTENTION_RESOLVED_ACTION_ID,

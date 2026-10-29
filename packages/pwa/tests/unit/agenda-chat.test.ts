@@ -35,13 +35,17 @@ describe('agendaCounts and agendaSegments', () => {
   });
 
   it('says it in segments, blocking first, with the ferret by name', () => {
-    expect(agendaSegments(agendaCounts(board), 'Johnnie')).toEqual(['1 blocking', '3 need you', '2 with Johnnie']);
+    expect(agendaSegments(agendaCounts(board), 'Johnnie')).toEqual([
+      { count: 1, words: 'blocking' },
+      { count: 3, words: 'need you' },
+      { count: 2, words: 'with Johnnie' },
+    ]);
   });
 
   it('says plainly that nothing needs the owner when only the ferret has items', () => {
     expect(agendaSegments({ blocking: 0, needYou: 0, withFerret: 2 }, 'Johnnie')).toEqual([
-      'Nothing needs you',
-      '2 with Johnnie',
+      { count: null, words: 'Nothing needs you' },
+      { count: 2, words: 'with Johnnie' },
     ]);
   });
 });
