@@ -1,8 +1,10 @@
 import {
   AttentionSnapshotSchema,
+  type SessionAgendaMode,
+  SessionAgendaModePatchResultSchema,
   SessionAgendaModePatchSchema,
   SessionAgendaModeSchema,
-  type SessionAgendaMode,
+  sessionAgendaEnabled,
 } from '@ferretry/protocol';
 import { attentionBoardPath } from '../attention/gateway.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
@@ -49,10 +51,15 @@ export class ProtocolNotifyGateway implements INotifyGateway {
 
   async setAgendaMode(sessionId: string, enabled: boolean): Promise<SessionAgendaMode> {
     const body = SessionAgendaModePatchSchema.parse({ enabled });
-    return await this.client.request(agendaModePath(sessionId), SessionAgendaModeSchema, {
-      method: 'PATCH',
-      headers: { 'content-type': 'application/json', ...this.#headers },
-      body: JSON.stringify(body),
-    });
+    const { view, restartRequired, note } = await this.client.request(
+      agendaModePath(sessionId),
+      SessionAgendaModePatchResultSchema,
+      {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json', ...this.#headers },
+        body: JSON.stringify(body),
+      },
+    );
+    return { enabled: sessionAgendaEnabled(view.config), restartRequired, note };
   }
 }

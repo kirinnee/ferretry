@@ -1,15 +1,17 @@
-import { AGENDA_ENV } from '@ferretry/fleet';
+import { type SessionConfig, sessionAgendaEnabled } from '@ferretry/protocol';
 import type { AgendaModes } from '../../lib/attention/index.ts';
 import { tryParseSessionId } from '../../lib/session-id.ts';
-import type { SessionEnvironmentStore } from '../../lib/session/lifecycle/types.ts';
 
-/** Whether a ferret works in agenda mode: the flag in its launch environment, which is also what its prompt reads. */
-export class EnvironmentAgendaModes implements AgendaModes {
-  constructor(private readonly environments: Pick<SessionEnvironmentStore, 'read'>) {}
+/** Whether a ferret works in agenda mode: the switch recorded on its session document (`config.agenda`), default off. */
+export class SessionConfigAgendaModes implements AgendaModes {
+  constructor(
+    private readonly sessions: { get(id: string): Promise<{ readonly config: SessionConfig } | undefined> },
+  ) {}
 
   async enabled(sessionId: string): Promise<boolean> {
     const id = tryParseSessionId(sessionId);
     if (id === undefined) return false;
-    return (await this.environments.read(id).catch((): Readonly<Record<string, string>> => ({})))[AGENDA_ENV] === '1';
+    const view = await this.sessions.get(id).catch(() => undefined);
+    return view !== undefined && sessionAgendaEnabled(view.config);
   }
 }

@@ -36,6 +36,7 @@ import {
 } from './components/session-workspace-model.ts';
 import { SessionsPage } from './components/sessions-page.tsx';
 import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx';
+import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { AttentionInboxPage } from './features/attention/attention-inbox-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
@@ -114,17 +115,19 @@ import { StepUpDialog, UNLOCK_COPY } from './features/step-up/step-up-dialog.tsx
 import { useStuckMessageActions } from './features/stuck-messages/use-stuck-message-actions.tsx';
 import { useAskWardenActions } from './features/warden/ask-warden.tsx';
 import { WardenOverviewSurface } from './features/warden/warden-overview-surface.tsx';
+import { useWhatsNewHost, WhatsNewProvider } from './features/whats-new/whats-new-host.tsx';
+import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
 import { useAttentionSession, useAttentionSnapshot } from './hooks/use-attention.ts';
-import { useAttentionReplies } from './hooks/use-attention-replies.ts';
 import {
   AttentionInboxContext,
   useAttentionInbox,
   useAttentionInboxModel,
   useInboxMachines,
 } from './hooks/use-attention-inbox.ts';
+import { useAttentionReplies } from './hooks/use-attention-replies.ts';
 import { useCarrierPreferences, useTunnelService, useTunnelSwitches } from './hooks/use-carrier-preferences.ts';
 import { useConfigChangeFeed } from './hooks/use-config-change-feed.ts';
 import { useConnectionHealth } from './hooks/use-connection-health.ts';
@@ -249,8 +252,6 @@ import { CommandPalette, type PaletteSettingsSource } from './shell/command-pale
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
 import { pairPhonePaletteCommand, whatsNewPaletteCommand } from './shell/palette-destinations.ts';
-import { WhatsNewProvider, useWhatsNewHost } from './features/whats-new/whats-new-host.tsx';
-import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { machinePaletteSessions, paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
@@ -1087,6 +1088,8 @@ function SessionRoute({
   const hypermediaActions = useHypermediaSessionActions({ connection, fetcher: useDaemonFetch() });
   // Pack mode's Actions-menu toggle, and its status line: also read at the next launch.
   const packActions = usePackSessionActions({ connection, fetcher: useDaemonFetch() });
+  // Agenda mode's Actions-menu toggle: also read at the next launch.
+  const agendaActions = useAgendaSessionActions({ connection, fetcher: useDaemonFetch() });
   /*
    * DRAWN FROM THIS DEVICE'S CACHE FIRST. Back into a chat, or a reload, used to open on an empty
    * transcript that refilled a round trip later; the last copy this device saw is drawn in the first
@@ -1419,6 +1422,7 @@ function SessionRoute({
       ...learningActions.contributions,
       ...hypermediaActions.contributions,
       ...packActions.contributions,
+      ...agendaActions.contributions,
       ...stuckActions.contributions,
     ],
     [
@@ -1426,6 +1430,7 @@ function SessionRoute({
       learningActions.contributions,
       hypermediaActions.contributions,
       packActions.contributions,
+      agendaActions.contributions,
       stuckActions.contributions,
     ],
   );
@@ -1508,6 +1513,7 @@ function SessionRoute({
       {learningActions.host}
       {hypermediaActions.host}
       {packActions.host}
+      {agendaActions.host}
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
@@ -1516,7 +1522,10 @@ function SessionRoute({
           switches={{
             hypermedia: hypermediaActions.onFor(session),
             pack: packActions.onFor(session),
-            onToggle: switchTapper({ hypermedia: hypermediaActions, pack: packActions }, session.config.id),
+            onToggle: switchTapper(
+              { hypermedia: hypermediaActions, pack: packActions, agenda: agendaActions },
+              session.config.id,
+            ),
           }}
           browserLogin={store.browserLogin}
           attention={attention}

@@ -579,8 +579,17 @@ export const SessionConfigSchema = z.object({
    * for hypermedia; the machine's own switch and the depth limit still apply. Read at launch.
    */
   pack: z.boolean().optional(),
+  /**
+   * Whether this ferret is told to keep an agenda of items for the owner (docs/agenda.md). ABSENT MEANS OFF, unlike
+   * hypermedia and Pack: agenda mode is opt-in, and the one-time migration records it ON for a ferret that already
+   * had open items. Read at launch, so a change takes effect at the next launch.
+   */
+  agenda: z.boolean().optional(),
 });
 export type SessionConfig = z.infer<typeof SessionConfigSchema>;
+
+/** Whether a ferret is told to keep an agenda, resolved: the recorded switch, else OFF (docs/agenda.md). */
+export const sessionAgendaEnabled = (config: Pick<SessionConfig, 'agenda'>): boolean => config.agenda ?? false;
 
 /**
  * Whether a ferret is told it may use hypermedia, resolved: the recorded switch, else the default for

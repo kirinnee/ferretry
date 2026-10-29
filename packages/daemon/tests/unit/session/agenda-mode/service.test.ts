@@ -8,12 +8,13 @@ import {
 } from '../../../../src/lib/session/agenda-mode/service.ts';
 
 function world(facts: AgendaModeFacts | undefined) {
-  const writes: Array<readonly [string, boolean]> = [];
+  const writes: Array<readonly [string, boolean, string]> = [];
   const service = new SessionAgendaModeService({
     facts: async () => facts,
-    write: async (sessionId, enabled) => {
-      writes.push([sessionId, enabled]);
+    write: async (sessionId, enabled, at) => {
+      writes.push([sessionId, enabled, at]);
     },
+    now: () => '2026-10-29T10:00:00.000Z',
   });
   return { service, writes };
 }
@@ -42,7 +43,7 @@ describe('SessionAgendaModeService', () => {
     // Assert
     should(live.restartRequired).be.true();
     should(idle.restartRequired).be.false();
-    should(running.writes).deepEqual([['s1', true]]);
+    should(running.writes).deepEqual([['s1', true, '2026-10-29T10:00:00.000Z']]);
   });
 
   it('should say a switch already in place was already so, and need no restart', async () => {

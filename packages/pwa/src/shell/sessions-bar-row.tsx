@@ -19,10 +19,10 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { type ReactNode, useContext, useState } from 'react';
-import { hypermediaOn, packOn } from '../features/session-info/info-model.ts';
+import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
-import type { DaemonId } from '../lib/daemon-connection.ts';
 import { unreadCount } from '../lib/attention-inbox.ts';
+import type { DaemonId } from '../lib/daemon-connection.ts';
 import { MachineChip } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
 import { useRowContextGesture } from './row-context-gesture.ts';
@@ -95,7 +95,12 @@ export function SessionsBarRow({
         ) : machine !== undefined ? (
           <MachineChip name={machine} />
         ) : (
-          <SwitchMarks hypermedia={hypermediaOn(view)} learning={learningPassive} pack={packOn(view)} />
+          <SwitchMarks
+            agenda={agendaOn(view)}
+            hypermedia={hypermediaOn(view)}
+            learning={learningPassive}
+            pack={packOn(view)}
+          />
         )}
         {preview === undefined ? null : (
           <span

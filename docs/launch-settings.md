@@ -98,7 +98,7 @@ so the next message queues nothing. The Instructions row then shows the new size
   the next owner message offers it again.
 - **A record with no fingerprint** (launched before they were kept) compares sizes. A session with no
   record at all is told nothing, because nothing says what it has.
-- **The per-ferret sections** (Hypermedia, Pack mode, Learning) still change only at a restart. They depend
+- **The per-ferret sections** (Hypermedia, Pack mode, Agenda mode, Learning) still change only at a restart. They depend
   on switches and on the routing prompt. The Settings row's "Running with older settings — Restart to apply"
   still covers every change, because the wrapper that carries all the sections is part of its digest.
 

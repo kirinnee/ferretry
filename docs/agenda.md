@@ -7,6 +7,15 @@ nothing to decide is a **notice**, not an agenda item (see [Notices](#notices)).
 The daemon owns the model: the state machine is `packages/daemon/src/lib/attention/state-machine.ts`,
 the wire contract is `packages/protocol/src/lib/attention.ts`. This page says what they mean.
 
+## Agenda mode is a switch
+
+A ferret keeps an agenda only while its **Agenda mode** switch is on. It is a recorded per-session setting
+like Hypermedia and Pack mode (`config.agenda`, `sessionAgendaEnabled`; OFF unless set), switched from the
+ferret's **Actions › Agenda mode** toggle or `fy notify agenda on|off`, and it takes effect at the ferret's
+next launch. With it off the ferret is told only the notify rule and the session summary carries no
+`agendaMode`, so the chat draws no agenda line or drawer. The whole contract is
+[notifications.md § Agenda mode](notifications.md#agenda-mode).
+
 ## Turns
 
 Every open item is somebody's turn. `attentionTurn(item)` (protocol) is the one definition:

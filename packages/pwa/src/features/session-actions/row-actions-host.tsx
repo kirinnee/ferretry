@@ -24,6 +24,7 @@ import { daemonLearningPath, daemonSessionPath } from '../../lib/pages/routes.ts
 import { useAppStore, useConnectionSnapshot, useDaemonClient, useDaemonFetch } from '../../lib/store.tsx';
 import type { MenuAnchor } from '../../shell/context-menu.tsx';
 import type { SessionMenuState } from '../../shell/session-menu-context.ts';
+import { useAgendaSessionActions } from '../agenda/agenda-session-actions.tsx';
 import { useHypermediaSessionActions } from '../hypermedia/hypermedia-session-actions.tsx';
 import { useLearningSessionActions } from '../learning/learning-session-actions.tsx';
 import { usePackSessionActions } from '../pack/pack-session-actions.tsx';
@@ -114,6 +115,7 @@ function RowActions({
   });
   const hypermedia = useHypermediaSessionActions({ connection, fetcher });
   const pack = usePackSessionActions({ connection, fetcher });
+  const agenda = useAgendaSessionActions({ connection, fetcher });
   const [notice, setNotice] = useState<string | null>(null);
   const [migrateOpen, setMigrateOpen] = useState(false);
   const dismissNotice = useCallback(() => setNotice(null), []);
@@ -231,6 +233,7 @@ function RowActions({
       ...learning.contributions,
       ...hypermedia.contributions,
       ...pack.contributions,
+      ...agenda.contributions,
     ],
     context,
   );
@@ -253,6 +256,7 @@ function RowActions({
       {learning.host}
       {hypermedia.host}
       {pack.host}
+      {agenda.host}
       <ActionToast notice={notice} onDismiss={dismissNotice} />
       {restartRefusal.panel}
       {convert.sheet}

@@ -272,6 +272,7 @@ describe('the sessions bar row actions', () => {
       'move-machine',
       'hypermedia',
       'pack',
+      'agenda',
       'passive-learning',
       'scan-ferret',
       'restart',
@@ -463,6 +464,7 @@ describe('the sessions bar row actions', () => {
     const { root, calls } = await show();
     await choose(root, 'hypermedia');
     await choose(root, 'pack');
+    await choose(root, 'agenda');
     expect(calls.fetches.some(url => url.startsWith('https://alpha.example.test'))).toBe(true);
   });
 

@@ -1,12 +1,14 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { SessionTopBar } from '../../../../src/components/session-top-bar.tsx';
+import { useAgendaSessionActions } from '../../../../src/features/agenda/agenda-session-actions.tsx';
 import { useHypermediaSessionActions } from '../../../../src/features/hypermedia/hypermedia-session-actions.tsx';
 import { usePackSessionActions } from '../../../../src/features/pack/pack-session-actions.tsx';
 import {
+  AGENDA_MARK_LABEL,
   HYPERMEDIA_MARK_LABEL,
   PACK_MARK_LABEL,
-  type SwitchSection,
   SwitchMarks,
+  type SwitchSection,
   switchTapper,
 } from '../../../../src/features/session-info/switch-marks.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
@@ -30,19 +32,20 @@ const marks = (root: HTMLElement) =>
 
 describe('a ferret’s switch marks', () => {
   it('draws nothing while every section is off', async () => {
-    mounted = await mount(<SwitchMarks hypermedia={false} learning={false} pack={false} />);
+    mounted = await mount(<SwitchMarks agenda={false} hypermedia={false} learning={false} pack={false} />);
     expect(mounted.container.querySelector('[data-switch-marks]')).toBeNull();
   });
 
   it('draws one mark per section that is on, in the prompt’s order, each named in words and not a control', async () => {
-    mounted = await mount(<SwitchMarks hypermedia learning pack />);
+    mounted = await mount(<SwitchMarks agenda hypermedia learning pack />);
     const root = mounted.container;
-    expect(marks(root)).toEqual(['learning', 'hypermedia', 'pack']);
+    expect(marks(root)).toEqual(['learning', 'hypermedia', 'pack', 'agenda']);
     const hypermedia = must(root.querySelector('[data-switch-mark="hypermedia"]'), 'hypermedia mark');
     expect(hypermedia.getAttribute('role')).toBe('img');
     expect(hypermedia.getAttribute('aria-label')).toBe(HYPERMEDIA_MARK_LABEL);
     expect(hypermedia.getAttribute('title')).toBe(HYPERMEDIA_MARK_LABEL);
     expect(root.querySelector('[data-switch-mark="pack"]')?.getAttribute('aria-label')).toBe(PACK_MARK_LABEL);
+    expect(root.querySelector('[data-switch-mark="agenda"]')?.getAttribute('aria-label')).toBe(AGENDA_MARK_LABEL);
     expect(root.querySelector('button')).toBeNull();
   });
 
@@ -86,16 +89,32 @@ describe('a ferret’s switch marks', () => {
   });
 });
 
+it('draws the Agenda mark from the session’s record when the host hands none', async () => {
+  mounted = await mount(
+    <SessionTopBar
+      actions={null}
+      compact={false}
+      project={null}
+      session={sessionView('s1', { config: { teammate: 'hadi', mode: 'auto', pack: false, agenda: true } })}
+    />,
+  );
+  expect(marks(mounted.container)).toEqual(['agenda']);
+});
+
 describe('switchTapper', () => {
   it('sends a header tap to that section’s own switch, for this ferret', async () => {
     const sent: string[] = [];
     const tap = (section: string) => async (sessionId: string, next: boolean) => {
       sent.push(`${section} ${sessionId} ${String(next)}`);
     };
-    const onToggle = switchTapper({ hypermedia: { tap: tap('hypermedia') }, pack: { tap: tap('pack') } }, 's1');
+    const onToggle = switchTapper(
+      { hypermedia: { tap: tap('hypermedia') }, pack: { tap: tap('pack') }, agenda: { tap: tap('agenda') } },
+      's1',
+    );
     onToggle('pack', false);
     onToggle('hypermedia', true);
-    expect(sent).toEqual(['pack s1 false', 'hypermedia s1 true']);
+    onToggle('agenda', false);
+    expect(sent).toEqual(['pack s1 false', 'hypermedia s1 true', 'agenda s1 false']);
   });
 });
 
@@ -103,7 +122,8 @@ describe('switchTapper', () => {
 function TapHost({ fetcher, section }: { readonly fetcher: DaemonFetch; readonly section: SwitchSection }) {
   const hypermedia = useHypermediaSessionActions({ connection: DAEMON, fetcher });
   const pack = usePackSessionActions({ connection: DAEMON, fetcher });
-  const actions = section === 'hypermedia' ? hypermedia : pack;
+  const agenda = useAgendaSessionActions({ connection: DAEMON, fetcher });
+  const actions = { hypermedia, pack, agenda }[section];
   return (
     <>
       <button data-tap="" onClick={() => void actions.tap('session-hadi', false)} type="button">
@@ -121,6 +141,7 @@ describe('a header tap that the daemon refuses', () => {
   it.each([
     ['hypermedia', 'Hypermedia could not be switched: operator access is closed'],
     ['pack', 'Pack mode could not be switched: operator access is closed'],
+    ['agenda', 'Agenda mode could not be switched: operator access is closed'],
   ] as const)('says why %s could not be switched in its own status line', async (section, sentence) => {
     mounted = await mount(<TapHost fetcher={refusing} section={section} />);
     await click(must(mounted.container.querySelector<HTMLElement>('[data-tap]'), 'tap'));

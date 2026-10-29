@@ -165,12 +165,19 @@ The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,000 characters, 
 test) names the verbs and flags `fy agenda` takes, what `--blocking`, `--will-block` and `--by` mean, and
 that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat.
 
-- **The switch** is the launch environment variable `FY_AGENDA=1` (`AGENDA_ENV`) — the one place the
-  mode lives. Read by the daemon, it is what sets `agendaMode` on the session summary.
-- **Flipping it:** `fy notify agenda` reads the mode, `fy notify agenda on|off` switches it, over
-  `GET`/`PATCH /v1/sessions/:id/agenda-mode` (operator scope; no capability, like the Pack switch). The
-  reply says what it does: a running ferret reads its instructions once, at launch, so the change takes
-  effect when the ferret next starts.
+- **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
+  means OFF), exactly like `config.hypermedia` and `config.pack`. At each launch the daemon turns it into
+  the launch environment variable `FY_AGENDA=1|0` (`AGENDA_ENV`), and it is what sets `agendaMode` on the
+  session summary, so with the switch off the summary carries no `agendaMode` and the chat draws no agenda
+  line or drawer.
+- **Flipping it in the app:** the ferret's **Actions › Agenda mode** toggle (beside Hypermedia and Pack
+  mode, in the header and the sessions list), or the **Agenda mode** mark in the header. The ferret's
+  Info › Runtime tab shows it as a row, and the sidebar / header marks (a to-do list icon) show it only
+  while it is on.
+- **Flipping it from a ferret:** `fy notify agenda` reads the mode, `fy notify agenda on|off` switches it,
+  over `GET`/`PATCH /v1/sessions/:id/agenda-mode` (operator scope; no capability, like the Pack switch).
+  `PATCH` answers `{ view, restartRequired, note }` like the Hypermedia and Pack switches: a running ferret
+  reads its instructions once, at launch, so the change takes effect when the ferret next starts.
 - **The nudge follows the mode.** The turn-end check (the safety net for a reply that asks the owner to act
   but raised nothing) names `fy agenda add …` for a ferret in agenda mode, and `fy notify …` for one that
   is not.
@@ -181,8 +188,8 @@ that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat.
 Before agenda mode, a ferret's open items WERE its agenda. So once, on the first start of a daemon that
 knows about the mode:
 
-1. every ferret with at least one **open non-notice item** gets agenda mode ON (its launch environment
-   and its summary);
+1. every ferret with at least one **open non-notice item** gets agenda mode ON (it records `config.agenda: true`, which sets its launch
+   environment and its summary);
 2. the items are left exactly as they are;
 3. the daemon records that it ran, in `agenda-mode-migration.json` in its home.
 
