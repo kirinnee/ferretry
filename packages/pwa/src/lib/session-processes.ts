@@ -160,9 +160,21 @@ const GROUP_HEADING: Record<ProcessGroupKey, string> = {
   ended: 'Recently ended',
 };
 
-/** Live processes, not yet gone: what the tab's count is. */
-export const liveProcessCount = (list: SessionProcessList | null): number =>
-  list === null ? 0 : list.processes.filter(entry => entry.state !== 'exited').length;
+/**
+ * What the tab's count is: live, top-level entries that are not helpers — what the person started or
+ * cares about. Helpers (the ferret's own MCP servers) always run, and children (renderers, test workers)
+ * would inflate the number, so either would keep "Processes · N" from ever being quiet.
+ */
+export const liveProcessCount = (list: SessionProcessList | null): number => {
+  if (list === null) return 0;
+  const listed = new Set(list.processes.map(entry => entry.id));
+  return list.processes.filter(
+    entry =>
+      entry.state !== 'exited' &&
+      entry.kind !== 'helper' &&
+      (entry.parentId === undefined || !listed.has(entry.parentId)),
+  ).length;
+};
 
 /**
  * Groups a list for display: command, background, server, helper, then the exited under "Recently ended".
