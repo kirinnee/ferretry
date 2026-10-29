@@ -62,7 +62,7 @@ describe('parseChangelog', () => {
         changes: [
           {
             scope: 'chat',
-            text: "show a reply's blocks as the agent writes them",
+            text: "Show a reply's blocks as the agent writes them",
             pr: { number: 815, url: 'https://github.com/o/r/pull/815' },
           },
         ],
@@ -74,7 +74,7 @@ describe('parseChangelog', () => {
     expect(releases[1]?.groups.map(group => group.title)).toEqual(['New', 'Faster']);
     const unscoped = releases[1]?.groups[0]?.changes[1];
     expect(unscoped?.scope).toBeUndefined();
-    expect(unscoped?.text).toBe("open links in this computer's default browser");
+    expect(unscoped?.text).toBe("Open links in this computer's default browser");
     expect(unscoped?.pr?.number).toBe(767);
   });
 
@@ -205,5 +205,33 @@ describe('browserChangelogStorage', () => {
       if (descriptor !== undefined) Object.defineProperty(globalThis, 'localStorage', descriptor);
       else delete (globalThis as { localStorage?: unknown }).localStorage;
     }
+  });
+});
+
+describe('parseChangelog, what a reader sees', () => {
+  const wording = `## [1.0.0](https://github.com/o/r/compare/v0.9.0...v1.0.0) (2026-10-28)
+
+### Fixes
+
+* **test:** drive the idle budget suite with a manual clock ([#1](https://github.com/o/r/issues/1)) ([aaaaaaa](https://github.com/o/r/commit/aaaaaaa))
+* **CI:** pin the runner image ([#2](https://github.com/o/r/issues/2)) ([bbbbbbb](https://github.com/o/r/commit/bbbbbbb))
+* **build:** pin the toolchain ([#3](https://github.com/o/r/issues/3)) ([ccccccc](https://github.com/o/r/commit/ccccccc))
+* **chat:** keep the \`reply\` visible ([#4](https://github.com/o/r/issues/4)) ([ddddddd](https://github.com/o/r/commit/ddddddd))
+* \`fy\` opens faster ([#5](https://github.com/o/r/issues/5)) ([eeeeeee](https://github.com/o/r/commit/eeeeeee))
+`;
+
+  it('leaves out lines scoped test, ci or build, however the scope is cased', () => {
+    const changes = parseChangelog(wording)[0]?.groups[0]?.changes ?? [];
+    expect(changes.map(change => change.pr?.number)).toEqual([4, 5]);
+  });
+
+  it('starts every line with a capital and leaves a leading code span as written', () => {
+    const changes = parseChangelog(wording)[0]?.groups[0]?.changes ?? [];
+    expect(changes.map(change => change.text)).toEqual(['Keep the `reply` visible', '`fy` opens faster']);
+  });
+
+  it('keeps a release whose every line was left out, with no groups', () => {
+    const only = wording.split('\n').slice(0, 6).join('\n');
+    expect(parseChangelog(only)).toEqual([expect.objectContaining({ version: '1.0.0', groups: [] })]);
   });
 });

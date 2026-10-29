@@ -57,6 +57,12 @@ const TRAILING_CLOSES = /,?\s*closes\s+\[[^\]]+\]\([^)]*\)(?:[,\s]+\[[^\]]+\]\([
 const TRAILING_HASH = /\s*\(\[[0-9a-f]{7,40}\]\([^)]*\)\)\s*$/u;
 const TRAILING_PR = /\s*\(\[#(\d+)\]\(([^)]*)\)\)\s*$/u;
 
+/** Scopes that name how the project is built, not what a person using it sees; their lines stay out of the page. */
+const INTERNAL_SCOPES: ReadonlySet<string> = new Set(['test', 'ci', 'build']);
+
+/** A line starts with a capital; a subject that opens on a symbol or a number is left as written. */
+const capitalised = (text: string): string => text.charAt(0).toLocaleUpperCase('en') + text.slice(1);
+
 /** The release page for a version, derived from the compare link the heading carries. */
 function releasePage(compareUrl: string | undefined, version: string): string | undefined {
   const at = compareUrl?.indexOf('/compare/') ?? -1;
@@ -67,6 +73,7 @@ function parseChange(first: string, continuation: readonly string[], kind: Chang
   const scoped = SCOPED_BULLET.exec(first);
   // A breaking-change body quotes the commits around it as plain bullets; only the scoped line is the change.
   if (scoped === null && kind === 'breaking') return undefined;
+  if (INTERNAL_SCOPES.has(scoped?.[1]?.trim().toLowerCase() ?? '')) return undefined;
   const lead = scoped === null ? first.slice(2) : (scoped[2] ?? '');
   let text = [lead, ...continuation].join(' ').trim().replace(TRAILING_CLOSES, '').replace(TRAILING_HASH, '');
   // A subject may mention an earlier pull request before its own; the last link is the change's.
@@ -75,7 +82,7 @@ function parseChange(first: string, continuation: readonly string[], kind: Chang
     pr ??= next;
     text = text.replace(TRAILING_PR, '');
   }
-  text = text.trim();
+  text = capitalised(text.trim());
   if (text === '') return undefined;
   const change: { scope?: string; text: string; pr?: { number: number; url: string } } = { text };
   if (scoped?.[1] !== undefined) change.scope = scoped[1].trim();
