@@ -1477,7 +1477,7 @@ export class DaemonStorage {
     this.watched.clear();
     await this.serial.runExclusive(async () => {
       try {
-        this.index.close();
+        await this.index.close();
       } finally {
         await this.homeLock.release();
       }

@@ -945,7 +945,7 @@ describe('journal storage', () => {
       fleetEventPointers: () => [],
       countEvents: () => 0,
       removeSession: () => undefined,
-      close: () => undefined,
+      close: async () => undefined,
     };
     const storage = new DaemonStorage(
       paths,
@@ -1485,15 +1485,18 @@ describe('the bounded fleet event tail', () => {
     // Arrange — a row deleted straight out of SQLite while the journals stay whole. This is the
     // damage a resolving tail cannot notice on its own: every pointer the query returns resolves
     // perfectly against real journal bytes, there are simply too few of them, and the fingerprint
-    // still matches so nothing re-indexes.
+    // still matches so nothing re-indexes. Deleted between two opens: a running daemon answers from the
+    // copy it read at open, so the file's damage is what the NEXT open reads.
     const home = await createTemporaryHome();
-    const opened = await openStorage(home);
+    const first = await openStorage(home);
     const id = parseSessionId('holed-index');
-    for (let index = 1; index <= 3; index += 1) await opened.storage.append(id, `event-${index}`, {});
-    const database = new Database(opened.paths.sessionIndex, { strict: true });
+    for (let index = 1; index <= 3; index += 1) await first.storage.append(id, `event-${index}`, {});
+    await closeStorage(first.storage);
+    const database = new Database(first.paths.sessionIndex, { strict: true });
     database.run('DELETE FROM events WHERE sequence = 2');
     const afterDeletion = database.query<{ total: number }, []>('SELECT COUNT(*) AS total FROM events').get()?.total;
     database.close();
+    const opened = await openStorage(home);
 
     // Act
     const error = await capturedError(async () => await opened.storage.tailEvents());

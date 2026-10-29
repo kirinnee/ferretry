@@ -16,7 +16,7 @@
 import { LoadSafeWorker } from './load-safe-worker.ts';
 
 /** The bundled worker programs, by name: each is `packages/daemon/bin/<name>.worker.ts`. */
-export type BundledWorkerName = 'analytics-fold' | 'housekeeping' | 'pdf-decrypt' | 'session';
+export type BundledWorkerName = 'analytics-fold' | 'housekeeping' | 'pdf-decrypt' | 'session' | 'session-index';
 
 /**
  * The URL to start the worker `name` from. `moduleUrl` is this module's own unless a test asks how a
