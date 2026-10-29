@@ -6713,7 +6713,7 @@ function Shell() {
       render: () => <SettingsPageHarness />,
     },
     {
-      label: 'Attention ledger',
+      label: 'Inbox ledger',
       render: () => (
         <Card className="min-h-[360px] overflow-hidden">
           <AttentionBoard

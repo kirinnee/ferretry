@@ -3559,11 +3559,11 @@ try {
           // a tall viewport to capture the full, real phone-width board.
           const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
           await page.setViewportSize({ width: viewport.width, height: 2_400 });
-          const attention = page.getByLabel('Attention ledger');
+          const attention = page.getByLabel('Inbox ledger');
           await attention.locator('summary').filter({ hasText: 'Resolution audit' }).click();
           await captureElement(page, attention, attentionTarget);
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
-          process.stdout.write(`📸 Attention ledger -> ${attentionTarget}\n`);
+          process.stdout.write(`📸 Inbox ledger -> ${attentionTarget}\n`);
           const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
           await captureElement(page, page.getByLabel('Pins trigger'), pinsTriggerTarget);
           process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
