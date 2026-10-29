@@ -1,0 +1,208 @@
+/**
+ * The Inbox as the owner meets it, one view per URL (`agenda-screenshot.ts` bundles this and drives it):
+ *
+ *   ?view=sections        all three sections: Stopped on you, Needs you, With ferrets (folded), plus a notice
+ *   ?view=sections-open   the same with "With ferrets" unfolded
+ *   ?view=warden          `/inbox?from=warden`: the "From Warden" chip and only what the Warden raised
+ *
+ * The REAL `AttentionInboxPage`; only the data is invented and nothing is sent anywhere.
+ */
+
+import type { AttentionItem, SessionView } from '@ferretry/protocol';
+import { type ReactElement, useState, useSyncExternalStore } from 'react';
+import { createRoot } from 'react-dom/client';
+import { AttentionInboxPage } from '../src/features/attention/attention-inbox-page.tsx';
+import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
+import { DeferredAttentionActions, type InboxCard, inboxCardKey } from '../src/lib/attention-inbox.ts';
+import { daemonId } from '../src/lib/daemon-connection.ts';
+import { AppTabBar } from '../src/shell/app-bar.tsx';
+import { sessionView } from '../tests/support/sessions.ts';
+
+const NOW = Date.parse('2026-10-29T09:00:00.000Z');
+const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
+const ahead = (minutes: number): string => new Date(NOW + minutes * 60_000).toISOString();
+const STUDIO = daemonId('studio');
+const LAPTOP = daemonId('laptop');
+
+const item = (id: string, minutes: number, by: string, patch: Partial<AttentionItem>): AttentionItem =>
+  ({
+    id,
+    source: 'agent-raised',
+    sourceRef: null,
+    subject: `Ask ${id}`,
+    why: 'Needs a decision.',
+    waitingSince: ago(minutes),
+    howToResolve: 'Answer it.',
+    raisedBy: 'agent',
+    raisedBySession: 'fr',
+    raisedByName: by,
+    ...patch,
+  }) as AttentionItem;
+
+const ferret = (
+  id: string,
+  teammate: string,
+  label: string,
+  attention?: { readonly open: number; readonly first: string; readonly ask: string; readonly stopped?: boolean },
+): SessionView =>
+  sessionView(id, {
+    config: { teammate: teammate as never, label, cwd: `/home/kirin/Workspace/${id}` },
+    state: {
+      lastActivityAt: ago(1),
+      ...(attention === undefined ? {} : { attention: { ...attention, latestAt: ago(2) } }),
+    } as never,
+  });
+
+const card = (it: AttentionItem, view: SessionView, machine: string, daemon = STUDIO): InboxCard => ({
+  key: inboxCardKey(daemon, view.config.id, it.id),
+  daemonId: daemon,
+  machineName: machine,
+  view,
+  item: it,
+});
+
+const LEDGER = ferret('rc', 'ottilie', 'Ledger storage', { open: 1, first: 'A5', ask: 'storage', stopped: true });
+const RELAY = ferret('ra', 'hadi', 'Relay advertisement', { open: 2, first: 'A2', ask: 'relay' });
+const RELEASE = ferret('fr', 'johnnie', 'Release cut', { open: 1, first: 'A3', ask: 'rebase' });
+const RUNTIME = ferret('mg', 'maryah', 'Runtime migration', { open: 1, first: 'A6', ask: 'login' });
+const NIGHTLY = ferret('nl', 'zelda', 'Nightly benchmarks');
+const CARE = ferret('wd', 'warden', 'Machine care');
+
+const A5 = item('A5', 12, 'ottilie', {
+  title: 'Which storage engine for the ledger?',
+  subject: 'Which storage engine should keep the ledger: SQLite or Postgres?',
+  blockingNow: true,
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'SQLite', description: 'One file, no server to run' },
+      { label: 'Postgres', description: 'A server to run and patch' },
+    ],
+  },
+} as Partial<AttentionItem>);
+const A2 = item('A2', 9, 'hadi', {
+  title: 'Restart the staging relay?',
+  subject: 'Can I restart the staging relay? It drops live sessions for about ten seconds.',
+  neededBy: ahead(480),
+  ask: { kind: 'permission' },
+} as Partial<AttentionItem>);
+const A3 = item('A3', 2, 'johnnie', {
+  title: 'Rebase onto main now?',
+  subject: 'Rebase onto main now, or wait for #768 to merge?',
+  willBlock: 'the release cut',
+  ask: { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }] },
+} as Partial<AttentionItem>);
+const A6 = item('A6', 25, 'maryah', {
+  title: 'Which login should the runtime use?',
+  subject: 'Which login should the new runtime use, the personal one or the team one?',
+  ask: { kind: 'open-question' },
+});
+const N1 = item('A22', 4, 'hadi', {
+  subject: 'The relay latency benchmark is back under 40 ms after the cache fix.',
+  why: 'The relay latency benchmark is back under 40 ms after the cache fix.',
+  notice: true,
+  kind: 'info',
+} as Partial<AttentionItem>);
+const WITH = (id: string, minutes: number, title: string): AttentionItem =>
+  item(id, minutes + 20, 'zelda', {
+    title,
+    subject: title,
+    ask: { kind: 'open-question' },
+    waitingOn: 'ferret',
+    waitingFor: 'discussion',
+    askedAt: ago(minutes),
+  } as Partial<AttentionItem>);
+const warden = (id: string, minutes: number, title: string, subject: string, key: string): AttentionItem =>
+  item(id, minutes, 'warden', {
+    title,
+    subject,
+    why: subject,
+    raisedBy: 'daemon',
+    sourceRef: `warden:ask:fleet:cleanup:${key}`,
+    ask: { kind: 'permission' },
+  } as Partial<AttentionItem>);
+const W1 = warden(
+  'A30',
+  40,
+  'Clear 14 stale worktrees?',
+  'Fourteen worktrees have not been touched for 30 days.',
+  'wt',
+);
+const W2 = warden('A31', 70, 'Drop two old build caches?', 'Two caches are 18 GB and unused since August.', 'cache');
+
+const OWNER: readonly InboxCard[] = [
+  card(A5, LEDGER, 'studio'),
+  card(A2, RELAY, 'studio'),
+  card(N1, RELAY, 'studio'),
+  card(A3, RELEASE, 'studio'),
+  card(A6, RUNTIME, 'laptop', LAPTOP),
+  card(W1, CARE, 'studio'),
+  card(W2, CARE, 'studio'),
+];
+const FERRET: readonly InboxCard[] = [
+  card(WITH('A9', 11, 'Pick the staging region'), NIGHTLY, 'studio'),
+  card(WITH('A10', 4, 'Which cache to drop?'), NIGHTLY, 'studio'),
+];
+
+const deferred = new DeferredAttentionActions(async () => undefined);
+
+function Inbox({
+  phone,
+  from,
+  withFerretsOpen,
+}: {
+  readonly phone: boolean;
+  readonly from: 'warden' | null;
+  readonly withFerretsOpen: boolean;
+}): ReactElement {
+  const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
+  const [source, setSource] = useState(from);
+  const inbox: AttentionInbox = {
+    unread: [],
+    total: OWNER.length,
+    cards: OWNER,
+    withFerret: FERRET,
+    reading: false,
+    resolved: [],
+    resolvedReading: false,
+    loadResolved: () => undefined,
+    deferred,
+    deferredState: state,
+    connectionFor: () => undefined,
+  };
+  return (
+    <div className="flex h-dvh flex-col bg-bg" data-fixture="">
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <AttentionInboxPage
+          from={source}
+          inbox={inbox}
+          now={NOW}
+          onClearFrom={() => setSource(null)}
+          onNavigate={() => undefined}
+          phone={phone}
+          withFerretsOpen={withFerretsOpen}
+        />
+      </div>
+      {phone ? (
+        <AppTabBar
+          active="attention"
+          attentionCount={inbox.total}
+          daemon={STUDIO}
+          onNavigate={() => undefined}
+          onOpenPalette={() => undefined}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+const view = new URLSearchParams(location.search).get('view') ?? 'sections';
+const root = document.getElementById('root');
+if (root === null) throw new Error('missing #root');
+createRoot(root).render(
+  <Inbox
+    from={view === 'warden' ? 'warden' : null}
+    phone={window.innerWidth < 768}
+    withFerretsOpen={view === 'sections-open'}
+  />,
+);
