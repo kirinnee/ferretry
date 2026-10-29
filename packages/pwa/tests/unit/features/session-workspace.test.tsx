@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
+import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import { FileInstanceSurface } from '../../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../../src/components/files-tab.tsx';
 import { SessionTerminalDeck } from '../../../src/components/session-terminal-deck.tsx';
-import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
 import { BrowserSurfaceList } from '../../../src/features/browser/browser-surface-list.tsx';
 import {
   browserEngineForSession,
@@ -14,6 +14,7 @@ import { UnifiedBrowserSurface } from '../../../src/features/browser/unified-bro
 import type { SessionBrowser } from '../../../src/features/browser/use-session-browser.ts';
 import { SessionSearchProvider } from '../../../src/features/session-search/session-search.tsx';
 import { AgentControlMarker } from '../../../src/features/workspace/agent-control-marker.tsx';
+import { ConsoleSurface } from '../../../src/features/workspace/console-surface.tsx';
 import type { WorkspaceFormFactor } from '../../../src/features/workspace/phone/phone-tab.ts';
 import { PhoneWorkspace } from '../../../src/features/workspace/phone/phone-workspace.tsx';
 import {
@@ -21,11 +22,11 @@ import {
   SessionWorkspace,
   type SessionWorkspaceProps,
 } from '../../../src/features/workspace/session-workspace.tsx';
+import { RailDivider } from '../../../src/features/workspace/split-divider.tsx';
 import {
   type AgentSurfaceTabs,
   NO_AGENT_SURFACE_TABS,
 } from '../../../src/features/workspace/use-agent-surface-tabs.ts';
-import { RailDivider } from '../../../src/features/workspace/split-divider.tsx';
 import {
   type SessionWorkspaceController,
   useSessionWorkspace,
@@ -42,14 +43,13 @@ import {
   useWorkspaceFormFactor,
 } from '../../../src/features/workspace/use-workspace-environment.ts';
 import { WorkspaceView } from '../../../src/features/workspace/workspace-view.tsx';
-import { ConsoleSurface } from '../../../src/features/workspace/console-surface.tsx';
-import { BottomSheet } from '../../../src/shell/bottom-sheet.tsx';
-import { ContextMenu } from '../../../src/shell/context-menu.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { openWorkspaceTab, workspaceTab } from '../../../src/lib/workspace-layout.ts';
 import { WorkspaceLayoutStore } from '../../../src/lib/workspace-layout-store.ts';
 import { WorkspaceRailPreferenceStore } from '../../../src/lib/workspace-rail-preferences.ts';
+import { BottomSheet } from '../../../src/shell/bottom-sheet.tsx';
+import { ContextMenu } from '../../../src/shell/context-menu.tsx';
 import '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 import { sessionView } from '../../support/sessions.ts';
@@ -843,7 +843,7 @@ describe('closing workspace tabs', () => {
 
       run(() => phone().props.onCloseOthers('file:src/login.tsx'));
       await settle();
-      expect(ids()).toEqual(['chat', 'console', 'file:src/login.tsx']);
+      expect(ids()).toEqual(['chat', 'console', 'file:src/login.tsx', 'processes']);
 
       // Nothing left to close: the layout is left exactly as it was.
       const before = store.snapshot(scope);

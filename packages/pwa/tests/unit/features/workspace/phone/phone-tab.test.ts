@@ -1,29 +1,36 @@
 import { describe, expect, it } from 'bun:test';
-import { DRAWER_MAX, RAIL_MAX } from '../../../../../src/hooks/use-layout-mode.ts';
 import {
   adjacentPhoneTab,
   centredScrollLeft,
   PHONE_CHAT_TAB,
   PHONE_CONSOLE_TAB,
+  PHONE_PROCESSES_TAB,
   type PhoneTab,
   phoneTabOrder,
   phoneTabTakesKeys,
   TABLET_MIN_HEIGHT,
   workspaceFormFactor,
 } from '../../../../../src/features/workspace/phone/phone-tab.ts';
+import { DRAWER_MAX, RAIL_MAX } from '../../../../../src/hooks/use-layout-mode.ts';
 
 const dev: PhoneTab = { id: 't1', kind: 'terminal', label: 'dev', driver: { name: 'hadi' } };
 const app: PhoneTab = { id: 'b1', kind: 'browser', label: 'app' };
 
 describe('phoneTabOrder', () => {
-  it('leads with Chat and Console, then the workspace tabs in order', () => {
-    expect(phoneTabOrder([dev, app]).map(tab => tab.id)).toEqual(['chat', 'console', 't1', 'b1']);
+  it('leads with Chat, Console and Processes, then the workspace tabs in order', () => {
+    expect(phoneTabOrder([dev, app]).map(tab => tab.id)).toEqual(['chat', 'console', 'processes', 't1', 'b1']);
   });
 
   it('drops a workspace tab that reuses a fixed id', () => {
     const clash: PhoneTab = { id: 'chat', kind: 'file', label: 'chat.md' };
     const console: PhoneTab = { id: 'console', kind: 'file', label: 'x' };
-    expect(phoneTabOrder([clash, console, app])).toEqual([PHONE_CHAT_TAB, PHONE_CONSOLE_TAB, app]);
+    const processes: PhoneTab = { id: 'processes', kind: 'file', label: 'y' };
+    expect(phoneTabOrder([clash, console, processes, app])).toEqual([
+      PHONE_CHAT_TAB,
+      PHONE_CONSOLE_TAB,
+      PHONE_PROCESSES_TAB,
+      app,
+    ]);
   });
 });
 
@@ -40,7 +47,8 @@ describe('phoneTabTakesKeys', () => {
 describe('adjacentPhoneTab', () => {
   const order = phoneTabOrder([dev, app]);
   it('steps either way without wrapping', () => {
-    expect(adjacentPhoneTab(order, 'console', 'next')?.id).toBe('t1');
+    expect(adjacentPhoneTab(order, 'console', 'next')?.id).toBe('processes');
+    expect(adjacentPhoneTab(order, 'processes', 'next')?.id).toBe('t1');
     expect(adjacentPhoneTab(order, 'console', 'previous')?.id).toBe('chat');
     expect(adjacentPhoneTab(order, 'chat', 'previous')).toBeNull();
     expect(adjacentPhoneTab(order, 'b1', 'next')).toBeNull();
