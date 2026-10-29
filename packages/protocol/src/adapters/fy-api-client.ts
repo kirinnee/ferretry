@@ -130,6 +130,7 @@ import {
   type SessionTranscriptMoved,
 } from '../lib/session-live.ts';
 import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
+import { type TranscriptImageDownload, TranscriptImageDownloadSchema } from '../lib/transcript-images.ts';
 import {
   type MachineSkillsInventory,
   MachineSkillsInventorySchema,
@@ -1095,6 +1096,13 @@ export class FyApiClient implements IFyApiClient {
     return this.request(
       `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/handoffs/${SessionHandoffNameSchema.parse(name)}`,
       SessionHandoffSchema,
+    );
+  }
+
+  transcriptImage(id: string, handle: string): Promise<TranscriptImageDownload> {
+    return this.request(
+      `/v1/sessions/${encodeURIComponent(NonEmptyValueSchema.parse(id))}/transcript-images/${encodeURIComponent(NonEmptyValueSchema.parse(handle))}`,
+      TranscriptImageDownloadSchema,
     );
   }
 

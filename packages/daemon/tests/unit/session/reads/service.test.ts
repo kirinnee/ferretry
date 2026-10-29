@@ -11,6 +11,7 @@ import {
   MAX_MESSAGE_PAGE,
   type OperatorMessageReadResult,
   OperatorReadError,
+  type OperatorReadRedactor,
   OperatorReadService,
   type PaneCapture,
   type PaneScope,
@@ -118,6 +119,7 @@ const service = (options: {
   readonly context?: SessionTranscriptMessageTokenContext;
   readonly reads?: string[];
   readonly codec?: SessionTranscriptMessageTokenCodec;
+  readonly redactor?: OperatorReadRedactor;
 }): OperatorReadService =>
   new OperatorReadService(
     {
@@ -146,6 +148,7 @@ const service = (options: {
     },
     options.codec ?? messageCodec(),
     { read: async () => options.storedSnapshot ?? { kind: 'absent' } },
+    options.redactor,
   );
 
 const message = (text: string, overrides: Partial<TranscriptEvent> = {}): TranscriptEvent =>
@@ -934,5 +937,229 @@ describe('renderTranscript compaction boundaries', () => {
       'system/compaction: compacted (auto)',
       'system/compaction: compacted',
     ]);
+  });
+});
+
+const at = (byteOffset: number, byteLength: number) => ({ byteOffset, byteLength });
+
+const shot = (attachment: Record<string, unknown>, where = at(0, 100)): TranscriptEvent =>
+  ({
+    kind: 'attachment',
+    harness: 'claude',
+    role: 'user',
+    attachment: { kind: 'image', ...attachment },
+    ...where,
+  }) as TranscriptEvent;
+
+const result = (content: unknown, text: string | undefined, where = at(0, 100), isError = false): TranscriptEvent =>
+  ({
+    kind: 'tool-result',
+    harness: 'claude',
+    role: 'tool',
+    result: { callId: 'c', content, ...(text === undefined ? {} : { text }), isError },
+    ...where,
+  }) as TranscriptEvent;
+
+const block = (data: string, mediaType = 'image/png') => ({
+  type: 'image',
+  source: { type: 'base64', media_type: mediaType, data },
+});
+
+describe('renderTranscript image markers', () => {
+  it('should name an image attachment by its record handle and declared type', () => {
+    // Act
+    const text = renderTranscript([shot({ data: 'AAAA', mediaType: 'image/png', name: 'a.png' }, at(40, 200))]);
+
+    // Assert
+    should(text).equal('user/attachment: image [fy-image 40.200.0 image/png]');
+  });
+
+  it('should write a dash for a type the transcript did not declare, or declared as something a chat cannot paint', () => {
+    // Act
+    const none = renderTranscript([shot({ data: 'AAAA' })]);
+    const odd = renderTranscript([shot({ data: 'AAAA', mediaType: 'text/html' })]);
+
+    // Assert
+    should(none).equal('user/attachment: image [fy-image 0.100.0 -]');
+    should(odd).equal('user/attachment: image [fy-image 0.100.0 -]');
+  });
+
+  it('should leave an image with no bytes to serve, or no record metadata, as the plain word', () => {
+    // Act
+    const link = renderTranscript([shot({ uri: 'https://example.com/a.png' })]);
+    const unlocated = renderTranscript([shot({ data: 'AAAA' }, {} as ReturnType<typeof at>)]);
+
+    // Assert
+    should(link).equal('user/attachment: image');
+    should(unlocated).equal('user/attachment: image');
+  });
+
+  it('should number the images of one record in order and restart for the next record', () => {
+    // Act
+    const text = renderTranscript([
+      shot({ data: 'AAAA', mediaType: 'image/png' }, at(0, 100)),
+      shot({ data: 'BBBB', mediaType: 'image/jpeg' }, at(0, 100)),
+      shot({ data: 'CCCC', mediaType: 'image/webp' }, at(101, 90)),
+    ]);
+
+    // Assert
+    should(text.split('\n')).eql([
+      'user/attachment: image [fy-image 0.100.0 image/png]',
+      'user/attachment: image [fy-image 0.100.1 image/jpeg]',
+      'user/attachment: image [fy-image 101.90.0 image/webp]',
+    ]);
+  });
+
+  it('should append one marker line per image to a tool result, keeping its text', () => {
+    // Act
+    const text = renderTranscript([
+      result(
+        [{ type: 'text', text: 'screenshot taken' }, block('AAAA'), block('BBBB', 'image/jpeg')],
+        'screenshot taken',
+      ),
+    ]);
+
+    // Assert
+    should(text.split('\n')).eql([
+      'tool/tool-result: screenshot taken',
+      '    [fy-image 0.100.0 image/png]',
+      '    [fy-image 0.100.1 image/jpeg]',
+    ]);
+  });
+
+  it('should print only the markers for an image-only tool result, never its base64', () => {
+    // Act
+    const text = renderTranscript([result([block('AAAAAAAAAAAAAAAA')], undefined)]);
+
+    // Assert
+    should(text).equal('tool/tool-result: [fy-image 0.100.0 image/png]');
+    should(text).not.containEql('AAAAAAAA');
+  });
+
+  it('should keep the error prefix on a tool result that failed with an image', () => {
+    // Act
+    const text = renderTranscript([result([block('AAAA')], 'it broke', at(0, 100), true)]);
+
+    // Assert
+    should(text.split('\n')).eql(['tool/tool-result: error it broke', '    [fy-image 0.100.0 image/png]']);
+  });
+
+  it('should leave a tool result with no image, or no byte metadata, exactly as it was', () => {
+    // Act
+    const plain = renderTranscript([result('hello', 'hello')]);
+    const unlocated = renderTranscript([result([block('AAAA')], 'shot', {} as ReturnType<typeof at>)]);
+
+    // Assert
+    should(plain).equal('tool/tool-result: hello');
+    should(unlocated).equal('tool/tool-result: shot');
+  });
+
+  it('should leave the first record unmarked when the window may have cut it, and mark the rest', () => {
+    // Arrange
+    const events = [
+      shot({ data: 'AAAA', mediaType: 'image/png' }, at(0, 100)),
+      shot({ data: 'BBBB', mediaType: 'image/png' }, at(101, 90)),
+    ];
+
+    // Act
+    const text = renderTranscript(events, { partialFirstRecord: true });
+
+    // Assert
+    should(text.split('\n')).eql(['user/attachment: image', 'user/attachment: image [fy-image 101.90.0 image/png]']);
+  });
+});
+
+describe('OperatorReadService.logs image markers', () => {
+  const mask = (text: string): string => text.replace(/\d{4}/gu, '####');
+  const masking: OperatorReadRedactor = {
+    redact: async text => mask(text),
+    batch: async work => work({ text: mask, data: value => value }),
+  };
+
+  it('should carry a marker through redaction untouched while the rest of the log is scrubbed', async () => {
+    // Arrange
+    const reads = service({
+      tail: {
+        kind: 'read',
+        events: [message('pin 1234'), shot({ data: 'AAAA', mediaType: 'image/png' }, at(4096, 300))],
+      },
+      redactor: masking,
+    });
+
+    // Act
+    const text = await reads.logs('s1', 50);
+
+    // Assert
+    should(text.split('\n')[1]).equal('user/attachment: image [fy-image 4096.300.0 image/png]');
+    should(text.split('\n')[0]).not.containEql('1234');
+  });
+
+  it('should scrub text that only looks like a marker, so marker syntax cannot carry a secret past redaction', async () => {
+    // Arrange
+    const reads = service({
+      tail: {
+        kind: 'read',
+        events: [
+          message('[fy-image 1234.5678.0 image/png]'),
+          shot({ data: 'AAAA', mediaType: 'image/png' }, at(4096, 300)),
+        ],
+      },
+      redactor: masking,
+    });
+
+    // Act
+    const [forged, real] = (await reads.logs('s1', 50)).split('\n');
+
+    // Assert
+    should(forged).equal('[09:08:07] assistant/message: [fy-image ####.####.0 image/png]');
+    should(real).equal('user/attachment: image [fy-image 4096.300.0 image/png]');
+  });
+
+  it('should scrub a log with no marker in it as it always did', async () => {
+    // Arrange
+    const reads = service({ tail: { kind: 'read', events: [message('pin 1234')] }, redactor: masking });
+
+    // Act
+    const text = await reads.logs('s1', 50);
+
+    // Assert
+    should(text).equal('[09:08:07] assistant/message: pin ####');
+  });
+
+  it('should not name the images of a record a full tail may have cut, and name them once the tail is whole', async () => {
+    // Arrange
+    const events = [
+      shot({ data: 'AAAA', mediaType: 'image/png' }, at(0, 100)),
+      shot({ data: 'BBBB', mediaType: 'image/png' }, at(101, 90)),
+    ];
+    const full = service({ tail: { kind: 'read', events } });
+    const room = service({ tail: { kind: 'read', events } });
+
+    // Act
+    const cut = await full.logs('s1', 2);
+    const whole = await room.logs('s1', 50);
+
+    // Assert
+    should(cut.split('\n')[0]).equal('user/attachment: image');
+    should(whole.split('\n')[0]).equal('user/attachment: image [fy-image 0.100.0 image/png]');
+  });
+
+  it("should number a turn's images from the turn's own records", async () => {
+    // Arrange
+    const started = { kind: 'turn', harness: 'claude', role: 'system', state: 'started' } as TranscriptEvent;
+    const events = [
+      started,
+      shot({ data: 'AAAA', mediaType: 'image/png' }, at(51, 100)),
+      started,
+      shot({ data: 'BBBB', mediaType: 'image/png' }, at(203, 100)),
+    ];
+    const reads = service({ tail: { kind: 'read', events } });
+
+    // Act
+    const text = await reads.logs('s1', 50, 1);
+
+    // Assert
+    should(text).containEql('[fy-image 203.100.0 image/png]');
+    should(text).not.containEql('51.100');
   });
 });

@@ -1,3 +1,9 @@
+## [4.103.2](https://github.com/kirinnee/ferretry/compare/v4.103.1...v4.103.2) (2026-10-29)
+
+### Fixes
+
+* **transcript:** reference large base64 payloads instead of parsing them ([#875](https://github.com/kirinnee/ferretry/issues/875)) ([01d54c0](https://github.com/kirinnee/ferretry/commit/01d54c0dbecf22bc5729cf95d1b7e38317f53827))
+
 ## [4.103.1](https://github.com/kirinnee/ferretry/compare/v4.103.0...v4.103.1) (2026-10-29)
 
 ### Fixes

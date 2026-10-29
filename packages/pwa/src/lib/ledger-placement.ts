@@ -310,6 +310,7 @@ const stillLanding = (
   return !entries.some(
     (entry, index) =>
       entry.kind === 'user' &&
+      entry.images === undefined &&
       !worn.has(index) &&
       (entry.at === undefined || entry.at >= accepted - RECORD_CLOCK_SLACK_MS),
   );

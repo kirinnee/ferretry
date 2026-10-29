@@ -19,6 +19,9 @@
  * every path stayed under 110 ms before the fix as well, so the first case guards the budget and the
  * second one is what fails without the fix.
  *
+ * The image route's proof of one multi-megabyte screenshot record runs here too — read the record, parse it
+ * alone, check its base64, read the bytes back, serialise the answer — cold and then from its remembered proof.
+ *
  * In a child process, so the probe measures those paths alone, and so the throttle caps only them.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
@@ -48,7 +51,8 @@ interface PathMeasurement {
  * results, and now and then one record of a few megabytes — a pasted screenshot, an edit whose
  * structured patch is sixty thousand lines. The largest record of the owner's 283 MB transcript is 1.3 MB.
  */
-async function claudeTranscript(file: string, megabytes: number): Promise<void> {
+async function claudeTranscript(file: string, megabytes: number): Promise<string> {
+  let firstScreenshot = '';
   let record = 0;
   const stamp = (): string => new Date(Date.UTC(2026, 0, 1) + record * 1_000).toISOString();
   const base = { sessionId: SESSION, parentUuid: null, cwd: '/work', version: '2.1.0' };
@@ -120,9 +124,13 @@ async function claudeTranscript(file: string, megabytes: number): Promise<void> 
   try {
     let written = 0;
     for (let block = 0; written < megabytes * 1024 * 1024; block += 1) {
-      const chunk =
-        Array.from({ length: 200 }, exchange).join('') +
-        (block % 4 === 1 ? screenshot() : block % 4 === 3 ? patch() : '');
+      const exchanges = Array.from({ length: 200 }, exchange).join('');
+      const extra = block % 4 === 1 ? screenshot() : block % 4 === 3 ? patch() : '';
+      if (block % 4 === 1 && firstScreenshot === '') {
+        // The handle the log would print for this record: its offset, its length without the newline, image 0.
+        firstScreenshot = `${String(written + Buffer.byteLength(exchanges))}.${String(Buffer.byteLength(extra) - 1)}.0`;
+      }
+      const chunk = exchanges + extra;
       await handle.write(chunk);
       written += Buffer.byteLength(chunk);
     }
@@ -132,10 +140,11 @@ async function claudeTranscript(file: string, megabytes: number): Promise<void> 
   } finally {
     await handle.close();
   }
+  return firstScreenshot;
 }
 
 /** The child's whole program: each main-thread parse path, one after another, each under its own probe. */
-const program = (transcript: string, userHome: string): string => `
+const program = (transcript: string, userHome: string, imageHandle: string): string => `
   import { join } from 'node:path';
   import { JscStackSampler } from ${modulePath('../../../src/adapters/runtime/stall-attribution.ts')};
   import { summariseStacks } from ${modulePath('../../../src/lib/runtime/liveness.ts')};
@@ -144,6 +153,8 @@ const program = (transcript: string, userHome: string): string => `
   import { NodeForeignHistoryFiles } from ${modulePath('../../../src/adapters/imports/node-foreign-history-files.ts')};
   import { ConversationImportService } from ${modulePath('../../../src/lib/imports/conversations.ts')};
   import { ForeignHistoryImporter } from ${modulePath('../../../src/lib/imports/foreign-history.ts')};
+  import { TranscriptImageReader } from ${modulePath('../../../src/lib/session/transcript/image-reader.ts')};
+  import { NodeTranscriptImageFiles } from ${modulePath('../../../src/adapters/transcript/image-files.ts')};
   import { tailTranscriptEvents } from ${modulePath('../../../src/lib/session/transcript/reader.ts')};
   import { ClaudeTranscriptParser, CodexTranscriptParser, PacedTranscriptParser } from ${modulePath('../../../src/lib/transcript/index.ts')};
   const file = ${JSON.stringify(transcript)};
@@ -193,6 +204,17 @@ const program = (transcript: string, userHome: string): string => `
     const listing = await new ForeignHistoryImporter(new NodeForeignHistoryFiles(), roots, paced).list();
     return listing.conversations.reduce((sum, row) => sum + row.eventCount, 0);
   });
+  // One multi-megabyte screenshot record, from its handle to the JSON a client receives: the proof (read, one
+  // record's parse, the charset pass), then the bytes read back and the response's own serialisation.
+  const images = new TranscriptImageReader({ locate: async () => ({ file, harness: 'claude' }) }, new NodeTranscriptImageFiles(), paced);
+  await measure('transcript image', async () => {
+    const found = await images.lookup(${JSON.stringify(SESSION)}, ${JSON.stringify(imageHandle)});
+    return JSON.stringify(await found.download()).length;
+  });
+  await measure('transcript image again', async () => {
+    const found = await images.lookup(${JSON.stringify(SESSION)}, ${JSON.stringify(imageHandle)});
+    return JSON.stringify(await found.download()).length;
+  });
   const imports = new ConversationImportService(
     new NodeConversationFiles(),
     [{ harness: 'claude', home: join(home, '.claude'), source: 'computer' }],
@@ -207,6 +229,7 @@ const program = (transcript: string, userHome: string): string => `
 
 let transcript = '';
 let userHome = '';
+let imageHandle = '';
 
 beforeAll(async () => {
   const root = await tempDirectory('fyd-io-pressure-transcript-');
@@ -215,7 +238,7 @@ beforeAll(async () => {
   const project = join(userHome, '.claude', 'projects', '-work');
   await mkdir(project, { recursive: true });
   // Three bounded reads and more, so a window carries a partial line across every read boundary.
-  await claudeTranscript(transcript, 100);
+  imageHandle = await claudeTranscript(transcript, 100);
   // Under the history listing's 32 MiB whole-file cap, so it is parsed whole rather than skipped.
   await claudeTranscript(join(project, `${IMPORTED}.jsonl`), 28);
 }, 60_000);
@@ -226,7 +249,7 @@ afterAll(async () => {
 
 /** Runs the program, under `prefix` when one is given, and returns what each path measured. */
 async function measured(prefix: readonly string[] = []): Promise<readonly PathMeasurement[]> {
-  const child = Bun.spawn([...prefix, process.execPath, '-e', program(transcript, userHome)], {
+  const child = Bun.spawn([...prefix, process.execPath, '-e', program(transcript, userHome, imageHandle)], {
     stdout: 'pipe',
     stderr: 'pipe',
   });
@@ -244,9 +267,11 @@ function assertWithinBudget(measurements: readonly PathMeasurement[]): void {
     'read',
     'tail',
     'history listing',
+    'transcript image',
+    'transcript image again',
     'import listing',
   ]);
-  for (const each of measurements.slice(0, 4)) should(each.events).be.above(0, `${each.path} parsed nothing`);
+  for (const each of measurements.slice(0, 6)) should(each.events).be.above(0, `${each.path} parsed nothing`);
   const over = measurements.filter(each => each.maxLagMs >= BLOCK_BUDGET_MS);
   should(over).deepEqual([]);
 }

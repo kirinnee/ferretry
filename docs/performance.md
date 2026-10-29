@@ -91,6 +91,14 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
 - **Screenshots in a transcript** are not read into memory. A pasted image is one record of several
   megabytes, nearly all of it base64. The daemon remembers where those bytes are in the file instead of
   loading them; nothing it shows today displays them.
+  Asking for one (`GET /v1/sessions/:id/transcript-images/:handle`) reads only that record, proves it
+  is a PNG, JPEG, GIF or WebP from its first bytes, and checks the base64 in slices that hand the event
+  loop back between them. It remembers the proof (where the bytes are, never the bytes) for the last
+  128 handles, and proves at most two at a time. Measured on a 100 MB transcript holding a 2.75 MB
+  base64 screenshot (three runs unthrottled, three under `MemoryHigh=250M`): the longest event-loop lag
+  was 5–12 ms for a first request and 1–6 ms from a remembered proof, against the 200 ms budget; for
+  comparison the transcript window was 23–108 ms and the history listing 26–41 ms. The guard is the
+  image case in `io-pressure-transcript.test.ts`.
 - `fyd --check` lists `session-index` and `analytics-index` with the other workers. If a writer thread
   fails five times in ten minutes, the daemon writes that index on its main thread instead and says so
   once in its log.

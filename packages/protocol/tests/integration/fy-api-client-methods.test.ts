@@ -471,6 +471,21 @@ const CASES: readonly MethodCase[] = [
     expected: { name: 'turn-008', message: 'hi', attachments: [{ filename: 'a.png', mime: 'image/png' }] },
   },
   {
+    name: 'transcript image behind a handle',
+    invoke: client => client.transcriptImage(SESSION_ID, '120.340.1'),
+    verb: 'GET',
+    path: '/v1/sessions/session-1/transcript-images/120.340.1',
+    response: () =>
+      jsonResponse({
+        image: { handle: '120.340.1', mediaType: 'image/png', byteLength: 12 },
+        base64: 'iVBORw0KGgoAAAAA',
+      }),
+    expected: {
+      image: { handle: '120.340.1', mediaType: 'image/png', byteLength: 12 },
+      base64: 'iVBORw0KGgoAAAAA',
+    },
+  },
+  {
     name: 'retry send',
     invoke: client => client.retrySend(SESSION_ID, 'send-1'),
     verb: 'POST',
