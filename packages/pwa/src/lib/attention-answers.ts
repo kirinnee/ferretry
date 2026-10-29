@@ -30,6 +30,7 @@ import {
   type AttentionItem,
   type AttentionKind,
   type AttentionResponse,
+  type AttentionUndeliveredReply,
   attentionCanDiscuss,
   attentionCardAnswers,
   attentionCardKind,
@@ -114,6 +115,30 @@ export const answerAction = (answer: AttentionCardAnswer, reply: string): InboxA
       return { kind: 'needs-info', label, ...withNote(note) };
     case 'dismiss':
       return { kind: 'dismiss', label, ...withNote(note) };
+  }
+};
+
+/** The label a retried answer carries (the undo toast says "Marked !A3 done"; the button said "Retry"). */
+export const RETRY_LABEL = 'Retry';
+
+/**
+ * The owner's own answer that never reached the ferret, as the action that sends it again. Each variant of
+ * `undelivered.reply` is the action request without its id, and each `InboxAction` kind is sent as
+ * exactly that request — so Retry is the same POST the answer was, through the same client.
+ */
+export const undeliveredAction = (reply: AttentionUndeliveredReply): InboxAction => {
+  const note = withNote(reply.note);
+  switch (reply.action) {
+    case 'resolve':
+      return reply.response === undefined
+        ? { kind: 'resolve', label: RETRY_LABEL, ...note }
+        : { kind: 'respond', label: RETRY_LABEL, response: reply.response, ...note };
+    case 'dismiss':
+      return { kind: 'dismiss', label: RETRY_LABEL, ...note };
+    case 'needs-info':
+      return { kind: 'needs-info', label: RETRY_LABEL, ...note };
+    case 'discuss':
+      return { kind: 'discuss', label: RETRY_LABEL, ...note };
   }
 };
 

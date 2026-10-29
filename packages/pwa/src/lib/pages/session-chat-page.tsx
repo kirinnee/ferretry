@@ -110,6 +110,7 @@ import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withAnswerPrefix } from '../answer-chip.ts';
 import type { DaemonAttentionClient } from '../attention-client.ts';
+import { isInDiscussion, needsYouItems, unreadCount } from '../attention-inbox.ts';
 import type { AttentionLoadStatus } from '../attention-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
@@ -1271,7 +1272,11 @@ export function SessionChatPage({
     <>
       <SessionTopBar
         actions={lifecycleActions}
-        attentionOpen={attention?.snapshot?.items.length ?? session.state.attention?.open ?? 0}
+        attentionOpen={
+          attention?.snapshot === null || attention?.snapshot === undefined
+            ? unreadCount(session)
+            : needsYouItems(attention.snapshot.items)
+        }
         turn={turn}
         compact={compact}
         infoOpen={info.open}
@@ -1329,7 +1334,11 @@ export function SessionChatPage({
   // The text column and the composer share one measure (`.kt-chat-surface`, styles/index.css); the
   // composer's row reserves the transcript scrollbar's width so both centre on one axis.
   const shownAttention = shownAttentionItem(attention?.snapshot ?? null, attentionSelected);
-  chipRef.current = { id: shownAttention?.id ?? null, on: answerChipOn };
+  // An item in discussion waits on its ferret: the next message is never offered as its answer.
+  chipRef.current = {
+    id: shownAttention === undefined || isInDiscussion(shownAttention) ? null : shownAttention.id,
+    on: answerChipOn,
+  };
   const composerClient = useMemo(() => withAnswerPrefix(client, () => chipRef.current), [client]);
   const chat = (
     <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
@@ -1368,12 +1377,14 @@ export function SessionChatPage({
               chip={{ on: answerChipOn, onChange: setAnswerChipOn }}
               client={attention.client}
               connection={connection}
+              ferret={sessionDisplayName(session)}
               focus={attentionFocus}
               id={attentionId}
               repliesSlot={
                 attentionReplies === undefined ? undefined : (
                   <AttentionRepliesNotice
                     ferret={sessionDisplayName(session)}
+                    heldForComposer={attentionReplies.heldForComposer}
                     heldForTurn={attentionReplies.heldForTurn}
                     onSendNow={attentionReplies.sendNow}
                     secondsLeft={attentionReplies.secondsLeft}

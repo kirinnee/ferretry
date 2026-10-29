@@ -284,6 +284,48 @@ describe('useAttentionInboxModel', () => {
     expect(read().connectionFor(studio.daemonId)).toBe(studio);
   });
 
+  describe('when the page goes to the background', () => {
+    const setVisibility = (state: DocumentVisibilityState) =>
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: state });
+    afterEach(() => setVisibility('visible'));
+
+    const heldDismiss = async (client: DaemonAttentionClient) => {
+      const { timers } = manualTimers();
+      let inbox: AttentionInbox | null = null;
+      const machines: readonly AttentionInboxMachine[] = [
+        { connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 1))] },
+      ];
+      view = await mount(
+        <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+      );
+      await settle();
+      const [only] = (inbox as unknown as AttentionInbox).cards;
+      await interact(() => {
+        if (only !== undefined) (inbox as unknown as AttentionInbox).deferred.schedule(only, DISMISS_ACTION);
+      });
+    };
+
+    test('should send what is held when the page becomes hidden, as a phone does when the app is left', async () => {
+      const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+      const { client, calls } = fakeClient(boards);
+      await heldDismiss(client);
+      setVisibility('hidden');
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle();
+      expect(calls.filter(call => call.method === 'dismiss')).toHaveLength(1);
+    });
+
+    test('should keep holding while the page is visible, so the undo window stays open', async () => {
+      const boards = new Map([['studio/a', board('a', [item('A1', 1)])]]);
+      const { client, calls } = fakeClient(boards);
+      await heldDismiss(client);
+      setVisibility('visible');
+      await interact(() => document.dispatchEvent(new Event('visibilitychange')));
+      await settle();
+      expect(calls.filter(call => call.method === 'dismiss')).toHaveLength(0);
+    });
+  });
+
   test('says it is reading while an unread board has not arrived', async () => {
     const { client } = fakeClient(new Map());
     const { timers } = manualTimers();

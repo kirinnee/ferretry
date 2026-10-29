@@ -50,6 +50,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
 import { attentionAge, attentionKindMeta } from './attention-board.tsx';
 import { AttentionBriefSections } from './attention-brief.tsx';
+import { AttentionDelivery } from './attention-delivery.tsx';
 import { useReplyDraft } from './attention-reply-draft.tsx';
 import { AttentionBody, AttentionSteps } from './attention-steps.tsx';
 
@@ -242,6 +243,7 @@ export function AttentionCard({
         </span>
         {headerSlot}
       </header>
+      <AttentionDelivery busy={busy} ferret={origin?.ferret} item={item} onAct={onAct} />
       <h3 className="fy-attn-card__title" data-attention-title="" id={titleId}>
         {title}
       </h3>

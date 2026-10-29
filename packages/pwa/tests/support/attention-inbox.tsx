@@ -138,6 +138,7 @@ export function InboxHarness({
   const inbox: AttentionInbox = {
     unread: [],
     total: cards.length,
+    discussing: [],
     cards: cards.filter(card => !hidden.has(card.key)),
     reading,
     resolved,

@@ -378,6 +378,7 @@ function Inbox({
     unread: [],
     total: cards.length,
     cards: cards.filter(entry => !hidden.has(entry.key)),
+    discussing: [],
     reading: false,
     resolved,
     resolvedReading: false,

@@ -47,6 +47,8 @@
         "harness/cards-fit-page.tsx",
         "harness/attention-collapse-screenshot.ts",
         "harness/attention-collapse-page.tsx",
+        "harness/attention-delivery-screenshot.ts",
+        "harness/attention-delivery-page.tsx",
         "harness/processes-tab-screenshot.tsx",
         "harness/notifications-screenshot.ts",
         "harness/notifications-page.tsx",

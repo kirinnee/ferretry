@@ -24,6 +24,8 @@ export interface AttentionReplies {
   readonly pending: readonly string[];
   /** The batch is due but held: the ferret is mid-turn, and it is sent when the turn ends. */
   readonly heldForTurn: boolean;
+  /** Due answers wait because the ferret's message box holds text: nothing is typed into it until it is empty. */
+  readonly heldForComposer: boolean;
   readonly sending: boolean;
   readonly sendNow: () => void;
 }
@@ -51,7 +53,8 @@ export const useAttentionReplies = (
   scope: DaemonSessionScope | null,
   clock: RepliesClock = browserRepliesClock,
 ): AttentionReplies => {
-  const replies = useAttentionSnapshot(client, scope)?.replies;
+  const snapshot = useAttentionSnapshot(client, scope);
+  const replies = snapshot?.replies;
   const dueAt = replies?.dueAt;
   const [now, setNow] = useState(() => clock.now());
   const [sending, setSending] = useState(false);
@@ -66,6 +69,7 @@ export const useAttentionReplies = (
   const secondsLeft = dueAt === undefined ? null : secondsUntil(dueAt, now);
   const expired = dueAt !== undefined && secondsLeft === 0;
   const heldForTurn = replies?.heldForTurn === true;
+  const heldForComposer = snapshot?.delivery?.heldForComposer === true;
 
   useEffect(() => {
     if (!expired || heldForTurn || scope === null || dueAt === undefined || rereadFor.current === dueAt) return;
@@ -94,6 +98,7 @@ export const useAttentionReplies = (
     secondsLeft: expired ? null : secondsLeft,
     pending: expired && !heldForTurn ? [] : (replies?.pending ?? []),
     heldForTurn,
+    heldForComposer,
     sending,
     sendNow,
   };
