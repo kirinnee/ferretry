@@ -107,12 +107,12 @@ describe('Attention in a conversation', () => {
 
     // Act / Assert
     should(boardReplyMessage(answered)).equal('[answer to !A2 «Rebase onto main now?»] Wait');
-    should(boardReplyMessage(answeredWithNote)).equal('[answer to !A3 «Which region?»] eu-west-1\n\nNote: cheapest');
-    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Done.\n\nNote: Only after 6pm');
+    should(boardReplyMessage(answeredWithNote)).equal('[answer to !A3 «Which region?»] eu-west-1 · note: cheapest');
+    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Done · note: Only after 6pm');
     should(boardReplyMessage(bareDone)).equal('[done !A5 «Look at the flaky test»] The owner marked this done.');
-    should(boardReplyMessage(dismissed)).equal('[dismissed !A5 «Look at the flaky test»] No longer needed');
+    should(boardReplyMessage(dismissed)).equal('[dismissed !A5 «Look at the flaky test»] Not needed: No longer needed');
     should(boardReplyMessage(bareDismiss)).equal(
-      '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
+      '[dismissed !A5 «Look at the flaky test»] Not needed — the owner dismissed this without a reason.',
     );
   });
 
@@ -166,20 +166,44 @@ describe('Attention in a conversation', () => {
     // Assert
     should(lines).deepEqual({
       choose: '[answer to !A2 «Rebase onto main now?»] Rebase now',
-      chooseNote: '[answer to !A2 «Rebase onto main now?»] Rebase now\n\nNote: after lunch',
+      chooseNote: '[answer to !A2 «Rebase onto main now?»] Rebase now · note: after lunch',
       approve: '[answer to !A4 «Deploy?»] Approved.',
-      approveNote: '[answer to !A4 «Deploy?»] Approved.\n\nNote: only for this repo',
+      approveNote: '[answer to !A4 «Deploy?»] Approved. · note: only for this repo',
       reject: '[answer to !A4 «Deploy?»] Rejected.',
-      rejectNote: '[answer to !A4 «Deploy?»] Rejected.\n\nNote: use the staging account',
+      rejectNote: '[answer to !A4 «Deploy?»] Rejected. · note: use the staging account',
       good: '[answer to !A6 «Is the summary right?»] Your answer is good.',
-      goodNote: '[answer to !A6 «Is the summary right?»] Your answer is good.\n\nNote: nice and short',
+      goodNote: '[answer to !A6 «Is the summary right?»] Your answer is good. · note: nice and short',
       done: '[done !A5 «Look at the flaky test»] The owner marked this done.',
-      doneNote: '[answer to !A5 «Look at the flaky test»] Done.\n\nNote: merged it myself',
-      dismiss: '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
-      dismissNote: '[dismissed !A5 «Look at the flaky test»] not this week',
+      doneNote: '[answer to !A5 «Look at the flaky test»] Done · note: merged it myself',
+      dismiss: '[dismissed !A5 «Look at the flaky test»] Not needed — the owner dismissed this without a reason.',
+      dismissNote: '[dismissed !A5 «Look at the flaky test»] Not needed: not this week',
       needsInfo: '[needs more info !A5 «Ask A5?»] The owner needs more information.',
       needsInfoNote: '[needs more info !A5 «Ask A5?»] which account?',
     });
+  });
+
+  it('should tell an other answer apart from a chosen option, with or without a note', () => {
+    // Arrange
+    const other = closed(CHOICE, { response: { kind: 'other', answer: 'Neither — rewrite it' } });
+    const otherWithNote = closed(CHOICE, {
+      response: { kind: 'other', answer: 'Neither — rewrite it' },
+      resolutionNote: 'by Friday',
+    });
+    const otherNoteEqualsWords = closed(CHOICE, {
+      response: { kind: 'other', answer: 'Neither' },
+      resolutionNote: 'Other answer (none of the options): Neither',
+    });
+
+    // Act / Assert
+    should(boardReplyMessage(other)).equal(
+      '[answer to !A2 «Rebase onto main now?»] Other answer (none of the options): Neither — rewrite it',
+    );
+    should(boardReplyMessage(otherWithNote)).equal(
+      '[answer to !A2 «Rebase onto main now?»] Other answer (none of the options): Neither — rewrite it · note: by Friday',
+    );
+    should(boardReplyMessage(otherNoteEqualsWords)).equal(
+      '[answer to !A2 «Rebase onto main now?»] Other answer (none of the options): Neither',
+    );
   });
 
   it('should read a non-default answer label as the start of the owner’s reply, after the answer', () => {
@@ -197,11 +221,11 @@ describe('Attention in a conversation', () => {
 
     // Act / Assert
     should(boardReplyMessage(always)).equal(
-      '[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow — it is the same repo every time',
+      '[answer to !A4 «Deploy?»] Approved. · note: Always allow — it is the same repo every time',
     );
-    should(boardReplyMessage(alwaysBare)).equal('[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow');
+    should(boardReplyMessage(alwaysBare)).equal('[answer to !A4 «Deploy?»] Approved. · note: Always allow');
     should(boardReplyMessage(skip)).equal(
-      '[dismissed !A5 «Look at the flaky test»] Skip — the owner of that test is away',
+      '[dismissed !A5 «Look at the flaky test»] Not needed: Skip — the owner of that test is away',
     );
   });
 

@@ -531,13 +531,19 @@ const AttentionResolutionSchema = z.discriminatedUnion('resolvedBy', [
   }),
 ]);
 
+/** A response fits its ask by kind, except `other`: the owner's own words, which any ask with options takes. */
+function responseKindFitsAsk(ask: string | undefined, response: string): boolean {
+  if (response === 'other') return ask !== undefined && ask !== 'open-question' && ask !== 'task';
+  return ask === response;
+}
+
 export const ResolvedAttentionItemSchema = z
   .intersection(AttentionItemSchema, AttentionResolutionSchema)
   .superRefine((value, context) => {
     if (value.disposition === 'dismissed' && value.response !== undefined) {
       context.addIssue({ code: 'custom', message: 'a dismissed item may not carry a response', path: ['response'] });
     }
-    if (value.response !== undefined && value.ask?.kind !== value.response.kind) {
+    if (value.response !== undefined && !responseKindFitsAsk(value.ask?.kind, value.response.kind)) {
       context.addIssue({ code: 'custom', message: 'response kind must match the original ask', path: ['response'] });
     }
     if (value.response?.kind === 'multiple-choice' && value.ask?.kind === 'multiple-choice') {

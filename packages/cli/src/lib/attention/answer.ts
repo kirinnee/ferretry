@@ -11,9 +11,12 @@ export interface AnswerFlags {
   readonly good?: boolean;
   readonly clarify?: string;
   readonly answer?: string;
+  /** The owner's own words instead of the options: "none of these". */
+  readonly other?: string;
 }
 
-const ONE_ANSWER = 'give exactly one answer: --approve/--reject, --yes/--no, --choice, --good/--clarify, or --answer';
+const ONE_ANSWER =
+  'give exactly one answer: --approve/--reject, --yes/--no, --choice, --good/--clarify, --answer, or --other';
 
 /**
  * Read the answer a `attention done` carries, or nothing when the item had no ask.
@@ -25,9 +28,14 @@ export function parseAnswer(flags: AnswerFlags): AttentionResponse | undefined {
   const permission = flags.approve === true || flags.reject === true;
   const yesNo = flags.yes === true || flags.no === true;
   const review = flags.good === true || flags.clarify !== undefined;
-  const chosen = [permission, yesNo, flags.choice !== undefined, review, flags.answer !== undefined].filter(
-    Boolean,
-  ).length;
+  const chosen = [
+    permission,
+    yesNo,
+    flags.choice !== undefined,
+    review,
+    flags.answer !== undefined,
+    flags.other !== undefined,
+  ].filter(Boolean).length;
 
   if (chosen === 0) return undefined;
   if (chosen > 1) throw new Error(ONE_ANSWER);
@@ -47,6 +55,7 @@ export function parseAnswer(flags: AnswerFlags): AttentionResponse | undefined {
       clarification: required(flags.clarify, '--clarify', 'the clarification text'),
     };
   }
+  if (flags.other !== undefined) return { kind: 'other', answer: required(flags.other, '--other', 'the answer text') };
   return { kind: 'open-question', answer: required(flags.answer ?? '', '--answer', 'the answer text') };
 }
 

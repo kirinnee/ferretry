@@ -269,8 +269,8 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
           message: [
             `[answer to !${named} «What should I call the next test item?»] gaytem`,
             `[done !${doneInApp} «First?»] The owner marked this done.`,
-            `[answer to !${doneAtShell} «Second?»] Done.\n\nNote: Handled it myself`,
-            `[dismissed !${dismissed} «Third?»] The owner dismissed this without an answer.`,
+            `[answer to !${doneAtShell} «Second?»] Done · note: Handled it myself`,
+            `[dismissed !${dismissed} «Third?»] Not needed — the owner dismissed this without a reason.`,
           ].join('\n\n'),
         },
       ],
@@ -313,14 +313,11 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     should(results.map(each => each.status)).deepEqual([200, 200, 200, 200, 200]);
     const [sent] = [...sends.sent.values()];
     should(sent?.message.split('\n\n')).deepEqual([
-      `[answer to !${chosen} «Rebase?»] Wait`,
-      'Note: after lunch',
-      `[answer to !${approved} «Deploy?»] Approved.`,
-      'Note: Always allow — same repo',
-      `[answer to !${done} «Look?»] Done.`,
-      'Note: Done — thanks',
+      `[answer to !${chosen} «Rebase?»] Wait · note: after lunch`,
+      `[answer to !${approved} «Deploy?»] Approved. · note: Always allow — same repo`,
+      `[answer to !${done} «Look?»] Done · note: Done — thanks`,
       `[needs more info !${asked} «Which account?»] the work one, please`,
-      `[dismissed !${dismissed} «Still needed?»] Skip — not this week`,
+      `[dismissed !${dismissed} «Still needed?»] Not needed: Skip — not this week`,
     ]);
   });
 

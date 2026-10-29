@@ -266,12 +266,15 @@ describe('attention command surface', () => {
     await answer.parsed;
     const reject = run(['attention', 'done', 'A1', '--reject'], snapshot([]));
     await reject.parsed;
+    const other = run(['attention', 'done', 'A1', '--other', 'neither of those'], snapshot([]));
+    await other.parsed;
 
     // Assert
     should(choice.gateway.applied[0]?.request).match({ response: { kind: 'multiple-choice', choice: 'staging' } });
     should(clarify.gateway.applied[0]?.request).match({ response: { verdict: 'clarify' } });
     should(answer.gateway.applied[0]?.request).match({ response: { kind: 'open-question', answer: 'use staging' } });
     should(reject.gateway.applied[0]?.request).match({ response: { decision: 'reject' } });
+    should(other.gateway.applied[0]?.request).match({ response: { kind: 'other', answer: 'neither of those' } });
   });
 
   it('should dismiss with a note', async () => {

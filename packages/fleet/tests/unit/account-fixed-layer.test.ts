@@ -689,23 +689,24 @@ describe('ATTENTION_INSTRUCTION', () => {
     // A card: a title that is the push heading, and a one-line ask that is its text.
     should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
     should(text).containEql('Title ≤40 chars (push heading); ask ≤120.');
-    // Isolated: the reader has not followed the conversation, and the test is whether they could answer cold.
-    should(text).containEql('Isolation test: could the owner answer with nothing else open?');
-    should(text).containEql('No "as above"');
-    // Point form: the situation, why now and earlier answers are separate flags; charts ride in the body.
-    should(text).containEql('Point form (ADHD-friendly)');
+    // Isolated: the reader has not followed the conversation, so they must be able to answer cold.
+    should(text).containEql('Owner answers cold: no "as above"');
+    should(text).containEql('ticket/PR numbers');
+    // Point form: the situation, why now and earlier answers are separate flags; a SMALL diagram or mock-up
+    // rides in the body when it shows the point faster than words.
     should(text).containEql('`--premise` = situation, `--context` = why now, `--decided` = earlier answers');
-    should(text).containEql('fy-render fence in `--body`');
+    should(text).containEql('a SMALL diagram/mock-up (fy-render svg|html|mermaid) if it beats words');
     should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
     // Kinds, at most three directional answers, the recommendation on the right.
     should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
-    should(text).containEql('Choice: 2–3 `--option`s (what each does)');
+    should(text).containEql('Choice: 2–3 `--option`s;');
     should(text).containEql('`--recommend <pick> --recommend-why <line>`');
     should(text).containEql('`--up "<label>"`: 3rd answer (task, permission)');
     should(text).containEql('`--step "<md>"` each');
-    should(text).containEql('no secrets');
-    should(text).containEql('"[answer to !A3 …]"');
+    // An answer is read apart: an option with its note, or the owner's own words instead of the options.
+    should(text).containEql('"[answer to !A3 …] <option> · note: …"');
+    should(text).containEql('"Other answer (none of the options): …"');
     // The need-more-info loop: expand the same item.
     should(text).containEql('"[needs more info !A3 …]" → `zz attention edit <id>`');
     // The discussion loop: talk first, then update or close; open items are read on demand.

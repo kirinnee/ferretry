@@ -260,6 +260,13 @@ describe('harnessQuestionAnswers', () => {
     should(harnessQuestionAnswers(choice, { kind: 'permission', decision: 'approve' }).ok).be.false();
   });
 
+  it('should refuse an answer outside the options: a form cannot be filled with it', () => {
+    should(harnessQuestionAnswers(choice, { kind: 'other', answer: 'neither' })).deepEqual({
+      ok: false,
+      reason: 'an answer outside the options cannot fill a form',
+    });
+  });
+
   it('should read one answer in words as the option it names, the options it lists, or text', () => {
     const multi: PendingQuestion = { toolUseId: 't', questions: [CHECKS] };
     const open = (answer: string) => ({ kind: 'open-question' as const, answer });
