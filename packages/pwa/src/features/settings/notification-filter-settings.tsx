@@ -3,9 +3,8 @@
  *
  * Every paired machine now sends every event (`packages/daemon/src/lib/push/service.ts`); this
  * screen is the only place left that decides what a reader actually sees: the four switches
- * (needs you, finished, failed, new device), quiet hours, and — unlike the four switches, which are
- * device-wide — a per-machine on/off list so one noisy pairing can be muted without affecting the
- * rest. All of it is local to this browser; nothing here is sent to any daemon.
+ * (needs you, finished, failed, new device) and quiet hours, all device-wide. Muting one machine alone is a
+ * row in `notification-machines.tsx`. All of it is local to this browser; nothing here is sent to any daemon.
  */
 import {
   type DeviceNotificationFilterPreferences,
@@ -19,21 +18,12 @@ import {
 import { Toggle } from './notification-settings.tsx';
 
 export const NOTIFICATION_FILTER_SCOPE_NOTE =
-  'Every paired machine sends every event now. These switches decide what this browser shows — they apply to every machine at once, except the list below, which is per machine.';
-
-export interface NotificationFilterMachine {
-  readonly daemonId: string;
-  readonly label: string;
-  readonly enabled: boolean;
-}
+  'Every paired machine sends every event now. These switches decide what this browser shows — they apply to every machine at once. Muting one machine alone is in its row above.';
 
 export interface NotificationFilterSettingsViewProps {
   readonly preferences: DeviceNotificationFilterPreferences;
-  /** Every paired machine, in the reader's own list order. Empty hides the section entirely. */
-  readonly machines?: readonly NotificationFilterMachine[];
   readonly onCategoryChange: (category: NotificationCategory, next: boolean) => void;
   readonly onQuietHoursChange: (patch: Partial<QuietHours>) => void;
-  readonly onToggleMachine: (daemonId: string, next: boolean) => void;
 }
 
 /**
@@ -42,10 +32,8 @@ export interface NotificationFilterSettingsViewProps {
  */
 export function NotificationFilterSettingsView({
   preferences,
-  machines = [],
   onCategoryChange,
   onQuietHoursChange,
-  onToggleMachine,
 }: NotificationFilterSettingsViewProps) {
   const { categories, quietHours } = preferences;
   return (
@@ -96,20 +84,6 @@ export function NotificationFilterSettingsView({
             />
           </label>
         </div>
-      )}
-      {machines.length > 0 && (
-        <fieldset className="flex flex-col gap-2">
-          <legend className="text-meta font-semibold text-muted">Per machine</legend>
-          {machines.map(machine => (
-            <Toggle
-              key={machine.daemonId}
-              checked={machine.enabled}
-              onChange={next => onToggleMachine(machine.daemonId, next)}
-              label={machine.label}
-              description="Notify from this machine. Off mutes it alone; every other pairing is unaffected."
-            />
-          ))}
-        </fieldset>
       )}
     </section>
   );

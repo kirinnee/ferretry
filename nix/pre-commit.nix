@@ -63,7 +63,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Non-trusted action SHA pins";
       entry = validator "scripts/validate/action-pins.sh non-trusted";
-      files = "^(\\.github/workflows/.*\\.ya?ml|config/action-trust\\.json)$";
+      files = "^(\\.github/(workflows|actions)/.*\\.ya?ml|config/action-trust\\.json)$";
       pass_filenames = false;
       language = "system";
     };
@@ -72,7 +72,7 @@ pre-commit-lib.run {
       enable = true;
       name = "Trusted action major pins";
       entry = validator "scripts/validate/action-pins.sh trusted";
-      files = "^(\\.github/workflows/.*\\.ya?ml|config/action-trust\\.json)$";
+      files = "^(\\.github/(workflows|actions)/.*\\.ya?ml|config/action-trust\\.json)$";
       pass_filenames = false;
       language = "system";
     };

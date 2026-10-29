@@ -215,6 +215,7 @@ const WARDEN_ACT_WORDS: Readonly<Record<keyof WardenConfig['mayActAlone'], strin
   restart: 'restart a ferret',
   failover: 'move a ferret to another login',
   stop: 'stop a ferret',
+  closeLeftovers: 'close a browser a finished ferret left running',
 };
 
 function wardenLoosening(before: WardenConfig, after: WardenConfig): readonly string[] {

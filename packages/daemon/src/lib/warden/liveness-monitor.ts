@@ -16,6 +16,8 @@
  * is forgotten.
  */
 
+import type { SessionTurnState } from '@ferretry/protocol';
+import { ACTIVE_MONITORED } from './detect.ts';
 import {
   foldLivenessSample,
   type LivenessSample,
@@ -24,7 +26,7 @@ import {
   reflexSettingsFor,
   reflexStep,
 } from './liveness.ts';
-import { ACTIVE_MONITORED } from './detect.ts';
+import { waitingOnOwner } from './sus.ts';
 import type { WardenLivenessLedger, WardenSessionStatus } from './types.ts';
 
 /** One ferret the monitor may look at. */
@@ -35,6 +37,8 @@ export interface LivenessTarget {
   readonly mode: 'auto' | 'interactive';
   /** A declared wait: the ferret said it is parked, so silence is expected. */
   readonly waiting: boolean;
+  /** Whose move it is. A ferret whose turn is over waits on its owner: its silence is expected too. */
+  readonly turnState?: SessionTurnState;
   readonly nudgeAfterSeconds?: number;
   readonly killAfterSeconds?: number;
   /** The tmux session its pane lives in, when it has one. */
@@ -102,7 +106,9 @@ export class WardenLivenessMonitor {
       const anchored = late ? { ...folded, anchorAt: new Date(nowMs).toISOString(), frozenTicks: 0 } : folded;
       const step = reflexStep(anchored, nowMs, reflexSettingsFor(target, this.tickSeconds), {
         nudgeAllowed: options.nudgeAllowed,
-        suspended: late || target.waiting || target.mode === 'interactive',
+        // A ferret at its prompt or on a question is waiting on its owner: a nudge would only type into
+        // their conversation. (Its helpers used to look like a live subprocess and hid this.)
+        suspended: late || target.waiting || target.mode === 'interactive' || waitingOnOwner(target.turnState, false),
       });
       this.tracks.set(target.id, step.track);
       // Watched only when the look SAW something: a ferret whose screen and transcript both could not be
@@ -117,6 +123,11 @@ export class WardenLivenessMonitor {
   /** The ledger the monitor has built for a ferret, or `undefined` when it has none. */
   ledger(sessionId: string): WardenLivenessLedger | undefined {
     return this.tracks.get(sessionId)?.ledger;
+  }
+
+  /** Since when a browser the ferret launched has been running under its pane, this turn. */
+  leftoverBrowserSince(sessionId: string): string | undefined {
+    return this.tracks.get(sessionId)?.leftoverBrowserSince;
   }
 
   /** When the ferret was confirmed frozen, this episode. */

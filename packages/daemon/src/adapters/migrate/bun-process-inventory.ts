@@ -120,6 +120,35 @@ export class BunProcessProbe implements ProcessProbePort {
     }
   }
 
+  /**
+   * The processes among `pids` holding a LISTEN socket, from procfs: the listening inodes of
+   * `net/tcp` and `net/tcp6`, matched against each process's open descriptors. `undefined` without
+   * procfs; a process that exits or is not ours to read simply holds none.
+   */
+  async listening(pids: readonly number[]): Promise<ReadonlySet<number> | undefined> {
+    const proc = this.procRoot;
+    if (proc === undefined) return undefined;
+    const inodes = new Set<string>();
+    for (const table of ['tcp', 'tcp6']) {
+      const text = await readFile(join(proc, 'net', table), 'utf8').catch(() => '');
+      for (const inode of listeningInodes(text)) inodes.add(inode);
+    }
+    const found = new Set<number>();
+    if (inodes.size === 0) return found;
+    for (const pid of pids) {
+      const fds = await readdir(join(proc, String(pid), 'fd')).catch(() => []);
+      for (const fd of fds) {
+        const link = await readlink(join(proc, String(pid), 'fd', fd)).catch(() => '');
+        const inode = /^socket:\[(\d+)\]$/u.exec(link)?.[1];
+        if (inode !== undefined && inodes.has(inode)) {
+          found.add(pid);
+          break;
+        }
+      }
+    }
+    return found;
+  }
+
   /** Reads `/proc`, so a platform without it degrades to an unknown directory rather than failing. */
   async workingDirectory(pid: number): Promise<string | undefined> {
     try {
@@ -129,6 +158,16 @@ export class BunProcessProbe implements ProcessProbePort {
       return undefined;
     }
   }
+}
+
+/** The socket inodes a `/proc/net/tcp`-format table lists in state `0A` (LISTEN). */
+export function listeningInodes(table: string): readonly string[] {
+  const inodes: string[] = [];
+  for (const line of table.split('\n').slice(1)) {
+    const fields = line.trim().split(/\s+/u);
+    if (fields[3] === '0A' && fields[9] !== undefined && fields[9] !== '0') inodes.push(fields[9]);
+  }
+  return inodes;
 }
 
 /** Every child of every thread of `pid`, ascending — the order a pid-sorted table lists them in. */
@@ -220,7 +259,10 @@ export class PaneProcessInventory implements ProcessInventoryPort {
         binaryName: this.provenance.binaryName,
         configuredServers,
       });
-      return { kind: 'observed', processes: inventoryProcesses(rows, cwdByPid, known) };
+      // Only what provenance left unexplained: the harness and its own helpers are never servers to keep.
+      const unexplained = rows.filter(row => !known.has(row.pid)).map(row => row.pid);
+      const listening = (await this.probe.listening?.(unexplained).catch(() => undefined)) ?? new Set();
+      return { kind: 'observed', processes: inventoryProcesses(rows, cwdByPid, known, listening) };
     } catch (error) {
       return unobservable(`the pane could not be inspected: ${detail(error)}`);
     }

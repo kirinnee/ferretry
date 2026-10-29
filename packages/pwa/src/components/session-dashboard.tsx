@@ -60,6 +60,8 @@ const DASHBOARD_TABS = [
 ] as const;
 
 export interface SessionDashboardProps {
+  /** The device setting "Group Needs you at the top"; absent means on. */
+  readonly groupNeedsYou?: boolean;
   readonly connection: DaemonConnection;
   /** null is the loading state; an empty array is an authoritative empty fleet. */
   readonly sessions: readonly SessionView[] | null;
@@ -140,6 +142,7 @@ export function SessionDashboard({
   error,
   dashboardView,
   density,
+  groupNeedsYou = true,
   usage,
   accounts = null,
   wardenStatus,
@@ -170,7 +173,7 @@ export function SessionDashboard({
       ? groups.reduce((count, group) => count + group.rows.length, 0)
       : allMachinesShown(allMachines);
   // Sessions with open Attention lead the page, lifted out of their folders; the rest keep their groups.
-  const lifted = useMemo(() => pullDashboardNeedsYou(groups), [groups]);
+  const lifted = useMemo(() => pullDashboardNeedsYou(groups, groupNeedsYou), [groups, groupNeedsYou]);
   const totalCount = allMachines?.total ?? sessions?.length ?? 0;
   // Across machines the list is "read" once any machine has answered; one machine at a time, once it has.
   const read = allMachines === undefined ? sessions !== null : allMachines.loaded;

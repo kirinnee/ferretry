@@ -1396,16 +1396,7 @@ function SettingsPageHarness({ standalone = false }: { readonly standalone?: boo
         recognitionSupport: HARNESS_RECOGNITION_AVAILABLE,
         voice: HARNESS_PARAKEET_ABSENT,
       }}
-      notifications={
-        <NotificationSettingsView
-          permission="granted"
-          enabled
-          delivery="active"
-          devices={[]}
-          onEnabled={() => {}}
-          onRevokeDevice={() => {}}
-        />
-      }
+      notifications={<NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />}
       probeDaemon={harnessSettingsProbe}
       carrier={activeCarrier.carrier}
       relayAdvertised={activeCarrier.relayAdvertised}
@@ -3981,12 +3972,14 @@ const PALETTE_SETTINGS: PaletteSettingsSource = (daemon, query) => settingsPalet
  * strip and captures the panel, which proves the journey rather than just the render.
  */
 function AttentionPanelHarness() {
-  const [expanded, setExpanded] = useState(false);
+  const [selected, setSelected] = useState<string | null>(null);
   const client = useMemo(
     () => ({
       respond: async () => undefined,
       resolve: async () => undefined,
       dismiss: async () => undefined,
+      needsInfo: async () => undefined,
+      progress: async () => undefined,
     }),
     [],
   );
@@ -3995,11 +3988,11 @@ function AttentionPanelHarness() {
       <AttentionPanel
         client={client}
         connection={daemon}
-        expanded={expanded}
         id="harness-attention-panel"
         now={HARNESS_NOW}
-        onExpandedChange={setExpanded}
+        onSelect={setSelected}
         scope={scope}
+        selectedId={selected}
         snapshot={ATTENTION}
         status="ready"
       />
@@ -6733,14 +6726,7 @@ function Shell() {
             <Label>Notifications</Label>
           </PanelHeader>
           <PanelBody>
-            <NotificationSettingsView
-              permission="granted"
-              enabled
-              delivery="active"
-              devices={[]}
-              onEnabled={() => {}}
-              onRevokeDevice={() => {}}
-            />
+            <NotificationSettingsView permission="granted" devices={[]} onRevokeDevice={() => {}} />
           </PanelBody>
         </Card>
       ),

@@ -20,14 +20,11 @@ const device: PushDeviceView = {
 };
 
 const view = (overrides: Partial<NotificationSettingsViewProps> = {}) => {
-  const calls = { enabled: [] as boolean[], revoked: [] as string[] };
+  const calls = { revoked: [] as string[] };
   const props: NotificationSettingsViewProps = {
     permission: 'granted',
-    enabled: true,
-    delivery: 'active',
     devices: [],
     currentDeviceId: null,
-    onEnabled: enabled => calls.enabled.push(enabled),
     onRevokeDevice: id => calls.revoked.push(id),
     ...overrides,
   };
@@ -35,64 +32,31 @@ const view = (overrides: Partial<NotificationSettingsViewProps> = {}) => {
 };
 
 describe('NotificationSettingsView', () => {
-  it('states unsupported capability plainly without offering a non-working switch', () => {
+  it('states unsupported capability plainly', () => {
     const { renderer } = view({ permission: 'unsupported' });
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_UNSUPPORTED_NOTE);
-    expect(renderer.root.findAllByProps({ role: 'switch' })).toHaveLength(0);
   });
 
-  it('keeps notifications quiet until browser permission and a device preference are both active', () => {
-    const { renderer } = view({ permission: 'default', enabled: true });
-    const switches = renderer.root.findAllByProps({ role: 'switch' });
-    expect(switches).toHaveLength(1);
-    expect(switches[0]?.props['aria-checked']).toBe(false);
+  it('carries no enrol switch of its own: every machine is switched in the machine list', () => {
+    const { renderer } = view({ permission: 'default' });
+    expect(renderer.root.findAllByProps({ role: 'switch' })).toHaveLength(0);
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_SCOPE_NOTE);
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_IOS_NOTE);
   });
 
-  it('disables a browser-denied master switch and explains the remedy', () => {
+  it('explains a browser-denied permission and its remedy', () => {
     const { renderer } = view({ permission: 'denied' });
-    const master = renderer.root.findByProps({ role: 'switch' });
-    expect(master.props.disabled).toBe(true);
     expect(JSON.stringify(renderer.toJSON())).toContain(NOTIFICATION_DENIED_NOTE);
   });
 
-  it('reports an in-progress Web Push registration without claiming closed-app delivery is ready', () => {
-    const { renderer } = view({ delivery: 'checking' });
-    const tree = JSON.stringify(renderer.toJSON());
-    expect(tree).toContain('Checking closed-app Web Push');
-    expect(tree).not.toContain('closed-app delivery is ready');
+  it('states the browser permission in each of its three states', () => {
+    expect(JSON.stringify(view({ permission: 'default' }).renderer.toJSON())).toContain('Not asked yet');
+    expect(JSON.stringify(view({ permission: 'granted' }).renderer.toJSON())).toContain('Allowed in this browser.');
+    expect(JSON.stringify(view({ permission: 'denied' }).renderer.toJSON())).toContain('Blocked in this browser.');
   });
 
-  it('states the browser permission, and offers an explicit button only while it has not been asked', () => {
-    const asked = view({ permission: 'default', enabled: false });
-    expect(JSON.stringify(asked.renderer.toJSON())).toContain('Not asked yet');
-    const allow = asked.renderer.root.findByProps({ 'data-notification-allow': '' });
-    run(() => allow.props.onClick());
-    expect(asked.calls.enabled).toEqual([true]);
-
-    const granted = view({ permission: 'granted' });
-    expect(JSON.stringify(granted.renderer.toJSON())).toContain('Allowed in this browser.');
-    expect(granted.renderer.root.findAllByProps({ 'data-notification-allow': '' })).toHaveLength(0);
-
-    const denied = view({ permission: 'denied' });
-    expect(JSON.stringify(denied.renderer.toJSON())).toContain('Blocked in this browser.');
-    expect(denied.renderer.root.findAllByProps({ 'data-notification-allow': '' })).toHaveLength(0);
-  });
-
-  it('flips only the master switch, never inventing daemon-global state', () => {
-    const { calls, renderer } = view();
-    const master = renderer.root.findByProps({ role: 'switch' });
-    run(() => master.props.onClick());
-    expect(calls.enabled).toEqual([false]);
-  });
-
-  it('keeps all settings controls at the touch-target floor and revokes the exact device id', () => {
+  it('revokes the exact device id', () => {
     const { calls, renderer } = view({ devices: [device], currentDeviceId: device.id });
-    const switches = renderer.root.findAllByProps({ role: 'switch' });
-    expect(switches).toHaveLength(1);
-    for (const toggle of switches) expect(toggle.props.className).toContain('min-h-[44px]');
-    expect(JSON.stringify(renderer.toJSON())).toContain('closed-app delivery is ready');
     expect(JSON.stringify(renderer.toJSON())).toContain('· this device');
     const revoke = renderer.root.findByProps({ 'aria-label': 'Revoke push notifications for iPhone' });
     run(() => revoke.props.onClick());

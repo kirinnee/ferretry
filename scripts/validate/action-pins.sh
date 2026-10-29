@@ -14,7 +14,7 @@ jq -e '.schemaVersion == 1 and (.actions | type == "object") and ([.actions[] | 
 tmp="$(mktemp)"
 seen="$(mktemp)"
 trap 'rm -f "${tmp}" "${seen}"' EXIT
-rg -n --no-heading '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]]+' .github/workflows >"${tmp}" || true
+rg -n --no-heading '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]+[^[:space:]]+' .github/workflows .github/actions >"${tmp}" || true
 
 while IFS=: read -r file line body; do
   [ -n "${body}" ] || continue

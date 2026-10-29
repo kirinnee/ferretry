@@ -33,8 +33,9 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Browser, Page } from 'playwright-core';
 import should from 'should';
-import { FY_RENDER_VISUAL_CASES } from './fixtures/fy-render-visual-cases.ts';
 import { fakeTilePng } from '../support/fake-tile.ts';
+import { FY_RENDER_VISUAL_CASES } from './fixtures/fy-render-visual-cases.ts';
+import { THEME_FAMILIES } from '../../src/lib/theme-preferences.ts';
 import { sharedChromium } from './support/chromium.ts';
 import { fyRenderIntegrationFixture } from './support/fy-render-integration-fixture.ts';
 
@@ -197,7 +198,7 @@ interface Scene {
 const openScene = async (
   which: string,
   viewport: (typeof VIEWPORTS)[number],
-  options: { reducedMotion?: 'reduce'; theme?: 'light' | 'dark' } = {},
+  options: { reducedMotion?: 'reduce'; theme?: 'light' | 'dark'; themeName?: string } = {},
 ): Promise<Scene> => {
   if (!caseNames.has(which)) throw new Error(`no such fy-render fixture: ${which}`);
   const context = await browser.newContext({
@@ -236,7 +237,12 @@ const openScene = async (
   await page.route('https://tile.openstreetmap.org/**', route =>
     route.fulfill({ body: Buffer.from(fakeTilePng()), contentType: 'image/png' }),
   );
-  const theme = options.theme === 'light' ? '&theme=studio-light' : '';
+  const theme =
+    options.themeName !== undefined
+      ? `&theme=${options.themeName}`
+      : options.theme === 'light'
+        ? '&theme=studio-light'
+        : '';
   await page.goto(`${server.url.origin}/?case=${which}${theme}`);
   await page.waitForSelector('[data-fy-render-type]');
   return {
@@ -659,4 +665,413 @@ describe('fy-render component evidence — Map', () => {
       await scene.close();
     }
   }, 120_000);
+});
+
+/**
+ * A theme token as the page resolves it, the way `fy-render-theme.ts` does: painted on one pixel of a
+ * canvas and read back, so the test compares against the browser's own answer rather than a copy of
+ * `themes.css`.
+ */
+const resolvedToken = async (page: Page, token: string): Promise<string> =>
+  await page.evaluate(name => {
+    const raw = getComputedStyle(document.querySelector('figure.fy-render') ?? document.documentElement)
+      .getPropertyValue(`--${name}`)
+      .trim();
+    const canvas = document.createElement('canvas');
+    canvas.width = 1;
+    canvas.height = 1;
+    const context = canvas.getContext('2d') as CanvasRenderingContext2D;
+    context.fillStyle = raw;
+    context.fillRect(0, 0, 1, 1);
+    const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
+    return `#${[r, g, b].map(value => value.toString(16).padStart(2, '0')).join('')}`;
+  }, token);
+
+/** How many of the chart canvas's pixels are exactly this colour: proof the theme is what painted it. */
+const pixelsOf = async (page: Page, hex: string): Promise<number> =>
+  await page.evaluate(colour => {
+    const canvas = document.querySelector('.fy-render-chart canvas') as HTMLCanvasElement;
+    const data = (canvas.getContext('2d') as CanvasRenderingContext2D).getImageData(
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+    ).data;
+    const [r, g, b] = [1, 3, 5].map(at => Number.parseInt(colour.slice(at, at + 2), 16));
+    let count = 0;
+    for (let index = 0; index < data.length; index += 4)
+      if (data[index] === r && data[index + 1] === g && data[index + 2] === b && data[index + 3] === 255) count += 1;
+    return count;
+  }, hex);
+
+const waitForChart = async (page: Page): Promise<void> => {
+  await page.waitForSelector('[data-fy-render-chart="drawn"]', { timeout: 40_000 });
+  // The draw animation is 420 ms; a capture before it ends shows half-grown bars.
+  await page.waitForTimeout(700);
+};
+
+describe('fy-render component evidence — Chart', () => {
+  for (const theme of ['light', 'dark'] as const) {
+    for (const viewport of VIEWPORTS) {
+      test(`should draw a stacked bar chart in the theme’s own colours, ${theme}, at ${viewport.name}`, async () => {
+        // Arrange
+        const scene = await openScene('chart-bar', viewport, { theme });
+        const { outside, page, shot } = scene;
+
+        try {
+          // Act — nothing to press: it is near, so it draws by itself.
+          await waitForChart(page);
+
+          // Assert — painted by the theme: the first series is the first palette slot, the muted series the
+          // muted token, both found as exact pixels on the canvas.
+          const first = await resolvedToken(page, 'viz-1');
+          const muted = await resolvedToken(page, 'muted');
+          should(await pixelsOf(page, first)).be.above(200);
+          should(await pixelsOf(page, muted)).be.above(50);
+          // In the page, not a frame; nothing fetched from anywhere; no sideways scroll.
+          should(await page.locator('iframe').count()).equal(0);
+          should(outside).eql([]);
+          should(await overflow(page)).equal(0);
+          const box = await page.locator('.fy-render-chart-plot').boundingBox();
+          should(box?.width ?? 0).be.belowOrEqual(viewport.width);
+          should(box?.height ?? 0).be.aboveOrEqual(200);
+          // Named for a screen reader, with the numbers behind it.
+          should(await page.locator('canvas[role="img"]').getAttribute('aria-label')).equal(
+            'Chart: Warden spend per day, by kind of work',
+          );
+          should(await page.locator('.fy-render-chart-data tbody tr').count()).equal(7);
+          // ...and that table is clipped to nothing: a transcript's `.md table` must not paint it over the canvas.
+          const table = await page.locator('.fy-render-chart-data').boundingBox();
+          should(table?.width ?? 99).be.belowOrEqual(1);
+          // Nor give the legend list bullets.
+          should(
+            await page.evaluate(
+              () => getComputedStyle(document.querySelector('.fy-render-chart-legend') as Element).listStyleType,
+            ),
+          ).equal('none');
+          should(await page.locator('.fy-render-chart-title').textContent()).equal('Warden spend');
+          await shot(`chart-01-bar-${theme}`, { first, muted, overflow: await overflow(page) });
+
+          // Act — a tooltip, by hover or by tap.
+          const plot = (await page.locator('.fy-render-chart-plot canvas').boundingBox()) as {
+            x: number;
+            y: number;
+            width: number;
+            height: number;
+          };
+          const at = { x: plot.x + plot.width * 0.62, y: plot.y + plot.height * 0.6 };
+          if (viewport.width <= 480) await page.touchscreen.tap(at.x, at.y);
+          else await page.mouse.move(at.x, at.y);
+          await page.waitForTimeout(400);
+          await shot(`chart-02-tooltip-${theme}`);
+
+          // Act — the legend hides a series, and says so.
+          const key = page.getByRole('button', { name: 'Reports' });
+          await key.click();
+          await page.waitForTimeout(600);
+
+          // Assert
+          should(await key.getAttribute('aria-pressed')).equal('false');
+          await shot(`chart-03-legend-${theme}`);
+        } finally {
+          await scene.close();
+        }
+      }, 120_000);
+    }
+  }
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const viewport of VIEWPORTS) {
+      test(`should step through a frames chart with buttons and the keyboard, ${theme}, at ${viewport.name}`, async () => {
+        // Arrange
+        const scene = await openScene('chart-frames', viewport, { theme });
+        const { page, shot } = scene;
+
+        try {
+          await waitForChart(page);
+          const step = page.locator('output.fy-render-chart-step');
+          should(await step.textContent()).equal('1 / 3 One worker');
+          should(await page.getByRole('button', { name: 'Previous step' }).isDisabled()).be.true();
+          await shot(`chart-04-frames-1-${theme}`, { overflow: await overflow(page) });
+          should(await overflow(page)).equal(0);
+
+          // Act — Next.
+          await page.getByRole('button', { name: 'Next step' }).click();
+          await page.waitForTimeout(700);
+
+          // Assert — the frame's own title and series.
+          should(await step.textContent()).equal('2 / 3 Four workers');
+          should(await page.locator('.fy-render-chart-title').textContent()).equal('Queue depth, four workers');
+          await shot(`chart-05-frames-2-${theme}`);
+
+          // Act — the slider, from the keyboard.
+          await page.getByRole('slider', { name: 'Step' }).focus();
+          await page.keyboard.press('ArrowRight');
+          await page.waitForTimeout(700);
+
+          // Assert
+          should(await step.textContent()).equal('3 / 3 Autoscaled');
+          should(await page.getByRole('button', { name: 'Next step' }).isDisabled()).be.true();
+          should(await page.locator('.fy-render-chart-data caption').textContent()).equal(
+            'Data: Queue depth as workers are added — Autoscaled',
+          );
+          await shot(`chart-06-frames-3-${theme}`);
+        } finally {
+          await scene.close();
+        }
+      }, 120_000);
+    }
+  }
+
+  test('should zoom a line chart with a dragged box on a mouse, and reset it', async () => {
+    // Arrange
+    const scene = await openScene('chart-frames', VIEWPORTS[1], { theme: 'light' });
+    const { page, shot } = scene;
+
+    try {
+      await waitForChart(page);
+      const plot = (await page.locator('.fy-render-chart-plot canvas').boundingBox()) as {
+        x: number;
+        y: number;
+        width: number;
+        height: number;
+      };
+
+      // Act — drag a box across the middle of the x axis.
+      await page.mouse.move(plot.x + plot.width * 0.3, plot.y + plot.height * 0.5);
+      await page.mouse.down();
+      await page.mouse.move(plot.x + plot.width * 0.65, plot.y + plot.height * 0.5, { steps: 8 });
+      await page.mouse.up();
+      await page.waitForTimeout(600);
+
+      // Assert — zoomed, with a way back.
+      const reset = page.getByRole('button', { name: 'Reset zoom' });
+      should(await reset.count()).equal(1);
+      await shot('chart-07-zoomed');
+      await reset.click();
+      await page.waitForTimeout(300);
+      should(await reset.count()).equal(0);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
+  test('should leave one finger to the page’s scroll on a phone, inline', async () => {
+    // Arrange
+    const scene = await openScene('chart-frames', VIEWPORTS[0], { theme: 'dark' });
+    const { page } = scene;
+
+    try {
+      await waitForChart(page);
+
+      // Assert — nothing bound a gesture to the canvas, so the browser keeps its own touch handling.
+      const touchAction = await page.evaluate(
+        () => getComputedStyle(document.querySelector('.fy-render-chart canvas') as Element).touchAction,
+      );
+      should(['auto', 'manipulation']).containEql(touchAction);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
+  for (const theme of ['light', 'dark'] as const) {
+    test(`should draw a doughnut, a palette slice per label, ${theme}`, async () => {
+      // Arrange
+      const scene = await openScene('chart-doughnut', VIEWPORTS[1], { theme });
+      const { page, shot } = scene;
+
+      try {
+        await waitForChart(page);
+
+        // Assert — every slice is a palette slot, in order, and the legend names the slices.
+        for (const slot of ['viz-1', 'viz-2', 'viz-3', 'viz-4'])
+          should(await pixelsOf(page, await resolvedToken(page, slot))).be.above(100);
+        should(await page.locator('.fy-render-chart-key').allTextContents()).eql([
+          'Planning',
+          'Implementation',
+          'Review',
+          'Chores',
+        ]);
+        await shot(`chart-08-doughnut-${theme}`);
+      } finally {
+        await scene.close();
+      }
+    }, 120_000);
+  }
+
+  test('should repaint in the new palette when the reader switches theme, on screen', async () => {
+    // Arrange
+    const scene = await openScene('chart-bar', VIEWPORTS[1], { themeName: 'studio-dark' });
+    const { page, shot } = scene;
+
+    try {
+      await waitForChart(page);
+      const before = await page.locator('[data-fy-render-chart]').getAttribute('data-fy-render-chart-palette');
+
+      // Act — a different family in the same mode: "dark" alone would not notice.
+      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'mission-dark'));
+      await page.waitForFunction(
+        previous =>
+          document.querySelector('[data-fy-render-chart]')?.getAttribute('data-fy-render-chart-palette') !== previous,
+        before,
+      );
+      await page.waitForTimeout(700);
+
+      // Assert
+      should(await pixelsOf(page, await resolvedToken(page, 'viz-1'))).be.above(200);
+      await shot('chart-09-repainted-mission-dark');
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
+  test('should fall back to its source, quietly, when the author tried to colour it', async () => {
+    // Arrange
+    const scene = await openScene('chart-painted', VIEWPORTS[0]);
+    const { page, shot } = scene;
+
+    try {
+      // Act
+      await page.waitForSelector('[data-fy-render-failure="render"]', { timeout: 40_000 });
+
+      // Assert — the ordinary fence, the reason kept as a title, no canvas.
+      should(await page.locator('[data-fy-render-error="true"] pre').count()).equal(1);
+      should(await page.locator('[data-fy-render-error="true"]').getAttribute('title')).containEql('color');
+      should(await page.locator('canvas').count()).equal(0);
+      await shot('chart-10-fallback', { overflow: await overflow(page) });
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
+  test('should keep every theme’s series colours apart, in every family and mode', async () => {
+    // Arrange — every theme the reader can pick: each family in each mode, from the app's own list.
+    const names = THEME_FAMILIES.flatMap(family => [`${family.id}-light`, `${family.id}-dark`]);
+    should(names.length).equal(22);
+    const scene = await openScene('chart-bar', VIEWPORTS[1]);
+    const { page } = scene;
+
+    try {
+      // Act
+      const palettes = await page.evaluate(themes => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 1;
+        canvas.height = 1;
+        const context = canvas.getContext('2d', { willReadFrequently: true }) as CanvasRenderingContext2D;
+        const rgb = (raw: string): number[] => {
+          context.clearRect(0, 0, 1, 1);
+          context.fillStyle = raw;
+          context.fillRect(0, 0, 1, 1);
+          return [...context.getImageData(0, 0, 1, 1).data.slice(0, 3)];
+        };
+        return themes.map(name => {
+          document.documentElement.setAttribute('data-theme', name);
+          const style = getComputedStyle(document.documentElement);
+          return {
+            colors: [1, 2, 3, 4, 5, 6, 7, 8].map(slot => rgb(style.getPropertyValue(`--viz-${slot}`).trim())),
+            name,
+          };
+        });
+      }, names);
+
+      // Assert — no two of the first five slots are near-duplicates in any theme (RGB distance at least 60
+      // of a possible 441), and no two of all eight closer than 30: what `themes.css` claims for the order.
+      const near: string[] = [];
+      for (const { name, colors } of palettes)
+        for (let a = 0; a < colors.length; a += 1)
+          for (let b = a + 1; b < colors.length; b += 1) {
+            const distance = Math.hypot(...[0, 1, 2].map(at => (colors[a]?.[at] ?? 0) - (colors[b]?.[at] ?? 0)));
+            if (distance < (a < 5 && b < 5 ? 60 : 30))
+              near.push(`${name}: viz-${a + 1} ~ viz-${b + 1} (${Math.round(distance)})`);
+          }
+      manifest.push({ palettes, scene: 'chart-palette-distinctness' });
+      should(near).eql([]);
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+});
+
+describe('fy-render component evidence — Mermaid in the theme', () => {
+  /** The compiled diagram's SVG text, decoded from the `<img>` it reached. */
+  const diagramSvg = async (page: Page): Promise<string> =>
+    decodeURIComponent(
+      ((await page.locator('img[data-fy-render-diagram="true"]').getAttribute('src')) ?? '').replace(
+        'data:image/svg+xml,',
+        '',
+      ),
+    ).toLowerCase();
+
+  for (const theme of ['light', 'dark'] as const) {
+    for (const viewport of VIEWPORTS) {
+      test(`should paint a diagram from the app’s tokens, not Mermaid’s stock theme, ${theme}, at ${viewport.name}`, async () => {
+        // Arrange
+        const scene = await openScene('mermaid', viewport, { theme });
+        const { page, shot } = scene;
+
+        try {
+          // Act
+          await waitForMermaidDiagram(page);
+          await page.waitForTimeout(300);
+
+          // Assert — the node fill, its border and the text are the theme's own.
+          const svg = await diagramSvg(page);
+          for (const token of ['accent-soft', 'accent', 'fg', 'muted'])
+            should(svg).containEql(await resolvedToken(page, token));
+          should(await overflow(page)).equal(0);
+          await shot(`mermaid-06-themed-${theme}`);
+        } finally {
+          await scene.close();
+        }
+      }, 120_000);
+    }
+  }
+
+  test('should redraw a diagram on screen when the palette changes within the same mode', async () => {
+    // Arrange
+    const scene = await openScene('mermaid', VIEWPORTS[1], { themeName: 'studio-dark' });
+    const { page, shot } = scene;
+
+    try {
+      await waitForMermaidDiagram(page);
+      const before = await diagramSvg(page);
+
+      // Act — dark to dark: a cache keyed on light/dark alone would keep the old picture.
+      await page.evaluate(() => document.documentElement.setAttribute('data-theme', 'mission-dark'));
+      await page.waitForFunction(
+        previous => {
+          const src = document.querySelector('img[data-fy-render-diagram="true"]')?.getAttribute('src') ?? '';
+          return decodeURIComponent(src.replace('data:image/svg+xml,', '')).toLowerCase() !== previous;
+        },
+        before,
+        { timeout: 40_000 },
+      );
+
+      // Assert
+      should(await diagramSvg(page)).containEql(await resolvedToken(page, 'accent-soft'));
+      await shot('mermaid-07-repainted-mission-dark');
+    } finally {
+      await scene.close();
+    }
+  }, 120_000);
+
+  for (const which of ['mermaid-theme-directive', 'mermaid-theme-frontmatter'])
+    test(`should keep the app’s palette when a diagram asks for another (${which})`, async () => {
+      // Arrange
+      const scene = await openScene(which, VIEWPORTS[1], { theme: 'light' });
+      const { page } = scene;
+
+      try {
+        // Act
+        await waitForMermaidDiagram(page);
+
+        // Assert — `theme`, `themeVariables` and `themeCSS` are secure keys: neither a directive nor front
+        // matter reaches them.
+        const svg = await diagramSvg(page);
+        should(svg).not.containEql('#ff0000');
+        should(svg).containEql(await resolvedToken(page, 'accent-soft'));
+      } finally {
+        await scene.close();
+      }
+    }, 120_000);
 });

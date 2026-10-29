@@ -119,7 +119,7 @@ describe('the assigned warden prompt', () => {
 
   it.each([
     { kind: 'sus_thinking' as const, expected: /work counters advancing/u },
-    { kind: 'sus_subprocess' as const, expected: /background subprocess/u },
+    { kind: 'sus_subprocess' as const, expected: /tool command the agent started/u },
     { kind: 'unattended_question' as const, expected: /waiting on an unanswered question/u },
     { kind: 'peer_wait_unanswerable' as const, expected: /The sweep flagged: /u },
     { kind: 'owner_request' as const, expected: /The OWNER asked for this investigation/u },

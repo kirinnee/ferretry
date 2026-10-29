@@ -1,7 +1,7 @@
 /**
- * The Attention surfaces on one page each (`attention-screenshot.ts` bundles this): the inbox (the
- * phone's swipe deck with its Attention tab, the desktop grid), the in-ferret panel over a transcript
- * line that references `!A3`, and the sessions bar — column and collapsed rail — with unread rows.
+ * The Attention surfaces on one page each (`attention-screenshot.ts` bundles this): the two-pane inbox
+ * (a phone list, a desktop list beside a real-shaped chat), the pinned item above a composer, and the
+ * sessions bar — column and collapsed rail — with unread rows.
  *
  * Every component is the REAL one; only the data is invented, and nothing leaves the page: answers are
  * held by a real `DeferredAttentionActions` whose commit does nothing.
@@ -127,6 +127,50 @@ const OLD = item('A7', 5, {
   ask: { kind: 'permission' },
 });
 
+const FENCE = '```';
+const TASK_STEPS = [
+  'Store the relay key: `fy secret set RELAY_KEY`',
+  'Check the advertisement lists it:\n\n' +
+    FENCE +
+    'sh\nfy relay status --json | jq .directory\nfy relay status --watch\n' +
+    FENCE,
+  'Compare with the diagram below and confirm it matches !A3\n\n' +
+    FENCE +
+    'fy-render\ntype: mermaid\nalt: key to relay to sessions\n---\nflowchart LR\n  key[New key] --> relay[Relay]\n  relay --> sessions[Sessions]\n' +
+    FENCE,
+  'Restart the relay: `fy daemon restart`',
+];
+const TASK = item('A8', 14, {
+  subject: 'Rotate the relay key on the studio machine',
+  why: 'The old key was pasted into a chat; rotate it before the release cut.',
+  body:
+    '## Before you start\n\n- You need shell access to **studio**\n- It takes about five minutes\n\nThe daemon keeps running; only the relay restarts at the end. A summary of the key path:\n\n' +
+    FENCE +
+    'sh\nfy secret list\n' +
+    FENCE +
+    '\n\nSee [the secrets doc](https://example.test/docs/secrets).',
+  steps: TASK_STEPS,
+  ask: { kind: 'task' },
+  raisedByName: 'ottilie',
+  history: [{ at: ago(30), kind: 'updated', note: 'added the restart step' }],
+} as Partial<AttentionItem>);
+const taskWith = (done: readonly number[]): AttentionItem => ({ ...TASK, stepsDone: [...done] }) as AttentionItem;
+const WAITING = item('A9', 22, {
+  subject: 'Pick the staging region for the relay',
+  why: 'I cannot tell which region you meant.',
+  body: 'Two regions are plausible: **eu-west** and **us-east**.',
+  steps: ['Decide the region', 'Tell me which'],
+  ask: { kind: 'task' },
+  raisedByName: 'hadi',
+  waitingOn: 'ferret',
+  askedAt: ago(12),
+  infoRequests: 1,
+  history: [
+    { at: ago(12), kind: 'needs-info', note: 'which region?' },
+    { at: ago(10), kind: 'updated', note: 'added the two candidates' },
+  ],
+} as Partial<AttentionItem>);
+
 const ferret = (id: string, teammate: string, label: string, patch: Partial<SessionView['state']> = {}) =>
   sessionView(id, {
     config: { teammate: teammate as never, label, cwd: `/home/kirin/Workspace/${id}` },
@@ -163,13 +207,19 @@ const CARDS: readonly InboxCard[] = [
 // Answers are held for the real undo window, then "sent" nowhere.
 const deferred = new DeferredAttentionActions(async () => undefined);
 
-function Inbox({ phone }: { readonly phone: boolean }): ReactElement {
+function Inbox({
+  phone,
+  cards = CARDS,
+}: {
+  readonly phone: boolean;
+  readonly cards?: readonly InboxCard[];
+}): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const hidden = deferred.hiddenKeys();
   const inbox: AttentionInbox = {
     unread: [],
-    total: CARDS.length,
-    cards: CARDS.filter(entry => !hidden.has(entry.key)),
+    total: cards.length,
+    cards: cards.filter(entry => !hidden.has(entry.key)),
     reading: false,
     deferred,
     deferredState: state,
@@ -178,7 +228,20 @@ function Inbox({ phone }: { readonly phone: boolean }): ReactElement {
   return (
     <div className="flex h-dvh flex-col bg-bg" data-fixture="">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <AttentionInboxPage inbox={inbox} now={NOW} onNavigate={() => undefined} phone={phone} />
+        <AttentionInboxPage
+          inbox={inbox}
+          now={NOW}
+          onNavigate={() => undefined}
+          phone={phone}
+          renderChat={selected => (
+            <div className="min-h-0 flex-1">
+              <ChatPane
+                board={boardOf(...(selected.item.id === 'A3' ? [selected.item] : [selected.item, REBASE]))}
+                target={selected.item.id}
+              />
+            </div>
+          )}
+        />
       </div>
       {phone ? (
         <AppTabBar
@@ -192,6 +255,12 @@ function Inbox({ phone }: { readonly phone: boolean }): ReactElement {
     </div>
   );
 }
+
+const TASK_CARDS: readonly InboxCard[] = [
+  card(taskWith([0, 1]), ferret('fr', 'ottilie', 'Attention inbox wiring'), 'studio'),
+  card(WAITING, SESSIONS[1] as SessionView, 'studio'),
+  card(REBASE, SESSIONS[0] as SessionView, 'studio'),
+];
 
 const BOARD: AttentionSnapshot = {
   v: 1,
@@ -250,40 +319,54 @@ function BoardPage(): ReactElement {
   );
 }
 
-function Panel({
+function ChatPane({
   board = BOARD,
-  open = true,
   target = 'A3',
 }: {
   readonly board?: AttentionSnapshot;
-  readonly open?: boolean;
   readonly target?: string | null;
 }): ReactElement {
-  const [expanded, setExpanded] = useState(open);
+  const [selected, setSelected] = useState<AttentionId | null>((target as AttentionId | null) ?? null);
+  const [chip, setChip] = useState(true);
   const noop = async (): Promise<void> => undefined;
   return (
-    <main className="mx-auto flex max-w-3xl flex-col gap-md bg-bg p-panel" data-fixture="">
-      <AttentionPanel
-        client={{ respond: noop, resolve: noop, dismiss: noop }}
-        connection={CONNECTION}
-        expanded={expanded}
-        focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
-        id="attention-panel"
-        now={NOW}
-        onExpandedChange={setExpanded}
-        scope={daemonSessionScope(CONNECTION, 'fr')}
-        snapshot={board}
-        status="ready"
-      />
-      <article className="rounded-panel border border-border bg-surface p-panel text-cell" data-chat-line="">
-        <p className="m-0 mb-xs text-meta text-faint">ottilie · 2m</p>
-        <Markdown
-          attentionReferenceResolver={id => BOARD.items.some(entry => entry.id === id)}
-          onAttentionOpen={() => setExpanded(true)}
-          text="I raised !A3 about the rebase — pick an option when you can. Meanwhile I'll keep going on the deck."
+    <div className="flex h-full min-h-0 flex-col bg-bg">
+      <div className="min-h-0 flex-1 overflow-y-auto p-panel">
+        <article className="rounded-panel border border-border bg-surface p-panel text-cell" data-chat-line="">
+          <p className="m-0 mb-xs text-meta text-faint">ottilie · 2m</p>
+          <Markdown
+            attentionReferenceResolver={id => board.items.some(entry => entry.id === id)}
+            text="I raised !A3 about the rebase — pick an option when you can. Meanwhile I will keep going on the inbox."
+          />
+        </article>
+      </div>
+      <div className="p-panel">
+        <AttentionPanel
+          chip={{ on: chip, onChange: setChip }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          connection={CONNECTION}
+          focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
+          id="attention-panel"
+          now={NOW}
+          onSelect={setSelected}
+          scope={daemonSessionScope(CONNECTION, 'fr')}
+          selectedId={selected}
+          snapshot={board}
+          status="ready"
         />
-      </article>
-    </main>
+        <div className="rounded-panel border border-border bg-surface p-panel text-meta text-faint">
+          Message ottilie…
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Panel(props: { readonly board?: AttentionSnapshot; readonly target?: string | null }): ReactElement {
+  return (
+    <div className="mx-auto h-dvh max-w-3xl" data-fixture="">
+      <ChatPane {...props} />
+    </div>
   );
 }
 
@@ -324,20 +407,24 @@ createRoot(root).render(
     <Inbox phone={false} />
   ) : view === 'panel' ? (
     <Panel />
+  ) : view === 'task-partial' ? (
+    <Panel board={boardOf(taskWith([0, 1]), REBASE)} target="A8" />
+  ) : view === 'task-full' ? (
+    <Panel board={boardOf(taskWith([0, 1, 2, 3]), REBASE)} target="A8" />
+  ) : view === 'task-waiting' ? (
+    <Panel board={boardOf(WAITING)} target="A9" />
+  ) : view === 'task-inbox-phone' ? (
+    <Inbox cards={TASK_CARDS} phone />
+  ) : view === 'task-inbox-desktop' ? (
+    <Inbox cards={TASK_CARDS} phone={false} />
   ) : view === 'overload' ? (
-    <Panel board={OVERLOAD_BOARD} open={false} target={null} />
-  ) : view === 'overload-open' ? (
     <Panel board={OVERLOAD_BOARD} target={null} />
   ) : view === 'rich' ? (
     <Panel board={boardOf(RICH)} target="A5" />
-  ) : view === 'single' ? (
-    <Panel board={boardOf(SINGLE)} target="A6" />
-  ) : view === 'old' ? (
-    <Panel board={boardOf(OLD)} target="A7" />
+  ) : view === 'long' ? (
+    <Panel board={boardOf(LONG)} target="A1" />
   ) : view === 'several' ? (
     <Panel board={boardOf(RICH, SINGLE, OLD)} target={null} />
-  ) : view === 'strip' ? (
-    <Panel board={boardOf(RICH, SINGLE, OLD)} open={false} target={null} />
   ) : view === 'board' ? (
     <BoardPage />
   ) : view === 'rail' ? (

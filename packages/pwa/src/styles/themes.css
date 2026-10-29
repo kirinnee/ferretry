@@ -304,6 +304,25 @@
   --tool-wait: #696f7d;
   --tool-generic: #6e6e7c;
 
+  /* ---- data-visualisation palette (an fy-render `chart`, a Mermaid diagram) ----
+     Eight series colours, read by `components/fy-render-theme.ts` and never by a payload: an author asks
+     for a slot or a tone, never a colour. Each slot NAMES a hue every family already restates per mode
+     and tunes for contrast against its own surface, so a new family gets a palette that matches it
+     without writing one. The ORDER is measured, not chosen: across every family and mode, the first five
+     stay at least 70 apart in RGB (of 441) and all eight at least 40, which the browser suite re-checks
+     against this sheet (`fy-render-component.visual.test.tsx`). The accent is NOT a slot: in several
+     families it IS one of these hues (Mission's cyan is its search teal), so a chart that wants the brand
+     colour asks for `tone: accent`. Declared here, alongside the values they read, so each resolves per
+     theme. */
+  --viz-1: var(--tool-read);
+  --viz-2: var(--tool-edit);
+  --viz-3: var(--tool-bash);
+  --viz-4: var(--tool-patch);
+  --viz-5: var(--syn-keyword);
+  --viz-6: var(--tool-search);
+  --viz-7: var(--src-claude);
+  --viz-8: var(--err);
+
   /* ---- syntax (consumed by highlight.css) ---- */
   --syn-comment: #6d6d7c;
   --syn-keyword: #7c3aed;

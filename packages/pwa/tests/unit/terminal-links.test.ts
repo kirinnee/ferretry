@@ -149,11 +149,157 @@ describe('linksOnRow', () => {
     }
   });
 
-  it('does not join rows the emulator did not wrap', () => {
-    const buffer = terminalBuffer(['https://a.test/very-lo', 'ng-path'], 22);
-    const [link] = linksOnRow(buffer, 22, 1);
-    expect(link?.text).toBe('https://a.test/very-lo');
-    expect(linksOnRow(buffer, 22, 2)).toEqual([]);
+  describe('a break the program made (rows the emulator did not mark as wrapped)', () => {
+    /** Lays text out across full rows the way a program that breaks lines itself does: none marked wrapped. */
+    const hard = (text: string, columns: number): BufferRow[] => {
+      const rows: BufferRow[] = [];
+      for (let at = 0; at < text.length; at += columns) rows.push(text.slice(at, at + columns));
+      return rows;
+    };
+    const full = 'https://a.test/very-long-path';
+
+    it('joins an address that runs to the right edge with the rest on the next row', () => {
+      const buffer = terminalBuffer(['https://a.test/very-lo', 'ng-path'], 22);
+      for (const row of [1, 2]) {
+        const [link] = linksOnRow(buffer, 22, row);
+        expect(link?.text).toBe(full);
+        expect(link?.href).toBe(full);
+        expect(link?.range).toEqual({ start: { x: 1, y: 1 }, end: { x: 7, y: 2 } });
+      }
+    });
+
+    it('keeps the words before the address out of the link', () => {
+      const buffer = terminalBuffer(['read https://a.test/aaaa', 'bbbb/cc and more'], 24);
+      const [link] = linksOnRow(buffer, 24, 2);
+      expect(link?.href).toBe('https://a.test/aaaabbbb/cc');
+      expect(link?.range).toEqual({ start: { x: 6, y: 1 }, end: { x: 7, y: 2 } });
+    });
+
+    it('tolerates the cells a program keeps back at the right edge, and no more', () => {
+      const tail = 'bbbb/cc';
+      const reaches = (head: string) => linksOnRow(terminalBuffer([head, tail], 24), 24, 1)[0]?.text;
+      expect(reaches('read https://a.test/aaaa')).toBe('https://a.test/aaaabbbb/cc');
+      expect(reaches('read https://a.test/aaa')).toBe('https://a.test/aaabbbb/cc');
+      expect(reaches('read https://a.test/aa')).toBe('https://a.test/aabbbb/cc');
+      expect(reaches('read https://a.test/a')).toBe('https://a.test/a');
+    });
+
+    it('follows an indented continuation, for a reply indented under its own bullet or not', () => {
+      const indented = terminalBuffer(['  https://a.test/aaaaaaa', '  tail/x'], 24);
+      const [link] = linksOnRow(indented, 24, 2);
+      expect(link?.text).toBe('https://a.test/aaaaaaatail/x');
+      expect(link?.range).toEqual({ start: { x: 3, y: 1 }, end: { x: 8, y: 2 } });
+
+      const bullet = terminalBuffer(['⏺ https://a.test/aaaaaaa', '  tail/x'], 24);
+      expect(linksOnRow(bullet, 24, 2)[0]?.text).toBe('https://a.test/aaaaaaatail/x');
+
+      const flush = terminalBuffer(['  https://a.test/aaaaaaa', 'tail/x'], 24);
+      expect(linksOnRow(flush, 24, 2)[0]?.text).toBe('https://a.test/aaaaaaatail/x');
+    });
+
+    it('follows an address over three rows, and over a soft wrap followed by a hard one', () => {
+      const long = 'go https://example.test/a/rather/long/path?x=1';
+      const three = terminalBuffer(hard(long, 20), 20);
+      for (const row of [1, 2, 3]) {
+        const [link] = linksOnRow(three, 20, row);
+        expect(link?.text).toBe('https://example.test/a/rather/long/path?x=1');
+        expect(link?.range.start).toEqual({ x: 4, y: 1 });
+        expect(link?.range.end.y).toBe(3);
+      }
+
+      const mixed = terminalBuffer(
+        ['go https://example.t', { text: 'est/a/rather/long/pa', wrapped: true }, 'th?x=1'],
+        20,
+      );
+      for (const row of [1, 2, 3])
+        expect(linksOnRow(mixed, 20, row)[0]?.text).toBe('https://example.test/a/rather/long/path?x=1');
+    });
+
+    it('stops a joined address at the whitespace or closing punctuation it ends in', () => {
+      const buffer = terminalBuffer(['see https://a.test/aaaa', 'bbbb/cc). then more'], 23);
+      expect(linksOnRow(buffer, 23, 1)[0]?.text).toBe('https://a.test/aaaabbbb/cc');
+    });
+
+    it('does not join an address that merely ends at the edge to a line that cannot continue it', () => {
+      const head = 'read https://a.test/aaaa';
+      const unrelated = [
+        ' next line',
+        '   deeper',
+        '$ npm test',
+        '• a bullet',
+        '- an item',
+        '│ boxed',
+        '"quoted"',
+        '<tag>',
+        'Next steps follow',
+        '',
+      ];
+      for (const next of unrelated) {
+        const buffer = terminalBuffer([head, next], 24);
+        expect(linksOnRow(buffer, 24, 1)[0]?.text).toBe('https://a.test/aaaa');
+        expect(linksOnRow(buffer, 24, 2)).toEqual([]);
+      }
+    });
+
+    it('does not join text that is not an address, however it ends', () => {
+      const buffer = terminalBuffer(['the quick brown fox jumps', 'over/the/lazy dog'], 25);
+      expect(linksOnRow(buffer, 25, 1)).toEqual([]);
+      expect(linksOnRow(buffer, 25, 2)).toEqual([]);
+    });
+
+    it('does not join across a blank row or past the last row', () => {
+      const buffer = terminalBuffer(['read https://a.test/aaaa', '', 'bbbb/cc'], 24);
+      expect(linksOnRow(buffer, 24, 1)[0]?.text).toBe('https://a.test/aaaa');
+      expect(linksOnRow(buffer, 24, 3)).toEqual([]);
+      expect(linksOnRow(terminalBuffer(['read https://a.test/aaaa'], 24), 24, 1)[0]?.text).toBe('https://a.test/aaaa');
+    });
+
+    it('joins no more rows than a soft wrap does', () => {
+      const rows = hard(`https://a.test/${'a'.repeat(400)}`, 10);
+      const buffer = terminalBuffer(rows, 10);
+      const [link] = linksOnRow(buffer, 10, 20);
+      expect(link).toBeDefined();
+      const spanned = (link?.range.end.y ?? 0) - (link?.range.start.y ?? 0) + 1;
+      expect(spanned).toBeLessThanOrEqual(65);
+      expect(spanned).toBeGreaterThan(2);
+    });
+
+    it('leaves an OSC 8 hyperlink to its own range: only its row, judged against what it says', () => {
+      const buffer = terminalBuffer(['https://a.test/very-lo', 'ng-path'], 22);
+      const asked: { visible: string; href: string }[] = [];
+      const opened: string[] = [];
+      const handler = terminalHyperlinkHandler(
+        { buffer: () => buffer, columns: () => 22 },
+        {
+          open: (_click, href) => void opened.push(href),
+          confirm: (visible, href) => {
+            asked.push({ visible, href });
+            return false;
+          },
+        },
+      );
+      handler.activate(click(), full, { start: { x: 1, y: 1 }, end: { x: 22, y: 1 } });
+      expect(asked).toEqual([{ visible: 'https://a.test/very-lo', href: full }]);
+      expect(opened).toEqual([]);
+      handler.activate(click(), full, { start: { x: 1, y: 1 }, end: { x: 7, y: 2 } });
+      expect(opened).toEqual([full]);
+    });
+
+    it('hands the whole address to the opener from either half', () => {
+      const buffer = terminalBuffer(['https://a.test/very-lo', 'ng-path'], 22);
+      const opened: string[] = [];
+      const provider = terminalLinkProvider(
+        { buffer: () => buffer, columns: () => 22 },
+        { open: (_click, href) => void opened.push(href), confirm: () => false },
+      );
+      for (const row of [1, 2]) {
+        provider.provideLinks(row, links => {
+          expect(links).toHaveLength(1);
+          links?.[0]?.activate(click(), links[0].text);
+        });
+      }
+      expect(opened).toEqual([full, full]);
+    });
   });
 
   it('drops sentence punctuation that lands on a wrapped row', () => {

@@ -325,7 +325,7 @@ const renderMermaid = async (source: string, libraryUrl: string): Promise<Record
     const opened = await handshakeReport(bridge);
     if (opened.ready !== true) return { handshake: opened };
     const library = await fetchOnce(libraryUrl, FY_RENDER_SANDBOX_LIBRARIES.mermaid.maxBytes);
-    bridge.send({ kind: 'render-mermaid', library, source, theme: 'light' });
+    bridge.send({ kind: 'render-mermaid', library, palette: 'light:00000000', source, theme: 'light' });
     const reply = await bridge.awaitMessage(
       ['mermaid-svg', 'error'],
       FY_RENDER_SANDBOX_LIMITS.mermaidDeadlineMs - 2_000,
@@ -369,7 +369,13 @@ const steps: Readonly<Record<string, () => Promise<Record<string, Json>>>> = {
       const opened = await handshakeReport(bridge);
       if (opened.ready !== true) return { handshake: opened };
       const library = await fetchOnce(config.mermaidUrl, FY_RENDER_SANDBOX_LIBRARIES.mermaid.maxBytes);
-      const command = { kind: 'render-mermaid', library, source: FY_RENDER_JOURNEY_MERMAID_SOURCE, theme: 'light' };
+      const command = {
+        kind: 'render-mermaid',
+        library,
+        palette: 'light:00000000',
+        source: FY_RENDER_JOURNEY_MERMAID_SOURCE,
+        theme: 'light',
+      };
       // A SECOND global message offering a SECOND port. The frame took the first
       // one and removed its global listener, so nothing may ever answer on this.
       const secondChannelAnswered = await bridge.attemptSecondChannel(command, 1_500);

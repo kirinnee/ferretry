@@ -585,13 +585,13 @@ describe('FyRenderSandbox compiled diagram', () => {
        * parsing, the `done` latch or the ordering that sit in front of it.
        */
       const node = frameMock();
-      const compiled: { svg: string; theme: string }[] = [];
+      const compiled: { svg: string; theme: string; palette: string }[] = [];
       const failures: FyRenderSandboxFailure[] = [];
       const tree = render(
         <FyRenderSandbox
           block={mermaidBlock()}
           deadlines={{ hardMs: 60_000, readyMs: 60_000 }}
-          onCompiled={(svg, theme) => compiled.push({ svg, theme })}
+          onCompiled={(svg, theme, palette) => compiled.push({ palette, svg, theme })}
           onFailed={failure => failures.push(failure)}
           onRendered={() => {}}
           playing={false}
@@ -602,7 +602,7 @@ describe('FyRenderSandbox compiled diagram', () => {
 
       // Act — the shell's own reply, on the channel the parent transferred to it.
       const port = handshake(node);
-      run(() => port.postMessage({ kind: 'mermaid-svg', svg: MERMAID_SVG, theme: 'light' }));
+      run(() => port.postMessage({ kind: 'mermaid-svg', palette: 'light:0a1b2c3d', svg: MERMAID_SVG, theme: 'light' }));
       await settle(40);
 
       // Assert — exactly once, with the exact bytes and the theme the shell used.
@@ -612,9 +612,12 @@ describe('FyRenderSandbox compiled diagram', () => {
       should(compiled).have.length(1);
       should(compiled[0]?.svg).equal(MERMAID_SVG);
       should(compiled[0]?.theme).equal('light');
+      should(compiled[0]?.palette).equal('light:0a1b2c3d');
 
       // Act — a second reply on the same live port.
-      run(() => port.postMessage({ kind: 'mermaid-svg', svg: '<svg id="second"/>', theme: 'dark' }));
+      run(() =>
+        port.postMessage({ kind: 'mermaid-svg', palette: 'dark:0a1b2c3d', svg: '<svg id="second"/>', theme: 'dark' }),
+      );
       await settle(40);
 
       // Assert — DROPPED. One render per frame: Reload is a fresh frame, never a

@@ -1,7 +1,7 @@
 import type { SessionStatus } from '@ferretry/protocol';
-import { refusalSentence } from './inflight-describe.ts';
 import type { KnownProcess } from './harness-provenance.ts';
-import { verdictBlocksMigration, worstVerdict, type InflightVerdict } from './verdict.ts';
+import { refusalSentence } from './inflight-describe.ts';
+import { type InflightVerdict, verdictBlocksMigration, worstVerdict } from './verdict.ts';
 
 export interface OpenToolInfo {
   readonly toolUseId: string;
@@ -19,6 +19,10 @@ export interface ProcessInfo {
   /** Set when the process is the agent's own and is relaunched with the CLI. */
   readonly known?: KnownProcess;
   readonly verdict: InflightVerdict;
+  /** Its parent, so the Warden can tell a tool command from a helper by where it sits in the tree. */
+  readonly ppid?: number;
+  /** It holds a listening socket — a server. Absent where that could not be observed. */
+  readonly listening?: true;
 }
 
 /**
