@@ -424,6 +424,46 @@ describe('QuestionForm', () => {
     expect(form.root.findAllByType('pre')).toHaveLength(0);
   });
 
+  test('offers Resume but no Console when a paused refusal arrives on a host without one', async () => {
+    const form = await refusedWith(new FyHttpError(PAUSED_SENTENCE, 409, 'answer_paused', undefined));
+
+    expect(form.root.findAllByProps({ className: 'fy-question-resume' })).toHaveLength(1);
+    expect(form.root.findAllByProps({ className: 'fy-question-console' })).toHaveLength(0);
+    expect(form.root.findAllByProps({ 'data-question-held': '' })).toHaveLength(0);
+  });
+
+  test('sends a lone question’s Other text on Ctrl+Enter, and ignores a plain Enter', async () => {
+    const calls: unknown[][] = [];
+    const form = render(
+      <QuestionForm
+        api={{ answer: async (...args) => calls.push(args) as never }}
+        daemon={daemonA}
+        question={{ toolUseId: 'quick', questions: [{ question: 'What else?', options: [{ label: 'Known option' }] }] }}
+        sessionId="quick-session"
+      />,
+    );
+    run(() => form.root.findAllByType('input')[1]?.props.onChange());
+    run(() => form.root.findByType('textarea').props.onChange({ currentTarget: { value: 'my own words' } }));
+    const press = (key: string, ctrlKey: boolean) =>
+      run(() =>
+        form.root.findByType('textarea').props.onKeyDown({
+          key,
+          ctrlKey,
+          metaKey: false,
+          nativeEvent: { isComposing: false },
+          preventDefault: () => undefined,
+        }),
+      );
+    press('Enter', false);
+    expect(calls).toHaveLength(0);
+    await runUntil(
+      () => press('Enter', true),
+      () => calls.length === 1,
+      'the answer to reach the daemon',
+    );
+    expect(calls[0]?.[4]).toBe('my own words');
+  });
+
   test('makes Other exclusive, renders its text field, and submits its trimmed value', async () => {
     const calls: unknown[][] = [];
     const form = render(
