@@ -74,13 +74,13 @@ export function boardReplyMessage(item: ResolvedAttentionItem): string {
   const note = item.resolutionNote?.trim() ?? '';
   if (item.response !== undefined) {
     const words = responseWords(item.response);
-    return `[answer to ${named(item)}] ${words}${note === '' || note === words ? '' : `\n\nNote: ${note}`}`;
+    return `[answer to ${named(item)}] ${words}${note === '' || note === words ? '' : ` · note: ${note}`}`;
   }
   if (item.disposition === 'dismissed')
-    return `[dismissed ${named(item)}] ${note === '' ? 'The owner dismissed this without an answer.' : note}`;
+    return `[dismissed ${named(item)}] ${note === '' ? 'Not needed — the owner dismissed this without a reason.' : `Not needed: ${note}`}`;
   return note === ''
     ? `[done ${named(item)}] The owner marked this done.`
-    : `[answer to ${named(item)}] Done.\n\nNote: ${note}`;
+    : `[answer to ${named(item)}] Done · note: ${note}`;
 }
 
 /**

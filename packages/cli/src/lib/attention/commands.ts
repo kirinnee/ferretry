@@ -243,7 +243,8 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--no', 'answer a yes-or-no card with No')
       .option('--good', 'answer an answer-review ask: the answer is good')
       .option('--clarify <text>', 'answer an answer-review ask: ask for a clarification')
-      .option('--answer <text>', 'answer an open question'),
+      .option('--answer <text>', 'answer an open question')
+      .option('--other <text>', 'answer with your own words instead of the options (any ask that offers options)'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.resolve(id, merged<AttentionResolveOptions>(command));
   });

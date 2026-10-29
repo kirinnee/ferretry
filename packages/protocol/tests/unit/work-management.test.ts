@@ -1236,6 +1236,22 @@ describe('attention schemas', () => {
     for (const value of actions) should(attention.AttentionActionRequestSchema.safeParse(value).success).be.true();
   });
 
+  it('should accept an other answer on a resolved item whose ask offers options, and no other', () => {
+    // Arrange
+    const other = { kind: 'other', answer: 'neither, rewrite it' };
+    const withAsk = (ask: unknown) => ({ ...resolvedAttention, ask, response: other });
+
+    // Act / Assert
+    for (const ask of [
+      { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'B' }] },
+      { kind: 'permission' },
+      { kind: 'answer-review' },
+    ])
+      should(attention.ResolvedAttentionItemSchema.safeParse(withAsk(ask)).success).be.true();
+    for (const ask of [{ kind: 'open-question' }, { kind: 'task' }, undefined])
+      should(attention.ResolvedAttentionItemSchema.safeParse(withAsk(ask)).success).be.false();
+  });
+
   it('should reject ambiguous attention and resolution state', () => {
     // Arrange
     const multipleChoice = { kind: 'multiple-choice', options: [{ label: 'A' }, { label: 'B' }] };

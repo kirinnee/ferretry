@@ -235,7 +235,7 @@ describe('Attention board observers', () => {
       },
       {
         sessionId: SESSION,
-        message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
+        message: '[dismissed !A4 «Fourth?»] Not needed — the owner dismissed this without a reason.',
         id: 'A4',
       },
       {
@@ -245,7 +245,7 @@ describe('Attention board observers', () => {
       },
       {
         sessionId: SESSION,
-        message: '[dismissed !A4 «Fourth?»] The owner dismissed this without an answer.',
+        message: '[dismissed !A4 «Fourth?»] Not needed — the owner dismissed this without a reason.',
         id: 'A4',
       },
     ]);

@@ -25,6 +25,14 @@ describe('answer flags', () => {
     should(actual).deepEqual({ kind: 'multiple-choice', choice: 'ship it' });
   });
 
+  it('should read an answer in the owner’s own words, instead of the options', () => {
+    // Act + Assert
+    should(parseAnswer({ other: '  neither, rewrite it ' })).deepEqual({
+      kind: 'other',
+      answer: 'neither, rewrite it',
+    });
+  });
+
   it('should read an accepted review', () => {
     // Act
     const actual = parseAnswer({ good: true });
@@ -95,6 +103,12 @@ describe('conflicting answers', () => {
     should(() => parseAnswer({ clarify: '' })).throw(/--clarify needs the clarification text/u);
   });
 
+  it('should refuse a blank other answer, and one beside another answer', () => {
+    // Act + Assert
+    should(() => parseAnswer({ other: '  ' })).throw(/--other needs the answer text/u);
+    should(() => parseAnswer({ other: 'x', choice: 'a' })).throw(/exactly one answer/u);
+  });
+
   it('should refuse a blank answer', () => {
     // Act + Assert
     should(() => parseAnswer({ answer: '  ' })).throw(/--answer needs the answer text/u);
@@ -112,5 +126,6 @@ describe('describing a recorded answer', () => {
       'clarification requested: which?',
     );
     should(describeAnswer({ kind: 'open-question', answer: 'staging' })).equal('answered: staging');
+    should(describeAnswer({ kind: 'other', answer: 'neither' })).equal('answered with none of the options: neither');
   });
 });
