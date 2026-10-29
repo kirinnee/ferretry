@@ -10,6 +10,9 @@
  * - A WIDER SCREEN puts the selected item's CARD beside the list, the whole pane tall: its detail scrolls
  *   inside it, its answer bar stays pinned at the bottom, and a "Last messages from <ferret>" fold shows
  *   what the ferret said last. ↑/↓ (and j/k) move the selection; answering an item selects the next one.
+ * - WHERE A POINTER DRIVES IT (wide AND a fine pointer) swiping does not matter, so the item is drawn FLAT
+ *   — no card, no swipe arrows, a text column of about 720px — and the list is a slim column that folds
+ *   to a rail of icons and counts (the choice is kept on this device; ↑/↓ and j/k still walk the items).
  * - A PHONE gets the same list, and a tapped row opens its card full screen as the swipe deck — the
  *   items after it next in line, so each answer deals the next card.
  *
@@ -18,9 +21,21 @@
  */
 
 import { attentionCardAnswers, DISCUSS_LABEL } from '@ferretry/protocol';
-import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, MessagesSquare, Search, SkipForward, X } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  CheckCheck,
+  ChevronRight,
+  MessagesSquare,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Search,
+  SkipForward,
+  X,
+} from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
+import { useFinePointer } from '../../hooks/use-attention-flat.ts';
 import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
 import { canDiscussNow, kindWord } from '../../lib/attention-answers.ts';
 import {
@@ -56,6 +71,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { attentionAge, attentionKindMeta, attentionReference } from './attention-board.tsx';
 import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
+import { useAttentionListRail } from './attention-collapse.ts';
 import { AttentionRecentMessages } from './attention-recent-messages.tsx';
 import { ResolvedRow } from './attention-resolved.tsx';
 import { AttentionSwipeDeck } from './attention-swipe-deck.tsx';
@@ -94,11 +110,13 @@ interface CardHostProps {
   readonly readRecent?: ((card: InboxCard) => Promise<readonly RecentMessage[]>) | undefined;
   readonly onProgress?: ((card: InboxCard, step: number, done: boolean) => Promise<void>) | undefined;
   readonly recentOpen?: boolean | undefined;
+  /** The item is drawn flat, not as a card (a wide screen driven by a pointer). */
+  readonly flat?: boolean | undefined;
 }
 
 /** One card, answering into the undo window. */
 const renderInboxCard = (
-  { inbox, onNavigate, now, readRecent, onProgress, recentOpen }: CardHostProps,
+  { inbox, onNavigate, now, readRecent, onProgress, recentOpen, flat }: CardHostProps,
   card: InboxCard,
   act: (action: InboxAction) => void,
   swipeHints: boolean,
@@ -110,6 +128,7 @@ const renderInboxCard = (
       error={failureFor(inbox.deferredState.failed, card.key)}
       item={card.item}
       key={card.key}
+      {...(flat === true ? { flat: true } : {})}
       {...(onSkip === undefined ? {} : { onSkip })}
       onAct={act}
       origin={origin}
@@ -334,6 +353,8 @@ export interface AttentionInboxPageProps {
   readonly onProgress?: (card: InboxCard, step: number, done: boolean) => Promise<void>;
   /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
+  /** Whether the primary pointer is fine (mouse, trackpad); the browser's own answer otherwise. */
+  readonly finePointer?: boolean;
   /** Starts the selected card's "Last messages" fold open (a harness). */
   readonly recentOpen?: boolean;
   /** On a phone, the item whose card starts open (a harness); the list otherwise. */
@@ -472,6 +493,99 @@ function GroupedList({
 /** The collapse key of the In discussion group: never a conversation's `(daemonId, sessionId)` key. */
 const DISCUSSION_GROUP = 'in-discussion';
 
+/** The list's fold control: a slim column becomes a rail of icons, and back. */
+function ListRailToggle({ rail, onToggle }: { readonly rail: boolean; readonly onToggle: () => void }) {
+  const Icon = rail ? PanelLeftOpen : PanelLeftClose;
+  const label = rail ? 'Show the list' : 'Fold the list to icons';
+  return (
+    <button
+      aria-label={label}
+      aria-pressed={rail}
+      className="fy-attn-rail__toggle"
+      data-attention-rail-toggle=""
+      onClick={onToggle}
+      title={label}
+      type="button"
+    >
+      <Icon aria-hidden="true" size={16} />
+    </button>
+  );
+}
+
+/**
+ * The folded list: one button per conversation, drawn as its first item's kind icon and a count. The
+ * group's name is its `title`, so a hover names it; pressing it selects the group's first item. The
+ * discussion group is the same with a speech icon.
+ */
+function GroupRail({
+  groups,
+  talking,
+  selectedKey,
+  onSelect,
+  onSelectTalking,
+}: {
+  readonly groups: readonly InboxGroup[];
+  readonly talking: readonly InboxCard[];
+  readonly selectedKey: string | null;
+  readonly onSelect: (key: string) => void;
+  readonly onSelectTalking: (key: string) => void;
+}) {
+  const entries = [
+    ...groups.flatMap(group => {
+      const [first] = group.cards;
+      return first === undefined
+        ? []
+        : [
+            {
+              key: group.key,
+              name: group.ferret === null ? group.title : `${group.title} · ${group.ferret}`,
+              cards: group.cards,
+              Icon: attentionKindMeta(first.item).icon,
+              select: onSelect,
+            },
+          ];
+    }),
+    ...(talking.length === 0
+      ? []
+      : [
+          {
+            key: DISCUSSION_GROUP,
+            name: 'In discussion',
+            cards: talking,
+            Icon: MessagesSquare,
+            select: onSelectTalking,
+          },
+        ]),
+  ];
+  return (
+    <ul aria-label="Waiting on you" className="fy-attn-rail" data-attention-rail="">
+      {entries.map(entry => {
+        // Pressing a group walks its items: the first, then the next after the selected one, round again.
+        const at = entry.cards.findIndex(card => card.key === selectedKey);
+        const target = entry.cards[(at + 1) % entry.cards.length];
+        const holdsSelected = at >= 0;
+        return (
+          <li key={entry.key}>
+            <button
+              aria-current={holdsSelected || undefined}
+              aria-label={`${entry.name}, ${entry.cards.length} waiting`}
+              className="fy-attn-rail__group"
+              data-attention-rail-group={entry.key}
+              data-selected={holdsSelected || undefined}
+              onClick={() => target !== undefined && entry.select(target.key)}
+              title={entry.name}
+              type="button"
+            >
+              <entry.Icon aria-hidden="true" size={16} />
+              <span className="fy-attn-rail__count">{entry.cards.length}</span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
 /**
  * The items the owner asked to talk through, under one "In discussion" header below the list: they wait on
  * the ferret's reply, not on the owner, so they are out of the count and the swipe deck, but still one tap
@@ -603,8 +717,14 @@ export function AttentionInboxPage({
   reducedMotion,
   recentOpen,
   initialOpen,
+  finePointer,
 }: AttentionInboxPageProps) {
   const headingId = useId();
+  const pointerIsFine = useFinePointer();
+  // Flat is a wide screen a pointer drives; a phone, or a touch-first screen, keeps the swipe card.
+  const flat = !phone && (finePointer ?? pointerIsFine);
+  const [rail, toggleRail] = useAttentionListRail();
+  const railed = flat && rail;
   const [chosen, setChosen] = useState<string | null>(initialOpen ?? null);
   const [opened, setOpened] = useState<boolean>(initialOpen !== undefined);
   const [filter, setFilter] = useState<InboxFilter>('open');
@@ -623,9 +743,10 @@ export function AttentionInboxPage({
   const talkingOpen = !collapsed.has(DISCUSSION_GROUP);
   // The queue is what waits on the owner; a discussion is picked from its own group and never dealt next.
   const order = groups.flatMap(group => group.cards.map(card => card.key));
+  // A folded rail lists no rows, so the keys walk every item then; otherwise only the rows that are showing.
   const navigable = [
-    ...groups.flatMap(group => (collapsed.has(group.key) ? [] : group.cards.map(card => card.key))),
-    ...(talkingOpen ? talking.map(card => card.key) : []),
+    ...groups.flatMap(group => (!railed && collapsed.has(group.key) ? [] : group.cards.map(card => card.key))),
+    ...(railed || talkingOpen ? talking.map(card => card.key) : []),
   ];
 
   // The selection follows the reader's pick while it is listed, and the item after it once it leaves.
@@ -698,7 +819,15 @@ export function AttentionInboxPage({
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
   const empty = inbox.cards.length === 0 && inbox.discussing.length === 0;
   const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
-  const host: CardHostProps = { inbox, onNavigate, now, readRecent, onProgress, recentOpen };
+  const host: CardHostProps = {
+    inbox,
+    onNavigate,
+    now,
+    readRecent,
+    onProgress,
+    recentOpen,
+    flat,
+  };
   const atEnd = selectedKey === QUEUE_END;
   const skip = (): void => setChosen(skipSelection(order, selectedKey));
   const review = (): void => setChosen(order[0] ?? null);
@@ -751,29 +880,42 @@ export function AttentionInboxPage({
     <NothingMatches onClear={clearFilters} />
   ) : (
     <div className="fy-attn-inbox__body">
-      <div className="fy-attn-inbox__lists">
-        {groups.length === 0 ? null : (
-          <GroupedList
-            collapsed={collapsed}
+      <div className="fy-attn-inbox__lists" data-attention-lists={railed ? 'rail' : 'full'}>
+        {flat ? <ListRailToggle onToggle={toggleRail} rail={rail} /> : null}
+        {railed ? (
+          <GroupRail
             groups={groups}
-            now={now}
             onSelect={select}
-            onToggle={toggleGroup}
-            rowRefs={rowRefs}
-            selectedKey={phone ? null : selectedKey}
-            showMachine={machines.length > 1}
+            onSelectTalking={selectTalking}
+            selectedKey={selectedKey}
+            talking={talking}
           />
-        )}
-        {talking.length === 0 ? null : (
-          <DiscussionGroup
-            cards={talking}
-            now={now}
-            onSelect={selectTalking}
-            onToggle={() => toggleGroup(DISCUSSION_GROUP)}
-            open={talkingOpen}
-            rowRefs={rowRefs}
-            selectedKey={phone ? null : selectedKey}
-          />
+        ) : (
+          <>
+            {groups.length === 0 ? null : (
+              <GroupedList
+                collapsed={collapsed}
+                groups={groups}
+                now={now}
+                onSelect={select}
+                onToggle={toggleGroup}
+                rowRefs={rowRefs}
+                selectedKey={phone ? null : selectedKey}
+                showMachine={machines.length > 1}
+              />
+            )}
+            {talking.length === 0 ? null : (
+              <DiscussionGroup
+                cards={talking}
+                now={now}
+                onSelect={selectTalking}
+                onToggle={() => toggleGroup(DISCUSSION_GROUP)}
+                open={talkingOpen}
+                rowRefs={rowRefs}
+                selectedKey={phone ? null : selectedKey}
+              />
+            )}
+          </>
         )}
       </div>
       {phone ? null : atEnd ? (
@@ -840,7 +982,12 @@ export function AttentionInboxPage({
   }
 
   return (
-    <main aria-labelledby={headingId} className="fy-attn-inbox" data-attention-inbox={phone ? 'list' : 'panes'}>
+    <main
+      aria-labelledby={headingId}
+      className="fy-attn-inbox"
+      data-attention-flat={flat || undefined}
+      data-attention-inbox={phone ? 'list' : 'panes'}
+    >
       {header}
       {banner}
       <OrphanedFailures inbox={inbox} />

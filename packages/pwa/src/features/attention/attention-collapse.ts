@@ -172,3 +172,36 @@ export const useAttentionCollapse = (
   const collapsed = current.entry.collapsed && openIds.length > 0 && unseenIds(current.entry, openIds).length === 0;
   return { collapsed, collapse, expand };
 };
+
+/** Whether the Attention page's list is folded to its slim rail: a layout preference of this device, never daemon state. */
+const ATTENTION_LIST_RAIL_KEY = 'fy-attention-list-rail-v1';
+
+const readListRail = (storage: CollapseStorage | undefined): boolean => {
+  try {
+    return storage?.getItem(ATTENTION_LIST_RAIL_KEY) === '1';
+  } catch {
+    return false;
+  }
+};
+
+const writeListRail = (storage: CollapseStorage | undefined, rail: boolean): boolean => {
+  if (storage === undefined) return false;
+  try {
+    storage.setItem(ATTENTION_LIST_RAIL_KEY, rail ? '1' : '0');
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** The list-rail choice, kept on this device; it still holds for the tab when the browser refuses storage. */
+export const useAttentionListRail = (
+  storage: CollapseStorage | undefined = browserCollapseStorage(),
+): readonly [boolean, () => void] => {
+  const [rail, setRail] = useState(() => readListRail(storage));
+  const toggle = useCallback(() => {
+    setRail(!rail);
+    writeListRail(storage, !rail);
+  }, [rail, storage]);
+  return [rail, toggle];
+};
