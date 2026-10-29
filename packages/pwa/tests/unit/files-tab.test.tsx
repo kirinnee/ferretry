@@ -257,6 +257,58 @@ describe('the Files tab', () => {
     }
   });
 
+  it('reopens a file it already holds as the rendered view, in its one tab', async () => {
+    fixture.listings = { '': { entries: [{ name: 'a.ts', type: 'file' }] } };
+    fixture.files = { 'a.ts': { path: 'a.ts', content: 'const a = 1;' } };
+    const view = await open(<FilesTab daemon={daemon} scope={scope} />);
+    try {
+      await click(view.container, 'Open file a.ts');
+      await settle();
+      await click(view.container, 'Show raw bytes for a.ts');
+      await settle();
+      await click(view.container, 'Back to the file list');
+      await settle();
+
+      await click(view.container, 'Open file a.ts');
+      await settle();
+      expect(byLabel(view.container, 'Show raw bytes for a.ts').getAttribute('aria-pressed')).toBe('false');
+      expect(view.container.querySelectorAll('[aria-label="Close a.ts"]')).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('moves the highlight of a file it already holds when the same file is referenced again', async () => {
+    fixture.files = { 'src/a.ts': { path: 'src/a.ts', content: 'one\ntwo\nthree' } };
+    const view = await open(
+      <FilesTab
+        daemon={daemon}
+        scope={scope}
+        requestedReference={{ sequence: 1, reference: { path: 'src/a.ts', line: 2 } }}
+        onRequestedReferenceHandled={() => undefined}
+      />,
+    );
+    try {
+      const title = () => must(view.container.querySelector('.kt-fs-title-path'), 'the title').textContent;
+      expect(title()).toBe('@src/a.ts:2');
+      await view.render(
+        withSessionSearch(
+          <FilesTab
+            daemon={daemon}
+            scope={scope}
+            requestedReference={{ sequence: 2, reference: { path: 'src/a.ts', line: 3 } }}
+            onRequestedReferenceHandled={() => undefined}
+          />,
+        ),
+      );
+      await settle();
+      expect(title()).toBe('@src/a.ts:3');
+      expect(view.container.querySelectorAll('[aria-label="Close src/a.ts"]')).toHaveLength(1);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('ignores a reference whose path this viewer cannot address', async () => {
     fixture.listings = { '': { entries: [] } };
     const view = await open(
