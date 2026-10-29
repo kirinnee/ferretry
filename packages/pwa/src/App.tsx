@@ -1552,9 +1552,7 @@ function SessionRoute({
           // Only THIS daemon's slice, and only once it has actually been read:
           // `sessions === null` is "not read yet", which must not reach the
           // reference surface as a fleet with nobody in it.
-          {...(fleetSlice?.sessions === null || fleetSlice?.sessions === undefined
-            ? {}
-            : { daemonSessions: fleetSlice.sessions })}
+          daemonSessions={fleetSlice?.sessions ?? undefined}
           entries={placedEntries}
           onRetry={retrySend}
           onCancel={cancelSend}
@@ -1674,10 +1672,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
     },
     [store.clients],
   );
-  const readWardenStatus = useCallback(
-    async (daemon: DaemonConnection) => await (await store.clients.client(daemon)).wardenStatus(),
-    [store.clients],
-  );
   const createDaemonClient = useCallback(
     async (daemon: DaemonConnection) => await store.clients.client(daemon),
     [store.clients],
@@ -1734,7 +1728,6 @@ function SettingsRoute({ connection }: DaemonPageProps) {
       controls={store.controls}
       dictation={dictation}
       probeDaemon={probeDaemon}
-      readWardenStatus={readWardenStatus}
       // Through the app's client pool, so a grant read travels the same carrier — direct first, relay
       // as the automatic fallback — as every other daemon call. The surface's own default would dial
       // the daemon address directly, which is how a screen ends up reporting a limit it could not read
@@ -2488,11 +2481,7 @@ export function AppShell() {
       daemonId: record.daemonId,
       name: distinctDaemonName(record, connectionSnapshot.connections),
     }));
-    const machineRecord = connectionSnapshot.connections.find(candidate => candidate.daemonId === connection.daemonId);
-    const machineName =
-      machineRecord === undefined
-        ? daemonDisplayName(connection)
-        : distinctDaemonName(machineRecord, connectionSnapshot.connections);
+    const machineName = distinctDaemonName(connection, connectionSnapshot.connections);
     const sessionsBar = (presentation: SessionsBarPresentation, onClose?: () => void) => (
       <ShellSessionsBar
         connection={connection}
