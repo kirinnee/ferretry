@@ -1,3 +1,10 @@
+## [4.97.0](https://github.com/kirinnee/ferretry/compare/v4.96.1...v4.97.0) (2026-10-29)
+
+### Features
+
+* **pwa:** add an in-app What's new page ([#832](https://github.com/kirinnee/ferretry/issues/832)) ([e06da76](https://github.com/kirinnee/ferretry/commit/e06da7665219ab5eec95eb10a5dba0bc3aa58d7a))
+* **pwa:** capitalise What's new lines and hide test, ci and build entries ([#839](https://github.com/kirinnee/ferretry/issues/839)) ([1367606](https://github.com/kirinnee/ferretry/commit/1367606a0cd660ae75ebff771650d7eb44e1e0dc))
+
 ## [4.96.1](https://github.com/kirinnee/ferretry/compare/v4.96.0...v4.96.1) (2026-10-29)
 
 ### Fixes
