@@ -86,4 +86,12 @@ describe('the resolved records', () => {
     expect(entry).toMatchObject({ kind: 'form', id: ATTENTION_RESOLVED_ACTION_ID, label: '1 resolved' });
     expect(resolvedActionContribution([], 'attn', null).build(undefined)).toBeNull();
   });
+
+  test('the menu entry renders the list for its conversation, ringing the linked item', async () => {
+    const entry = resolvedActionContribution([record('A1', '2026-07-31T10:00:00.000Z')], 'attn', 'A1').build(undefined);
+    if (entry?.kind !== 'form') throw new Error('expected the resolved entry to be a form');
+    view = await mount(<>{entry.render({ close: () => {} } as Parameters<typeof entry.render>[0])}</>);
+    const row = must(must(view.container, 'view').querySelector('[data-attention-record="A1"]'), 'the A1 row');
+    expect(row.getAttribute('data-highlighted')).toBe('true');
+  });
 });
