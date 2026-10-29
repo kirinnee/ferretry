@@ -1,3 +1,9 @@
+## [4.106.0](https://github.com/kirinnee/ferretry/compare/v4.105.5...v4.106.0) (2026-10-29)
+
+### Features
+
+* **daemon:** tell the owner as one Warden notification per subject ([#890](https://github.com/kirinnee/ferretry/issues/890)) ([d9ff772](https://github.com/kirinnee/ferretry/commit/d9ff7721da05fed1e1fb0c36cc3990cf45416702))
+
 ## [4.105.5](https://github.com/kirinnee/ferretry/compare/v4.105.4...v4.105.5) (2026-10-29)
 
 ### Fixes
