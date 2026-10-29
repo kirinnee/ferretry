@@ -1,3 +1,9 @@
+## [4.105.1](https://github.com/kirinnee/ferretry/compare/v4.105.0...v4.105.1) (2026-10-29)
+
+### Fixes
+
+* **attention:** deliver card answers on receipt, and give Discuss its own state ([#880](https://github.com/kirinnee/ferretry/issues/880)) ([9ba2770](https://github.com/kirinnee/ferretry/commit/9ba2770dbb9442496c49f6e5a767eae79502c0de))
+
 ## [4.105.0](https://github.com/kirinnee/ferretry/compare/v4.104.0...v4.105.0) (2026-10-29)
 
 ### Features
