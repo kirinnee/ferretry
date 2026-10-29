@@ -28,6 +28,7 @@ const BACKSLASH = 0x5c;
 const PLACEHOLDER_PREFIX = '\u0000fy-bytes:';
 const PLACEHOLDER_JSON_PREFIX = new TextEncoder().encode('\\u0000fy-bytes:');
 const encoder = new TextEncoder();
+const decoder = new TextDecoder();
 
 function isBase64Byte(byte: number): boolean {
   return (
@@ -47,50 +48,126 @@ function isPureBase64(bytes: Uint8Array, from: number, to: number): boolean {
   return true;
 }
 
-/** The byte ranges, within `record`, of every string literal's contents that should be referenced. */
-function largeLiterals(record: Uint8Array): readonly (readonly [number, number])[] {
-  const found: [number, number][] = [];
-  // Outside a string, a quote can only open one, so the record is read literal by literal. The native
-  // `indexOf` does the scanning, through two cursors that only move forward — the next quote and the
-  // next backslash — so a record full of escapes is still read once, and only a long enough literal is
-  // looked at byte by byte.
-  let quote = record.indexOf(QUOTE);
-  let backslash = record.indexOf(BACKSLASH);
-  const after = (cursor: number, byte: number, position: number): number =>
-    cursor >= 0 && cursor < position ? record.indexOf(byte, position) : cursor;
-  while (quote >= 0) {
-    const from = quote + 1;
-    let position = from;
-    let escaped = false;
-    quote = after(quote, QUOTE, position);
-    backslash = after(backslash, BACKSLASH, position);
-    while (quote >= 0 && backslash >= 0 && backslash < quote) {
-      escaped = true;
-      position = backslash + 2;
-      quote = after(quote, QUOTE, position);
-      backslash = after(backslash, BACKSLASH, position);
-    }
-    if (quote < 0) break;
-    if (!escaped && quote - from >= LARGE_STRING_BYTES && isPureBase64(record, from, quote)) found.push([from, quote]);
-    quote = after(quote, QUOTE, quote + 1);
-  }
-  return found;
+/** One cut: a base64 literal's contents become a placeholder, or an ignored value becomes `null`. */
+interface Cut {
+  readonly start: number;
+  readonly end: number;
+  readonly kind: 'reference' | 'null';
+}
+
+const OPEN_BRACE = 0x7b;
+const CLOSE_BRACE = 0x7d;
+const OPEN_BRACKET = 0x5b;
+const CLOSE_BRACKET = 0x5d;
+const COLON = 0x3a;
+const COMMA = 0x2c;
+const NULL_JSON = encoder.encode('null');
+
+function isWhitespace(byte: number): boolean {
+  return byte === 0x20 || byte === 0x0a || byte === 0x0d || byte === 0x09;
 }
 
 /**
- * `record` with each large base64 literal replaced by a placeholder for its bytes in the file, or
- * `record` itself when it has none. `recordByteOffset` is where the record starts in the transcript.
+ * Every cut `record` needs, in one pass.
+ *
+ * Outside a string, a quote can only open one, so the record is read literal by literal. The native
+ * `indexOf` finds each literal, through two cursors that only move forward — the next quote and the
+ * next backslash — so a record full of escapes is still read once. The bytes BETWEEN literals are
+ * walked one by one; they are brackets, commas and numbers, which is how the nesting depth is known.
+ *
+ * A top-level key in `ignored` whose value is an object or an array has that value cut to `null`: the
+ * parser declared it never reads it, so the tens of thousands of strings it may hold are never built.
  */
-export function referenceLargeStrings(record: Uint8Array, recordByteOffset: number): Uint8Array {
+function cutsOf(record: Uint8Array, ignored: ReadonlySet<string>): readonly Cut[] {
+  const cuts: Cut[] = [];
+  let depth = 0;
+  /** The last literal read, and the depth it was read at: a key, if a colon follows. */
+  let lastLiteral: { readonly from: number; readonly to: number; readonly depth: number } | undefined;
+  /** True between an ignored key's colon and its value's first byte. */
+  let ignoreNext = false;
+  /** Where the ignored value being skipped began, and the depth it closes back to. */
+  let skipping: { readonly from: number; readonly depth: number } | undefined;
+  const structure = (from: number, to: number): void => {
+    for (let index = from; index < to; index += 1) {
+      const byte = record[index] as number;
+      if (isWhitespace(byte) || byte === COMMA) continue;
+      if (byte === COLON) {
+        ignoreNext =
+          skipping === undefined &&
+          lastLiteral?.depth === 1 &&
+          ignored.has(decoder.decode(record.subarray(lastLiteral.from, lastLiteral.to)));
+        continue;
+      }
+      if (byte === OPEN_BRACE || byte === OPEN_BRACKET) {
+        if (ignoreNext) skipping = { from: index, depth };
+        depth += 1;
+      } else if (byte === CLOSE_BRACE || byte === CLOSE_BRACKET) {
+        depth -= 1;
+        if (skipping !== undefined && depth === skipping.depth) {
+          cuts.push({ start: skipping.from, end: index + 1, kind: 'null' });
+          skipping = undefined;
+        }
+      }
+      ignoreNext = false;
+      lastLiteral = undefined;
+    }
+  };
+  let position = 0;
+  let quote = record.indexOf(QUOTE);
+  let backslash = record.indexOf(BACKSLASH);
+  const after = (cursor: number, byte: number, from: number): number =>
+    cursor >= 0 && cursor < from ? record.indexOf(byte, from) : cursor;
+  while (quote >= 0) {
+    structure(position, quote);
+    const from = quote + 1;
+    let scan = from;
+    let escaped = false;
+    quote = after(quote, QUOTE, scan);
+    backslash = after(backslash, BACKSLASH, scan);
+    while (quote >= 0 && backslash >= 0 && backslash < quote) {
+      escaped = true;
+      scan = backslash + 2;
+      quote = after(quote, QUOTE, scan);
+      backslash = after(backslash, BACKSLASH, scan);
+    }
+    // A literal that never closes: the record is cut off, and parsing it will say so.
+    if (quote < 0) return cuts.filter(cut => cut.kind === 'reference');
+    ignoreNext = false;
+    lastLiteral = { from, to: quote, depth };
+    if (skipping === undefined && !escaped && quote - from >= LARGE_STRING_BYTES && isPureBase64(record, from, quote)) {
+      cuts.push({ start: from, end: quote, kind: 'reference' });
+    }
+    position = quote + 1;
+    quote = after(quote, QUOTE, position);
+  }
+  structure(position, record.byteLength);
+  // An ignored value still open at the end is a record cut off: nothing of it is cut.
+  return cuts;
+}
+
+/**
+ * `record` lightened: each large base64 literal replaced by a placeholder for its bytes in the file, and
+ * each top-level value under a key in `ignoredKeys` replaced by `null` — or `record` itself when
+ * nothing applies. `recordByteOffset` is where the record starts in the transcript.
+ */
+export function referenceLargeStrings(
+  record: Uint8Array,
+  recordByteOffset: number,
+  ignoredKeys: readonly string[] = [],
+): Uint8Array {
   if (record.byteLength < LARGE_RECORD_BYTES) return record;
-  const literals = largeLiterals(record);
-  if (literals.length === 0) return record;
+  const cuts = cutsOf(record, new Set(ignoredKeys));
+  if (cuts.length === 0) return record;
   const pieces: Uint8Array[] = [];
   let from = 0;
-  for (const [start, end] of literals) {
-    pieces.push(record.subarray(from, start), PLACEHOLDER_JSON_PREFIX);
-    pieces.push(encoder.encode(`${String(recordByteOffset + start)}:${String(end - start)}`));
-    from = end;
+  for (const cut of cuts) {
+    pieces.push(record.subarray(from, cut.start));
+    if (cut.kind === 'null') pieces.push(NULL_JSON);
+    else {
+      pieces.push(PLACEHOLDER_JSON_PREFIX);
+      pieces.push(encoder.encode(`${String(recordByteOffset + cut.start)}:${String(cut.end - cut.start)}`));
+    }
+    from = cut.end;
   }
   pieces.push(record.subarray(from));
   const skeleton = new Uint8Array(pieces.reduce((total, piece) => total + piece.byteLength, 0));

@@ -186,6 +186,11 @@ function claudeUsage(
 /** Pure Claude Code JSONL parser implementing the shared transcript contract. */
 export class ClaudeTranscriptParser implements TranscriptParser {
   readonly harness = 'claude' as const;
+  /**
+   * Claude Code's own copy of what a tool returned (a file's whole text, an edit's structured patch of
+   * tens of thousands of lines). Every event is made from `message`, which carries the same result.
+   */
+  readonly ignoredRecordKeys = ['toolUseResult'] as const;
 
   parse(
     input: TranscriptParseInput,

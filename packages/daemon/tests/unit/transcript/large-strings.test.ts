@@ -182,3 +182,79 @@ describe('a Claude transcript with a pasted screenshot', () => {
     should(parsed.rawRecords?.[1]?.bytes).deepEqual(line);
   });
 });
+
+describe('referenceLargeStrings with ignored keys', () => {
+  const LINES = Array.from({ length: 4_000 }, (_, line) => `+  const value${String(line)} = compute(${String(line)});`);
+  const cut = (value: unknown, keys: readonly string[] = ['toolUseResult']): unknown =>
+    JSON.parse(decoder.decode(referenceLargeStrings(bytesOf(value), 0, keys)));
+
+  it.each([
+    ['an object', { structuredPatch: [{ oldStart: 1, lines: LINES }] }],
+    ['an array', LINES],
+  ])('should cut a top-level ignored key whose value is %s to null', (_name, toolUseResult) => {
+    // Act
+    const actual = cut({ type: 'user', message: { content: 'kept' }, toolUseResult, after: [1, 2] });
+
+    // Assert
+    should(actual).deepEqual({ type: 'user', message: { content: 'kept' }, toolUseResult: null, after: [1, 2] });
+  });
+
+  it('should leave a scalar value, the same key nested deeper, and keys it was not given', () => {
+    // Arrange
+    const value = {
+      toolUseResult: 'text',
+      nested: { toolUseResult: { lines: LINES } },
+      other: { lines: LINES },
+      count: 3,
+    };
+
+    // Act
+    const actual = cut(value);
+
+    // Assert
+    should(actual).deepEqual(value);
+  });
+
+  it('should not reference base64 inside an ignored value, and still reference it elsewhere', () => {
+    // Act
+    const actual = cut({ toolUseResult: { image: PAYLOAD }, data: PAYLOAD }) as Record<string, unknown>;
+
+    // Assert
+    should(actual.toolUseResult).be.null();
+    should(placeholderRef(actual.data)?.byteLength).equal(PAYLOAD.length);
+  });
+
+  it('should cut nothing of an ignored value a record ends inside', () => {
+    // Arrange — cut off by a crash before the value closes.
+    const record = encoder.encode(`{"toolUseResult":{"lines":${JSON.stringify(LINES)}`);
+
+    // Act
+    const actual = referenceLargeStrings(record, 0, ['toolUseResult']);
+
+    // Assert
+    should(actual).equal(record);
+  });
+
+  it('should give a Claude record the events it gives without the ignored value', () => {
+    // Arrange
+    const record = {
+      type: 'user',
+      uuid: 'p-1',
+      timestamp: '2026-10-29T06:09:00.000Z',
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'edit-1', content: 'Updated.' }] },
+    };
+    const parse = (value: unknown) =>
+      new ClaudeTranscriptParser().parse({ bytes: encoder.encode(`${JSON.stringify(value)}\n`), source: 'c.jsonl' })
+        .events;
+
+    // Act
+    const heavy = parse({ ...record, toolUseResult: { structuredPatch: [{ lines: LINES }] } });
+    const light = parse({ ...record, toolUseResult: null });
+
+    // Assert — only the record's own length differs: it is the record's true size in the file.
+    const sized = (events: typeof heavy) => events.map(({ byteLength: _length, ...event }) => event);
+    should(sized(heavy)).deepEqual(sized(light));
+    should(heavy[0]?.byteLength).be.above(light[0]?.byteLength ?? 0);
+    should(heavy.length).be.above(0);
+  });
+});
