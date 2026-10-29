@@ -227,6 +227,12 @@ function InboxLine({
       >
         {line.text} ›
       </RouteLink>
+      {line.stale && (
+        // The last good count, never an all-clear: the owner may have been told about more since.
+        <span role="status" className="ml-sm text-warn">
+          Couldn’t refresh; this is the last count.
+        </span>
+      )}
     </p>
   );
 }
