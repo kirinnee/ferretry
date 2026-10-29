@@ -1,0 +1,7 @@
+⏺ Done reading the cache layer; two snapshot tests still need refreshing.
+
+✻ Compacting conversation… (12s · esc to interrupt · ctrl+t to show todos)
+
+────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────

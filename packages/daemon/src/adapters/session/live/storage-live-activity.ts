@@ -8,7 +8,8 @@ import {
   liveActivitySample,
   type PaneState,
   paneLiveReading,
-  paneShowsCompaction,
+  type PaneCompaction,
+  paneCompaction,
   expectedCompaction,
   resolveCompaction,
   type SessionId,
@@ -60,7 +61,7 @@ export class StorageLiveActivitySource implements LiveActivitySource {
   private readonly trackers = new Map<SessionId, CompactionTracker>();
   private readonly idlePaneReads = new Map<
     SessionId,
-    { readonly at: number; readonly compacting: boolean | undefined }
+    { readonly at: number; readonly compaction: PaneCompaction | false | undefined }
   >();
 
   constructor(
@@ -115,7 +116,7 @@ export class StorageLiveActivitySource implements LiveActivitySource {
     const pane = await this.reads.paneState(id).catch(() => undefined);
     this.idlePaneReads.set(id, {
       at: nowMs,
-      compacting: pane === undefined ? undefined : paneShowsCompaction(pane.visible),
+      compaction: pane === undefined ? undefined : (paneCompaction(pane.visible) ?? false),
     });
     return pane;
   }
@@ -131,14 +132,22 @@ export class StorageLiveActivitySource implements LiveActivitySource {
     const harness = events[0]?.harness ?? 'claude';
     const tracker = this.trackers.get(id);
     // A skipped idle read repeats what the last read said, so a quiet session neither forgets nor invents one.
-    const paneCompacting =
+    const reading =
       pane === undefined
         ? tracker === undefined
           ? undefined
-          : this.idlePaneReads.get(id)?.compacting
-        : paneShowsCompaction(pane.visible);
+          : this.idlePaneReads.get(id)?.compaction
+        : (paneCompaction(pane.visible) ?? false);
+    const paneCompacting = reading === undefined ? undefined : reading !== false;
     const estimate = expectedCompaction(harness, (await this.history?.durations(harness, model).catch(() => [])) ?? []);
-    const verdict = resolveCompaction({ nowMs, paneCompacting, events, tracker, estimate });
+    const verdict = resolveCompaction({
+      nowMs,
+      paneCompacting,
+      ...(reading === undefined || reading === false ? {} : { progress: reading }),
+      events,
+      tracker,
+      estimate,
+    });
     if (verdict.tracker === undefined) this.trackers.delete(id);
     else this.trackers.set(id, verdict.tracker);
     if (verdict.finished !== undefined) {

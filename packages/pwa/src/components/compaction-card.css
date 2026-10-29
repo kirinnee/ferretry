@@ -1,6 +1,6 @@
 /* ═══ THE COMPACTION CARD AND ITS DIVIDER (components/compaction-card.tsx) ═════════════════════════
-   Every colour, stroke, corner and shadow is a theme role (the card roles in `themes.css`), so each family restyles it. The bar is an ESTIMATE of progress, and
-   nothing here draws it as a measurement: the figure is `~N%`, the note says where it comes from.
+   Every colour, stroke, corner and shadow is a theme role (the card roles in `themes.css`), so each family restyles it. The bar and figure exist only when the harness
+   reported a percentage; without one the card shows a spinner and the usual duration, never a made-up figure.
    Reduced motion is the global still in index.css (`transition` is zeroed there), so the fill simply
    jumps a second at a time instead of gliding. */
 
@@ -44,12 +44,9 @@
   height: 100%;
   transition: width 1s linear;
 }
-.fy-compaction-card[data-overdue] .fy-compaction-card__fill {
-  background-image: repeating-linear-gradient(
-    135deg,
-    transparent 0 6px,
-    color-mix(in srgb, var(--accent-fg) 35%, transparent) 6px 12px
-  );
+.fy-compaction-card__spinner {
+  flex: none;
+  align-self: center;
 }
 .fy-compaction-card__meta,
 .fy-compaction-card__note {

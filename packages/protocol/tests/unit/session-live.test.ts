@@ -129,7 +129,6 @@ describe('the compaction readout', () => {
     tokensBefore: 150_000,
     tokensAfter: 9_000,
   } satisfies live.SessionCompactionDone;
-  const startMs = Date.parse(running.startedAt);
 
   it('should round-trip both phases through the one discriminated schema', () => {
     should(live.SessionCompactionSchema.parse(running)).deepEqual(running);
@@ -145,7 +144,11 @@ describe('the compaction readout', () => {
 
   it('should refuse an unknown phase, an unknown field, a non-positive estimate and an unknown basis', () => {
     should(live.SessionCompactionSchema.safeParse({ ...running, phase: 'queued' }).success).be.false();
-    should(live.SessionCompactionSchema.safeParse({ ...running, percent: 40 }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...running, percent: 101 }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...running, percent: -1 }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...running, percent: 4.5 }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...running, tokensWritten: -1 }).success).be.false();
+    should(live.SessionCompactionSchema.safeParse({ ...done, percent: 40 }).success).be.false();
     should(live.SessionCompactionSchema.safeParse({ ...running, expectedMs: 0 }).success).be.false();
     should(live.SessionCompactionSchema.safeParse({ ...running, basis: 'guess' }).success).be.false();
     should(live.SessionCompactionSchema.safeParse({ ...done, tokensAfter: -1 }).success).be.false();
@@ -155,13 +158,18 @@ describe('the compaction readout', () => {
     should(live.SessionLiveActivitySchema.parse({ ...sample, compaction: running }).compaction).deepEqual(running);
   });
 
-  it('should estimate linearly in elapsed time, never above the cap, never below zero', () => {
-    should(live.compactionPercent(running, startMs)).equal(0);
-    should(live.compactionPercent(running, startMs + 24_000)).equal(40);
-    should(live.compactionPercent(running, startMs + 59_000)).equal(live.COMPACTION_PERCENT_CAP);
-    should(live.compactionPercent(running, startMs + 600_000)).equal(95);
-    should(live.compactionPercent(running, startMs - 5_000)).equal(0);
-    should(live.compactionPercent({ ...running, startedAt: 'not a time' }, startMs)).equal(0);
+  it('should carry the percent and tokens written the harness reported, both optional', () => {
+    const reported = { ...running, percent: 49, tokensWritten: 37_400 };
+
+    should(live.SessionCompactionSchema.parse(reported)).deepEqual(reported);
+    should(live.SessionCompactionSchema.parse({ ...running, percent: 0 })).containDeep({ percent: 0 });
+    should(live.SessionCompactionSchema.parse({ ...running, percent: 100 })).containDeep({ percent: 100 });
+    should(live.SessionCompactionSchema.parse(running)).not.have.property('percent');
+  });
+
+  it('should have no estimator: a percentage is only ever the harness’s own', () => {
+    should(live).not.have.property('compactionPercent');
+    should(live).not.have.property('COMPACTION_PERCENT_CAP');
   });
 
   it('should state what a compaction freed only when both ends are known and the context shrank', () => {
