@@ -331,6 +331,7 @@ export type AttentionBrief = {
 export const attentionBriefOf = (value: AttentionBrief): AttentionBrief => ({
   ...(value.premise === undefined ? {} : { premise: value.premise }),
   ...(value.decided === undefined ? {} : { decided: value.decided }),
+  ...(value.stillOpen === undefined ? {} : { stillOpen: value.stillOpen }),
   ...(value.terms === undefined ? {} : { terms: value.terms }),
   ...(value.questions === undefined ? {} : { questions: value.questions }),
   ...(value.recommendation === undefined ? {} : { recommendation: value.recommendation }),

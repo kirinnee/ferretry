@@ -25,6 +25,7 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --premise      the SITUATION: what is going on, so a cold reader starts here; repeat for one bullet each
   --context      WHY IT MATTERS NOW and the supporting facts (not the situation); repeat for bullets
   --decided      earlier answers that bear on this item, one bullet each (repeat)
+  --still-open   what is still open to decide, one bullet each (repeat); update it as the talk goes on
   --term         TERM=meaning for every codename or term of art you use (repeat)
   --question     each thing they must answer (repeat); --option gives a lone question its choices
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
@@ -130,6 +131,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
         [],
       )
       .option('--decided <point>', 'an earlier answer that bears on this; repeat for bullet points', collect, [])
+      .option('--still-open <point>', 'what is still open to decide; repeat for bullet points', collect, [])
       .option('-w, --why <reason>', 'why this needs the human now (defaults to the ask)')
       .option('-r, --resolve <how>', 'the concrete action that clears it')
       .option('--term <TERM=meaning>', 'spell out one piece of jargon; repeat', collect, [])
@@ -158,6 +160,7 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--premise <point>', 'replace the premise (the situation); repeat for bullet points', collect, [])
       .option('-c, --context <point>', 'replace the context; repeat for bullet points', collect, [])
       .option('--decided <point>', 'replace the earlier answers; repeat for bullet points', collect, [])
+      .option('--still-open <point>', 'replace what is still open; repeat for bullet points', collect, [])
       .option('--term <TERM=meaning>', 'replace the terms with these; repeat', collect, [])
       .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
       .option('--recommend <decision>', 'replace the recommendation')

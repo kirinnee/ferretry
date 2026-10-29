@@ -6,7 +6,7 @@ import type {
   AttentionItem,
   AttentionResponse,
 } from '@ferretry/protocol';
-import { MAX_ATTENTION_PER_SESSION } from '@ferretry/protocol';
+import { MAX_ATTENTION_PER_SESSION, MAX_ATTENTION_REVISIONS } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -275,6 +275,44 @@ describe('Attention state machine', () => {
     should(refreshed.snapshot.items[0]?.terms).be.undefined();
     should(refreshed.snapshot.items[0]?.questions).be.undefined();
     should(refreshed.snapshot.items[0]?.links).be.undefined();
+  });
+
+  it('should restate the premise, what is decided and what is still open on a stable-source refresh, clearing the ones left out', () => {
+    // Arrange
+    const first = raised(DAEMON, {
+      source: 'task',
+      sourceRef: 'F12',
+      ask: undefined,
+      premise: 'The warden saw a stall',
+      decided: 'Wait ten minutes',
+      stillOpen: 'Restart the ferret?',
+    });
+
+    // Act
+    const restated = succeeded(
+      applyAttentionCommand(
+        first.ledger,
+        raiseCommand(
+          DAEMON,
+          {
+            source: 'task',
+            sourceRef: 'F12',
+            ask: undefined,
+            premise: 'The stall is over an hour old',
+            stillOpen: 'Kill it?',
+          },
+          SECOND,
+        ),
+      ),
+    );
+
+    // Assert
+    should(first.item).containDeep({ waitingSince: FIRST });
+    should(first.item?.waitingOn).be.undefined();
+    should(restated.change).equal('refreshed');
+    should(restated.item?.premise).equal('The stall is over an hour old');
+    should(restated.item?.stillOpen).equal('Kill it?');
+    should(restated.item?.decided).be.undefined();
   });
 
   it('should ignore identical and stale stable-source generations', () => {
@@ -1242,7 +1280,7 @@ describe('Attention state machine discuss', () => {
     should(unraised.error.code).equal('invalid');
   });
 
-  it('should end the discussion when the ferret edits the item, and drop the mark when it is closed', () => {
+  it('should keep the discussion going when the ferret edits the item, end it only on surface, and drop the mark when closed', () => {
     // Arrange
     const asked = succeeded(discuss(raised().ledger));
 
@@ -1256,14 +1294,19 @@ describe('Attention state machine discuss', () => {
         at: THIRD,
       }),
     );
+    const surfaced = succeeded(
+      applyAttentionCommand(edited.ledger, { action: 'surface', actor: AGENT, id: 'A1', at: THIRD }),
+    );
     const closed = succeeded(
       applyAttentionCommand(asked.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', note: null, at: THIRD }),
     );
 
     // Assert
-    should(edited.change).equal('info-added');
-    should(edited.item?.waitingFor).be.undefined();
-    should(edited.item?.history?.map(entry => entry.kind)).deepEqual(['discuss', 'updated']);
+    should(edited.change).equal('refreshed');
+    should(edited.item).containDeep({ waitingOn: 'ferret', waitingFor: 'discussion' });
+    should(edited.item?.history?.map(entry => entry.kind)).deepEqual(['discuss']);
+    should(surfaced.change).equal('surfaced');
+    should(surfaced.item?.waitingFor).be.undefined();
     should(closed.ledger.entries[0]?.item.waitingFor).be.undefined();
   });
 });
@@ -1491,13 +1534,7 @@ describe('Attention state machine undelivered', () => {
       applyAttentionCommand(raised().ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND }),
     );
     const updated = succeeded(
-      applyAttentionCommand(discussing.ledger, {
-        action: 'edit',
-        actor: AGENT,
-        id: 'A1',
-        patch: { subject: 'Approve the deployment of v2?' },
-        at: THIRD,
-      }),
+      applyAttentionCommand(discussing.ledger, { action: 'surface', actor: AGENT, id: 'A1', at: THIRD }),
     );
 
     // Act + Assert
@@ -1686,7 +1723,7 @@ describe('Attention state machine: an ask starts in discussion', () => {
     should(reworded.item).containDeep({ waitingOn: 'ferret', waitingFor: 'discussion' });
   });
 
-  it('should let the owner talk a surfaced ask through again, which a ferret’s edit then answers', () => {
+  it('should let the owner talk a surfaced ask through again, which a ferret’s edit leaves in discussion until it surfaces it', () => {
     // Arrange
     const surfaced = succeeded(surface(born().ledger));
     const discussing = succeeded(
@@ -1703,10 +1740,141 @@ describe('Attention state machine: an ask starts in discussion', () => {
         at: '2026-07-30T13:00:00Z',
       }),
     );
+    const surfacedAgain = succeeded(
+      applyAttentionCommand(answered.ledger, { action: 'surface', actor: AGENT, id: 'A1', at: '2026-07-30T14:00:00Z' }),
+    );
 
     // Assert
     should(discussing.item).containDeep({ waitingFor: 'discussion', infoRequests: 1 });
-    should(answered.change).equal('info-added');
-    should(answered.item?.waitingOn).be.undefined();
+    should(answered.change).equal('refreshed');
+    should(answered.item).containDeep({ waitingOn: 'ferret', waitingFor: 'discussion' });
+    should(surfacedAgain.change).equal('surfaced');
+    should(surfacedAgain.item?.waitingOn).be.undefined();
+  });
+});
+
+describe('Attention state machine: a card is a living summary', () => {
+  const born = (overrides: Partial<RaiseAttentionRequest> = {}) => raised(AGENT, { surface: false, ...overrides });
+  const editing = (
+    ledger: AttentionLedger,
+    patch: Extract<AttentionCommand, { action: 'edit' }>['patch'],
+    at = SECOND,
+    actor: AttentionActor = AGENT,
+  ): AttentionMutation => applyAttentionCommand(ledger, { action: 'edit', actor, id: 'A1', patch, at });
+
+  it('should record one revision naming the fields that changed and what they said before', () => {
+    // Arrange
+    const created = born({ premise: 'We run two relays', decided: 'Use SQLite' });
+
+    // Act
+    const edited = succeeded(
+      editing(created.ledger, {
+        decided: 'Use SQLite\nKeep the relays',
+        stillOpen: 'Which region first?',
+        premise: 'We run two relays',
+      }),
+    );
+
+    // Assert
+    should(edited.item?.revisions).deepEqual([
+      {
+        at: SECOND,
+        by: 'agent',
+        changed: ['decided', 'stillOpen'],
+        previous: { decided: 'Use SQLite' },
+      },
+    ]);
+    should(edited.item?.stillOpen).equal('Which region first?');
+  });
+
+  it('should name the actor kind that edited, and keep the revisions oldest first', () => {
+    // Arrange
+    const created = born();
+    const first = succeeded(editing(created.ledger, { stillOpen: 'Which region?' }));
+
+    // Act
+    const second = succeeded(editing(first.ledger, { stillOpen: 'Which size?' }, THIRD, HUMAN));
+
+    // Assert
+    should(second.item?.revisions?.map(revision => revision.by)).deepEqual(['agent', 'human']);
+    should(second.item?.revisions?.[1]?.previous).deepEqual({ stillOpen: 'Which region?' });
+  });
+
+  it('should add no revision and change nothing when an edit says what the card already says', () => {
+    // Arrange
+    const created = born({ premise: 'We run two relays' });
+
+    // Act
+    const same = succeeded(editing(created.ledger, { premise: 'We run two relays' }));
+    const reworded = succeeded(editing(created.ledger, { context: 'Fresh context' }));
+    const again = succeeded(editing(reworded.ledger, { context: 'Fresh context' }, THIRD));
+
+    // Assert
+    should(same.changed).be.false();
+    should(reworded.item?.revisions).have.length(1);
+    should(again.changed).be.false();
+    should(again.ledger).deepEqual(reworded.ledger);
+  });
+
+  it('should keep only the newest revisions, oldest dropped', () => {
+    // Arrange
+    let ledger = born().ledger;
+
+    // Act
+    for (let index = 1; index <= MAX_ATTENTION_REVISIONS + 3; index += 1) {
+      ledger = succeeded(editing(ledger, { stillOpen: `Point ${index}` })).ledger;
+    }
+
+    // Assert
+    const revisions = activeEntry(ledger).item.revisions ?? [];
+    should(revisions).have.length(MAX_ATTENTION_REVISIONS);
+    should(revisions[0]?.previous).deepEqual({ stillOpen: 'Point 3' });
+    should(revisions.at(-1)?.previous).deepEqual({ stillOpen: `Point ${MAX_ATTENTION_REVISIONS + 2}` });
+  });
+
+  it('should not end the discussion, surface the item or change who it waits on when it is edited in discussion', () => {
+    // Arrange
+    const created = born();
+
+    // Act
+    const edited = succeeded(editing(created.ledger, { stillOpen: 'Which region?', decided: 'Use SQLite' }));
+
+    // Assert
+    should(edited.change).equal('refreshed');
+    should(edited.item).containDeep({ waitingOn: 'ferret', askedAt: FIRST, waitingFor: 'discussion' });
+    should(edited.item?.history).be.undefined();
+  });
+
+  it('should carry the still-open points onto a raised item and keep them in the same-request comparison', () => {
+    // Arrange
+    const created = born({ stillOpen: 'Which region?' });
+
+    // Act
+    const again = succeeded(
+      applyAttentionCommand(created.ledger, raiseCommand(AGENT, { surface: false, stillOpen: 'Which region?' })),
+    );
+    const different = succeeded(
+      applyAttentionCommand(created.ledger, raiseCommand(AGENT, { surface: false, stillOpen: 'Which size?' })),
+    );
+
+    // Assert
+    should(created.item?.stillOpen).equal('Which region?');
+    should(again.changed).be.false();
+    should(different.item?.id).not.equal('A1');
+  });
+
+  it('should still settle the wait of an item that waits on information when the ferret edits it', () => {
+    // Arrange
+    const asked = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const edited = succeeded(editing(asked.ledger, { stillOpen: 'Which branch?' }, THIRD));
+
+    // Assert
+    should(edited.change).equal('info-added');
+    should(edited.item?.waitingOn).be.undefined();
+    should(edited.item?.revisions).have.length(1);
   });
 });

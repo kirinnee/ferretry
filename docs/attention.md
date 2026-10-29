@@ -44,6 +44,25 @@ pushes on its own, once.
 (`fy attention done <id> "<what they said>"`) and surfaces what they did not (`fy attention surface <id>`). A chat
 reply never resolves an item in discussion on its own.
 
+**The card is a living summary.** Each time the ferret and the owner talk an ask through, the ferret rewrites the card
+so it says where things stand: `--decided` (what is settled so far), `--still-open` (what remains, in point form, like
+`decided`) and fresh `--option`s. `fy attention edit <id> --still-open "<point>"` (repeatable; also on `add`) does it,
+and `ls` prints it under `decided:`. The owner opens the card later and reads the conclusion, not the thread.
+
+- **Edits never notify an item in discussion.** An edit lands silently: no push, no change to what needs the owner,
+  and it does NOT end the discussion. Only `surface` (or a new ask) moves a card onto the queue. An edit of a
+  surfaced item behaves as it always did.
+- **Revisions.** Every edit that changes a revisable field (title, subject, context, premise, decided, stillOpen,
+  terms, questions, recommendation, impact, urgency, links, steps, body) appends ONE entry to `revisions`:
+  `{ at, by, changed, previous }` — `by` is the actor's kind (human, agent, daemon), `changed` the fields whose value
+  actually differs, `previous` their old values (a field absent from `previous` was absent before). An edit that
+  changes nothing adds none. The list is oldest first and keeps the last 10 (`MAX_ATTENTION_REVISIONS`); the app
+  can show what the card said before. A source refresh of a stable-sourceRef item (a Warden escalation, say)
+  restates premise, decided and still-open from the new request but records no revision: it is the daemon
+  restating a fact, not a conversation.
+- **The nudge-once safety net.** See "The turn-end check": a ferret that discussed an ask and left its card
+  alone is reminded once.
+
 ## The loop
 
 | Step            | Who                                                                                      | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -259,6 +278,7 @@ before the structure existed still reads.
 | Terms            | `terms[]` `{term, meaning}`                         | Every codename or term of art the item uses, spelled out. At most 12.                                                                                                           |
 | Questions        | `questions[]`                                       | One per decision: `question`, optional `options`, `recommended` and `why`. ≤ 6.                                                                                                 |
 | Already decided  | `decided`                                           | Earlier answers that bear on this item, in point form, so the owner need not remember them. Same shape as `premise`.                                                            |
+| Still open       | `stillOpen`                                         | What remains to be settled, in point form. Same shape as `decided`; read it with `decided` as the card's running summary.                                                       |
 | Recommendation   | `recommendation`                                    | The overall suggested decision `{decision, why?}`.                                                                                                                              |
 | Impact / urgency | `impact`, `urgency`                                 | What happens if nobody answers, and by when, in words.                                                                                                                          |
 | Links            | `links[]` `{label?, target}`                        | PRs, files and references (`#F12`, `@file`, a URL). At most 10.                                                                                                                 |
@@ -289,14 +309,14 @@ before the structure existed still reads.
   header. The history is one step away: the header's Actions menu has an "N resolved" entry (only when
   there is any), and the inbox has a Resolved filter that reads the boards of the 30 most recently active
   conversations.
-- **Raising one.** It can be raised from flags (`--premise`, `--context`, `--decided`, `--term "X=meaning"`, `--question`,
+- **Raising one.** It can be raised from flags (`--premise`, `--context`, `--decided`, `--still-open`, `--term "X=meaning"`, `--question`,
   `--option`, `--recommend`, `--recommend-why`, `--impact`, `--urgency`, `--link`) or from a JSON body
   (`--json-file <path>`, `-` for stdin), where a flag wins over the same field. `fy attention add --help`
   prints the JSON shape. Every length is checked before anything is sent, and a refusal names the field.
 
 ### The order a card reads in
 
-Premise, Context, the question, Already decided, Options, Recommendation and why, Terms, Steps, More
+Premise, Context, the question, Already decided, Still open, Options, Recommendation and why, Terms, Steps, More
 detail (the body). A section that an item does not carry is skipped; the order never changes.
 
 **Premise and context are different things.** The premise is the situation — "the work login expires
@@ -320,7 +340,7 @@ ferret the same rules, with a good and a bad example:
   file paths or unexplained capitals. A needed term goes in `terms` with its meaning.
 - **A title and an ask.** The title says what the item is about in a few plain words, under 40
   characters, with no ids. The ask is one plain sentence under 120 characters, answer first.
-- **Point form.** One idea per bullet. `premise`, `context`, `decided` and `impact` take a list (`--premise`, `-c`, `--decided` repeated, or a JSON array) and are stored as
+- **Point form.** One idea per bullet. `premise`, `context`, `decided`, `stillOpen` and `impact` take a list (`--premise`, `-c`, `--decided` and `--still-open` repeated, or a JSON array) and are stored as
   `- point` lines; the app draws them as a bullet list, collapsed as before.
 - **Instructions in the item.** When the owner must DO something, give every step with `--step "<markdown>"`
   (repeat, in order; or `steps` in the JSON body), or one `--body-file <path|->` document: exact commands,
@@ -343,10 +363,11 @@ opening this cold cannot tell what is going on" — but is never refused
 (`packages/daemon/src/lib/attention/writing-lint.ts`). The CLI itself refuses a raise with no title or
 with more than three options.
 
-**`fy attention edit <id>`** rewords an open item the ferret raised: summary, premise, context, decided, terms, the
+**`fy attention edit <id>`** rewords an open item the ferret raised: summary, premise, context, decided, still open, terms, the
 questions' words (same count and options, in order), title, recommendation, impact, urgency, links, steps and body. It
 never changes the ask, who raised it or the question options, and it does not push again — except an
-edit that answers an open Need more info request, which pushes once (see "The loop").
+edit that answers an open Need more info request, which pushes once (see "The loop"). An edit of an item in
+discussion never pushes and never surfaces it, and each edit that changes a field is recorded as a revision.
 
 ### How the app shows steps and to-dos
 
@@ -393,6 +414,12 @@ board rather than every reply, never learns there was something to do. So the da
 or, if an open item already covers it or it needs no owner, say why not in one line.`
    An interactive ferret is also offered its question tool. The nudge is journalled as
    `attention.nudged` with its asks.
+6. **A discussed ask left alone.** When the turn's opener carries the owner's `[reply about !A5 …]` and the turn
+   neither edited, closed (`done`, `dismiss`) nor surfaced `!A5` (a command `attention edit|done|dismiss|surface`
+   naming it), the ferret gets ONE short nudge: `[attention check] You discussed !A5 — update its card (…: decided
+so far, still open, fresh options), surface it (…) or close it (…).` One reply, one nudge (same send id rule as
+   below); if the reply also asked the owner to act, the two lines go in a single message, the discussion line first.
+   A turn the nudge started is never nudged again, so the exchange ends there.
 
 - **Once per reply, never a loop.** The send id is `attention-nudge-<session>-<reply>`, derived from the
   reply's message id (or its words), and the send ledger keeps one message per id. So a turn end seen twice,

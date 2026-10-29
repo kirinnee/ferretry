@@ -100,6 +100,19 @@ describe('attention listing', () => {
     should(blank).not.containEql('decided:');
   });
 
+  it('should print the still-open points right after the decided ones, only when there are some', () => {
+    // Act
+    const full = renderAttentionList(
+      snapshot([humanItem('A1', 'x', { decided: '- shared account', stillOpen: '- rollback plan' })]),
+    );
+    const blank = renderAttentionList(snapshot([humanItem('A1', 'x', { stillOpen: ' ' })]));
+
+    // Assert
+    should(full).containEql('      still open: - rollback plan');
+    should(full.indexOf('decided:')).be.below(full.indexOf('still open:'));
+    should(blank).not.containEql('still open:');
+  });
+
   it('should print the structured brief, and drop a why that only repeats the summary', () => {
     // Act
     const rich = renderAttentionList(

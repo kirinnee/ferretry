@@ -9,6 +9,8 @@ import {
   type AttentionItem,
   AttentionItemSchema,
   type AttentionKind,
+  type AttentionRevisableField,
+  type AttentionRevision,
   type AttentionResponse,
   type AttentionSnapshot,
   type AttentionSource,
@@ -16,6 +18,7 @@ import {
   attentionBriefOf,
   MAX_ATTENTION_HISTORY,
   MAX_ATTENTION_PER_SESSION,
+  MAX_ATTENTION_REVISIONS,
   MAX_ATTENTION_RESOLUTIONS,
   type ResolvedAttentionItem,
   ResolvedAttentionItemSchema,
@@ -437,11 +440,6 @@ function startsInDiscussion(actor: AttentionActor, request: RaiseAttentionReques
   return actor.kind === 'agent' && request.surface !== true && request.kind !== 'info';
 }
 
-/** An item that began in discussion and has had no request of the owner's: a ferret's reword does not end it. */
-function bornInDiscussion(item: AttentionItem): boolean {
-  return item.waitingOn !== undefined && item.waitingFor === 'discussion' && item.infoRequests === undefined;
-}
-
 function refreshStable(
   ledger: AttentionLedger,
   existing: Extract<AttentionEntry, { lifecycle: 'active' }>,
@@ -471,6 +469,9 @@ function refreshStable(
     kind: request.kind,
     answers: request.answers,
     // A refresh replaces the brief whole: a field the new request leaves out is cleared, not kept.
+    premise: request.premise,
+    decided: request.decided,
+    stillOpen: request.stillOpen,
     terms: request.terms,
     questions: request.questions,
     recommendation: request.recommendation,
@@ -745,6 +746,9 @@ const EDITABLE_FIELDS = [
   'subject',
   'title',
   'context',
+  'premise',
+  'decided',
+  'stillOpen',
   'terms',
   'questions',
   'recommendation',
@@ -753,7 +757,7 @@ const EDITABLE_FIELDS = [
   'links',
   'steps',
   'body',
-] as const;
+] as const satisfies readonly AttentionRevisableField[];
 
 /** The option labels of each question, in order — what an edit must leave alone to keep the ask true. */
 function questionShape(questions: AttentionBrief['questions']): string {
@@ -762,11 +766,20 @@ function questionShape(questions: AttentionBrief['questions']): string {
   );
 }
 
+/** Whether a patch value says what the item already says; an absent context and a null one are the same. */
+function sameField(left: unknown, right: unknown): boolean {
+  return sortedJson(left ?? null) === sortedJson(right ?? null);
+}
+
 /**
- * Rewords an OPEN item in place. The writing changes (summary, context, terms, question wording,
- * recommendation, impact, urgency, links); the ask, the reason and the raiser do not, and neither does
- * the item's place in line, so an edit never re-notifies. Only whoever may close an item may edit it.
- * Questions keep their count and their options, because the ask was derived from them.
+ * Rewords an OPEN item in place. The writing changes (summary, context, premise, what is decided and still
+ * open, terms, question wording, recommendation, impact, urgency, links); the ask, the reason and the raiser
+ * do not, and neither does the item's place in line, so an edit never re-notifies. Only whoever may close an
+ * item may edit it. Questions keep their count and their options, because the ask was derived from them.
+ *
+ * Every edit that changes something appends ONE revision (who, which fields, what they said before) so the
+ * card can be read as a living summary of its discussion; an edit that changes nothing adds none. An edit of
+ * an item IN DISCUSSION stays in discussion: only `surface` takes it to the owner.
  */
 function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation {
   const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
@@ -781,11 +794,22 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
   if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
     return failure('invalid', 'questions may be reworded but not added, removed or given other options');
   }
+  const changed = EDITABLE_FIELDS.filter(
+    field => patch[field] !== undefined && !sameField(patch[field], target.item[field]),
+  );
+  if (changed.length === 0) return unchanged(ledger);
   const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...kept } = target.item;
-  const stepsChanged = patch.steps !== undefined && !sameSteps(target.item.steps, patch.steps);
   const keepsWaiting =
-    target.item.waitingOn === undefined || command.actor.kind !== 'agent' || bornInDiscussion(target.item);
-  const item: AttentionItem = {
+    target.item.waitingOn === undefined || command.actor.kind !== 'agent' || target.item.waitingFor === 'discussion';
+  const revision: AttentionRevision = {
+    at: command.at,
+    by: command.actor.kind,
+    changed,
+    previous: Object.fromEntries(
+      changed.flatMap(field => (target.item[field] === undefined ? [] : [[field, target.item[field]]])),
+    ),
+  };
+  const edited: AttentionItem = {
     ...kept,
     ...(keepsWaiting && target.item.waitingOn !== undefined
       ? {
@@ -794,28 +818,15 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
           ...(target.item.waitingFor === undefined ? {} : { waitingFor: target.item.waitingFor }),
         }
       : {}),
-    ...(stepsDone === undefined || stepsChanged ? {} : { stepsDone }),
-    ...(patch.subject === undefined ? {} : { subject: patch.subject }),
-    ...(patch.title === undefined ? {} : { title: patch.title }),
-    ...(patch.context === undefined ? {} : { context: patch.context }),
-    ...(patch.terms === undefined ? {} : { terms: patch.terms }),
-    ...(patch.questions === undefined ? {} : { questions: patch.questions }),
-    ...(patch.recommendation === undefined ? {} : { recommendation: patch.recommendation }),
-    ...(patch.impact === undefined ? {} : { impact: patch.impact }),
-    ...(patch.urgency === undefined ? {} : { urgency: patch.urgency }),
-    ...(patch.links === undefined ? {} : { links: patch.links }),
-    ...(patch.steps === undefined ? {} : { steps: patch.steps }),
-    ...(patch.body === undefined ? {} : { body: patch.body }),
+    ...(stepsDone === undefined || changed.includes('steps') ? {} : { stepsDone }),
+    ...Object.fromEntries(changed.map(field => [field, patch[field]])),
+    revisions: [...(target.item.revisions ?? []), revision].slice(-MAX_ATTENTION_REVISIONS),
   };
-  const before = keepsWaiting
-    ? target.item
-    : (({ waitingOn: _w, askedAt: _a, waitingFor: _f, ...rest }) => rest)(target.item);
-  if (sortedJson(item) === sortedJson(before)) return unchanged(ledger);
   // The ferret's edit that answers an open request clears the mark and says so in the history.
   const answers = !keepsWaiting;
   const final: AttentionItem = answers
-    ? { ...item, history: withHistory(item.history, { at: command.at, kind: 'updated' }) }
-    : item;
+    ? { ...edited, history: withHistory(edited.history, { at: command.at, kind: 'updated' }) }
+    : edited;
   return replaceItem(ledger, final, command.at, answers ? 'info-added' : 'refreshed');
 }
 

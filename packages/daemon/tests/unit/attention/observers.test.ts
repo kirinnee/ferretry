@@ -116,6 +116,34 @@ describe('Attention surfaced push', () => {
   });
 });
 
+describe('Attention edit in discussion', () => {
+  it('should announce nothing to the owner when a ferret updates the card of an ask in discussion', async () => {
+    // Arrange
+    const announced: string[] = [];
+    const surfacedPush = new AttentionSurfacedPush({
+      surfaced: async (_session, item) => void announced.push(`surfaced ${item.id}`),
+    });
+    const moreInfoPush = new AttentionMoreInfoPush({
+      moreInfoAdded: async (_session, item) => void announced.push(`info ${item.id}`),
+    });
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    await attention.raise(SESSION, { ...ASK, surface: undefined }, AGENT);
+
+    // Act
+    await attention.edit(SESSION, 'A1', { stillOpen: 'Which region?' }, AGENT);
+    await attention.edit(SESSION, 'A1', { decided: 'Use SQLite', stillOpen: 'Which size?' }, AGENT);
+    for (const { sessionId, change } of changes.seen) {
+      await surfacedPush.changed(sessionId, change);
+      await moreInfoPush.changed(sessionId, change);
+    }
+
+    // Assert
+    should(changes.seen.map(each => each.change.change)).deepEqual(['created', 'refreshed', 'refreshed']);
+    should(announced).deepEqual([]);
+  });
+});
+
 describe('Attention board observers', () => {
   it('should tell change observers about every committed change, with its source, and never an unchanged one', async () => {
     // Arrange
@@ -502,28 +530,26 @@ describe('Attention more-info push', () => {
     should(pushed).deepEqual(['A1~1']);
   });
 
-  it('should say when the wait an edit cleared was a discussion, including one turned from a request for information', async () => {
+  it('should push nothing when an edit lands during a discussion, which stays open until it is surfaced', async () => {
     // Arrange
     const changes = new RecordingChanges();
     const attention = service(new MemoryRepository(), changes);
     const pushed: string[] = [];
     const observer = new AttentionMoreInfoPush({
-      moreInfoAdded: async (_session, item, _snapshot, discussion) => {
-        pushed.push(`${item.id}~${item.infoRequests}:${discussion ? 'discussion' : 'info'}`);
+      moreInfoAdded: async (_session, item) => {
+        pushed.push(item.id);
       },
     });
     await attention.raise(SESSION, ASK, AGENT);
     await attention.discuss(SESSION, 'A1', HUMAN, 'Why now?');
     await attention.edit(SESSION, 'A1', { subject: 'Rebase after the freeze?' }, AGENT);
-    await attention.needsInfo(SESSION, 'A1', HUMAN);
-    await attention.discuss(SESSION, 'A1', HUMAN);
-    await attention.edit(SESSION, 'A1', { subject: 'Rebase after the freeze, or never?' }, AGENT);
+    await attention.edit(SESSION, 'A1', { stillOpen: 'Which branch?' }, AGENT);
 
     // Act
     for (const { sessionId, change } of changes.seen) await observer.changed(sessionId, change);
 
     // Assert
-    should(pushed).deepEqual(['A1~1:discussion', 'A1~3:discussion']);
+    should(pushed).deepEqual([]);
   });
 });
 
@@ -540,6 +566,7 @@ describe('Attention discuss delivery', () => {
     await attention.discuss(SESSION, 'A1', HUMAN, 'I do not follow the premise');
     await attention.discuss(SESSION, 'A1', HUMAN, 'asked again');
     await attention.edit(SESSION, 'A1', { subject: 'Rebase onto main after the freeze?' }, AGENT);
+    await attention.surface(SESSION, 'A1', AGENT);
     await attention.needsInfo(SESSION, 'A1', HUMAN, 'Which branch?');
     for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
 

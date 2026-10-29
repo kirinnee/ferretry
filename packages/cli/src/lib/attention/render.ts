@@ -82,6 +82,9 @@ function itemLines(item: AttentionItem): string[] {
   if (item.decided !== undefined && item.decided.trim() !== '') {
     lines.push(`${INDENT}decided: ${compact(item.decided)}`);
   }
+  if (item.stillOpen !== undefined && item.stillOpen.trim() !== '') {
+    lines.push(`${INDENT}still open: ${compact(item.stillOpen)}`);
+  }
   lines.push(...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);

@@ -686,8 +686,8 @@ describe('ATTENTION_INSTRUCTION', () => {
     should(text).containEql(
       'Before ending a reply that asks them to decide or DO anything, raise each ask as its OWN item',
     );
-    // An ask starts in discussion in the chat, one per thing; a card is a short title and a one-line ask.
-    should(text).containEql('one per thing, starting in chat discussion:');
+    // An ask starts in discussion in the chat; a card is a short title and a one-line ask.
+    should(text).containEql('starting in discussion:');
     should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
     should(text).containEql('Title ≤40 chars; ask ≤120.');
     // Isolated: the reader has not followed the conversation, so they must be able to answer cold.
@@ -695,7 +695,9 @@ describe('ATTENTION_INSTRUCTION', () => {
     should(text).containEql('ticket/PR numbers');
     // Point form: the situation, why now and earlier answers are separate flags; a SMALL diagram or mock-up
     // rides in the body when it shows the point faster than words.
-    should(text).containEql('`--premise` = situation, `--context` = why now, `--decided` = earlier answers');
+    should(text).containEql(
+      '`--premise` = situation, `--context` = why now, `--decided` = settled, `--still-open` = left',
+    );
     should(text).containEql('a SMALL diagram/mock-up (fy-render svg|html|mermaid)');
     should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
@@ -709,10 +711,11 @@ describe('ATTENTION_INSTRUCTION', () => {
     should(text).containEql('"Other answer (none of the options): …"');
     // The need-more-info loop: expand the same item.
     should(text).containEql('"[needs more info !A3 …]" → `zz attention edit <id>`');
-    // The discussion loop: a reply about an ask closes nothing; close what it answered, surface the rest.
-    should(text).containEql('"[reply about !A3 …]" is chat; nothing closes:');
-    should(text).containEql('`zz attention done <id>` what it answered');
-    should(text).containEql('`zz attention surface <id>` the rest');
+    // The discussion loop: a reply about an ask closes nothing; update the card, close what it answered, surface the rest.
+    should(text).containEql(
+      '"[reply about !A3 …]" is chat: `zz attention edit <id>` its card (settled, still open, new options);',
+    );
+    should(text).containEql('`done` what it answered, `surface` the rest.');
     // Open items are read on demand.
     should(text).containEql('Open: `zz attention ls`');
     should(text).not.containEql('notify');

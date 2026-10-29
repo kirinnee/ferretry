@@ -485,6 +485,21 @@ describe('attention writing flags', () => {
     });
   });
 
+  it('should collect repeated --still-open into bullet points on add and edit', async () => {
+    // Arrange + Act
+    const added = run(
+      ['attention', 'add', 'pick', '-t', 'Pick', '--still-open', 'rollback plan', '--still-open', 'who signs'],
+      afterAdd,
+    );
+    await added.parsed;
+    const edited = run(['attention', 'edit', '!A1', '--still-open', 'who signs']);
+    await edited.parsed;
+
+    // Assert
+    should(added.gateway.applied[0]?.request).match({ stillOpen: '- rollback plan\n- who signs' });
+    should(edited.gateway.applied[0]?.request).deepEqual({ action: 'edit', id: 'A1', stillOpen: 'who signs' });
+  });
+
   it('should reword an item with edit', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(['attention', 'edit', '!A1', '--summary', 'Plain ask', '-c', 'a', '-c', 'b']);

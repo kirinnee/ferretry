@@ -41,6 +41,8 @@ export interface BriefFlags extends AskFlags {
   readonly context?: string | readonly string[];
   /** Repeated: earlier answers that bear on this, one point each. */
   readonly decided?: string | readonly string[];
+  /** Repeated: what is still open to decide, one point each. */
+  readonly stillOpen?: string | readonly string[];
   readonly resolve?: string;
   /** `TERM=meaning`, repeated. */
   readonly term?: readonly string[];
@@ -78,6 +80,7 @@ const BriefFileSchema = z.strictObject({
   premise: Prose.optional(),
   context: Prose.optional(),
   decided: Prose.optional(),
+  stillOpen: Prose.optional(),
   resolve: z.string().optional(),
   kind: z.string().optional(),
   options: z.array(OptionInput).optional(),
@@ -151,6 +154,7 @@ export function composeAddRequest(
   const premise = prose(flags.premise) ?? prose(file.premise);
   const context = prose(flags.context) ?? prose(file.context);
   const decided = prose(flags.decided) ?? prose(file.decided);
+  const stillOpen = prose(flags.stillOpen) ?? prose(file.stillOpen);
   const body = text(flags.body) ?? text(file.body);
   const answers = defaultAttentionAnswers(
     card.kind,
@@ -174,6 +178,7 @@ export function composeAddRequest(
     context: context ?? null,
     ...(premise === undefined ? {} : { premise }),
     ...(decided === undefined ? {} : { decided }),
+    ...(stillOpen === undefined ? {} : { stillOpen }),
     howToResolve: text(flags.resolve) ?? text(file.resolve) ?? DEFAULT_HOW_TO_RESOLVE,
     ...(ask === undefined ? {} : { ask }),
     ...(answers.length === 0 ? {} : { answers }),
@@ -406,6 +411,8 @@ export interface EditFlags {
   readonly premise?: string | readonly string[];
   readonly context?: string | readonly string[];
   readonly decided?: string | readonly string[];
+  /** Repeated: what is still open to decide, one point each. */
+  readonly stillOpen?: string | readonly string[];
   readonly term?: readonly string[];
   /** The new wording of the item's questions, in order — as many as it has. */
   readonly question?: readonly string[];
@@ -435,6 +442,7 @@ export function composeEditRequest(
   const premise = prose(flags.premise);
   const context = prose(flags.context);
   const decided = prose(flags.decided);
+  const stillOpen = prose(flags.stillOpen);
   const impact = prose(flags.impact);
   const urgency = text(flags.urgency);
   const decision = text(flags.recommend);
@@ -461,6 +469,7 @@ export function composeEditRequest(
     ...(premise === undefined ? {} : { premise }),
     ...(context === undefined ? {} : { context }),
     ...(decided === undefined ? {} : { decided }),
+    ...(stillOpen === undefined ? {} : { stillOpen }),
     ...(terms === undefined ? {} : { terms }),
     ...(questions === undefined ? {} : { questions }),
     ...(decision === undefined ? {} : { recommendation: { decision, ...(why === undefined ? {} : { why }) } }),

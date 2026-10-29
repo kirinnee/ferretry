@@ -332,6 +332,17 @@ const attentionCases: SchemaCase[] = [
   { name: 'attention source', schema: attention.AttentionSourceSchema, value: 'agent-raised' },
   { name: 'card kind', schema: attention.AttentionKindSchema, value: 'yesno' },
   { name: 'swipe direction', schema: attention.AttentionDirectionSchema, value: 'up' },
+  { name: 'revisable field', schema: attention.AttentionRevisableFieldSchema, value: 'stillOpen' },
+  {
+    name: 'revision',
+    schema: attention.AttentionRevisionSchema,
+    value: {
+      at: '2026-05-01T10:00:00.000Z',
+      by: 'agent',
+      changed: ['decided', 'stillOpen'],
+      previous: { stillOpen: '- who signs' },
+    },
+  },
   { name: 'answer effect', schema: attention.AttentionAnswerEffectSchema, value: 'needs-info' },
   {
     name: 'card answer',

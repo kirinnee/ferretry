@@ -215,6 +215,27 @@ describe('attention brief points and edits', () => {
     should(flagged).containDeep({ premise: 'from the flag', decided: 'earlier' });
   });
 
+  it('should turn repeated still-open flags into bullets on add and edit, and read them from a JSON body', () => {
+    // Arrange
+    const file = parseBriefFile(JSON.stringify({ summary: 'Pick', stillOpen: ['rollback plan', 'who signs'] }));
+
+    // Act
+    const several = add(['pick'], { stillOpen: ['rollback plan', 'who signs'] });
+    const one = add(['pick'], { stillOpen: ['rollback plan'] });
+    const none = add(['pick'], {});
+    const fromFile = add([], {}, file);
+    const flagged = add([], { stillOpen: ['from the flag'] }, file);
+    const edit = composeEditRequest('A3', { stillOpen: ['a', 'b'] }, undefined);
+
+    // Assert
+    should(several).containDeep({ stillOpen: '- rollback plan\n- who signs' });
+    should(one).containDeep({ stillOpen: 'rollback plan' });
+    should(none).not.have.property('stillOpen');
+    should(fromFile).containDeep({ stillOpen: '- rollback plan\n- who signs' });
+    should(flagged).containDeep({ stillOpen: 'from the flag' });
+    should(edit).deepEqual({ action: 'edit', id: 'A3', stillOpen: '- a\n- b' });
+  });
+
   it('should compose an edit that replaces the premise and the decided points', () => {
     // Arrange / Act
     const request = composeEditRequest('A3', { premise: ['a', 'b'], decided: ['c'] }, undefined);
