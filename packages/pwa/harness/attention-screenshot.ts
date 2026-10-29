@@ -6,6 +6,10 @@
  *   details-phone / -desktop      the same, Details open
  *   task-*                       a step-by-step to-do: ticked partly / fully, waiting on the ferret, the
  *                                 phone deck mid-swipe right (Done) and left (Need more info), the desktop inbox
+ *   quiet-empty-*                a chat with nothing open: nothing above the composer, no badge
+ *   quiet-one-*                  a chat with one open item: the pinned card and the header count
+ *   quiet-menu-* / quiet-resolved-*  the header Actions menu showing "7 resolved", and the list it opens
+ *   inbox-resolved-*             the inbox with its Resolved filter chosen
  *   sidebar / rail / drawer       unread rows, the Needs-you group, the Attention entry, the rail badges
  *
  *   bun scripts/build-fy-render-libs.ts      # once: the Mermaid sandbox the task scenes render
@@ -174,6 +178,37 @@ try {
           await shot(page, scheme, `task-swipe-${direction}-phone`);
           await page.mouse.up();
         }
+        await page.close();
+      }
+
+      for (const [label, context] of [
+        ['phone', phone],
+        ['desktop', desktop],
+      ] as const) {
+        page = await open(context, theme, 'quiet-empty');
+        if ((await page.locator('[data-attention-panel]').count()) > 0) fail('an empty chat drew the Attention panel');
+        if ((await page.locator('[data-attention-clear], [data-attention-resolved]').count()) > 0)
+          fail('an empty chat drew an empty-state or resolved line');
+        await shot(page, scheme, `quiet-empty-${label}`);
+        await page.close();
+        page = await open(context, theme, 'quiet-one');
+        await shot(page, scheme, `quiet-one-${label}`);
+        await page.close();
+        page = await open(context, theme, 'quiet-empty');
+        await page.locator('[data-session-actions-trigger]').click();
+        await page.locator('[data-session-action-item="attention-resolved"]').waitFor({ state: 'visible' });
+        await page.waitForTimeout(150);
+        await shot(page, scheme, `quiet-menu-${label}`);
+        await page.locator('[data-session-action-item="attention-resolved"]').click();
+        await page.locator('[data-attention-resolved-list]').waitFor({ state: 'visible' });
+        await page.waitForTimeout(200);
+        await shot(page, scheme, `quiet-resolved-${label}`);
+        await page.close();
+        page = await open(context, theme, 'inbox-resolved');
+        await page.locator('[data-attention-filter-option="resolved"]').click();
+        await page.locator('[data-attention-resolved-pane]').waitFor({ state: 'visible' });
+        await page.waitForTimeout(150);
+        await shot(page, scheme, `inbox-resolved-${label}`, label === 'desktop');
         await page.close();
       }
 

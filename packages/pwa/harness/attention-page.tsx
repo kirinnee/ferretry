@@ -7,13 +7,27 @@
  * held by a real `DeferredAttentionActions` whose commit does nothing.
  */
 
-import type { AttentionId, AttentionItem, AttentionSnapshot, SessionView } from '@ferretry/protocol';
+import type {
+  AttentionId,
+  AttentionItem,
+  AttentionSnapshot,
+  ResolvedAttentionItem,
+  SessionView,
+} from '@ferretry/protocol';
+import { Pencil, RotateCw, Square } from 'lucide-react';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Markdown } from '../src/components/markdown.tsx';
+import { SessionTopBar } from '../src/components/session-top-bar.tsx';
 import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
 import { AttentionInboxPage } from '../src/features/attention/attention-inbox-page.tsx';
 import { AttentionPanel } from '../src/features/attention/attention-panel.tsx';
+import {
+  ATTENTION_RESOLVED_ACTION_ID,
+  resolvedActionContribution,
+} from '../src/features/attention/attention-resolved.tsx';
+import { ActionsMenu } from '../src/features/session-actions/actions-menu.tsx';
+import { type SessionActionContribution, sessionActionSections } from '../src/features/session-actions/registry.ts';
 import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
 import { DeferredAttentionActions, type InboxCard, inboxCardKey } from '../src/lib/attention-inbox.ts';
 import { daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
@@ -210,9 +224,11 @@ const deferred = new DeferredAttentionActions(async () => undefined);
 function Inbox({
   phone,
   cards = CARDS,
+  resolved = [],
 }: {
   readonly phone: boolean;
   readonly cards?: readonly InboxCard[];
+  readonly resolved?: AttentionInbox['resolved'];
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const hidden = deferred.hiddenKeys();
@@ -221,6 +237,9 @@ function Inbox({
     total: cards.length,
     cards: cards.filter(entry => !hidden.has(entry.key)),
     reading: false,
+    resolved,
+    resolvedReading: false,
+    loadResolved: () => undefined,
     deferred,
     deferredState: state,
     connectionFor: () => undefined,
@@ -370,6 +389,165 @@ function Panel(props: { readonly board?: AttentionSnapshot; readonly target?: st
   );
 }
 
+const resolvedItem = (
+  id: string,
+  minutes: number,
+  patch: Partial<AttentionItem>,
+  resolution: Record<string, unknown>,
+): ResolvedAttentionItem =>
+  ({
+    ...item(id, minutes + 60, patch),
+    resolvedAt: ago(minutes),
+    resolutionNote: null,
+    resolvedBy: 'human',
+    resolvedBySession: null,
+    resolvedByName: null,
+    disposition: 'done',
+    ...resolution,
+  }) as unknown as ResolvedAttentionItem;
+
+const PERMISSION = { kind: 'permission' } as const;
+const RESOLVED_SEVEN: readonly ResolvedAttentionItem[] = [
+  resolvedItem(
+    'A14',
+    6,
+    { subject: 'Can I delete the stale build cache?', ask: PERMISSION },
+    { response: { kind: 'permission', decision: 'approve' } },
+  ),
+  resolvedItem(
+    'A13',
+    55,
+    {
+      subject: 'Use the shared fixture for the inbox tests?',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
+    },
+    { response: { kind: 'multiple-choice', choice: 'Yes' } },
+  ),
+  resolvedItem(
+    'A12',
+    190,
+    { subject: 'Rotate the relay key on the studio machine', ask: { kind: 'task' } },
+    { response: undefined },
+  ),
+  resolvedItem(
+    'A11',
+    320,
+    { subject: 'Which login should the new runtime use?', ask: { kind: 'open-question' } },
+    { response: { kind: 'open-question', text: 'The team login, please.' } },
+  ),
+  resolvedItem(
+    'A10',
+    700,
+    { subject: 'Restart the staging relay?', ask: PERMISSION },
+    { disposition: 'dismissed', resolutionNote: 'Superseded by A12.' },
+  ),
+  resolvedItem(
+    'A9',
+    1_500,
+    { subject: 'Squash the branch before merge?', ask: PERMISSION },
+    { response: { kind: 'permission', decision: 'deny' } },
+  ),
+  resolvedItem(
+    'A8',
+    2_900,
+    {
+      subject: 'Rebase onto main now, or wait?',
+      ask: { kind: 'multiple-choice', options: [{ label: 'Rebase now' }, { label: 'Wait' }] },
+    },
+    { response: { kind: 'multiple-choice', choice: 'Wait' } },
+  ),
+];
+
+const quietBoard = (open: readonly AttentionItem[]): AttentionSnapshot => ({
+  ...BOARD,
+  items: open.map(entry => ({ ...entry, raisedBySession: 'fr' })) as AttentionItem[],
+  resolved: [...RESOLVED_SEVEN],
+  count: open.length,
+});
+
+const QUIET_RESOLVED_ROWS: AttentionInbox['resolved'] = RESOLVED_SEVEN.map((record, index) => {
+  const view = SESSIONS[index % 4] as SessionView;
+  const daemon = index % 3 === 2 ? LAPTOP : STUDIO;
+  return {
+    key: inboxCardKey(daemon, view.config.id, record.id),
+    daemonId: daemon,
+    machineName: daemon === LAPTOP ? 'laptop' : 'studio',
+    view,
+    record,
+  };
+});
+
+const HARNESS_ACTIONS: readonly SessionActionContribution<unknown>[] = [
+  {
+    group: 'session',
+    order: 10,
+    build: () => ({ kind: 'run', id: 'rename', label: 'Rename', icon: Pencil, run: () => undefined }),
+  },
+  {
+    group: 'tools',
+    order: 10,
+    build: () => ({ kind: 'run', id: 'reload', label: 'Reload this ferret', icon: RotateCw, run: () => undefined }),
+  },
+  {
+    group: 'danger',
+    order: 10,
+    build: () => ({ kind: 'run', id: 'stop', label: 'Stop ferret', icon: Square, danger: true, run: () => undefined }),
+  },
+];
+
+/** A real chat page's top: header, Actions menu, the quiet panel and the composer. Nothing else is invented. */
+function QuietChat({ open }: { readonly open: readonly AttentionItem[] }): ReactElement {
+  const compact = window.innerWidth < 640;
+  const board = quietBoard(open);
+  const [form, setForm] = useState<string | null>(null);
+  const sections = sessionActionSections(
+    [...HARNESS_ACTIONS, resolvedActionContribution(board.resolved, 'attention-panel', null)],
+    undefined,
+  );
+  const noop = async (): Promise<void> => undefined;
+  const session = SESSIONS[0] as SessionView;
+  return (
+    <div className="mx-auto flex h-dvh max-w-3xl flex-col bg-bg" data-fixture="">
+      <SessionTopBar
+        actions={null}
+        attentionOpen={board.items.length}
+        compact={compact}
+        menu={<ActionsMenu compact={compact} form={form} name="Ottilie" onFormChange={setForm} sections={sections} />}
+        project="ferretry"
+        session={session}
+      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-panel">
+        <article className="rounded-panel border border-border bg-surface p-panel text-cell" data-chat-line="">
+          <p className="m-0 mb-xs text-meta text-faint">ottilie · 2m</p>
+          <Markdown
+            attentionReferenceResolver={() => true}
+            text="Rebased and pushed. The inbox wiring is done; I am starting on the resolved filter now."
+          />
+        </article>
+      </div>
+      <div className="p-panel">
+        <AttentionPanel
+          chip={{ on: true, onChange: () => undefined }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          connection={CONNECTION}
+          focus={null}
+          id="attention-panel"
+          now={NOW}
+          onOpenResolved={() => setForm(ATTENTION_RESOLVED_ACTION_ID)}
+          onSelect={() => undefined}
+          scope={daemonSessionScope(CONNECTION, 'fr')}
+          selectedId={null}
+          snapshot={board}
+          status="ready"
+        />
+        <div className="rounded-panel border border-border bg-surface p-panel text-meta text-faint">
+          Message ottilie…
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Bar({ presentation }: { readonly presentation: 'column' | 'rail' | 'drawer' }): ReactElement {
   return (
     <div className="flex bg-bg" data-fixture="" style={{ height: presentation === 'drawer' ? '100dvh' : 760 }}>
@@ -425,6 +603,12 @@ createRoot(root).render(
     <Panel board={boardOf(LONG)} target="A1" />
   ) : view === 'several' ? (
     <Panel board={boardOf(RICH, SINGLE, OLD)} target={null} />
+  ) : view === 'quiet-empty' ? (
+    <QuietChat open={[]} />
+  ) : view === 'quiet-one' ? (
+    <QuietChat open={[REBASE]} />
+  ) : view === 'inbox-resolved' ? (
+    <Inbox phone={window.innerWidth < 640} resolved={QUIET_RESOLVED_ROWS} />
   ) : view === 'board' ? (
     <BoardPage />
   ) : view === 'rail' ? (

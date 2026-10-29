@@ -73,6 +73,50 @@
   color: var(--muted);
   font-size: var(--text-sm);
 }
+/* OPEN / RESOLVED: a small two-button toggle, the pressed one filled. Resolved history is reachable here and
+   in a chat's header menu — nowhere else. */
+.fy-attn-inbox__filter {
+  display: inline-flex;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.fy-attn-inbox__filter-button {
+  min-height: 32px;
+  padding: 0 var(--gap-md);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.fy-attn-inbox__filter-button:hover {
+  color: var(--fg);
+}
+.fy-attn-inbox__filter-button[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-attn-inbox__resolved {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-attn-inbox__records {
+  gap: var(--gap-md);
+}
+.fy-attn-inbox__none,
+.fy-attn-inbox__hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
 .fy-attn-inbox__reading {
   display: inline-flex;
   align-items: center;

@@ -42,6 +42,11 @@ import {
   attentionLedgerIds,
   shownAttentionItem,
 } from '../../features/attention/attention-panel.tsx';
+import { AttentionRepliesNotice } from '../../features/attention/attention-replies-notice.tsx';
+import {
+  ATTENTION_RESOLVED_ACTION_ID,
+  resolvedActionContribution,
+} from '../../features/attention/attention-resolved.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -90,6 +95,7 @@ import { useAgentSurfaceTabs } from '../../features/workspace/use-agent-surface-
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
+import type { AttentionReplies } from '../../hooks/use-attention-replies.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
@@ -101,8 +107,6 @@ import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
-import { AttentionRepliesNotice } from '../../features/attention/attention-replies-notice.tsx';
-import type { AttentionReplies } from '../../hooks/use-attention-replies.ts';
 import { withAnswerPrefix } from '../answer-chip.ts';
 import type { DaemonAttentionClient } from '../attention-client.ts';
 import type { AttentionLoadStatus } from '../attention-store.ts';
@@ -517,6 +521,8 @@ export function SessionChatPage({
     if (target !== null) setAttentionSelected(target);
     setAttentionFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
   }, []);
+  // The resolved item a link named, so the list the header menu opens rings it. Cleared with the form.
+  const [resolvedTarget, setResolvedTarget] = useState<AttentionId | null>(null);
   const chipRef = useRef<{ id: AttentionId | null; on: boolean }>({ id: null, on: false });
   const openAttentionReference = useCallback((id: AttentionId): void => showAttention(id), [showAttention]);
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
@@ -673,6 +679,7 @@ export function SessionChatPage({
     // and the session id.
     setAttentionSelected(null);
     setAttentionFocus(null);
+    setResolvedTarget(null);
   }, [connection, session.config.id]);
 
   // `?attention=A3` opens the conversation AT that item. Declared after the reset above so that, on a
@@ -1076,7 +1083,20 @@ export function SessionChatPage({
       <AddMcpForm agentName={agentName} host={host} login={runtime} ports={mcpPorts} project={project} />
     ),
   };
-  const actionSections = sessionActionSections([...CORE_SESSION_ACTIONS, ...actionContributions], coreContext);
+  const openResolved = useCallback((id: AttentionId): void => {
+    setResolvedTarget(id);
+    setActionForm(ATTENTION_RESOLVED_ACTION_ID);
+  }, []);
+  const changeActionForm = useCallback((next: string | null): void => {
+    setActionForm(next);
+    if (next !== ATTENTION_RESOLVED_ACTION_ID) setResolvedTarget(null);
+  }, []);
+  const contributions: readonly SessionActionContribution<CoreActionContext>[] = [
+    ...CORE_SESSION_ACTIONS,
+    resolvedActionContribution(attention?.snapshot?.resolved ?? [], attentionId, resolvedTarget),
+    ...actionContributions,
+  ];
+  const actionSections = sessionActionSections(contributions, coreContext);
   const actionsMenu = (
     <ActionsMenu
       compact={compact}
@@ -1087,7 +1107,7 @@ export function SessionChatPage({
         else setActionFailure(detail === undefined ? { sentence } : { sentence, detail });
       }}
       onNotice={setActionNotice}
-      onFormChange={setActionForm}
+      onFormChange={changeActionForm}
       sections={actionSections}
     />
   );
@@ -1250,6 +1270,7 @@ export function SessionChatPage({
     <>
       <SessionTopBar
         actions={lifecycleActions}
+        attentionOpen={attention?.snapshot?.items.length ?? session.state.attention?.open ?? 0}
         turn={turn}
         compact={compact}
         infoOpen={info.open}
@@ -1359,6 +1380,7 @@ export function SessionChatPage({
                 )
               }
               key={`${connection.daemonId}:${session.config.id}`}
+              onOpenResolved={openResolved}
               onSelect={setAttentionSelected}
               scope={scope}
               selectedId={attentionSelected}

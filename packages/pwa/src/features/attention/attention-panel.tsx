@@ -15,22 +15,28 @@
  * A LINK POINTS AT ONE ITEM. `?attention=A3`, a notification and a proved `!A3` all arrive as a `focus`
  * request: the block shows THAT item and rings it. Nothing opens by itself. An id the board does not hold
  * is said out loud ("!A3 is no longer open") rather than silently replaced by a different decision, and a
- * resolved one is reachable behind "Resolved (N)".
+ * resolved one is opened in the resolved list (`onOpenResolved`).
+ *
+ * NOTHING OPEN, NOTHING DRAWN. The panel is the most important thing on the page while something waits on
+ * the reader and must take no room while nothing does: no "all clear" line, and no resolved history under
+ * every chat — that lives behind the header menu's "N resolved" (`attention-resolved.tsx`).
  */
 
-import type { AttentionId, AttentionItem, AttentionSnapshot, ResolvedAttentionItem } from '@ferretry/protocol';
-import { Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { AttentionId, AttentionItem, AttentionSnapshot } from '@ferretry/protocol';
+import { ChevronLeft, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
 import { actionSentence, type InboxAction } from '../../lib/attention-inbox.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
-import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
-import { attentionReference, describeResponse, resolutionBadge } from './attention-board.tsx';
+import { attentionReference } from './attention-board.tsx';
 import { AttentionCard } from './attention-card.tsx';
+import { attentionPanelItemId } from './attention-resolved.tsx';
+
+export { attentionPanelItemId };
 
 /** The three answers the panel sends, and nothing else of the client. */
 export type AttentionActionClient = Pick<
@@ -98,6 +104,8 @@ export interface AttentionPanelProps {
   /** The item the block shows, which the chat page also needs to build the answer prefix. */
   readonly selectedId: AttentionId | null;
   readonly onSelect: (id: AttentionId) => void;
+  /** A request named a resolved item: open the resolved list at it. The panel itself draws no history. */
+  readonly onOpenResolved?: (id: AttentionId) => void;
   readonly chip?: AttentionAnswerChip;
   /** Drawn in the block while the machine holds answers ("Sending in 8 s… / Send now"). */
   readonly repliesSlot?: ReactNode;
@@ -107,7 +115,6 @@ export interface AttentionPanelProps {
 const copyWriter = browserClipboardWriter();
 
 const NO_ITEMS: readonly AttentionItem[] = [];
-const NO_RESOLVED: readonly ResolvedAttentionItem[] = [];
 
 interface CardState {
   readonly busy: boolean;
@@ -116,13 +123,6 @@ interface CardState {
 
 const failure = (reason: unknown): string =>
   reason instanceof Error ? reason.message : 'The machine did not accept this answer.';
-
-/** The DOM id one item is drawn under, so a link can scroll to it. */
-export const attentionPanelItemId = (panelId: string, id: AttentionId): string => `${panelId}-item-${id}`;
-
-/** Newest resolution first: the one just made is the one the reader is looking for. */
-const byNewestResolution = (left: ResolvedAttentionItem, right: ResolvedAttentionItem): number =>
-  Date.parse(right.resolvedAt) - Date.parse(left.resolvedAt);
 
 /** The open item the block shows: the chosen one while it is open, else the first. */
 export const shownAttentionItem = (
@@ -140,17 +140,15 @@ export function AttentionPanel({
   focus = null,
   selectedId,
   onSelect,
+  onOpenResolved,
   chip,
   repliesSlot,
   now,
 }: AttentionPanelProps) {
   const renderProse = useCallback((text: string): ReactNode => <ChatProse copyable={copyWriter} text={text} />, []);
   const items = snapshot?.items ?? NO_ITEMS;
-  const resolvedItems = snapshot?.resolved ?? NO_RESOLVED;
-  const resolved = useMemo(() => [...resolvedItems].sort(byNewestResolution), [resolvedItems]);
   const [cards, setCards] = useState<ReadonlyMap<AttentionId, CardState>>(new Map());
   const [announcement, setAnnouncement] = useState('');
-  const [resolvedOpen, setResolvedOpen] = useState(false);
   const target = focus?.target ?? null;
   const location = target === null ? null : locateAttention(snapshot, target);
   const selected = shownAttentionItem(snapshot, selectedId);
@@ -178,7 +176,7 @@ export function AttentionPanel({
   };
 
   // A REQUEST IS HONOURED ONCE, when it can be: after the board that says where the item is has been
-  // read, and — for a resolved item — after its list has unfolded.
+  // read. A resolved item is handed to the page, which opens the resolved list at it.
   const handled = useRef<number | null>(null);
   useEffect(() => {
     if (focus === null || handled.current === focus.seq || focus.target === null) return;
@@ -188,8 +186,9 @@ export function AttentionPanel({
       onSelect(focus.target);
       return;
     }
-    if (where === 'resolved' && !resolvedOpen) {
-      setResolvedOpen(true);
+    if (where === 'resolved') {
+      handled.current = focus.seq;
+      onOpenResolved?.(focus.target);
       return;
     }
     handled.current = focus.seq;
@@ -197,160 +196,101 @@ export function AttentionPanel({
     const item = document.getElementById(attentionPanelItemId(id, focus.target));
     item?.scrollIntoView?.({ block: 'nearest' });
     item?.focus({ preventScroll: true });
-  }, [focus, snapshot, resolvedOpen, id, selected?.id, onSelect]);
+  }, [focus, snapshot, id, selected?.id, onSelect, onOpenResolved]);
 
   const loading = snapshot === null && (status === 'idle' || status === 'loading');
   const unavailable = snapshot === null && status === 'error';
   const state = selected === undefined ? undefined : cards.get(selected.id);
-  const quiet = selected === undefined && resolved.length === 0 && !loading && !unavailable && target === null;
-  if (quiet) return null;
-  return (
-    <section aria-label="Needs you" className="fy-attn-panel" data-attention-panel="" id={id}>
-      <p aria-live="polite" className="sr-only" role="status">
-        {announcement}
-      </p>
-      {target !== null && location === 'unknown' ? (
-        <p className="fy-attn-panel__note" data-attention-missing={target} role="status">
-          <CircleAlert aria-hidden="true" size={14} />
-          {attentionReference(target)} is no longer open.
-        </p>
-      ) : null}
-      {snapshot !== null && snapshot.parseErrors > 0 ? (
-        <p className="fy-attn-panel__note" data-tone="err" role="alert">
-          <CircleAlert aria-hidden="true" size={14} />
-          The machine reported {snapshot.parseErrors} damaged Attention records; repair them before trusting this list.
-        </p>
-      ) : null}
-      {loading ? (
-        <p className="fy-attn-panel__note" role="status">
-          <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
-          Checking this ferret's Attention…
-        </p>
-      ) : unavailable ? (
-        <p className="fy-attn-panel__note" data-tone="err" role="alert">
-          <CircleAlert aria-hidden="true" size={14} />
-          Attention cannot be read right now. Reconnect before assuming nothing needs you.
-        </p>
-      ) : selected === undefined ? (
-        <p className="fy-attn-panel__note" data-attention-clear="">
-          <Check aria-hidden="true" size={14} />
-          Nothing needs you right now.
-        </p>
-      ) : (
-        <div className="fy-attn-panel__item" id={attentionPanelItemId(id, selected.id)} key={selected.id} tabIndex={-1}>
-          {items.length > 1 ? (
-            <nav aria-label="Open items" className="fy-attn-pager">
-              <button
-                aria-label="Previous item"
-                className="fy-attn-pager__step"
-                disabled={selectedIndex <= 0}
-                onClick={() => onSelect(items[selectedIndex - 1]?.id ?? selected.id)}
-                type="button"
-              >
-                <ChevronLeft aria-hidden="true" size={16} />
-              </button>
-              <span aria-live="polite" className="fy-attn-pager__where" data-attention-pager="">
-                Needs you · {selectedIndex + 1} of {items.length}
-              </span>
-              <button
-                aria-label="Next item"
-                className="fy-attn-pager__step"
-                disabled={selectedIndex >= items.length - 1}
-                onClick={() => onSelect(items[selectedIndex + 1]?.id ?? selected.id)}
-                type="button"
-              >
-                <ChevronRight aria-hidden="true" size={16} />
-              </button>
-            </nav>
-          ) : null}
-          <AttentionCard
-            busy={state?.busy ?? false}
-            error={state?.error ?? null}
-            highlighted={target === selected.id}
-            item={selected}
-            onAct={action => act(selected, action)}
-            onProgress={(step, done) => client.progress(connection, scope, selected.id, step, done)}
-            pinned
-            renderProse={renderProse}
-            {...(now === undefined ? {} : { now })}
-          />
-          {repliesSlot}
-          {chip === undefined ? null : (
-            <label className="fy-attn-chip" data-attention-answer-chip="">
-              <input checked={chip.on} onChange={event => chip.onChange(event.target.checked)} type="checkbox" />
-              Send my next message as the answer to {attentionReference(selected.id)}
-            </label>
-          )}
-        </div>
-      )}
-      {resolved.length === 0 ? null : (
-        <div className="fy-attn-panel__resolved">
-          <button
-            aria-controls={`${id}-resolved`}
-            aria-expanded={resolvedOpen}
-            className="fy-attn-panel__fold"
-            data-attention-resolved={resolved.length}
-            onClick={() => setResolvedOpen(open => !open)}
-            type="button"
-          >
-            <ChevronDown aria-hidden="true" className="fy-attn-panel__chevron" size={14} />
-            Resolved ({resolved.length})
-          </button>
-          {resolvedOpen ? (
-            <ul className="fy-attn-panel__records" id={`${id}-resolved`}>
-              {resolved.map(record => (
-                <ResolvedRow
-                  highlighted={target === record.id}
-                  id={attentionPanelItemId(id, record.id)}
-                  key={`${record.id}:${record.resolvedAt}`}
-                  record={record}
-                />
-              ))}
-            </ul>
-          ) : null}
-        </div>
-      )}
-    </section>
+  const missing = target !== null && location === 'unknown';
+  const quiet = selected === undefined && !loading && !unavailable && !missing;
+  // The live region outlives the block: answering the last open item removes the block, and the sentence
+  // that says what was sent must still be spoken.
+  const live = (
+    <p aria-live="polite" className="sr-only" role="status">
+      {announcement}
+    </p>
   );
-}
-
-/** One resolved item: what it asked, who cleared it and how — the same badge the audit ledger uses. */
-function ResolvedRow({
-  record,
-  id,
-  highlighted,
-}: {
-  readonly record: ResolvedAttentionItem;
-  readonly id: string;
-  readonly highlighted: boolean;
-}) {
-  const badge = resolutionBadge(record);
-  const BadgeIcon = badge.icon;
+  if (quiet) return live;
   return (
-    <li
-      className="fy-attn-panel__record"
-      data-attention-record={record.id}
-      data-highlighted={highlighted || undefined}
-      id={id}
-      tabIndex={-1}
-    >
-      <p className="fy-attn-panel__record-subject">{record.subject}</p>
-      <p className="fy-attn-panel__record-meta">
-        <span
-          className={cn(
-            'inline-flex shrink-0 items-center gap-1 rounded border px-1.5 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider',
-            badge.className,
-          )}
-        >
-          <BadgeIcon aria-hidden="true" size={11} />
-          {badge.label}
-        </span>
-        <span className="mono">{attentionReference(record.id)}</span>
-        {highlighted ? <span className="fy-attn-card__pointer">linked</span> : null}
-        <span>{new Date(record.resolvedAt).toLocaleString()}</span>
-      </p>
-      {record.response ? <p className="fy-attn-panel__record-answer">{describeResponse(record.response)}</p> : null}
-      {record.resolutionNote ? <p className="fy-attn-panel__record-note">{record.resolutionNote}</p> : null}
-    </li>
+    <>
+      {live}
+      <section aria-label="Needs you" className="fy-attn-panel" data-attention-panel="" id={id}>
+        {missing && target !== null ? (
+          <p className="fy-attn-panel__note" data-attention-missing={target} role="status">
+            <CircleAlert aria-hidden="true" size={14} />
+            {attentionReference(target)} is no longer open.
+          </p>
+        ) : null}
+        {snapshot !== null && snapshot.parseErrors > 0 ? (
+          <p className="fy-attn-panel__note" data-tone="err" role="alert">
+            <CircleAlert aria-hidden="true" size={14} />
+            The machine reported {snapshot.parseErrors} damaged Attention records; repair them before trusting this
+            list.
+          </p>
+        ) : null}
+        {loading ? (
+          <p className="fy-attn-panel__note" role="status">
+            <LoaderCircle aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={14} />
+            Checking this ferret's Attention…
+          </p>
+        ) : unavailable ? (
+          <p className="fy-attn-panel__note" data-tone="err" role="alert">
+            <CircleAlert aria-hidden="true" size={14} />
+            Attention cannot be read right now. Reconnect before assuming nothing needs you.
+          </p>
+        ) : selected === undefined ? null : (
+          <div
+            className="fy-attn-panel__item"
+            id={attentionPanelItemId(id, selected.id)}
+            key={selected.id}
+            tabIndex={-1}
+          >
+            {items.length > 1 ? (
+              <nav aria-label="Open items" className="fy-attn-pager">
+                <button
+                  aria-label="Previous item"
+                  className="fy-attn-pager__step"
+                  disabled={selectedIndex <= 0}
+                  onClick={() => onSelect(items[selectedIndex - 1]?.id ?? selected.id)}
+                  type="button"
+                >
+                  <ChevronLeft aria-hidden="true" size={16} />
+                </button>
+                <span aria-live="polite" className="fy-attn-pager__where" data-attention-pager="">
+                  Needs you · {selectedIndex + 1} of {items.length}
+                </span>
+                <button
+                  aria-label="Next item"
+                  className="fy-attn-pager__step"
+                  disabled={selectedIndex >= items.length - 1}
+                  onClick={() => onSelect(items[selectedIndex + 1]?.id ?? selected.id)}
+                  type="button"
+                >
+                  <ChevronRight aria-hidden="true" size={16} />
+                </button>
+              </nav>
+            ) : null}
+            <AttentionCard
+              busy={state?.busy ?? false}
+              error={state?.error ?? null}
+              highlighted={target === selected.id}
+              item={selected}
+              onAct={action => act(selected, action)}
+              onProgress={(step, done) => client.progress(connection, scope, selected.id, step, done)}
+              pinned
+              renderProse={renderProse}
+              {...(now === undefined ? {} : { now })}
+            />
+            {repliesSlot}
+            {chip === undefined ? null : (
+              <label className="fy-attn-chip" data-attention-answer-chip="">
+                <input checked={chip.on} onChange={event => chip.onChange(event.target.checked)} type="checkbox" />
+                Send my next message as the answer to {attentionReference(selected.id)}
+              </label>
+            )}
+          </div>
+        )}
+      </section>
+    </>
   );
 }

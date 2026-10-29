@@ -118,25 +118,6 @@
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
   outline-offset: 2px;
 }
-.fy-attn-panel__fold {
-  display: inline-flex;
-  min-height: 44px;
-  align-items: center;
-  gap: var(--gap-xs);
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.fy-attn-panel__fold:hover {
-  color: var(--fg);
-}
-.fy-attn-panel__fold > .fy-attn-panel__chevron {
-  margin-left: 0;
-}
 .fy-attn-panel__record {
   border-left: var(--stroke-heavy) solid var(--border-soft);
   padding-left: var(--gap-sm);
@@ -156,6 +137,17 @@
 .fy-attn-panel__record-subject {
   color: var(--fg);
   font-weight: var(--weight-medium);
+}
+.fy-attn-panel__record-origin {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+.fy-attn-panel__record-link {
+  color: inherit;
+  text-decoration: none;
+}
+.fy-attn-panel__record-link:hover {
+  text-decoration: underline;
 }
 .fy-attn-panel__record-meta {
   display: flex;
