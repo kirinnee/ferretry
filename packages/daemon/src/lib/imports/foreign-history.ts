@@ -4,7 +4,7 @@ import {
   isOwnerMessage,
   type TranscriptEvent,
   type TranscriptHarness,
-  type TranscriptParser,
+  type PacedTranscriptParser,
 } from '../transcript/index.ts';
 import { spokenText } from './conversation-text.ts';
 
@@ -117,7 +117,8 @@ export class ForeignHistoryImporter {
   constructor(
     private readonly files: ForeignHistoryFiles,
     private readonly roots: ForeignHistoryRoots,
-    private readonly parsers: Readonly<Record<TranscriptHarness, TranscriptParser>>,
+    /** Paced, because a listing parses every file up to 32 MiB whole and would hold the loop through each. */
+    private readonly parsers: Readonly<Record<TranscriptHarness, PacedTranscriptParser>>,
   ) {}
 
   async list(): Promise<ForeignHistoryListing> {
@@ -171,7 +172,7 @@ export class ForeignHistoryImporter {
       };
     const text = size === undefined ? undefined : await this.files.text(candidate.source);
     if (text === undefined) return { reason: 'the transcript could not be read' };
-    const parsed = this.parsers[candidate.harness].parse({ text, source: candidate.source, endOfInput: true });
+    const parsed = await this.parsers[candidate.harness].parse({ text, source: candidate.source, endOfInput: true });
     // An invalid/partial transcript is lost history, never a shorter conversation. The list reports
     // every skipped source rather than silently showing a plausible but incomplete subset.
     if (parsed.issues.length > 0 || parsed.remainder.length > 0) {

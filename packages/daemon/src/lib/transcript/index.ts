@@ -11,6 +11,8 @@ export {
 export { isOwnerMessage } from './owner.ts';
 export type { TranscriptSearchMatch, TranscriptSearchOptions } from './search.ts';
 export { searchTranscript } from './search.ts';
+export type { SlicedTranscriptInput, TranscriptParsePacing } from './sliced.ts';
+export { PacedTranscriptParser, parseTranscriptInSlices } from './sliced.ts';
 export type {
   ObservedHumanInput,
   ObservedHumanInputProof,
