@@ -1,15 +1,16 @@
 import { Database } from 'bun:sqlite';
 import { afterEach, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, symlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import {
   BunSqliteIndex,
   BunSqliteIndexFactory,
-  InlineIndexPersister,
+  type IndexFile,
+  InlineIndexFile,
   StateFileSystem,
-  WorkerIndexPersister,
+  WorkerIndexFile,
   WriteBehindSessionIndex,
 } from '../../src/adapters/index.ts';
 import type { HostedWorker } from '../../src/adapters/runtime/bundled-worker-host.ts';
@@ -19,6 +20,7 @@ import {
   type IndexWriterScope,
   serveIndexWriter,
 } from '../../src/adapters/storage/index-writer-program.ts';
+import type { IndexLoad } from '../../src/adapters/storage/sqlite-index-schema.ts';
 import { applyIndexWrite, replaceSessionRows } from '../../src/adapters/storage/sqlite-index-statements.ts';
 import {
   createFoundationPaths,
@@ -354,13 +356,14 @@ describe('the index SQL', () => {
   });
 });
 
-describe('InlineIndexPersister', () => {
-  it('should apply each batch in one transaction and refuse batches once closed', async () => {
+describe('InlineIndexFile', () => {
+  it('should load the file, apply each batch in one transaction, and refuse batches once closed', async () => {
     // Arrange
-    const { database } = await indexFile();
-    const subject = new InlineIndexPersister(database);
+    const { paths, database } = await indexFile();
+    const subject = new InlineIndexFile(paths.sessionIndex);
 
     // Act
+    const load = await subject.load();
     await subject.persist([
       { kind: 'replace-all', sessions: [session(A, 2)], events: pointers(2) },
       { kind: 'remove-session', id: B },
@@ -376,14 +379,32 @@ describe('InlineIndexPersister', () => {
     }
 
     // Assert
+    should(load.kind).equal('loaded');
     should(persisted).deepEqual([1, 2]);
     should(String(refused)).containEql('closed');
+    database.close();
+  });
+
+  it('should let go of a file that must be dropped, and open one for writing when first asked', async () => {
+    // Arrange — a file stamped with a version this daemon does not know.
+    const { paths, database } = await indexFile();
+    database.exec('PRAGMA user_version = 99');
+    database.close();
+    const subject = new InlineIndexFile(paths.sessionIndex);
+
+    // Act
+    const load = await subject.load();
+    await rm(paths.sessionIndex);
+    await subject.close();
+
+    // Assert — the connection was released, so the file could be deleted and nothing reopened it.
+    should(load).deepEqual({ kind: 'drop' });
   });
 });
 
 /** The index writer's program served in this thread, behind the part of a Worker a host uses. */
 function inProcessWriter(
-  open: (file: string) => Database,
+  open: (file: string) => Database = file => new Database(file, { create: true, strict: true }),
 ): HostedWorker<IndexWriterRequest, IndexWriterResponse> & { terminated: boolean } {
   const scope: IndexWriterScope = { onmessage: null, postMessage: () => undefined };
   const worker = {
@@ -402,16 +423,26 @@ function inProcessWriter(
   return worker;
 }
 
+/** The program over a scope whose answers are collected, and a way to send it requests. */
+function servedWriter(open: (file: string) => Database = file => new Database(file, { strict: true })): {
+  readonly answers: IndexWriterResponse[];
+  readonly send: (request: IndexWriterRequest) => void;
+} {
+  const answers: IndexWriterResponse[] = [];
+  const scope: IndexWriterScope = { onmessage: null, postMessage: message => answers.push(message) };
+  serveIndexWriter(scope, open);
+  return {
+    answers,
+    send: data => scope.onmessage?.({ data } as unknown as MessageEvent<IndexWriterRequest>),
+  };
+}
+
 describe('the index writer program', () => {
-  it('should answer a probe, refuse a write before it is opened, and say why a batch failed', async () => {
+  it('should answer a probe, refuse a write before it is greeted, and say why a batch failed', async () => {
     // Arrange
-    const answers: IndexWriterResponse[] = [];
-    const scope: IndexWriterScope = { onmessage: null, postMessage: message => answers.push(message) };
     const { paths, database } = await indexFile();
     database.close();
-    serveIndexWriter(scope, file => new Database(file, { strict: true }));
-    const send = (data: IndexWriterRequest): void =>
-      scope.onmessage?.({ data } as unknown as MessageEvent<IndexWriterRequest>);
+    const { answers, send } = servedWriter();
 
     // Act
     send({ probe: true });
@@ -422,51 +453,105 @@ describe('the index writer program', () => {
       id: 2,
       writes: [{ kind: 'append-events', session: session(A, 1), events: [pointer(1, A, 0)] }],
     });
-    send({ kind: 'close', id: 3 });
+    send({ kind: 'persist', id: 3, writes: [{ kind: 'refresh-session', session: session(A, 1) }] });
+    send({ kind: 'close', id: 4 });
+    send({ kind: 'close', id: 5 });
 
     // Assert
     should(answers[0]).deepEqual({ probe: true });
-    should(answers[1]).match({ id: 1, ok: false, error: /before it was opened/ });
+    should(answers[1]).match({ id: 1, ok: false, error: /before it was greeted/ });
     should(answers[2]).match({ id: 2, ok: false, error: /CHECK constraint failed/ });
-    should(answers[3]).deepEqual({ id: 3, ok: true });
+    should(answers.slice(3)).deepEqual([
+      { id: 3, ok: true },
+      { id: 4, ok: true },
+      { id: 5, ok: true },
+    ]);
+  });
+
+  it('should load a current file whole, and let go of one that must be dropped', async () => {
+    // Arrange
+    const { paths, database } = await indexFile();
+    applyIndexWrite(database, { kind: 'append-events', session: session(A, 1), events: [pointer(1)] }, 'strict');
+    const { answers, send } = servedWriter();
+    send({ kind: 'open', file: paths.sessionIndex });
+
+    // Act
+    send({ kind: 'load', id: 1 });
+    database.exec('PRAGMA user_version = 99');
+    send({ kind: 'load', id: 2 });
+    await rm(paths.sessionIndex);
+    database.close();
+
+    // Assert
+    const loaded = answers[0] as { readonly load?: { readonly kind: string; readonly bytes?: Uint8Array } };
+    should(loaded.load?.kind).equal('loaded');
+    should(loaded.load?.bytes?.byteLength).be.above(0);
+    should(answers[1]).deepEqual({ id: 2, ok: true, load: { kind: 'drop' } });
+  });
+
+  it('should refuse to open a file a symbolic link has replaced', async () => {
+    // Arrange
+    const { paths, database } = await indexFile();
+    database.close();
+    await rm(paths.sessionIndex);
+    await symlink(join(paths.home, 'elsewhere.sqlite'), paths.sessionIndex);
+    const { answers, send } = servedWriter();
+    send({ kind: 'open', file: paths.sessionIndex });
+
+    // Act
+    send({ kind: 'persist', id: 1, writes: [] });
+
+    // Assert
+    should(answers).match([{ id: 1, ok: false, error: /refuses to follow a symbolic link/ }]);
   });
 
   it('should quote a failure that is not an Error as it was thrown', () => {
     // Arrange
-    const answers: IndexWriterResponse[] = [];
-    const scope: IndexWriterScope = { onmessage: null, postMessage: message => answers.push(message) };
     const throwing = {
       exec: () => undefined,
       transaction: () => () => {
         throw 'the disk is gone';
       },
     } as unknown as Database;
-    serveIndexWriter(scope, () => throwing);
+    const { answers, send } = servedWriter(() => throwing);
+    send({ kind: 'open', file: join(tmpdir(), 'ferretry-unused.sqlite') });
 
     // Act
-    scope.onmessage?.({ data: { kind: 'open', file: 'unused' } } as unknown as MessageEvent<IndexWriterRequest>);
-    scope.onmessage?.({ data: { kind: 'persist', id: 1, writes: [] } } as unknown as MessageEvent<IndexWriterRequest>);
+    send({ kind: 'persist', id: 1, writes: [] });
 
     // Assert
     should(answers).deepEqual([{ id: 1, ok: false, error: 'the disk is gone' }]);
   });
 });
 
-describe('WorkerIndexPersister', () => {
-  it('should persist each batch on the writer and close it before the fallback connection', async () => {
+/** An index file that records what reaches it, as the fallback behind the writer thread. */
+class RecordingFile extends RecordingPersister implements IndexFile {
+  loads = 0;
+
+  async load(): Promise<IndexLoad> {
+    this.loads += 1;
+    return { kind: 'loaded', bytes: new Uint8Array() };
+  }
+}
+
+describe('WorkerIndexFile', () => {
+  it('should load and persist on the writer, then close it before the fallback', async () => {
     // Arrange
     const { paths, database } = await indexFile();
-    const fallback = new RecordingPersister();
-    const worker = inProcessWriter(file => new Database(file, { strict: true }));
-    const subject = new WorkerIndexPersister(paths.sessionIndex, fallback, { spawn: () => worker });
+    const fallback = new RecordingFile();
+    const worker = inProcessWriter();
+    const subject = new WorkerIndexFile(paths.sessionIndex, fallback, { spawn: () => worker });
 
     // Act
+    const load = await subject.load();
     await subject.persist([{ kind: 'replace-session', session: session(A, 2), events: pointers(2) }]);
     const persisted = sequencesIn(database);
     await subject.close();
 
     // Assert
+    should(load.kind).equal('loaded');
     should(persisted).deepEqual([1, 2]);
+    should(fallback.loads).equal(0);
     should(fallback.batches).deepEqual([]);
     should(fallback.closed).equal(1);
     should(subject.retired).be.false();
@@ -474,47 +559,42 @@ describe('WorkerIndexPersister', () => {
     database.close();
   });
 
-  it('should refuse a batch the writer could not apply, and retire to the fallback after repeated failures', async () => {
+  it('should load on the main thread, and retire to it, when the writer never answers', async () => {
     // Arrange
     const { paths, database } = await indexFile();
-    const fallback = new RecordingPersister();
+    const fallback = new RecordingFile();
     let retired = 0;
-    const subject = new WorkerIndexPersister(paths.sessionIndex, fallback, {
+    const subject = new WorkerIndexFile(paths.sessionIndex, fallback, {
       // A thread that never answers: stuck on a disk that never returns.
       spawn: () => ({ onmessage: null, onerror: null, postMessage: () => undefined, terminate: () => undefined }),
       timeoutMs: 20,
       restart: { backoffMs: 0, maxBackoffMs: 0, maxFailures: 1, windowMs: 60_000 },
       retired: () => (retired += 1),
     });
-    const bad: IndexWrite = { kind: 'append-events', session: session(A, 1), events: [pointer(1, A, 0)] };
-    const good: IndexWrite = { kind: 'remove-session', id: A };
+    const write: IndexWrite = { kind: 'remove-session', id: A };
 
     // Act
-    let refused: unknown;
-    try {
-      await subject.persist([bad]);
-    } catch (error) {
-      refused = error;
-    }
-    await subject.persist([good]);
+    const load = await subject.load();
+    await subject.persist([write]);
     await subject.close();
 
     // Assert
-    should(String(refused)).containEql('did not persist a batch of index writes within 20 ms');
+    should(load.kind).equal('loaded');
+    should(fallback.loads).equal(1);
     should(retired).equal(1);
     should(subject.retired).be.true();
-    should(fallback.batches).deepEqual([[good]]);
+    should(fallback.batches).deepEqual([[write]]);
     should(fallback.closed).equal(1);
     database.close();
   });
 
-  it('should say why the writer refused a batch, and close the fallback even when the writer cannot close', async () => {
+  it('should refuse a batch the writer could not apply, and close the fallback even when the writer cannot close', async () => {
     // Arrange
     const { paths, database } = await indexFile();
     database.close();
-    const fallback = new RecordingPersister();
+    const fallback = new RecordingFile();
     let opened: Database | undefined;
-    const subject = new WorkerIndexPersister(paths.sessionIndex, fallback, {
+    const subject = new WorkerIndexFile(paths.sessionIndex, fallback, {
       spawn: () =>
         inProcessWriter(file => {
           opened = new Database(file, { strict: true });
@@ -537,12 +617,14 @@ describe('WorkerIndexPersister', () => {
     should(fallback.closed).equal(1);
   });
 
-  it('should write the file through the real bundled writer thread', async () => {
+  it('should load and write the file through the real bundled writer thread', async () => {
     // Arrange
     const { paths, database } = await indexFile();
-    const subject = new WorkerIndexPersister(paths.sessionIndex, new InlineIndexPersister(database));
+    database.close();
+    const subject = new WorkerIndexFile(paths.sessionIndex, new InlineIndexFile(paths.sessionIndex));
 
     // Act
+    const load = await subject.load();
     await subject.persist([{ kind: 'replace-session', session: session(A, 3), events: pointers(3) }]);
     await subject.close();
     const reopened = new Database(paths.sessionIndex, { readonly: true, strict: true });
@@ -550,12 +632,13 @@ describe('WorkerIndexPersister', () => {
     reopened.close();
 
     // Assert
+    should(load.kind).equal('loaded');
     should(persisted).deepEqual([1, 2, 3]);
   });
 });
 
 describe('BunSqliteIndexFactory', () => {
-  it('should load a WAL file into memory and persist what changed through its persister', async () => {
+  it('should load a WAL file into memory and persist what changed through its index file', async () => {
     // Arrange — a file left in WAL mode by an earlier daemon, with rows only in its log.
     const { paths, database } = await indexFile();
     database.exec('PRAGMA journal_mode = WAL');
@@ -576,5 +659,32 @@ describe('BunSqliteIndexFactory', () => {
     // Assert
     should(loaded).equal(1);
     should(persisted).deepEqual([1, 2]);
+  });
+
+  it('should refuse a file that still must be dropped after it was recreated, and close it', async () => {
+    // Arrange
+    const paths = await temporaryPaths();
+    const fileSystem = new StateFileSystem(paths);
+    await fileSystem.ensureDirectory(paths.home, 0o700);
+    let closed = 0;
+    const stubborn: IndexFile = {
+      load: async () => ({ kind: 'drop' }),
+      persist: async () => undefined,
+      close: async () => {
+        closed += 1;
+      },
+    };
+
+    // Act
+    let refused: unknown;
+    try {
+      await new BunSqliteIndexFactory({ create: () => stubborn }).open(paths, fileSystem);
+    } catch (error) {
+      refused = error;
+    }
+
+    // Assert
+    should(String(refused)).containEql('still not current');
+    should(closed).equal(1);
   });
 });
