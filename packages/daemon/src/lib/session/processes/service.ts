@@ -31,7 +31,7 @@ import {
 } from './transcript-evidence.ts';
 
 /** How many recent conversation events are searched for what the harness recorded about its commands. */
-export const PROCESS_TRANSCRIPT_TAIL = 400;
+const PROCESS_TRANSCRIPT_TAIL = 400;
 
 export type SessionProcessFailure = 'not_found' | 'changed' | 'not_stoppable';
 
@@ -154,9 +154,7 @@ export class SessionProcessService {
     const look = await this.look(sessionId);
     if (look.kind === 'unavailable')
       throw new SessionProcessError('changed', `process ${processId} has already ended: ${look.reason}`);
-    const entry = look.look.entries.find(
-      candidate => candidate.row.pid === id.pid && candidate.row.start === id.start,
-    );
+    const entry = look.look.entries.find(candidate => candidate.row.pid === id.pid && candidate.row.start === id.start);
     if (entry === undefined)
       throw new SessionProcessError(
         'changed',
@@ -181,13 +179,12 @@ export class SessionProcessService {
 
   private parse(processId: string): { readonly pid: number; readonly start: number } {
     const id = parseProcessId(processId);
-    if (id === undefined) throw new SessionProcessError('not_found', `${JSON.stringify(processId)} is not a process id`);
+    if (id === undefined)
+      throw new SessionProcessError('not_found', `${JSON.stringify(processId)} is not a process id`);
     return id;
   }
 
-  private async look(
-    sessionId: string,
-  ): Promise<
+  private async look(sessionId: string): Promise<
     | { readonly kind: 'looked'; readonly look: Look }
     | {
         readonly kind: 'unavailable';
@@ -335,16 +332,16 @@ export class SessionProcessService {
   private async redactList(list: SessionProcessList): Promise<SessionProcessList> {
     return await this.deps.redactor.batch(scrub => ({
       ...list,
-      processes: list.processes.map(process => {
-        const command = truncateCommand(scrub.text(process.command), SESSION_PROCESS_COMMAND_MAX);
+      processes: list.processes.map(item => {
+        const command = truncateCommand(scrub.text(item.command), SESSION_PROCESS_COMMAND_MAX);
         const label =
-          process.label === undefined
+          item.label === undefined
             ? undefined
-            : truncateCommand(scrub.text(process.label), SESSION_PROCESS_COMMAND_MAX).text;
+            : truncateCommand(scrub.text(item.label), SESSION_PROCESS_COMMAND_MAX).text;
         return {
-          ...process,
+          ...item,
           command: command.text,
-          commandTruncated: process.commandTruncated || command.truncated,
+          commandTruncated: item.commandTruncated || command.truncated,
           ...(label === undefined ? {} : { label }),
         };
       }),
@@ -353,13 +350,13 @@ export class SessionProcessService {
 }
 
 function wireBase(entry: ProcessEntry): Omit<SessionProcess, 'state' | 'output' | 'stoppable'> {
-  const command = truncateCommand(entry.row.argv || `pid ${entry.row.pid}`, SESSION_PROCESS_COMMAND_MAX);
+  // Cut to the wire limit only AFTER scrubbing (`redactList`): a secret straddling the limit would leak its prefix.
   return {
     id: entry.id,
     pid: entry.row.pid,
     ...(entry.parentId === undefined ? {} : { parentId: entry.parentId }),
-    command: command.text,
-    commandTruncated: command.truncated,
+    command: entry.row.argv || `pid ${entry.row.pid}`,
+    commandTruncated: false,
     ...(entry.label === undefined ? {} : { label: entry.label }),
     kind: entry.kind,
     startedAt: new Date(entry.row.startedAtMs).toISOString(),

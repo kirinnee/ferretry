@@ -218,7 +218,7 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     detail: { mode: 'console' },
   },
   // Stopping one of the ferret's processes from the Processes tab: an act on its pane, like Ctrl-C into the
-  // Console, counted on the session the same way and never naming the process.
+  // Console, counted on the session the same way and never naming which one.
   {
     method: 'POST',
     path: '/v1/sessions/:sessionId/processes/:processId/stop',

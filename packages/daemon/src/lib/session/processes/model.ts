@@ -1,5 +1,4 @@
 import {
-  SESSION_PROCESS_COMMAND_MAX,
   type SessionProcessKind,
   type SessionProcessOutputAvailability,
   type SessionProcessState,
@@ -134,7 +133,7 @@ export function processEntries(view: ProcessView): readonly ProcessEntry[] {
       id: processIdOf(row.pid, row.start),
       row,
       ...(parent === undefined ? {} : { parentId: parent.id }),
-      ...(label === undefined ? {} : { label: label.slice(0, SESSION_PROCESS_COMMAND_MAX) }),
+      ...(label === undefined ? {} : { label }),
       kind,
       state,
       output: liveOutputAvailability(row.stdout, row.stderr),
