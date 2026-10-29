@@ -458,3 +458,5 @@ test for release changes, and it needs no tokens.
 4. Classify any new action in `config/action-trust.json` and pin it accordingly.
 5. If the job needs tools the shell lacks, add them through
    `nix/packages.nix` → `nix/env.nix` ([Nix](../nix/index.md)) — never `apt-get` in a workflow.
+
+<!-- throwaway proof -->
