@@ -1,7 +1,7 @@
 /**
  * WHETHER THE PRIMARY POINTER IS A MOUSE OR TRACKPAD (`(pointer: fine)`): on such a screen swiping does
- * not matter, so the Attention page draws the selected item flat — no card, no swipe arrows. A browser
- * with no `matchMedia` is read as coarse, which keeps the swipe card.
+ * not matter, so the chat's agenda has no swipe arrows and may dock beside the chat. A browser with no
+ * `matchMedia` is read as coarse, which keeps the touch layout.
  */
 
 import { useSyncExternalStore } from 'react';

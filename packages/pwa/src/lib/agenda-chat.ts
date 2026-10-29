@@ -31,12 +31,18 @@ export const agendaCounts = (items: readonly AttentionItem[]): AgendaCounts => {
   };
 };
 
-/** The words of the line, in segments: "2 blocking", "5 need you", "2 with Johnnie". Nothing needing you says so. */
-export const agendaSegments = (counts: AgendaCounts, ferret: string): readonly string[] => {
-  const segments: string[] = [];
-  if (counts.blocking > 0) segments.push(`${counts.blocking} blocking`);
-  if (counts.needYou > 0) segments.push(`${counts.needYou} need you`);
-  else if (counts.withFerret > 0) segments.push('Nothing needs you');
-  if (counts.withFerret > 0) segments.push(`${counts.withFerret} with ${ferret}`);
+export interface AgendaSegment {
+  /** The number the line shows in bold; `null` for a segment that is only words. */
+  readonly count: number | null;
+  readonly words: string;
+}
+
+/** The line's segments: "2 blocking", "5 need you", "2 with Johnnie". Nothing needing you says so. */
+export const agendaSegments = (counts: AgendaCounts, ferret: string): readonly AgendaSegment[] => {
+  const segments: AgendaSegment[] = [];
+  if (counts.blocking > 0) segments.push({ count: counts.blocking, words: 'blocking' });
+  if (counts.needYou > 0) segments.push({ count: counts.needYou, words: 'need you' });
+  else if (counts.withFerret > 0) segments.push({ count: null, words: 'Nothing needs you' });
+  if (counts.withFerret > 0) segments.push({ count: counts.withFerret, words: `with ${ferret}` });
   return segments;
 };

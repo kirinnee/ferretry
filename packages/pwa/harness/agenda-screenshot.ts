@@ -208,7 +208,10 @@ const oneRow = async (page: Page, label: string): Promise<void> => {
       ...document.querySelectorAll(
         '[data-agenda-line] .fy-agenda-line__name, [data-agenda-line] .fy-agenda-line__segment',
       ),
-    ].map(element => Math.round(element.getBoundingClientRect().top)),
+    ]
+      .map(element => element.getBoundingClientRect())
+      .filter(box => box.width > 0 && box.height > 0)
+      .map(box => Math.round(box.top)),
   );
   check(
     new Set(tops).size <= 1,
