@@ -94,6 +94,14 @@ export type SessionActionEntry =
       readonly kind: 'form';
       /** The form's title, as its popover or sheet heading. */
       readonly title: string;
+      /**
+       * `drawer` is for a LIST, not a form: a right-hand drawer under a dimmed backdrop on a desktop, a
+       * full-screen sheet on a phone, with a header and ✕ the frame draws. Absent, the form hangs in a
+       * popover (desktop) or a bottom sheet (phone) under its own `title` heading.
+       */
+      readonly presentation?: 'drawer';
+      /** A drawer's visible heading when it should say more than `title` does: "Resolved · 7". */
+      readonly heading?: string;
       readonly render: (host: SessionActionFormHost) => ReactNode;
     });
 

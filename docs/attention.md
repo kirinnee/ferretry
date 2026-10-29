@@ -234,7 +234,7 @@ before the structure existed still reads.
 - **Nothing open, nothing drawn.** A chat with no open item shows nothing above its composer: no "all
   clear" line and no resolved history. Open items are the pinned card and an accent count in the chat
   header. The history is one step away: the header's Actions menu has an "N resolved" entry (only when
-  there is any), and the inbox has a Resolved filter that reads the boards of the 30 most recently active
+  there is any) that opens a right-hand drawer (a full-screen sheet on a phone), and the inbox has a Resolved filter that reads the boards of the 30 most recently active
   conversations.
 - **Raising one.** It can be raised from flags (`--premise`, `--context`, `--decided`, `--term "X=meaning"`, `--question`,
   `--option`, `--recommend`, `--recommend-why`, `--impact`, `--urgency`, `--link`) or from a JSON body
