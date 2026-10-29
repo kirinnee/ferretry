@@ -1063,6 +1063,38 @@ describe('rendezvous: handing the claim over to the same daemon', () => {
     should(plain.arrived.state.pending[0]).not.have.property('handover');
   });
 
+  it('should mark only the claiming socket as verifying when two feature-asking sockets are pending', () => {
+    const arrive = (state: RendezvousState, socketId: string) =>
+      reduceRendezvous(state, {
+        kind: 'daemon-arrived',
+        socketId,
+        challenge: new Uint8Array(32).fill(7),
+        host,
+        features: [...features],
+        handover: tokenTwo,
+        at: 3_000,
+      }).state;
+    const both = arrive(arrive(holding(), 'first'), 'second');
+
+    const step = reduceRendezvous(both, {
+      kind: 'frame',
+      socketId: 'second',
+      frame: control(RENDEZVOUS_SESSION_ID, {
+        t: 'claim',
+        protocol: RELAY_PROTOCOL_ID,
+        publicKey,
+        signature,
+        replaces: tokenOne,
+      }),
+      at: 3_000,
+    });
+
+    should(step.state.pending.map(entry => [entry.socketId, entry.verifying, entry.replaces])).deepEqual([
+      ['first', false, undefined],
+      ['second', true, tokenOne],
+    ]);
+  });
+
   it('should let a verified claim naming the incumbent token supersede it, with a new token', () => {
     const step = claim(holding(), 'new', { handover: tokenTwo, replaces: tokenOne });
     should(closures(step.settled.effects)).deepEqual([
