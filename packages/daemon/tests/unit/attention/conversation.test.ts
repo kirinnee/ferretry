@@ -251,6 +251,42 @@ describe('Attention in a conversation', () => {
     should(turn.answers.map(each => each.id)).deepEqual(['A2', 'A3']);
   });
 
+  it('should deliver a reply about an item still in discussion as a reply, and resolve nothing', () => {
+    // Arrange
+    const talking = item('A8', {
+      subject: 'Which region?',
+      ask: { kind: 'open-question' },
+      waitingOn: 'ferret',
+      askedAt: AT,
+      waitingFor: 'discussion',
+    });
+
+    // Act
+    const turn = conversationTurn('!A8 eu-west-1 sounds right', [talking]);
+
+    // Assert
+    should(turn.message).equal('[reply about !A8 «Which region?»] !A8 eu-west-1 sounds right');
+    should(turn.answers).deepEqual([]);
+  });
+
+  it('should word each referenced item by where it is: a reply for one in discussion, an answer for a surfaced one', () => {
+    // Arrange
+    const talking = item('A8', {
+      subject: 'Which region?',
+      ask: { kind: 'open-question' },
+      waitingOn: 'ferret',
+      askedAt: AT,
+      waitingFor: 'discussion',
+    });
+
+    // Act
+    const turn = conversationTurn('!A8 maybe eu, !A2 Wait', [talking, CHOICE]);
+
+    // Assert
+    should(turn.message).startWith('[answer to !A2 «Rebase onto main now?»] [reply about !A8 «Which region?»] ');
+    should(turn.answers.map(each => each.id)).deepEqual(['A2']);
+  });
+
   it('should deliver a plain message exactly as typed, however many items are open, and resolve none', () => {
     // Arrange
     const open = [CHOICE, OPEN, PERMISSION, PLAIN, item('A6'), item('A7')];
@@ -297,7 +333,7 @@ describe('Attention in a conversation', () => {
     // Assert
     should(open).deepEqual({ kind: 'open-question', answer: 'eu-west-1' });
     should(choice).deepEqual({ kind: 'multiple-choice', choice: 'Rebase now' });
-    should(notAChoice).be.undefined();
+    should(notAChoice).deepEqual({ kind: 'other', answer: 'rebase it tomorrow' });
     should(permission).be.undefined();
     should(plain).be.undefined();
     should(blank).be.undefined();

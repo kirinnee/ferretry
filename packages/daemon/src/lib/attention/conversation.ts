@@ -37,6 +37,8 @@ const quoted = (ask: string): string => (ask.length > ASK_QUOTE_CHARS ? `${ask.s
 
 const named = (item: Pick<AttentionItem, 'id' | 'subject'>): string => `!${item.id} «${quoted(item.subject)}»`;
 
+const namedByTitle = (item: AttentionItem): string => `!${item.id} «${quoted(attentionTitle(item))}»`;
+
 /** The open items a message references, in board order, each once. */
 export function referencedAttention(message: string, items: readonly AttentionItem[]): readonly AttentionItem[] {
   const ids = new Set([...message.matchAll(ATTENTION_REFERENCE)].map(match => match[1]));
@@ -93,7 +95,7 @@ export function needsInfoMessage(item: AttentionItem): string {
 }
 
 /**
- * The message a ferret receives when the owner wants to talk one of ITS items through before answering —
+ * The message a ferret receives when the owner, looking at a SURFACED item, wants to talk it through before answering —
  * they do not follow it, or its premise is wrong. The item stays open: the ferret answers in chat, then
  * updates the item (`attention edit`) or closes it when the premise was wrong (`attention done`).
  */
@@ -114,24 +116,29 @@ export interface ConversationTurn {
 /**
  * A person's message to a ferret, read against that ferret's open items.
  *
- * - It references open items: it IS the answer to them — prefixed `[answer to !A3 «ask»]` so the
+ * - It references SURFACED open items: it IS the answer to them — prefixed `[answer to !A3 «ask»]` so the
  *   ferret knows what it answers, and they resolve.
+ * - It references items IN DISCUSSION: it is one turn of that discussion — prefixed
+ *   `[reply about !A5 «title»]`, and nothing resolves. The ferret closes what the reply answered
+ *   (`attention done`) and surfaces what it did not (`attention surface`).
  * - It references none: delivered exactly as typed, however many items are open. Nothing is resolved.
- * - An item IN DISCUSSION is never answered by chat: the owner asked to talk it through, and talking about
- *   it (the app's answer chip still names it) is that discussion, delivered as typed. The ferret ends the
- *   discussion by updating or closing the item; the owner answers it on its card.
  */
 export function conversationTurn(message: string, open: readonly AttentionItem[]): ConversationTurn {
-  const answers = referencedAttention(message, open).filter(item => !inDiscussion(item));
-  if (answers.length > 0) return { message: `[answer to ${answers.map(named).join(', ')}] ${message}`, answers };
-  return { message, answers };
+  const referenced = referencedAttention(message, open);
+  const answers = referenced.filter(item => !inDiscussion(item));
+  const discussed = referenced.filter(inDiscussion);
+  const prefixes = [
+    ...(answers.length > 0 ? [`[answer to ${answers.map(named).join(', ')}]`] : []),
+    ...(discussed.length > 0 ? [`[reply about ${discussed.map(namedByTitle).join(', ')}]`] : []),
+  ];
+  return { message: prefixes.length === 0 ? message : `${prefixes.join(' ')} ${message}`, answers };
 }
 
 /**
  * How a chat message answers one item on the board, or `undefined` when it can only RESOLVE it (with
- * the message as the note): an open question takes the words as its answer, and a choice takes them
- * only when, once the reference is taken out, they name one of its options exactly. Anything else —
- * no ask, a permission, a review — is never guessed from prose.
+ * the message as the note): an open question takes the words as its answer, and a choice takes them as the
+ * option they name exactly (once the reference is taken out) — or, when they name none, as an `other` answer
+ * in the owner's words. Anything else — no ask, a permission, a review — is never guessed from prose.
  */
 export function conversationResponse(item: AttentionItem, message: string): AttentionResponse | undefined {
   // The words without the references that named the item: "!A3 eu-west-1" answers "eu-west-1".
@@ -145,10 +152,12 @@ export function conversationResponse(item: AttentionItem, message: string): Atte
   if (item.ask.kind !== 'multiple-choice') return undefined;
   const words = answer.toLowerCase();
   const option = item.ask.options.find(candidate => candidate.label.trim().toLowerCase() === words);
-  return option === undefined ? undefined : { kind: 'multiple-choice', choice: option.label };
+  return option === undefined
+    ? { kind: 'other', answer: answer.slice(0, MAX_ATTENTION_DETAIL_LENGTH) }
+    : { kind: 'multiple-choice', choice: option.label };
 }
 
-/** An item the owner asked to talk through, now waiting on the ferret's reply rather than on the owner. */
+/** An item still in discussion with its ferret — not on the owner's queue yet — waiting on the ferret rather than the owner. */
 export function inDiscussion(item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>): boolean {
   return item.waitingOn !== undefined && item.waitingFor === 'discussion';
 }
