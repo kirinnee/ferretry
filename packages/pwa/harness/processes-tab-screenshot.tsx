@@ -37,6 +37,7 @@ import { ProcessesSurface } from '../../src/features/workspace/processes-surface
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { ALL_PROCESSES, PROCESSES_NOW, outputAnswer } from '../../tests/support/session-processes.ts';
+import { liveProcessCount } from '../../src/lib/session-processes.ts';
 import { useState } from 'react';
 
 const daemon = daemonConnection({ daemonId: 'harness', baseUrl: 'https://harness.example.test', deviceId: 'token' });
@@ -73,7 +74,7 @@ function Scene() {
       <div className="flex shrink-0 items-center gap-2 border-b border-border-soft px-panel py-2 text-meta text-muted">
         <span>Chat</span>
         <span>Console</span>
-        <strong className="text-fg">Processes · 5</strong>
+        <strong className="text-fg">Processes · {liveProcessCount(ALL_PROCESSES)}</strong>
       </div>
       <div className="flex min-h-0 flex-1 flex-col">
         <ProcessesSurface
