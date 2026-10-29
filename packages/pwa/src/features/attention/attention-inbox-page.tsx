@@ -16,7 +16,7 @@
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
  *
  * The page renders off the shell's `AttentionInbox` alone, so it render-tests with a fake one; reading a
- * ferret's last messages and ticking a step are the host's (`readRecent`, `onProgress`).
+ * ferret's last messages are the host's (`readRecent`).
  */
 
 import { attentionCardAnswers, DISCUSS_LABEL } from '@ferretry/protocol';
@@ -97,13 +97,12 @@ interface CardHostProps {
   readonly onNavigate: (to: string) => void;
   readonly now: number | undefined;
   readonly readRecent?: ((card: InboxCard) => Promise<readonly RecentMessage[]>) | undefined;
-  readonly onProgress?: ((card: InboxCard, step: number, done: boolean) => Promise<void>) | undefined;
   readonly recentOpen?: boolean | undefined;
 }
 
 /** One card, answering into the undo window. */
 const renderInboxCard = (
-  { inbox, onNavigate, now, readRecent, onProgress, recentOpen }: CardHostProps,
+  { inbox, onNavigate, now, readRecent, recentOpen }: CardHostProps,
   card: InboxCard,
   act: (action: InboxAction) => void,
   swipeHints: boolean,
@@ -120,9 +119,6 @@ const renderInboxCard = (
       origin={origin}
       swipeHints={swipeHints}
       {...(now === undefined ? {} : { now })}
-      {...(onProgress === undefined
-        ? {}
-        : { onProgress: (step: number, done: boolean) => onProgress(card, step, done) })}
       {...(readRecent === undefined
         ? {}
         : {
@@ -351,8 +347,6 @@ export interface AttentionInboxPageProps {
   readonly banner?: ReactNode;
   /** Reads the last few things the card's ferret said. Absent: the card has no "Last messages" fold. */
   readonly readRecent?: (card: InboxCard) => Promise<readonly RecentMessage[]>;
-  /** Ticks or unticks a step of a to-do on its machine. Absent: the steps are read-only. */
-  readonly onProgress?: (card: InboxCard, step: number, done: boolean) => Promise<void>;
   /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
   /** Starts the deck card's "Last messages" fold open (a harness). */
@@ -619,7 +613,6 @@ export function AttentionInboxPage({
   clock,
   banner,
   readRecent,
-  onProgress,
   reducedMotion,
   recentOpen,
   initialOpen,
@@ -709,7 +702,7 @@ export function AttentionInboxPage({
   const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
   const nothingForYou = inbox.cards.length === 0;
   const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
-  const host: CardHostProps = { inbox, onNavigate, now, readRecent, onProgress, recentOpen };
+  const host: CardHostProps = { inbox, onNavigate, now, readRecent, recentOpen };
   const atEnd = deckPlace === QUEUE_END;
   const skip = (): void => setDeckAt(skipSelection(order, deckPlace));
   const review = (): void => setDeckAt(order[0] ?? null);

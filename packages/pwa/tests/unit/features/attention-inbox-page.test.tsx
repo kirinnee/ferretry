@@ -281,6 +281,39 @@ describe('AttentionInboxPage rows', () => {
     await mounted.unmount();
   });
 
+  it('says who raised an item when it is not the ferret whose group it sits in', async () => {
+    const raised = inboxCard(
+      attentionItem('W3', { subject: 'Drop the cache?', raisedBy: 'daemon', sourceRef: 'warden:ask:cache' } as never),
+      sessionView('sess-10', { config: { teammate: 'kai', name: undefined } }),
+    );
+    const mounted = await mount(page(fakeInbox(), [raised, twoWay]));
+    const authors = [...mounted.container.querySelectorAll('[data-attention-row-author]')].map(
+      node => node.textContent,
+    );
+    expect(authors).toEqual(['From Warden']);
+    await mounted.unmount();
+  });
+
+  it('clears the Find box with Escape, and leaves an empty box alone', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay]));
+    const find = must(mounted.container.querySelector<HTMLInputElement>('[data-attention-find]'), 'Find');
+    const pressEscape = () =>
+      interact(() => {
+        find.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+      });
+    await pressEscape();
+    expect(rows(mounted)).toHaveLength(2);
+    await interact(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(find, 'nothing like this');
+      find.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(rows(mounted)).toHaveLength(0);
+    await pressEscape();
+    expect(find.value).toBe('');
+    expect(rows(mounted)).toHaveLength(2);
+    await mounted.unmount();
+  });
+
   it('links a ferret’s header to its chat', async () => {
     const mounted = await mount(page(fakeInbox(), [twoWay]));
     const head = must(mounted.container.querySelector<HTMLAnchorElement>('.fy-inbox-group__head'), 'the group head');
@@ -501,6 +534,8 @@ describe('AttentionInboxPage on a phone', () => {
     expect(swipeHintFor(undefined)).toBe('');
     expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · → Ship · ↓ Discuss');
     expect(swipeHintFor(bare)).toBe('Swipe → Got it · ↓ Discuss');
+    const task = inboxCard(attentionItem('A9', { subject: 'Do the list', answers: [] } as never));
+    expect(swipeHintFor(task)).toBe('Reply in words, or open the chat · ↓ Discuss');
   });
 
   it('reads the ferret’s last messages only when the fold is opened, and shows them', async () => {
@@ -528,6 +563,65 @@ describe('AttentionInboxPage on a phone', () => {
       [...mounted.container.querySelectorAll('[data-attention-recent-message]')].map(message => message.textContent),
     ).toEqual(['Cut the release branch.', 'Raised !A2 about shipping.']);
     await mounted.unmount();
+  });
+
+  it('says "Later" once the skipped cards are left waiting, and counts them', async () => {
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay], { phone: true, initialOpen: twoWay.key }));
+    const skip = () =>
+      must(mounted.container.querySelector<HTMLButtonElement>('.fy-attn-deck__top [data-attention-skip]'), 'Skip');
+    await interact(() => skip().click());
+    await interact(() => skip().click());
+    await interact(() =>
+      must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-later]'), 'Later').click(),
+    );
+    const end = must(mounted.container.querySelector('[data-attention-queue-end]'), 'the end');
+    expect(end.getAttribute('data-attention-queue-end')).toBe('later');
+    expect(end.textContent).toContain('All caught up for now');
+    expect(end.textContent).toContain('2 are still open');
+    await mounted.unmount();
+  });
+
+  it('says "Updating" in the deck header while boards are read', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [threeWay], { phone: true, initialOpen: threeWay.key, reading: true }),
+    );
+    expect(mounted.container.querySelector('[data-attention-inbox="card"] [data-attention-updating]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('says how long ago each message was written, and says so when the ferret has written nothing', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [twoWay], {
+        phone: true,
+        initialOpen: twoWay.key,
+        recentOpen: true,
+        readRecent: async () => [
+          { text: 'Cut the release branch.', timestamp: '2026-08-01T05:00:00.000Z' },
+          { text: 'Pushed it.', timestamp: '2026-08-01T12:00:00.000Z' },
+          { text: 'No time on this one.' },
+        ],
+      }),
+    );
+    await flush();
+    expect([...mounted.container.querySelectorAll('[data-attention-recent-message]')].map(m => m.textContent)).toEqual([
+      '7h agoCut the release branch.',
+      'just nowPushed it.',
+      'No time on this one.',
+    ]);
+    await mounted.unmount();
+    const quiet = await mount(
+      page(fakeInbox(), [twoWay], {
+        phone: true,
+        initialOpen: twoWay.key,
+        recentOpen: true,
+        readRecent: async () => [],
+      }),
+    );
+    await flush();
+    expect(quiet.container.querySelector('.fy-attn-recent__note')?.textContent).toBe(
+      'Kai hasn’t written anything yet.',
+    );
+    await quiet.unmount();
   });
 
   it('says a failed read in the fold, and draws no fold when the host cannot read', async () => {
