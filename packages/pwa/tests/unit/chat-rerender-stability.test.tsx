@@ -228,6 +228,16 @@ describe('a fold the reader opened stays open when its row is redrawn in a new s
       '2 tools',
     );
     expect(bodies()).toBe(1);
+
+    // Act — the reader folds that call again, from inside the group.
+    const lines = view.container.querySelectorAll<HTMLButtonElement>(
+      '[data-transcript-kind="tool"] .border-l .kt-chrome > button',
+    );
+    await interact(() => must(lines[0], 'the call inside the group').click());
+
+    // Assert — it closes; the group stays open around it.
+    expect(bodies()).toBe(0);
+    expect(lines.length).toBe(2);
   });
 
   test('a sub-ferret start keeps its brief open as the start finishes', async () => {
