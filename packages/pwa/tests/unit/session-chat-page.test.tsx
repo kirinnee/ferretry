@@ -2538,7 +2538,7 @@ describe('SessionChatPage', () => {
     });
 
     test('counts a held answer down above the composer when the host passes attentionReplies', () => {
-      const replies = { secondsLeft: 8, pending: ['A3'], sending: false, sendNow: () => undefined };
+      const replies = { secondsLeft: 8, pending: ['A3'], heldForTurn: false, sending: false, sendNow: () => undefined };
       const page = renderSessionChatPage(chatPage({ attention: attentionModel(), attentionReplies: replies }));
       try {
         const slot = panel(page.root).props.repliesSlot;

@@ -22,6 +22,8 @@ export interface AttentionReplies {
   /** Whole seconds until the daemon sends the held answers; `null` when nothing is held. */
   readonly secondsLeft: number | null;
   readonly pending: readonly string[];
+  /** The batch is due but held: the ferret is mid-turn, and it is sent when the turn ends. */
+  readonly heldForTurn: boolean;
   readonly sending: boolean;
   readonly sendNow: () => void;
 }
@@ -35,7 +37,8 @@ export const secondsUntil = (dueAt: string, now: number): number | null => {
 /**
  * The daemon holds a ferret's answers for a settle window; this counts it down from the board's `replies`
  * and offers "Send now". A daemon that never sends `replies` delivers at once, so this stays empty for it.
- * When the window passes, the board is read again once, so the held answers are seen to have left.
+ * When the window passes, the board is read again once, so the held answers are seen to have left —
+ * unless the daemon says it is holding them for the ferret's turn, which keeps the notice up.
  */
 export const useAttentionReplies = (
   client: DaemonAttentionClient,
@@ -57,12 +60,13 @@ export const useAttentionReplies = (
 
   const secondsLeft = dueAt === undefined ? null : secondsUntil(dueAt, now);
   const expired = dueAt !== undefined && secondsLeft === 0;
+  const heldForTurn = replies?.heldForTurn === true;
 
   useEffect(() => {
-    if (!expired || scope === null || dueAt === undefined || rereadFor.current === dueAt) return;
+    if (!expired || heldForTurn || scope === null || dueAt === undefined || rereadFor.current === dueAt) return;
     rereadFor.current = dueAt;
     void client.revalidate(connection, scope).catch(() => {});
-  }, [expired, dueAt, client, connection, scope]);
+  }, [expired, heldForTurn, dueAt, client, connection, scope]);
 
   const sendNow = (): void => {
     if (scope === null || sending) return;
@@ -75,7 +79,8 @@ export const useAttentionReplies = (
 
   return {
     secondsLeft: expired ? null : secondsLeft,
-    pending: expired ? [] : (replies?.pending ?? []),
+    pending: expired && !heldForTurn ? [] : (replies?.pending ?? []),
+    heldForTurn,
     sending,
     sendNow,
   };
