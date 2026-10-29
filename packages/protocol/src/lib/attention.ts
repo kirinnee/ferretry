@@ -522,6 +522,14 @@ const AttentionItemBaseShape = {
   revisions: z.array(AttentionRevisionSchema).min(1).max(MAX_ATTENTION_REVISIONS).optional(),
   /** The owner's last action on this item never reached the ferret; present only on an open item. */
   undelivered: AttentionUndeliveredSchema.optional(),
+  /**
+   * A PLAIN NOTIFICATION (`fy notify`), not an agenda item: a summary the owner reads in the ferret's Inbox
+   * group and taps to open its chat. It has no answers and no turn; reading or clearing it resolves it. An old
+   * app reads it as an info card.
+   */
+  notice: z.literal(true).optional(),
+  /** The ferret asked for the phone to buzz for this notification (`fy notify --ping`). */
+  ping: z.literal(true).optional(),
 };
 
 export const AttentionItemSchema = z
@@ -838,6 +846,10 @@ export const SessionAttentionSummarySchema = z.object({
    * when none is.
    */
   discussing: PositiveIntegerSchema.optional(),
+  /** The ferret works in AGENDA MODE (a switchable instruction section, off by default): the chat draws its agenda. */
+  agendaMode: z.literal(true).optional(),
+  /** The ferret is STOPPED on the owner: idle, with at least one item on the owner's turn. */
+  stopped: z.literal(true).optional(),
 });
 export type SessionAttentionSummary = z.infer<typeof SessionAttentionSummarySchema>;
 
