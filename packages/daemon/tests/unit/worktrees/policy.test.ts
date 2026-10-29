@@ -251,6 +251,33 @@ describe('assessWorktreeRemoval', () => {
   });
 });
 
+describe('assessWorktreeRemoval branch pricing', () => {
+  const branchEvidence = {
+    protectedBranch: false,
+    checkedOut: false,
+    activeCheckout: false,
+    liveTerminals: 0,
+    branchPreexisted: false,
+    commitsPushed: false,
+    integrated: true,
+  };
+
+  it('should price the branch deletion on the check when branch evidence exists and omit it otherwise', () => {
+    // Act
+    const without = assessWorktreeRemoval(safeEvidence());
+    const priced = assessWorktreeRemoval(safeEvidence({ branchEvidence }));
+    const confirmed = assessWorktreeRemoval(
+      safeEvidence({ branchEvidence, branchConfirmations: ['delete_unpushed_branch'] }),
+    );
+
+    // Assert
+    should(without.branchDeletion).be.undefined();
+    should(priced.branchDeletion?.deletable).be.false();
+    should(priced.branchDeletion?.blockers.map(item => item.code)).deepEqual(['unpushed_commits']);
+    should(confirmed.branchDeletion?.deletable).be.true();
+  });
+});
+
 describe('assessBranchDeletion', () => {
   it('should allow an integrated, pushed, newly-created inactive branch', () => {
     // Act

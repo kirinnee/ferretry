@@ -20,6 +20,7 @@ import {
   requiresHumanLiveVerification,
   requiresHumanWorkflowApproval,
   requiresReopenAction,
+  sameTaskDoneRequestFingerprint,
   taskPhaseFromStatus,
   taskPhaseMovesBackward,
   taskStatusFromPhase,
@@ -279,6 +280,22 @@ describe('identity versus board authorization', () => {
     should(canActorVerifyTaskDone(blankDurableIds)).be.false();
     should(canActorVerifyTaskDone(mismatchedRetryId)).be.false();
     should(canActorVerifyTaskDone(valid, { action: 'status', status: 'done', reason: 'a different click' })).be.false();
+  });
+});
+
+describe('completion request fingerprints', () => {
+  it('should treat equal parsed requests as the same completion and any differing field as another', () => {
+    // Arrange
+    const phase = { action: 'phase', phase: 'done', reason: 'shipped' } as const;
+    const status = { action: 'status', status: 'done', reason: 'shipped', note: 'n' } as const;
+
+    // Act + Assert
+    should(sameTaskDoneRequestFingerprint(phase, { ...phase })).be.true();
+    should(sameTaskDoneRequestFingerprint(phase, { ...phase, reason: 'other' })).be.false();
+    should(sameTaskDoneRequestFingerprint(phase, status)).be.false();
+    should(sameTaskDoneRequestFingerprint(status, phase)).be.false();
+    should(sameTaskDoneRequestFingerprint(status, { ...status })).be.true();
+    should(sameTaskDoneRequestFingerprint(status, { ...status, note: 'm' })).be.false();
   });
 });
 

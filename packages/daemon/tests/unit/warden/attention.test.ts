@@ -236,6 +236,22 @@ describe('board rows in the fleet view', () => {
   });
 });
 
+describe('ordering rows that wait identically', () => {
+  it('should fall back to the row id when session and waiting instant are both equal', () => {
+    // Arrange
+    const same = at(-20);
+    const boards = [
+      board('s1', [boardItem({ id: 'A3', waitingSince: same }), boardItem({ id: 'A1', waitingSince: same })]),
+    ];
+
+    // Act
+    const result = view({ boards });
+
+    // Assert
+    should(result.items.map(item => item.id)).eql(['A1', 'A3']);
+  });
+});
+
 describe('judging a board row', () => {
   const verdict = (overrides: Partial<JudgedVerdict> = {}): JudgedVerdict => ({
     at: at(-5),
