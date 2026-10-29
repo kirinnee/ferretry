@@ -1,3 +1,10 @@
+## [4.103.1](https://github.com/kirinnee/ferretry/compare/v4.103.0...v4.103.1) (2026-10-29)
+
+### Fixes
+
+* **daemon:** close live sockets before storage on shutdown ([#874](https://github.com/kirinnee/ferretry/issues/874)) ([95a99a9](https://github.com/kirinnee/ferretry/commit/95a99a9b93c73caf3f89111dbdfe7b561ac04587))
+* **daemon:** open the session index on its writer thread ([#870](https://github.com/kirinnee/ferretry/issues/870)) ([9e8078d](https://github.com/kirinnee/ferretry/commit/9e8078da96651f1c96e6131baf5cb15b6640bfe1)), closes [#857](https://github.com/kirinnee/ferretry/issues/857) [#866](https://github.com/kirinnee/ferretry/issues/866)
+
 ## [4.103.0](https://github.com/kirinnee/ferretry/compare/v4.102.0...v4.103.0) (2026-10-29)
 
 ### Features
