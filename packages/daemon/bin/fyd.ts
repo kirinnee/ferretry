@@ -9009,11 +9009,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       storage.subscribeStates((id, state) => void harnessPrompts.stateWritten(id, state));
       void harnessPrompts.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
-      // The turn-end check (docs/attention.md § The turn-end check): a reply that asks the owner to act,
+      // The turn-end check (docs/agenda.md, nudge-once): a reply that asks the owner to act,
       // from a turn that raised no item for it, gets one nudge. Read after the transcript has settled, since
       // the turn's end can be seen on the pane before its last words reach the file; a listener must never
       // throw into the journal's append path, and a check that cannot read says nothing.
-      const nudgeSessions = new StorageAttentionNudgeSessions(storage);
+      const nudgeSessions = new StorageAttentionNudgeSessions(storage, {
+        read: async sessionId => await agendaModes.enabled(sessionId),
+      });
       const attentionNudge = new AttentionTurnNudge(
         {
           enabled: async () => (await effectiveAccountModel())?.machine.attentionNudge ?? true,

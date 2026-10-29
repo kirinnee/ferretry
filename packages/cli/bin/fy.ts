@@ -136,7 +136,7 @@ import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerModelsCommands } from '../src/lib/models/commands';
 import { ModelsController } from '../src/lib/models/controller';
-import { registerNotifyCommands } from '../src/lib/notify/commands';
+import { registerNotifyCommands, runNotify } from '../src/lib/notify/commands';
 import { ProtocolNotifyGateway } from '../src/lib/notify/gateway';
 import { registerOnboardCommands } from '../src/lib/onboard/commands';
 import { OnboardController } from '../src/lib/onboard/controller';
@@ -820,7 +820,8 @@ function accountCommandDeps(world: CliWorld, client: SharedDaemonClient): Accoun
  * new group is a one-line append — it merges the way a barrel does, by keeping both sides.
  */
 const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
-  ({ program, world, client, ownSessionId }) =>
+  ({ program, world, client, ownSessionId }) => {
+    const notifyPorts = { gateway: new ProtocolNotifyGateway(client, ownSessionId), out: world.io, ownSessionId };
     registerAttentionCommands(
       program,
       new AttentionController(
@@ -829,7 +830,9 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
         ownSessionId,
         new AttentionBriefInput(world.cwd),
       ),
-    ),
+      async (words, options) => await runNotify(notifyPorts, words, options),
+    );
+  },
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
   ({ program, world, client, ownSessionId }) =>

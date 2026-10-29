@@ -14,10 +14,17 @@ const afterAdd = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2'
 function run(argv: string[]) {
   const gateway = new RecordingAttentionGateway(board, afterAdd);
   const out = new CapturingOutput();
+  const sent: Array<{ words: readonly string[]; options: unknown }> = [];
   const program = new Command().name('fy').exitOverride();
   program.configureOutput({ writeOut: () => {}, writeErr: () => {} });
-  registerAttentionCommands(program, new AttentionController(gateway, out, SESSION, undefined, () => NOW));
-  return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, out };
+  registerAttentionCommands(
+    program,
+    new AttentionController(gateway, out, SESSION, undefined, () => NOW),
+    async (words, options) => {
+      sent.push({ words, options });
+    },
+  );
+  return { parsed: program.parseAsync(['node', 'fy', ...argv]), gateway, out, sent };
 }
 
 describe('agenda --by time', () => {
@@ -167,14 +174,14 @@ describe('deprecated attention alias', () => {
     should(ATTENTION_DEPRECATION).startWith('`fy attention` is now `fy agenda`');
   });
 
-  it('should keep notify on the alias only, as a notice', async () => {
+  it('should keep notify on the alias only, handed to fy notify', async () => {
     // Arrange + Act
     const viaAlias = run(['attention', 'notify', 'build is green']);
     await viaAlias.parsed;
     const viaAgenda = run(['agenda', 'notify', 'build is green']);
 
     // Assert
-    should(viaAlias.gateway.applied[0]?.request).containDeep({ action: 'add', notice: true });
+    should(viaAlias.sent).deepEqual([{ words: ['build is green'], options: {} }]);
     await should(viaAgenda.parsed).be.rejectedWith(/unknown command 'notify'/u);
   });
 

@@ -1,11 +1,4 @@
-import {
-  ATTENTION_PUSH_TITLE_LENGTH,
-  AttentionActionRequestSchema,
-  type AttentionId,
-  type AttentionSnapshot,
-  clipAtWord,
-  MAX_ATTENTION_SUBJECT_LENGTH,
-} from '@ferretry/protocol';
+import type { AttentionId, AttentionSnapshot } from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
 import {
   type BriefFile,
@@ -14,7 +7,6 @@ import {
   composeEditRequest,
   type EditFlags,
   parseBriefFile,
-  titleFrom,
 } from './brief.ts';
 import type { IAttentionBriefInput, IAttentionGateway, IAttentionOutput } from './ports.ts';
 import { attentionReference, parseAttentionReference } from './reference.ts';
@@ -66,14 +58,6 @@ export interface AttentionResolveOptions extends AttentionCommandOptions, Answer
 /** Flags that surface an item. */
 export interface AttentionSurfaceOptions extends AttentionCommandOptions {
   readonly why?: string;
-}
-
-/** Flags that shape an info card raised from a message. */
-export interface AttentionNotifyOptions extends AttentionCommandOptions {
-  readonly title?: string;
-  readonly kind?: string;
-  /** Ask for the owner's phone to buzz for this notice. */
-  readonly ping?: boolean;
 }
 
 /** The one line the deprecated `fy attention` prints to stderr before it does what `fy agenda` does. */
@@ -250,40 +234,6 @@ export class AttentionController {
     this.#report(snapshot, options, () => renderAttentionMutation('dismissed', attentionReference(id), snapshot));
   }
 
-  /**
-   * `notify` raises a notice: a plain notification with nothing to decide. The title is `--title` or the
-   * start of the text, the subject is the text as one line, and a text that does not fit one line goes
-   * whole into the context. `--ping` asks for the phone to buzz.
-   */
-  async notify(words: readonly string[], options: AttentionNotifyOptions): Promise<void> {
-    refuseProgressKind(options.kind);
-    const message = words.join(' ').trim();
-    if (message === '') throw new Error('notify needs the notification text');
-    const line = message.replaceAll(/\s+/gu, ' ');
-    const fits = line.length <= MAX_ATTENTION_SUBJECT_LENGTH;
-    const subject = fits ? line : clipAtWord(line, MAX_ATTENTION_SUBJECT_LENGTH);
-    const title = titleFrom(text(options.title) ?? clipAtWord(line, ATTENTION_PUSH_TITLE_LENGTH));
-    const request = AttentionActionRequestSchema.parse({
-      action: 'add',
-      source: 'agent-raised',
-      sourceRef: null,
-      subject,
-      title,
-      kind: 'info',
-      why: subject,
-      context: fits ? null : message,
-      howToResolve: 'Nothing to do: it is a notice.',
-      notice: true,
-      ...(options.ping === true ? { ping: true } : {}),
-    });
-    const sessionId = this.#target(options);
-    const before = await this.gateway.snapshot(sessionId);
-    const after = await this.gateway.apply(sessionId, request);
-    const raised = onlyNewId(before, after);
-    const verb = raised === undefined ? 'notice sent' : `notice ${attentionReference(raised)} sent`;
-    this.#report(after, options, () => renderAttentionMutation(verb, undefined, after, raised));
-  }
-
   /** The JSON body and the Markdown body the flags name, each read once: standard input serves only one. */
   async #inputs(
     jsonPath: string | undefined,
@@ -337,18 +287,6 @@ function withoutBy<T extends { readonly by?: string }>(options: T): Omit<T, 'by'
 function text(value: string | undefined): string | undefined {
   const trimmed = value?.trim() ?? '';
   return trimmed === '' ? undefined : trimmed;
-}
-
-/** Progress and finishing never notify the owner; `--kind` once chose between them and now only says no. */
-function refuseProgressKind(value: string | undefined): void {
-  const kind = text(value);
-  if (kind === undefined) return;
-  if (kind === 'completed' || kind === 'failed') {
-    throw new Error(
-      'progress and finishing never notify the owner — raise an item (fy agenda add) only when they must decide or do something',
-    );
-  }
-  throw new Error(`notify takes no --kind (it raises an info card), not "${kind}"`);
 }
 
 /** The single id present after a write and absent before it, if the write produced exactly one. */

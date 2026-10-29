@@ -303,8 +303,10 @@ describe('launchInstructionFacts', () => {
       'tools',
       'settings',
       'attention',
+      'notify',
       'hypermedia',
       'pack',
+      'agenda',
       'learning',
     ]);
   });
