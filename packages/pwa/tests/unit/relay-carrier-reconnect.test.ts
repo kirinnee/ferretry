@@ -134,6 +134,7 @@ const routerFor = async (
     answer?: Parameters<typeof autoDial>[1];
     deviceKey?: DaemonCarrierRouterOptions['deviceKey'];
     heartbeat?: DaemonCarrierRouterOptions['heartbeat'];
+    unknownFatesRemembered?: number;
   } = {},
 ) => {
   const identity = await newDaemonIdentity();
@@ -158,6 +159,7 @@ const routerFor = async (
       throw new TypeError('Failed to fetch');
     },
     health: health.reporter,
+    ...(options.unknownFatesRemembered === undefined ? {} : { unknownFatesRemembered: options.unknownFatesRemembered }),
   });
   router.resolvePaired(() => [daemon]);
   return {
@@ -394,9 +396,13 @@ describe('no carrier at all', () => {
   });
 
   it('should remember only a bounded number of ids in doubt, forgetting the oldest first', async () => {
+    // A small bound: every id put in doubt costs a whole session handshake, and hundreds of them were
+    // seconds of CPU on a busy runner for the same eviction a handful proves.
+    const remembered = 4;
     const { router, daemon, setReach } = await routerFor({
       relay: false,
       answer: { closeOnRequest: () => ({ code: 1006, reason: 'dropped' }) },
+      unknownFatesRemembered: remembered,
     });
     const post = (id: string) =>
       rejection(
@@ -406,10 +412,11 @@ describe('no carrier at all', () => {
           headers: { [FY_REQUEST_ID_HEADER]: id },
         }),
       );
-    for (let index = 0; index <= 256; index += 1) await post(`doubt-${String(index)}`);
+    for (let index = 0; index <= remembered; index += 1) await post(`doubt-${String(index)}`);
     setReach(() => 'refuse');
     expect(carrierDelivery(await post('doubt-0'))).toBe('unsent');
-    expect(carrierDelivery(await post('doubt-256'))).toBe('unknown');
+    expect(carrierDelivery(await post('doubt-1'))).toBe('unknown');
+    expect(carrierDelivery(await post(`doubt-${String(remembered)}`))).toBe('unknown');
   });
 });
 

@@ -1053,6 +1053,12 @@ export interface DaemonCarrierRouterOptions {
    * Absent means nobody is keeping score, which is every router built before it existed.
    */
   readonly health?: ConnectionHealthReporter;
+  /**
+   * How many request ids in doubt are remembered — {@link UNKNOWN_FATES_REMEMBERED} by default. It is a
+   * parameter for the same reason a session's `maxRequestId` is: every id put in doubt costs a session
+   * that died under it, and proving the oldest is forgotten at the real bound took hundreds of handshakes.
+   */
+  readonly unknownFatesRemembered?: number;
 }
 
 /**
@@ -1325,6 +1331,7 @@ export class DaemonCarrierRouter {
   readonly #health: ConnectionHealthReporter | undefined;
   /** Request ids a session died under after they left — see {@link CarrierUnavailableError}'s `delivery`. */
   readonly #unknownFates = new Set<string>();
+  readonly #unknownFatesRemembered: number;
   /** Per-call ordinal for stream session keys. Never reused, so no two streams can collide. */
   #streams = 0;
   #paired: () => readonly DaemonConnection[] = () => [];
@@ -1370,6 +1377,7 @@ export class DaemonCarrierRouter {
     this.#presence = options.presence ?? (() => false);
     this.#rotation = options.rotation;
     this.#health = options.health;
+    this.#unknownFatesRemembered = options.unknownFatesRemembered ?? UNKNOWN_FATES_REMEMBERED;
   }
 
   /**
@@ -1802,7 +1810,7 @@ export class DaemonCarrierRouter {
     if (doubted && requestId !== null) {
       this.#unknownFates.delete(requestId);
       this.#unknownFates.add(requestId);
-      if (this.#unknownFates.size > UNKNOWN_FATES_REMEMBERED) {
+      if (this.#unknownFates.size > this.#unknownFatesRemembered) {
         const [oldest] = this.#unknownFates;
         this.#unknownFates.delete(oldest as string);
       }
@@ -2117,6 +2125,15 @@ export class DaemonCarrierRouter {
       ...(this.#presence() ? { presence: true as const } : {}),
     };
     const signal = init.signal ?? undefined;
+    // A DEADLINE THAT PASSED BEFORE THE REQUEST LEFT says nothing about this session: the time went on the
+    // walk and the handshake, and the daemon was never asked. Retiring the session for it threw away a
+    // working one — and on a link whose handshake outlasts the deadline, every request opened a session
+    // only to close it unused. The caller still gets its own abort, and nothing was sent anywhere.
+    try {
+      signal?.throwIfAborted();
+    } catch (reason) {
+      throw new RelayAnswerError(reason);
+    }
     try {
       const response = relayResponse(await session.request(record, signal));
       // Only an ANSWER settles the pending key. A request that died without one leaves it pending,
