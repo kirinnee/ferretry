@@ -92,15 +92,56 @@ every second, and the GitHub times from the last runs before Namespace (p50):
   and directories report different `st_dev`, and the shared-history planner refuses a rename it reads
   as cross-device although `rename(2)` succeeds there. The tests write under `/tmp` by design
   (`scripts/test/swept.sh`), so that is a product question about overlay filesystems, not a CI knob.
-- **No path filters beyond E2E's.** Of 120 merged pull requests, two changed only documentation, and
-  `E2E Relevance` already skips those. Skipping a unit or int group for an unrelated change would
-  leave its files out of the per-group 100% ledger, and the jobs a PWA-only change could skip run on
-  GitHub, where they cost nothing.
+- **No path filters beyond E2E's and macOS's.** Of 120 merged pull requests, two changed only
+  documentation, and `E2E Relevance` already skips those. Skipping a unit or int group for an unrelated
+  change would leave its files out of the per-group 100% ledger, and the jobs a PWA-only change could
+  skip run on GitHub, where they cost nothing. The macOS jobs are the exception, for the reason in
+  [macOS jobs on a pull request](#macos-jobs-on-a-pull-request): the slots are scarce, not the money.
 - **Moving a job between pools is its `runs-on`.** A Namespace job's `runs-on` is one expression:
   `ubuntu-latest` off a pull request or under `CI_RUNNER_POOL=github`, its `nscloud-*` labels
   otherwise; a matrix entry with `shape: github` always takes `ubuntu-latest`. Its cache step carries
   `if: runner.environment == 'self-hosted'` (a Namespace runner registers as self-hosted), so the
   same job runs on either pool and nothing else in it depends on the runner vendor.
+
+## macOS jobs on a pull request
+
+macOS runs on GitHub only, is free for a public repository, and **only 5 macOS jobs run at once across
+the whole account**. Every run used 4 of them (Containment, Sandbox Shell (Safari), Harness Contract
+`macos-15`, Smoke `darwin-arm64`), so two overlapping runs queued: the p90 wait was 6 minutes and the
+worst 74. The queue, not the work, held pull requests up, and there is no paid pool to buy out of it
+(Namespace macOS is ten times a Linux unit's price, ~$600 a month at this pace).
+
+So a pull request runs **Smoke on every run** and the other three **only when their inputs change**.
+`main`, a manual dispatch and any doubt run all four: they are the release gates, so a path list that
+missed an input shows up one merge later and never as a release that skipped its proof.
+
+| Job (check name)              | On a pull request, when this changes                                                                                                                                                                                    |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Smoke darwin-arm64`          | always: it runs the shipped binary, and almost every pull request changes the binary                                                                                                                                    |
+| `Containment (macOS)`         | the daemon's file viewer, pinner, git, process inventory, pane identity and file-event code; `fy attach`'s tmux reader; the protocol's process incarnation; their integration tests; `scripts/ci/darwin-confinement.sh` |
+| `Sandbox Shell (Safari)`      | `packages/pwa/harness/fy-render-safari/`, `packages/pwa/scripts/`, `public/_headers`, the `fy-render` library and journey fixture; `scripts/ci/safari-render-proof.sh`                                                  |
+| `Harness Contract (macos-15)` | `packages/fleet/**`, the daemon contract suite and transcript conversion, `VERIFIED_HARNESS_VERSIONS`. The nightly `Harness Contract (latest)` covers upstream drift in between                                         |
+
+All three also run when anything in the **toolchain or the pipeline** changes: `flake.lock`,
+`flake.nix`, `nix/**`, `.github/workflows/**`, `.github/actions/**`, `bun.lock`, a manifest, a bunfig or
+tsconfig, or `setup.sh`. The Linux leg of `Harness Contract` always runs; only its `macos-15` leg is added
+to the matrix.
+
+- **A job, not a `paths` filter** — for the reason `E2E Relevance` gives. `macOS Relevance`
+  (`changes` in `ci.yaml`, `scripts/ci/macos-relevance.sh`) lists the pull request's files through the API
+  and writes one output per job. A job it leaves out is **skipped, and a skipped check counts as
+  passed**, so no stub check and no branch-protection change is needed. It fails open: an unreadable or
+  empty file list runs all three.
+- **The lists are generous on purpose** and held to the scripts, not to memory:
+  `scripts/validate/macos-relevance.sh` (`a-macos-relevance`, and `test.sh`) extracts every test path
+  `darwin-confinement.sh` runs, every file the Safari probe and the contract suite import, and the
+  `VERIFIED_HARNESS_VERSIONS` file, and fails unless each one selects its job. It also fails if a
+  docs-only change selects any job, if `flake.lock` or a workflow does not select all three, or if
+  `ci.yaml` stops gating them (or starts gating Smoke). Adding a path to a job's script therefore
+  fails pre-commit until the list covers it.
+- **Why the Harness matrix is data.** A job-level `if:` cannot read `matrix`, so the `macos-15` leg is
+  in or out through `fromJSON(needs.changes.outputs.harness_os)`; the check keeps its name,
+  `Harness Contract (macos-15)`, when it runs and is absent when it does not.
 
 ## Workflow split
 
@@ -129,6 +170,7 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 | `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                       |
 | `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                      |
 | `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one runner per build target                                 |
+| `changes`        | `./scripts/ci/macos-relevance.sh`                                                | `macOS Relevance`: gates Containment, Safari and the `macos-15` Harness leg   |
 
 Notable details:
 
