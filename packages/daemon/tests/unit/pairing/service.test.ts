@@ -22,6 +22,8 @@ import {
   type PairingDeviceRecord,
   PairingDeviceRegistry,
   type PairingDeviceStore,
+  type PairingGrant,
+  type PairingGrantObserver,
   PAIRING_GRANTS_PER_HOUR,
   PAIRING_MAX_DEVICES,
   PairingRateLimiter,
@@ -242,6 +244,8 @@ function fixture(
     readonly idleExpiryDays?: () => number;
     /** How long one idle day is, when a case drives the period in seconds. */
     readonly idleDayMs?: number;
+    /** The observer told once a grant is persisted, when a case is about what it is handed or what it may do. */
+    readonly onGranted?: PairingGrantObserver;
   } = {},
 ) {
   const clock = new FakeClock();
@@ -269,6 +273,7 @@ function fixture(
     ...(options.idleExpiryDays === undefined ? {} : { idleExpiryDays: options.idleExpiryDays }),
     ...(options.idleDayMs === undefined ? {} : { idleDayMs: options.idleDayMs }),
     ...(options.audit === undefined ? {} : { audit: options.audit }),
+    ...(options.onGranted === undefined ? {} : { onGranted: options.onGranted }),
   });
   const mint = () => service.mint();
   return { clock, cryptography, devices, credentials, service, mint };
@@ -304,6 +309,29 @@ describe('PairingService minting and status', () => {
       status: 'pending',
       expiresAt: '2026-08-03T12:02:00.000Z',
     });
+  });
+
+  it('should forget the oldest observation once 128 minted codes are remembered', async () => {
+    // Arrange — every mint gets a distinct id, so each one leaves its own observation behind
+    const { cryptography, service } = fixture();
+    let minted = 0;
+    cryptography.pairingId = () => {
+      minted += 1;
+      return `fy_pair_${String(minted).padStart(22, 'd')}`;
+    };
+    const ids = (count: number) =>
+      Array.from({ length: count }, (_, index) => `fy_pair_${String(index + 1).padStart(22, 'd')}` as PairingId);
+
+    // Act
+    for (let index = 0; index < 128; index += 1) service.mint();
+    const beforeEviction = ids(128).map(id => service.status(id) !== undefined);
+    service.mint();
+
+    // Assert — the 129th mint pushes only the oldest out
+    should(beforeEviction.every(Boolean)).be.true();
+    should(service.status(ids(1)[0] as PairingId)).be.undefined();
+    should(service.status(ids(2)[1] as PairingId)).not.be.undefined();
+    should(service.status(ids(129)[128] as PairingId)?.status).equal('pending');
   });
 
   it('should disclose the discovered rendezvous and never a published one, whatever it publishes', async () => {
@@ -740,6 +768,42 @@ describe('PairingService redemption', () => {
     should(failed.kind).equal('refused');
     should(retried.kind).equal('refused');
     should(current.credentials.all()).be.empty();
+  });
+
+  it('should tell the grant observer once, after the device is persisted, with no key or token in it', async () => {
+    const grants: PairingGrant[] = [];
+    const persistedWhenTold: number[] = [];
+    const current = fixture({
+      onGranted: async grant => {
+        grants.push(grant);
+        persistedWhenTold.push(current.devices.records.length);
+      },
+    });
+    current.mint();
+
+    const result = await redeemRelayed(current.service, { code: CODE, deviceName: 'phone' });
+
+    should(result.kind).equal('paired');
+    should(grants).deepEqual([
+      { deviceId: FIRST_DEVICE_ID, deviceName: 'phone', carrier: 'relay', createdAt: '2026-08-03T12:00:00.000Z' },
+    ]);
+    should(persistedWhenTold).deepEqual([1]);
+    should(JSON.stringify(grants)).not.containEql(DEVICE_KEY);
+  });
+
+  it('should keep a device paired when the grant observer rejects, rather than refusing a pairing that happened', async () => {
+    const current = fixture({
+      onGranted: async () => {
+        throw new Error('disk full');
+      },
+    });
+    current.mint();
+
+    const result = await redeemDirect(current.service, { code: CODE, deviceName: 'phone' }, 'peer-one');
+
+    should(result.kind).equal('paired');
+    should(current.credentials.get(FIRST_DEVICE_ID)?.publicKey).equal(DEVICE_KEY);
+    should(current.devices.records.map(record => record.id)).deepEqual([FIRST_DEVICE_ID]);
   });
 
   it('should perform the constant-time comparison even when no usable code exists', async () => {

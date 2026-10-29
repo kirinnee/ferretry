@@ -3742,3 +3742,60 @@ describe('requests that run side by side', () => {
     await Promise.all(receipts);
   });
 });
+
+describe('a session that cannot carry its own answer', () => {
+  it('should end the session when a peer that never returns credit lets the answer queue outgrow a window', async () => {
+    // Arrange — a peer ignoring credit: the daemon's answers pile up behind a window that never reopens.
+    const { link, wire: sent } = harness();
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Act — the window carries what it can, a second window's worth queues, and one request more has nowhere to wait.
+    for (let id = 1; id <= CREDIT_WINDOW_FRAMES * 2 + 1; id += 1) {
+      channel = await clientSend(link, channel, { t: 'req', id, method: 'GET', path: '/v1/health' });
+    }
+
+    // Assert
+    should(controlOf(sent.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.protocolError,
+      reason: 'this session cannot carry its own answer',
+    });
+    should(link.report().sessions).equal(0);
+  });
+});
+
+describe('a record the channel refuses to seal', () => {
+  it('should end the session with the seal refusal when a handler closes with a reason too long for one record', async () => {
+    // Arrange — a stream whose close reason is the handler's to choose, and is not bounded on the way in.
+    const stream = fakeStream();
+    const harnessed = harness(undefined, DEVICE_TOKEN, accepts(stream));
+    const opened = await keyedSession(harnessed);
+    await clientSend(harnessed.link, opened.channel, {
+      t: 'stream',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+      path: '/v1/events',
+    });
+    const downstream = stream.downstream;
+    if (downstream === undefined) throw new Error('the stream was never attached');
+
+    // Act
+    downstream.close(1000, 'x'.repeat(MAX_PLAINTEXT_BYTES));
+    await settle(harnessed.link);
+
+    // Assert — the channel's own refusal, said once, and nothing sealed behind it
+    should(controlOf(harnessed.wire.frames.at(-1))).containDeep({
+      t: 'closed',
+      code: RELAY_CLOSE_CODES.frameTooLarge,
+      reason: 'payload exceeds one record',
+    });
+    should(harnessed.link.report().sessions).equal(0);
+  });
+});
