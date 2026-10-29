@@ -66,6 +66,14 @@ export interface MetricChartProps {
   readonly emptyText?: string;
   /** Round ticks from zero to at least the largest total; defaults to a 1-2-2.5-5 decimal step. */
   readonly axisTicks?: (max: number) => readonly number[];
+  /** The plot's height classes; defaults to the Overview's `h-40 sm:h-48`. */
+  readonly plotClassName?: string;
+  /**
+   * What the readout shows, and which bar is drawn at full strength, while nothing is hovered:
+   * `peak` (default) the tallest point, with the others dimmed; `last` the newest point, with no bar
+   * dimmed, so nothing looks selected until it is hovered.
+   */
+  readonly resting?: 'peak' | 'last';
 }
 
 const HATCH = 'repeating-linear-gradient(135deg, var(--warn) 0 2px, transparent 2px 4px)';
@@ -115,6 +123,8 @@ export function AnalyticsMetricChart({
   flagNote,
   emptyText = 'Nothing in this period.',
   axisTicks = analyticsAxisTicks,
+  plotClassName = 'h-40 sm:h-48',
+  resting = 'peak',
 }: MetricChartProps) {
   const [hovered, setHovered] = useState<string | null>(null);
   const totals = new Map(points.map(point => [point.key, pointTotal(point)]));
@@ -124,7 +134,8 @@ export function AnalyticsMetricChart({
     (best, point) => (totals.get(point.key)! > (best === null ? 0 : totals.get(best.key)!) ? point : best),
     null,
   );
-  const focus = points.find(point => point.key === hovered) ?? peak;
+  const focus = points.find(point => point.key === hovered) ?? (resting === 'last' ? (points.at(-1) ?? null) : peak);
+  const dimOthers = resting === 'peak' || hovered !== null;
   const flagged = points.some(point => point.flagged === true);
   const total = [...totals.values()].reduce((sum, value) => sum + value, 0);
   const readout = (point: MetricChartPoint): string =>
@@ -155,7 +166,7 @@ export function AnalyticsMetricChart({
       </p>
       {/* `py-2` insets the plot by half a label, so the top tick and the baseline tick sit inside. */}
       <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-sm py-2">
-        <div aria-hidden="true" className="relative h-40 sm:h-48" data-chart-axis="">
+        <div aria-hidden="true" className={`relative ${plotClassName}`} data-chart-axis="">
           {/* Invisible copies give the axis the width of its widest tick. */}
           {ticks.map(tick => (
             <span key={`w${tick}`} className="mono invisible block h-0 overflow-hidden whitespace-nowrap text-2xs">
@@ -175,7 +186,7 @@ export function AnalyticsMetricChart({
         <div
           role="img"
           aria-label={`${title}, ${points[0]?.label ?? ''} to ${points.at(-1)?.label ?? ''}: ${format(total)} in total${peak ? `, highest ${format(totals.get(peak.key)!)} at ${peak.label}` : ''}.`}
-          className="relative h-40 sm:h-48"
+          className={`relative ${plotClassName}`}
         >
           {ticks.map(tick => (
             <span
@@ -201,7 +212,7 @@ export function AnalyticsMetricChart({
                   {point.flagged === true && <span className="mb-px block h-1 w-full" style={{ background: HATCH }} />}
                   {pointSum > 0 ? (
                     <span
-                      className={`flex w-full flex-col-reverse overflow-hidden rounded-t-xs ${focus?.key === point.key ? '' : 'opacity-75'}`}
+                      className={`flex w-full flex-col-reverse overflow-hidden rounded-t-xs ${!dimOthers || focus?.key === point.key ? '' : 'opacity-75'}`}
                       style={{ height: `${(100 * pointSum) / top}%` }}
                     >
                       {series.map((entry, index) => (

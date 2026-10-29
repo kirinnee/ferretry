@@ -15,10 +15,16 @@
  * living inside one feature is a dependency the other should never have to take.
  */
 
-/** Title-cases a callsign slug for display: `ms-98` → `Ms-98`. */
+import { displaySystemCallsign, isSystemCallsign } from '@ferretry/protocol';
+
+/**
+ * Title-cases a callsign slug for display: `ms-98` → `Ms-98`. A callsign Ferretry gave a session itself
+ * (`warden-00002a`) is an identifier, not a first name: it is shown as `warden-00002A`.
+ */
 export const displayCallsign = (raw: string | null | undefined): string => {
   const slug = (raw ?? '').trim();
   if (slug === '') return '';
+  if (isSystemCallsign(slug)) return displaySystemCallsign(slug);
   return slug
     .split('-')
     .map(segment => (segment === '' ? segment : `${segment[0]?.toUpperCase() ?? ''}${segment.slice(1)}`))

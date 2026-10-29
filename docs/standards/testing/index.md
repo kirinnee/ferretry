@@ -544,6 +544,33 @@ by name against the host `PATH`. Three rules now hold, and each has a mechanism 
   daemon, keeps both the server and the client running for good
   (`packages/cli/tests/integration/support/supervised-daemon-teardown.ts` owns that order).
 
+### No test runs inside the agent session that started it
+
+On 2026-10-29 every live agent on the dev box lost its pane in the same two seconds while agents were
+running the integration tier from inside their own panes. An agent's pane carries the live daemon's
+`FY_HOME` (the owner's real state home) and a `TMUX` naming the server every agent on the machine
+runs under; a suite started there inherits both, a fixture that "restores the previous `FY_HOME`"
+hands the real home back to whatever a timed-out test is still running, and any `tmux` without `-S`
+reaches the live server. Three rules hold:
+
+- **The session is shed first.** `packages/daemon/tests/support/ambient-session.ts` removes `FY_HOME`,
+  `TMUX`, `TMUX_PANE` and the `FY_SESSION_*`/pack variables before any test file loads — from the
+  preload every `bunfig.*.toml` names, and again from the integration support modules so a suite
+  started without its preload (`bun test tests/integration` inside a package) is shed too. What they
+  named is recorded in `FY_TEST_PROTECTED_PATHS`, with the account's default state home, and a run
+  whose `TMPDIR` lies inside one refuses to start.
+- **A teardown touches only what is disposable.** Before a socket is killed or a root removed,
+  `assertDisposable` requires it strictly inside a temporary directory and clear of every protected
+  path. `scripts/test/tmux-sweep.ts` refuses such a root with exit 2 and kills nothing, and never
+  sweeps a server whose socket resolves into a protected path.
+- **Never by pattern.** Test code kills by pid, or a tmux process whose argv names `-S` and its own
+  socket verbatim — never `pkill`/`killall`, which match every command line on the machine
+  (`scripts/validate/no-pattern-kill.sh`).
+
+The product keeps the same line: `fy daemon stop`'s escalation is `systemctl --user kill
+--kill-who=main`, because the unit's control group also holds the tmux server, and a kill of the whole
+group ends every agent.
+
 ---
 
 ## Quick Checklist

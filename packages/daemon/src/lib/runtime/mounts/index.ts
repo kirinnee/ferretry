@@ -25,9 +25,9 @@ import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { SessionObserverHost } from '../../session/observer/host.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
-import type { TranscriptImageReader } from '../../session/transcript/image-reader.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
+import type { TranscriptImages } from '../../session/transcript/image-reader.ts';
 import type { StepUpService } from '../../step-up/index.ts';
 import type { TunnelSwitchPort } from '../../tunnel/index.ts';
 import type { DaemonUpdateSubsystem } from '../../update/index.ts';
@@ -395,7 +395,7 @@ export interface MountedSubsystems {
    *  header for why a dead pane and an unresolved transcript are errors and an empty event page is not. */
   readonly sessionReads: OperatorReadService;
   /** One image of that transcript, named by the handle its log carried: proved before it is served. */
-  readonly transcriptImages: TranscriptImageReader;
+  readonly transcriptImages: TranscriptImages;
   /** A short-lived, freshly validated tmux identity for a local human attach. */
   readonly sessionAttach: SessionAttachSubsystem;
   /** Typing into a session's own pane — the Console — governed as a session terminal is. */

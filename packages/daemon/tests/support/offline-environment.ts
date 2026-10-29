@@ -1,3 +1,12 @@
+import { shedAmbientSession } from './ambient-session.ts';
+
+/**
+ * NO TEST RUNS INSIDE THE AGENT SESSION THAT STARTED IT: the pane's `FY_HOME` and `TMUX` name the
+ * owner's real state home and the tmux server every live agent runs under. Shed before anything else
+ * here, so not even this module's defaults are decided with them in place. See `ambient-session.ts`.
+ */
+shedAmbientSession();
+
 /**
  * EVERY TEST TIER RUNS OFFLINE. Preloaded by each `bunfig.*.toml`, before any test file.
  *

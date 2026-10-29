@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { SessionStatusSchema } from './session.ts';
+import {
+  nextSystemCallsignSequence,
+  SYSTEM_CALLSIGN_MAX_SEQUENCE,
+  systemCallsignName,
+  systemCallsignSequence,
+} from './system-callsigns.ts';
 
 /**
  * THE WARDEN WIRE — the supervisor that watches every ferret, and everything a client reads or sends
@@ -653,6 +659,8 @@ export const WardenInvestigationSchema = z.object({
   costUsd: NonNegativeFiniteSchema.optional(),
   agent: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
+  /** The investigator's name, `warden-0007`. Absent while queued, and from an older daemon. */
+  wardenName: z.string().min(1).optional(),
 });
 export type WardenInvestigation = z.infer<typeof WardenInvestigationSchema>;
 
@@ -679,6 +687,21 @@ export type WardenActionKind = z.infer<typeof WardenActionKindSchema>;
 export const WardenActionOutcomeSchema = z.enum(['done', 'held', 'failed']);
 export type WardenActionOutcome = z.infer<typeof WardenActionOutcomeSchema>;
 
+/**
+ * Who acted on a flag. `auto` is a rule — no model was asked; `jev` is Jev, the cheap first responder;
+ * `llm` is an LLM investigation's verdict; `owner` is the owner (Leave it longer, an answer on a card).
+ */
+export const WardenActorSchema = z.enum(['auto', 'jev', 'llm', 'owner']);
+export type WardenActor = z.infer<typeof WardenActorSchema>;
+
+/**
+ * What became of a flag, as the Warden's stats count it. `moved` a stuck ferret got going (a nudge,
+ * resume, restart or failover); `cleared` it was judged healthy and left alone; `stopped` it was
+ * stopped; `asked` the Warden handed it to the owner.
+ */
+export const WardenOutcomeSchema = z.enum(['moved', 'cleared', 'stopped', 'asked']);
+export type WardenOutcome = z.infer<typeof WardenOutcomeSchema>;
+
 export const WardenActionSchema = z.object({
   at: InstantSchema,
   sessionId: z.string().min(1),
@@ -700,8 +723,104 @@ export const WardenActionSchema = z.object({
   reason: z.string().min(1).max(500).optional(),
   /** The account a failover moved to. */
   agent: z.string().min(1).optional(),
+  /** Who acted (`WardenActorSchema`). Absent from an older daemon: read it through {@link wardenActionActor}. */
+  actor: WardenActorSchema.optional(),
+  /** The investigator (`warden-0007`) whose verdict this carried out. Investigation actions only. */
+  investigator: z.string().min(1).optional(),
 });
 export type WardenAction = z.infer<typeof WardenActionSchema>;
+
+// ── Who acted, and what became of the flag ──────────────────────────────────────────────────────
+
+/**
+ * Who acted, for an action from any daemon. A daemon that records `actor` is believed; an older one is
+ * read from what it did record: Jev and the owner name themselves, and a `warden` action is an
+ * investigation's exactly when it carries that investigation's report — a rule has none.
+ */
+export function wardenActionActor(action: Pick<WardenAction, 'actor' | 'by' | 'reportPath'>): WardenActor {
+  if (action.actor !== undefined) return action.actor;
+  if (action.by === 'jev') return 'jev';
+  if (action.by === 'owner') return 'owner';
+  return action.reportPath === undefined ? 'auto' : 'llm';
+}
+
+/**
+ * What an action means for the stats, or `undefined` when it counts as none of them: a failed attempt
+ * changed nothing, and closing a leftover browser is housekeeping, not a judgement about a ferret.
+ * Anything held for the owner is `asked`, whatever it was going to be.
+ */
+export function wardenActionOutcome(action: Pick<WardenAction, 'action' | 'outcome'>): WardenOutcome | undefined {
+  if (action.outcome === 'failed') return undefined;
+  if (action.outcome === 'held') return 'asked';
+  switch (action.action) {
+    case 'bless':
+      return 'cleared';
+    case 'nudge':
+    case 'resume':
+    case 'restart':
+    case 'failover':
+      return 'moved';
+    case 'stop':
+      return 'stopped';
+    case 'close_leftover':
+      return undefined;
+  }
+}
+
+/** One outcome's count, split by who acted. `owner` is absent when the owner did none of them. */
+export const WardenActorCountsSchema = z.object({
+  auto: NonNegativeIntegerSchema,
+  jev: NonNegativeIntegerSchema,
+  llm: NonNegativeIntegerSchema,
+  owner: NonNegativeIntegerSchema.optional(),
+});
+export type WardenActorCounts = z.infer<typeof WardenActorCountsSchema>;
+
+/**
+ * One UTC day of the Warden's work, rolled up from its persisted state as it happened — never
+ * reconstructed from the capped action list, which a busy day overflows.
+ */
+export const WardenDayStatsSchema = z.object({
+  day: WardenSpendDaySchema,
+  /** New flags raised. */
+  flags: NonNegativeIntegerSchema,
+  /** Flags Jev answered (a failed call is not a decision). */
+  jevDecisions: NonNegativeIntegerSchema,
+  /** LLM investigations started. */
+  investigations: NonNegativeIntegerSchema,
+  jevUsd: NonNegativeFiniteSchema,
+  /** Known investigation spend; an investigation not priced yet adds nothing until it is. */
+  investigationUsd: NonNegativeFiniteSchema,
+  moved: WardenActorCountsSchema,
+  cleared: WardenActorCountsSchema,
+  stopped: WardenActorCountsSchema,
+  asked: WardenActorCountsSchema,
+});
+export type WardenDayStats = z.infer<typeof WardenDayStatsSchema>;
+
+/** How many days of {@link WardenDayStats} the status carries, today included. */
+export const WARDEN_HISTORY_DAYS = 7;
+
+// ── Investigator names ──────────────────────────────────────────────────────────────────────────
+
+/**
+ * Every investigator the Warden starts is called `warden-000001`, `warden-000002`, … `warden-FFFFFF`
+ * — the shape every system session shares (`system-callsigns.ts`), never a name from the first-name pool.
+ */
+export const WARDEN_INVESTIGATOR_NAME_PATTERN = /^warden-([0-9a-f]{6})$/iu;
+
+/** The largest sequence: `warden-FFFFFF`. The next one wraps to 1. */
+export const WARDEN_INVESTIGATOR_MAX_SEQUENCE = SYSTEM_CALLSIGN_MAX_SEQUENCE;
+
+/** The stored (lowercase) callsign for sequence `sequence`, 1 … {@link WARDEN_INVESTIGATOR_MAX_SEQUENCE}. */
+export const wardenInvestigatorName = (sequence: number): string => systemCallsignName('warden', sequence);
+
+/** The sequence number in an investigator's name, or `undefined` for any other name. */
+export const wardenInvestigatorSequence = (name: string | undefined): number | undefined =>
+  systemCallsignSequence('warden', name);
+
+/** The next investigator sequence after `last` that is not in `inUse`. */
+export const nextWardenInvestigatorSequence = nextSystemCallsignSequence;
 
 export const WardenBlessingViewSchema = z.object({
   sessionId: z.string().min(1),
@@ -739,6 +858,11 @@ export const WardenStatusViewSchema = z.object({
   /** What the Warden did, or was told to do and waits on the owner for, newest first. */
   actions: z.array(WardenActionSchema),
   blessings: z.array(WardenBlessingViewSchema),
+  /**
+   * Up to {@link WARDEN_HISTORY_DAYS} UTC days of work, oldest first, today last. Only days this daemon
+   * kept a record for: a day it did not is missing, never a zero. Absent from an older daemon.
+   */
+  history: z.array(WardenDayStatsSchema).optional(),
 });
 export type WardenStatusView = z.infer<typeof WardenStatusViewSchema>;
 

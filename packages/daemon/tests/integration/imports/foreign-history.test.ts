@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { NodeForeignHistoryFiles } from '../../../src/adapters/imports/index.ts';
-import { ForeignHistoryImporter } from '../../../src/lib/imports/index.ts';
-import { foreignHistoryRoutes } from '../../../src/lib/runtime/mounts/foreign-history.ts';
 import { LOOP_PARSE_PACING } from '../../../src/adapters/transcript/index.ts';
+import { FileForeignTranscriptReader, ForeignHistoryImporter } from '../../../src/lib/imports/index.ts';
+import { foreignHistoryRoutes } from '../../../src/lib/runtime/mounts/foreign-history.ts';
 import {
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -55,14 +55,15 @@ describe('foreign harness history integration', () => {
     const unreadable = join(project, 'unreadable.jsonl');
     await writeFile(unreadable, claudeRecord('This file cannot be read.'));
     await chmod(unreadable, 0o000);
+    const files = new NodeForeignHistoryFiles();
     const subject = new ForeignHistoryImporter(
-      new NodeForeignHistoryFiles(),
+      files,
       // Codex's root is intentionally absent: a person who has not used one harness has no error.
       { claudeProjects, codexSessions: join(root, 'fixture-home', '.codex', 'sessions') },
-      {
+      new FileForeignTranscriptReader(files, {
         claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), LOOP_PARSE_PACING),
         codex: new PacedTranscriptParser(new CodexTranscriptParser(), LOOP_PARSE_PACING),
-      },
+      }),
     );
 
     // Act

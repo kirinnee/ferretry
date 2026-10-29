@@ -304,7 +304,8 @@ import {
 } from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
-import { FileNameClaimStore } from '../src/adapters/names/index.ts';
+import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
+import { FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import {
   bunProbeSpawn,
@@ -465,6 +466,12 @@ import {
   NodeTranscriptFileRuntime,
   NodeTranscriptImageFiles,
   NodeTranscriptSource,
+  TranscriptParseWorker,
+  WorkerConversationDescriber,
+  WorkerConversationIndex,
+  WorkerForeignTranscriptReader,
+  WorkerTranscriptImages,
+  WorkerTranscriptSource,
 } from '../src/adapters/transcript/index.ts';
 import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
@@ -695,6 +702,8 @@ import {
   FleetRefreshService,
   FleetSecretReferences,
   FleetWardenAgents,
+  FileConversationDescriber,
+  FileForeignTranscriptReader,
   ForeignHistoryImporter,
   type FoundationPaths,
   fastStartRefusal,
@@ -779,6 +788,7 @@ import {
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
+  SystemCallsignIssuer,
   type NameClaim,
   type NameSubsystem,
   NO_IO_PRESSURE,
@@ -991,12 +1001,14 @@ import {
   type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
-  TranscriptImageReader,
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
   TranscriptSendEvidence,
   type TranscriptSource,
+  type TranscriptImageLocator,
+  TranscriptImageReader,
+  type TranscriptImages,
   TranscriptTailCache,
   type TriageGuardPort,
   TunnelCarrier,
@@ -1027,6 +1039,7 @@ import {
   verifySessionTranscriptMessageToken,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  WardenCallsignTakenError,
   type WardenFleetSession,
   WardenLivenessMonitor,
   type WardenSubsystem,
@@ -4082,6 +4095,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             agent: request.agent,
             ...(request.model === undefined ? {} : { model: request.model }),
             name: request.name,
+            // Its own callsign, with no fallback: one would draw a first name from the pool, which is for real ferrets.
+            ...(request.teammate === undefined ? {} : { teammate: request.teammate }),
             // The label is what the detector's lineage shield reads: a warden that was not labelled
             // would be swept, flagged and investigated by the next warden, forever.
             label: WARDEN_LABEL,
@@ -4092,7 +4107,11 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             boardAccess: 'none' as const,
           };
           const payload = JSON.stringify(start);
-          const view = await parts.control.start(start, crypto.randomUUID(), payload);
+          const view = await parts.control.start(start, crypto.randomUUID(), payload).catch((error: unknown) => {
+            if (error instanceof SessionControlError && error.failure === 'callsign_taken')
+              throw new WardenCallsignTakenError(request.teammate ?? '');
+            throw error;
+          });
           return {
             sessionId: view.config.id,
             createdAt: view.config.createdAt,
@@ -7279,19 +7298,42 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     claude: new PacedTranscriptParser(claudeTranscriptParser, LOOP_PARSE_PACING),
     codex: new PacedTranscriptParser(codexTranscriptParser, LOOP_PARSE_PACING),
   };
-  const transcriptSources = [
+  /**
+   * The one thread every transcript read below is parsed on (`bin/transcript-parse.worker.ts`): the
+   * window, the whole read, the tail, the conversation index, the image route and both history
+   * listings. It runs the very readers the event loop would, and the loop receives their answers in
+   * pages, so where a transcript is parsed changes and what it answers does not. If the thread keeps
+   * failing it is retired, and every reader below does its work here on the main thread instead.
+   */
+  /** Where an import listing may read a transcript's hand-off pointer from: see `HandoffScope`. */
+  const conversationHandoffScope = { roots: [paths.sessions], coordinatorHomes: [userHome] };
+  const transcriptParseWorker = new TranscriptParseWorker({
+    handoffScope: conversationHandoffScope,
+    retired: () =>
+      bootNotices.state(
+        'the transcript worker kept failing, so transcripts are parsed on the main thread until the daemon restarts',
+      ),
+  });
+  /** The readers the proxies fall back to: the same sources, parsing on this thread. */
+  const inlineTranscriptSources = [
     new NodeTranscriptSource(claudeTranscriptParser),
     new NodeTranscriptSource(codexTranscriptParser),
-  ];
+  ] as const;
+  const transcriptSources = inlineTranscriptSources.map(
+    inline => new WorkerTranscriptSource(inline.harness, transcriptParseWorker, inline),
+  );
   /**
    * Every session's addressable conversation, folded once and extended by what was appended — one for
    * the daemon, so a page of a long session costs its appended bytes rather than the whole file. See
    * `ConversationIndex` for what is proved before a held fold is extended.
+   *
+   * Folded and held in the transcript worker, because its input is every raw byte of the file. The
+   * fallback index is over the INLINE sources: a proxy window carries no raw records, so a fold over one
+   * would refuse.
    */
-  const conversationIndex = new ConversationIndex(
-    transcriptSources,
-    new NodeTranscriptFileRuntime(),
-    LOOP_PARSE_PACING,
+  const conversationIndex = new WorkerConversationIndex(
+    transcriptParseWorker,
+    new ConversationIndex(inlineTranscriptSources, new NodeTranscriptFileRuntime(), LOOP_PARSE_PACING),
   );
   /**
    * A separate read surface for conversations that existed before Ferretry.
@@ -7300,10 +7342,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * has no mutation method and it is deliberately not backed by the session store: a foreign JSONL
    * has neither a Ferretry journal nor a live pane and must never be presented as resumable.
    */
+  const foreignHistoryFiles = new NodeForeignHistoryFiles();
   const foreignHistory = new ForeignHistoryImporter(
-    new NodeForeignHistoryFiles(),
+    foreignHistoryFiles,
     foreignHistoryRoots(userHome),
-    pacedTranscriptParsers,
+    new WorkerForeignTranscriptReader(
+      transcriptParseWorker,
+      new FileForeignTranscriptReader(foreignHistoryFiles, pacedTranscriptParsers),
+    ),
   );
   /**
    * A session's own transcript, over the provenance its start recorded.
@@ -7441,22 +7487,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * It resolves the file and the harness exactly as the tail does, and parses ONLY the one record the
    * handle names with that harness's own paced parser — see `TranscriptImageReader` for the proof.
    */
-  const createTranscriptImageReader = (storage: DaemonStorage): TranscriptImageReader => {
+  const createTranscriptImageReader = (storage: DaemonStorage): TranscriptImages => {
     const resolver = createTranscriptFileResolver(storage);
-    return new TranscriptImageReader(
-      {
-        locate: async sessionId => {
-          const file = await resolver.file(sessionId).catch(() => undefined);
-          if (file === undefined) return undefined;
-          const id = tryParseSessionId(sessionId);
-          if (id === undefined) return undefined;
-          const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
-          if (!config.success) return undefined;
-          return { file, harness: config.data.harness === 'codex' ? 'codex' : 'claude' };
-        },
+    const locator: TranscriptImageLocator = {
+      locate: async sessionId => {
+        const file = await resolver.file(sessionId).catch(() => undefined);
+        if (file === undefined) return undefined;
+        const id = tryParseSessionId(sessionId);
+        if (id === undefined) return undefined;
+        const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+        if (!config.success) return undefined;
+        return { file, harness: config.data.harness === 'codex' ? 'codex' : 'claude' };
       },
-      new NodeTranscriptImageFiles(),
-      pacedTranscriptParsers,
+    };
+    // Located here, where the session's documents are; proved and read on the transcript worker.
+    return new WorkerTranscriptImages(
+      transcriptParseWorker,
+      locator,
+      new TranscriptImageReader(locator, new NodeTranscriptImageFiles(), pacedTranscriptParsers),
     );
   };
   /**
@@ -8215,6 +8263,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       await probeBundledWorker('housekeeping'),
       await probeBundledWorker('session-index'),
       await probeBundledWorker('analytics-index'),
+      await probeBundledWorker('transcript-parse'),
       { name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) },
     ],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
@@ -8756,6 +8805,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
+      // System sessions (the Learning miner, Pack clean-up) take ids of their own, never a pool name.
+      const systemCallsigns = new SystemCallsignIssuer({
+        counters: new FileSystemCallsignCounters(join(paths.state, 'system-callsigns.json'), stateFiles),
+        held: async () => (await liveCallsigns(storage)).map(claim => claim.callsign),
+        serial: callsignClaims,
+      });
       const sessionControl = releasingAttachmentsOnStop(
         releasingAttachmentsOnStop(
           createSessionControlSubsystem(
@@ -8821,8 +8876,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
        * pointer is read back only from a session's own folder, or as an agent coordinator's turn file
        * (`~/.<coordinator>/<agent>/turns/turn-NNN.md`, kteam's layout).
        */
+      const conversationFiles = new NodeConversationFiles();
       const conversationImport = new ConversationImportService(
-        new NodeConversationFiles(),
+        conversationFiles,
         [
           { harness: 'claude', home: sharedHistoryPoolDirectory(paths.fleet, 'claude'), source: 'ferretry' },
           { harness: 'codex', home: sharedHistoryPoolDirectory(paths.fleet, 'codex'), source: 'ferretry' },
@@ -8832,7 +8888,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             userHome,
           }),
         ],
-        pacedTranscriptParsers,
+        // Read and described on the transcript worker, which was told the same hand-off scope.
+        new WorkerConversationDescriber(
+          transcriptParseWorker,
+          new FileConversationDescriber(conversationFiles, pacedTranscriptParsers, conversationHandoffScope),
+        ),
         new StorageConversationOwners(storage),
         createConversationAdopter(
           storage,
@@ -8856,7 +8916,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
           new NodeConversationLinker(),
         ),
-        { roots: [paths.sessions], coordinatorHomes: [userHome] },
         new AccountModelConversationListPolicy(declaredAccountModel),
       );
       const wardenPaths = createWardenPaths(paths.home);
@@ -9602,7 +9661,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: learningBoard,
         sessions,
         transcripts: createTranscriptReader(storage),
-        sessionControl,
+        sessionControl: withSystemCallsign(sessionControl, systemCallsigns, 'learning'),
         config: () => configFiles.current().evaluation.effective.learning,
         configFiles,
         identities: agentIdentities(storage),
@@ -9791,7 +9850,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         probeSettings: async () => (await configFiles.load()).evaluation.effective.pack.probe,
         probe: packProbe,
-        start: async request => await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request)),
+        start: async request =>
+          await withSystemCallsign(sessionControl, systemCallsigns, 'pack').start(
+            request,
+            crypto.randomUUID(),
+            JSON.stringify(request),
+          ),
         status: async reference => {
           const id = tryParseSessionId(reference);
           return id === undefined ? undefined : (await sessions.get(id))?.state.status;

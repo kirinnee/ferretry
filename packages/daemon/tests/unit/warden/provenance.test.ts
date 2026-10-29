@@ -161,6 +161,16 @@ describe('warden provenance markdown', () => {
     should(markdown).not.containEql('- From:');
   });
 
+  it('should name the investigator as it is shown, and leave the line out for a sidecar without one', () => {
+    // Arrange / Act
+    const named = renderProvenanceMarkdown(buildWardenSpawnProvenance(facts, preferred, undefined, 'warden-00002a'));
+    const unnamed = renderProvenanceMarkdown(buildWardenSpawnProvenance(facts, preferred));
+
+    // Assert
+    should(named).containEql('- Investigator: **`warden-00002A`**');
+    should(unnamed).not.containEql('- Investigator:');
+  });
+
   it('should explain where a failover came from and why', () => {
     // Arrange / Act
     const markdown = renderProvenanceMarkdown(buildWardenSpawnProvenance(facts, failedOver));

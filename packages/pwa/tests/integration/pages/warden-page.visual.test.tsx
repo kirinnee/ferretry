@@ -139,16 +139,18 @@ function OverviewSurface(_: WardenSurfaceProps) {
         </div>
       </section>
       <section className="fixture-card">
-        <h2>Needs you</h2>
-        <p>Maryah asked which relay fallback to use and is waiting for your answer.</p>
+        <h2>Recent actions</h2>
+        <p>Maryah moved by Jev 96% — restarted its process; its terminal had closed.</p>
         <div className="fixture-actions">
-          <input aria-label="Note for the investigation" data-focus="note" defaultValue="look at the pane" />
-          <button type="button" data-focus="investigate">
-            Investigate
+          <button type="button" data-focus="filter" aria-pressed="false">
+            Jev
           </button>
-          <a href="#report" data-focus="report">
+          <button type="button" data-focus="toggle" aria-expanded="false">
+            Details
+          </button>
+          <button type="button" data-focus="report" aria-label="Open report">
             Report
-          </a>
+          </button>
         </div>
       </section>
     </>
@@ -226,7 +228,7 @@ describe('Warden page visual contract', () => {
             await page.keyboard.press('Tab');
             focusOrder.push(await page.locator(':focus').getAttribute('data-focus'));
           }
-          should(focusOrder).deepEqual(['sweep', 'settings', 'note', 'investigate', 'report']);
+          should(focusOrder).deepEqual(['sweep', 'settings', 'filter', 'toggle', 'report']);
 
           if (viewport.name === 'mobile') {
             const controls = page.locator('button, input, a[data-focus]');

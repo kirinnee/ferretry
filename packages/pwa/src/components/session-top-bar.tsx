@@ -24,7 +24,7 @@
  * same session mutation.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import { displaySystemCallsign, type SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
@@ -43,7 +43,7 @@ import { UnreadBadge } from '../shell/unread-badge.tsx';
  */
 export const sessionDisplayName = (session: SessionView): string => {
   const { config } = session;
-  return displayCallsign(config.teammate) || config.label || config.name || config.id;
+  return displaySystemCallsign(displayCallsign(config.teammate) || config.label || config.name || config.id);
 };
 
 /** The status word for each turn: the person's words, not the daemon's. */

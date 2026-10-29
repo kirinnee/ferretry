@@ -179,6 +179,47 @@ describe('BundledWorkerHost', () => {
     should(threads).have.length(2);
   });
 
+  it('should post a notice to a running thread only, and time an idle thread again on the idle time then read', async () => {
+    // Arrange
+    let idleMs = 10_000;
+    const { host, threads, ask } = hostOf(echo, { idleMs: () => idleMs });
+
+    // Act
+    host.notify({ id: 0, ask: 'nobody is there' });
+    const startedByNotice = threads.length;
+    await ask('x');
+    idleMs = 5;
+    host.notify({ id: 0, ask: 'news' });
+    await Bun.sleep(30);
+    const sent = threads[0]?.sent.map(each => ('id' in each ? each.ask : 'greeting'));
+    const endedAfterNotice = threads[0]?.terminated;
+    host.close();
+
+    // Assert
+    should(startedByNotice).equal(0);
+    should(sent).deepEqual(['x', 'news']);
+    should(endedAfterNotice).be.true();
+  });
+
+  it('should leave an idle thread running when a notice arrives while a request is still waiting', async () => {
+    // Arrange
+    const { host, threads } = hostOf((request, thread) => {
+      if ('id' in request && request.ask === 'slow')
+        setTimeout(() => thread.reply({ id: request.id, value: 'done' }), 20);
+    });
+    const id = host.nextId();
+
+    // Act
+    const pending = host.request(id, { id, ask: 'slow' }, 'answer');
+    host.notify({ id: 0, ask: 'news' });
+    const answered = await pending;
+    host.close();
+
+    // Assert
+    should(answered).equal('done');
+    should(threads).have.length(1);
+  });
+
   it('should quote the runtime when a thread fails, unless told how to say it', async () => {
     // Arrange
     const crashing = (request: Request, thread: ScriptedThread) => {

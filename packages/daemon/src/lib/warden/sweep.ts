@@ -75,6 +75,14 @@ import type {
   WardenAttentionView as WireAttentionView,
   WardenAnomaly as WireWardenAnomaly,
 } from '@ferretry/protocol';
+import {
+  displaySystemCallsign,
+  nextWardenInvestigatorSequence,
+  wardenActionActor,
+  wardenInvestigatorName,
+  wardenInvestigatorSequence,
+} from '@ferretry/protocol';
+import { displayAgentName } from '../names/session-names.ts';
 import type { TriageDecision, TriageGuardPort } from '../speedups/jev.ts';
 import { type AttentionBoardInput, buildWardenAttentionView } from './attention.ts';
 import {
@@ -135,6 +143,7 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
+import { recordWardenAsk, recordWardenOutcome, wardenAskActor, wardenHistory, withDailyRollup } from './daily.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
 import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
@@ -238,6 +247,22 @@ export interface WardenSpawnRequest {
    * one session it was sent to look at.
    */
   readonly stopCapability?: string;
+  /**
+   * The investigator's own callsign, `warden-00002a`. Always set by the sweep: a system session that
+   * asked for no name would be handed a first name from the pool, and those are for real ferrets.
+   */
+  readonly teammate?: string;
+}
+
+/** Every one of the 16,777,215 investigator names is held — a fleet no machine will hold, refused rather than looped. */
+const NO_INVESTIGATOR_NAME = new Error('every warden-xxxxxx name is in use');
+
+/** The spawner's answer when the callsign it was asked to claim is already held. */
+export class WardenCallsignTakenError extends Error {
+  constructor(readonly callsign: string) {
+    super(`callsign ${callsign} is already claimed`);
+    this.name = 'WardenCallsignTakenError';
+  }
 }
 
 /** Putting a warden on the host. Its real implementation is the ordinary session
@@ -573,10 +598,15 @@ function wireAnomaly(anomaly: WardenAnomaly): WireWardenAnomaly {
  * the timer that fires the periodic run.
  */
 export class WardenSweepService {
+  private readonly ports: WardenSweepPorts;
+
   constructor(
-    private readonly ports: WardenSweepPorts,
+    ports: WardenSweepPorts,
     private readonly settings: WardenSweepSettings,
-  ) {}
+  ) {
+    // Every state write carries the daily rollup, so no call site has to remember to fold it.
+    this.ports = { ...ports, state: withDailyRollup(ports.state, ports.nowMs) };
+  }
 
   /** The configuration as an operator reads it, with everything they should know
    *  about it. */
@@ -636,6 +666,11 @@ export class WardenSweepService {
     ]);
     const resolved = await this.resolveLogin(stored.config);
     const budget = this.budget(stored.config, state, nowMs, resolved.usable);
+    const investigators = new Map(
+      (state.investigations ?? []).flatMap(record =>
+        record.wardenName === undefined ? [] : [[record.id, record.wardenName] as const],
+      ),
+    );
     return {
       config: stored.config,
       ...(state.lastSweepAt === undefined ? {} : { lastSweepAt: state.lastSweepAt }),
@@ -656,10 +691,14 @@ export class WardenSweepService {
           meta: state.queueMeta ?? {},
           records: state.investigations ?? [],
           live: wardenId => liveIds.has(wardenId),
+        }).map(entry => {
+          const wardenName = entry.wardenSession === undefined ? undefined : investigators.get(entry.wardenSession);
+          return wardenName === undefined ? entry : { ...entry, wardenName };
         }),
       ],
       actions: (state.actions ?? []).slice(0, WARDEN_STATUS_LIST_LIMIT).map(action => ({ ...action })),
       blessings: [...blessingViews(state.blessings ?? {}, nowMs)],
+      history: [...wardenHistory(state, nowMs)],
     };
   }
 
@@ -856,6 +895,7 @@ export class WardenSweepService {
           action: 'bless',
           outcome: 'done',
           by: 'owner',
+          actor: 'owner',
           ...(kinds[0] === undefined ? {} : { anomalyKind: kinds[0] }),
           detail: `You asked the Warden to leave it alone ${how}.`,
         },
@@ -997,7 +1037,13 @@ export class WardenSweepService {
         continue;
       }
       if (!config.enabled || !config.mayActAlone.nudge) continue;
-      const base = { at, sessionId: event.sessionId, action: 'nudge' as const, by: 'warden' as const };
+      const base = {
+        at,
+        sessionId: event.sessionId,
+        action: 'nudge' as const,
+        by: 'warden' as const,
+        actor: 'auto' as const,
+      };
       try {
         await this.ports.remedies.nudge(event.sessionId, REFLEX_NUDGE_MESSAGE);
         state = this.recordAction(state, {
@@ -1271,7 +1317,7 @@ export class WardenSweepService {
         input.config,
         state,
         {
-          name: `warden:${target.config.teammate ?? targetId}`,
+          name: `Investigate ${target.config.teammate === undefined ? targetId.slice(0, 8) : displayAgentName(target.config.teammate)}`,
           prompt: buildAssignedWardenPrompt(anomaly, target, reportPath, this.settings),
           cwd: this.settings.wardenCwd,
           effort: input.config.investigation.effort,
@@ -1293,7 +1339,8 @@ export class WardenSweepService {
         continue;
       }
       const { facts, selection } = result.started;
-      await this.writeProvenance(reportPath, facts, selection, targetId);
+      const investigator = result.started.investigator;
+      await this.writeProvenance(reportPath, facts, selection, targetId, investigator);
       // Only the kind this warden was actually shown. A sibling kind it was never
       // asked about stays visibly unjudged rather than borrowing its verdict.
       nextAssignments = {
@@ -1318,6 +1365,7 @@ export class WardenSweepService {
           reportPath,
           agent: facts.agent,
           ...(facts.model === undefined ? {} : { model: facts.model }),
+          ...(investigator === undefined ? {} : { wardenName: investigator }),
         },
         ...records,
       ];
@@ -1327,6 +1375,7 @@ export class WardenSweepService {
       spawned.push(facts.sessionId);
       this.ports.journal.record('fleet.warden_assigned', {
         wardenId: facts.sessionId,
+        ...(investigator === undefined ? {} : { investigator: displaySystemCallsign(investigator) }),
         targetId,
         kind: anomaly.kind,
         reportPath,
@@ -1543,6 +1592,7 @@ export class WardenSweepService {
       at,
       sessionId: anomaly.sessionId,
       by: 'jev' as const,
+      actor: 'jev' as const,
       anomalyKind: anomaly.kind,
       confidence: outcome.confidence,
       ...(decision.reason === undefined ? {} : { reason: decision.reason }),
@@ -1621,7 +1671,13 @@ export class WardenSweepService {
     const at = new Date(nowMs).toISOString();
     let next = state;
     for (const candidate of leftoverBrowserCandidates(fleet, nowMs, { tickSeconds: DEFAULT_TICK_SECONDS })) {
-      const base = { at, sessionId: candidate.sessionId, action: 'close_leftover' as const, by: 'warden' as const };
+      const base = {
+        at,
+        sessionId: candidate.sessionId,
+        action: 'close_leftover' as const,
+        by: 'warden' as const,
+        actor: 'auto' as const,
+      };
       // Said once per leftover: a hold or a failure repeated every sweep would bury the list.
       const said = (next.actions ?? []).some(
         action =>
@@ -1664,9 +1720,26 @@ export class WardenSweepService {
     return next;
   }
 
-  /** Newest first, bounded: the list the owner reads as "Recent actions". */
+  /**
+   * Newest first, bounded: the list the owner reads as "Recent actions" — and the ONE place an action
+   * is counted toward the day's stats, stamped with who acted and, for an investigation's verdict, which
+   * investigator it was.
+   */
   private recordAction(state: WardenRuntimeState, action: WardenAction): WardenRuntimeState {
-    return { ...state, actions: [action, ...(state.actions ?? [])].slice(0, WARDEN_HISTORY_LIMIT) };
+    const investigator =
+      action.investigator ??
+      (action.reportPath === undefined
+        ? undefined
+        : state.investigations?.find(record => record.reportPath === action.reportPath)?.wardenName);
+    const stamped: WardenAction = {
+      ...action,
+      actor: action.actor ?? wardenActionActor(action),
+      ...(investigator === undefined ? {} : { investigator }),
+    };
+    return recordWardenOutcome(
+      { ...state, actions: [stamped, ...(state.actions ?? [])].slice(0, WARDEN_HISTORY_LIMIT) },
+      stamped,
+    );
   }
 
   /**
@@ -1761,6 +1834,7 @@ export class WardenSweepService {
       action: 'bless',
       outcome: 'done',
       by: 'warden',
+      actor: 'llm',
       ...(record.kinds[0] === undefined ? {} : { anomalyKind: record.kinds[0] }),
       reportPath: record.reportPath,
       detail: `The investigation found it healthy, so this flag is left alone ${leftAloneNote(record.subject, cleared.ttlMs, cleared.streak)}.`,
@@ -1794,6 +1868,7 @@ export class WardenSweepService {
       sessionId: targetId,
       action: act.action,
       by: 'warden' as const,
+      actor: 'llm' as const,
       ...(record.kinds[0] === undefined ? {} : { anomalyKind: record.kinds[0] }),
       reportPath: record.reportPath,
       ...(act.action === 'failover' ? { agent: act.agent } : {}),
@@ -1968,7 +2043,7 @@ export class WardenSweepService {
       config,
       state,
       {
-        name: 'warden-sweep',
+        name: 'Fleet triage',
         prompt: buildWardenSweepPrompt({
           anomalies,
           sessions: input.fleet,
@@ -1995,7 +2070,8 @@ export class WardenSweepService {
     }
 
     const { facts, selection } = result.started;
-    await this.writeProvenance(reportPath, facts, selection);
+    const investigator = result.started.investigator;
+    await this.writeProvenance(reportPath, facts, selection, undefined, investigator);
     state = {
       ...state,
       lastSpawnAt: input.at,
@@ -2015,6 +2091,7 @@ export class WardenSweepService {
             reportPath,
             agent: facts.agent,
             ...(facts.model === undefined ? {} : { model: facts.model }),
+            ...(investigator === undefined ? {} : { wardenName: investigator }),
           },
           ...(state.investigations ?? []),
         ],
@@ -2024,6 +2101,7 @@ export class WardenSweepService {
     };
     this.ports.journal.record('fleet.warden_spawned', {
       sessionId: facts.sessionId,
+      ...(investigator === undefined ? {} : { investigator: displaySystemCallsign(investigator) }),
       count: anomalies.length,
       reportPath,
     });
@@ -2187,9 +2265,15 @@ export class WardenSweepService {
     const notified: Record<string, string> = Object.fromEntries(
       Object.entries(sweep.state.notified ?? {}).filter(([key]) => standing.has(key)),
     );
+    let state = sweep.state;
     for (const request of plan.raise) {
       const write = await this.ports.attention.raise(request.sessionId, request);
-      if (write !== 'rejected') notified[request.subjectKey] ??= sweep.at;
+      if (write !== 'rejected' && notified[request.subjectKey] === undefined) {
+        notified[request.subjectKey] = sweep.at;
+        // Counted once per episode, when the owner is first told — the day's "Asked you".
+        const actor = wardenAskActor(request.reason);
+        if (actor !== undefined) state = recordWardenAsk(state, sweep.at, actor);
+      }
       if (write === 'rejected') {
         this.ports.journal.record('fleet.warden_escalation_failed', {
           sessionId: request.sessionId,
@@ -2211,8 +2295,8 @@ export class WardenSweepService {
         change: write,
       });
     }
-    if (JSON.stringify(notified) !== JSON.stringify(sweep.state.notified ?? {}))
-      await this.ports.state.write({ ...sweep.state, notified });
+    if (state !== sweep.state || JSON.stringify(notified) !== JSON.stringify(sweep.state.notified ?? {}))
+      await this.ports.state.write({ ...state, notified });
   }
 
   // ─── accounts ───────────────────────────────────────────────────────────────
@@ -2238,6 +2322,8 @@ export class WardenSweepService {
       readonly facts: WardenSpawnFacts;
       readonly account: WardenAccount;
       readonly selection: WardenSelectionProvenance;
+      /** The investigator's callsign, `warden-00002a`. */
+      readonly investigator: string;
     };
     readonly exhausted: boolean;
     readonly error?: unknown;
@@ -2246,19 +2332,45 @@ export class WardenSweepService {
     const attempts = Math.min(MAX_SPAWN_ATTEMPTS, Math.max(1, accounts.length));
     let next = state;
     let error: unknown;
+    // One name per spawn, kept across the accounts it is tried on: a login that fails to start has not
+    // used it, so the sequence has no gaps for a refused start.
+    const issued = await this.issueInvestigator(next);
+    next = issued.state;
+    let investigator = issued.name;
+    if (investigator === undefined) return { state: next, exhausted: false, error: NO_INVESTIGATOR_NAME };
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const picked = await this.pickAccount(accounts, config, next, tried);
       next = picked.state;
       if (picked.account === undefined) return { state: next, exhausted: attempt === 0, error };
-      const result = await this.spawn({
-        ...request,
-        agent: picked.account.agent,
-        ...(picked.account.model === undefined ? {} : { model: picked.account.model }),
-      });
+      const start = (teammate: string): Promise<{ readonly facts?: WardenSpawnFacts; readonly error?: unknown }> =>
+        this.spawn({
+          ...request,
+          teammate,
+          agent: (picked.account as WardenAccount).agent,
+          ...((picked.account as WardenAccount).model === undefined
+            ? {}
+            : { model: (picked.account as WardenAccount).model }),
+        });
+      let result = await start(investigator);
+      // A name another session took since the ledger was read is no fault of the account: take the next
+      // free one and try once more, without a strike.
+      if (result.error instanceof WardenCallsignTakenError) {
+        this.ports.journal.record('fleet.warden_callsign_taken', {
+          ...context,
+          investigator: displaySystemCallsign(investigator),
+        });
+        const taken = wardenInvestigatorSequence(investigator);
+        const again = await this.issueInvestigator(next, taken === undefined ? [] : [taken]);
+        next = again.state;
+        if (again.name !== undefined) {
+          investigator = again.name;
+          result = await start(investigator);
+        }
+      }
       if (result.facts !== undefined)
         return {
           state: { ...next, failover: recordWardenSuccess(next.failover ?? {}, picked.account.agent) },
-          started: { facts: result.facts, account: picked.account, selection: picked.selection },
+          started: { facts: result.facts, account: picked.account, selection: picked.selection, investigator },
           exhausted: false,
         };
       error = result.error;
@@ -2272,6 +2384,26 @@ export class WardenSweepService {
       });
     }
     return { state: next, exhausted: false, error };
+  }
+
+  /**
+   * The next investigator name, `warden-00002a`: the sequence after the last one issued that no session
+   * in the fleet holds, and not one in `refused`. Persisted at once, so a restart never reissues it.
+   * Never a name from the pool: those are for real ferrets.
+   */
+  private async issueInvestigator(
+    state: WardenRuntimeState,
+    refused: readonly number[] = [],
+  ): Promise<{ readonly state: WardenRuntimeState; readonly name?: string }> {
+    const fleet = await this.ports.fleet.fleet().catch(() => []);
+    const inUse = new Set<number>(refused);
+    for (const session of fleet) {
+      const sequence = wardenInvestigatorSequence(session.config.teammate);
+      if (sequence !== undefined) inUse.add(sequence);
+    }
+    const sequence = nextWardenInvestigatorSequence(state.investigatorSequence ?? 0, inUse);
+    if (sequence === undefined) return { state };
+    return { state: { ...state, investigatorSequence: sequence }, name: wardenInvestigatorName(sequence) };
   }
 
   /**
@@ -2414,9 +2546,13 @@ export class WardenSweepService {
     facts: WardenSpawnFacts,
     selection: WardenSelectionProvenance,
     targetId?: string,
+    investigator?: string,
   ): Promise<void> {
     try {
-      await this.ports.artifacts.writeProvenance(reportPath, buildWardenSpawnProvenance(facts, selection, targetId));
+      await this.ports.artifacts.writeProvenance(
+        reportPath,
+        buildWardenSpawnProvenance(facts, selection, targetId, investigator),
+      );
     } catch (error) {
       this.ports.journal.record('fleet.warden_provenance_failed', {
         wardenId: facts.sessionId,

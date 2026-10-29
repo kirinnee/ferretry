@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
@@ -5,6 +7,7 @@ import {
   CompactionRecordSchema,
   expectedCompaction,
   MAX_COMPACTION_MS,
+  paneCompaction,
   paneShowsCompaction,
   resolveCompaction,
   TYPICAL_COMPACTION_MS,
@@ -19,8 +22,10 @@ import type { TranscriptEvent } from '../../../../src/lib/transcript/types.ts';
  * exactly once for the history, a pane that merely failed to read must not end one, and a second
  * compaction must still be seen after the first.
  *
- * The pane lines and boundary records are synthetic reconstructions of the documented shapes, not
- * captures from a live harness.
+ * The Claude Code progress frame is built from the exact text the owner saw on a live pane while it was
+ * compacting (`tests/fixtures/compaction/claude-2.1.28x-compacting-progress.txt`: the Compacting line,
+ * the `▰▱` bar with its percentage, the tip line). The Codex frame, the bar-less Claude frame and the
+ * boundary records are synthetic reconstructions of the documented shapes.
  */
 
 const BASE = Date.parse('2026-10-18T10:00:00.000Z');
@@ -59,6 +64,9 @@ const evidence = (over: Partial<CompactionEvidence>): CompactionEvidence => ({
   ...over,
 });
 
+const FIXTURES = join(import.meta.dir, '../../../fixtures/compaction');
+const fixture = (name: string): string => readFileSync(join(FIXTURES, name), 'utf8');
+
 const CLAUDE_LINE = '✻ Compacting conversation… (12s · esc to interrupt · ctrl+t to show todos)';
 const CODEX_LINE = '• Compacting (3s • Esc to interrupt)';
 
@@ -85,6 +93,61 @@ describe('paneShowsCompaction', () => {
     should(paneShowsCompaction('✻ Pontificating… (12s · esc to interrupt)')).be.false();
     should(paneShowsCompaction('')).be.false();
     should(paneShowsCompaction(old)).be.false();
+  });
+});
+
+describe('paneCompaction', () => {
+  it('should read the percentage and the tokens written off a live Claude Code frame', () => {
+    should(paneCompaction(fixture('claude-2.1.28x-compacting-progress.txt'))).deepEqual({
+      percent: 49,
+      tokensWritten: 37_400,
+    });
+  });
+
+  it('should report a running compaction with no progress when the harness paints none', () => {
+    should(paneCompaction(fixture('claude-2.1.28x-compacting-no-bar.txt'))).deepEqual({});
+    should(paneCompaction(fixture('codex-compacting.txt'))).deepEqual({});
+    should(paneCompaction('')).be.undefined();
+  });
+
+  it('should take the percentage only from the line directly under the Compacting line', () => {
+    // Arrange
+    const bar = '  ▰▰▰▰▱▱▱▱ 49%';
+    const spaced = `${CLAUDE_LINE}\n\n${bar}`;
+    const stray = `⏺ Done.\n${bar}\n${CLAUDE_LINE}`;
+
+    // Assert
+    should(paneCompaction(spaced)).deepEqual({});
+    should(paneCompaction(stray)).deepEqual({});
+    should(paneCompaction(`${CLAUDE_LINE}\n${bar}`)).deepEqual({ percent: 49 });
+  });
+
+  it('should demand the bar glyphs and a percentage that ends the line', () => {
+    const under = (line: string): ReturnType<typeof paneCompaction> => paneCompaction(`${CLAUDE_LINE}\n${line}`);
+
+    should(under('  49%')).deepEqual({});
+    should(under('  ▰▰▱▱ 49% done')).deepEqual({});
+    should(under('  ▰▰▱▱ about 49%')).deepEqual({});
+    should(under('  ▰▰▱▱ 120%')).deepEqual({});
+    should(under('  ▰▰▱▱ 0%')).deepEqual({ percent: 0 });
+    should(under('  ▰▰▰▰▰▰▰▰▰▰ 100%')).deepEqual({ percent: 100 });
+  });
+
+  it('should read the ↓ counter in any spinner glyph, and ignore a counter that is not a ↓ one', () => {
+    should(paneCompaction('✢ Compacting conversation… (7m 14s · ↓ 37.4k tokens)')).deepEqual({ tokensWritten: 37_400 });
+    should(paneCompaction('✻ Compacting conversation… (1m 2s · ↓ 812 tokens)')).deepEqual({ tokensWritten: 812 });
+    should(paneCompaction('✻ Compacting conversation… (1m 2s · ↑ 9.9k tokens)')).deepEqual({});
+  });
+
+  it('should not read a percentage under prose that only mentions Compacting', () => {
+    should(paneCompaction('• Compacting the cache before the build…\n  ▰▰▱▱ 49%')).be.undefined();
+  });
+
+  it('should still read the real frame when carriage returns end every line', () => {
+    const frame = fixture('claude-2.1.28x-compacting-progress.txt').replaceAll('\n', '\r\n');
+
+    should(paneCompaction(frame)).deepEqual({ percent: 49, tokensWritten: 37_400 });
+    should(paneShowsCompaction(frame)).be.true();
   });
 });
 
@@ -129,6 +192,25 @@ describe('resolveCompaction', () => {
       basis: 'history',
     });
     should(verdict.finished).be.undefined();
+  });
+
+  it('should carry the percent and tokens the pane reported, and only while the pane shows the compaction', () => {
+    // Arrange
+    const tracker = { startedAt: at(2) };
+    const progress = { percent: 49, tokensWritten: 37_400 };
+
+    // Act
+    const shown = resolveCompaction(evidence({ paneCompacting: true, progress, tracker }));
+    const unreadable = resolveCompaction(evidence({ paneCompacting: undefined, progress, tracker }));
+    const started = resolveCompaction(evidence({ paneCompacting: true, progress }));
+    const bare = resolveCompaction(evidence({ paneCompacting: true, tracker }));
+
+    // Assert
+    should(shown.compaction).containDeep({ phase: 'running', percent: 49, tokensWritten: 37_400 });
+    should(started.compaction).containDeep({ phase: 'running', percent: 49, tokensWritten: 37_400 });
+    should(unreadable.compaction).not.have.property('percent');
+    should(bare.compaction).not.have.property('percent');
+    should(bare.compaction).not.have.property('tokensWritten');
   });
 
   it('should start with no context size when the transcript states none', () => {

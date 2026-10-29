@@ -239,6 +239,22 @@ investigation, for the cap only. The status's savings line — (Jev's leaves + t
 average, minus Jev's own cost — appears only once an investigation has been priced. The caps are unchanged by
 Jev acting: an act costs the one Jev answer it came from.
 
+**Daily history, and who acted.** The state keeps a rollup per UTC day (`daily`, the last 14 days; the status's
+`history` is the last 7, oldest first, today last, and only days the daemon recorded). Each action is counted as
+it is recorded, under what became of the flag — **moved** (a nudge, resume, restart or failover), **cleared**
+(a bless), **stopped**, or **asked** (anything held for you) — and under who acted: **auto** (a rule: the liveness
+reflex, a leftover browser) · **jev** (Jev acting alone) · **llm** (an investigation's verdict) · **owner** (_Leave it
+longer_). A failed attempt and a closed leftover browser count as none. Flags raised, Jev's decisions and spend, and
+investigations and their cost are folded in from the counters above, and a number only ever goes up, so a record
+pruned from the capped list does not take a day's count down. A cost priced the next day lands on the day its
+investigation started. An action that came from an investigation also names it (`investigator`).
+
+**Investigators are named `warden-000001` … `warden-FFFFFF`**, from a counter in `warden/state.json`
+(`investigatorSequence`) that wraps to 1 and skips a name a live session still holds — never from the first-name
+pool, which is for real ferrets. The name is stored lowercase and shown with its digits uppercase
+(`warden-00002A`) in the status, notifications, logs, and the report's provenance sidecar. If the name is taken by
+the time the session starts, the next free one is tried once, without counting against the account.
+
 **A cleared flag stays quiet until its situation changes.** Every flag on a ferret carries a **subject** —
 which episode of trouble it is: its turn and the moment the episode began (the transcript last grew, the
 ferret froze, it went idle), and for a stuck command that process itself, across turns. When Jev or an

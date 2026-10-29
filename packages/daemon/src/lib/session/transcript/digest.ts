@@ -6,7 +6,7 @@ import type {
   TranscriptRawRecord,
   TranscriptRole,
 } from '../../transcript/types.ts';
-import { extendSessionTranscriptRawPrefix, sessionTranscriptRawPrefixStart } from './message-token.ts';
+import { extendSessionTranscriptRawPrefix, sessionTranscriptRawPrefixStart } from './raw-prefix.ts';
 
 /** The roles a replacement harness can receive as ordinary conversation context. */
 export type ConversationMessageRole = Extract<TranscriptRole, 'user' | 'assistant' | 'developer' | 'system'>;

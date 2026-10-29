@@ -1,23 +1,26 @@
 import type { SessionCompactionBasis, SessionCompactionState } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { TranscriptEvent, TranscriptHarness } from '../../transcript/types.ts';
+import { tokenCounterValue } from './policy.ts';
 
 /**
  * WHEN A HARNESS IS COMPACTING ITS CONTEXT, AND HOW LONG THAT USUALLY TAKES.
  *
- * Three facts, three sources, and none of them is a percentage:
+ * Four facts, three sources:
  *
- *   1. THE PANE says a compaction is RUNNING: Claude Code paints `✻ Compacting conversation… (12s ·
- *      esc to interrupt)` and Codex `• Compacting (3s • Esc to interrupt)`. The line is matched only
- *      with its glyph, its ellipsis AND an interrupt/elapsed parenthetical, so an agent that merely
- *      writes the word "Compacting" in a reply cannot start one.
- *   2. THE TRANSCRIPT says it has ENDED: the harness's own boundary record (a `compaction` event),
+ *   1. THE PANE says a compaction is RUNNING: Claude Code paints `✢ Compacting conversation… (7m 14s · ↓
+ *      37.4k tokens)` and Codex `• Compacting (3s • Esc to interrupt)`. The line is matched only with its
+ *      glyph, its ellipsis AND an interrupt/elapsed parenthetical, so an agent that merely writes the word
+ *      "Compacting" in a reply cannot start one.
+ *   2. THE PANE ALSO REPORTS PROGRESS, on current Claude Code: a bar and a whole percentage on the line
+ *      DIRECTLY UNDER the Compacting line (`▰▰▰▱▱▱ 49%`), and the `↓ N tokens` counter in the parenthetical.
+ *      Both are read as the harness's own numbers. Older Claude Code and Codex paint neither; then the
+ *      frame carries neither, and nothing is estimated.
+ *   3. THE TRANSCRIPT says it has ENDED: the harness's own boundary record (a `compaction` event),
  *      and the context sizes either side of it from the neighbouring usage records.
- *   3. THIS DAEMON'S HISTORY says how long one takes: the median of the compactions it has watched
- *      from start to end. With none yet, a fixed prior — and the frame says it is one (`typical`).
- *
- * NO HARNESS REPORTS PROGRESS, so the percentage is derived by the reader from `startedAt` and
- * `expectedMs` (see `compactionPercent` in the protocol) and is an estimate, not a reading.
+ *   4. THIS DAEMON'S HISTORY says how long one usually takes: the median of the compactions it has
+ *      watched from start to end. With none yet, a fixed prior — and the frame says it is one (`typical`).
+ *      It is shown as "usually ~Ns", only when the pane gave no real percent.
  *
  * Pure and total: captured text, parsed events and a tracker in, a verdict out.
  */
@@ -29,13 +32,43 @@ const STATUS_WINDOW_LINES = 25;
 const COMPACTING_LINE =
   /^\s*[•◦✻✳✶✽✢∗·✦✧]\s+Compacting\b[^\n(]{0,80}(?:…|\.\.\.)?\s*\([^)\n]*(?:interrupt|\d+\s*[hms]\b)[^)\n]*\)?\s*$/iu;
 
+/** Claude Code's progress bar line: filled and empty block glyphs, then a whole percentage that ends the line. */
+const PROGRESS_LINE = /^\s*[▰▱▮▯■□█▓▒░]+\s+(\d{1,3})\s?%\s*$/u;
+
+/** The `↓ 37.4k tokens` counter inside the Compacting line's parenthetical. */
+const WRITTEN_TOKENS = /↓\s*([\d.,]+)\s*([kKmM]?)\s*tokens?\b/u;
+
+/** What the harness itself reports about a compaction it is running; a field is absent when it paints none. */
+export interface PaneCompaction {
+  /** Whole percent 0–100 off the bar under the Compacting line. */
+  readonly percent?: number;
+  /** Tokens written so far, off the `↓ N tokens` counter. */
+  readonly tokensWritten?: number;
+}
+
+/**
+ * The compaction a captured frame shows right now (`undefined` when none), with whatever progress the
+ * harness paints. The percentage is taken only from the line DIRECTLY under the Compacting line.
+ */
+export const paneCompaction = (frame: string): PaneCompaction | undefined => {
+  const lines = frame.replaceAll('\r\n', '\n').split('\n').slice(-STATUS_WINDOW_LINES);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const line = lines[index] as string;
+    if (!COMPACTING_LINE.test(line)) continue;
+    const counter = WRITTEN_TOKENS.exec(line);
+    const written = counter === null ? undefined : tokenCounterValue(counter[1] as string, counter[2] as string);
+    const bar = PROGRESS_LINE.exec(lines[index + 1] ?? '');
+    const percent = bar === null ? undefined : Number(bar[1]);
+    return {
+      ...(percent === undefined || percent > 100 ? {} : { percent }),
+      ...(written === undefined ? {} : { tokensWritten: written }),
+    };
+  }
+  return undefined;
+};
+
 /** Whether a captured frame shows the harness compacting right now. */
-export const paneShowsCompaction = (frame: string): boolean =>
-  frame
-    .replaceAll('\r\n', '\n')
-    .split('\n')
-    .slice(-STATUS_WINDOW_LINES)
-    .some(line => COMPACTING_LINE.test(line));
+export const paneShowsCompaction = (frame: string): boolean => paneCompaction(frame) !== undefined;
 
 /** The prior used until this daemon has watched one compaction, per harness. Assumptions, labelled `typical`. */
 export const TYPICAL_COMPACTION_MS: Readonly<Record<TranscriptHarness, number>> = {
@@ -96,6 +129,8 @@ export interface CompactionEvidence {
   readonly nowMs: number;
   /** `undefined` when the pane could not be read: the tracker is then left as it was. */
   readonly paneCompacting: boolean | undefined;
+  /** What the pane reports about the compaction it shows; absent when it paints no progress. */
+  readonly progress?: PaneCompaction;
   readonly events: readonly TranscriptEvent[];
   readonly tracker: CompactionTracker | undefined;
   readonly estimate: CompactionEstimate;
@@ -192,10 +227,13 @@ export const resolveCompaction = (evidence: CompactionEvidence): CompactionVerdi
     };
   }
 
+  const progress = paneCompacting === true ? evidence.progress : undefined;
   const running = (tracker: CompactionTracker): SessionCompactionState => ({
     phase: 'running',
     startedAt: tracker.startedAt,
     ...(tracker.tokensBefore === undefined ? {} : { tokensBefore: tracker.tokensBefore }),
+    ...(progress?.percent === undefined ? {} : { percent: progress.percent }),
+    ...(progress?.tokensWritten === undefined ? {} : { tokensWritten: progress.tokensWritten }),
     expectedMs: estimate.expectedMs,
     basis: estimate.basis,
   });

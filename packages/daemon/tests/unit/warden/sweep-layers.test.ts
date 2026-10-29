@@ -182,7 +182,7 @@ describe('Jev in front of investigations', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['warden:s1']);
+    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['Investigate s1']);
     should(subject.state().passedOn).deepEqual([]);
     should(subject.state().investigations?.[0]).match({ origin: 'jev' });
   });
@@ -631,7 +631,7 @@ describe('the liveness reflex', () => {
 
     // Assert
     should(actual.anomalies).match([{ kind: 'agent_frozen', sessionId: 's1', since: at(-1), assignedWarden: true }]);
-    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['warden:s1']);
+    should(subject.spawns.map(spawn => spawn.name)).deepEqual(['Investigate s1']);
     should(subject.spawns[0]?.prompt).containEql('recommend RESTART');
   });
 });

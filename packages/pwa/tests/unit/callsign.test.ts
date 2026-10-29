@@ -12,6 +12,15 @@ describe('displayCallsign', () => {
     expect(displayCallsign('   ')).toBe('');
   });
 
+  it('shows a system callsign as an identifier, with uppercase hex digits', () => {
+    expect(displayCallsign('warden-00002a')).toBe('warden-00002A');
+    expect(displayCallsign('warden-ffffff')).toBe('warden-FFFFFF');
+  });
+
+  it('still title-cases a first-name callsign that merely starts with warden', () => {
+    expect(displayCallsign('warden-ada')).toBe('Warden-Ada');
+  });
+
   it('survives a slug with empty segments', () => {
     expect(displayCallsign('a--b')).toBe('A--B');
   });

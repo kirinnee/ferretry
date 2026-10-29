@@ -1,8 +1,8 @@
 /**
- * What the Warden page says, worked out without a browser.
+ * What the Warden page says, worked out without a browser: the status sentence, the Warden-notifications
+ * link, the Watching rows and the Investigations rows. The stat tiles, layer lines and chart are in
+ * `warden-stats-model.ts`; the Recent-actions rows are in `warden-action-rows-model.ts`.
  *
- * The page is the Insights pattern: one status sentence, a savings line, then sessions grouped by what
- * they need from the owner — Needs you, Watching — and two histories, Investigations and Recent actions.
  * Every judgement about grouping, wording and tone lives here, where it can be proved, rather than in
  * ternaries inside JSX.
  *
@@ -10,27 +10,26 @@
  *
  *   1. JEV IS CREDITED ONLY WHAT IT RECORDED. A Jev action carries `by: 'jev'` and its confidence, so the
  *      copy says "Jev" exactly there; an investigation's verdict and a rule never read as Jev's.
- *   2. NO ALL-CLEAR OVER A BAD READ. The "who needs you" feed has four outcomes and they never collapse:
- *      an unreadable board is `degraded`, a daemon that never swept is `no-sweep`, and a failed refresh
- *      keeps the last answer but marks it stale. Only `clean-sweep` may say nobody needs you.
+ *   2. NO ALL-CLEAR OVER A BAD READ. The Warden-notifications count has its own outcomes and they never
+ *      collapse: an unreadable board is `degraded`, a daemon that never swept is `no-sweep`, and a failed
+ *      refresh keeps the last answer but marks it stale. Only a clean read of zero may say there are none.
  *   3. NEVER INVENT A NUMBER. A saving the daemon did not price is left out, not estimated.
  */
 
 import type {
   FleetAttentionItem,
   WardenAction,
-  WardenActionKind,
   WardenAnomaly,
-  WardenAttentionOutcome,
   WardenAttentionView,
   WardenBlessingView,
   WardenFailoverAccountView,
   WardenInvestigation,
-  WardenJudgement,
   WardenLayers,
   WardenStatusView,
   WardenVerdictKind,
 } from '@ferretry/protocol';
+import { displaySystemCallsign } from '@ferretry/protocol';
+import type { WardenReadState } from '../../hooks/use-warden-poll.ts';
 import {
   wardenAccountLabel,
   wardenInvestigationHead,
@@ -53,56 +52,11 @@ const VERDICT_CHIPS: Readonly<Record<WardenVerdictKind, WardenChip>> = {
 
 export const verdictChip = (verdict: WardenVerdictKind): WardenChip => VERDICT_CHIPS[verdict];
 
-const ACTION_DONE: Readonly<Record<WardenActionKind, WardenChip>> = {
-  bless: chip('blessed', 'ok'),
-  nudge: chip('nudged', 'accent'),
-  resume: chip('revived', 'ok'),
-  restart: chip('restarted', 'ok'),
-  stop: chip('stopped', 'err'),
-  failover: chip('failed over', 'accent'),
-  close_leftover: chip('cleaned up', 'ok'),
-};
-
-const ACTION_VERB: Readonly<Record<WardenActionKind, string>> = {
-  bless: 'bless',
-  nudge: 'nudge',
-  resume: 'resume',
-  restart: 'restart',
-  stop: 'stop',
-  failover: 'fail over',
-  close_leftover: 'close a leftover browser',
-};
-
 /** `96%`, from Jev's 0–1 confidence. */
 export const percent = (confidence: number): string => `${Math.round(confidence * 100)}%`;
 
 /** US dollars to the cent: `$0.42`. */
 export const usd = (amount: number): string => `$${amount.toFixed(2)}`;
-
-const plural = (count: number, one: string, many = `${one}s`): string => `${count} ${count === 1 ? one : many}`;
-
-/** The chip for one recorded action: what happened, what is waiting on the owner, or what failed. */
-export const actionChip = (action: WardenAction): WardenChip => {
-  if (action.outcome === 'held')
-    return chip(`${action.by === 'jev' ? 'Jev recommends ' : ''}${ACTION_VERB[action.action]} · asks you`, 'warn');
-  if (action.outcome === 'failed') return chip(`${ACTION_VERB[action.action]} failed`, 'err');
-  if (action.action === 'bless' && action.by === 'owner') return chip('left alone by you', 'accent');
-  if (action.action === 'bless' && action.by === 'jev')
-    return chip(
-      action.confidence === undefined ? 'blessed by Jev' : `blessed by Jev ${percent(action.confidence)}`,
-      'ok',
-    );
-  return ACTION_DONE[action.action];
-};
-
-/**
- * Who stands behind an action Jev took or recommended: `Jev · 94% sure`. A bless already says it in its own
- * chip, and an investigation's or a rule's action has no Jev to name.
- */
-const jevChip = (action: WardenAction): WardenChip | undefined => {
-  if (action.by !== 'jev' || action.action === 'bless') return undefined;
-  return chip(action.confidence === undefined ? 'Jev' : `Jev · ${percent(action.confidence)} sure`, 'accent');
-};
 
 // ── Time ────────────────────────────────────────────────────────────────────────────────────────
 
@@ -125,6 +79,20 @@ export const nextSweepLabel = (at: string | undefined, now: number): string | un
   if (!Number.isFinite(time)) return undefined;
   const minutes = Math.ceil((time - now) / 60_000);
   return minutes <= 0 ? 'next sweep due now' : `next in ${minutes} min`;
+};
+
+/**
+ * The time a row shows in its narrow column: `now`, `5m`, `17h`, `2d`. The full instant belongs in the
+ * row's `title`. An unreadable instant is an empty string rather than a made-up one.
+ */
+export const compactAgo = (at: string | undefined, now: number): string => {
+  const time = Date.parse(at ?? '');
+  if (!Number.isFinite(time)) return '';
+  const minutes = Math.max(0, minutesBetween(time, now));
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.round(minutes / 60);
+  return hours < 24 ? `${hours}h` : `${Math.round(hours / 24)}d`;
 };
 
 // ── Status line ─────────────────────────────────────────────────────────────────────────────────
@@ -195,23 +163,6 @@ export const wardenStatusLine = (status: WardenStatusView, now: number): WardenS
   return warning === undefined ? { lead, parts } : { lead, parts, warning };
 };
 
-/** Today's flags and what became of them. Undefined while the Warden is off. */
-export const wardenSavingsLine = (status: WardenStatusView): string | undefined => {
-  if (!status.config.enabled || status.triage.jev.reason === 'disabled') return undefined;
-  const { savings, spend } = status;
-  const { layers } = status.config;
-  const flags = plural(savings.flags, 'flag');
-  const pending = spend.pendingInvestigations > 0 ? ` · ${spend.pendingInvestigations} pending` : '';
-  const investigated = `${savings.investigations} investigated (${usd(spend.investigationUsd)})${pending}`;
-  const cleared = `${savings.jevSkips} cleared by Jev (${usd(spend.jevUsd)})`;
-  const handled = savings.jevActions === undefined ? '' : ` · Jev handled ${savings.jevActions} itself`;
-  if (!layers.jev && !layers.llm) return `Today: ${flags} shown to you · no AI · $0.00`;
-  if (!layers.jev) return `Today: ${flags} · ${investigated}`;
-  if (!layers.llm) return `Today: ${flags} · ${cleared}${handled} · the rest shown to you`;
-  const saved = savings.savedUsd === undefined ? '' : ` · ~${usd(savings.savedUsd)} saved vs investigating all`;
-  return `Today: ${flags} · ${cleared}${handled} · ${investigated}${saved}`;
-};
-
 export const wardenHowItWorks = (layers: WardenLayers): string => {
   if (!layers.jev && !layers.llm)
     return 'How it works: free rules flag anomalies and show them to you. No AI runs and nothing is spent.';
@@ -224,23 +175,36 @@ export const wardenHowItWorks = (layers: WardenLayers): string => {
   return `How it works: free rules flag anomalies.${jev}${llm}`;
 };
 
-// ── Who needs you ───────────────────────────────────────────────────────────────────────────────
+// ── Warden notifications ────────────────────────────────────────────────────────────────────────
 
-/** What the Needs-you group says when it has no rows. Only a clean sweep is an all-clear. */
-export const needsYouEmpty = (outcome: WardenAttentionOutcome, stale: boolean): string => {
-  if (stale) return 'Nobody was waiting at the last check, but that check is stale. Not an all-clear.';
-  if (outcome === 'clean-sweep') return 'Nothing is waiting on you right now.';
-  if (outcome === 'degraded') return 'The check is incomplete, so this is not an all-clear.';
-  return 'No sweep has run yet, so nobody has been checked.';
-};
+/**
+ * What the one quiet line about Warden notifications says. The notifications live in the Attention
+ * inbox; this page only counts them, and counts honestly: a read that failed or came back incomplete is
+ * a warning, never "none".
+ */
+export type WardenInboxLine =
+  | { readonly kind: 'hidden' }
+  | { readonly kind: 'link'; readonly text: string; readonly stale: boolean }
+  | { readonly kind: 'none'; readonly text: string }
+  | { readonly kind: 'warning'; readonly text: string };
 
-/** The Warden's judgement as a chip, when it made one worth showing. */
-const judgementChip = (judgement: WardenJudgement | undefined): WardenChip | undefined => {
-  if (judgement === undefined) return undefined;
-  if (judgement.state === 'failed') return chip('Warden failed', 'err');
-  if (judgement.state !== 'judged' || judgement.verdict === undefined) return undefined;
-  const verdict = VERDICT_CHIPS[judgement.verdict];
-  return chip(`Warden: ${verdict.label}`, verdict.tone);
+const COULD_NOT_COUNT: WardenInboxLine = { kind: 'warning', text: 'Couldn’t count Warden notifications' };
+
+export const wardenInboxLine = (attention: WardenReadState<WardenAttentionView>): WardenInboxLine => {
+  if (attention.status === 'loading') return { kind: 'hidden' };
+  if (attention.status === 'error') return COULD_NOT_COUNT;
+  const { view } = attention;
+  if (view.outcome === 'degraded' || view.wardenDegraded !== undefined) return COULD_NOT_COUNT;
+  const count = view.items.length;
+  if (count === 0)
+    return attention.status === 'stale' || view.outcome === 'no-sweep'
+      ? COULD_NOT_COUNT
+      : { kind: 'none', text: 'No Warden notifications' };
+  return {
+    kind: 'link',
+    text: `${count} Warden ${count === 1 ? 'notification' : 'notifications'} in Inbox`,
+    stale: attention.status === 'stale',
+  };
 };
 
 const SOURCE_CHIPS: Readonly<Record<Exclude<FleetAttentionItem['source'], 'warden-anomaly'>, WardenChip>> = {
@@ -257,11 +221,6 @@ const sourceChip = (item: FleetAttentionItem): WardenChip =>
       : ANOMALY_CHIPS[item.anomalyKind]
     : SOURCE_CHIPS[item.source];
 
-/** Nobody has judged this flag yet: the owner may send it to an investigation. */
-export const canInvestigate = (item: FleetAttentionItem): boolean =>
-  item.source === 'warden-anomaly' &&
-  (item.judgement === undefined || item.judgement.state === 'none' || item.judgement.state === 'failed');
-
 /** Being judged right now, so it is watched rather than waiting on the owner. */
 const inFlight = (item: FleetAttentionItem): boolean =>
   item.judgement?.state === 'pending' || item.judgement?.state === 'queued';
@@ -271,14 +230,7 @@ const itemReason = (item: FleetAttentionItem): string => {
   return [...new Set(parts)].join(' — ') || 'No reason recorded.';
 };
 
-const provenance = (judgement: WardenJudgement | undefined): string | undefined => {
-  const by = judgement?.judgedBy;
-  if (judgement?.state !== 'judged' || by === undefined) return undefined;
-  const who = [by.agent, by.model].filter(part => part !== undefined && part !== '').join(' · ');
-  return who === '' ? undefined : `Judged by ${who}`;
-};
-
-/** One session's row in a group. The name is resolved by the view, from the session list. */
+/** One session's row in the Watching list. The name is resolved by the view, from the session list. */
 export interface WardenRow {
   readonly key: string;
   readonly sessionId: string;
@@ -286,17 +238,10 @@ export interface WardenRow {
   readonly teammate?: string;
   readonly label?: string;
   readonly reason: string;
-  /** A second, quieter line: who judged it, which model, what it cost. */
-  readonly detail?: string;
   readonly chips: readonly WardenChip[];
   readonly at?: string;
-  /** Offer "Investigate": an unjudged flag. */
-  readonly investigate?: boolean;
   /** Offer "Leave it longer": the ferret has a flag, or one was cleared. */
   readonly leave?: boolean;
-  /** Offer "Report": a finished investigation's evidence. */
-  readonly reportPath?: string;
-  readonly verdict?: WardenVerdictKind;
 }
 
 const dedupeChips = (chips: readonly (WardenChip | undefined)[]): WardenChip[] => {
@@ -310,41 +255,8 @@ const timestamp = (at: string | undefined): number => {
   return Number.isFinite(parsed) ? parsed : Number.POSITIVE_INFINITY;
 };
 
-const optional = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
+export const optional = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);
-
-/**
- * The Needs-you rows: one per session, oldest wait first. A session with several items keeps its oldest
- * one's reason and gathers every chip, so it appears once.
- */
-export const needsYouRows = (view: WardenAttentionView): readonly WardenRow[] => {
-  const bySession = new Map<string, FleetAttentionItem[]>();
-  const items = view.items
-    .filter(item => !inFlight(item))
-    .sort((left, right) => timestamp(left.waitingSince) - timestamp(right.waitingSince));
-  for (const item of items) bySession.set(item.sessionId, [...(bySession.get(item.sessionId) ?? []), item]);
-  return [...bySession.entries()].map(([sessionId, group]) => {
-    const [first, ...rest] = group as [FleetAttentionItem, ...FleetAttentionItem[]];
-    const judged = group.find(item => item.judgement?.reportPath !== undefined)?.judgement;
-    return {
-      key: `needs:${sessionId}`,
-      sessionId,
-      ...optional('teammate', first.teammate),
-      ...optional('label', first.label),
-      reason: itemReason(first),
-      ...optional('detail', provenance(first.judgement)),
-      chips: dedupeChips([
-        ...group.map(sourceChip),
-        ...group.map(item => judgementChip(item.judgement)),
-        rest.length > 0 ? chip(`+${plural(rest.length, 'more reason')}`, 'pend') : undefined,
-      ]),
-      at: first.waitingSince,
-      ...(group.some(canInvestigate) ? { investigate: true } : {}),
-      ...(group.some(item => item.source === 'warden-anomaly') ? { leave: true } : {}),
-      ...optional('reportPath', judged?.reportPath),
-    };
-  });
-};
 
 // ── Watching ────────────────────────────────────────────────────────────────────────────────────
 
@@ -396,22 +308,19 @@ export const cooldownChip = (blessing: WardenBlessingView, now: number): WardenC
 };
 
 /**
- * The Watching rows: current flags nobody needs the owner for yet, flags being judged right now, and
- * sessions a blessing has cleared — each with how long it stays quiet. A session already in Needs you
- * is never repeated here. A flagged or cleared ferret offers "Leave it longer".
+ * The Watching rows: current flags, flags being judged right now, and sessions a blessing has cleared —
+ * each with how long it stays quiet. A flagged or cleared ferret offers "Leave it longer".
  */
 export const watchingRows = (
   status: WardenStatusView,
   attention: WardenAttentionView | undefined,
-  exclude: ReadonlySet<string>,
   now: number,
 ): readonly WardenRow[] => {
   const rows = new Map<string, WardenRow>();
   const blessings = new Map(status.blessings.map(blessing => [blessing.sessionId, blessing]));
   const grouped = new Map<string, WardenAnomaly[]>();
   for (const anomaly of status.anomalies)
-    if (!exclude.has(anomaly.sessionId))
-      grouped.set(anomaly.sessionId, [...(grouped.get(anomaly.sessionId) ?? []), anomaly]);
+    grouped.set(anomaly.sessionId, [...(grouped.get(anomaly.sessionId) ?? []), anomaly]);
   for (const [sessionId, group] of grouped) {
     const [first] = group as [WardenAnomaly, ...WardenAnomaly[]];
     const running = investigationFor(status, sessionId);
@@ -433,7 +342,7 @@ export const watchingRows = (
     });
   }
   for (const item of attention?.items ?? []) {
-    if (!inFlight(item) || exclude.has(item.sessionId) || rows.has(item.sessionId)) continue;
+    if (!inFlight(item) || rows.has(item.sessionId)) continue;
     rows.set(item.sessionId, {
       key: `watch:${item.sessionId}`,
       sessionId: item.sessionId,
@@ -448,7 +357,7 @@ export const watchingRows = (
     });
   }
   for (const blessing of status.blessings) {
-    if (exclude.has(blessing.sessionId) || rows.has(blessing.sessionId)) continue;
+    if (rows.has(blessing.sessionId)) continue;
     const bless = latestBless(status, blessing.sessionId);
     rows.set(blessing.sessionId, {
       key: `watch:${blessing.sessionId}`,
@@ -466,9 +375,9 @@ export const watchingRows = (
   return [...rows.values()];
 };
 
-// ── Histories ───────────────────────────────────────────────────────────────────────────────────
+// ── Investigations ──────────────────────────────────────────────────────────────────────────────
 
-const ORIGIN_REASON: Readonly<Record<WardenInvestigation['origin'], string>> = {
+const ORIGIN_TITLE: Readonly<Record<WardenInvestigation['origin'], string>> = {
   sweep: 'Flagged by the sweep',
   jev: 'Jev sent it for a closer look',
   owner: 'You asked for an investigation',
@@ -476,15 +385,47 @@ const ORIGIN_REASON: Readonly<Record<WardenInvestigation['origin'], string>> = {
 
 const STATE_ORDER: Readonly<Record<WardenInvestigation['state'], number>> = { running: 0, queued: 1, done: 2 };
 
+/** One investigation as a compact row: who investigated, which ferret, how it ended, what it cost. */
+export interface WardenInvestigationRow {
+  readonly key: string;
+  /** The ferret investigated; empty for a fleet-wide triage. */
+  readonly sessionId?: string;
+  /**
+   * `warden-00002A` (`warden-00002C · Fleet triage` for a fleet-wide one); `Not started` while queued, since an
+   * id is issued only when a slot frees; and the old label for one an older daemon never named.
+   */
+  readonly investigator: string;
+  /** The investigator has a real name on the wire. */
+  readonly named: boolean;
+  readonly chip: WardenChip;
+  /** The flag that was investigated, as a quiet chip. */
+  readonly anomaly?: WardenChip;
+  readonly cost?: string;
+  readonly at?: string;
+  readonly title: string;
+  readonly reportPath?: string;
+  readonly verdict?: WardenVerdictKind;
+}
+
+const investigationName = (entry: WardenInvestigation): string => {
+  const fleet = entry.scope === 'fleet';
+  if (entry.wardenName !== undefined) {
+    const name = displaySystemCallsign(entry.wardenName);
+    return fleet ? `${name} · Fleet triage` : name;
+  }
+  if (entry.state === 'queued') return 'Not started';
+  return fleet ? 'Fleet triage' : 'Investigation';
+};
+
 /** Running first, then the queue in order, then finished ones newest first. */
-export const investigationRows = (status: WardenStatusView): readonly WardenRow[] =>
+export const investigationRows = (status: WardenStatusView): readonly WardenInvestigationRow[] =>
   [...status.investigations]
     .sort((left, right) => STATE_ORDER[left.state] - STATE_ORDER[right.state])
     .map(entry => {
-      const kind = entry.anomalyKind === undefined ? '' : `: ${ANOMALY_CHIPS[entry.anomalyKind].label}`;
-      const who = [entry.agent, entry.model, entry.costUsd === undefined ? undefined : usd(entry.costUsd)]
-        .filter(part => part !== undefined)
-        .join(' · ');
+      const named = entry.wardenName !== undefined;
+      const fleet = entry.scope === 'fleet';
+      const investigator = investigationName(entry);
+      const who = [entry.agent, entry.model].filter(part => part !== undefined).join(' · ');
       const stateChip =
         entry.state === 'done'
           ? entry.verdict === undefined
@@ -493,35 +434,20 @@ export const investigationRows = (status: WardenStatusView): readonly WardenRow[
           : investigationStateChip(status, entry);
       return {
         key: `investigation:${entry.id}`,
-        sessionId: entry.targetSession ?? entry.wardenSession ?? entry.id,
-        reason:
-          entry.scope === 'fleet' ? `Fleet triage of several flags${kind}` : `${ORIGIN_REASON[entry.origin]}${kind}`,
-        ...optional('detail', who === '' ? undefined : who),
-        chips: [stateChip],
+        ...optional('sessionId', entry.targetSession),
+        investigator,
+        named,
+        chip: stateChip,
+        ...optional('anomaly', entry.anomalyKind === undefined ? undefined : ANOMALY_CHIPS[entry.anomalyKind]),
+        ...optional('cost', entry.costUsd === undefined ? undefined : usd(entry.costUsd)),
         ...optional('at', entry.finishedAt ?? entry.startedAt ?? entry.queuedAt),
+        title: [fleet ? 'Fleet triage of several flags' : ORIGIN_TITLE[entry.origin], who]
+          .filter(part => part !== '')
+          .join(' · '),
         ...optional('reportPath', entry.reportPath),
         ...optional('verdict', entry.verdict),
       };
     });
-
-/** How many recent actions the page lists. Older ones are in the reports. */
-export const RECENT_ACTIONS_SHOWN = 12;
-
-export const actionRows = (status: WardenStatusView): readonly WardenRow[] =>
-  status.actions.slice(0, RECENT_ACTIONS_SHOWN).map((entry, index) => ({
-    key: `action:${entry.at}:${entry.sessionId}:${index}`,
-    sessionId: entry.sessionId,
-    reason: entry.detail,
-    ...optional('detail', entry.reason === undefined ? undefined : `Jev’s reason: ${entry.reason}`),
-    chips: dedupeChips([
-      actionChip(entry),
-      jevChip(entry),
-      entry.anomalyKind === undefined ? undefined : ANOMALY_CHIPS[entry.anomalyKind],
-      entry.action === 'failover' && entry.agent !== undefined ? chip(`→ ${entry.agent}`, 'pend') : undefined,
-    ]),
-    at: entry.at,
-    ...optional('reportPath', entry.reportPath),
-  }));
 
 // ── Accounts ────────────────────────────────────────────────────────────────────────────────────
 
@@ -531,3 +457,18 @@ export const accountChip = (account: WardenFailoverAccountView, inUse: string | 
   if (!account.eligible) return chip(`${label} · ${account.reason ?? 'unavailable'}`, 'warn');
   return chip(account.agent === inUse ? `${label} · in use` : label, 'ok');
 };
+
+/** The whole instant for a tooltip: `2026-07-31 09:14 UTC`. An unreadable instant is returned as it came. */
+export const fullTime = (at: string): string => {
+  const time = Date.parse(at);
+  return Number.isFinite(time) ? `${new Date(time).toISOString().slice(0, 16).replace('T', ' ')} UTC` : at;
+};
+
+/** What the report dialog needs to open one report: where it is, which ferret, and how it ended. */
+export interface WardenReportTarget {
+  /** The ferret the report is about; absent for a fleet-wide triage, whose report covers several. */
+  readonly sessionId?: string;
+  readonly reportPath: string;
+  readonly at?: string;
+  readonly verdict?: WardenVerdictKind;
+}

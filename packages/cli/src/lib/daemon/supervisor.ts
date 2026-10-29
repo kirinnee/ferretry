@@ -210,10 +210,20 @@ export class SystemdSupervisor implements IServiceDefinitionSupervisor {
     await this.#require(['restart', this.layout.systemdUnitName]);
   }
 
+  /**
+   * A polite `stop`, or — escalated — a SIGKILL aimed at the DAEMON ALONE.
+   *
+   * `--kill-who=main` is the whole point of the escalation's argv. `systemctl kill` signals every
+   * process in the unit's control group by default, and the tmux server hosting every session's pane is
+   * spawned from this unit and so lives in that group: a stuck stop escalated without it SIGKILLed the
+   * server and every agent on the machine with it. The unit's `KillMode=process` protects a `stop` and a
+   * `restart`, never a `kill`. (`--kill-who` is the spelling every systemd accepts; 252 renamed it
+   * `--kill-whom` and still reads this one.)
+   */
   async stop(request: StopRequest): Promise<void> {
     await this.#require(
       request.escalate
-        ? ['kill', '--signal=SIGKILL', this.layout.systemdUnitName]
+        ? ['kill', '--kill-who=main', '--signal=SIGKILL', this.layout.systemdUnitName]
         : ['stop', this.layout.systemdUnitName],
     );
   }

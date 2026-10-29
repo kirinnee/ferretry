@@ -1,5 +1,9 @@
 import { rm } from 'node:fs/promises';
 import { basename, resolve } from 'node:path';
+import { assertDisposable, shedAmbientSession } from '../../../../daemon/tests/support/ambient-session.ts';
+
+// A CLI suite started without its tier's preload still never sees the agent session it was started from.
+shedAmbientSession();
 
 /**
  * What a fixture that boots a real `fyd` through the CLI's supervisor started, and must end.
@@ -66,6 +70,19 @@ function signal(pid: number, name: NodeJS.Signals): void {
   }
 }
 
+/** The paths a teardown may act on; each refused one is left alone and named in `failures`. */
+function disposable(paths: readonly string[], what: string, failures: string[]): readonly string[] {
+  return paths.filter(path => {
+    try {
+      assertDisposable(path, what);
+      return true;
+    } catch (error) {
+      failures.push(error instanceof Error ? error.message : String(error));
+      return false;
+    }
+  });
+}
+
 /** Whether `done` held within `withinMs`, read every {@link POLL_MS}. */
 async function within(withinMs: number, done: () => boolean): Promise<boolean> {
   const deadline = Date.now() + withinMs;
@@ -94,6 +111,12 @@ async function within(withinMs: number, done: () => boolean): Promise<boolean> {
  * (`scripts/test/tmux-sweep.ts`), and reported — so the test that left it fails by name instead of
  * the whole run failing on a socket nobody can trace back. The same goes for a daemon that would not
  * stop on SIGTERM.
+ *
+ * NOTHING OUTSIDE A TEMPORARY DIRECTORY IS EVER KILLED OR REMOVED. Every socket and root is checked by
+ * `assertDisposable` before tmux is asked anything: a fixture that resolved its socket from an inherited
+ * `FY_HOME` would otherwise run `kill-server` on the live server every agent on the machine runs
+ * under. A refused path is left alone and the teardown fails naming it; the daemons the fixture itself
+ * started, by pid, are still ended.
  */
 export async function tearDownSupervisedDaemons(
   fixture: SupervisedDaemonFixture,
@@ -110,13 +133,13 @@ export async function tearDownSupervisedDaemons(
     failures.push(`fyd ${String(pid)} was still running ${String(exitWithinMs)} ms after SIGTERM and was killed`);
   }
 
-  const sockets = [...fixture.sockets];
+  const sockets = disposable([...fixture.sockets], 'the fixture tmux socket', failures);
   fixture.sockets.clear();
   if (tmux !== null)
     for (const socket of sockets)
       await Bun.spawn([tmux, '-S', socket, 'kill-server'], { stdout: 'ignore', stderr: 'ignore' }).exited;
 
-  const roots = [...fixture.roots];
+  const roots = disposable([...fixture.roots], 'the fixture root', failures);
   fixture.roots.clear();
   if (!(await within(settleWithinMs, () => tmuxOn(sockets).length === 0))) {
     const left = tmuxOn(sockets);

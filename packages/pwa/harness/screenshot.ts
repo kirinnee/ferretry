@@ -2345,6 +2345,8 @@ try {
             const pageTarget = join(outDir, `warden-page-${SCHEME}-${viewport.name}.png`);
             await captureElement(page, overview, pageTarget);
             process.stdout.write(`📸 Warden page ${viewport.name} -> ${pageTarget}\n`);
+            const overflow = await overview.evaluate(el => el.scrollWidth - el.clientWidth);
+            if (overflow > 0) throw new Error(`Warden page scrolls sideways by ${overflow}px on ${viewport.name}`);
             continue;
           }
           if (FILES_ONLY) {

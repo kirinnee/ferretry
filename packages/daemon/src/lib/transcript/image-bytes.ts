@@ -14,7 +14,7 @@
  * character check — a table lookup, run in slices with a yield between them (`LOOP` pacing, as
  * `sliced.ts`), so a multi-megabyte record never holds the event loop past its budget.
  */
-import type { TranscriptImageMediaType } from '@ferretry/protocol';
+import type { TranscriptImageMediaType } from '@ferretry/protocol/transcript-images';
 
 /** Characters checked per slice before the loop is given back. 512 KiB is well under a millisecond. */
 const SLICE_BYTES = 512 * 1024;

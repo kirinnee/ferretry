@@ -2553,9 +2553,7 @@ describe('AppShell', () => {
     try {
       await settle();
       const report = must(
-        [...view.container.querySelectorAll<HTMLButtonElement>('button')].find(
-          button => button.textContent === 'Report',
-        ),
+        view.container.querySelector<HTMLButtonElement>('button[aria-label="Open report"]'),
         'the investigation’s Report button',
       );
 
@@ -2570,7 +2568,7 @@ describe('AppShell', () => {
     }
   });
 
-  it('keeps who needs you after a failed refresh, but calls it stale rather than an all-clear', async () => {
+  it('keeps the Warden notification count after a failed refresh, but calls it stale rather than an all-clear', async () => {
     // Arrange
     let reads = 0;
     // EVERY half-minute refresh on the page, run together: the sessions bar keeps its own list fresh on
@@ -2595,18 +2593,16 @@ describe('AppShell', () => {
       const { view } = await renderShell(`/d/${ALPHA}/warden`, [alpha.daemonId], { wardenAttention: attention });
       try {
         await settle();
-        expect(view.container.textContent).toContain('Which relay? — Waiting for your answer.');
+        expect(view.container.textContent).toContain('1 Warden notification in Inbox');
 
         // Act
         await interact(() => poll());
         await settle();
 
         // Assert
-        expect(view.container.textContent).toContain(
-          'Can’t refresh who needs you (the feed is temporarily unavailable)',
-        );
-        expect(view.container.textContent).toContain('Which relay? — Waiting for your answer.');
-        expect(view.container.textContent).not.toContain('Nothing is waiting on you right now.');
+        expect(view.container.textContent).toContain('1 Warden notification in Inbox');
+        expect(view.container.textContent).toContain('Couldn’t refresh; this is the last count.');
+        expect(view.container.textContent).not.toContain('No Warden notifications');
       } finally {
         await view.unmount();
       }

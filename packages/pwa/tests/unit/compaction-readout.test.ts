@@ -16,34 +16,58 @@ const running = (extra: Partial<SessionCompactionRunning> = {}): SessionCompacti
 });
 
 describe('compactionRunningReadout', () => {
-  test('is an estimate from elapsed time, said out loud', () => {
+  test('with the harness’s own percent, says that figure and the tokens written — and no estimate', () => {
+    const readout = compactionRunningReadout(
+      running({ tokensBefore: 412_345, percent: 49, tokensWritten: 37_400 }),
+      434,
+    );
+    expect(readout).toEqual({
+      percent: 49,
+      elapsed: '7m 14s',
+      from: '412k tokens',
+      written: '37k tokens written',
+      usual: null,
+      overdue: false,
+      valueText: '49 percent',
+    });
+  });
+
+  test('never calls a real percent overdue, however long it has run', () => {
+    const readout = compactionRunningReadout(running({ percent: 12 }), 3_000);
+    expect(readout.percent).toBe(12);
+    expect(readout.overdue).toBe(false);
+    expect(readout.usual).toBeNull();
+  });
+
+  test('with no percent reported, derives none: it says the usual duration and the real clock', () => {
     const readout = compactionRunningReadout(running({ tokensBefore: 412_345 }), 24);
     expect(readout).toEqual({
-      percent: 40,
+      percent: null,
       elapsed: '24s',
       from: '412k tokens',
-      note: 'Estimate from this machine’s past compactions',
+      written: null,
+      usual: 'Usually ~60s here',
       overdue: false,
-      valueText: 'About 40 percent, estimated',
+      valueText: 'Compacting context',
     });
   });
 
   test('says the timing is typical when there is no history, and omits a start it never read', () => {
-    const readout = compactionRunningReadout(running({ basis: 'typical' }), 6);
+    const readout = compactionRunningReadout(running({ basis: 'typical', expectedMs: 40_000 }), 6);
     expect(readout.from).toBeNull();
-    expect(readout.note).toBe('Estimate from typical timing — no history on this machine yet');
+    expect(readout.usual).toBe('Usually ~40s — typical timing, no history on this machine yet');
   });
 
-  test('holds at 95 and admits it is running long once the expected time is spent', () => {
+  test('rounds a long usual duration to minutes', () => {
+    expect(compactionRunningReadout(running({ expectedMs: 300_000 }), 1).usual).toBe('Usually ~5m here');
+  });
+
+  test('admits it is running long, with still no percent, once the usual time is spent', () => {
     const readout = compactionRunningReadout(running(), 130);
-    expect(readout.percent).toBe(95);
+    expect(readout.percent).toBeNull();
     expect(readout.overdue).toBe(true);
     expect(readout.elapsed).toBe('2m 10s');
-    expect(readout.note).toBe('Taking longer than usual — still working');
-  });
-
-  test('never reads below zero', () => {
-    expect(compactionRunningReadout(running(), -5).percent).toBe(0);
+    expect(readout.usual).toBe('Taking longer than usual — still working');
   });
 });
 

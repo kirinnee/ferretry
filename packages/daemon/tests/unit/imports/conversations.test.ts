@@ -24,6 +24,7 @@ import {
   conversationKey,
   conversationLinkFailure,
   conversationResumeArguments,
+  FileConversationDescriber,
 } from '../../../src/lib/imports/index.ts';
 import {
   ClaudeTranscriptParser,
@@ -141,6 +142,10 @@ const parsers = {
   codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED),
 };
 
+/** The describer a service reads through: the real one, over the same fake files and parsers. */
+const describing = (files: ConversationFiles, scope = NO_HANDOFF_SCOPE) =>
+  new FileConversationDescriber(files, parsers, scope);
+
 const tree: Tree = {
   host: {
     claude: {
@@ -224,7 +229,7 @@ const subject = (
   owners: ReadonlyMap<string, string> = new Map(),
   adopter: ConversationAdopter = new RecordingAdopter(),
   files: FakeFiles = new FakeFiles(tree),
-) => new ConversationImportService(files, ROOTS, parsers, { owners: async () => owners }, adopter);
+) => new ConversationImportService(files, ROOTS, describing(files), { owners: async () => owners }, adopter);
 
 describe('conversation discovery', () => {
   it('should describe each conversation once, newest first, from the first home that holds it', async () => {
@@ -257,10 +262,11 @@ describe('conversation discovery', () => {
 
   it('should keep the latest message, the turn count and the model when they are there', async () => {
     // Act
+    const files = new FakeFiles(tree);
     const listing = await new ConversationImportService(
-      new FakeFiles(tree),
+      files,
       [{ harness: 'claude', home: '/host/claude', source: 'computer' }],
-      parsers,
+      describing(files),
       { owners: async () => new Map() },
       new RecordingAdopter(),
     ).list({ harness: 'claude' });
@@ -549,10 +555,13 @@ describe('where a listing reads and what its rows say', () => {
     elsewhere: { turns: { 'turn-002.md': 'Not read: outside every allowed folder' } },
   };
   const service = (files: FakeFiles) =>
-    new ConversationImportService(files, ROOTS, parsers, { owners: async () => new Map() }, new RecordingAdopter(), {
-      roots: ['/fy/state/sessions'],
-      coordinatorHomes: [],
-    });
+    new ConversationImportService(
+      files,
+      ROOTS,
+      describing(files, { roots: ['/fy/state/sessions'], coordinatorHomes: [] }),
+      { owners: async () => new Map() },
+      new RecordingAdopter(),
+    );
 
   it('should list only Ferretry’s own history, or only the computer’s, when asked', async () => {
     // Arrange
@@ -684,17 +693,19 @@ describe('conversation names', () => {
     },
   };
   const codexSessions = (namedTree.host as { codex: { sessions: Tree } }).codex.sessions;
-  const named = () =>
-    new ConversationImportService(
-      new FakeFiles(namedTree),
+  const named = () => {
+    const files = new FakeFiles(namedTree);
+    return new ConversationImportService(
+      files,
       [
         { harness: 'claude', home: '/host/claude', source: 'computer' },
         { harness: 'codex', home: '/host/codex', source: 'computer' },
       ],
-      parsers,
+      describing(files),
       { owners: async () => new Map() },
       new RecordingAdopter(),
     );
+  };
 
   it('should name a Claude conversation by its /rename title over any generated one, the latest winning', async () => {
     // Act
@@ -742,10 +753,11 @@ describe('conversation names', () => {
   it('should search the name, and treat a missing or unreadable Codex index as no names', async () => {
     // Arrange
     const service = named();
+    const bareFiles = new FakeFiles({ host: { codex: { sessions: codexSessions } } });
     const bare = new ConversationImportService(
-      new FakeFiles({ host: { codex: { sessions: codexSessions } } }),
+      bareFiles,
       [{ harness: 'codex', home: '/host/codex', source: 'computer' }],
-      parsers,
+      describing(bareFiles),
       { owners: async () => new Map() },
       new RecordingAdopter(),
     );
@@ -821,16 +833,16 @@ describe('conversations wrapped by a harness or by Ferretry', () => {
         },
       },
     };
+    const files = new FakeFiles(tree);
     const service = new ConversationImportService(
-      new FakeFiles(tree),
+      files,
       [
         { harness: 'claude', home: '/pool/claude', source: 'ferretry' },
         { harness: 'codex', home: '/pool/codex', source: 'ferretry' },
       ],
-      parsers,
+      describing(files, { roots: ['/fy/state/sessions'], coordinatorHomes: [] }),
       { owners: async () => new Map() },
       new RecordingAdopter(),
-      { roots: ['/fy/state/sessions'], coordinatorHomes: [] },
     );
     return (await service.list()).conversations;
   };
@@ -1023,15 +1035,7 @@ describe('keeping in sync with the computer’s own history', () => {
     return state;
   };
   const synced = (files: FakeFiles, setting: ConversationListPolicy, adopter = new RecordingAdopter()) =>
-    new ConversationImportService(
-      files,
-      ROOTS,
-      parsers,
-      { owners: async () => new Map() },
-      adopter,
-      NO_HANDOFF_SCOPE,
-      setting,
-    );
+    new ConversationImportService(files, ROOTS, describing(files), { owners: async () => new Map() }, adopter, setting);
 
   it('should list Ferretry’s history and the computer’s together, saying where each file is kept', async () => {
     // Arrange

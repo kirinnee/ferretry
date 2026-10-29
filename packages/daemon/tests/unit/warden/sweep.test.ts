@@ -474,7 +474,7 @@ describe('escalating to a fleet warden', () => {
 
     // Assert
     should(actual.spawned).equal('w0');
-    should(subject.spawns[0]?.name).equal('warden-sweep');
+    should(subject.spawns[0]?.name).equal('Fleet triage');
     should(subject.spawns[0]?.stopCapability).be.undefined();
     should(subject.state().lastSpawnAt).equal(at(0));
     should(journalTypes(subject)).containEql('fleet.warden_spawned');
@@ -678,7 +678,7 @@ describe('assigning a warden to one suspect session', () => {
 
     // Assert
     should(actual.assignedWardens).deepEqual(['w0']);
-    should(subject.spawns[0]?.name).equal('warden:s1');
+    should(subject.spawns[0]?.name).equal('Investigate s1');
     should(subject.spawns[0]?.stopCapability).equal('capability-1');
     should(subject.state().assignments?.s1?.kinds).deepEqual(['unattended_question']);
     should(journalTypes(subject)).containEql('fleet.warden_assigned');
@@ -898,7 +898,7 @@ describe('assigning a warden to one suspect session', () => {
     await subject.service.run({ force: false });
 
     // Assert
-    should(subject.spawns[0]?.name).equal('warden:s2');
+    should(subject.spawns[0]?.name).equal('Investigate s2');
   });
 
   it('should drop a queued target that went terminal and say the investigation was closed', async () => {

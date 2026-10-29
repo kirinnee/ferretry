@@ -40,7 +40,7 @@ import {
   type PortableConversationRow,
   startPortableConversation,
 } from './digest.ts';
-import { extendSessionTranscriptRawPrefix } from './message-token.ts';
+import { extendSessionTranscriptRawPrefix } from './raw-prefix.ts';
 import type { TranscriptRowsIndex, TranscriptTarget } from './reader.ts';
 
 /**

@@ -24,10 +24,13 @@ import {
   type WardenAction,
   WardenActionSchema,
   WardenClearedBySchema,
+  type WardenDayStats,
+  WardenDayStatsSchema,
   WardenGuardFailureCodeSchema,
   type WardenInvestigationOrigin,
   WardenInvestigationOriginSchema,
   WardenJevActsSchema,
+  WARDEN_INVESTIGATOR_MAX_SEQUENCE,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
@@ -195,6 +198,7 @@ const InvestigationRecordSchema = z.object({
   costUsd: z.number().finite().min(0).optional(),
   agent: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
+  wardenName: z.string().min(1).optional(),
 }) satisfies z.ZodType<unknown, WardenInvestigationRecord>;
 
 const CostAverageSchema = z.object({
@@ -288,6 +292,17 @@ export function recordJevHandoff(
   return Object.fromEntries([[key, handoff], ...rest]);
 }
 
+/**
+ * The days the state keeps, read entry by entry: one corrupt day costs that day, not the history —
+ * and a document that is not a list at all costs only this section, through the per-section salvage.
+ */
+const DailySchema = z.array(z.unknown()).transform((entries): readonly WardenDayStats[] =>
+  entries.flatMap(entry => {
+    const parsed = WardenDayStatsSchema.safeParse(entry);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+
 /** How many investigations and actions the state remembers beyond today's. */
 export const WARDEN_HISTORY_LIMIT = 50;
 
@@ -355,6 +370,10 @@ export interface WardenRuntimeState {
   /** Why each queued target is queued, keyed by target session id. */
   readonly queueMeta?: Readonly<Record<string, WardenQueueEntryMeta>>;
   readonly sweepCoverage?: WardenSweepCoverage;
+  /** The last 14 UTC days of the Warden's work, oldest first (`daily.ts`). Absent in a document that predates it. */
+  readonly daily?: readonly WardenDayStats[];
+  /** The sequence of the last investigator named `warden-xxxxxx`; the next one is issued after it. */
+  readonly investigatorSequence?: number;
 }
 
 const RuntimeStateSchema = z.object({
@@ -381,6 +400,8 @@ const RuntimeStateSchema = z.object({
   actions: z.array(WardenActionSchema).optional(),
   queueMeta: z.record(z.string(), QueueMetaSchema).optional(),
   sweepCoverage: SweepCoverageSchema.optional(),
+  daily: DailySchema.optional(),
+  investigatorSequence: z.number().int().min(0).max(WARDEN_INVESTIGATOR_MAX_SEQUENCE).optional(),
 });
 
 export const EMPTY_WARDEN_STATE: WardenRuntimeState = {};

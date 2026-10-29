@@ -5858,7 +5858,6 @@ function Shell() {
             sessions={WORKSPACE_FLEET}
             settingsHref="#warden"
             onSweep={() => {}}
-            onInvestigate={() => {}}
             onLeave={() => {}}
             onOpenReport={() => {}}
           />
