@@ -9,7 +9,9 @@ import {
   attentionKeyDirection,
   deckRoom,
   dragOffset,
+  scrollStartOf,
   swipeKeyHint,
+  verticalTargets,
 } from '../../../src/features/attention/attention-swipe-deck.tsx';
 import { AttentionUndoToast } from '../../../src/features/attention/attention-undo-toast.tsx';
 import { swipeTargets } from '../../../src/lib/attention-answers.ts';
@@ -548,17 +550,60 @@ describe('Discuss: the fixed answer that is always down', () => {
     await mounted.unmount();
   });
 
-  it('does not take a drag down that began in an overflowing detail: that is the reader scrolling', async () => {
-    const fake = fakeInbox();
-    const mounted = await mount(deckPage(fake, [threeWay]));
+  /** The top card's detail, made to overflow (900 px of content in 200 px) and scrolled to `scrollTop`. */
+  const overflowingDetail = (mounted: Mounted, scrollTop: number): HTMLElement => {
     const scroller = must(deckTop(mounted).querySelector<HTMLElement>('[data-attention-scroll]'), 'the detail');
     Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 900 });
     Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 200 });
-    const target = await dragBy(mounted, 0, 300, scroller);
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: scrollTop });
+    return scroller;
+  };
+
+  it('does not take a drag down or up that began mid-way through an overflowing detail: that is the reader scrolling', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const scroller = overflowingDetail(mounted, 300);
+    const down = await dragBy(mounted, 0, 300, scroller);
     expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(false);
-    await release(target, 0, 300);
+    await release(down, 0, 300);
+    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
     expect(pendingActions(fake)).toEqual([]);
     expect(topId(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('discusses from a drag down that began in an overflowing detail already scrolled to its top', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const scroller = overflowingDetail(mounted, 0);
+    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
+    expect(pendingActions(fake)).toEqual([]);
+    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
+    expect(pendingActions(fake).map(action => action.kind)).toEqual(['discuss']);
+    await mounted.unmount();
+  });
+
+  it('gives the up answer from a drag up that began in an overflowing detail already scrolled to its bottom', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const scroller = overflowingDetail(mounted, 700);
+    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
+    expect(pendingActions(fake)).toEqual([]);
+    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
+    expect(pendingActions(fake)).toHaveLength(1);
+    expect(pendingActions(fake)[0]?.kind).not.toBe('discuss');
+    await mounted.unmount();
+  });
+
+  it('takes a vertical swipe from the title whatever the detail is scrolled to, past the same clear distance', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    overflowingDetail(mounted, 300);
+    const short = await dragBy(mounted, 0, 60);
+    await release(short, 0, 60);
+    expect(pendingActions(fake)).toEqual([]);
+    await swipe(mounted, 0, 300);
+    expect(pendingActions(fake).map(action => action.kind)).toEqual(['discuss']);
     await mounted.unmount();
   });
 
@@ -644,5 +689,56 @@ describe('Discuss: the fixed answer that is always down', () => {
       expect(mounted.container.querySelector('[data-attention-discuss]')).toBeNull();
       await mounted.unmount();
     }
+  });
+});
+
+describe('verticalTargets', () => {
+  const targets = swipeTargets(threeWay.item, '');
+
+  it('keeps every answer for a drag from the header, the title or the answer bar', () => {
+    expect(verticalTargets(targets, null)).toEqual(targets);
+  });
+
+  it('keeps only the sideways answers mid-way through a scrolling detail, and each vertical one at its own edge', () => {
+    expect(Object.keys(verticalTargets(targets, { atTop: false, atBottom: false })).sort()).toEqual(['left', 'right']);
+    expect(Object.keys(verticalTargets(targets, { atTop: true, atBottom: false })).sort()).toEqual([
+      'down',
+      'left',
+      'right',
+    ]);
+    expect(Object.keys(verticalTargets(targets, { atTop: false, atBottom: true })).sort()).toEqual([
+      'left',
+      'right',
+      'up',
+    ]);
+  });
+
+  it('never adds a direction the card does not take', () => {
+    const { up: _up, down: _down, ...sideways } = targets;
+    expect(verticalTargets(sideways, { atTop: true, atBottom: true })).toEqual(sideways);
+  });
+});
+
+describe('scrollStartOf', () => {
+  const detail = (scrollHeight: number, clientHeight: number, scrollTop: number): HTMLElement => {
+    const scroller = document.createElement('div');
+    scroller.setAttribute('data-attention-scroll', '');
+    for (const [key, value] of Object.entries({ scrollHeight, clientHeight, scrollTop }))
+      Object.defineProperty(scroller, key, { configurable: true, value });
+    const inside = document.createElement('p');
+    scroller.append(inside);
+    return inside;
+  };
+
+  it('is null outside a detail, and for a detail that fits whole', () => {
+    expect(scrollStartOf(document.createElement('p'))).toBeNull();
+    expect(scrollStartOf(null)).toBeNull();
+    expect(scrollStartOf(detail(200, 200, 0))).toBeNull();
+  });
+
+  it('says whether an overflowing detail sat at its top or its bottom', () => {
+    expect(scrollStartOf(detail(900, 200, 0))).toEqual({ atTop: true, atBottom: false });
+    expect(scrollStartOf(detail(900, 200, 300))).toEqual({ atTop: false, atBottom: false });
+    expect(scrollStartOf(detail(900, 200, 700))).toEqual({ atTop: false, atBottom: true });
   });
 });

@@ -12,11 +12,13 @@
  *   and nothing is sent; past it the card flies off and the answer is handed to `onAct` — which, in the
  *   inbox, holds it for the undo window (`DeferredAttentionActions`) rather than posting it.
  * - DOWN IS ALWAYS DISCUSS (`attentionCanDiscuss`, never one of the card's three answers): a deliberate drag
- *   down on a card a ferret raised asks to talk it through. It is read ONLY WHERE A DOWNWARD DRAG IS NOT
- *   ALREADY A SCROLL. The card's detail is its own scroller and keeps vertical panning entirely: a drag
- *   that starts inside a detail that overflows is a scroll, never a discuss. A drag from the header, the
- *   title or the answer bar is ours — the CSS gives those parts `touch-action: none` (`pan-up` when the
- *   card has no up answer), so the browser never takes it. The Discuss button and ArrowDown are the
+ *   down on a card a ferret raised asks to talk it through. The card's detail is its own scroller, so a
+ *   VERTICAL SWIPE NEVER FIGHTS A SCROLL ({@link verticalTargets}): a drag from the header, the title or the
+ *   answer bar is ours — the CSS gives those parts `touch-action: none` (`pan-up` when the card has no up
+ *   answer), so the browser never takes it — and a drag that starts inside a detail that overflows counts
+ *   as ↓ only when that detail was already scrolled to its top, and as ↑ only when it was already at its
+ *   bottom. Anywhere else in the detail it is the reader scrolling. Either way it commits only past the
+ *   same clear distance as a sideways swipe (`swipeThreshold`). The Discuss button and ArrowDown are the
  *   same answer for a reader who does not swipe.
  * - A SCROLL IS NEVER A SWIPE. `touch-action` on the card hands the browser every direction the card does
  *   not use: with no up answer it keeps vertical panning entirely (`pan-y`), and with one it keeps only
@@ -197,8 +199,8 @@ interface Drag {
 /** A drag in progress, as the pointer moved it: raw, before {@link dragOffset} draws it. */
 interface RawDrag extends Drag {
   readonly width: number;
-  /** It began inside a detail that scrolls: a drag down there is that scroll, never Discuss. */
-  readonly inScroll: boolean;
+  /** Where it began in a detail that scrolls, or `null` outside one: see {@link verticalTargets}. */
+  readonly scroll: ScrollStart | null;
 }
 
 interface Gesture {
@@ -206,7 +208,7 @@ interface Gesture {
   readonly startX: number;
   readonly startY: number;
   readonly width: number;
-  readonly inScroll: boolean;
+  readonly scroll: ScrollStart | null;
   moved: boolean;
   dx: number;
   dy: number;
@@ -224,17 +226,36 @@ export const dragOffset = (dx: number, dy: number, targets: SwipeTargets): Drag 
   dy: dy >= 0 ? (targets.down === undefined ? 0 : dy) : targets.up === undefined ? dy * 0.2 : dy,
 });
 
-/** The card's swipe targets for a drag that began in its detail: a scroller that overflows owns the downward drag. */
-const targetsFor = (targets: SwipeTargets, inScroll: boolean): SwipeTargets => {
-  if (!inScroll || targets.down === undefined) return targets;
-  const { down: _down, ...rest } = targets;
-  return rest;
+/** A drag that began inside the card's detail while it overflowed: whether the detail sat at its top, or its bottom. */
+export interface ScrollStart {
+  readonly atTop: boolean;
+  readonly atBottom: boolean;
+}
+
+/**
+ * The card's swipe targets for a drag that began at `scroll` — `null` for the header, the title or the answer
+ * bar, which keep every target. Inside a detail that overflows, a vertical drag is the reader scrolling,
+ * except where the detail cannot scroll any further that way: ↓ stays only when it was at its top, ↑ only
+ * when it was at its bottom. The sideways answers always stay; a detail never scrolls sideways.
+ */
+export const verticalTargets = (targets: SwipeTargets, scroll: ScrollStart | null): SwipeTargets => {
+  if (scroll === null) return targets;
+  const { up, down, ...sideways } = targets;
+  return {
+    ...sideways,
+    ...(scroll.atBottom && up !== undefined ? { up } : {}),
+    ...(scroll.atTop && down !== undefined ? { down } : {}),
+  };
 };
 
-/** Whether a pointer went down inside the card's detail while that detail has more to scroll than it shows. */
-const startsInOverflowingScroll = (target: EventTarget | null): boolean => {
+/** Where a pointer went down in the card's detail, or `null` when it was outside it or the detail fits whole. */
+export const scrollStartOf = (target: EventTarget | null): ScrollStart | null => {
   const scroller = target instanceof Element ? target.closest<HTMLElement>('[data-attention-scroll]') : null;
-  return scroller !== null && scroller.scrollHeight > scroller.clientHeight + 1;
+  if (scroller === null || scroller.scrollHeight <= scroller.clientHeight + 1) return null;
+  return {
+    atTop: scroller.scrollTop <= 1,
+    atBottom: scroller.scrollTop + scroller.clientHeight >= scroller.scrollHeight - 1,
+  };
 };
 
 /** A drag never starts where the reader types. */
@@ -321,7 +342,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
       startX: event.clientX,
       startY: event.clientY,
       width: event.currentTarget.getBoundingClientRect().width,
-      inScroll: startsInOverflowingScroll(event.target),
+      scroll: scrollStartOf(event.target),
       moved: false,
       dx: 0,
       dy: 0,
@@ -342,7 +363,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
         // A pointer the browser already released cannot be captured; the drag still reads.
       }
     }
-    setDrag({ dx: current.dx, dy: current.dy, width: current.width, inScroll: current.inScroll });
+    setDrag({ dx: current.dx, dy: current.dy, width: current.width, scroll: current.scroll });
   };
 
   const onPointerUp = (event: PointerEvent<HTMLDivElement>): void => {
@@ -351,7 +372,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
     gesture.current = null;
     if (!current.moved) return;
     swallowClick.current = true;
-    const live = targetsFor(targets, current.inScroll);
+    const live = verticalTargets(targets, current.scroll);
     const intent = swipeIntent(current.dx, current.dy, current.width, live);
     if (intent.committed && intent.direction !== null)
       give(top, intent.direction, dragOffset(current.dx, current.dy, live));
@@ -366,7 +387,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
 
   if (top === undefined && leaving === null) return null;
 
-  const live = drag === null ? targets : targetsFor(targets, drag.inScroll);
+  const live = drag === null ? targets : verticalTargets(targets, drag.scroll);
   const intent = drag === null ? null : swipeIntent(drag.dx, drag.dy, drag.width, live);
   const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live);
   const stamp: SwipeTarget | undefined = intent?.direction == null ? undefined : live[intent.direction];
