@@ -38,7 +38,7 @@ describe('CompactionCard', () => {
     expect(text).not.toContain('Usually');
     expect(text).toContain('7m 14s · 37k tokens written · from 412k tokens');
     expect(view.root.findAllByProps({ 'data-spinner': '' }).length).toBe(0);
-    scheduler.advance(10_000);
+    run(() => scheduler.advance(10_000));
     expect(textOf(view.toJSON())).toContain('7m 24s');
     run(() => view.unmount());
   });
@@ -52,7 +52,7 @@ describe('CompactionCard', () => {
     expect(text).not.toContain('%');
     expect(text).toContain('12s · from 412k tokens');
     expect(text).toContain('Usually ~60s here');
-    scheduler.advance(18_000);
+    run(() => scheduler.advance(18_000));
     expect(textOf(view.toJSON())).toContain('30s');
     expect(view.root.findAllByProps({ role: 'progressbar' }).length).toBe(0);
     run(() => view.unmount());
