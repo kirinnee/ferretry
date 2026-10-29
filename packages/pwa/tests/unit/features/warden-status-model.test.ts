@@ -8,6 +8,7 @@ import {
   wardenInvestigationHead,
   wardenLoginProblem,
   wardenNeedsYouCount,
+  wardenPacedUntil,
   wardenTriageLabel,
 } from '../../../src/features/warden/warden-status-model.ts';
 import {
@@ -167,6 +168,28 @@ describe('wardenNeedsYouCount', () => {
 describe('wardenTriageLabel', () => {
   const on = { configured: true, active: true, reason: 'configured' } as const;
   const off = { configured: false, active: false, reason: 'configured' } as const;
+
+  it('should say a layer stopped only for this hour is paced, and until when', () => {
+    // Arrange
+    const base = wardenStatus();
+    const paced = wardenStatus({
+      triage: {
+        jev: { configured: true, active: false, reason: 'jev_cap' },
+        llm: { configured: true, active: false, reason: 'investigation_cap' },
+      },
+      spend: {
+        ...base.spend,
+        capsHit: ['jev', 'investigation'],
+        capsPaced: ['jev'],
+        pacedUntil: '2026-10-29T07:00:00.000Z',
+      },
+    });
+
+    // Act / Assert
+    expect(wardenTriageLabel(paced)).toBe('Rules only (Jev paced to 07:00, LLM cap hit)');
+    expect(wardenPacedUntil(paced, 'jev')).toBe('07:00 UTC');
+    expect(wardenPacedUntil(paced, 'investigation')).toBeUndefined();
+  });
 
   it('should name the layers in effect, any the owner switched on that a cap stopped, or Off', () => {
     // Arrange

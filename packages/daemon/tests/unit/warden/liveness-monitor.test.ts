@@ -183,34 +183,152 @@ describe('the liveness monitor', () => {
     should(monitor.ledger('s1')).deepEqual({});
   });
 
-  it('should count a ferret watched in its grace period and while it was seen recently, never disarmed', async () => {
+  it('should count a ferret watched in its grace period, unwatched only after three on-time blind looks', async () => {
     // Arrange
     let readable = true;
     const { monitor, advance } = subject({ sample: () => (readable ? { paneHash: 'x' } : {}) });
     const disarmed = monitor.watching('s1');
     monitor.arm();
     const grace = monitor.watching('s1');
-    advance(3 * TICK_MS);
-    const unseen = monitor.watching('s1');
-    await monitor.tick({ nudgeAllowed: true });
+    for (let tick = 0; tick < 4; tick += 1) {
+      await monitor.tick({ nudgeAllowed: true });
+      advance(TICK_MS);
+    }
     const seen = monitor.watching('s1');
     readable = false;
-    advance(TICK_MS);
-    await monitor.tick({ nudgeAllowed: true });
-    advance(2 * TICK_MS);
+    const blindAfter: boolean[] = [];
+    for (let look = 0; look < 3; look += 1) {
+      await monitor.tick({ nudgeAllowed: true });
+      blindAfter.push(monitor.watching('s1'));
+      advance(TICK_MS);
+    }
 
     // Act
-    const blind = monitor.watching('s1');
     monitor.disarm();
 
     // Assert
-    should([disarmed, grace, unseen, seen, blind, monitor.watching('s1')]).deepEqual([
+    should([disarmed, grace, seen, ...blindAfter, monitor.watching('s1')]).deepEqual([
       false,
       true,
-      false,
+      true,
+      true,
       true,
       false,
       false,
     ]);
+  });
+
+  it('should count a ferret started since the last tick as watched — it has missed no look', async () => {
+    // Arrange — 2026-10-29 06:26: a ferret flagged dead_monitor 14 s after it was born.
+    let fleet = [target()];
+    const { monitor, advance } = subject({ targets: () => fleet });
+    monitor.arm();
+    for (let tick = 0; tick < 4; tick += 1) {
+      await monitor.tick({ nudgeAllowed: true });
+      advance(TICK_MS);
+    }
+    fleet = [target(), target({ id: 'newborn' })];
+
+    // Act
+    const watched = monitor.watching('newborn');
+
+    // Assert
+    should(watched).be.true();
+    should(monitor.stalled()).be.false();
+  });
+
+  it('should count no ferret unwatched when the host is starved — the stall is the monitor’s, said once', async () => {
+    // Arrange — 2026-10-29 05:54–06:10: event-loop stalls of 10–143 s; every tick ran minutes late.
+    const fleet = Array.from({ length: 15 }, (_, index) => target({ id: `s${index}` }));
+    const { monitor, advance } = subject({ targets: () => fleet });
+    monitor.arm();
+    await monitor.tick({ nudgeAllowed: true });
+
+    // Act — ticks every three minutes instead of every thirty seconds.
+    for (let tick = 0; tick < 4; tick += 1) {
+      advance(6 * TICK_MS);
+      await monitor.tick({ nudgeAllowed: true });
+    }
+    advance(4 * TICK_MS);
+    const watchedWhileStarved = fleet.filter(item => monitor.watching(item.id)).length;
+    // …then the host stops ticking at all for five minutes.
+    advance(7 * TICK_MS);
+
+    // Assert — nobody was counted unwatched while ticks still ran; a monitor that sees nothing for five
+    // minutes is stalled, which the sweep reports as ONE fault.
+    should(watchedWhileStarved).equal(15);
+    should(monitor.stalled()).be.true();
+    should(fleet.filter(item => monitor.watching(item.id))).be.empty();
+  });
+
+  it('should not count a blind look in a tick that ran long against the ferret', async () => {
+    // Arrange — one ferret readable, one not, and each look takes 20 s of a starved host.
+    let now = NOW;
+    const monitor = new WardenLivenessMonitor(
+      {
+        targets: async () => [target(), target({ id: 's2' })],
+        sample: async item => {
+          now += 20_000;
+          return item.id === 's1' ? { paneHash: 'x' } : {};
+        },
+        nowMs: () => now,
+      },
+      TICK_MS / 1000,
+    );
+    monitor.arm();
+
+    // Act
+    for (let tick = 0; tick < 6; tick += 1) {
+      await monitor.tick({ nudgeAllowed: true });
+      now += TICK_MS;
+    }
+
+    // Assert
+    should([monitor.watching('s1'), monitor.watching('s2'), monitor.stalled()]).deepEqual([true, true, false]);
+  });
+
+  it('should not blame the ferrets for a tick blind to every one of them', async () => {
+    // Arrange
+    let readable = true;
+    const fleet = [target(), target({ id: 's2' })];
+    const { monitor, advance } = subject({ targets: () => fleet, sample: () => (readable ? { paneHash: 'x' } : {}) });
+    monitor.arm();
+    await monitor.tick({ nudgeAllowed: true });
+    readable = false;
+
+    // Act
+    for (let tick = 0; tick < 10; tick += 1) {
+      advance(TICK_MS);
+      await monitor.tick({ nudgeAllowed: true });
+    }
+    const unwatchedWhileBlind = [monitor.watching('s1'), monitor.watching('s2')];
+    const stalledAfterBlindTicks = monitor.stalled();
+    readable = true;
+    advance(TICK_MS);
+    await monitor.tick({ nudgeAllowed: true });
+
+    // Assert — no ferret blamed for ticks blind to all; stalled once that lasts five minutes; and both
+    // watched again the moment it sees.
+    should(unwatchedWhileBlind).deepEqual([false, false]);
+    should(stalledAfterBlindTicks).be.true();
+    should([monitor.stalled(), monitor.watching('s1'), monitor.watching('s2')]).deepEqual([false, true, true]);
+  });
+
+  it('should say when it first looked at a ferret, and forget it when the ferret stops working', async () => {
+    // Arrange
+    let fleet = [target()];
+    const { monitor, advance } = subject({ targets: () => fleet });
+    const before = monitor.observedSince('s1');
+    await monitor.tick({ nudgeAllowed: true });
+    advance(TICK_MS);
+    await monitor.tick({ nudgeAllowed: true });
+    const first = monitor.observedSince('s1');
+    fleet = [];
+
+    // Act
+    await monitor.tick({ nudgeAllowed: true });
+
+    // Assert
+    should([before, first, monitor.observedSince('s1')]).deepEqual([undefined, new Date(NOW).toISOString(), undefined]);
   });
 });

@@ -31,7 +31,12 @@ import type {
   WardenStatusView,
   WardenVerdictKind,
 } from '@ferretry/protocol';
-import { wardenAccountLabel, wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
+import {
+  wardenAccountLabel,
+  wardenInvestigationHead,
+  wardenLoginProblem,
+  wardenPacedUntil,
+} from './warden-status-model.ts';
 import { ANOMALY_CHIPS, chip, layersLabel, type WardenChip } from './warden-vocabulary.ts';
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────────────────────────
@@ -145,9 +150,15 @@ const passedTo = (status: WardenStatusView): string =>
 
 const guardWarning = (status: WardenStatusView, now: number): string | undefined => {
   const { jev, llm } = status.triage;
+  const llmPaced = wardenPacedUntil(status, 'investigation');
+  if (llm.reason === 'investigation_cap' && llmPaced !== undefined)
+    return `This hour’s share of the LLM cap is spent — flags wait until ${llmPaced}`;
   if (llm.reason === 'investigation_cap') return 'LLM cap hit — flags wait for you until midnight UTC';
   if (llm.reason === 'no_login')
     return `${wardenLoginProblem(status.login, status.failover?.accounts ?? []) ?? 'No investigation login'} — investigations are off until you choose one in Settings › Warden`;
+  const jevPaced = wardenPacedUntil(status, 'jev');
+  if (jev.reason === 'jev_cap' && jevPaced !== undefined)
+    return `This hour’s share of the Jev cap is spent — every flag ${passedTo(status)} until ${jevPaced}`;
   if (jev.reason === 'jev_cap') return `Jev cap hit — every flag ${passedTo(status)} until midnight UTC`;
   if (!jev.configured) return undefined;
   if (status.triage.guardFailure?.code === 'not_set') return `No Jev key — every flag ${passedTo(status)}`;

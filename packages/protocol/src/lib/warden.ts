@@ -597,6 +597,14 @@ export const WardenSpendSchema = z.preprocess(
     pendingInvestigations: NonNegativeIntegerSchema,
     /** Every cap today's spend reached. Each one turns off only its own layer. */
     capsHit: z.array(WardenCapSchema),
+    /**
+     * The caps in `capsHit` reached only for THIS UTC hour: a layer may spend at most a quarter of its
+     * day in any one hour, so one burst cannot burn the day. Such a layer is back at `pacedUntil`, not at
+     * midnight. Absent from a daemon that predates pacing, and when nothing is paced.
+     */
+    capsPaced: z.array(WardenCapSchema).optional(),
+    /** The top of the next UTC hour, when `capsPaced` is not empty. */
+    pacedUntil: InstantSchema.optional(),
     investigationsLastHour: NonNegativeIntegerSchema,
     maxInvestigationsPerHour: PositiveIntegerSchema,
   }),

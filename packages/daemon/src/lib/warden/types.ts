@@ -154,6 +154,13 @@ export interface WardenSessionView {
   readonly hasDoneMarker?: boolean;
   /** When the liveness reflex confirmed this ferret frozen, this episode. */
   readonly frozenAt?: string;
+  /**
+   * When THIS daemon began watching the ferret (`WardenLivenessMonitor.observedSince`). The sus
+   * classifiers measure silence from no earlier than this: a restarted daemon's documents carry
+   * instants from before it was watching, and silence nobody observed is no evidence. Absent: the
+   * session's own turn start is the only floor.
+   */
+  readonly observedSince?: string;
   /** Since when a browser the agent launched has been running under its pane, this turn. */
   readonly leftoverBrowserSince?: string;
 }

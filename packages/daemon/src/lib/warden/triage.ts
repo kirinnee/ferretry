@@ -67,9 +67,26 @@ import type { WardenVerdictKind } from './verdicts.ts';
 
 const HOUR_MS = 3_600_000;
 
+/**
+ * The share of a layer's daily cap it may spend in any one UTC hour. On 2026-10-29 the investigation
+ * cap was gone by 01:23 and Jev's by 11:00, each in a burst — after which every flag waited for the
+ * owner for the rest of the day. A quarter means a day lasts at least four busy hours.
+ */
+export const HOURLY_CAP_SHARE = 0.25;
+
 /** The UTC calendar day an instant falls on, `YYYY-MM-DD`: the day every cap counts against. */
 export function utcDay(nowMs: number): string {
   return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+/** The UTC clock hour an instant falls in, `YYYY-MM-DDTHH`: the hour the pacing counts against. */
+export function utcHour(nowMs: number): string {
+  return new Date(nowMs).toISOString().slice(0, 13);
+}
+
+/** The top of the next UTC hour. */
+function nextUtcHourMs(nowMs: number): number {
+  return Math.floor(nowMs / HOUR_MS) * HOUR_MS + HOUR_MS;
 }
 
 /** Today's Jev counters. Investigations are counted from their own records, so they cannot drift. */
@@ -82,6 +99,10 @@ export interface WardenTriageDay {
   /** Flags Jev settled by acting alone. Absent in a day recorded before Jev could act. */
   readonly jevActions?: number;
   readonly jevUsd: number;
+  /** The UTC hour `jevHourUsd` counts (`YYYY-MM-DDTHH`). Absent in a day recorded before pacing. */
+  readonly jevHour?: string;
+  /** Jev's spend in `jevHour`. */
+  readonly jevHourUsd?: number;
 }
 
 /** One investigation the Warden started, kept so its cost can be priced once analytics has read it. */
@@ -140,6 +161,16 @@ function startedOn(records: readonly WardenInvestigationRecord[], day: string): 
   });
 }
 
+/** Jev's spend in the UTC hour `nowMs` falls in. */
+export function jevUsdThisHour(today: WardenTriageDay, nowMs: number): number {
+  return today.jevHour === utcHour(nowMs) ? (today.jevHourUsd ?? 0) : 0;
+}
+
+/** Whether Jev may be called now: under its daily cap, and under its share of it for this hour. */
+export function jevWithinBudget(today: WardenTriageDay, caps: WardenCaps, nowMs: number): boolean {
+  return today.jevUsd < caps.jevUsdPerDay && jevUsdThisHour(today, nowMs) < caps.jevUsdPerDay * HOURLY_CAP_SHARE;
+}
+
 /** Investigations started within the hour before `nowMs`. */
 export function investigationsInLastHour(records: readonly WardenInvestigationRecord[], nowMs: number): number {
   return records.filter(record => {
@@ -167,11 +198,26 @@ export function wardenSpend(input: WardenSpendInput): WardenSpend {
   const today = startedOn(input.records, input.today.day);
   const investigationUsd = today.reduce((sum, record) => sum + (record.costUsd ?? 0), 0);
   const pending = today.filter(record => record.costUsd === undefined).length;
-  const estimate = investigationUsd + pending * (averageInvestigationUsd(input.average) ?? 0);
-  const capsHit: WardenCap[] = [
+  const average = averageInvestigationUsd(input.average) ?? 0;
+  const estimate = investigationUsd + pending * average;
+  const hour = utcHour(input.nowMs);
+  const hourEstimate = today
+    .filter(record => {
+      const at = instantMs(record.startedAt);
+      return at !== undefined && utcHour(at) === hour;
+    })
+    .reduce((sum, record) => sum + (record.costUsd ?? average), 0);
+  const daily: WardenCap[] = [
     ...(input.today.jevUsd >= input.caps.jevUsdPerDay ? (['jev'] as const) : []),
     ...(estimate >= input.caps.investigationUsdPerDay ? (['investigation'] as const) : []),
   ];
+  const paced: WardenCap[] = [
+    ...(!daily.includes('jev') && !jevWithinBudget(input.today, input.caps, input.nowMs) ? (['jev'] as const) : []),
+    ...(!daily.includes('investigation') && hourEstimate >= input.caps.investigationUsdPerDay * HOURLY_CAP_SHARE
+      ? (['investigation'] as const)
+      : []),
+  ];
+  const capsHit = (['jev', 'investigation'] as const).filter(cap => daily.includes(cap) || paced.includes(cap));
   return {
     day: input.today.day,
     jevUsd: input.today.jevUsd,
@@ -180,6 +226,7 @@ export function wardenSpend(input: WardenSpendInput): WardenSpend {
     investigationCapUsd: input.caps.investigationUsdPerDay,
     pendingInvestigations: pending,
     capsHit,
+    ...(paced.length === 0 ? {} : { capsPaced: paced, pacedUntil: new Date(nextUtcHourMs(input.nowMs)).toISOString() }),
     investigationsLastHour: investigationsInLastHour(input.records, input.nowMs),
     maxInvestigationsPerHour: input.caps.maxInvestigationsPerHour,
   };
@@ -250,6 +297,19 @@ export function jevActsFor(
 ): readonly TriageActVerdict[] {
   if (anomaly.fleetKey !== undefined || anomaly.affectedSessionIds !== undefined) return [];
   return JEV_ACTS_BY_KIND[anomaly.kind];
+}
+
+/**
+ * The kinds Jev is never asked about: what they say is a fact about the DAEMON, not about anything a
+ * ferret's transcript or screen can show. `dead_monitor` means "this daemon is not watching the turn" —
+ * Jev, shown the turn, can neither confirm nor refute it, and is offered no act on it. On 2026-10-29 it
+ * answered `unsure` to every one of 39 such flags, which was right, and paid for each.
+ */
+const JEV_BLIND_KINDS: ReadonlySet<WardenAnomalyKind> = new Set(['dead_monitor', 'owner_request']);
+
+/** Whether Jev is worth asking about this flag at all: a flag it cannot judge is handed on unasked. */
+export function jevJudges(anomaly: Pick<WardenAnomaly, 'kind'>): boolean {
+  return !JEV_BLIND_KINDS.has(anomaly.kind);
 }
 
 /** Why Jev's answer was handed on instead of carried out. */
@@ -387,17 +447,24 @@ export function guardBackingOff(health: WardenGuardHealth, nowMs: number): boole
   return until !== undefined && until > nowMs;
 }
 
-/** Count one decision into today's counters. */
+/**
+ * Count one decision into today's counters and this hour's spend. A failure is no decision — nothing
+ * came back to decide with — but what the provider charged for it, if anything, is still spent.
+ */
 export function recordGuardDecision(
   today: WardenTriageDay,
   decision: TriageDecision,
   outcome: WardenGuardOutcome,
+  nowMs: number,
 ): WardenTriageDay {
+  const cost = decision.costUsd ?? 0;
   return {
     ...today,
     jevDecisions: today.jevDecisions + (decision.failure === undefined ? 1 : 0),
     jevSkips: today.jevSkips + (outcome.kind === 'leave' ? 1 : 0),
-    jevUsd: today.jevUsd + (decision.costUsd ?? 0),
+    jevUsd: today.jevUsd + cost,
+    jevHour: utcHour(nowMs),
+    jevHourUsd: jevUsdThisHour(today, nowMs) + cost,
   };
 }
 
