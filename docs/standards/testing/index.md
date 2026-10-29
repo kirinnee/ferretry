@@ -431,7 +431,7 @@ implies coverage that is not there.
 A flaky test is a defect in the test, and the remedy is to fix it. What the quarantine does is stop
 a known flake from holding a release hostage **while** it is being fixed.
 
-**Fix the cause, not the budget.** The flakes fixed so far were all one of two shapes, and neither
+**Fix the cause, not the budget.** The flakes fixed so far were all one of three shapes, and none
 was "the machine is slow":
 
 - **Asserting a moment that can be skipped.** A 5ms poll can move a sign-in from "awaiting approval"
@@ -440,6 +440,11 @@ was "the machine is slow":
 - **A fixed sleep standing in for an event.** `await sleep(20)` and then reading a frame that WebCrypto
   produces off the event loop. Wait for the frame itself, with a bounded deadline that names what
   never arrived (`never shown: the Codex login awaiting approval`).
+- **A question that can never be answered.** A deadline checked between polls bounds nothing if one
+  poll never returns. Playwright never settles an `evaluate` sent to a service worker the browser has
+  stopped but not yet closed, not even with an error, so its `.catch` never runs; an update stops the
+  worker it replaces a few milliseconds before closing it. Race the call against the thing going
+  away (`worker.once('close')`) so every poll settles.
 
 Raising a timeout is legitimate only when you can say why the old budget was wrong, measured.
 
