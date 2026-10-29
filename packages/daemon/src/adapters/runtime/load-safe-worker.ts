@@ -11,8 +11,10 @@
  * opened crashed none. Bun 1.4.0 no longer crashes either way.
  *
  * So `terminate()` here ends the thread at once when it has loaded, and otherwise as soon as it does:
- * `open` is dispatched after the entry module and its static imports are evaluated, and `error` when
- * loading fails. Until then the thread is as good as ended — a caller ignores what a thread it ended
+ * Bun 1.3 dispatched `open` after the entry module and its static imports were evaluated, and `error`
+ * instead when loading failed. Bun 1.4 dispatches `open` as the thread starts, before the entry module
+ * runs, and `error` after it when loading fails; the guard holds on both, and is the only one a
+ * source run under an older Bun has. Until then the thread is as good as ended — a caller ignores what a thread it ended
  * posts, as every caller here already does for a thread it replaced. A module a worker imports
  * dynamically after it opened is not covered; none of the daemon's workers end while one loads.
  *
