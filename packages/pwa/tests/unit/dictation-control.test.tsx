@@ -481,6 +481,202 @@ describe('<DictationControl>', () => {
   });
 });
 
+/** A controlled composer: the draft the control reads follows what it wrote, as the real composer does. */
+const InsertHost = (props: {
+  provider: FakeRecognitionProvider;
+  initial?: string;
+  writes: string[];
+  settings?: SttSettings;
+  enhancementFetch?: DictationControlProps['enhancementFetch'];
+}): React.ReactElement => {
+  const [draft, setDraft] = React.useState(props.initial ?? '');
+  return (
+    <div>
+      <button type="button" data-type-more onClick={() => setDraft(current => current + ' more')}>
+        type
+      </button>
+      <DictationControl
+        {...controlProps({
+          recognition: props.provider,
+          draft,
+          settings: props.settings ?? settingsWith({ afterDictation: 'insert' }),
+          enhancementFetch: props.enhancementFetch,
+          onDraftChange: result => {
+            props.writes.push(result.text);
+            setDraft(result.text);
+          },
+        })}
+      />
+    </div>
+  );
+};
+
+const inserted = (container: HTMLElement): HTMLElement | null => container.querySelector('[data-dictation-inserted]');
+
+const undoButton = (container: HTMLElement): HTMLButtonElement =>
+  must(
+    container.querySelector<HTMLButtonElement>('button[aria-label="Undo the inserted dictation"]'),
+    'the undo button',
+  );
+
+describe('<DictationControl> insert straight away', () => {
+  it('puts the take in the draft, closes the panel, and offers Undo — with no Insert press', async () => {
+    const provider = promptRecognition();
+    const writes: string[] = [];
+    const view = await mount(<InsertHost provider={provider} initial="note:" writes={writes} />);
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('dictated words'));
+    await stop(view.container);
+
+    expect(writes).toEqual(['note: dictated words']);
+    expect(panel(view.container)).toBeNull();
+    expect(view.container.querySelector('textarea[data-review-text]')).toBeNull();
+    expect(inserted(view.container)?.textContent).toContain('Inserted');
+    expect(view.container.querySelector('[role="status"]')?.textContent).toBe('Inserted');
+    await view.unmount();
+  });
+
+  it('Undo puts the draft back exactly as it was, once, and the note goes', async () => {
+    const provider = promptRecognition();
+    const writes: string[] = [];
+    const view = await mount(<InsertHost provider={provider} initial="note:" writes={writes} />);
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('dictated words'));
+    await stop(view.container);
+
+    await interact(() => undoButton(view.container).click());
+    expect(writes).toEqual(['note: dictated words', 'note:']);
+    expect(inserted(view.container)).toBeNull();
+    expect(view.container.querySelector('button[aria-label="Undo the inserted dictation"]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('takes the note away, rather than overwrite typing, once the draft is edited', async () => {
+    const provider = promptRecognition();
+    const writes: string[] = [];
+    const view = await mount(<InsertHost provider={provider} initial="note:" writes={writes} />);
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('dictated words'));
+    await stop(view.container);
+    expect(inserted(view.container)).not.toBeNull();
+
+    await clickLabelled(view.container, 'button[data-type-more]', 'the typing stand-in');
+    expect(inserted(view.container)).toBeNull();
+    expect(writes).toEqual(['note: dictated words']);
+    await view.unmount();
+  });
+
+  it('shows the panel with the reason, and inserts nothing, when the correction fails', async () => {
+    const provider = promptRecognition();
+    const writes: string[] = [];
+    const view = await mount(
+      <InsertHost
+        provider={provider}
+        writes={writes}
+        settings={settingsWith({ afterDictation: 'insert', enhancementProvider: 'groq' })}
+        enhancementFetch={async () => new Response(JSON.stringify({ code: 'secret_missing' }), { status: 400 })}
+      />,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('raw words'));
+    await stop(view.container);
+
+    expect(writes).toEqual([]);
+    expect(inserted(view.container)).toBeNull();
+    expect(panel(view.container)).not.toBeNull();
+    expect(view.container.querySelector('[data-review-notice="cleanup-failed"]')).not.toBeNull();
+    expect(reviewText(view.container).value).toBe('raw words');
+    await view.unmount();
+  });
+
+  it('still names a take that captured nothing, and inserts nothing', async () => {
+    const provider = promptRecognition();
+    const writes: string[] = [];
+    const view = await mount(<InsertHost provider={provider} writes={writes} />);
+    await openAndBegin(view.container, provider);
+    await stop(view.container);
+
+    expect(writes).toEqual([]);
+    expect(inserted(view.container)).toBeNull();
+    expect(view.container.textContent).toContain('No speech was captured');
+    await view.unmount();
+  });
+
+  it('says on the button which way the setting goes', async () => {
+    const insertView = await mount(<InsertHost provider={promptRecognition()} writes={[]} />);
+    expect(micButton(insertView.container).getAttribute('title')).toContain('goes into your draft when it is ready');
+    await insertView.unmount();
+
+    const reviewView = await mount(
+      <InsertHost provider={promptRecognition()} writes={[]} settings={settingsWith({ afterDictation: 'review' })} />,
+    );
+    expect(micButton(reviewView.container).getAttribute('title')).toContain('review the text before it reaches');
+    await reviewView.unmount();
+  });
+
+  it('follows the setting for push-to-talk: a released hold inserts with no review', async () => {
+    const provider = promptRecognition();
+    const writes: string[] = [];
+    const listeners = new Map<string, (event: Event) => void>();
+    const shortcutHost: ShortcutHost = {
+      keys: {
+        addEventListener: (type, listener) => listeners.set(type, listener),
+        removeEventListener: type => listeners.delete(type),
+      },
+      visibility: { addEventListener: () => undefined, removeEventListener: () => undefined },
+      visibilityState: () => 'visible',
+      now: () => 0,
+    };
+    const composer = document.createElement('textarea');
+    document.body.appendChild(composer);
+    const view = await mount(
+      <DictationControl
+        {...controlProps({
+          recognition: provider,
+          shortcutHost,
+          composerRef: { current: composer },
+          settings: settingsWith({ afterDictation: 'insert' }),
+          onDraftChange: result => writes.push(result.text),
+        })}
+      />,
+    );
+    const press = (type: 'keydown' | 'keyup'): void => {
+      const event = new KeyboardEvent(type, { key: 'Alt', code: 'AltLeft', altKey: type === 'keydown' });
+      Object.defineProperty(event, 'target', { value: composer });
+      listeners.get(type)?.(event);
+    };
+
+    await interact(() => press('keydown'));
+    await interact(() => provider.begin());
+    shortcutHost.now = () => 5_000;
+    await interact(() => provider.speak('held words'));
+    await interact(async () => press('keyup'));
+
+    expect(writes).toEqual(['held words']);
+    expect(panel(view.container)).toBeNull();
+    expect(inserted(view.container)).not.toBeNull();
+
+    composer.remove();
+    await view.unmount();
+  });
+
+  it('still parks the take for review when the person reviews first', async () => {
+    const provider = promptRecognition();
+    const writes: string[] = [];
+    const view = await mount(
+      <InsertHost provider={provider} writes={writes} settings={settingsWith({ afterDictation: 'review' })} />,
+    );
+    await openAndBegin(view.container, provider);
+    await interact(() => provider.speak('dictated words'));
+    await stop(view.container);
+
+    expect(writes).toEqual([]);
+    expect(inserted(view.container)).toBeNull();
+    expect(reviewText(view.container).value).toBe('dictated words');
+    await view.unmount();
+  });
+});
+
 describe('<DictationControl> names the engine that will listen', () => {
   it('says Parakeet transcribes on this device when it is chosen and available', async () => {
     const voice = { support: { available: true } } as unknown as ParakeetVoice;

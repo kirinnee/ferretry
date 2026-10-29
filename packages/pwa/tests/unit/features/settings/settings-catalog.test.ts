@@ -153,6 +153,12 @@ describe('shared settings catalog', () => {
     expect(settingsPaletteEntries(alpha, 'microphone').map(entry => entry.settingId)).toContain('dictation');
   });
 
+  test('makes the after-dictating choice findable by what a person would type', () => {
+    for (const query of ['review first', 'insert straight away', 'preview', 'inject', 'after dictating']) {
+      expect(settingsPaletteEntries(alpha, query).map(entry => entry.settingId)).toContain('dictation');
+    }
+  });
+
   test('makes the enhancement feature findable by its own names', () => {
     for (const query of ['enhance', 'enhancement', 'dictionary', 'vocabulary', 'glossary', 'jargon', 'correction']) {
       expect(settingsPaletteEntries(alpha, query).map(entry => entry.settingId)).toContain('dictation');

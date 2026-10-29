@@ -44,6 +44,7 @@ import { onDeviceModel } from '../../lib/stt/model-catalog.ts';
 import type { OnDeviceVoices } from '../../lib/stt/on-device-voices.ts';
 import type { ParakeetVoice } from '../../lib/stt/parakeet-voice.ts';
 import {
+  AFTER_DICTATION_OPTIONS,
   DEFAULT_ENHANCEMENT_MODELS,
   DEFAULT_GROQ_ENHANCEMENT_MODEL,
   type DictationEngineId,
@@ -57,7 +58,7 @@ import {
   type SttSettingsPatch,
   sttDictionary,
 } from '../../lib/stt/stt-settings.ts';
-import { Textarea } from '../../shell/primitives.tsx';
+import { Badge, Textarea } from '../../shell/primitives.tsx';
 import { DictationShortcutPicker } from './dictation-shortcut-picker.tsx';
 import { type DeviceClass, type DeviceClassGlobalLike, deviceClassOf } from '../../lib/stt/engine-defaults.ts';
 import { EngineCatalogList, type TrialClock } from './engine-catalog-list.tsx';
@@ -66,6 +67,10 @@ import { VoiceCleanupSettings } from './voice-cleanup-settings.tsx';
 
 export const DICTATION_SAFETY_NOTE =
   'Ferretry never sends microphone audio to your daemon. Stop settles the browser transcript, corrects it once, and inserts it at your current caret. Nothing is ever sent for you.';
+
+/** Under "After dictating": the choice is this browser's, and either way nothing is sent for the person. */
+export const AFTER_DICTATION_EXPLANATION =
+  'Push-to-talk follows this too. With “Insert straight away” the text lands at your caret as soon as it is ready and an Undo note appears; if clean-up fails or nothing was heard, the panel stays open with the reason instead.';
 
 export const DICTATION_DISABLED_EXPLANATION =
   'Off means off: the microphone cannot open for dictation. Your engine, dictionary and shortcut are kept, so turning dictation back on needs no reload.';
@@ -256,6 +261,49 @@ export function DictationSettings({
               <p className="text-meta leading-base text-muted">{LIVE_WORDS_EXPLANATION}</p>
             </section>
           )}
+
+          {/* ---- what happens when the text is ready ---- */}
+          <section aria-label="After dictating" className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <span id="stt-after-dictation" className="text-ui font-semibold">
+                After dictating
+              </span>
+              <Badge tone="pend">This device</Badge>
+            </div>
+            <div
+              role="radiogroup"
+              aria-labelledby="stt-after-dictation"
+              className="grid grid-cols-1 gap-2 sm:grid-cols-2"
+            >
+              {AFTER_DICTATION_OPTIONS.map(option => {
+                const checked = settings.afterDictation === option.id;
+                return (
+                  <label
+                    key={option.id}
+                    className={cn(
+                      'flex min-h-[44px] min-w-0 cursor-pointer flex-col items-start justify-center rounded-control border px-control-x py-2 text-left transition-colors',
+                      'has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-accent',
+                      checked
+                        ? 'border-accent bg-accent-soft text-accent'
+                        : 'border-border bg-surface-2 text-fg hover:border-accent',
+                    )}
+                  >
+                    <input
+                      type="radio"
+                      name="stt-after-dictation"
+                      value={option.id}
+                      checked={checked}
+                      onChange={() => update({ afterDictation: option.id })}
+                      className="sr-only"
+                    />
+                    <span className="text-ui font-semibold">{option.label}</span>
+                    <span className="text-meta leading-tight text-muted">{option.description}</span>
+                  </label>
+                );
+              })}
+            </div>
+            <p className="text-meta leading-base text-muted">{AFTER_DICTATION_EXPLANATION}</p>
+          </section>
 
           {/* ---- push-to-talk shortcut ---- */}
           <DictationShortcutPicker binding={settings.shortcut} onChange={shortcut => update({ shortcut })} />
