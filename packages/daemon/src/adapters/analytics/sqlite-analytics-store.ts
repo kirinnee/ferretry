@@ -16,6 +16,7 @@ import {
   type AnalyticsPricingRateUnit,
   type AnalyticsPricingSource,
   type AnalyticsPricingUnknownReason,
+  type AnalyticsStorePersister,
   type AnalyticsStoredSession,
   type AnalyticsStoreStatus,
   type AnalyticsUsagePricingSnapshot,
@@ -24,8 +25,13 @@ import {
   decideAnalyticsIndexSchema,
   type FileSystemPort,
   type FoundationPaths,
+  NO_ANALYTICS_WRITES,
   type OpenedAnalyticsIndexStore,
 } from '../../lib/index.ts';
+import type { WriteBehindOptions } from '../storage/write-behind-queue.ts';
+import { InlineAnalyticsPersister } from './analytics-persisters.ts';
+import { applyAnalyticsWrites, COLUMNS, configureAnalyticsConnection } from './sqlite-analytics-statements.ts';
+import { WriteBehindAnalyticsStore } from './write-behind-analytics-store.ts';
 
 /** The only denomination a stored snapshot's amounts can be in; see `pricingProvenanceFromRow`. */
 const ANALYTICS_STORED_RATE_UNIT_SCHEMA = z.literal('million_tokens');
@@ -107,71 +113,6 @@ interface SessionRow {
   readonly signature: string;
   readonly ingested_at: string;
 }
-
-const COLUMNS = [
-  'id',
-  'agent',
-  'model',
-  'context_window',
-  'harness',
-  'mode',
-  'status',
-  'label',
-  'cwd',
-  'parent',
-  'tree',
-  'day',
-  'week',
-  'created_at',
-  'finished_at',
-  'pricing_model',
-  'equivalent_api_cost_usd_micros',
-  'tokens',
-  'input_tokens',
-  'output_tokens',
-  'cached_input_tokens',
-  'cache_write_input_tokens',
-  'cache_write_5m_input_tokens',
-  'cache_write_1h_input_tokens',
-  'reasoning_tokens',
-  'turns',
-  'duration_ms',
-  'active_duration_ms',
-  'time_to_first_output_ms',
-  'context_end_percent',
-  'stalled',
-  'failed',
-  'migrated',
-  'completed',
-  'usage_refusal',
-  'pricing_kind',
-  'pricing_reason',
-  'pricing_identity_raw',
-  'pricing_identity_model_id',
-  'pricing_identity_variant',
-  'pricing_identity_context_window',
-  'pricing_identity_revision',
-  'pricing_key',
-  'pricing_provider',
-  'pricing_currency',
-  'pricing_rate_unit',
-  'pricing_source_kind',
-  'pricing_source_provider',
-  'pricing_source_url',
-  'pricing_last_synced_at',
-  'pricing_verified_at',
-  'pricing_valid_from',
-  'pricing_valid_through',
-  'rate_input',
-  'rate_cached_read',
-  'rate_cache_write',
-  'rate_cache_write_5m',
-  'rate_cache_write_1h',
-  'rate_reasoning',
-  'rate_output',
-  'signature',
-  'ingested_at',
-] as const;
 
 const EXPECTED_TABLES = ['analytics_meta', 'analytics_sessions'] as const;
 const EXPECTED_META_COLUMNS = ['id', 'home'] as const;
@@ -363,83 +304,14 @@ function storedFromRow(row: SessionRow): AnalyticsStoredSession {
   };
 }
 
-function values(session: AnalyticsStoredSession): readonly (string | number | null)[] {
-  const { raw, pricing } = session;
-  const priced = pricing?.kind === 'priced' ? pricing : null;
-  const rates = priced?.rate.ratesUsdMicrosPerMillion;
-  const source = priced?.rate.source;
-  return [
-    raw.id,
-    raw.agent,
-    raw.model,
-    raw.contextWindow,
-    raw.harness,
-    raw.mode,
-    raw.status,
-    raw.label,
-    raw.cwd,
-    raw.parent,
-    raw.tree ?? null,
-    raw.day,
-    raw.week,
-    raw.createdAt,
-    session.finishedAt,
-    raw.pricingModel,
-    raw.equivalentApiCostUsdMicros,
-    raw.tokens,
-    raw.inputTokens,
-    raw.outputTokens,
-    raw.cachedInputTokens,
-    raw.cacheWriteInputTokens,
-    raw.cacheWrite5mInputTokens,
-    raw.cacheWrite1hInputTokens,
-    raw.reasoningTokens ?? null,
-    raw.turns,
-    raw.durationMs,
-    raw.activeDurationMs,
-    raw.timeToFirstOutputMs,
-    raw.contextEndPercent,
-    Number(raw.stalled),
-    Number(raw.failed),
-    Number(raw.migrated),
-    Number(raw.completed),
-    session.usageRefusal,
-    pricing?.kind ?? null,
-    pricing?.kind === 'unpriced' ? pricing.reason : null,
-    pricing?.identity?.raw ?? null,
-    pricing?.identity?.modelId ?? null,
-    pricing?.identity?.variant ?? null,
-    pricing?.identity?.contextWindow ?? null,
-    pricing?.identity?.revision ?? null,
-    priced?.rate.pricingKey ?? null,
-    priced?.rate.provider ?? null,
-    priced?.rate.currency ?? null,
-    priced?.rate.rateUnit ?? null,
-    source?.kind ?? null,
-    source?.kind === 'provider_sync' ? source.provider : source?.kind === 'model_catalog' ? source.catalog : null,
-    source?.kind === 'provider_sync' || source?.kind === 'model_catalog' ? source.sourceUrl : null,
-    priced?.rate.lastSyncedAt ?? null,
-    priced?.rate.verifiedAt ?? null,
-    priced?.rate.validFrom ?? null,
-    priced?.rate.validThrough ?? null,
-    rates?.input ?? null,
-    rates?.cachedRead ?? null,
-    rates?.cacheWrite ?? null,
-    rates?.cacheWrite5m ?? null,
-    rates?.cacheWrite1h ?? null,
-    rates?.reasoning ?? null,
-    rates?.output ?? null,
-    session.signature,
-    session.ingestedAt,
-  ];
-}
-
 /**
+ * The store over one SQLite connection: in the daemon, a copy held in memory.
+ *
  * Not exported: the factory is the only way in, because opening this file has PREFLIGHT rules — every
  * path walked through the confined port, a foreign index discarded, modes set — and a caller holding a
- * raw `Database` could skip every one of them.
+ * raw `Database` could skip every one of them. {@link WriteBehindAnalyticsStore} persists what it accepts.
  */
-class BunSqliteAnalyticsStore implements AnalyticsIndexStore {
+export class BunSqliteAnalyticsStore implements AnalyticsIndexStore {
   constructor(private readonly database: Database) {}
 
   ingested(): ReadonlyMap<string, AnalyticsIngestedMarker> {
@@ -455,24 +327,11 @@ class BunSqliteAnalyticsStore implements AnalyticsIndexStore {
 
   /** One transaction for the whole batch: a partially written pass would report a fleet nobody ran. */
   upsert(rows: readonly AnalyticsStoredSession[]): void {
-    const placeholders = COLUMNS.map(() => '?').join(', ');
-    const updates = COLUMNS.filter(column => column !== 'id')
-      .map(column => `${column} = excluded.${column}`)
-      .join(', ');
-    const statement = this.database.query(
-      `INSERT INTO analytics_sessions (${COLUMNS.join(', ')}) VALUES (${placeholders})
-       ON CONFLICT(id) DO UPDATE SET ${updates}`,
-    );
-    this.database.transaction(() => {
-      for (const row of rows) statement.run(...values(row));
-    })();
+    applyAnalyticsWrites(this.database, { ...NO_ANALYTICS_WRITES, upserts: rows });
   }
 
   forget(ids: readonly string[]): void {
-    const statement = this.database.query('DELETE FROM analytics_sessions WHERE id = ?');
-    this.database.transaction(() => {
-      for (const id of ids) statement.run(id);
-    })();
+    applyAnalyticsWrites(this.database, { ...NO_ANALYTICS_WRITES, forgets: ids });
   }
 
   rows(): readonly AnalyticsStoredSession[] {
@@ -505,15 +364,11 @@ class BunSqliteAnalyticsStore implements AnalyticsIndexStore {
   }
 
   drop(): void {
-    this.database.exec('DELETE FROM analytics_sessions');
+    applyAnalyticsWrites(this.database, { ...NO_ANALYTICS_WRITES, drop: true });
   }
 
-  close(): void {
-    try {
-      this.database.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    } finally {
-      this.database.close();
-    }
+  async close(): Promise<void> {
+    this.database.close();
   }
 }
 
@@ -555,10 +410,7 @@ function storedHome(database: Database, hasTables: boolean): string | null {
 
 function configure(database: Database, home: string): void {
   database.exec('PRAGMA journal_mode = WAL');
-  // The durable session documents are fsynced before a row is derived from them, so the disposable
-  // materialization can safely use NORMAL: the worst a lost write costs is one re-ingestion.
-  database.exec('PRAGMA synchronous = NORMAL');
-  database.exec('PRAGMA busy_timeout = 5000');
+  configureAnalyticsConnection(database);
   database.exec(`
     CREATE TABLE IF NOT EXISTS analytics_meta (
       id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -654,7 +506,44 @@ async function openDatabase(paths: FoundationPaths, fileSystem: FileSystemPort):
   return new Database(paths.analyticsIndex, { create: true, strict: true });
 }
 
+/**
+ * The file's whole content as a database in memory, read once at open.
+ *
+ * Bytes 18 and 19 of a database header are its read and write format versions, and 2 means WAL: a copy in
+ * memory refuses to open in that mode, so the copy is marked as the rollback journal it then is. The table
+ * is one row per finished session, a few megabytes on the owner's fleet, so holding it costs little.
+ */
+function inMemoryCopy(database: Database): Database {
+  const bytes = database.serialize();
+  bytes[18] = 1;
+  bytes[19] = 1;
+  return Database.deserialize(bytes, { strict: true });
+}
+
+/** Who persists one opened analytics file, given the connection its open already holds. */
+export interface AnalyticsPersisterFactory {
+  create(file: string, connection: Database): AnalyticsStorePersister;
+}
+
+/** The writes made on the main thread, through the connection the open used: the fallback, and tests. */
+const INLINE_ANALYTICS_PERSISTERS: AnalyticsPersisterFactory = {
+  create: (_file, connection) => new InlineAnalyticsPersister(connection),
+};
+
+/**
+ * Opens the analytics file, then answers from a copy in memory and persists behind it.
+ *
+ * NO READ OR WRITE OF THE STORE TOUCHES THE DISK ON THE EVENT LOOP after this open. The boot sweep's one
+ * upsert committed on the loop and ended, sooner or later, in SQLite's checkpoint — an `fsync` of the log
+ * and the database — which stalled the loop for 307 ms in CI and, on a saturated disk, for seconds. The
+ * file is still written: by {@link AnalyticsPersisterFactory}, in batches, on the thread the daemon gives it.
+ */
 export class BunSqliteAnalyticsStoreFactory implements AnalyticsIndexStoreFactory {
+  constructor(
+    private readonly persisters: AnalyticsPersisterFactory = INLINE_ANALYTICS_PERSISTERS,
+    private readonly options: WriteBehindOptions = {},
+  ) {}
+
   async open(paths: FoundationPaths, fileSystem: FileSystemPort): Promise<OpenedAnalyticsIndexStore> {
     await fileSystem.ensureDirectory(paths.index, 0o700);
     let database: Database | undefined;
@@ -684,7 +573,12 @@ export class BunSqliteAnalyticsStoreFactory implements AnalyticsIndexStoreFactor
       for (const file of analyticsIndexFiles(paths)) {
         if ((await fileSystem.information(file)) !== undefined) await fileSystem.setMode(file, 0o600);
       }
-      return { store: new BunSqliteAnalyticsStore(database), rebuildRequired: decision !== 'use' };
+      const memory = new BunSqliteAnalyticsStore(inMemoryCopy(database));
+      const persister = this.persisters.create(paths.analyticsIndex, database);
+      return {
+        store: new WriteBehindAnalyticsStore(memory, persister, this.options),
+        rebuildRequired: decision !== 'use',
+      };
     } catch (error) {
       database?.close();
       throw error;

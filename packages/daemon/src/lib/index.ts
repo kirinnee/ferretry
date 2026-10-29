@@ -9,6 +9,7 @@ export * from './analytics/query.ts';
 export * from './analytics/results.ts';
 export * from './analytics/session-record.ts';
 export * from './analytics/store.ts';
+export * from './analytics/store-writes.ts';
 export * from './analytics/usage-fold.ts';
 export * from './api/index.ts';
 export * from './attachments/index.ts';
