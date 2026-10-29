@@ -194,6 +194,25 @@ describe('TaskBoardChildGrantService refusals', () => {
     should(actual.message).containEql('reused with another payload');
   });
 
+  it('should answer a retried request id carrying the same payload without recording a second intent', () => {
+    // Arrange
+    const first = requested(children, createState(), { role: 'worker' });
+
+    // Act
+    const replayed = children.request(first, sessions, {
+      source: rootCredential,
+      targetSessionId: 'child',
+      role: 'worker',
+      requestId: 'req',
+      at,
+    });
+
+    // Assert
+    should(replayed.state).equal(first);
+    should(replayed.result.requestId).equal('req');
+    should(replayed.state.boards[0]?.childGrantIntents).have.length(1);
+  });
+
   it('should refuse an approval by a member that is not the exact current coordinator', () => {
     // Arrange
     const withChild = children.approve(
@@ -282,6 +301,38 @@ describe('TaskBoardChildGrantService refusals', () => {
     // Assert
     should(actual.code).equal('conflict');
     should(actual.message).containEql('approval request id was reused');
+  });
+});
+
+describe('TaskBoardChildGrantService approval replay', () => {
+  const children = new TaskBoardChildGrantService(new TaskBoardAuthorizationService(hash));
+
+  it('should report an approved grant that lost its durable binding as unavailable on replay', () => {
+    // Arrange
+    const approved = children.approve(
+      requested(children, createState()),
+      sessions,
+      { coordinator: coordinatorCredential, grantRequestId: 'req', requestId: 'approve', at },
+      material('child'),
+    ).state;
+    const unbound: TaskBoardRepositoryState = {
+      ...approved,
+      bindings: approved.bindings.filter(binding => binding.grantId !== 'child-grant'),
+    };
+
+    // Act
+    const actual = refusal(() =>
+      children.approve(
+        unbound,
+        sessions,
+        { coordinator: coordinatorCredential, grantRequestId: 'req', requestId: 'approve', at },
+        material('child'),
+      ),
+    );
+
+    // Assert
+    should(actual.code).equal('unavailable');
+    should(actual.message).containEql('no durable binding');
   });
 });
 

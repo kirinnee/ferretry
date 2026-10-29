@@ -21,6 +21,7 @@ import {
   requiresHumanWorkflowApproval,
   requiresReopenAction,
   sameTaskDoneRequestFingerprint,
+  taskDoneRequestFingerprint,
   taskPhaseFromStatus,
   taskPhaseMovesBackward,
   taskStatusFromPhase,
@@ -296,6 +297,16 @@ describe('completion request fingerprints', () => {
     should(sameTaskDoneRequestFingerprint(status, phase)).be.false();
     should(sameTaskDoneRequestFingerprint(status, { ...status })).be.true();
     should(sameTaskDoneRequestFingerprint(status, { ...status, note: 'm' })).be.false();
+  });
+});
+
+describe('completion request fingerprint derivation', () => {
+  it('should derive the parsed completion from a done phase request', () => {
+    // Arrange + Act
+    const actual = taskDoneRequestFingerprint({ action: 'phase', phase: 'done', reason: 'shipped' });
+
+    // Assert
+    should(actual).deepEqual({ action: 'phase', phase: 'done', reason: 'shipped' });
   });
 });
 
