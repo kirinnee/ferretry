@@ -167,6 +167,13 @@ export interface DeviceControls {
   readonly composerVimMode: boolean;
   /** Where an ordinary tap on an external link opens (`OpenLinksIn`). */
   readonly openLinksIn: OpenLinksIn;
+  /**
+   * Keep the interactive chats and the most recently opened ones fresh in the background, so switching
+   * to one is instant (`lib/background-fresh.ts`). On by default; per device.
+   */
+  readonly keepChatsFresh: boolean;
+  /** …but not while the browser says the link is cellular. Where it cannot say, this changes nothing. */
+  readonly keepChatsFreshNotOnCellular: boolean;
 }
 
 /** What a screen renders: device preferences plus THIS daemon's project scope. */
@@ -198,6 +205,8 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   skillSuggestions: true,
   composerVimMode: false,
   openLinksIn: 'browser',
+  keepChatsFresh: true,
+  keepChatsFreshNotOnCellular: false,
 });
 
 /**
@@ -314,6 +323,11 @@ const readDeviceControls = (value: unknown): DeviceControls => {
       fields.openLinksIn === 'panel' || fields.openLinksIn === 'computer'
         ? fields.openLinksIn
         : DEFAULT_DEVICE_CONTROLS.openLinksIn,
+    keepChatsFresh: readFlag(fields.keepChatsFresh, DEFAULT_DEVICE_CONTROLS.keepChatsFresh),
+    keepChatsFreshNotOnCellular: readFlag(
+      fields.keepChatsFreshNotOnCellular,
+      DEFAULT_DEVICE_CONTROLS.keepChatsFreshNotOnCellular,
+    ),
   };
 };
 
