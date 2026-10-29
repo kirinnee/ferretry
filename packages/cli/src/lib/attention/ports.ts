@@ -1,10 +1,4 @@
-import type {
-  AttentionActionRequest,
-  AttentionSnapshot,
-  DirectNotificationRequest,
-  DirectNotificationResponse,
-  IFyApiClient,
-} from '@ferretry/protocol';
+import type { AttentionActionRequest, AttentionSnapshot, IFyApiClient } from '@ferretry/protocol';
 
 /**
  * Presentation port for the attention commands — the narrowest slice of the shipped `ConsoleIo`
@@ -26,8 +20,6 @@ export interface IAttentionGateway {
   apply(sessionId: string, request: AttentionActionRequest): Promise<AttentionSnapshot>;
   /** Deliver the answers held for the ferret now, skipping the settle window; the board as it was left. */
   sendReplies(sessionId: string): Promise<AttentionSnapshot>;
-  /** Push a direct notification — not an attention item, so there is nothing to resolve. */
-  notify(sessionId: string, request: DirectNotificationRequest): Promise<DirectNotificationResponse>;
 }
 
 /** The only client capability the attention gateway consumes. */

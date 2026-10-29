@@ -111,24 +111,29 @@ describe('attention command surface', () => {
 
   it('should accept the explicit add verb', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'add', 'pick a cluster'], afterAdd);
+    const { parsed, gateway } = run(['attention', 'add', 'pick a cluster', '--title', 'Pick a cluster'], afterAdd);
     await parsed;
 
     // Assert
-    should(gateway.applied[0]?.request).match({ subject: 'pick a cluster' });
+    should(gateway.applied[0]?.request).match({ subject: 'pick a cluster', title: 'Pick a cluster', kind: 'reply' });
   });
 
   it('should collect repeated --option into a choice ask', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['attention', 'add', 'which cluster', '--option', 'staging', '--option', 'prod'],
+      ['attention', 'add', 'which cluster', '--title', 'Cluster', '--option', 'staging', '--option', 'prod'],
       afterAdd,
     );
     await parsed;
 
     // Assert
     should(gateway.applied[0]?.request).match({
+      kind: 'choice',
       ask: { kind: 'multiple-choice', options: [{ label: 'staging' }, { label: 'prod' }] },
+      answers: [
+        { direction: 'left', does: 'choose', label: 'prod' },
+        { direction: 'right', does: 'choose', label: 'staging' },
+      ],
     });
   });
 
@@ -139,6 +144,8 @@ describe('attention command surface', () => {
         'attention',
         'add',
         'approve the deploy',
+        '--title',
+        'Deploy approval',
         '--kind',
         'permission',
         '--why',
@@ -164,7 +171,25 @@ describe('attention command surface', () => {
   it('should carry the short-form add flags', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['attention', 'add', 'choose', '-k', 'choice', '-o', 'a', '-o', 'b', '-c', 'ctx', '-w', 'why', '-r', 'how'],
+      [
+        'attention',
+        'add',
+        'choose',
+        '-t',
+        'Choose',
+        '-k',
+        'choice',
+        '-o',
+        'a',
+        '-o',
+        'b',
+        '-c',
+        'ctx',
+        '-w',
+        'why',
+        '-r',
+        'how',
+      ],
       afterAdd,
     );
     await parsed;
@@ -258,13 +283,27 @@ describe('attention command surface', () => {
     should(gateway.applied[0]?.request).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 
-  it('should push a notification', async () => {
+  it('should raise an info item for a notification', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'notify', 'the', 'build', 'is', 'green', '-t', 'CI']);
+    const { parsed, gateway } = run(['attention', 'notify', 'the', 'build', 'is', 'green', '-t', 'CI'], afterAdd);
     await parsed;
 
     // Assert
-    should(gateway.notified[0]?.request).deepEqual({ body: 'the build is green', title: 'CI' });
+    should(gateway.applied[0]?.request).match({
+      action: 'add',
+      kind: 'info',
+      title: 'CI',
+      subject: 'the build is green',
+    });
+  });
+
+  it('should refuse notify --kind completed and raise nothing', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'notify', 'all done', '--kind', 'completed']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/progress and finishing never notify the owner/u);
+    should(gateway.applied).be.empty();
   });
 
   it('should honour --session on the group and on the subcommand', async () => {
@@ -400,7 +439,7 @@ describe('attention writing flags', () => {
   it('should collect repeated --context and --impact into bullet points on add', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['attention', 'add', 'pick', '-c', 'one', '-c', 'two', '--impact', 'blocks', '--impact', 'costs'],
+      ['attention', 'add', 'pick', '-t', 'Pick', '-c', 'one', '-c', 'two', '--impact', 'blocks', '--impact', 'costs'],
       afterAdd,
     );
     await parsed;
@@ -443,7 +482,7 @@ describe('attention writing flags', () => {
 describe('attention step flags', () => {
   it('should raise with repeated --step, edit with them, and tick with step', async () => {
     // Arrange + Act
-    const added = run(['attention', 'add', 'Log in', '--step', 'Run it', '--step', 'Paste it']);
+    const added = run(['attention', 'add', 'Log in', '--title', 'Log in', '--step', 'Run it', '--step', 'Paste it']);
     await added.parsed;
     const edited = run(['attention', 'edit', '!A1', '--step', 'Only this']);
     await edited.parsed;
@@ -480,10 +519,145 @@ describe('attention needs-info command', () => {
 
   it('should raise a to-do with --task', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'add', 'Log in', '--task', '--step', 'Run it'], afterAdd);
+    const { parsed, gateway } = run(
+      ['attention', 'add', 'Log in', '--title', 'Log in', '--task', '--step', 'Run it'],
+      afterAdd,
+    );
     await parsed;
 
     // Assert
     should(gateway.applied[0]?.request).match({ action: 'add', ask: { kind: 'task' }, steps: ['Run it'] });
+  });
+});
+
+describe('attention card flags', () => {
+  it('should refuse an add with no title', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'add', 'approve the deploy']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/give the card a title: --title/u);
+    should(gateway.applied).be.empty();
+  });
+
+  it('should take --ask as the one-line ask and keep --summary working', async () => {
+    // Arrange + Act
+    const ask = run(['attention', 'add', '--title', 'Deploy', '--ask', 'Approve the deploy?'], afterAdd);
+    await ask.parsed;
+    const summary = run(['attention', 'add', '--title', 'Deploy', '--summary', 'Approve the deploy?'], afterAdd);
+    await summary.parsed;
+
+    // Assert
+    should(ask.gateway.applied[0]?.request).match({ subject: 'Approve the deploy?' });
+    should(summary.gateway.applied[0]?.request).match({ subject: 'Approve the deploy?' });
+  });
+
+  it('should add the up answer with --up and --up-why on a permission card', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(
+      [
+        'attention',
+        'add',
+        'Run it?',
+        '-t',
+        'Run',
+        '-k',
+        'permission',
+        '--up',
+        'Always allow',
+        '--up-why',
+        'for this repo',
+      ],
+      afterAdd,
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).match({
+      kind: 'permission',
+      answers: [
+        { direction: 'left', label: 'Deny' },
+        { direction: 'up', does: 'approve', label: 'Always allow', description: 'for this repo' },
+        { direction: 'right', label: 'Allow' },
+      ],
+    });
+  });
+
+  it('should refuse --up on a kind that has no up answer', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'add', 'Ok?', '-t', 'Ok', '-k', 'yesno', '--up', 'Maybe']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/--up only fits --kind task/u);
+    should(gateway.applied).be.empty();
+  });
+
+  it('should refuse more than three options with the split advice', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run([
+      'attention',
+      'add',
+      'Which?',
+      '-t',
+      'Which',
+      '-o',
+      'a',
+      '-o',
+      'b',
+      '-o',
+      'c',
+      '-o',
+      'd',
+    ]);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/a card offers at most 3 answers/u);
+    should(gateway.applied).be.empty();
+  });
+
+  it('should refuse --option on a yesno card', async () => {
+    // Arrange + Act
+    const { parsed } = run(['attention', 'add', 'Ok?', '-t', 'Ok', '-k', 'yesno', '-o', 'a', '-o', 'b']);
+
+    // Assert
+    await should(parsed).be.rejectedWith(/--kind yesno brings its own Yes and No/u);
+  });
+
+  it('should retitle with edit --title', async () => {
+    // Arrange + Act
+    const { parsed, gateway } = run(['attention', 'edit', 'A1', '--title', 'Deploy approval']);
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'edit', id: 'A1', title: 'Deploy approval' });
+  });
+
+  it('should answer a yes or no card with done --yes and --no', async () => {
+    // Arrange + Act
+    const yes = run(['attention', 'done', 'A1', '--yes'], snapshot([]));
+    await yes.parsed;
+    const no = run(['attention', 'done', 'A1', '--no'], snapshot([]));
+    await no.parsed;
+
+    // Assert
+    should(yes.gateway.applied[0]?.request).match({ response: { kind: 'multiple-choice', choice: 'Yes' } });
+    should(no.gateway.applied[0]?.request).match({ response: { kind: 'multiple-choice', choice: 'No' } });
+  });
+
+  it('should name the card flags in the add help', async () => {
+    // Arrange
+    let help = '';
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({ writeOut: text => (help += text), writeErr: () => {} });
+    registerAttentionCommands(
+      program,
+      new AttentionController(new RecordingAttentionGateway(board), new CapturingOutput(), SESSION),
+    );
+
+    // Act
+    await program.parseAsync(['node', 'fy', 'attention', 'add', '--help']).catch(() => undefined);
+
+    // Assert
+    for (const flag of ['--title', '--ask', '--up', '--up-why']) should(help).containEql(flag);
   });
 });
