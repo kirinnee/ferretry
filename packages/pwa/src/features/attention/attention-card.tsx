@@ -72,7 +72,7 @@ export interface AttentionCardProps {
   readonly onAct: (action: InboxAction) => void;
   /** Ticks or unticks one step on the machine; a rejection rolls the tick back. Absent: the steps are read-only. */
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
-  /** Pinned above the composer: no origin, the detail folded behind "Details", the reply left to the composer. */
+  /** Pinned above the composer: no origin, the detail folded behind "Details". */
   readonly pinned?: boolean;
   /** Extra DOM id for scroll targets. */
   readonly id?: string;
@@ -347,7 +347,7 @@ export function AttentionCard({
         replyIsAnswer={textOnly && !perQuestion}
         replyOpen={replyOpen}
         replyRef={replyRef}
-        showReply={!pinned && !perQuestion}
+        arrows={swipeHints || pinned}
         swipeHints={swipeHints}
         {...(isWaitingOnFerret(item) ? { waitingOn: ferret } : {})}
         {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}

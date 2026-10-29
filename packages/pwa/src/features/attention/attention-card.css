@@ -754,9 +754,6 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-reply-toggle__chevron[data-open] {
   transform: rotate(180deg);
 }
-.fy-attn-actions__row--end {
-  justify-content: flex-end;
-}
 
 /* The detail scrolls inside the card; the header and the answer bar stay put. In the deck the card is
    capped to the screen, and the detail is its own scroller: a vertical drag there scrolls the detail, a
