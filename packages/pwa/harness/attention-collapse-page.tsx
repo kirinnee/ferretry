@@ -79,7 +79,7 @@ function Chat({ items }: { readonly items: readonly AttentionItem[] }): ReactEle
       <div className="p-panel">
         <AttentionPanel
           chip={{ on: chip, onChange: setChip }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
           connection={CONNECTION}
           id="attention-panel"
           now={NOW}

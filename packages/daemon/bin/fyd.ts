@@ -712,6 +712,7 @@ import {
   harnessQuirks,
   InitialAttachmentError,
   InstructionRefresh,
+  instructionsReplyKey,
   InvalidDeadlineRefused,
   isControlAttachable,
   isQuestionScopedRequestId,
@@ -1679,6 +1680,8 @@ export interface DaemonWorld {
      * the document's `sessionWorkers`, read by `start` like every other configured value.
      */
     sessionWorkers: DaemonConfig['sessionWorkers'],
+    /** How long the owner's attention answers are held before they reach the ferret (`attention` block). */
+    attention: DaemonConfig['attention'],
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -3028,10 +3031,11 @@ function createSessionSendSubsystem(
    */
   conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
   /**
-   * The always-on instructions that changed since the ferret launched, told once with a PERSON's next
-   * message (`InstructionRefresh`, docs/launch-settings.md). A teammate's message never carries them.
+   * The always-on instructions that changed since the ferret launched, queued once as a message of their
+   * own when a PERSON writes (`InstructionRefresh`, docs/launch-settings.md). A teammate's message never
+   * triggers it, and the person's words are never changed.
    */
-  instructions: Pick<InstructionRefresh, 'prepare' | 'settle'>,
+  instructions: Pick<InstructionRefresh, 'queueIfStale'>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -3062,12 +3066,11 @@ function createSessionSendSubsystem(
             });
       const person = request.senderSessionId === undefined;
       const turn = person ? await conversation.prepare(id, request.message) : { message: request.message, answers: [] };
-      const refreshed = person ? await instructions.prepare(id, turn.message) : { message: turn.message, told: [] };
       const outcome = await service
         .send({
           id,
           sendId: request.sendId,
-          message: messageWithAttachments(refreshed.message, delivered),
+          message: messageWithAttachments(turn.message, delivered),
           ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
           ...(request.now === undefined ? {} : { now: request.now }),
           ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
@@ -3077,7 +3080,7 @@ function createSessionSendSubsystem(
       // Resolved only once the words were accepted: an item must never read as answered by a message the
       // ferret was not given.
       if (turn.answers.length > 0) await conversation.settle(id, turn, request.message);
-      await instructions.settle(id, refreshed);
+      if (person) await instructions.queueIfStale(id);
       return {
         ...(await view(id, 'took the message')),
         disposition: outcome.disposition,
@@ -8209,6 +8212,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       harnessDiscovery,
       browserLauncher,
       sessionWorkers,
+      attentionConfig,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
       // read from the configuration this boot loaded, and the adapters are built before that happens.
@@ -8797,6 +8801,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new KeyedAttentionReplyTimers(),
         new KeyedSerialExecutor(),
         { now: () => clock.now() },
+        {
+          settleMs: attentionConfig.replySettleSeconds * 1_000,
+          capMs: attentionConfig.replyMaxWaitSeconds * 1_000,
+        },
+        // A batch that falls due while the ferret is mid-turn waits for the turn to end. Unreadable state
+        // is not busy, so a damaged document never holds an answer.
+        {
+          busy: async sessionId => {
+            const id = tryParseSessionId(sessionId);
+            if (id === undefined) return false;
+            const state = SessionStateSchema.safeParse(await storage.readState(id));
+            return state.success && state.data.turnState === 'working';
+          },
+        },
       );
       // Answers held across a restart are delivered, in the background, once the daemon is up.
       void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
@@ -8841,7 +8859,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           attentionProjection,
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
-          new AttentionReplyDelivery(attentionReplies),
+          new AttentionReplyDelivery(attentionReplies, CLIENT_NAME),
           // The ferret's edit that answers the owner's request for more information: pushed once more.
           new AttentionMoreInfoPush(notifications),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
@@ -9927,9 +9945,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                   attachmentRoot: attachmentOriginals(sessionId),
                 });
           },
-          new AttentionConversation(attention, CLIENT_NAME),
+          new AttentionConversation(attention),
           new InstructionRefresh({
             sections: () => ALWAYS_ON_SECTIONS(CLIENT_NAME),
+            queue: async (sessionId, digest, note) =>
+              await attentionReplies.add(sessionId, instructionsReplyKey(digest), note),
             recorded: async sessionId => {
               const id = tryParseSessionId(sessionId);
               if (id === undefined) return undefined;
@@ -10823,6 +10843,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     harnessDiscovery,
     world.browserLauncher,
     config.sessionWorkers,
+    config.attention,
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must

@@ -17,16 +17,18 @@ import {
   DISMISS_ACTION,
   DONE_ACTION,
   directionOfAction,
+  historyLine,
   type InboxCard,
   inboxCardKey,
   inboxCards,
-  inboxResolved,
   inboxOptions,
+  inboxResolved,
+  isInDiscussion,
   NEEDS_INFO_ACTION,
   RESOLVED_READ_LIMIT,
   replyAction,
-  sessionsToReadForResolved,
   SWIPE_SLOP_PX,
+  sessionsToReadForResolved,
   swipeIntent,
   swipeMap,
   swipeThreshold,
@@ -34,6 +36,7 @@ import {
   unreadCount,
   unreadSessions,
   unreadTotal,
+  waitingSentence,
 } from '../../src/lib/attention-inbox.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -261,6 +264,59 @@ describe('replies', () => {
     expect(actionSentence(inboxOptions(card({ ask: choice('Wait', 'Go') }))[0] ?? DONE_ACTION, 'A3')).toBe(
       'Answered !A3: Wait',
     );
+  });
+});
+
+describe('Discuss', () => {
+  const agent = { raisedBy: 'agent' as const };
+
+  test('is the fixed down swipe of a ferret-raised card, never one of its three answers', () => {
+    const map = swipeMap(card({ ...agent, ask: choice('A', 'B', 'C') }));
+    expect(Object.keys(map).sort()).toEqual(['down', 'left', 'right', 'up']);
+    expect(map.down).toEqual({ kind: 'discuss', label: 'Discuss' });
+    expect(swipeMap(card({ ...agent, ask: { kind: 'open-question' } }))).toEqual({
+      down: { kind: 'discuss', label: 'Discuss' },
+    });
+    expect(swipeMap(card({ raisedBy: 'human', ask: choice('A', 'B') })).down).toBeUndefined();
+  });
+
+  test('commits a deliberate downward drag, and only where the card can discuss', () => {
+    expect(swipeIntent(0, 200, 360, swipeMap(card({ ...agent })))).toMatchObject({
+      direction: 'down',
+      committed: true,
+    });
+    expect(swipeIntent(0, 200, 360, swipeMap(card({ raisedBy: 'human' })))).toMatchObject({
+      direction: 'down',
+      committed: false,
+    });
+    expect(swipeIntent(0, 5, 360, swipeMap(card({ ...agent }))).direction).toBeNull();
+  });
+
+  test('finds the discuss action in the map, and says what is being held', () => {
+    const map = swipeMap(card({ ...agent }));
+    expect(directionOfAction(map, { kind: 'discuss', label: 'Discuss', note: 'why?' })).toBe('down');
+    expect(actionSentence({ kind: 'discuss', label: 'Discuss' }, 'A3')).toBe('Asked to discuss !A3');
+  });
+
+  test('reads "In discussion" with or without the ferret, and "Waiting on" otherwise', () => {
+    const discussing = { waitingOn: 'ferret', waitingFor: 'discussion' } as const;
+    expect(isInDiscussion(discussing)).toBe(true);
+    expect(isInDiscussion({ waitingOn: 'ferret', waitingFor: 'info' })).toBe(false);
+    expect(waitingSentence(discussing)).toBe('In discussion');
+    expect(waitingSentence(discussing, 'Piper')).toBe('In discussion with Piper');
+    expect(waitingSentence({ waitingOn: 'ferret', waitingFor: 'info' }, 'Piper')).toBe('Waiting on Piper');
+    expect(waitingSentence({ waitingOn: 'ferret' })).toBe('Waiting on the ferret');
+  });
+
+  test('puts "You asked to discuss" in the history line', () => {
+    const line = historyLine(
+      [
+        { at: '2026-07-31T10:42:00.000Z', kind: 'discuss' },
+        { at: '2026-07-31T10:44:00.000Z', kind: 'updated' },
+      ],
+      'UTC',
+    );
+    expect(line).toMatch(/^You asked to discuss .+ · updated .+$/u);
   });
 });
 

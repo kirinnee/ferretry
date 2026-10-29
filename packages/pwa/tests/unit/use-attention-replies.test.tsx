@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AttentionRepliesNotice } from '../../src/features/attention/attention-replies-notice.tsx';
-import { type RepliesClock, secondsUntil, useAttentionReplies } from '../../src/hooks/use-attention-replies.ts';
+import { AttentionRepliesNotice, countdownWords } from '../../src/features/attention/attention-replies-notice.tsx';
+import {
+  HELD_REREAD_MS,
+  type RepliesClock,
+  secondsUntil,
+  useAttentionReplies,
+} from '../../src/hooks/use-attention-replies.ts';
 import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
 import { DaemonAttentionStore } from '../../src/lib/attention-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -12,7 +17,7 @@ const daemon = daemonConnection({ daemonId: 'studio', baseUrl: 'https://studio.e
 const scope = daemonSessionScope(daemon, 's-1');
 const T0 = Date.parse('2026-10-28T12:00:00.000Z');
 
-const board = (replies?: { pending: string[]; dueAt: string }) => ({
+const board = (replies?: { pending: string[]; dueAt: string; heldForTurn?: true }) => ({
   v: 1,
   sessionId: 's-1',
   items: [],
@@ -26,21 +31,30 @@ const board = (replies?: { pending: string[]; dueAt: string }) => ({
 const json = (value: unknown): Response =>
   new Response(JSON.stringify(value), { status: 200, headers: { 'content-type': 'application/json' } });
 
+/** A clock whose intervals fire once per whole period that `advance` crosses, like `setInterval`. */
 const fakeClock = () => {
   let now = T0;
-  const ticks: Array<() => void> = [];
+  const timers: Array<{ readonly tick: () => void; readonly ms: number; next: number }> = [];
   const clock: RepliesClock = {
     now: () => now,
-    every: tick => {
-      ticks.push(tick);
-      return () => ticks.splice(ticks.indexOf(tick), 1);
+    every: (tick, ms) => {
+      const timer = { tick, ms, next: now + ms };
+      timers.push(timer);
+      return () => {
+        timers.splice(timers.indexOf(timer), 1);
+      };
     },
   };
   return {
     clock,
     advance: (ms: number) => {
       now += ms;
-      for (const tick of [...ticks]) tick();
+      for (const timer of [...timers]) {
+        while (timers.includes(timer) && timer.next <= now) {
+          timer.next += timer.ms;
+          timer.tick();
+        }
+      }
     },
   };
 };
@@ -68,6 +82,7 @@ const setup = async (initial: ReturnType<typeof board>) => {
     return (
       <AttentionRepliesNotice
         ferret="zoe"
+        heldForTurn={replies.heldForTurn}
         onSendNow={replies.sendNow}
         secondsLeft={replies.secondsLeft}
         sending={replies.sending}
@@ -86,7 +101,51 @@ describe('secondsUntil', () => {
   });
 });
 
+describe('countdownWords', () => {
+  test('reads a minute-scale wait in seconds, then in whole minutes rounded up', () => {
+    expect(countdownWords(45)).toBe('45 s');
+    expect(countdownWords(59)).toBe('59 s');
+    expect(countdownWords(60)).toBe('1 min');
+    expect(countdownWords(61)).toBe('2 min');
+    expect(countdownWords(120)).toBe('2 min');
+  });
+});
+
 describe('batched answers notice', () => {
+  test('reads a 60 s window as a minute-scale countdown', async () => {
+    const { root, time } = await setup(board({ pending: ['A1'], dueAt: '2026-10-28T12:01:00.000Z' }));
+    expect(root.textContent).toContain('Sending to zoe in 1 min…');
+    await interact(() => time.advance(15_000));
+    expect(root.textContent).toContain('in 45 s…');
+  });
+
+  test('past its time but held for the ferret’s turn, it says it is waiting and offers Send now', async () => {
+    const { root, time, calls } = await setup(
+      board({ pending: ['A1'], dueAt: '2026-10-28T12:00:08.000Z', heldForTurn: true }),
+    );
+    await interact(() => time.advance(9_000));
+    expect(root.querySelector('[data-attention-replies]')?.textContent).toContain(
+      'Waiting for zoe to finish its turn…',
+    );
+    expect(root.querySelector('[data-attention-send-now]')).not.toBeNull();
+    expect(calls.filter(call => call.method === 'GET')).toHaveLength(0);
+  });
+
+  test('while held for the ferret’s turn it re-reads the board, and clears once the batch has gone', async () => {
+    const held = board({ pending: ['A1'], dueAt: '2026-10-28T12:00:08.000Z', heldForTurn: true });
+    const { root, time, calls, setNext } = await setup(held);
+    setNext(held);
+    await interact(() => time.advance(HELD_REREAD_MS));
+    expect(calls.filter(call => call.method === 'GET')).toHaveLength(1);
+    expect(root.textContent).toContain('Waiting for zoe to finish its turn…');
+    setNext(board());
+    await interact(() => time.advance(HELD_REREAD_MS));
+    expect(calls.filter(call => call.method === 'GET')).toHaveLength(2);
+    expect(root.querySelector('[data-attention-replies]')).toBeNull();
+    await interact(() => time.advance(HELD_REREAD_MS));
+    expect(calls.filter(call => call.method === 'GET')).toHaveLength(2);
+  });
+
   test('shows nothing when the board carries no replies', async () => {
     const { root } = await setup(board());
     expect(root.querySelector('[data-attention-replies]')).toBeNull();

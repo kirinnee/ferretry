@@ -1184,6 +1184,8 @@ describe('attention schemas', () => {
     // Act + Assert
     // A waiting mark needs its time, and the history is bounded.
     should(attention.AttentionItemSchema.safeParse({ ...attentionItem, waitingOn: 'ferret' }).success).be.false();
+    // What the owner waits FOR exists only while they wait.
+    should(attention.AttentionItemSchema.safeParse({ ...attentionItem, waitingFor: 'discussion' }).success).be.false();
     should(
       attention.AttentionItemSchema.safeParse({
         ...attentionItem,

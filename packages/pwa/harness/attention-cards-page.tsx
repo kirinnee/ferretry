@@ -10,6 +10,7 @@ import type { AttentionItem } from '@ferretry/protocol';
 import { type ReactElement, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AttentionCard } from '../src/features/attention/attention-card.tsx';
+import { AttentionRepliesNotice } from '../src/features/attention/attention-replies-notice.tsx';
 import { AttentionSwipeDeck } from '../src/features/attention/attention-swipe-deck.tsx';
 import type { InboxCard } from '../src/lib/attention-inbox.ts';
 import { inboxCardKey } from '../src/lib/attention-inbox.ts';
@@ -136,6 +137,14 @@ const REPLY = item('A7', 12, {
   kind: 'reply',
 } as Partial<AttentionItem>);
 
+const IN_DISCUSSION = item('A2', 9, {
+  ...(CHOICE as object),
+  waitingOn: 'ferret',
+  waitingFor: 'discussion',
+  askedAt: ago(4),
+  history: [{ at: ago(4), kind: 'discuss', note: 'Why not just keep the board in memory?' }],
+} as Partial<AttentionItem>);
+
 const FIXTURES: Readonly<Record<string, AttentionItem>> = {
   task: TASK,
   choice: CHOICE,
@@ -144,6 +153,7 @@ const FIXTURES: Readonly<Record<string, AttentionItem>> = {
   review: REVIEW,
   info: INFO,
   reply: REPLY,
+  'in-discussion': IN_DISCUSSION,
 };
 
 const card = (it: AttentionItem): InboxCard => {
@@ -186,10 +196,29 @@ function Deck({ fixture }: { readonly fixture: AttentionItem }): ReactElement {
   );
 }
 
+function RepliesNotice({ held }: { readonly held: boolean }): ReactElement {
+  return (
+    <div className="mx-auto flex w-full max-w-[460px] flex-col gap-2 bg-bg p-3" data-fixture="">
+      <AttentionRepliesNotice
+        ferret="ottilie"
+        heldForTurn={held}
+        onSendNow={() => undefined}
+        secondsLeft={held ? null : 105}
+        sending={false}
+      />
+      <div className="rounded-lg border border-border bg-surface p-3 text-sm text-muted">Message ottilie…</div>
+    </div>
+  );
+}
+
 const name = new URLSearchParams(location.search).get('view') ?? 'task';
 const swiping = name === 'task-swipe';
-const fixture = FIXTURES[swiping ? 'task' : name];
+const fixture = FIXTURES[name === 'task-swipe' ? 'task' : name === 'discuss-swipe' ? 'choice' : name];
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
-if (fixture === undefined) throw new Error(`no fixture named ${name}`);
-createRoot(root).render(<Deck fixture={fixture} />);
+if (name === 'replies-countdown' || name === 'replies-held') {
+  createRoot(root).render(<RepliesNotice held={name === 'replies-held'} />);
+} else {
+  if (fixture === undefined) throw new Error(`no fixture named ${name}`);
+  createRoot(root).render(<Deck fixture={fixture} />);
+}

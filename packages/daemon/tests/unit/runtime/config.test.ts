@@ -718,3 +718,41 @@ describe('the session-worker pool size', () => {
     should(() => parseDaemonConfig({ sessionWorkers: { max: 0 } })).throw();
   });
 });
+
+describe('the attention reply window', () => {
+  it('should hold answers for a minute after the last, and three minutes after the first, unless told otherwise', () => {
+    // Assert
+    should(defaultDaemonConfig().attention).deepEqual({ replySettleSeconds: 60, replyMaxWaitSeconds: 180 });
+    should(parseDaemonConfig({ attention: { replySettleSeconds: 10 } }).attention).deepEqual({
+      replySettleSeconds: 10,
+      replyMaxWaitSeconds: 180,
+    });
+  });
+
+  it('should accept a settle equal to the cap, and the bounds of one second and one hour', () => {
+    // Act + Assert
+    should(parseDaemonConfig({ attention: { replySettleSeconds: 1, replyMaxWaitSeconds: 1 } }).attention).deepEqual({
+      replySettleSeconds: 1,
+      replyMaxWaitSeconds: 1,
+    });
+    should(
+      parseDaemonConfig({ attention: { replySettleSeconds: 3600, replyMaxWaitSeconds: 3600 } }).attention,
+    ).deepEqual({ replySettleSeconds: 3600, replyMaxWaitSeconds: 3600 });
+  });
+
+  it('should refuse a settle longer than the cap, naming both keys, instead of clamping it', () => {
+    // Act + Assert
+    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 200 } })).throw(/replySettleSeconds/);
+    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
+      /replyMaxWaitSeconds/,
+    );
+  });
+
+  it('should refuse a value out of range, a fraction and a key the block does not define', () => {
+    // Act + Assert
+    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 0 } })).throw();
+    should(() => parseDaemonConfig({ attention: { replyMaxWaitSeconds: 3601 } })).throw();
+    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 1.5 } })).throw();
+    should(() => parseDaemonConfig({ attention: { quietSeconds: 5 } })).throw();
+  });
+});

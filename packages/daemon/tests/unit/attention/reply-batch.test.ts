@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   ATTENTION_REPLY_CAP_MS,
+  ATTENTION_REPLY_HOLD_CEILING_MS,
+  ATTENTION_REPLY_RECHECK_MS,
   ATTENTION_REPLY_SETTLE_MS,
   type AttentionOutbox,
   type AttentionOutboxRepository,
@@ -12,6 +14,7 @@ import {
   beginAttentionBatch,
   emptyAttentionOutbox,
   finishAttentionBatch,
+  instructionsReplyKey,
   MAX_ATTENTION_PENDING_REPLIES,
   needsInfoReplyKey,
   withPendingReply,
@@ -115,7 +118,7 @@ describe('the attention outbox', () => {
     // Act + Assert
     should(attentionReplyDueAt(emptyAttentionOutbox(SESSION))).be.undefined();
     should(attentionReplyDueAt(outbox(0))).equal(Date.parse(AT) + ATTENTION_REPLY_SETTLE_MS);
-    should(attentionReplyDueAt(outbox(0, 27))).equal(Date.parse(AT) + ATTENTION_REPLY_CAP_MS);
+    should(attentionReplyDueAt(outbox(0, 150))).equal(Date.parse(AT) + ATTENTION_REPLY_CAP_MS);
   });
 
   it('should keep a single answer’s send id, and name every item in a batch’s', () => {
@@ -283,5 +286,203 @@ describe('the attention reply batcher and needs-info requests', () => {
 
     // Assert
     should(held?.pending).deepEqual(['A3']);
+  });
+});
+
+/** A clock the case moves, and a ferret that is busy while the case says so. */
+function timed() {
+  const outboxes = new MemoryOutboxes();
+  const timers = new HeldTimers();
+  const sends = new Sends();
+  const time = { ms: Date.parse(AT) };
+  const ferret = { busy: false, unreadable: false };
+  const batcher = new AttentionReplyBatcher(
+    outboxes,
+    sends,
+    timers,
+    inline,
+    { now: () => new Date(time.ms).toISOString() },
+    { settleMs: ATTENTION_REPLY_SETTLE_MS, capMs: ATTENTION_REPLY_CAP_MS },
+    {
+      busy: async () => {
+        if (ferret.unreadable) throw new Error('state unreadable');
+        return ferret.busy;
+      },
+    },
+  );
+  /** Moves time to the armed timer and runs what it would. */
+  const fire = async (): Promise<number> => {
+    const armed = timers.tasks.get(SESSION);
+    time.ms += armed?.delayMs ?? 0;
+    await batcher.flush(SESSION);
+    return armed?.delayMs ?? -1;
+  };
+  return { outboxes, timers, sends, time, ferret, batcher, fire };
+}
+
+describe('the attention reply batcher while the ferret is mid-turn', () => {
+  it('should hold a due batch while the ferret works, let later answers join it, and send once it is idle', async () => {
+    // Arrange
+    const { batcher, timers, sends, time, ferret } = timed();
+    ferret.busy = true;
+    await batcher.add(SESSION, 'A1', 'one');
+
+    // Act — due while busy: nothing goes, and it looks again soon. An answer joins the held batch.
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+    await batcher.flush(SESSION);
+    const rechecked = timers.tasks.get(SESSION)?.delayMs;
+    const during = await batcher.pending(SESSION);
+    await batcher.add(SESSION, 'A2', 'two');
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+    await batcher.flush(SESSION);
+    const sentWhileBusy = sends.sent.length;
+    ferret.busy = false;
+    time.ms += ATTENTION_REPLY_RECHECK_MS;
+    await batcher.flush(SESSION);
+
+    // Assert
+    should(rechecked).equal(ATTENTION_REPLY_RECHECK_MS);
+    should(during?.heldForTurn).be.true();
+    should(sentWhileBusy).equal(0);
+    should(sends.sent).deepEqual([{ message: 'one\n\ntwo', sendId: 'attention-session-1-A1-A2' }]);
+  });
+
+  it('should not say a batch is held for the turn before it is due, or when the ferret is idle', async () => {
+    // Arrange
+    const { batcher, time, ferret } = timed();
+    ferret.busy = true;
+    await batcher.add(SESSION, 'A1', 'one');
+
+    // Act
+    const early = await batcher.pending(SESSION);
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+    ferret.busy = false;
+    const idle = await batcher.pending(SESSION);
+
+    // Assert
+    should(early).not.have.property('heldForTurn');
+    should(idle).not.have.property('heldForTurn');
+    should(idle?.pending).deepEqual(['A1']);
+  });
+
+  it('should send anyway once the hold has lasted its ceiling past the due time', async () => {
+    // Arrange
+    const { batcher, sends, time, ferret } = timed();
+    ferret.busy = true;
+    await batcher.add(SESSION, 'A1', 'one');
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+
+    // Act
+    await batcher.flush(SESSION);
+    const held = sends.sent.length;
+    time.ms += ATTENTION_REPLY_HOLD_CEILING_MS;
+    const projected = await batcher.pending(SESSION);
+    await batcher.flush(SESSION);
+
+    // Assert
+    should(held).equal(0);
+    should(projected).not.have.property('heldForTurn');
+    should(sends.sent).have.length(1);
+  });
+
+  it('should treat a state that cannot be read as not busy', async () => {
+    // Arrange
+    const { batcher, sends, time, ferret } = timed();
+    ferret.unreadable = true;
+    await batcher.add(SESSION, 'A1', 'one');
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+
+    // Act
+    await batcher.flush(SESSION);
+
+    // Assert
+    should(sends.sent).have.length(1);
+  });
+
+  it('should let "Send now" ignore the hold', async () => {
+    // Arrange
+    const { batcher, sends, timers, time, ferret } = timed();
+    ferret.busy = true;
+    await batcher.add(SESSION, 'A1', 'one');
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+    await batcher.flush(SESSION);
+
+    // Act
+    await batcher.sendNow(SESSION);
+    await settled();
+
+    // Assert
+    should(sends.sent).deepEqual([{ message: 'one', sendId: 'attention-session-1-A1' }]);
+    should(timers.tasks.has(SESSION)).be.false();
+  });
+
+  it('should keep the hold across a restart: resume re-arms it and the ferret still works', async () => {
+    // Arrange
+    const { batcher, sends, timers, time, ferret, outboxes } = timed();
+    ferret.busy = true;
+    await batcher.add(SESSION, 'A1', 'one');
+    timers.tasks.clear();
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+
+    // Act
+    await batcher.resume([SESSION]);
+    const rearmed = await timers.tasks.get(SESSION)?.delayMs;
+    await batcher.flush(SESSION);
+
+    // Assert
+    should(rearmed).equal(0);
+    should(sends.sent).be.empty();
+    should(outboxes.files.get(SESSION)?.pending.map(each => each.id)).deepEqual(['A1']);
+  });
+
+  it('should run the timer’s recheck task, and send when the ferret has gone idle', async () => {
+    // Arrange
+    const { batcher, sends, timers, time, ferret } = timed();
+    ferret.busy = true;
+    await batcher.add(SESSION, 'A1', 'one');
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+    await batcher.flush(SESSION);
+
+    // Act
+    ferret.busy = false;
+    time.ms += ATTENTION_REPLY_RECHECK_MS;
+    timers.tasks.get(SESSION)?.task();
+    await settled();
+
+    // Assert
+    should(sends.sent).have.length(1);
+  });
+
+  it('should never list a non-item key as an item, and report nothing when only one is held', async () => {
+    // Arrange
+    const { batcher, time } = timed();
+    const key = instructionsReplyKey('0123456789abcd');
+    await batcher.add(SESSION, key, '[instructions updated] …');
+    time.ms += ATTENTION_REPLY_SETTLE_MS;
+
+    // Act
+    const onlyNote = await batcher.pending(SESSION);
+    await batcher.add(SESSION, 'A4', 'answer');
+    const both = await batcher.pending(SESSION);
+
+    // Assert
+    should(key).equal('instructions~0123456789abcd');
+    should(onlyNote).be.undefined();
+    should(both?.pending).deepEqual(['A4']);
+  });
+
+  it('should send a note and the answers together as one message under one send id', async () => {
+    // Arrange
+    const { batcher, sends, fire } = timed();
+    await batcher.add(SESSION, 'A4', 'answer');
+    await batcher.add(SESSION, instructionsReplyKey('0123456789abcd'), 'note');
+
+    // Act
+    await fire();
+
+    // Assert
+    should(sends.sent).deepEqual([
+      { message: 'answer\n\nnote', sendId: 'attention-session-1-A4-instructions~0123456789abcd' },
+    ]);
   });
 });

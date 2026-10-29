@@ -1373,6 +1373,7 @@ export function SessionChatPage({
                 attentionReplies === undefined ? undefined : (
                   <AttentionRepliesNotice
                     ferret={sessionDisplayName(session)}
+                    heldForTurn={attentionReplies.heldForTurn}
                     onSendNow={attentionReplies.sendNow}
                     secondsLeft={attentionReplies.secondsLeft}
                     sending={attentionReplies.sending}

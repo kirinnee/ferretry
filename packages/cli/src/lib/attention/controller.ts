@@ -180,6 +180,20 @@ export class AttentionController {
     );
   }
 
+  /** The owner asks to talk an item through before answering. The item stays open, in discussion. */
+  async discuss(reference: string, options: AttentionResolveOptions): Promise<void> {
+    const id = parseAttentionReference(reference);
+    const note = text(options.note);
+    const snapshot = await this.gateway.apply(this.#target(options), {
+      action: 'discuss',
+      id,
+      ...(note === undefined ? {} : { note }),
+    });
+    this.#report(snapshot, options, () =>
+      renderAttentionMutation('asked to discuss', attentionReference(id), snapshot),
+    );
+  }
+
   async dismiss(reference: string, options: AttentionResolveOptions): Promise<void> {
     const id = parseAttentionReference(reference);
     const note = text(options.note);

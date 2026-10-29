@@ -50,6 +50,23 @@ export const DEFAULT_ANSWER_LABELS: Readonly<Record<Exclude<AttentionAnswerEffec
   dismiss: 'Skip',
 };
 
+/**
+ * The fixed answer EVERY card a ferret raised carries besides its own (at most three): talk it through
+ * before answering. It never takes one of the three direction slots — the app gives it the downward swipe
+ * and its own button (docs/attention.md, "Discuss").
+ */
+export const DISCUSS_LABEL = 'Discuss';
+
+/** Whether the owner can ask to discuss an item: only one a ferret raised has a ferret to talk to. */
+export const attentionCanDiscuss = (item: { readonly raisedBy: 'human' | 'agent' | 'daemon' }): boolean =>
+  item.raisedBy === 'agent';
+
+/** Whether an open item is in discussion: the owner asked to talk it through and the ferret has not updated it. */
+export const attentionInDiscussion = (item: {
+  readonly waitingOn?: 'ferret' | undefined;
+  readonly waitingFor?: 'info' | 'discussion' | undefined;
+}): boolean => item.waitingOn === 'ferret' && item.waitingFor === 'discussion';
+
 /** The label `info`'s one answer carries: it resolves the item, acknowledged. */
 export const GOT_IT_LABEL = 'Got it';
 

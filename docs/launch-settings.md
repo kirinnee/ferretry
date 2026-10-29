@@ -85,12 +85,17 @@ a fingerprint of each one (`digest`, `instructionDigest`) beside its size.
 
 When the owner next writes to a ferret, the daemon compares those fingerprints with the words every agent
 is told now (`packages/daemon/src/lib/session/launch/instruction-refresh.ts`). For each section that
-changed, it appends the new words to that message once, under `[instructions updated]`, as a replacement
-for the matching part of the system prompt. Once the message is accepted, the launch record marks those
-sections as told, so the next message carries nothing. The Instructions row then shows the new sizes.
+changed, it queues the new words once, under `[instructions updated]`, as a replacement for the matching
+part of the system prompt. Once the note is durably queued, the launch record marks those sections as told,
+so the next message queues nothing. The Instructions row then shows the new sizes.
 
-- **The owner's message carries it.** The note is never sent as a message of its own, which would start a
-  turn for every ferret on the machine the moment a release landed. A teammate's message never carries it.
+- **The owner's message triggers it and goes out exactly as typed.** The note is its own message in the
+  ferret's attention outbox, under the key `instructions~<digest>` (a key made from the note's words, so
+  the same note is never queued twice). It rides the same quiet window and the same hold while the ferret
+  is mid-turn as the owner's answers ([attention.md](attention.md)), and joins a batch of them as one
+  message. Only an owner's message triggers it: a release must not start a turn for every ferret on the
+  machine, and a teammate's message never does. If the note cannot be queued it is not marked as told, so
+  the next owner message offers it again.
 - **A record with no fingerprint** (launched before they were kept) compares sizes. A session with no
   record at all is told nothing, because nothing says what it has.
 - **The per-ferret sections** (Hypermedia, Pack mode, Learning) still change only at a restart. They depend

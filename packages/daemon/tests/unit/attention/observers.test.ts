@@ -217,7 +217,7 @@ describe('Attention board observers', () => {
     await attention.resolve(SESSION, 'A3', HUMAN, 'answered in chat', 'conversation');
     should((await attention.dismiss(SESSION, 'A4', HUMAN)).ok).be.true();
     const messenger = new RecordingMessenger();
-    const delivery = new AttentionReplyDelivery(messenger);
+    const delivery = new AttentionReplyDelivery(messenger, 'fy');
 
     // Act
     for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
@@ -253,7 +253,7 @@ describe('Attention board observers', () => {
   it('should not tell a ferret about an item another session or the daemon raised', async () => {
     // Arrange
     const messenger = new RecordingMessenger();
-    const delivery = new AttentionReplyDelivery(messenger);
+    const delivery = new AttentionReplyDelivery(messenger, 'fy');
     const base = {
       id: 'A1',
       source: 'agent-raised',
@@ -295,7 +295,7 @@ describe('Attention board observers', () => {
     await attention.raise(SESSION, ASK, AGENT);
     await attention.raise(SESSION, { ...ASK, subject: 'Region?', ask: { kind: 'open-question' } }, AGENT);
     await attention.raise(SESSION, { ...ASK, subject: 'Deploy?', ask: { kind: 'permission' } }, AGENT);
-    const conversation = new AttentionConversation(attention, 'fy');
+    const conversation = new AttentionConversation(attention);
     const message = '!A1 wait, !A2 eu-west-1 !A3';
 
     // Act
@@ -319,26 +319,20 @@ describe('Attention board observers', () => {
 
   it('should leave a person’s message exactly as written when the board cannot be read', async () => {
     // Arrange
-    const conversation = new AttentionConversation(
-      {
-        list: async () => {
-          throw new Error('disk gone');
-        },
-        answer: async () => ({ ok: false, error: { code: 'corrupt', message: 'x' } }),
-        resolve: async () => ({ ok: false, error: { code: 'corrupt', message: 'x' } }),
+    const conversation = new AttentionConversation({
+      list: async () => {
+        throw new Error('disk gone');
       },
-      'fy',
-    );
-    const refused = new AttentionConversation(
-      {
-        list: async () => ({ ok: false, error: { code: 'not-found', message: 'gone' } }),
-        answer: async () => ({ ok: false, error: { code: 'corrupt', message: 'x' } }),
-        resolve: async () => {
-          throw new Error('cannot resolve');
-        },
+      answer: async () => ({ ok: false, error: { code: 'corrupt', message: 'x' } }),
+      resolve: async () => ({ ok: false, error: { code: 'corrupt', message: 'x' } }),
+    });
+    const refused = new AttentionConversation({
+      list: async () => ({ ok: false, error: { code: 'not-found', message: 'gone' } }),
+      answer: async () => ({ ok: false, error: { code: 'corrupt', message: 'x' } }),
+      resolve: async () => {
+        throw new Error('cannot resolve');
       },
-      'fy',
-    );
+    });
 
     // Act
     const unreadable = await conversation.prepare(SESSION, 'hello !A1');
@@ -360,7 +354,7 @@ describe('Attention board progress observers', () => {
     await attention.raise(SESSION, { ...ASK, steps: ['Do it'] }, AGENT);
     await attention.progress(SESSION, 'A1', 0, true, HUMAN);
     const messenger = new RecordingMessenger();
-    const delivery = new AttentionReplyDelivery(messenger);
+    const delivery = new AttentionReplyDelivery(messenger, 'fy');
 
     // Act
     for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
@@ -380,7 +374,7 @@ describe('Attention needs-info delivery', () => {
     const changes = new RecordingChanges();
     const attention = service(new MemoryRepository(), changes);
     const messenger = new RecordingMessenger();
-    const delivery = new AttentionReplyDelivery(messenger);
+    const delivery = new AttentionReplyDelivery(messenger, 'fy');
     await attention.raise(SESSION, TASK, AGENT);
 
     // Act
@@ -407,7 +401,7 @@ describe('Attention needs-info delivery', () => {
   it('should never tell a ferret about a request by an agent, or on an item another session raised', async () => {
     // Arrange
     const messenger = new RecordingMessenger();
-    const delivery = new AttentionReplyDelivery(messenger);
+    const delivery = new AttentionReplyDelivery(messenger, 'fy');
     const item = (session: string): AttentionItem =>
       ({
         id: 'A1',
@@ -463,8 +457,8 @@ describe('Attention more-info push', () => {
     const attention = service(new MemoryRepository(), changes);
     const pushed: string[] = [];
     const observer = new AttentionMoreInfoPush({
-      moreInfoAdded: async (_session, item) => {
-        pushed.push(`${item.id}~${item.infoRequests}`);
+      moreInfoAdded: async (_session, item, _snapshot, discussion) => {
+        pushed.push(`${item.id}~${item.infoRequests}${discussion ? ' discussion' : ''}`);
       },
     });
     await attention.raise(SESSION, ASK, AGENT);
@@ -478,5 +472,72 @@ describe('Attention more-info push', () => {
 
     // Assert
     should(pushed).deepEqual(['A1~1']);
+  });
+
+  it('should say when the wait an edit cleared was a discussion, including one turned from a request for information', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const pushed: string[] = [];
+    const observer = new AttentionMoreInfoPush({
+      moreInfoAdded: async (_session, item, _snapshot, discussion) => {
+        pushed.push(`${item.id}~${item.infoRequests}:${discussion ? 'discussion' : 'info'}`);
+      },
+    });
+    await attention.raise(SESSION, ASK, AGENT);
+    await attention.discuss(SESSION, 'A1', HUMAN, 'Why now?');
+    await attention.edit(SESSION, 'A1', { subject: 'Rebase after the freeze?' }, AGENT);
+    await attention.needsInfo(SESSION, 'A1', HUMAN);
+    await attention.discuss(SESSION, 'A1', HUMAN);
+    await attention.edit(SESSION, 'A1', { subject: 'Rebase after the freeze, or never?' }, AGENT);
+
+    // Act
+    for (const { sessionId, change } of changes.seen) await observer.changed(sessionId, change);
+
+    // Assert
+    should(pushed).deepEqual(['A1~1:discussion', 'A1~3:discussion']);
+  });
+});
+
+describe('Attention discuss delivery', () => {
+  it('should tell the raising ferret once per discussion, under the same counter as a request for information', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger, 'fy');
+    await attention.raise(SESSION, ASK, AGENT);
+
+    // Act
+    await attention.discuss(SESSION, 'A1', HUMAN, 'I do not follow the premise');
+    await attention.discuss(SESSION, 'A1', HUMAN, 'asked again');
+    await attention.edit(SESSION, 'A1', { subject: 'Rebase onto main after the freeze?' }, AGENT);
+    await attention.needsInfo(SESSION, 'A1', HUMAN, 'Which branch?');
+    for (const { sessionId, change } of changes.seen) await delivery.changed(sessionId, change);
+
+    // Assert
+    should(messenger.sent.map(each => each.id)).deepEqual(['A1~1', 'A1~2']);
+    should(messenger.sent[0]?.message).equal(
+      '[discuss !A1 «Rebase onto main now?»] The owner wants to talk this through before answering: I do not follow the premise. Reply in chat to clear it up; then update the item (`fy attention edit A1`) or close it if the premise was wrong (`fy attention done A1`).',
+    );
+    should(messenger.sent[1]?.message).startWith('[needs more info !A1');
+  });
+
+  it('should never tell a ferret about a discussion another session raised, or one an agent asked for', async () => {
+    // Arrange
+    const changes = new RecordingChanges();
+    const attention = service(new MemoryRepository(), changes);
+    const messenger = new RecordingMessenger();
+    const delivery = new AttentionReplyDelivery(messenger, 'fy');
+    await attention.raise(SESSION, ASK, AGENT);
+    await attention.discuss(SESSION, 'A1', HUMAN);
+    const seen = changes.seen.at(-1)?.change as AttentionBoardChange;
+
+    // Act
+    await delivery.changed('session-2', seen);
+    await delivery.changed(SESSION, { ...seen, actor: AGENT });
+
+    // Assert
+    should(messenger.sent).deepEqual([]);
   });
 });

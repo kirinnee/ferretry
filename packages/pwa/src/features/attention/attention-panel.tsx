@@ -43,7 +43,7 @@ export { attentionPanelItemId };
 /** The three answers the panel sends, and nothing else of the client. */
 export type AttentionActionClient = Pick<
   DaemonAttentionClient,
-  'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'progress'
+  'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'discuss' | 'progress'
 >;
 
 /**
@@ -84,6 +84,7 @@ export const runPanelAction = async (
   if (action.kind === 'respond') await client.respond(connection, scope, id, action.response, action.note);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);
+  else if (action.kind === 'discuss') await client.discuss(connection, scope, id, action.note);
   else await client.resolve(connection, scope, id, action.note);
 };
 

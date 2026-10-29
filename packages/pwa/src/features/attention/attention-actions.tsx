@@ -3,7 +3,9 @@
  * order a swipe points — LEFT · UP · RIGHT — each with its arrow, the right one (the recommended one)
  * primary; an old choice's options past the third as plain buttons with no arrow; a collapsed
  * "Reply…" that opens a text box (open from the start on a `reply` card, which has nothing else to
- * answer with); and a ⋯ menu that holds Dismiss, the one answer nobody means to press by accident.
+ * answer with); a fixed "Discuss" button — the fourth answer, the downward swipe, on every card a ferret
+ * raised, never taking one of the three direction slots; and a ⋯ menu that holds Dismiss, the one answer
+ * nobody means to press by accident.
  *
  * The reply is OPTIONAL on every card: whatever answer is given afterwards carries it as its note. An
  * item answered one answer per question swaps all of that for a single "Send answers" button. Nothing
@@ -12,6 +14,7 @@
 
 import type { AttentionAskOption, AttentionCardAnswer } from '@ferretry/protocol';
 import {
+  ArrowDown,
   ArrowLeft,
   ArrowRight,
   ArrowUp,
@@ -20,6 +23,7 @@ import {
   Ellipsis,
   LoaderCircle,
   MessageSquarePlus,
+  MessagesSquare,
   Send,
   X,
 } from 'lucide-react';
@@ -106,6 +110,32 @@ function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDi
   );
 }
 
+/** The fixed Discuss answer: talk it through before answering. Tab-reachable, named, and the swipe down. */
+function DiscussButton({
+  busy,
+  swipeHints,
+  onDiscuss,
+}: {
+  readonly busy: boolean;
+  readonly swipeHints: boolean;
+  readonly onDiscuss: () => void;
+}) {
+  return (
+    <button
+      aria-label={swipeHints ? 'Discuss, or swipe down' : 'Discuss'}
+      className="kt-btn fy-attn-discuss"
+      data-attention-discuss=""
+      disabled={busy}
+      onClick={onDiscuss}
+      title="Talk it through with the ferret before you answer"
+      type="button"
+    >
+      {swipeHints ? <ArrowDown aria-hidden="true" size={14} /> : <MessagesSquare aria-hidden="true" size={14} />}
+      Discuss
+    </button>
+  );
+}
+
 function AnswerButton({
   answer,
   busy,
@@ -156,8 +186,10 @@ export interface AttentionActionsProps {
   /** Draws each answer's direction arrow. Defaults to `swipeHints`; a card that cannot be swiped may still show them. */
   readonly arrows?: boolean;
   readonly busy: boolean;
-  /** A to-do that is waiting on its ferret says so, above the bar. */
-  readonly waitingOn?: string;
+  /** An item waiting on its ferret says so, above the bar: "Waiting on Piper", "In discussion with Piper". */
+  readonly waiting?: string;
+  /** Asks to discuss; present only where the card can be discussed (a ferret raised it and it is not already). */
+  readonly onDiscuss?: () => void;
   readonly reply: string;
   readonly onReplyChange: (text: string) => void;
   readonly replyOpen: boolean;
@@ -182,7 +214,8 @@ export function AttentionActions({
   swipeHints,
   arrows = swipeHints,
   busy,
-  waitingOn,
+  waiting,
+  onDiscuss,
   reply,
   onReplyChange,
   replyOpen,
@@ -200,6 +233,8 @@ export function AttentionActions({
   const replyId = useId();
   const boxId = useId();
   const menu = dismissInMenu ? <ActionMenu busy={busy} onDismiss={onDismiss} /> : null;
+  const discuss =
+    onDiscuss === undefined ? null : <DiscussButton busy={busy} onDiscuss={onDiscuss} swipeHints={swipeHints} />;
   if (sendAnswers !== undefined) {
     return (
       <div className="fy-attn-actions" data-attention-actions="">
@@ -219,6 +254,7 @@ export function AttentionActions({
             )}
             Send answers
           </button>
+          {discuss}
           {menu}
         </div>
       </div>
@@ -227,10 +263,10 @@ export function AttentionActions({
   const hasAnswerButtons = answers.length > 0 || extraOptions.length > 0;
   return (
     <div className="fy-attn-actions" data-attention-actions="">
-      {waitingOn === undefined ? null : (
+      {waiting === undefined ? null : (
         <p className="fy-attn-actions__waiting m-0 text-meta text-muted" data-attention-waiting="" role="status">
           <LoaderCircle aria-hidden="true" size={13} />
-          Waiting on {waitingOn}
+          {waiting}
         </p>
       )}
       {hasAnswerButtons ? (
@@ -290,6 +326,7 @@ export function AttentionActions({
               size={14}
             />
           </button>
+          {discuss}
           {menu}
         </div>
       ) : null}
@@ -340,6 +377,9 @@ export function AttentionActions({
           </div>
           {replyIsAnswer ? menu : null}
         </form>
+      ) : null}
+      {replyIsAnswer && discuss !== null ? (
+        <div className="fy-attn-actions__row fy-attn-actions__row--end">{discuss}</div>
       ) : null}
     </div>
   );

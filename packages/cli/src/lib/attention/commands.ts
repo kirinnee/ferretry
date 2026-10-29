@@ -197,8 +197,18 @@ export function registerAttentionCommands(program: Command, controller: Attentio
 
   scoped(
     attention
+      .command('discuss')
+      .description('ask the ferret that raised an item to talk it through before you answer; the item stays open')
+      .argument('<id>', 'the attention reference, like !A3')
+      .option('-n, --note <text>', 'what is unclear or wrong, told to the ferret'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.discuss(id, merged<AttentionResolveOptions>(command));
+  });
+
+  scoped(
+    attention
       .command('send-now')
-      .description('deliver the answers held for the ferret now, instead of after the few-second wait'),
+      .description('deliver the answers held for the ferret now, instead of after the quiet window'),
   ).action(async (_flags: unknown, command: Command) => {
     await controller.sendNow(merged(command));
   });

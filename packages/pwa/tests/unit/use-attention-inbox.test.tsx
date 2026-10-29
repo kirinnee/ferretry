@@ -56,7 +56,7 @@ const board = (sessionId: string, items: readonly AttentionItem[]): AttentionSna
 });
 
 interface Call {
-  readonly method: 'revalidate' | 'respond' | 'resolve' | 'dismiss';
+  readonly method: 'revalidate' | 'respond' | 'resolve' | 'dismiss' | 'discuss';
   readonly daemonId: string;
   readonly sessionId: string;
   readonly detail?: unknown;
@@ -81,6 +81,7 @@ const fakeClient = (boards: Map<string, AttentionSnapshot>) => {
     respond: record('respond'),
     resolve: record('resolve'),
     dismiss: record('dismiss'),
+    discuss: record('discuss'),
   } as unknown as DaemonAttentionClient;
   return { client, calls };
 };
@@ -178,7 +179,7 @@ describe('useAttentionInboxModel', () => {
 
   test('sends a held answer to the right machine, by kind, when the window closes', async () => {
     const boards = new Map([
-      ['studio/a', board('a', [item('A1', 1, { kind: 'permission' }), item('A2', 2), item('A3', 3)])],
+      ['studio/a', board('a', [item('A1', 1, { kind: 'permission' }), item('A2', 2), item('A3', 3), item('A4', 4)])],
     ]);
     const { client, calls } = fakeClient(boards);
     const { timers, fire } = manualTimers();
@@ -201,6 +202,8 @@ describe('useAttentionInboxModel', () => {
       if (second !== undefined) read().deferred.schedule(second, DISMISS_ACTION);
       const third = card('A3');
       if (third !== undefined) read().deferred.schedule(third, { kind: 'resolve', label: 'Done', note: 'shipped' });
+      const fourth = card('A4');
+      if (fourth !== undefined) read().deferred.schedule(fourth, { kind: 'discuss', label: 'Discuss', note: 'why?' });
     });
     // Held: nothing sent, and the held cards are off the deck.
     expect(calls.filter(call => call.method !== 'revalidate')).toEqual([]);
@@ -212,6 +215,7 @@ describe('useAttentionInboxModel', () => {
       ['respond', ['A1', { kind: 'permission', decision: 'approve' }]],
       ['dismiss', ['A2', undefined]],
       ['resolve', ['A3', 'shipped']],
+      ['discuss', ['A4', 'why?']],
     ]);
   });
 

@@ -100,7 +100,7 @@ function loop(outboxes = new MemoryOutboxes(), sends = new RecordingSends()) {
     { now: () => clock.now() },
     { has: async sessionId => sessionId === SESSION },
     { raised: async () => undefined },
-    new TwiceTold(new AttentionReplyDelivery(batcher)),
+    new TwiceTold(new AttentionReplyDelivery(batcher, 'fy')),
   );
   const notifications: DirectNotificationSubsystem = {
     attentionDelivered: async () => 0,
@@ -154,7 +154,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     // Assert — nothing goes while the owner may still be answering; then one message, under the id a
     // single answer always had.
     should(held).equal(0);
-    should(jsonBody(answered).replies).deepEqual({ pending: [id], dueAt: '2026-10-28T17:00:08.000Z' });
+    should(jsonBody(answered).replies).deepEqual({ pending: [id], dueAt: '2026-10-28T17:01:00.000Z' });
     should(timers.armed.get(SESSION)).equal(ATTENTION_REPLY_SETTLE_MS);
     should([...sends.sent.entries()]).deepEqual([
       [
@@ -255,16 +255,22 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
       await raise('Five?'),
     ];
 
-    // Act — an answer every 7 s: each one is inside the last one's window.
+    // Act — an answer every 40 s: each one is inside the last one's window.
     const delays: number[] = [];
     for (const id of ids) {
       await post({ action: 'resolve', id }, browser);
       delays.push(timers.armed.get(SESSION) ?? -1);
-      clock.ms += 7_000;
+      clock.ms += 40_000;
     }
 
-    // Assert — 8 s each time, until the first answer's 30 s cap is nearer.
-    should(delays).deepEqual([8_000, 8_000, 8_000, 8_000, ATTENTION_REPLY_CAP_MS - 28_000]);
+    // Assert — the settle window each time, until the first answer's cap is nearer.
+    should(delays).deepEqual([
+      ATTENTION_REPLY_SETTLE_MS,
+      ATTENTION_REPLY_SETTLE_MS,
+      ATTENTION_REPLY_SETTLE_MS,
+      ATTENTION_REPLY_SETTLE_MS,
+      ATTENTION_REPLY_CAP_MS - 160_000,
+    ]);
   });
 
   it('should deliver at once when the owner taps "Send now", and hold nothing after', async () => {
@@ -316,7 +322,7 @@ describe('the attention loop, from a ferret’s raise to its delivered answer', 
     // Arrange
     const { sends, timers, attention, raise } = loop();
     const id = await raise('What should I call the next test item?');
-    const conversation = new AttentionConversation(attention, 'fy');
+    const conversation = new AttentionConversation(attention);
     const words = `!${id} gaytem`;
 
     // Act — what the send route does with a person's chat message: prepare, deliver, then settle.

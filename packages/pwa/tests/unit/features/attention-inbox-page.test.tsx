@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import { secondsLeft } from '../../../src/features/attention/attention-undo-toast.tsx';
+import type { ResolvedAttentionItem } from '@ferretry/protocol';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import {
   AttentionInboxPage,
@@ -9,7 +9,7 @@ import {
   swipeHintFor,
   waitingWords,
 } from '../../../src/features/attention/attention-inbox-page.tsx';
-import type { ResolvedAttentionItem } from '@ferretry/protocol';
+import { secondsLeft } from '../../../src/features/attention/attention-undo-toast.tsx';
 import { type InboxCard, type InboxResolved, inboxCardKey } from '../../../src/lib/attention-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
@@ -167,7 +167,7 @@ describe('AttentionInboxPage two panes', () => {
     );
     expect(answers).toEqual(['Skip', 'Wait', 'Rebase now']);
     expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe(
-      '1 more after this one · Swipe ← Skip · ↑ Wait · → Rebase now',
+      '1 more after this one · Swipe ← Skip · ↑ Wait · → Rebase now · ↓ Discuss',
     );
     const link = top?.querySelector<HTMLAnchorElement>('a[href*="?attention="]');
     const href = link?.getAttribute('href') ?? '';
@@ -179,11 +179,50 @@ describe('AttentionInboxPage two panes', () => {
 
   it('names the swipes of the card on top, and says a text-only card is answered in words', () => {
     expect(swipeHintFor(undefined)).toBe('');
-    expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · → Ship');
+    expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · → Ship · ↓ Discuss');
     const words = inboxCard(
       attentionItem('A9', { subject: 'What should the invite say?', ask: { kind: 'open-question' } }),
     );
-    expect(swipeHintFor(words)).toBe('Reply in words, or open the chat');
+    expect(swipeHintFor(words)).toBe('Reply in words, or open the chat · ↓ Discuss');
+  });
+
+  it('leaves ↓ Discuss out of the hint where nobody can discuss the item', () => {
+    const human = inboxCard(
+      attentionItem('A9', {
+        subject: 'Mine',
+        ask: choices('Ship', 'Hold'),
+        raisedBy: 'human',
+        raisedBySession: null,
+        raisedByName: null,
+      } as never),
+    );
+    expect(swipeHintFor(human)).toBe('Swipe ← Hold · → Ship');
+    const humanWords = inboxCard(
+      attentionItem('A8', {
+        ask: { kind: 'open-question' },
+        raisedBy: 'human',
+        raisedBySession: null,
+        raisedByName: null,
+      } as never),
+    );
+    expect(swipeHintFor(humanWords)).toBe('Reply in words, or open the chat');
+  });
+
+  it('marks a row "In discussion" in the list, and not one that is not', async () => {
+    const discussing = inboxCard(
+      attentionItem('A6', {
+        subject: 'Premise check',
+        ask: choices('Yes', 'No'),
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    const mounted = await mount(page(fakeInbox(), [discussing, twoWay]));
+    const marks = [...mounted.container.querySelectorAll('[data-attention-row-discussion]')];
+    expect(marks.map(mark => mark.textContent)).toEqual(['In discussion']);
+    expect(marks[0]?.closest('[data-attention-row]')?.textContent).toContain('Premise check');
+    await mounted.unmount();
   });
 
   it('on a phone says a to-do is waiting on its ferret, with no Done swipe to offer', async () => {

@@ -22,12 +22,13 @@ import {
   type AttentionItem,
   type AttentionQuestion,
   type AttentionSnapshot,
+  attentionInDiscussion,
   MAX_ATTENTION_DETAIL_LENGTH,
   type ResolvedAttentionItem,
   type SessionAttentionSummary,
   type SessionView,
 } from '@ferretry/protocol';
-import { answerActions, type InboxAction, swipeTargets } from './attention-answers.ts';
+import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } from './attention-answers.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { daemonSessionPath } from './pages/routes.ts';
 
@@ -157,7 +158,7 @@ export const inboxCards = (
   );
 };
 
-export type { InboxAction };
+export type { InboxAction, SwipeDirection };
 
 /** One resolved item in the inbox's Resolved filter: the record, its conversation and its machine. */
 export interface InboxResolved {
@@ -228,8 +229,20 @@ export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
 /** A to-do: the owner does something, nothing to choose. Its answers are Done and Need more info. */
 const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
 
-/** The ferret was asked for more information and has not yet edited the item. */
+/** The ferret was asked for more information, or to discuss, and has not yet edited the item. */
 export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
+
+/** The owner asked to talk this item through and the ferret has not updated it: it reads "In discussion". */
+export const isInDiscussion = (item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>): boolean =>
+  attentionInDiscussion(item);
+
+/** What an item waiting on its ferret says, in a few words: "In discussion with Piper", "Waiting on Piper". */
+export const waitingSentence = (item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>, ferret?: string): string =>
+  isInDiscussion(item)
+    ? ferret === undefined
+      ? 'In discussion'
+      : `In discussion with ${ferret}`
+    : `Waiting on ${ferret ?? 'the ferret'}`;
 
 /** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
 export const tickedSteps = (
@@ -260,7 +273,9 @@ export const historyLine = (history: AttentionItem['history'], timeZone?: string
   const words = history.map(entry =>
     entry.kind === 'needs-info'
       ? `You asked for more info ${clock(entry.at, timeZone)}`
-      : `updated ${clock(entry.at, timeZone)}`,
+      : entry.kind === 'discuss'
+        ? `You asked to discuss ${clock(entry.at, timeZone)}`
+        : `updated ${clock(entry.at, timeZone)}`,
   );
   return words.join(' · ');
 };
@@ -355,8 +370,6 @@ export const questionAnswersAction = (
   return answer === null ? null : { kind: 'respond', label: 'Reply', response: { kind: 'open-question', answer } };
 };
 
-export type SwipeDirection = 'right' | 'left' | 'up';
-
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
 
 /**
@@ -376,7 +389,7 @@ export const swipeMap = (item: Parameters<typeof swipeTargets>[0], reply = ''): 
  * answers afresh on every call: the button and the gesture must agree on the SAME option.
  */
 export const directionOfAction = (map: SwipeMap, action: InboxAction): SwipeDirection | null => {
-  for (const direction of ['right', 'left', 'up'] as const) {
+  for (const direction of ['right', 'left', 'up', 'down'] as const) {
     const mapped = map[direction];
     if (mapped !== undefined && mapped.kind === action.kind && mapped.label === action.label) return direction;
   }
@@ -393,7 +406,7 @@ export const swipeThreshold = (width: number): number =>
   Math.min(SWIPE_MAXIMUM_PX, Math.max(SWIPE_MINIMUM_PX, width * 0.35));
 
 export interface SwipeIntent {
-  /** The direction the drag is reading as, or `null` while it is too small or points down. */
+  /** The direction the drag is reading as, or `null` while it is too small. */
   readonly direction: SwipeDirection | null;
   /** 0 → 1 as the drag approaches the threshold; 1 at and beyond it. */
   readonly progress: number;
@@ -402,8 +415,9 @@ export interface SwipeIntent {
 }
 
 /**
- * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down means nothing,
- * because the deck scrolls that way. A direction with no action never commits.
+ * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down reads as Discuss,
+ * which commits only where the card takes it (the deck hands the browser every drag it must not read: see
+ * `attention-swipe-deck.tsx`). A direction with no action never commits.
  */
 export const swipeIntent = (
   dx: number,
@@ -413,9 +427,9 @@ export const swipeIntent = (
 ): SwipeIntent => {
   const threshold = swipeThreshold(width);
   const horizontal = Math.abs(dx) >= Math.abs(dy);
-  const distance = horizontal ? Math.abs(dx) : -dy;
+  const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
   if (distance < SWIPE_SLOP_PX) return { direction: null, progress: 0, committed: false };
-  const direction: SwipeDirection = horizontal ? (dx > 0 ? 'right' : 'left') : 'up';
+  const direction: SwipeDirection = horizontal ? (dx > 0 ? 'right' : 'left') : dy < 0 ? 'up' : 'down';
   const progress = Math.min(1, distance / threshold);
   return { direction, progress, committed: progress >= 1 && map[direction] !== undefined };
 };
@@ -443,6 +457,7 @@ export const replyAction = (item: Pick<AttentionItem, 'ask'>, text: string): Inb
 export const actionSentence = (action: InboxAction, id: AttentionId): string => {
   if (action.kind === 'dismiss') return `Dismissed !${id}`;
   if (action.kind === 'needs-info') return `Asked for more info on !${id}`;
+  if (action.kind === 'discuss') return `Asked to discuss !${id}`;
   if (action.label === 'Reply') return `Replied to !${id}`;
   if (action.kind === 'resolve') return `Marked !${id} done`;
   return `Answered !${id}: ${action.label}`;

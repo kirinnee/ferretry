@@ -237,6 +237,28 @@ describe('a to-do item', () => {
     expect(view.container.querySelector('[data-attention-answer]')).toBeNull();
   });
 
+  test('an item in discussion says so, and stays answerable', async () => {
+    const item = todo({
+      waitingOn: 'ferret',
+      askedAt: '2026-07-31T10:42:00.000Z',
+      waitingFor: 'discussion',
+      history: [{ at: '2026-07-31T10:42:00.000Z', kind: 'discuss' }],
+    });
+    view = await mount(
+      <AttentionCard
+        item={item}
+        onAct={() => {}}
+        origin={{ ferret: 'ottilie', machine: 'workshop', href: '/x', onNavigate: () => {} }}
+      />,
+    );
+    expect(view.container.querySelector('[data-attention-waiting]')?.textContent).toContain(
+      'In discussion with ottilie',
+    );
+    expect(view.container.querySelector('[data-attention-answer="right"]')).not.toBeNull();
+    expect(view.container.querySelector('[data-attention-discuss]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-history]')?.textContent).toMatch(/^You asked to discuss /u);
+  });
+
   test('shows its history, and marks an item the ferret just updated as new', async () => {
     const item = todo({
       history: [
@@ -254,9 +276,13 @@ describe('a to-do item', () => {
 
 describe('to-do helpers', () => {
   test('swipe: Done right and Need more info left; a waiting item and a text-only ask swipe nowhere', () => {
-    expect(swipeMap(todo())).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
-    expect(swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z' }))).toEqual({});
-    expect(swipeMap(attentionItem('A1', { ask: { kind: 'open-question' } }))).toEqual({});
+    const DISCUSS = { kind: 'discuss', label: 'Discuss' } as const;
+    expect(swipeMap(todo())).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION, down: DISCUSS });
+    expect(swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z' }))).toEqual({ down: DISCUSS });
+    expect(swipeMap(attentionItem('A1', { ask: { kind: 'open-question' } }))).toEqual({ down: DISCUSS });
+    expect(
+      swipeMap(todo({ waitingOn: 'ferret', askedAt: '2026-07-31T10:42:00.000Z', waitingFor: 'discussion' })),
+    ).toEqual({ right: DONE_ACTION, left: NEEDS_INFO_ACTION });
   });
 
   test('a to-do takes no typed reply', () => {

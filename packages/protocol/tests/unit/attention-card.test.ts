@@ -9,10 +9,13 @@ import {
 import {
   answerInDirection,
   askForKind,
+  attentionCanDiscuss,
   attentionCardAnswers,
   attentionCardKind,
+  attentionInDiscussion,
   attentionTitle,
   clipAtWord,
+  DISCUSS_LABEL,
   defaultAttentionAnswers,
   hasOwnTitle,
   isYesNoAsk,
@@ -254,5 +257,21 @@ describe('attention card', () => {
   it('clips at a word with an ellipsis', () => {
     should(clipAtWord('one two three four', 10)).equal('one two…');
     should(clipAtWord('short', 10)).equal('short');
+  });
+});
+
+describe('Discuss', () => {
+  it('is offered only on an item a ferret raised, under one fixed label', () => {
+    should(DISCUSS_LABEL).equal('Discuss');
+    should(attentionCanDiscuss(item)).be.true();
+    should(attentionCanDiscuss({ raisedBy: 'human' })).be.false();
+    should(attentionCanDiscuss({ raisedBy: 'daemon' })).be.false();
+  });
+
+  it('reads an item as in discussion only while the ferret is waited on for a discussion', () => {
+    should(attentionInDiscussion({ waitingOn: 'ferret', waitingFor: 'discussion' })).be.true();
+    should(attentionInDiscussion({ waitingOn: 'ferret', waitingFor: 'info' })).be.false();
+    should(attentionInDiscussion({ waitingOn: 'ferret' })).be.false();
+    should(attentionInDiscussion({})).be.false();
   });
 });

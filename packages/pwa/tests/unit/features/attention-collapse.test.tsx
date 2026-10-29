@@ -57,6 +57,7 @@ const silentClient: AttentionActionClient = {
   resolve: async () => void calls.push('resolve'),
   dismiss: async () => void calls.push('dismiss'),
   needsInfo: async () => void calls.push('needs-info'),
+  discuss: async () => void calls.push('discuss'),
   progress: async () => void calls.push('progress'),
 };
 

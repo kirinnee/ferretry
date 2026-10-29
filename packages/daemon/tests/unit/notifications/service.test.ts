@@ -262,4 +262,27 @@ describe('NotificationService more-info push', () => {
       sent: { title: 'Choose a release window', body: 'Updated: Choose a release window' },
     });
   });
+
+  it('should word the push for a discussion that ended, and keep the one-per-request key', async () => {
+    // Arrange
+    const world = fixture();
+    const discussed = AttentionItemSchema.parse({
+      ...item,
+      waitingOn: 'ferret',
+      askedAt: item.waitingSince,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+    });
+
+    // Act
+    await world.service.moreInfoAdded(SESSION, discussed, snapshot, true);
+    await world.service.moreInfoAdded(SESSION, discussed, snapshot, true);
+
+    // Assert
+    should(world.push.calls).equal(1);
+    should(world.ledger.records.filter(record => record.phase === 'requested')[0]).containDeep({
+      key: `attention:${SESSION}:A1:info-1`,
+      sent: { body: 'Updated after your discussion: Choose a release window' },
+    });
+  });
 });

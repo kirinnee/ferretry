@@ -275,6 +275,9 @@
 .fy-attn-deck__leaving[data-direction='up'] {
   animation-name: fy-attn-fly-up;
 }
+.fy-attn-deck__leaving[data-direction='down'] {
+  animation-name: fy-attn-fly-down;
+}
 @keyframes fy-attn-fly-right {
   from {
     transform: translate(var(--fly-x), var(--fly-y)) rotate(4deg);
@@ -302,6 +305,16 @@
   }
   to {
     transform: translate(var(--fly-x), -110vh);
+    opacity: 0;
+  }
+}
+@keyframes fy-attn-fly-down {
+  from {
+    transform: translate(var(--fly-x), var(--fly-y));
+    opacity: 1;
+  }
+  to {
+    transform: translate(var(--fly-x), 110vh);
     opacity: 0;
   }
 }
@@ -377,6 +390,13 @@
 }
 .fy-attn-row__meta {
   color: var(--faint);
+  font-size: var(--text-xs);
+}
+.fy-attn-row__state {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
   font-size: var(--text-xs);
 }
 @media (min-width: 900px) {
