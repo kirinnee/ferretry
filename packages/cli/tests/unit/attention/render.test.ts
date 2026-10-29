@@ -78,6 +78,28 @@ describe('attention listing', () => {
     should(withBlank).not.containEql('context:');
   });
 
+  it('should print the premise before the context and the decided points after it, only when there are some', () => {
+    // Act
+    const full = renderAttentionList(
+      snapshot([
+        humanItem('A1', 'x', {
+          premise: '- login expires',
+          context: 'keepalive fixes it',
+          decided: '- shared account',
+        }),
+      ]),
+    );
+    const blank = renderAttentionList(snapshot([humanItem('A1', 'x', { premise: '  ', decided: ' ' })]));
+
+    // Assert
+    should(full).containEql('      premise: - login expires');
+    should(full).containEql('      decided: - shared account');
+    should(full.indexOf('premise:')).be.below(full.indexOf('context:'));
+    should(full.indexOf('context:')).be.below(full.indexOf('decided:'));
+    should(blank).not.containEql('premise:');
+    should(blank).not.containEql('decided:');
+  });
+
   it('should print the structured brief, and drop a why that only repeats the summary', () => {
     // Act
     const rich = renderAttentionList(

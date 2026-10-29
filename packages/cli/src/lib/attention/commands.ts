@@ -21,7 +21,9 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
                  no IDs): it heads the card and is the notification's title — not the conversation's name
   <the ask>      the ASK: one plain sentence, 120 characters or fewer, answer first — not backstory;
                  it is the notification's body (\`--ask\` says the same when it is not given as words)
-  --context      what is happening and why it matters; repeat the flag for one bullet each
+  --premise      the SITUATION: what is going on, so a cold reader starts here; repeat for one bullet each
+  --context      WHY IT MATTERS NOW and the supporting facts (not the situation); repeat for bullets
+  --decided      earlier answers that bear on this item, one bullet each (repeat)
   --term         TERM=meaning for every codename or term of art you use (repeat)
   --question     each thing they must answer (repeat); --option gives a lone question its choices
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
@@ -33,9 +35,12 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --body-file    a Markdown file (- reads stdin) for instructions that are not a list
   --json-file    the same fields as JSON (- reads stdin); flags win over the file
 
-Every field renders as markdown: short bullets, one idea each, no walls of text. Never use
-ticket or PR numbers, internal codenames, file paths or unexplained capitals — say it in plain
-words, or define the term with --term. The daemon warns when an item breaks these; fix it with
+THE RULE IS ISOLATION: could the owner answer with nothing else open? A card is read cold, so it
+carries everything the answer needs — premise and context are guides to that, not boxes to tick.
+Every field renders as markdown: short bullets, one idea each, no walls of text; a fence in --body
+(fy-render) draws a chart or diagram when a picture beats words. Never use ticket or PR numbers,
+internal codenames, file paths or unexplained capitals — say it in plain words, or define the term
+with --term. The daemon warns when an item breaks these; fix it with
 \`edit <id>\`. Attention items never expire on a timer. Answering or dismissing on the board already
 resolves it — but if the blocker clears some OTHER way (the human answers in chat, the work is no
 longer needed), the raising agent must run \`done\` or \`dismiss\` itself, immediately. An item
@@ -46,7 +51,9 @@ The card is swiped, so it offers at most 3 answers (left, up, right) — see --k
 JSON body (title and ask are required; questions and options may be plain strings):
   {"title": "OCI work login",
    "ask": "Approve the OCI work-login plan?", "kind": "choice",
-   "context": "The work login expires daily; the plan adds a 30-min keepalive.",
+   "premise": ["Your work login expires every day", "A plan exists to keep it alive"],
+   "context": "The plan adds a 30-min keepalive, so you stop being logged out.",
+   "decided": ["You chose the shared account earlier"],
    "terms": [{"term": "OCI", "meaning": "Oracle Cloud Infrastructure"}],
    "questions": [{"question": "Which plan?", "options": ["Defaults", "I'll reply with changes"],
                   "recommended": "Defaults", "why": "Matches what runs today"}],
@@ -114,7 +121,14 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .option('--up-why <line>', 'one line that describes the --up answer')
       .option('--task', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
       .option('-o, --option <label>', 'a choice label; repeat for each option', collect, [])
-      .option('-c, --context <point>', 'what is happening and why it matters; repeat for bullet points', collect, [])
+      .option('--premise <point>', 'the situation: what is going on; repeat for bullet points', collect, [])
+      .option(
+        '-c, --context <point>',
+        'why it matters now and the supporting facts; repeat for bullet points',
+        collect,
+        [],
+      )
+      .option('--decided <point>', 'an earlier answer that bears on this; repeat for bullet points', collect, [])
       .option('-w, --why <reason>', 'why this needs the human now (defaults to the ask)')
       .option('-r, --resolve <how>', 'the concrete action that clears it')
       .option('--term <TERM=meaning>', 'spell out one piece of jargon; repeat', collect, [])
@@ -139,7 +153,9 @@ export function registerAttentionCommands(program: Command, controller: Attentio
       .argument('<id>', 'the attention reference, like !A3')
       .option('-t, --title <text>', 'the new title: what this is about, aim for 40 characters')
       .option('--summary <line>', 'the new one-line ask')
+      .option('--premise <point>', 'replace the premise (the situation); repeat for bullet points', collect, [])
       .option('-c, --context <point>', 'replace the context; repeat for bullet points', collect, [])
+      .option('--decided <point>', 'replace the earlier answers; repeat for bullet points', collect, [])
       .option('--term <TERM=meaning>', 'replace the terms with these; repeat', collect, [])
       .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
       .option('--recommend <decision>', 'replace the recommendation')

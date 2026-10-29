@@ -448,6 +448,40 @@ describe('attention writing flags', () => {
     should(gateway.applied[0]?.request).match({ context: '- one\n- two', impact: '- blocks\n- costs' });
   });
 
+  it('should collect repeated --premise and --decided into bullet points on add and edit', async () => {
+    // Arrange + Act
+    const added = run(
+      [
+        'attention',
+        'add',
+        'pick',
+        '-t',
+        'Pick',
+        '--premise',
+        'a',
+        '--premise',
+        'b',
+        '--decided',
+        'c',
+        '--decided',
+        'd',
+      ],
+      afterAdd,
+    );
+    await added.parsed;
+    const edited = run(['attention', 'edit', '!A1', '--premise', 'e', '--premise', 'f', '--decided', 'g']);
+    await edited.parsed;
+
+    // Assert
+    should(added.gateway.applied[0]?.request).match({ premise: '- a\n- b', decided: '- c\n- d' });
+    should(edited.gateway.applied[0]?.request).deepEqual({
+      action: 'edit',
+      id: 'A1',
+      premise: '- e\n- f',
+      decided: 'g',
+    });
+  });
+
   it('should reword an item with edit', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(['attention', 'edit', '!A1', '--summary', 'Plain ask', '-c', 'a', '-c', 'b']);

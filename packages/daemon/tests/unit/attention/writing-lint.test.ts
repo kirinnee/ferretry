@@ -185,3 +185,53 @@ describe('attention writing lint: an isolated card', () => {
     should(actual.join('\n')).match(/unexplained capitals \("OCI"\) in answer "Always allow"/u);
   });
 });
+
+describe('attention writing lint: premise and isolation', () => {
+  const { context: _, ...bare } = clean;
+
+  it('should warn strongly when a decision has neither premise nor context, and say how to fix it', () => {
+    const actual = lintAttentionWriting(bare);
+
+    should(actual).have.length(1);
+    should(actual[0]).match(/^a reader opening this cold cannot tell what is going on — add --premise points/u);
+    should(actual[0]).match(/attention edit <id> --premise/u);
+  });
+
+  it('should warn for each kind of decision: permission, choice, yes/no, open question and questions', () => {
+    const base = { title: 'Work login plan', subject: 'Pick a login plan' };
+    const decisions = [
+      { ...base, kind: 'permission' as const },
+      { ...base, kind: 'choice' as const },
+      { ...base, kind: 'yesno' as const },
+      { ...base, ask: { kind: 'open-question' as const } },
+      { ...base, questions: [{ question: 'Which plan?' }] },
+    ];
+
+    for (const decision of decisions) {
+      should(lintAttentionWriting(decision).join('\n')).match(/cannot tell what is going on/u);
+    }
+  });
+
+  it('should accept either a premise or a context, and say nothing about a to-do or an info card', () => {
+    const base = { title: 'Work login plan', subject: 'Pick a login plan' };
+
+    should(lintAttentionWriting({ ...bare, premise: '- the old login expires' })).deepEqual([]);
+    should(lintAttentionWriting({ ...bare, context: '- two plans fit' })).deepEqual([]);
+    should(lintAttentionWriting({ ...base, kind: 'task', ask: { kind: 'task' } })).deepEqual([]);
+    should(lintAttentionWriting({ ...base, kind: 'info' })).deepEqual([]);
+  });
+
+  it('should read the premise and the decided points for ids, paths and jargon like any other field', () => {
+    const actual = lintAttentionWriting({
+      ...clean,
+      premise: 'The OCI login broke after #1234 as discussed.',
+      decided: 'You chose the plan in packages/cli/src/main.ts.',
+    });
+    const text = actual.join('\n');
+
+    should(text).match(/points elsewhere \("as discussed"\) in premise/u);
+    should(text).match(/ticket or PR ids \("#1234"\) in premise/u);
+    should(text).match(/file paths \(.*main\.ts.*\) in decided/u);
+    should(text).match(/unexplained capitals \("OCI"\) in premise/u);
+  });
+});
