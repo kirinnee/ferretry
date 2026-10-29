@@ -408,9 +408,16 @@ function resolveSpecifier(importer: string, specifier: string, root: string): st
  * must be one we also saw. Bun erases type-only imports, so the reverse does not hold. A mismatch
  * means the lexer drifted and the walk would silently under-report, so it is a hard error.
  */
+/**
+ * A macro import (`with { type: 'macro' }`) is still an import edge, and the walk counts it as one. The
+ * transpiler, though, RUNS a macro to scan the file, and here it has no package to resolve it from, so
+ * the attribute is erased for the cross-check only.
+ */
+const MACRO_ATTRIBUTE = /\s+with\s*\{\s*type:\s*['"]macro['"]\s*\}/g;
+
 function assertNoMissedEdges(file: string, source: string, facts: ModuleFacts): void {
   const loader = file.endsWith('.tsx') ? 'tsx' : 'ts';
-  const scanned = new Bun.Transpiler({ loader }).scan(source);
+  const scanned = new Bun.Transpiler({ loader }).scan(source.replace(MACRO_ATTRIBUTE, ''));
   const missed = scanned.imports.map(entry => entry.path).filter(path => !facts.specifiers.has(path));
   if (missed.length > 0) {
     fail(`import parser missed ${missed.join(', ')} in ${file} — the reachability lexer needs fixing`);
