@@ -7,15 +7,12 @@ import type {
   TranscriptRawRecord,
   TranscriptRecordResult,
 } from './types.ts';
+import { utf8Length } from './utf8.ts';
 
 type TranscriptRecordParser = Pick<TranscriptParser, 'harness' | 'parseRecord'>;
 
 interface NormalizedTranscriptRecord extends TranscriptRecordResult {
   readonly observedInputs: TranscriptParseResult['observedInputs'];
-}
-
-function utf8Length(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
 }
 
 const BYTE_ORDER_MARK = '\uFEFF';
@@ -178,8 +175,9 @@ function textRecords(text: string, startByteOffset: number): readonly PhysicalTr
     const newline = text.indexOf('\n', characterOffset);
     const terminated = newline >= 0;
     const body = text.slice(characterOffset, terminated ? newline : text.length);
-    records.push({ byteOffset, byteLength: utf8Length(body), body, terminated });
-    byteOffset += utf8Length(body) + (terminated ? 1 : 0);
+    const byteLength = utf8Length(body);
+    records.push({ byteOffset, byteLength, body, terminated });
+    byteOffset += byteLength + (terminated ? 1 : 0);
     characterOffset = terminated ? newline + 1 : text.length;
   }
   return records;

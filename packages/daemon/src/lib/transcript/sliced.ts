@@ -5,6 +5,7 @@ import type {
   TranscriptParseResult,
   TranscriptRawRecord,
 } from './types.ts';
+import { utf8Length } from './utf8.ts';
 
 /**
  * How many bytes of transcript are parsed between two looks at the clock, and how long a parse may hold
@@ -108,25 +109,6 @@ function bytePiece(bytes: Uint8Array): InputPiece {
     lines: (from, to) => countLines(bytes.subarray(from, to)),
     bytes: (from, to) => to - from,
   };
-}
-
-/** The UTF-8 length of `text[from, to)`, counted rather than encoded so nothing is allocated for it. */
-function utf8Length(text: string, from: number, to: number): number {
-  let length = 0;
-  for (let index = from; index < to; index += 1) {
-    const code = text.charCodeAt(index);
-    if (code < 0x80) length += 1;
-    else if (code < 0x800) length += 2;
-    else if (code >= 0xd800 && code <= 0xdbff && index + 1 < to) {
-      const low = text.charCodeAt(index + 1);
-      // A surrogate pair is one four-byte character; a lone surrogate encodes as U+FFFD, three bytes.
-      if (low >= 0xdc00 && low <= 0xdfff) {
-        length += 4;
-        index += 1;
-      } else length += 3;
-    } else length += 3;
-  }
-  return length;
 }
 
 function textPiece(text: string): InputPiece {
