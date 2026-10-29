@@ -81,7 +81,7 @@ const REASON_TONE: Readonly<Record<OpenReason, string>> = {
  * print, and in a screenshot pasted into an issue — and this is the one mark on the page that tells
  * somebody how much of their machine a switch hands over.
  */
-function WeightMark({ weight }: { readonly weight: AccessWeight }) {
+export function WeightMark({ weight }: { readonly weight: AccessWeight }) {
   const filled = weightPips(weight);
   const copy = weightCopy(weight);
   return (

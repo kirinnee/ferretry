@@ -219,6 +219,17 @@ describe('AboutMachineSurface', () => {
     expect(container.querySelector('[data-about-changelog]')?.textContent).toContain('Full release on GitHub');
   });
 
+  it('opens What’s new without a New badge once the latest entry has been read', async () => {
+    const container = await show(new FakeMachine(updateView()), 5, {
+      open: () => undefined,
+      unread: false,
+      latest: '4.29.0',
+    });
+
+    expect(container.querySelector('[data-about-whats-new]')?.textContent).toContain('What’s new');
+    expect(container.querySelector('[data-about-whats-new-unread]')).toBeNull();
+  });
+
   it('shows no Update button when the machine is current', async () => {
     const container = await show(new FakeMachine(updateView({ available: false, check: { state: 'never' } })));
     expect(container.querySelector('[data-about-update]')).toBeNull();

@@ -182,3 +182,44 @@ describe('CgroupConfigCard', () => {
     expect(renderer.toJSON()).toBeNull();
   });
 });
+
+describe('CgroupConfigCard while a save is in flight', () => {
+  const spinning = (text: string): boolean => text.includes('animate-spin');
+
+  it('shows a spinner on Apply and locks it while the limits are being applied', () => {
+    const idle = render(<CgroupConfigCard connection={connection('a')} view={view()} onSave={() => {}} />);
+    const busy = render(<CgroupConfigCard connection={connection('a')} view={view()} saving onSave={() => {}} />);
+
+    expect(spinning(JSON.stringify(idle.toJSON()))).toBe(false);
+    expect(spinning(JSON.stringify(busy.toJSON()))).toBe(true);
+    const apply = busy.root
+      .findAllByType('button')
+      .find(button => JSON.stringify(button.props.children).includes('Apply'));
+    expect(apply?.props.disabled).toBe(true);
+  });
+
+  it('shows the same spinner on Disable where enforcement is unavailable but still saved as on', () => {
+    const idle = render(<CgroupConfigCard connection={connection('mac')} view={view(false)} onSave={() => {}} />);
+    const busy = render(
+      <CgroupConfigCard connection={connection('mac')} view={view(false)} saving onSave={() => {}} />,
+    );
+
+    expect(spinning(JSON.stringify(idle.toJSON()))).toBe(false);
+    expect(spinning(JSON.stringify(busy.toJSON()))).toBe(true);
+    expect(busy.root.findAllByType('button')[0]?.props.disabled).toBe(true);
+  });
+});
+
+describe('CgroupConfigCard when no session needs a restart', () => {
+  it('says nothing about restarting', () => {
+    const renderer = render(
+      <CgroupConfigCard
+        connection={connection('a')}
+        view={{ ...view(), restartRequiredSessions: [] }}
+        onSave={() => {}}
+      />,
+    );
+
+    expect(JSON.stringify(renderer.toJSON())).not.toContain('Restart required');
+  });
+});

@@ -144,3 +144,19 @@ describe('DoctorSettings', () => {
     expect(renderer.root.findAllByProps({ 'data-doctor-daemon': 'alpha' }).length).toBeGreaterThan(0);
   });
 });
+
+describe('DoctorSettings — a host with everything it needs', () => {
+  it('says the required dependencies are present instead of warning about a missing one', async () => {
+    const renderer = render(
+      <DoctorSettings connection={connection('alpha')} read={async () => ({ ...report, ready: true })} />,
+    );
+    await runAsync(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const text = JSON.stringify(renderer.toJSON());
+    expect(text).toContain('Required dependencies are present.');
+    expect(text).not.toContain('A required dependency is missing');
+  });
+});
