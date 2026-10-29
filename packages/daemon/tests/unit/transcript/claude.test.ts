@@ -285,6 +285,65 @@ describe('ClaudeTranscriptParser', () => {
     ]);
   });
 
+  it('should say a question tool call with no usable question at all has no valid questions', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const call = (input: unknown) =>
+      subject.parseRecord({
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'tool_use', id: 'tool-question', name: 'AskUserQuestion', input }],
+        },
+      });
+
+    // Act
+    const actual = [call({}), call({ questions: [{ options: [] }] })];
+
+    // Assert
+    for (const result of actual) {
+      should(result.issues).containDeep([
+        {
+          code: 'invalid-tool-input',
+          message: 'Claude question tool input has no valid questions',
+          recordType: 'assistant',
+          blockType: 'tool_use',
+        },
+      ]);
+    }
+  });
+
+  it('should report an error block that carries no message, and keep its siblings', () => {
+    // Arrange
+    const subject = new ClaudeTranscriptParser();
+    const input = {
+      type: 'user',
+      message: {
+        role: 'user',
+        content: [
+          { type: 'error', code: 'only_a_code' },
+          { type: 'text', text: 'still here' },
+        ],
+      },
+    };
+
+    // Act
+    const actual = subject.parseRecord(input, { line: 9 });
+
+    // Assert
+    should(actual.events).have.length(1);
+    should(actual.events[0]).containDeep({ kind: 'message', text: 'still here' });
+    should(actual.issues).containDeep([
+      {
+        code: 'invalid-record',
+        message: 'Claude error block has no message',
+        line: 9,
+        recordType: 'user',
+        blockType: 'error',
+      },
+    ]);
+  });
+
   it('should extract tool-result text only from strings and typed text blocks', () => {
     // Arrange
     const subject = new ClaudeTranscriptParser();
