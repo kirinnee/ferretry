@@ -670,10 +670,15 @@ export const LaunchInstructionSectionIdSchema = z.enum([
 ]);
 export type LaunchInstructionSectionId = z.infer<typeof LaunchInstructionSectionIdSchema>;
 
-/** One appended section, by name and size. The text itself is never carried. */
+/**
+ * One appended section, by name and size. The text itself is never carried — only, for the sections every
+ * agent gets, a short fingerprint of it (`@ferretry/fleet` `instructionDigest`), so the daemon can tell
+ * which of them changed since the launch. Absent on a record made before fingerprints were kept.
+ */
 export const LaunchInstructionSectionSchema = z.object({
   id: LaunchInstructionSectionIdSchema,
   chars: NonNegativeIntegerSchema,
+  digest: z.string().min(1).max(64).optional(),
 });
 export type LaunchInstructionSection = z.infer<typeof LaunchInstructionSectionSchema>;
 
@@ -682,7 +687,9 @@ export type LaunchInstructionSection = z.infer<typeof LaunchInstructionSectionSc
  * system-prompt sections it carried, its mode, and whether it may ask the owner a question.
  *
  * A LAUNCH FACT, refreshed by every launch and relaunch: a switch flipped while the session runs
- * reaches the agent only at its next launch, so the stored environment is not what it was told.
+ * reaches the agent only at its next launch, so the stored environment is not what it was told. The one
+ * exception is an always-on section whose words changed: the daemon tells a running ferret the new words
+ * once, with its owner's next message, and then records that section as told (docs/launch-settings.md).
  */
 export const SessionLaunchInstructionsSchema = z.object({
   sections: z.array(LaunchInstructionSectionSchema),
