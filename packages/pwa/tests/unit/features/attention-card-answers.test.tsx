@@ -69,12 +69,11 @@ describe('the card says what it is, at a glance', () => {
     expect(scroll.querySelector('[data-attention-title], [data-attention-ask]')).toBeNull();
   });
 
-  test('an old item with no title still has one, and does not repeat it as the ask', async () => {
-    const { root } = await card(attentionItem('A1', { subject: 'Ship the fix?' }));
-    expect(root.querySelector('[data-attention-title]')?.textContent?.length).toBeGreaterThan(0);
-    const title = root.querySelector('[data-attention-title]')?.textContent;
-    const ask = root.querySelector('[data-attention-ask]');
-    expect(ask === null || ask.textContent !== title).toBe(true);
+  test('an old item with no title is headed by its whole ask, said once', async () => {
+    const subject = 'Rebase onto main now, or wait for the attention store change to merge first?';
+    const { root } = await card(attentionItem('A1', { subject }));
+    expect(root.querySelector('[data-attention-title]')?.textContent).toBe(subject);
+    expect(root.querySelector('[data-attention-ask]')).toBeNull();
   });
 
   test('draws no empty sections for an item with no detail', async () => {

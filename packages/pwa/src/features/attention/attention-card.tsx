@@ -14,7 +14,7 @@
  */
 
 import type { AttentionItem } from '@ferretry/protocol';
-import { attentionTitle, DEFAULT_ANSWER_LABELS, unswipedChoices } from '@ferretry/protocol';
+import { attentionTitle, DEFAULT_ANSWER_LABELS, hasOwnTitle, unswipedChoices } from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
@@ -115,7 +115,9 @@ export function AttentionCard({
   const body = item.body?.trim() ? item.body : null;
   const questions = item.questions ?? [];
   const sendable = perQuestion ? questionAnswersAction(questions, picks) : null;
-  const title = attentionTitle(item);
+  // An item from before titles is headed by its whole ask, said once: a title cut from the ask would only
+  // repeat its first words above it. (A push still cuts one, to fit a lock screen: `attentionTitle`.)
+  const title = hasOwnTitle(item) ? attentionTitle(item) : item.subject.trim();
   const showAsk = item.subject.trim() !== title;
   const recommendation = item.recommendation;
   const hasDismissAnswer = answers.some(answer => answer.does === 'dismiss');

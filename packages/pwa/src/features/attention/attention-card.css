@@ -736,9 +736,13 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 /* The detail scrolls inside the card; the header and the answer bar stay put. In the deck the card is
    capped to the screen, and the detail is its own scroller: a vertical drag there scrolls the detail, a
    drag from anywhere else is the swipe up. */
-.fy-attn-deck__top .fy-attn-card,
 .fy-attn-card[data-capped] {
   max-height: min(78dvh, 44rem);
+}
+/* In the inbox the deck sits under the page heading and the filter and above the hint and the tab bar,
+   so the top card leaves them that room (about 19rem) rather than sliding under the tab bar. */
+.fy-attn-deck__top .fy-attn-card {
+  max-height: min(max(20rem, calc(100dvh - 19rem)), 44rem);
 }
 .fy-attn-deck__top .fy-attn-card > .fy-attn-card__scroll,
 .fy-attn-card[data-capped] > .fy-attn-card__scroll {
