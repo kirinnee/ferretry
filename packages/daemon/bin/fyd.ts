@@ -178,8 +178,8 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
-  InlineIndexPersister,
-  WorkerIndexPersister,
+  InlineIndexFile,
+  WorkerIndexFile,
   bundledWorkerUrl,
   CachedUsageFeed,
   CliUpdateLauncher,
@@ -7643,8 +7643,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ever runs on the event loop (src/adapters/storage/sqlite-index.ts says why).
       new BunSqliteIndexFactory(
         {
-          create: (file, connection) =>
-            new WorkerIndexPersister(file, new InlineIndexPersister(connection), {
+          create: file =>
+            new WorkerIndexFile(file, new InlineIndexFile(file), {
               retired: () =>
                 bootNotices.state(
                   'the session index writer kept failing, so the index file is written on the main thread until the daemon restarts',

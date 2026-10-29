@@ -23,7 +23,7 @@ import {
   BunSqliteIndex,
   BunSqliteIndexFactory,
   DaemonStorageFactory,
-  InlineIndexPersister,
+  InlineIndexFile,
   KeyedSerialExecutor,
   RuntimeEnvironment,
   SqliteHomeLockFactory,
@@ -31,7 +31,7 @@ import {
   StateFileSystemFactory,
   StateHomeLayout,
   SystemClock,
-  WorkerIndexPersister,
+  WorkerIndexFile,
 } from '../../../src/adapters/index.ts';
 import type { HostedWorker } from '../../../src/adapters/runtime/bundled-worker-host.ts';
 import type { IndexWriterRequest, IndexWriterResponse } from '../../../src/adapters/storage/index-writer-program.ts';
@@ -153,8 +153,8 @@ describe('the session index on a saturated disk', () => {
       new SqliteHomeLockFactory(),
       new BunSqliteIndexFactory(
         {
-          create: (file, connection) =>
-            new WorkerIndexPersister(file, new InlineIndexPersister(connection), {
+          create: file =>
+            new WorkerIndexFile(file, new InlineIndexFile(file), {
               spawn: () =>
                 new Worker(SLOW_WRITER, { type: 'module' }) as unknown as HostedWorker<
                   IndexWriterRequest,
