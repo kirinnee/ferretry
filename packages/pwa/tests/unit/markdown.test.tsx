@@ -140,6 +140,19 @@ describe('Markdown code fences', () => {
     should(code?.props.dangerouslySetInnerHTML).be.undefined();
     should(textOf(code as ReactTestInstance)).equal('<script>');
   });
+
+  test('should render an empty fence as empty, never as the word undefined', () => {
+    // Act — a fence with no body gives the renderer a code element with no text child at all.
+    const known = render(<Markdown text={'```ts\n```'} />);
+    const unknown = render(<Markdown text={'```\n```'} />);
+
+    // Assert
+    const highlighted = known.root.findAllByType('code')[0];
+    should(highlighted?.props.className).equal('hljs language-ts');
+    should(String(highlighted?.props.dangerouslySetInnerHTML.__html)).not.containEql('undefined');
+    should(textOf(highlighted as ReactTestInstance)).equal('');
+    should(textOf(unknown.root.findAllByType('code')[0] as ReactTestInstance)).equal('');
+  });
 });
 
 /**
