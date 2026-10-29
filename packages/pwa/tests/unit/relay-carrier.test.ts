@@ -34,6 +34,7 @@ import {
   openRelaySession,
   relayResponse,
   relayTunnelRequest,
+  requestLane,
 } from '../../src/lib/relay-carrier.ts';
 import { RelaySessionError, RelayStreamRefusedError } from '../../src/lib/relay-session.ts';
 import type { PromptOrigin } from '../../src/lib/step-up-gate.ts';
@@ -526,6 +527,17 @@ describe('the carrier router', () => {
     should(carriers.hosts()).eql([DIRECT_HOST]);
     should(router.choice(daemon.daemonId)?.reason).equal('Connected over direct.');
     should(auto.requests).eql([{ t: 'req', id: 1, method: 'GET', path: '/v1/projects', query: [['page', '2']] }]);
+  });
+
+  it('should carry an upload on a session of its own, so the polls beside it never wait behind it', async () => {
+    const { router, carriers } = await routerFor({ answer: { body: 'ok' } });
+    const upload = JSON.stringify({ base64: 'a'.repeat(40_000) });
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+    await router.fetch(`${DAEMON_URL}/v1/sessions/s1/attachments`, { method: 'POST', body: upload });
+    await router.fetch(`${DAEMON_URL}/v1/sessions/s1/attachments`, { method: 'POST', body: upload });
+    await router.fetch(`${DAEMON_URL}/v1/projects`);
+    // One request session and one upload session, each reused: two dials, not four.
+    should(carriers.dialled).have.length(2);
   });
 
   it('should route by the daemon a request was built for, never by the address two machines share', async () => {
@@ -2301,5 +2313,13 @@ describe('the carrier router meeting a presence requirement', () => {
 
     // Assert
     should(origins).eql(['background', 'background', 'explicit', 'explicit']);
+  });
+});
+
+describe('which session a relayed request rides', () => {
+  it('should send a body that needs parts on its own lane, so polls never wait behind an upload', () => {
+    should(requestLane(undefined)).equal('request');
+    should(requestLane('{"message":"hi"}')).equal('request');
+    should(requestLane(JSON.stringify({ base64: 'a'.repeat(4 * 1024 * 1024) }))).equal('bulk');
   });
 });

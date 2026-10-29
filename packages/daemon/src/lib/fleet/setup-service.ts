@@ -588,13 +588,15 @@ export class FleetSetupService {
 
   async #composeClone(change: CloneChange): Promise<Composed> {
     const catalog = this.deps.catalog;
-    const machine = catalog.machineName();
+    const host = catalog.machineName();
+    // The person's names for the two machines, when the app sent them; the hostnames are only what each calls itself.
+    const machine = change.names?.target ?? host;
     let bundle: FleetCloneBundle;
     let plan: ClonePlan;
     const reading = await this.#read();
     try {
       bundle = parseCloneBundle(change.bundle);
-      if (bundle.machine === machine) {
+      if (bundle.machine === host) {
         throw new CloneRefusal(`That setup was exported from ${machine} itself; pick another machine to copy from.`);
       }
       plan = planClone(reading.model, bundle, {
@@ -605,6 +607,8 @@ export class FleetSetupService {
         existingSecrets: await this.deps.secrets.names().catch(() => []),
         ...(change.skip === undefined ? {} : { skip: change.skip }),
         ...(change.source === undefined ? {} : { sourceDaemon: change.source.daemonId }),
+        ...(change.names === undefined ? {} : { sourceName: change.names.source }),
+        ...(change.defaultRuntime === undefined ? {} : { defaultRuntime: change.defaultRuntime }),
       });
     } catch (error) {
       if (error instanceof CloneRefusal) throw new FleetCatalogRefusal('fleet_change_refused', error.message);
@@ -616,9 +620,9 @@ export class FleetSetupService {
       model: plan.model,
       documents,
       secrets: [],
-      lines: describeClone(plan, bundle, machine),
+      lines: describeClone(plan, bundle, machine, change.names?.source),
       summary: [
-        `Copied ${plural(plan.copied.runtimes, 'runtime')} from ${bundle.machine}.`,
+        `Copied ${plural(plan.copied.runtimes, 'runtime')} from ${change.names?.source ?? bundle.machine}.`,
         ...(busiest === undefined || busiest.runtimes.length === 0
           ? []
           : [

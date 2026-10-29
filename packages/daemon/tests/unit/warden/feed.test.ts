@@ -3,13 +3,10 @@ import type { WardenAction } from '@ferretry/protocol';
 import should from 'should';
 import {
   blessingViews,
-  coverageAssignments,
   heldActions,
   investigationList,
   retainRecords,
   WARDEN_STATUS_LIST_LIMIT,
-  type WardenAttentionView,
-  wardenFeedView,
   type WardenSessionStatus,
 } from '../../../src/lib/warden/index.ts';
 
@@ -27,15 +24,6 @@ const action = (overrides: Partial<WardenAction> = {}): WardenAction => ({
 });
 
 const alive = (): WardenSessionStatus => 'running';
-
-const projection = (overrides: Partial<WardenAttentionView> = {}): WardenAttentionView => ({
-  generatedAt: at(0),
-  outcome: 'clean-sweep',
-  items: [],
-  boardsWithParseErrors: [],
-  verdictCoverage: { limit: 100, truncated: false },
-  ...overrides,
-});
 
 describe('actions that wait on the owner', () => {
   it('should keep a recent hold on a live ferret', () => {
@@ -70,129 +58,6 @@ describe('actions that wait on the owner', () => {
   ] as const)('should drop a hold %s', (_label, entry, statusOf) => {
     // Act / Assert
     should(heldActions([entry], statusOf, NOW)).deepEqual([]);
-  });
-});
-
-describe('the "who needs you" feed on the wire', () => {
-  it('should add held actions as rows of their own, with the recommendation and the report', () => {
-    // Arrange
-    const held = action({ reportPath: '/r.md', anomalyKind: 'sus_thinking' });
-
-    // Act
-    const actual = wardenFeedView({
-      projection: projection(),
-      actions: [held, action({ sessionId: 's2', action: 'failover', agent: 'claude-work', detail: 'move' })],
-      statusOf: alive,
-      names: new Map([['s1', { teammate: 'Kofi', label: 'pairing' }]]),
-      nowMs: NOW,
-    });
-
-    // Assert
-    should(actual.outcome).equal('items');
-    should(actual.items[0]).deepEqual({
-      sessionId: 's1',
-      teammate: 'Kofi',
-      label: 'pairing',
-      id: 'action:stop:s1',
-      source: 'warden-action',
-      subject: 'The Warden recommends stopping it',
-      why: held.detail,
-      waitingSince: held.at,
-      howToResolve: 'Open the ferret and stop it, or leave it running.',
-      recommendation: { action: 'stop', reason: held.detail },
-      anomalyKind: 'sus_thinking',
-      judgement: { state: 'judged', reason: held.detail, reportPath: '/r.md', at: held.at },
-    });
-    should(actual.items[1]).match({
-      subject: 'The Warden recommends an action',
-      howToResolve: 'Open the ferret and decide whether to do it.',
-      recommendation: { action: 'migrate', agent: 'claude-work' },
-    });
-  });
-
-  it('should name a held blessing as "leave"', () => {
-    // Act
-    const actual = wardenFeedView({
-      projection: projection(),
-      actions: [action({ action: 'bless' })],
-      statusOf: alive,
-      names: new Map(),
-      nowMs: NOW,
-    });
-
-    // Assert
-    should(actual.items[0]?.recommendation?.action).equal('leave');
-  });
-
-  it('should tag a flag row with its anomaly kind and keep the projection’s own outcome when nothing is held', () => {
-    // Arrange
-    const flag = {
-      sessionId: 's1',
-      id: 'anomaly:sus_thinking:s1',
-      source: 'warden-anomaly' as const,
-      subject: 'Session may be stuck thinking',
-      why: 'thinking',
-      waitingSince: at(-5),
-      howToResolve: 'Open the session and decide what to do.',
-      fromAnomaly: true,
-      judgement: { state: 'none' as const, reason: 'No matching warden judgement yet.' },
-    };
-    const board = { ...flag, id: 'A1', source: 'question' as const, fromAnomaly: undefined, judgement: undefined };
-
-    // Act
-    const items = wardenFeedView({
-      projection: projection({ outcome: 'items', items: [flag, board], lastSweepAt: at(-1) }),
-      actions: [],
-      statusOf: alive,
-      names: new Map(),
-      nowMs: NOW,
-    });
-    const degraded = wardenFeedView({
-      projection: projection({
-        outcome: 'degraded',
-        wardenDegraded: { reason: 'boards' },
-        boardsWithParseErrors: [{ sessionId: 's9', parseErrors: 2 }],
-      }),
-      actions: [],
-      statusOf: alive,
-      names: new Map(),
-      nowMs: NOW,
-    });
-
-    // Assert
-    should(items.items[0]?.anomalyKind).equal('sus_thinking');
-    should(items.items[1]).not.have.property('anomalyKind');
-    should(items.lastSweepAt).equal(at(-1));
-    should(degraded).match({ outcome: 'degraded', wardenDegraded: { reason: 'boards' } });
-    should(degraded.boardsWithParseErrors).deepEqual([{ sessionId: 's9', parseErrors: 2 }]);
-  });
-});
-
-describe('the flags a live fleet warden covers', () => {
-  it('should read as assignments while that warden is live', () => {
-    // Arrange
-    const coverage = {
-      wardenId: 'w9',
-      reportPath: '/r.md',
-      anomalies: [
-        { sessionId: 's1', kind: 'abandoned_wreckage' as const },
-        { sessionId: 's1', kind: 'quota_reset_passed' as const },
-        { sessionId: 's2', kind: 'declared_wait_overdue' as const },
-      ],
-    };
-
-    // Act
-    const live = coverageAssignments(coverage, () => true);
-    const gone = coverageAssignments(coverage, () => false);
-    const none = coverageAssignments(undefined, () => true);
-
-    // Assert
-    should(live).deepEqual({
-      s1: { wardenId: 'w9', kinds: ['abandoned_wreckage', 'quota_reset_passed'] },
-      s2: { wardenId: 'w9', kinds: ['declared_wait_overdue'] },
-    });
-    should(gone).deepEqual({});
-    should(none).deepEqual({});
   });
 });
 
@@ -340,5 +205,12 @@ describe('what the state remembers', () => {
 
     // Assert
     should(actual.map(record => record.id)).deepEqual(['a', 'c']);
+  });
+});
+
+describe('housekeeping is never a hold', () => {
+  it('should never keep a held leftover cleanup, which is listed under Recent actions instead', () => {
+    // Act / Assert
+    should(heldActions([action({ action: 'close_leftover' })], alive, NOW)).deepEqual([]);
   });
 });

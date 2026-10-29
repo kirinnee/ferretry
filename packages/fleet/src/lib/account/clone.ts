@@ -30,6 +30,7 @@
  * are the setup service's.
  */
 import {
+  type CloneAgentRuntime,
   type CloneRunnable,
   cloneBundleProblem,
   cloneFileOwned,
@@ -40,6 +41,7 @@ import {
   type FleetCloneCredential,
   type FleetCloneFile,
   secretReferencesIn,
+  suggestCloneDefault,
 } from '@ferretry/protocol';
 import type { HarnessKind } from '../manifest.ts';
 import { canonicalAssetReference } from '../paths.ts';
@@ -197,7 +199,31 @@ export interface CloneOptions {
   readonly skip?: readonly string[];
   /** The source's daemon id as the copying browser verified it, recorded on everything copied. */
   readonly sourceDaemon?: string;
+  /**
+   * The source as the person names it in their app (`Liftoff EC2`), for the sentences. The bundle's own
+   * `machine` is only what the source called itself, which is usually a hostname.
+   */
+  readonly sourceName?: string;
+  /**
+   * The default runtime for new agents once the copy is done: the SOURCE's name for an agent runtime the
+   * bundle brings, `null` to leave it unset, or left out to keep the target's own when the copy leaves it
+   * standing and otherwise pick a valid one ({@link CloneDefault}).
+   */
+  readonly defaultRuntime?: string | null;
 }
+
+/** What became of "Default runtime for new agents", so the preview and the description can say it. */
+export type CloneDefault =
+  /** The target had none and the copy chose none. */
+  | { readonly kind: 'none' }
+  /** The target's own default is still a runtime after the copy. */
+  | { readonly kind: 'kept'; readonly runtime: string }
+  /** The person chose it (or the source's was carried), under the name it lands with. */
+  | { readonly kind: 'chosen'; readonly runtime: string }
+  /** The person chose to leave it unset. */
+  | { readonly kind: 'unset' }
+  /** The target's default would have dangled, so the copy replaced it: `now` is absent when no runtime fits. */
+  | { readonly kind: 'repaired'; readonly was: string; readonly now?: string };
 
 /** One thing that took another name because the target already had one (E28). */
 export interface CloneRename {
@@ -244,6 +270,8 @@ export interface ClonePlan {
   readonly runnables: readonly CloneRunnable[];
   /** The components the person chose not to copy, as the bundle named them. */
   readonly skipped: readonly string[];
+  /** Where "Default runtime for new agents" ended up. */
+  readonly defaultRuntime: CloneDefault;
 }
 
 /** A path under a person's home on macOS or Linux, as it appears in text. */
@@ -279,7 +307,7 @@ export function parseCloneBundle(input: unknown): FleetCloneBundle {
  * every document only it carried. A skip that names nothing in the bundle is refused, so a stale
  * review can never be mistaken for one that left something out.
  */
-function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[]): FleetCloneBundle {
+function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[], sourceName: string): FleetCloneBundle {
   if (skip.length === 0) return bundle;
   const skipped = new Set(skip);
   const components: Record<string, Record<string, unknown>> = {};
@@ -293,7 +321,7 @@ function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[]): Flee
   }
   const unknown = [...skipped][0];
   if (unknown !== undefined) {
-    throw new CloneRefusal(`The setup from ${bundle.machine} has no ${unknown} to leave out. Review it again.`);
+    throw new CloneRefusal(`The setup from ${sourceName} has no ${unknown} to leave out. Review it again.`);
   }
   const profiles = Object.fromEntries(
     Object.entries(bundle.profiles).map(([name, profile]) => {
@@ -316,7 +344,7 @@ function withoutSkipped(bundle: FleetCloneBundle, skip: readonly string[]): Flee
 }
 
 /** The bundle as a model of its own, so a damaged one is refused before anything is renamed. */
-function bundleModel(bundle: FleetCloneBundle): AccountModel {
+function bundleModel(bundle: FleetCloneBundle, sourceName: string): AccountModel {
   const credentials: Record<string, Credential> = {};
   for (const credential of bundle.credentials) {
     // An environment login keeps its halves, so a runtime on its Codex half still reads as one.
@@ -336,7 +364,7 @@ function bundleModel(bundle: FleetCloneBundle): AccountModel {
   } catch (error) {
     const first = (error as { issues?: readonly { message: string }[] }).issues?.[0]?.message;
     throw new CloneRefusal(
-      `The setup from ${bundle.machine} cannot be copied${first === undefined ? '' : `: ${first}`}.`,
+      `The setup from ${sourceName} cannot be copied${first === undefined ? '' : `: ${first}`}. Nothing was changed.`,
     );
   }
 }
@@ -371,8 +399,9 @@ function referencedFiles(model: AccountModel): Set<string> {
  */
 export function planClone(target: AccountModel, offered: FleetCloneBundle, options: CloneOptions): ClonePlan {
   const skipped = [...new Set(options.skip ?? [])].toSorted();
-  const bundle = withoutSkipped(offered, skipped);
-  const source = bundleModel(bundle);
+  const sourceName = options.sourceName ?? offered.machine;
+  const bundle = withoutSkipped(offered, skipped, sourceName);
+  const source = bundleModel(bundle, sourceName);
   // Where it came from, on everything copied. Whatever the source said about its own items' origin is
   // replaced: that is the source's claim, and this copy's origin is the source.
   const origin = {
@@ -463,12 +492,15 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     };
   }
   const runtimes: Record<string, Runtime> = { ...base.runtimes };
+  const runtimeNames = new Map<string, string>();
+  const copiedAgents: CloneAgentRuntime[] = [];
   const slotRuntimes = new Map<string, string[]>();
   const missingHarnesses = new Set<HarnessKind>();
   const commandNames = new Set(base.advanced.commands.map(command => command.wrapper));
   for (const [name, runtime] of Object.entries(source.runtimes)) {
     const free = freeName(name, candidate => runtimes[candidate] !== undefined || commandNames.has(candidate));
     if (free !== name) renamed.push({ what: 'runtime', from: name, to: free });
+    runtimeNames.set(name, free);
     const credential = credentialIds.get(runtime.credential) as string;
     runtimes[free] = {
       credential,
@@ -478,8 +510,18 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
     };
     slotRuntimes.set(credential, [...(slotRuntimes.get(credential) ?? []), free]);
     const harness = runtimeHarness(source, runtime) as HarnessKind;
+    if (runtime.agent) copiedAgents.push({ name, harness });
     if (!options.installed.includes(harness)) missingHarnesses.add(harness);
   }
+
+  const { machine, defaultRuntime } = defaultAfterCopy({
+    base,
+    runtimes,
+    runtimeNames,
+    copiedAgents,
+    sourceName,
+    requested: options.defaultRuntime,
+  });
 
   // Documents: each under the path its component now names. A skill item the target has is kept.
   const existingItems = new Set(options.existingSkillItems);
@@ -501,11 +543,11 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
 
   let model: AccountModel;
   try {
-    model = parseAccountModel({ ...base, credentials, components, profiles, runtimes });
+    model = parseAccountModel({ ...base, machine, credentials, components, profiles, runtimes });
   } catch (error) {
     const first = (error as { issues?: readonly { message: string }[] }).issues?.[0]?.message;
     throw new CloneRefusal(
-      `Copying the setup from ${bundle.machine} would leave ${options.machine} with a setup it cannot read${first === undefined ? '' : `: ${first}`}.`,
+      `Copying the setup from ${sourceName} would leave ${options.machine} with a setup it cannot read${first === undefined ? '' : `: ${first}`}. Nothing was changed. Fix that on ${options.machine} (Settings › Machine), or copy again with the other choice for its existing setup.`,
     );
   }
 
@@ -576,6 +618,49 @@ export function planClone(target: AccountModel, offered: FleetCloneBundle, optio
       return { ...runnable, reference, name: reference.slice(runnable.kind.length + 1) };
     }),
     skipped,
+    defaultRuntime,
+  };
+}
+
+/**
+ * "Default runtime for new agents" once the copy is applied. It must name an AGENT runtime that exists,
+ * and Replace removes the target's own runtimes while the machine settings stay, so a default left alone
+ * would name a runtime that is gone. The person's choice wins; otherwise the target's own default stays
+ * when it is still there; otherwise the copy picks one of the same family ({@link suggestCloneDefault})
+ * and the plan says so. It never drops a default silently and never writes one that cannot resolve.
+ */
+function defaultAfterCopy(input: {
+  readonly base: AccountModel;
+  readonly runtimes: Readonly<Record<string, Runtime>>;
+  readonly runtimeNames: ReadonlyMap<string, string>;
+  readonly copiedAgents: readonly CloneAgentRuntime[];
+  readonly sourceName: string;
+  readonly requested: string | null | undefined;
+}): { readonly machine: AccountModel['machine']; readonly defaultRuntime: CloneDefault } {
+  const { base, runtimes, runtimeNames, copiedAgents, sourceName, requested } = input;
+  const { defaultRuntime: _current, ...rest } = base.machine;
+  const without = rest as AccountModel['machine'];
+  if (requested === null) return { machine: without, defaultRuntime: { kind: 'unset' } };
+  if (requested !== undefined) {
+    const landed = runtimeNames.get(requested);
+    if (landed === undefined || !copiedAgents.some(agent => agent.name === requested)) {
+      throw new CloneRefusal(
+        `${requested} can't be the default runtime: the setup from ${sourceName} has no agent runtime by that name (${copiedAgents.map(agent => agent.name).join(', ') || 'it has none'}). Pick another one.`,
+      );
+    }
+    return { machine: { ...without, defaultRuntime: landed }, defaultRuntime: { kind: 'chosen', runtime: landed } };
+  }
+  const current = base.machine.defaultRuntime;
+  if (current === undefined) return { machine: without, defaultRuntime: { kind: 'none' } };
+  if (runtimes[current]?.agent === true)
+    return { machine: base.machine, defaultRuntime: { kind: 'kept', runtime: current } };
+  const droppedHarness =
+    base.runtimes[current] === undefined ? undefined : runtimeHarness(base, base.runtimes[current]);
+  const picked = suggestCloneDefault({ candidates: copiedAgents, droppedHarness });
+  const now = picked === undefined ? undefined : runtimeNames.get(picked);
+  return {
+    machine: now === undefined ? without : { ...without, defaultRuntime: now },
+    defaultRuntime: { kind: 'repaired', was: current, ...(now === undefined ? {} : { now }) },
   };
 }
 
@@ -591,8 +676,28 @@ function runnableLine(reference: string, entry: CloneRunnable['entries'][number]
   ].join('\n');
 }
 
+function defaultSentence(outcome: CloneDefault, machine: string): string | undefined {
+  switch (outcome.kind) {
+    case 'chosen':
+      return `Default runtime for new agents on ${machine}: ${outcome.runtime}.`;
+    case 'unset':
+      return `Default runtime for new agents on ${machine}: none. Pick one in Settings › Machine before starting an agent without naming a runtime.`;
+    case 'repaired':
+      return outcome.now === undefined
+        ? `${machine}'s default runtime for new agents (${outcome.was}) is replaced by this copy and the copy has no agent runtime to take its place, so it is left unset.`
+        : `${machine}'s default runtime for new agents (${outcome.was}) is replaced by this copy, so new agents start on ${outcome.now} instead. Change it in the preview if you want another.`;
+    default:
+      return undefined;
+  }
+}
+
 /** What applying the copy would do, as the confirm card says it (§4.7 Preview and Done). */
-export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine: string): readonly string[] {
+export function describeClone(
+  plan: ClonePlan,
+  bundle: FleetCloneBundle,
+  machine: string,
+  sourceName: string = bundle.machine,
+): readonly string[] {
   const lines: string[] = [];
   if (plan.removed.runtimes + plan.removed.profiles + plan.removed.components > 0) {
     lines.push(
@@ -600,12 +705,12 @@ export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine
     );
   }
   lines.push(
-    `Copies ${plural(plan.copied.components, 'component')}, ${plural(plan.copied.modelSets, 'model set')}, ${plural(plan.copied.profiles, 'profile')} and ${plural(plan.copied.runtimes, 'runtime')} from ${bundle.machine}.`,
+    `Copies ${plural(plan.copied.components, 'component')}, ${plural(plan.copied.modelSets, 'model set')}, ${plural(plan.copied.profiles, 'profile')} and ${plural(plan.copied.runtimes, 'runtime')} from ${sourceName}.`,
   );
   for (const reference of plan.skipped) lines.push(`Leaves out ${reference}: you chose not to copy it.`);
   if (plan.runnables.length > 0) {
     lines.push(
-      `${plural(plan.runnables.length, 'component')} from ${bundle.machine} can make ${machine} run something: MCP servers, hooks and settings start programs when an agent launches, and instructions and skills are text an agent follows. Everything each one carries is listed here; leave out any you don’t trust.`,
+      `${plural(plan.runnables.length, 'component')} from ${sourceName} can make ${machine} run something: MCP servers, hooks and settings start programs when an agent launches, and instructions and skills are text an agent follows. Everything each one carries is listed here; leave out any you don’t trust.`,
     );
   }
   for (const runnable of plan.runnables) {
@@ -619,13 +724,15 @@ export function describeClone(plan: ClonePlan, bundle: FleetCloneBundle, machine
       `Doesn't copy ${plural(plan.slots.length, 'login')}: each becomes an empty slot on ${machine} that needs sign-in, and its runtimes keep pointing at it — ${slots}.`,
     );
   }
-  lines.push(`Doesn't copy history: past sessions stay on ${bundle.machine}.`);
+  lines.push(`Doesn't copy history: past sessions stay on ${sourceName}.`);
   const runtimeRenames = plan.renamed.filter(rename => rename.what !== 'login');
   if (runtimeRenames.length > 0) {
     lines.push(
       `${plural(runtimeRenames.length, 'name')} already used here got a new one: ${runtimeRenames.map(rename => `${rename.from} → ${rename.to}`).join(', ')}.`,
     );
   }
+  const chosen = defaultSentence(plan.defaultRuntime, machine);
+  if (chosen !== undefined) lines.push(chosen);
   for (const check of plan.checkPaths) lines.push(`Check after copying: ${check.reference} names ${check.path}.`);
   for (const harness of plan.missingHarnesses) {
     lines.push(

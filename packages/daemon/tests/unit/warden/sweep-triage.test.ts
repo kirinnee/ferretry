@@ -1,10 +1,11 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { WardenRuntimeState } from '../../../src/lib/warden/index.ts';
-import { WardenRequestError } from '../../../src/lib/warden/index.ts';
+import { investigationsOffMessage, WardenRequestError } from '../../../src/lib/warden/index.ts';
 import {
   at,
   enabled,
+  escalated,
   harness,
   JEV_INVESTIGATE,
   JEV_SKIP,
@@ -450,7 +451,8 @@ describe('what a verdict does', () => {
     // Assert
     should(subject.remedies).be.empty();
     should(subject.state().actions?.[0]).match({ action: 'stop', outcome: 'held' });
-    should(feed.items.map(item => item.source)).containEql('warden-action');
+    // A held act becomes a Warden card only while its flag still stands; this ferret is no longer flagged.
+    should(feed.items).be.empty();
     should(journalTypes(subject)).containEql('fleet.warden_action_held');
   });
 
@@ -816,6 +818,48 @@ describe('the owner asking for an investigation', () => {
 
     // Assert
     should(error).be.instanceOf(WardenRequestError).and.have.property('failure', 'cap');
+    should((error as Error).message).startWith('Today’s investigation cap ($2.00) is reached.');
+  });
+
+  it('should refuse until the next hour once this hour’s share of the cap is spent, and say when', async () => {
+    // Arrange — $0.60 this hour against a $2 day: past the $0.50 hourly share, far from the day's cap.
+    const subject = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1' })],
+      state: {
+        investigations: [
+          { id: 'r', scope: 'fleet', origin: 'sweep', startedAt: at(0), reportPath: '/r.md', costUsd: 0.6 },
+        ],
+      },
+    });
+
+    // Act
+    const error: unknown = await subject.service.requestInvestigation('s1').catch((cause: unknown) => cause);
+
+    // Assert
+    should(error).be.instanceOf(WardenRequestError).and.have.property('failure', 'cap');
+    should((error as Error).message).equal(
+      'This hour’s share of the investigation cap ($0.50 of $2.00 a day) is spent. Try again at 13:00 UTC.',
+    );
+  });
+
+  it('should tell a paced investigation layer apart from a spent day in the run’s own words', () => {
+    // Arrange
+    const on = { configured: true, active: true, reason: 'configured' } as const;
+    const layers = { jev: on, llm: { configured: true, active: false, reason: 'investigation_cap' } } as const;
+
+    // Act
+    const paced = investigationsOffMessage(layers, 2, {
+      capsPaced: ['investigation'],
+      pacedUntil: '2026-07-31T13:00:00.000Z',
+    });
+    const unknownHour = investigationsOffMessage(layers, 1, { capsPaced: ['investigation'] });
+
+    // Assert
+    should(paced).equal(
+      'this hour’s share of the investigation cap is spent: 2 flags Jev did not clear wait until 13:00 UTC',
+    );
+    should(unknownHour).endWith('waits until the next hour');
   });
 
   it('should answer "already running" for a ferret under investigation', async () => {
@@ -981,7 +1025,7 @@ describe('the status', () => {
 });
 
 describe('who needs you', () => {
-  it('should list an unjudged flag under rules, and leave out one Jev blessed', async () => {
+  it('should list the Warden card a flag nothing could look at raised, and none for one Jev blessed', async () => {
     // Arrange
     const rules = harness({ fleet: [unattended('s1')] });
     const guarded = harness({ config: jev(), fleet: [unattended('s1')] });
@@ -993,12 +1037,14 @@ describe('who needs you', () => {
     const quiet = await guarded.service.attention();
 
     // Assert
-    should(shown.items).match([{ sessionId: 's1', source: 'warden-anomaly', anomalyKind: 'unattended_question' }]);
+    should(shown.items).match([
+      { sessionId: 's1', source: 'agent-raised', raisedByName: 'Warden', anomalyKind: 'unattended_question' },
+    ]);
     should(quiet.items).deepEqual([]);
     should(quiet.outcome).equal('clean-sweep');
   });
 
-  it('should list a waiting board row from the feed and skip finished ferrets and wardens', async () => {
+  it('should list only the Warden’s own cards, never a ferret’s own ask, and skip finished ferrets and wardens', async () => {
     // Arrange
     const row = {
       id: 'A1',
@@ -1009,13 +1055,23 @@ describe('who needs you', () => {
       howToResolve: 'Answer it.',
       raisedBy: 'agent' as const,
     };
+    const card = {
+      ...row,
+      id: 'A2',
+      source: 'agent-raised' as const,
+      raisedBy: 'daemon' as const,
+      sourceRef: 'warden:ask:agent_frozen',
+    };
     const subject = harness({
       fleet: [
         session({ id: 's1' }),
         session({ id: 'done', status: 'completed' }),
         session({ id: 'w', label: 'fleet-warden' }),
       ],
-      feedBoards: { s1: { sessionId: 's1', parseErrors: 0, items: [row] } },
+      feedBoards: {
+        s1: { sessionId: 's1', parseErrors: 0, items: [row, card] },
+        done: { sessionId: 'done', parseErrors: 0, items: [{ ...card, id: 'A9' }] },
+      },
     });
     await subject.service.run({ force: false });
 
@@ -1023,20 +1079,23 @@ describe('who needs you', () => {
     const actual = await subject.service.attention();
 
     // Assert
-    should(actual.items).match([{ sessionId: 's1', id: 'A1', source: 'question' }]);
+    should(actual.items).match([{ sessionId: 's1', id: 'A2', anomalyKind: 'agent_frozen' }]);
+    should(actual.items).have.length(1);
   });
 
-  it('should say a flag the fleet warden is looking at is being looked at', async () => {
+  it('should raise no card for a flag the fleet warden is looking at', async () => {
     // Arrange
     const subject = harness({ config: enabled(), fleet: [triageable('s1')] });
     await subject.service.run({ force: false });
     subject.setFleet([triageable('s1'), session({ id: 'w0', label: 'fleet-warden' })]);
+    await subject.service.run({ force: false });
 
     // Act
     const actual = await subject.service.attention();
 
     // Assert
-    should(actual.items).match([{ sessionId: 's1', judgement: { state: 'pending' } }]);
+    should(subject.raises).be.empty();
+    should(actual.items).be.empty();
   });
 
   it('should say the feed is degraded when the reports cannot be read', async () => {
@@ -1052,9 +1111,10 @@ describe('who needs you', () => {
     should(actual.wardenDegraded?.reason).match(/could not be read/u);
   });
 
-  it('should keep the rows it has when the reports cannot be read', async () => {
+  it('should keep the cards it has when the reports cannot be read', async () => {
     // Arrange
     const subject = harness({ fleet: [unattended('s1')], verdicts: async () => undefined });
+    subject.seedBoard('s1', [escalated('unattended_question')]);
     await subject.service.run({ force: false });
 
     // Act
@@ -1065,7 +1125,7 @@ describe('who needs you', () => {
     should(actual.items).have.length(1);
   });
 
-  it('should keep the projection’s own banner over the unreadable-reports one', async () => {
+  it('should keep the louder exhausted banner over the unreadable-reports one', async () => {
     // Arrange: every account exhausted is the louder, more specific fact.
     const subject = harness({
       verdicts: async () => undefined,
@@ -1079,7 +1139,7 @@ describe('who needs you', () => {
     should(actual.wardenDegraded?.reason).match(/exhausted/u);
   });
 
-  it('should tolerate a board the feed cannot read', async () => {
+  it('should say a board the feed cannot read may hide a card, rather than that nothing waits', async () => {
     // Arrange
     const subject = harness({ fleet: [session({ id: 's1' })], feedBoards: {} });
 
@@ -1087,7 +1147,8 @@ describe('who needs you', () => {
     const actual = await subject.service.attention();
 
     // Assert
-    should(actual.outcome).equal('no-sweep');
+    should(actual.outcome).equal('degraded');
+    should(actual.wardenDegraded?.reason).match(/may be hidden/u);
   });
 });
 

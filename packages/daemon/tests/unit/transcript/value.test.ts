@@ -68,3 +68,23 @@ describe('transcript value normalization', () => {
     should(mixed.invalidEntries).equal(3);
   });
 });
+
+describe('transcriptJsonValue', () => {
+  it('should keep a value shared by two siblings in both places, and cut only a true cycle', () => {
+    // Arrange — one object referenced twice is not a cycle; one that contains itself is.
+    const shared = { kept: true };
+    const cycle: Record<string, unknown> = { name: 'loop' };
+    cycle.self = cycle;
+
+    // Act
+    const actual = transcriptJsonValue({ left: shared, right: shared, list: [shared, shared], cycle });
+
+    // Assert
+    should(actual).deepEqual({
+      left: { kept: true },
+      right: { kept: true },
+      list: [{ kept: true }, { kept: true }],
+      cycle: { name: 'loop', self: null },
+    });
+  });
+});

@@ -11,6 +11,7 @@
 import { Check, KeyRound, Lock } from 'lucide-react';
 import { type ReactNode, useId, useState } from 'react';
 import { Badge, Button } from '../../../shell/primitives.tsx';
+import { CLONE_KEEP_DEFAULT, CLONE_NO_DEFAULT, type CloneDefaultView } from './clone-model.ts';
 import {
   CLONE_ITEMS,
   type CloneItemId,
@@ -384,6 +385,47 @@ export function CloneOutcomes({
           </SetupNote>
         );
       })}
+    </SetupSection>
+  );
+}
+
+/**
+ * "Default runtime for new agents" on the Preview: the one the copy would leave this machine with, as a
+ * choice the person can change before copying. Replace removes this machine's runtimes, so the default
+ * has to be one the copy brings; saying so here is what keeps it from being a surprise.
+ */
+export function DefaultRuntimeChoice({
+  view,
+  onPick,
+}: {
+  readonly view: CloneDefaultView;
+  readonly onPick: (value: string) => void;
+}) {
+  const id = useId();
+  return (
+    <SetupSection title="Default runtime for new agents" name="default-runtime">
+      <label className="sr-only" htmlFor={id}>
+        Default runtime for new agents
+      </label>
+      <select
+        aria-describedby={`${id}-hint`}
+        className="kt-input w-full"
+        data-clone-default-runtime=""
+        id={id}
+        onChange={event => onPick(event.target.value)}
+        value={view.selected}
+      >
+        {view.canKeep ? <option value={CLONE_KEEP_DEFAULT}>Keep what it has now</option> : null}
+        {view.candidates.map(candidate => (
+          <option key={candidate.name} value={candidate.name}>
+            {candidate.name} ({SETUP_HARNESS_NAMES[candidate.harness]})
+          </option>
+        ))}
+        <option value={CLONE_NO_DEFAULT}>None (automatic)</option>
+      </select>
+      <p className="m-0 text-meta leading-base text-muted" data-clone-default-runtime-hint="" id={`${id}-hint`}>
+        {view.sentence}
+      </p>
     </SetupSection>
   );
 }

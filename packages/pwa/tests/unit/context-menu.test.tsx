@@ -239,7 +239,7 @@ describe('ContextMenu', () => {
     await menu.unmount();
   });
 
-  it('closes on Escape, on an outside pointer, on scroll, on resize and on a route change', async () => {
+  it('closes on Escape, on an outside pointer, on a reader-driven scroll, on resize and on a route change', async () => {
     const menu = await openMenu();
 
     await interact(() => pressKey(document, 'Escape'));
@@ -249,6 +249,8 @@ describe('ContextMenu', () => {
     await interact(() => backdrop.dispatchEvent(new Event('pointerdown', { bubbles: true })));
     expect(menu.state.closes).toBe(2);
 
+    // A scroll the reader started (a wheel just before it) moved the anchor away.
+    await interact(() => window.dispatchEvent(new Event('wheel')));
     await interact(() => window.dispatchEvent(new Event('scroll')));
     expect(menu.state.closes).toBe(3);
 
@@ -258,6 +260,88 @@ describe('ContextMenu', () => {
     await interact(() => window.dispatchEvent(new Event('popstate')));
     expect(menu.state.closes).toBe(5);
     await menu.unmount();
+  });
+
+  describe('scrolling', () => {
+    const rectAt = (left: number, top: number) => () =>
+      ({ left, top, right: left, bottom: top, width: 0, height: 0, x: left, y: top, toJSON: () => ({}) }) as DOMRect;
+
+    const openInScroller = async () => {
+      const scroller = document.createElement('div');
+      const trigger = document.createElement('button');
+      scroller.appendChild(trigger);
+      document.body.appendChild(scroller);
+      let rect = { left: 20, top: 30 };
+      trigger.getBoundingClientRect = () => rectAt(rect.left, rect.top)();
+      const state = { closes: 0 };
+      const mounted = await mount(
+        <ContextMenu
+          open
+          anchor={{ x: 20, y: 30 }}
+          items={[{ key: 'a', label: 'A', onSelect: () => {} }]}
+          onClose={() => {
+            state.closes += 1;
+          }}
+          ariaLabel="Actions"
+          triggerRef={{ current: trigger }}
+        />,
+      );
+      const menu = mounted.container.querySelector('[role="menu"]') as HTMLElement;
+      const moveTrigger = (top: number) => {
+        rect = { ...rect, top };
+      };
+      const cleanup = async () => {
+        await mounted.unmount();
+        scroller.remove();
+      };
+      return { scroller, trigger, menu, state, moveTrigger, cleanup };
+    };
+
+    it('stays open when an element that does not hold the trigger scrolls', async () => {
+      const view = await openInScroller();
+      const unrelated = document.createElement('div');
+      document.body.appendChild(unrelated);
+
+      await interact(() => unrelated.dispatchEvent(new Event('scroll')));
+
+      expect(view.state.closes).toBe(0);
+      expect(view.menu.style.top).toBe('30px');
+      unrelated.remove();
+      await view.cleanup();
+    });
+
+    it('stays open and moves by the trigger delta when its own container scrolls with no reader input', async () => {
+      const view = await openInScroller();
+
+      view.moveTrigger(10);
+      await interact(() => view.scroller.dispatchEvent(new Event('scroll')));
+
+      expect(view.state.closes).toBe(0);
+      expect(view.menu.style.top).toBe('10px');
+      expect(view.menu.style.left).toBe('20px');
+      await view.cleanup();
+    });
+
+    it('closes when its container scrolls just after a wheel from the reader', async () => {
+      const view = await openInScroller();
+
+      await interact(() => window.dispatchEvent(new Event('wheel')));
+      view.moveTrigger(10);
+      await interact(() => view.scroller.dispatchEvent(new Event('scroll')));
+
+      expect(view.state.closes).toBe(1);
+      await view.cleanup();
+    });
+
+    it('closes on a programmatic scroll once the trigger has left the document', async () => {
+      const view = await openInScroller();
+
+      view.trigger.remove();
+      await interact(() => window.dispatchEvent(new Event('scroll')));
+
+      expect(view.state.closes).toBe(1);
+      await view.cleanup();
+    });
   });
 
   it('closes rather than trapping Tab', async () => {

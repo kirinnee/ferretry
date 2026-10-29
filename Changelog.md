@@ -1,3 +1,47 @@
+## [4.106.1](https://github.com/kirinnee/ferretry/compare/v4.106.0...v4.106.1) (2026-10-29)
+
+### Fixes
+
+* **pwa:** keep reader state when new chat messages arrive ([#892](https://github.com/kirinnee/ferretry/issues/892)) ([30a2b5e](https://github.com/kirinnee/ferretry/commit/30a2b5ef5d0701d3c0f8b5d864a20e10541895f2))
+
+## [4.106.0](https://github.com/kirinnee/ferretry/compare/v4.105.5...v4.106.0) (2026-10-29)
+
+### Features
+
+* **daemon:** tell the owner as one Warden notification per subject ([#890](https://github.com/kirinnee/ferretry/issues/890)) ([d9ff772](https://github.com/kirinnee/ferretry/commit/d9ff7721da05fed1e1fb0c36cc3990cf45416702))
+
+## [4.105.5](https://github.com/kirinnee/ferretry/compare/v4.105.4...v4.105.5) (2026-10-29)
+
+### Fixes
+
+* **warden:** stop the flag noise that burnt both caps, and pace each cap through the day ([#888](https://github.com/kirinnee/ferretry/issues/888)) ([5e7fdc9](https://github.com/kirinnee/ferretry/commit/5e7fdc9d80cc76828f000975c2f77ec9346e523d))
+
+### Performance
+
+* **transcript:** allocate less per parse step under memory pressure ([#889](https://github.com/kirinnee/ferretry/issues/889)) ([96c8f1f](https://github.com/kirinnee/ferretry/commit/96c8f1f0215078480d375cf071f258031d4dee09))
+
+## [4.105.4](https://github.com/kirinnee/ferretry/compare/v4.105.3...v4.105.4) (2026-10-29)
+
+### Fixes
+
+* **fleet:** keep a valid default runtime when copying settings ([#887](https://github.com/kirinnee/ferretry/issues/887)) ([7a81ac2](https://github.com/kirinnee/ferretry/commit/7a81ac2b5d7d0c8cb116c6ff7192530fb5cf3d86))
+
+## [4.105.3](https://github.com/kirinnee/ferretry/compare/v4.105.2...v4.105.3) (2026-10-29)
+
+### Fixes
+
+* **daemon:** parse the built-in catalogs when the build is made ([#883](https://github.com/kirinnee/ferretry/issues/883)) ([26e5c3a](https://github.com/kirinnee/ferretry/commit/26e5c3afb3dce95db67e4122c2da71b37015d527))
+* **pwa:** stop one photo upload from failing every upload on the connection ([#884](https://github.com/kirinnee/ferretry/issues/884)) ([34ead3e](https://github.com/kirinnee/ferretry/commit/34ead3e442b4d2e7b90f919db452b5e096360703))
+* **relay:** let a daemon reclaim its rendezvous at once after a drop ([#886](https://github.com/kirinnee/ferretry/issues/886)) ([c9b8a1b](https://github.com/kirinnee/ferretry/commit/c9b8a1bb20f64aa5e743740e8307ddbedd13e642))
+
+## [4.105.2](https://github.com/kirinnee/ferretry/compare/v4.105.1...v4.105.2) (2026-10-29)
+
+### Fixes
+
+* **daemon:** page long and live transcripts through an incremental conversation index ([#881](https://github.com/kirinnee/ferretry/issues/881)) ([143ef45](https://github.com/kirinnee/ferretry/commit/143ef45d8248ead1ec0021fc006d350a842cbece))
+* **pwa:** open resolved Attention in a drawer with a header and close ([#882](https://github.com/kirinnee/ferretry/issues/882)) ([e1fc73c](https://github.com/kirinnee/ferretry/commit/e1fc73cf408c5ea443776a652e2cb1596b2991fe))
+* **transcript:** skip subtrees the parser never reads in large records ([#885](https://github.com/kirinnee/ferretry/issues/885)) ([4740e4f](https://github.com/kirinnee/ferretry/commit/4740e4fad9c4d2bb62ad718170792c4ca5170a9a)), closes [#875](https://github.com/kirinnee/ferretry/issues/875)
+
 ## [4.105.1](https://github.com/kirinnee/ferretry/compare/v4.105.0...v4.105.1) (2026-10-29)
 
 ### Fixes

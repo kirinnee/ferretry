@@ -14,6 +14,7 @@ import {
   type WardenSessionConfig,
   type WardenSessionState,
   type WardenSessionView,
+  susAnchorMs,
 } from '../../../src/lib/warden/index.ts';
 
 const NOW = Date.parse('2026-07-30T12:00:00.000Z');
@@ -707,5 +708,45 @@ describe('anomaly subjects', () => {
     // Assert
     should(dated).equal('turn:3|since:2026-07-30T11:00:00.000Z');
     should(bare).equal('turn:?|since:?');
+  });
+});
+
+describe('judging only silence this daemon observed', () => {
+  // 2026-10-29 05:28: two minutes after a restart, three working ferrets read as "thinking with no output
+  // for an hour" — the documents' transcript instant was from before the daemon was watching.
+  const restarted = (observedMinutesAgo: number): WardenSessionView => ({
+    ...view('s1', {
+      status: 'thinking',
+      startedAt: ago(120),
+      lastCounterAdvanceAt: ago(0.1),
+      lastTranscriptAt: ago(60),
+    }),
+    observedSince: ago(observedMinutesAgo),
+  });
+
+  it('should not flag a think as silent right after a restart', () => {
+    // Act
+    const result = detectAnomalies([restarted(2)], NOW, options);
+
+    // Assert
+    should(result.anomalies).be.empty();
+  });
+
+  it('should flag it once the daemon itself has watched the silence for the threshold', () => {
+    // Act
+    const result = detectAnomalies([restarted(20)], NOW, options);
+
+    // Assert
+    should(kinds(result.anomalies)).eql(['sus_thinking']);
+    should(result.anomalies[0]?.idleMinutes).eql(20);
+  });
+
+  it('should floor the anchor at the later of the turn start and the first look', () => {
+    // Act / Assert
+    should(susAnchorMs(ago(120), ago(2))).eql(Date.parse(ago(2)));
+    should(susAnchorMs(ago(2), ago(120))).eql(Date.parse(ago(2)));
+    should(susAnchorMs(undefined, ago(2))).eql(Date.parse(ago(2)));
+    should(susAnchorMs(ago(5), undefined)).eql(Date.parse(ago(5)));
+    should(susAnchorMs(undefined, undefined)).be.undefined();
   });
 });

@@ -98,6 +98,8 @@ export interface PendingAttachment {
   readonly status: PendingAttachmentStatus;
   readonly view?: AttachmentView;
   readonly error?: string;
+  /** What an upload that has not finished is doing instead — waiting its turn, or retrying a drop. */
+  readonly note?: string;
 }
 
 /** The part of a rendered user block a pending send is matched against. */

@@ -229,7 +229,9 @@ daemon → relay    { "t":"claim", "protocol":"ferretry-relay/1",
 relay  → daemon   { "t":"claimed", "protocol":"ferretry-relay/1", "limits": { … } }
 ```
 
-Both frames use the all-zero `sessionId`.
+Both frames use the all-zero `sessionId`. Each has one optional field, present only once a feature
+(below) has been negotiated: `claim` may carry `replaces`, and `claimed` may carry `features` and
+`handover`.
 
 The signed message is:
 
@@ -262,8 +264,8 @@ Every control message is a strict shape (an unknown `t` or key is refused, and t
 nothing beyond the messages above is ever **assumed** of a peer. A feature is asked for and echoed:
 
 1. The daemon names the features it speaks in its route's query string:
-   `…/v1/rendezvous/<daemonId>/daemon?features=claim-probe`. A rendezvous that does not know the
-   parameter ignores it — the route is the path, and only the path.
+   `…/v1/rendezvous/<daemonId>/daemon?features=claim-probe,claim-handover`. A rendezvous that does not
+   know the parameter ignores it — the route is the path, and only the path.
 2. A rendezvous that speaks one echoes it in `claimed`, and adds the key **only** for a daemon that asked:
    `{ "t":"claimed", "protocol":"ferretry-relay/1", "limits":{ … }, "features":["claim-probe"] }`.
    `features` is never empty and never names a feature the daemon did not ask for, so an older daemon's
@@ -274,7 +276,9 @@ nothing beyond the messages above is ever **assumed** of a peer. A feature is as
 None of this changes `ferretry-relay/1`: an endpoint that never asks sees byte-for-byte the protocol it
 always saw, which is why it is a feature and not a version.
 
-**`claim-probe`** is the only feature so far:
+There are two features so far, `claim-probe` and `claim-handover`.
+
+**`claim-probe`**:
 
 ```
 daemon → relay    { "t":"probe" }     sessionId = all zero
@@ -286,6 +290,31 @@ cannot: that the rendezvous still names this socket as the daemon. There is no "
 probe from a socket the rendezvous does not name is refused `4410` — the socket is plainly alive, it
 just spoke, so the slot is what was lost — and the daemon claims again on a new socket at once. A probe
 is hop-by-hop: it is never forwarded and never metered (§13).
+
+**`claim-handover`** lets a daemon take its OWN rendezvous back the moment it knows its socket is gone,
+instead of being refused `4409` until the sweep (§9) evicts a socket the rendezvous never heard close:
+
+```
+relay  → daemon   { "t":"claimed", …, "features":[…,"claim-handover"], "handover": <32 bytes b64url> }
+daemon → relay    { "t":"claim",   …, "replaces": <32 bytes b64url> }       on a LATER socket
+```
+
+- `handover` is a random token the rendezvous mints for the socket that has just been accepted as the
+  daemon, and sends in `claimed` — **only** to a daemon that asked for `claim-handover`. It is never sent
+  to anyone else, so `claimed` for a daemon that did not ask is byte-for-byte what it always was.
+- A daemon that holds one and whose socket has ENDED puts it in `replaces` in its next claim. It does
+  not send `replaces` while the socket that was issued the token is still the holder, and it forgets the
+  token once it has been used, and when a claim is refused for any reason except `4409`. A refusal of
+  `4409` leaves it, because the same daemon may well have another try coming.
+- `replaces` is a field of `claim` only when the claim socket asked for `claim-handover`; on any other
+  socket it is a protocol error (`4400`), because a peer that did not negotiate the feature gets the
+  strict shape it always had.
+- The token is single-purpose. Each accepted claim is issued a NEW one, and the old one stops working at
+  the moment it supersedes — see §9 for exactly what a matching `replaces` does.
+
+The token is a bearer secret, and it is safe because of where it goes: `claimed` travels only over the
+holder's own TLS socket, and the daemon keeps it only in memory. A second copy of the daemon's key —
+someone who has the key but not that socket — can pass every check in the claim and still not hold it.
 
 ### Sessions
 
@@ -529,6 +558,30 @@ claim is refused (`4409`). A daemon whose network dropped is therefore locked ou
 evicts its dead socket — at most `heartbeatSeconds × 1.5`. This is a deliberate trade: the other
 resolution, letting the newest socket win, hands the rendezvous to whoever connected most recently.
 
+**The one exception: a handover.** A claim from a socket that asked for `claim-handover` (§5) which
+names the incumbent's token supersedes it. The rendezvous decides this only AFTER the claim is
+verified (the fingerprint matches and the signature holds — §5), and only when ALL of these are true:
+
+1. a daemon holds the rendezvous, and its slot carries a token (it was accepted as a daemon that asked
+   for `claim-handover`);
+2. the new claim's `replaces` is present and equals that token, compared in constant time;
+3. the claim socket itself asked for `claim-handover`.
+
+Then, in this order: the old socket is closed `4410` with the reason "replaced by a fresh claim from the
+same daemon" (nothing is sent first — it is probably dead); every session on it ends exactly as if the
+daemon had dropped, so each client is told `closed` (`4404`) and reconnects as it would after any
+daemon drop; and the new socket becomes the daemon and is sent `claimed` carrying a NEW `handover`.
+The old token is gone with the slot it lived in.
+
+Everything else is unchanged. A claim with no `replaces`, a wrong one, or one to a rendezvous whose
+holder has no token is refused `4409` after its verdict, exactly as before — the incumbent wins. The
+reason another holder of the daemon's key cannot do this is that the token is not derived from the key:
+it is random, travels only over the incumbent's own socket, and exists only in the rendezvous's storage
+and the daemon's memory, so a claim that is perfectly signed still has nothing to put in `replaces`.
+The cost of a handover is what a dropped daemon already costs, and no more: its sessions end and
+reconnect. A socket that did not ask for the feature is still refused `4409` the moment it arrives,
+before it is challenged.
+
 **Many clients, each in its own session.** Up to `maxSessions` (8) clients may be connected at once —
 a phone and a laptop, say. There is no shared "the client" slot to be ambiguous about. Each session
 is an independent end-to-end conversation with its own keys, and one client can never address
@@ -598,28 +651,28 @@ shared one, and the daemon was refused `4429` for as long as the clients kept tr
 
 ### Close codes
 
-| Code   | Meaning                                                                                        |
-| ------ | ---------------------------------------------------------------------------------------------- |
-| `4400` | protocol error: unparseable, or right message in the wrong state                               |
-| `4401` | claim rejected: fingerprint mismatch or bad signature                                          |
-| `4402` | claim deadline expired                                                                         |
-| `4403` | the daemon refused the client's device proof — unknown, idle-expired, revoked or bad signature |
-| `4404` | no daemon holds this rendezvous                                                                |
-| `4408` | heartbeat timeout                                                                              |
-| `4409` | a daemon already holds this rendezvous                                                         |
-| `4410` | this daemon socket is live but the rendezvous no longer holds its claim: claim again at once   |
-| `4413` | frame too large                                                                                |
-| `4420` | sequence broken: a frame was dropped, duplicated or reordered                                  |
-| `4421` | a record failed authentication                                                                 |
-| `4426` | unsupported version or protocol identifier; a `/1` peer of a `/2` one is told which to update  |
-| `4429` | rendezvous busy: session, socket or rate limit reached                                         |
-| `4430` | flow violation: the sender exceeded its credit window                                          |
-| `4431` | the hosted relay is disabled by its runtime kill switch                                        |
-| `4432` | a per-daemon or global hosted connection ceiling was reached                                   |
-| `4433` | a per-daemon or global hosted bandwidth ceiling was reached                                    |
-| `4440` | the session concluded; code and public reason are constant, while the outcome was sealed first |
-| `4441` | the access lease ended (§14): open a new session — this is never a revocation                  |
-| `4500` | the rendezvous itself failed                                                                   |
+| Code   | Meaning                                                                                         |
+| ------ | ----------------------------------------------------------------------------------------------- |
+| `4400` | protocol error: unparseable, or right message in the wrong state                                |
+| `4401` | claim rejected: fingerprint mismatch or bad signature                                           |
+| `4402` | claim deadline expired                                                                          |
+| `4403` | the daemon refused the client's device proof — unknown, idle-expired, revoked or bad signature  |
+| `4404` | no daemon holds this rendezvous                                                                 |
+| `4408` | heartbeat timeout                                                                               |
+| `4409` | a daemon already holds this rendezvous (and the claim did not carry its handover token)         |
+| `4410` | this daemon socket is live but no longer holds the claim — lost, or replaced by a handover (§9) |
+| `4413` | frame too large                                                                                 |
+| `4420` | sequence broken: a frame was dropped, duplicated or reordered                                   |
+| `4421` | a record failed authentication                                                                  |
+| `4426` | unsupported version or protocol identifier; a `/1` peer of a `/2` one is told which to update   |
+| `4429` | rendezvous busy: session, socket or rate limit reached                                          |
+| `4430` | flow violation: the sender exceeded its credit window                                           |
+| `4431` | the hosted relay is disabled by its runtime kill switch                                         |
+| `4432` | a per-daemon or global hosted connection ceiling was reached                                    |
+| `4433` | a per-daemon or global hosted bandwidth ceiling was reached                                     |
+| `4440` | the session concluded; code and public reason are constant, while the outcome was sealed first  |
+| `4441` | the access lease ended (§14): open a new session — this is never a revocation                   |
+| `4500` | the rendezvous itself failed                                                                    |
 
 ---
 
@@ -1768,6 +1821,16 @@ answers `413`), and an answer over it is the daemon's `502` with code `answer_to
 truncated body, because a client that rendered half a session list would show a fleet that does not
 exist. The daemon reassembles at most four request bodies per session at once. There is no
 `oversize` record any more.
+
+**A client bounds its WHOLE records, not its parts.** The reference client ends a session when more
+than one credit window of records is waiting to leave it, because a deeper queue means the daemon has
+stopped returning credit. Only whole records count: a body's later parts were bounded when their
+request was, and a phone photo alone is some eighty of them. Counting them ended the session the
+moment a second upload — or any poll — queued behind one photo, and failed every request on it at
+once (the owner's batch of 21 photos, 2026-10-29). And because one session is one queue, the reference
+client sends a body large enough to need parts on a **second request session** of its own, so the reads
+every panel polls never wait behind an upload: a poll that missed its deadline there would retire the
+session carrying the uploads. Nothing on the wire changed; it is one more session per device.
 
 Answers carry an `id` because the daemon replies in whatever order its own handlers finish. Sequence
 numbers order the wire; they do not order the work.

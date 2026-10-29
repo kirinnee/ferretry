@@ -360,6 +360,12 @@ export interface RelayLinkDependencies {
    * authorization that no longer exists.
    */
   readonly connections: DeviceConnectionTracker;
+  /**
+   * `claim-handover` (§5): the token the previous socket's `claimed` carried, named in this link's claim as
+   * `replaces` so the rendezvous can supersede that socket at once. The carrier supplies it only after the
+   * socket that held it has ended; absent on a first dial and for a rendezvous that issued none.
+   */
+  readonly replaces?: string;
 }
 
 /** What the link is doing, for a surface that has to say whether this daemon is reachable at all. */
@@ -369,6 +375,8 @@ export interface RelayLinkReport {
   readonly claimProbe: boolean;
   /** `held` answers received on this link, so "answered since the probe" is a comparison, not a clock. */
   readonly held: number;
+  /** The `claim-handover` token the rendezvous issued with `claimed`, for the carrier to offer after this socket ends. */
+  readonly handover?: string;
   readonly sessions: number;
   /** The last refusal this link made or was told about. Absent is "nothing has gone wrong yet". */
   readonly lastRefusal?: string;
@@ -550,6 +558,7 @@ export class RelayLink {
   #claimed = false;
   #claimProbe = false;
   #held = 0;
+  #handover: string | undefined;
   #lastRefusal: string | undefined;
   /** Serialises everything that assigns a sequence number, because a record's nonce IS its sequence
    *  and two sealers racing would produce two records under one nonce. */
@@ -562,6 +571,7 @@ export class RelayLink {
       claimed: this.#claimed,
       claimProbe: this.#claimProbe,
       held: this.#held,
+      ...(this.#handover === undefined ? {} : { handover: this.#handover }),
       sessions: this.#sessions.size,
       ...(this.#lastRefusal === undefined ? {} : { lastRefusal: this.#lastRefusal }),
     };
@@ -672,6 +682,8 @@ export class RelayLink {
       case 'claimed':
         this.#claimed = true;
         this.#claimProbe = message.features?.includes('claim-probe') === true;
+        // Only a rendezvous that echoed the feature may issue a token; a stray one is not remembered.
+        this.#handover = message.features?.includes('claim-handover') === true ? message.handover : undefined;
         return;
       case 'held':
         this.#held += 1;
@@ -731,7 +743,12 @@ export class RelayLink {
       kind: FRAME_KINDS.control,
       sessionId: RENDEZVOUS_SESSION_ID,
       sequence: 0,
-      payload: encodeControlMessage({ t: 'claim', protocol: RELAY_PROTOCOL_ID, ...encodeClaim(claim) }),
+      payload: encodeControlMessage({
+        t: 'claim',
+        protocol: RELAY_PROTOCOL_ID,
+        ...encodeClaim(claim),
+        ...(this.deps.replaces === undefined ? {} : { replaces: this.deps.replaces }),
+      }),
     });
   }
 

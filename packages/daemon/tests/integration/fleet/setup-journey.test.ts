@@ -243,3 +243,94 @@ describe('the first run and Clone over real files', () => {
     should(await filesUnder(path.join(target.fleet))).not.containEql('credentials/claude-you/.credentials.json');
   });
 });
+
+/** A machine that already has a setup of its own, whose default runtime the source does not have. */
+async function targetWithOwnDefault(name: string): Promise<Machine> {
+  const target = await machine(name, { claude: false });
+  const steps = [
+    { kind: 'credential.add', id: 'work', harness: 'claude' },
+    { kind: 'component.put', name: 'house', component: { kind: 'instructions' }, content: 'Be kind.\n', create: true },
+    { kind: 'profile.put', name: 'plain', layers: ['instructions/house'], create: true },
+    { kind: 'runtime.put', name: 'claude-kirin', credential: 'work', profile: 'plain', agent: true, create: true },
+  ];
+  for (const step of steps) {
+    const staged = await target.catalog.propose(step as never);
+    await target.catalog.apply(staged.id, { governed: false } as never);
+  }
+  should((await declared(target)).machine.defaultRuntime).equal('claude-kirin');
+  return target;
+}
+
+describe('Clone and the default runtime for new agents over real files', () => {
+  it('should replace a setup whose own default is removed by taking the copy default, not refuse', async () => {
+    // Arrange
+    const source = await machine('ip-172-27-76-90', { claude: true });
+    await importHost(source);
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    const target = await targetWithOwnDefault('AMER-D22HXVF42W');
+
+    // Act
+    const staged = await target.catalog.propose({
+      kind: 'clone.import',
+      mode: 'replace',
+      bundle,
+      names: { source: 'Liftoff EC2', target: 'Liftoff MBP' },
+    });
+    const outcome = await target.catalog.apply(staged.id, { governed: false } as never);
+
+    // Assert: the copy is applied, the target can read it, and the default is one of the copied runtimes.
+    should(outcome).match({ outcome: 'executed', executor: 'clone' });
+    const model = await declared(target);
+    should(Object.keys(model.runtimes)).deepEqual(['claude-default']);
+    should(model.machine.defaultRuntime).equal('claude-default');
+    should(JSON.stringify(staged.preview)).containEql('Liftoff MBP');
+    should(JSON.stringify(staged.preview)).not.containEql('AMER-D22HXVF42W');
+  });
+
+  it('should leave the default unset when the person chose none, and still write a readable setup', async () => {
+    // Arrange
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    const target = await targetWithOwnDefault('work-linux');
+
+    // Act
+    const staged = await target.catalog.propose({
+      kind: 'clone.import',
+      mode: 'replace',
+      bundle,
+      defaultRuntime: null,
+    });
+    await target.catalog.apply(staged.id, { governed: false } as never);
+
+    // Assert
+    const model = await declared(target);
+    should(model.machine.defaultRuntime).be.undefined();
+  });
+
+  it('should keep the target default on an alongside copy and take the chosen runtime under its new name', async () => {
+    // Arrange
+    const source = await machine('studio', { claude: true });
+    await importHost(source);
+    const bundle = FleetCloneBundleSchema.parse(await source.setup.exportBundle());
+    const kept = await targetWithOwnDefault('work-linux');
+    const chosen = await targetWithOwnDefault('work-mac');
+
+    // Act
+    const keptStaged = await kept.catalog.propose({ kind: 'clone.import', mode: 'alongside', bundle });
+    await kept.catalog.apply(keptStaged.id, { governed: false } as never);
+    const chosenStaged = await chosen.catalog.propose({
+      kind: 'clone.import',
+      mode: 'alongside',
+      bundle,
+      defaultRuntime: 'claude-default',
+    });
+    await chosen.catalog.apply(chosenStaged.id, { governed: false } as never);
+
+    // Assert
+    should((await declared(kept)).machine.defaultRuntime).equal('claude-kirin');
+    const model = await declared(chosen);
+    should(Object.keys(model.runtimes).toSorted()).deepEqual(['claude-default', 'claude-kirin']);
+    should(model.machine.defaultRuntime).equal('claude-default');
+  });
+});

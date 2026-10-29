@@ -4,10 +4,13 @@ import should from 'should';
 import {
   ConversationDigestError,
   digestConversation,
+  extendPortableConversationRows,
   extendSessionTranscriptRawPrefix,
+  type PortableConversationCheckpoint,
   portableConversationRows,
   sameConversationMessagePoint,
   sessionTranscriptRawPrefixStart,
+  startPortableConversation,
 } from '../../../../src/lib/session/transcript/index.ts';
 import type { TranscriptBatch, TranscriptEvent, TranscriptRawRecord } from '../../../../src/lib/transcript/types.ts';
 
@@ -323,5 +326,332 @@ describe('conversation raw-record evidence', () => {
     // Act / Assert
     should(portableConversationRows('session-1', batch)).be.empty();
     should(portableConversationRows('session-1', transcript([], [], []))).be.empty();
+  });
+});
+
+/** Record-level evidence: it names a record as a whole, so it carries no block index. */
+const usage = (byteOffset: number): TranscriptEvent => ({
+  kind: 'usage',
+  harness: 'claude',
+  role: 'assistant',
+  byteOffset,
+  usage: { inputTokens: 3, outputTokens: 5 },
+});
+
+const turn = (byteOffset: number): TranscriptEvent => ({
+  kind: 'turn',
+  harness: 'claude',
+  role: 'system',
+  byteOffset,
+  state: 'completed',
+});
+
+describe('record-level events that share a point with a block', () => {
+  const oneRecord = [record(0, '{"assistant":true}\n')] as const;
+
+  it('should not refuse a message and its usage event at one byte offset', () => {
+    // Arrange: a Claude assistant record that reports usage normalizes to both, at block 0.
+    const batch = transcript([message(0, 'assistant', 'answer', 0), usage(0)], [], oneRecord);
+
+    // Act
+    const rows = portableConversationRows('session-1', batch);
+    const digest = digestConversation('session-1', batch, point(0));
+
+    // Assert
+    should(rows.map(row => row.text)).eql(['answer']);
+    should(digest.through).eql({ v: 1, byteOffset: 0, blockIndex: 0 });
+    should(digest.messages.map(entry => entry.text)).eql(['answer']);
+    should(sameBytes(digest.selectionEvidence?.rawPrefix, foldChain(...oneRecord))).be.true();
+  });
+
+  it('should still cut at the message when the record-level event is listed before it', () => {
+    // Arrange
+    const batch = transcript([usage(0), turn(0), message(0, 'assistant', 'answer', 0)], [], oneRecord);
+
+    // Act
+    const digest = digestConversation('session-1', batch, point(0));
+
+    // Assert
+    should(digest.messages.map(entry => entry.text)).eql(['answer']);
+    should(digest.omissions.map(entry => entry.kind)).eql(['usage', 'turn']);
+  });
+
+  it('should still refuse two block-level events at one point as a duplicate', () => {
+    // Arrange: a numbered block is a block, whatever its kind.
+    const numbered: TranscriptEvent = { ...usage(0), blockIndex: 0 };
+    const batch = transcript([message(0, 'assistant', 'answer', 0), numbered], [], oneRecord);
+    const twoMessages = transcript([message(0, 'user', 'a', 0), message(0, 'assistant', 'b', 0)], [], oneRecord);
+
+    // Act / Assert
+    should(() => portableConversationRows('session-1', batch)).throw(ConversationDigestError, {
+      failure: 'incomplete_transcript',
+    });
+    should(() => portableConversationRows('session-1', twoMessages)).throw(ConversationDigestError, {
+      failure: 'incomplete_transcript',
+    });
+  });
+
+  it('should refuse a cut at a point held only by a record-level event', () => {
+    // Arrange: no block holds byte 40, so the usage there is still the evidence a cut refuses on.
+    const records = [record(0, '{"a":1}\n'), record(40, '{"b":2}\n')] as const;
+    const batch = transcript([message(0, 'user', 'one'), usage(40)], [], records);
+    const turned = transcript([message(0, 'user', 'one'), turn(40)], [], records);
+
+    // Act / Assert
+    should(() => digestConversation('session-1', batch, point(40))).throw(ConversationDigestError, {
+      failure: 'target_not_message',
+    });
+    should(() => digestConversation('session-1', turned, point(40))).throw(ConversationDigestError, {
+      failure: 'target_not_message',
+    });
+  });
+
+  it('should refuse an event with no byte offset as unaddressable', () => {
+    // Arrange
+    const unaddressed: TranscriptEvent = { kind: 'turn', harness: 'claude', role: 'system', state: 'started' };
+    const batch = transcript([unaddressed], [], oneRecord);
+
+    // Act / Assert
+    should(() => portableConversationRows('session-1', batch)).throw(ConversationDigestError, {
+      failure: 'incomplete_transcript',
+    });
+  });
+});
+
+/** The failure a rejected fold carries, or a note that it did not refuse with a digest error. */
+const refusalOf = async (promise: Promise<unknown>): Promise<string> =>
+  await promise.then(
+    () => 'resolved',
+    error => (error instanceof ConversationDigestError ? error.failure : 'unexpected error'),
+  );
+
+describe('extendPortableConversationRows', () => {
+  const records = [
+    record(0, '{"m":"one"}\n'),
+    record(12, '\n'),
+    record(13, '{"m":"two"}\n'),
+    record(25, '{"m":"three"}\n'),
+  ] as const;
+  const events = [message(0, 'user', 'one'), message(13, 'assistant', 'two'), message(25, 'user', 'three')];
+  const pacing = (clock: () => number = () => 0) => {
+    const yields = { count: 0 };
+    return {
+      yields,
+      pacing: {
+        now: clock,
+        yieldToLoop: async () => {
+          yields.count += 1;
+        },
+      },
+    };
+  };
+  const checkpointAt = (end: number, ...folded: readonly TranscriptRawRecord[]): PortableConversationCheckpoint => ({
+    rawPrefix: foldChain(...folded),
+    end,
+  });
+
+  it('should start at the chain start with nothing folded', () => {
+    // Act
+    const actual = startPortableConversation();
+
+    // Assert
+    should(actual.end).equal(0);
+    should(sameBytes(actual.rawPrefix, sessionTranscriptRawPrefixStart())).be.true();
+  });
+
+  it('should give the same rows and chain when one batch is folded in two pieces', async () => {
+    // Arrange
+    const whole = portableConversationRows('session-1', transcript(events, [], records));
+    const { pacing: fake } = pacing();
+
+    // Act
+    const first = await extendPortableConversationRows(
+      'session-1',
+      startPortableConversation(),
+      transcript(events.slice(0, 2), [], records.slice(0, 3)),
+      fake,
+    );
+    const second = await extendPortableConversationRows(
+      'session-1',
+      first.checkpoint,
+      transcript(events.slice(2), [], records.slice(3)),
+      fake,
+    );
+
+    // Assert
+    const rows = [...first.rows, ...second.rows];
+    should(rows.map(row => row.text)).eql(whole.map(row => row.text));
+    should(rows.map(row => row.point)).eql(whole.map(row => row.point));
+    for (const [index, row] of rows.entries())
+      should(sameBytes(row.rawPrefix, whole[index]?.rawPrefix ?? new Uint8Array())).be.true();
+    should(sameBytes(second.checkpoint.rawPrefix, foldChain(...records))).be.true();
+    should(second.checkpoint.end).equal(25 + records[3].bytes.byteLength);
+  });
+
+  it('should refuse a record that leaves a gap after the checkpoint', async () => {
+    // Arrange
+    const { pacing: fake } = pacing();
+
+    // Act
+    const failure = extendPortableConversationRows(
+      'session-1',
+      checkpointAt(12, records[0]),
+      transcript([], [], [records[2]]),
+      fake,
+    );
+
+    // Assert
+    should(await refusalOf(failure)).equal('incomplete_transcript');
+  });
+
+  it('should refuse a record that overlaps bytes already folded', async () => {
+    // Arrange
+    const { pacing: fake } = pacing();
+
+    // Act
+    const failure = extendPortableConversationRows(
+      'session-1',
+      checkpointAt(13, records[0], records[1]),
+      transcript([], [], [records[1]]),
+      fake,
+    );
+
+    // Assert
+    should(await refusalOf(failure)).equal('incomplete_transcript');
+  });
+
+  it('should refuse a record that skips ahead after a contiguous one', async () => {
+    // Arrange
+    const { pacing: fake } = pacing();
+
+    // Act
+    const failure = extendPortableConversationRows(
+      'session-1',
+      startPortableConversation(),
+      transcript([], [], [records[0], records[2]]),
+      fake,
+    );
+
+    // Assert
+    should(await refusalOf(failure)).equal('incomplete_transcript');
+  });
+
+  it('should refuse a batch that carries no raw records', async () => {
+    // Arrange
+    const { pacing: fake } = pacing();
+
+    // Act
+    const failure = extendPortableConversationRows(
+      'session-1',
+      startPortableConversation(),
+      transcript([message(0, 'user', 'one')]),
+      fake,
+    );
+
+    // Assert
+    should(await refusalOf(failure)).equal('incomplete_transcript');
+  });
+
+  it('should refuse an incomplete issue before hashing any record', async () => {
+    // Arrange
+    const { pacing: fake, yields } = pacing();
+    let reads = 0;
+    const counting = {
+      now: () => {
+        reads += 1;
+        return 0;
+      },
+      yieldToLoop: fake.yieldToLoop,
+    };
+    const batch = transcript(
+      [message(0, 'user', 'one')],
+      [{ harness: 'claude', code: 'invalid-json', message: 'bad line', recoverable: false }],
+      [records[0]],
+    );
+
+    // Act
+    const failure = extendPortableConversationRows('session-1', startPortableConversation(), batch, counting);
+
+    // Assert
+    should(await refusalOf(failure)).equal('incomplete_transcript');
+    should(reads).equal(0);
+    should(yields.count).equal(0);
+  });
+
+  it('should keep the checkpoint and report no last record for a batch with no records', async () => {
+    // Arrange
+    const { pacing: fake } = pacing();
+    const checkpoint = checkpointAt(12, records[0]);
+
+    // Act
+    const actual = await extendPortableConversationRows('session-1', checkpoint, transcript([], [], []), fake);
+
+    // Assert
+    should(actual.rows).be.empty();
+    should(actual.checkpoint.end).equal(12);
+    should(sameBytes(actual.checkpoint.rawPrefix, checkpoint.rawPrefix)).be.true();
+    should(actual.lastRecord).be.undefined();
+    should('lastRecord' in actual).be.false();
+  });
+
+  it('should report the last record so extending its before-value gives the checkpoint', async () => {
+    // Arrange
+    const { pacing: fake } = pacing();
+
+    // Act
+    const actual = await extendPortableConversationRows(
+      'session-1',
+      startPortableConversation(),
+      transcript(events.slice(0, 2), [], records.slice(0, 3)),
+      fake,
+    );
+
+    // Assert
+    should(actual.lastRecord?.byteOffset).equal(13);
+    should(actual.lastRecord?.byteLength).equal(records[2].bytes.byteLength);
+    should(
+      sameBytes(
+        extendSessionTranscriptRawPrefix(actual.lastRecord?.before ?? new Uint8Array(), records[2].bytes),
+        actual.checkpoint.rawPrefix,
+      ),
+    ).be.true();
+    should(sameBytes(actual.lastRecord?.before, foldChain(records[0], records[1]))).be.true();
+  });
+
+  it('should yield to the loop once the clock passes the budget between records', async () => {
+    // Arrange: every reading of the clock is 13 ms after the last, so each record is over budget.
+    let now = 0;
+    const { pacing: fake, yields } = pacing(() => {
+      now += 13;
+      return now;
+    });
+
+    // Act
+    const actual = await extendPortableConversationRows(
+      'session-1',
+      startPortableConversation(),
+      transcript(events, [], records),
+      fake,
+    );
+
+    // Assert
+    should(yields.count).be.greaterThan(0);
+    should(sameBytes(actual.checkpoint.rawPrefix, foldChain(...records))).be.true();
+  });
+
+  it('should not yield while the clock stays inside the budget', async () => {
+    // Arrange
+    const { pacing: fake, yields } = pacing(() => 5);
+
+    // Act
+    await extendPortableConversationRows(
+      'session-1',
+      startPortableConversation(),
+      transcript(events, [], records),
+      fake,
+    );
+
+    // Assert
+    should(yields.count).equal(0);
   });
 });

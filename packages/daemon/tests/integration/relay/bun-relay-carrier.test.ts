@@ -1245,7 +1245,7 @@ describe('a carrier that asks the rendezvous itself whether it still holds the c
     const { carrier, socketAt, lines } = redialingCarrier({ url: 'wss://relay.example/hosted/path' });
     carrier.start();
     const url = new URL(socketAt(0).url);
-    should(url.searchParams.get('features')).equal('claim-probe');
+    should(url.searchParams.get('features')).equal('claim-probe,claim-handover');
     should(url.pathname).match(/^\/hosted\/path\/v1\/rendezvous\/fy_daemon_[A-Za-z0-9_-]{43}\/daemon$/u);
     should(carrier.status().relayUrl).not.match(/features/u);
     should(lines.join('\n')).not.match(/features/u);
@@ -1334,5 +1334,133 @@ describe('a carrier that asks the rendezvous itself whether it still holds the c
     clock.advance(0);
     should(fake.sockets).have.length(2);
     carrier.stop();
+  });
+});
+
+describe('a carrier that offers its last handover token to reclaim its own rendezvous', () => {
+  const TOKEN = 'A'.repeat(43);
+  const NEXT_TOKEN = 'B'.repeat(43);
+  const HANDING = { ...CLAIMED, features: ['claim-probe', 'claim-handover'], handover: TOKEN } as const;
+  const replacesOf = (socket: FakeSocket): (string | undefined)[] =>
+    socket.sent.flatMap(data => {
+      if (typeof data === 'string') return [];
+      const decoded = decodeFrame(data);
+      const message = decoded.ok ? decodeControlMessage(decoded.frame.payload) : null;
+      return message?.t === 'claim' ? [message.replaces] : [];
+    });
+  const redial = (harness: ReturnType<typeof redialingCarrier>): FakeSocket => {
+    const before = harness.fake.sockets.length;
+    harness.clock.advance(harness.clock.delays.at(-1) ?? 0);
+    should(harness.fake.sockets).have.length(before + 1);
+    return harness.socketAt(before);
+  };
+  const challenge = async (socket: FakeSocket): Promise<void> => {
+    socket.onopen?.(undefined);
+    socket.onmessage?.({
+      data: controlFrame({
+        t: 'challenge',
+        protocol: RELAY_PROTOCOL_ID,
+        nonce: toBase64Url(relayCrypto.randomBytes(NONCE_BYTES)),
+        host: 'relay.example',
+        deadlineSeconds: 10,
+      }),
+    });
+    await until(() => (replacesOf(socket).length > 0 ? true : undefined), 'the claim');
+  };
+
+  it('should claim without a token the first time, and offer the issued one only from the next socket', async () => {
+    const harness = redialingCarrier();
+    harness.carrier.start();
+    const first = harness.socketAt(0);
+    first.onopen?.(undefined);
+    await harness.claimOn(first, HANDING);
+
+    // The holding socket is live: nothing has dialled, so nothing has offered the token.
+    should(harness.fake.sockets).have.length(1);
+    should(replacesOf(first)).deepEqual([undefined]);
+
+    first.onclose?.({ code: 1006, reason: '' });
+    const second = redial(harness);
+    await challenge(second);
+
+    should(replacesOf(second)).deepEqual([TOKEN]);
+    harness.carrier.stop();
+  });
+
+  it('should not remember a token the rendezvous did not echo the feature for', async () => {
+    const harness = redialingCarrier();
+    harness.carrier.start();
+    const first = harness.socketAt(0);
+    first.onopen?.(undefined);
+    await harness.claimOn(first, { ...CLAIMED, features: ['claim-probe'], handover: TOKEN });
+
+    first.onclose?.({ code: 1006, reason: '' });
+    const second = redial(harness);
+    await challenge(second);
+
+    should(replacesOf(second)).deepEqual([undefined]);
+    harness.carrier.stop();
+  });
+
+  it('should keep the token through a refusal of 4409 and through a transport failure', async () => {
+    const harness = redialingCarrier();
+    harness.carrier.start();
+    const first = harness.socketAt(0);
+    first.onopen?.(undefined);
+    await harness.claimOn(first, HANDING);
+    first.onclose?.({ code: 1006, reason: '' });
+
+    const second = redial(harness);
+    await challenge(second);
+    second.onclose?.({ code: 4409, reason: 'another daemon already holds this rendezvous' });
+    const third = redial(harness);
+    await challenge(third);
+    third.onerror?.(undefined);
+    const fourth = redial(harness);
+    await challenge(fourth);
+
+    should(replacesOf(second)).deepEqual([TOKEN]);
+    should(replacesOf(third)).deepEqual([TOKEN]);
+    should(replacesOf(fourth)).deepEqual([TOKEN]);
+    harness.carrier.stop();
+  });
+
+  it('should drop the token once the rendezvous refuses a claim for any other reason', async () => {
+    const harness = redialingCarrier();
+    harness.carrier.start();
+    const first = harness.socketAt(0);
+    first.onopen?.(undefined);
+    await harness.claimOn(first, HANDING);
+    first.onclose?.({ code: 1006, reason: '' });
+
+    const second = redial(harness);
+    await challenge(second);
+    second.onclose?.({ code: 4401, reason: 'the claim was rejected' });
+    const third = redial(harness);
+    await challenge(third);
+
+    should(replacesOf(second)).deepEqual([TOKEN]);
+    should(replacesOf(third)).deepEqual([undefined]);
+    harness.carrier.stop();
+  });
+
+  it('should replace the token with the one a successful reclaim issues, and use each only once', async () => {
+    const harness = redialingCarrier();
+    harness.carrier.start();
+    const first = harness.socketAt(0);
+    first.onopen?.(undefined);
+    await harness.claimOn(first, HANDING);
+    first.onclose?.({ code: 1006, reason: '' });
+
+    const second = redial(harness);
+    second.onopen?.(undefined);
+    await harness.claimOn(second, { ...HANDING, handover: NEXT_TOKEN });
+    second.onclose?.({ code: 1006, reason: '' });
+    const third = redial(harness);
+    await challenge(third);
+
+    should(replacesOf(second)).deepEqual([TOKEN]);
+    should(replacesOf(third)).deepEqual([NEXT_TOKEN]);
+    harness.carrier.stop();
   });
 });

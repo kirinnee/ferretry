@@ -471,6 +471,7 @@ describe('CloneMachine · Preview', () => {
         mode: 'alongside',
         bundle: { ...bundle() },
         source: { daemonId: 'work' },
+        names: { source: 'work-linux', target: 'studio-mac' },
       });
       expect(calls.work.some(call => call.path === '/v1/fleet/proposals')).toBe(false);
       expect(retried).toBe(1);
@@ -1690,6 +1691,145 @@ describe('CloneMachine · API keys and sign-ins', () => {
         'voice:copied',
         'controls:copied',
       ]);
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+});
+
+// ── Default runtime for new agents ───────────────────────────────────────────────────────────────
+
+describe('CloneMachine · default runtime for new agents', () => {
+  const AGENTS = bundle({
+    runtimes: {
+      'claude-default': { credential: 'claude-work', profile: 'default', agent: true },
+      'claude-review': { credential: 'claude-work', profile: 'default', agent: true },
+      'codex-default': { credential: 'codex-work', profile: 'default', agent: true },
+    },
+  });
+  const OWN = machineView({ runtimeCount: 3, defaultRuntime: 'claude-kirin' });
+  const pickerOf = (screen: Awaited<ReturnType<typeof render>>) =>
+    must(screen.q('[data-clone-default-runtime]'), 'default runtime select') as HTMLSelectElement;
+  const choose = async (select: HTMLSelectElement, value: string) => {
+    await interact(() => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set;
+      setter?.call(select, value);
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+    await settle();
+  };
+  const untickControls = async (screen: Awaited<ReturnType<typeof render>>) =>
+    click(screen.q('[data-setup-choice="controls"] input'), 'untick controls');
+
+  it('offers the copied agent runtimes and says what a Replace does to this machine’s own default', async () => {
+    const { createClient } = daemons({
+      work: sourceFiles({ '/v1/fleet/export': AGENTS }),
+      target: fullTarget({ '/v1/fleet/profiles': stacks(1) }),
+    });
+    const screen = await render({ createClient, machine: OWN });
+    try {
+      await toPreview(screen);
+      await untickControls(screen);
+      const options = [...pickerOf(screen).options].map(option => option.textContent);
+      expect(options).toEqual([
+        'Keep what it has now',
+        'claude-default (Claude Code)',
+        'claude-review (Claude Code)',
+        'codex-default (Codex)',
+        'None (automatic)',
+      ]);
+      expect(pickerOf(screen).value).toBe('keep:current');
+      expect(screen.text('[data-clone-default-runtime-hint]')).toContain(
+        'studio-mac keeps its own default, claude-kirin.',
+      );
+
+      await click(screen.q('[data-step-next]'), 'Next');
+      await screen.choose('replace');
+      expect(pickerOf(screen).value).toBe('claude-default');
+      expect(screen.text('[data-clone-default-runtime-hint]')).toContain(
+        'studio-mac’s default, claude-kirin, goes with the runtimes this copy replaces, so new agents start on claude-default.',
+      );
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('sends the proposed runtime on a Replace so the copy never leaves a default that is gone', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles({ '/v1/fleet/export': AGENTS }),
+      target: fullTarget({ '/v1/fleet/profiles': stacks(1) }),
+    });
+    const screen = await render({ createClient, machine: OWN });
+    try {
+      await toPreview(screen);
+      await untickControls(screen);
+      await click(screen.q('[data-step-next]'), 'Next');
+      await screen.choose('replace');
+      await click(screen.q('[data-change-submit]'), 'Replace and copy');
+      expect(changeBodies(calls.target)[0]?.change).toMatchObject({
+        kind: 'clone.import',
+        mode: 'replace',
+        defaultRuntime: 'claude-default',
+        names: { source: 'work-linux', target: 'studio-mac' },
+      });
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('sends the runtime the person picked, and null for none', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles({ '/v1/fleet/export': AGENTS }),
+      target: fullTarget({ '/v1/fleet/profiles': stacks(1) }),
+    });
+    const screen = await render({ createClient, machine: OWN });
+    try {
+      await toPreview(screen);
+      await untickControls(screen);
+      await choose(pickerOf(screen), 'codex-default');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await screen.choose('replace');
+      expect(pickerOf(screen).value).toBe('codex-default');
+      await choose(pickerOf(screen), '');
+      await click(screen.q('[data-change-submit]'), 'Replace and copy');
+      expect(changeBodies(calls.target)[0]?.change).toMatchObject({ mode: 'replace', defaultRuntime: null });
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('carries the source’s own default when its runtime is copied, and does not undo it with the controls', async () => {
+    const { calls, createClient } = daemons({
+      work: sourceFiles({
+        '/v1/fleet/export': AGENTS,
+        '/v1/fleet/machine': machineView({ name: 'work-linux', defaultRuntime: 'claude-review' }),
+      }),
+      target: fullTarget({
+        '/v1/fleet/profiles': stacks(1),
+        '/v1/fleet/machine': machineView({ defaultRuntime: 'claude-review' }),
+      }),
+    });
+    const screen = await render({ createClient, machine: OWN });
+    try {
+      await toPreview(screen);
+      expect(pickerOf(screen).value).toBe('claude-review');
+      await click(screen.q('[data-step-next]'), 'Next');
+      await screen.choose('replace');
+      await click(screen.q('[data-change-submit]'), 'Replace and copy');
+      const [fleet, controls] = changeBodies(calls.target);
+      expect(fleet?.change).toMatchObject({ kind: 'clone.import', defaultRuntime: 'claude-review' });
+      expect(controls?.change).toMatchObject({ kind: 'machine.settings', defaultRuntime: 'claude-review' });
+    } finally {
+      await screen.view.unmount();
+    }
+  });
+
+  it('shows no choice when the copy brings no agent runtime to choose between', async () => {
+    const { createClient } = daemons({});
+    const screen = await render({ createClient });
+    try {
+      await toPreview(screen);
+      expect(screen.q('[data-clone-default-runtime]')).toBeNull();
     } finally {
       await screen.view.unmount();
     }

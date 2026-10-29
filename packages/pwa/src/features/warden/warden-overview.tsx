@@ -275,8 +275,10 @@ function StatusSummary({
         {needs > 0 && <Badge tone="warn">{needs} need you</Badge>}
         {watching > 0 && <Badge tone="pend">{watching} watching</Badge>}
         {line.warning !== undefined && (
-          <Badge tone="warn">
-            <AlertTriangle size={11} aria-hidden="true" />
+          // Wraps rather than clipping: the warning is a sentence, and at 390px its end (when a paced layer
+          // is back, what becomes of a flag) is the part that matters.
+          <Badge tone="warn" data-warden-warning className="max-w-full !whitespace-normal [overflow-wrap:anywhere]">
+            <AlertTriangle size={11} aria-hidden="true" className="shrink-0" />
             {line.warning}
           </Badge>
         )}

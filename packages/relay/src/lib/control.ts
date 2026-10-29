@@ -15,6 +15,7 @@ import {
   CREDIT_WINDOW_FRAMES,
   ED25519_SIGNATURE_BYTES,
   ED25519_SPKI_BYTES,
+  HANDOVER_TOKEN_BYTES,
   HEARTBEAT_SECONDS,
   MAX_FRAME_BYTES,
   MAX_SESSIONS_PER_RENDEZVOUS,
@@ -68,17 +69,24 @@ export const ControlMessageSchema = z.discriminatedUnion('t', [
     protocol: ProtocolIdSchema,
     publicKey: base64UrlOfBytes(ED25519_SPKI_BYTES),
     signature: base64UrlOfBytes(ED25519_SIGNATURE_BYTES),
+    /**
+     * `claim-handover` only: the token the last `claimed` on this rendezvous carried, offered when that
+     * socket has ended. A verified claim naming the holder's token supersedes the holder; see §9.
+     */
+    replaces: base64UrlOfBytes(HANDOVER_TOKEN_BYTES).optional(),
   }),
   /**
    * Rendezvous → daemon: the slot is held, these are the limits. `features` echoes the ones the daemon
    * asked for that this rendezvous speaks, and is absent — never empty — for a daemon that asked none,
-   * so an older daemon's strict parse never meets a key it does not know.
+   * so an older daemon's strict parse never meets a key it does not know. `handover` is the same: sent
+   * only to a daemon that asked for `claim-handover`.
    */
   z.strictObject({
     t: z.literal('claimed'),
     protocol: ProtocolIdSchema,
     limits: RelayLimitsSchema,
     features: z.array(z.enum(RELAY_FEATURES)).min(1).max(RELAY_FEATURES.length).readonly().optional(),
+    handover: base64UrlOfBytes(HANDOVER_TOKEN_BYTES).optional(),
   }),
   /** Daemon → rendezvous (`claim-probe` only): does the rendezvous's own state still name this socket? */
   z.strictObject({ t: z.literal('probe') }),

@@ -175,6 +175,11 @@ const TriageDaySchema = z.object({
   jevSkips: z.number().int().min(0),
   jevActions: z.number().int().min(0).optional(),
   jevUsd: z.number().finite().min(0),
+  jevHour: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}$/)
+    .optional(),
+  jevHourUsd: z.number().finite().min(0).optional(),
 }) satisfies z.ZodType<unknown, WardenTriageDay>;
 
 const InvestigationRecordSchema = z.object({
@@ -217,8 +222,8 @@ const QueueMetaSchema = z.object({
 }) satisfies z.ZodType<unknown, WardenQueueEntryMeta>;
 
 /**
- * The flags the live FLEET warden was sent about, so the "who needs you" feed can say they are being
- * looked at rather than that nobody has. Cleared once that warden is gone and its report judges them.
+ * The flags the live FLEET warden was sent about: while it runs they are being looked at, so none of
+ * them is put in front of the owner as a Warden notification (`owner-routes.ts`). Cleared once that warden is gone and its report judges them.
  */
 export interface WardenSweepCoverage {
   readonly wardenId: string;
@@ -231,6 +236,57 @@ const SweepCoverageSchema = z.object({
   reportPath: z.string().min(1),
   anomalies: z.array(z.object({ sessionId: z.string().min(1), kind: AnomalyKindSchema })),
 }) satisfies z.ZodType<unknown, WardenSweepCoverage>;
+
+/**
+ * Jev's last hand-on of one standing flag: why it passed the flag on, and how sure it was.
+ *
+ * Kept so that a flag the owner has to decide says WHY in the Warden's own terms — "Jev was not sure
+ * (42%)", "Jev would nudge it, but nudging alone is off" — instead of the bare fact that it is there.
+ * It describes the flag only while that flag stands in the status it was handed on in
+ * (`owner-routes.ts`); a stale entry is read as nothing and is dropped once the map is full.
+ */
+export interface WardenJevHandoff {
+  readonly at: string;
+  /** The status the ferret was in, as `passedOnKey` keys it: a change of status is a new situation. */
+  readonly status: WardenAnomaly['status'];
+  /** `JevEscalation` (`triage.ts`), kept as a string so a vocabulary change never loses the record. */
+  readonly why: string;
+  readonly confidence: number;
+  /** The act Jev was sure of and the Warden could not carry out alone. */
+  readonly recommends?: string;
+  readonly reason?: string;
+  readonly failure?: string;
+}
+
+const JevHandoffSchema = z.object({
+  at: Instant,
+  status: SessionStatusSchema,
+  why: z.string().min(1),
+  confidence: z.number().min(0).max(1),
+  recommends: z.string().min(1).optional(),
+  reason: z.string().min(1).optional(),
+  failure: z.string().min(1).optional(),
+}) satisfies z.ZodType<unknown, WardenJevHandoff>;
+
+/** How many hand-ons the state keeps: newest first, the rest dropped. */
+export const WARDEN_JEV_HANDOFF_LIMIT = 200;
+
+/** The key a hand-on is stored under: one per (ferret, kind), as the backoff keys its looks. */
+export const jevHandoffKey = (sessionId: string, kind: WardenAnomalyKind): string => `${sessionId}|${kind}`;
+
+/** Record Jev's hand-on of one flag, replacing any earlier one for it, bounded newest first. */
+export function recordJevHandoff(
+  store: Readonly<Record<string, WardenJevHandoff>>,
+  anomaly: Pick<WardenAnomaly, 'sessionId' | 'kind'>,
+  handoff: WardenJevHandoff,
+): Readonly<Record<string, WardenJevHandoff>> {
+  const key = jevHandoffKey(anomaly.sessionId, anomaly.kind);
+  const rest = Object.entries(store)
+    .filter(([existing]) => existing !== key)
+    .toSorted(([, left], [, right]) => right.at.localeCompare(left.at))
+    .slice(0, WARDEN_JEV_HANDOFF_LIMIT - 1);
+  return Object.fromEntries([[key, handoff], ...rest]);
+}
 
 /** How many investigations and actions the state remembers beyond today's. */
 export const WARDEN_HISTORY_LIMIT = 50;
@@ -268,6 +324,13 @@ export interface WardenRuntimeState {
   readonly clearStreaks?: ClearStreakStore;
   /** The flags Jev passed on that still stand (`passedOnKey` in `triage.ts`), so it is not asked about them again. */
   readonly passedOn?: readonly string[];
+  /** Why Jev passed each flag on, keyed by {@link jevHandoffKey}: what the owner's notification says about it. */
+  readonly jevHandoffs?: Readonly<Record<string, WardenJevHandoff>>;
+  /**
+   * The subjects the owner has been notified about (`escalation.ts`), with when, kept while each still has
+   * a reason: reading a notification clears it, so this — not the board — is what stops a second one.
+   */
+  readonly notified?: Readonly<Record<string, string>>;
   /** Live assigned wardens, keyed by target session id. */
   readonly assignments?: Readonly<Record<string, WardenAssignmentRecord>>;
   /** When each target's assigned warden finished, starting its cooldown. */
@@ -304,6 +367,8 @@ const RuntimeStateSchema = z.object({
   blessings: z.record(z.string(), BlessingSchema).optional(),
   clearStreaks: z.record(z.string(), ClearStreakSchema).optional(),
   passedOn: z.array(z.string().min(1)).optional(),
+  jevHandoffs: z.record(z.string(), JevHandoffSchema).optional(),
+  notified: z.record(z.string(), Instant).optional(),
   assignments: z.record(z.string(), AssignmentSchema).optional(),
   assignedCooldowns: z.record(z.string(), Instant).optional(),
   backoff: z.record(z.string(), BackoffSchema).optional(),

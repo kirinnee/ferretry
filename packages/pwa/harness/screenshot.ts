@@ -40,6 +40,7 @@
  *   bun harness/screenshot.ts --agent-clis-only [--light]   # Settings › Machine › Agent CLIs, every install method
  *   bun harness/screenshot.ts --session-layout-only [--light]   # the session page's layout checks, with frames
  *   bun harness/screenshot.ts --settings-only [--light]   # what CI runs
+ *   bun harness/screenshot.ts [--settings-only] --viewport mobile|desktop   # one viewport, owing only its share
  */
 
 import { spawnSync } from 'node:child_process';
@@ -64,6 +65,43 @@ const VIEWPORTS = [
   { name: 'mobile', width: 390, height: 844 },
   { name: 'desktop', width: 1_440, height: 900 },
 ] as const;
+
+type ViewportName = (typeof VIEWPORTS)[number]['name'];
+
+/**
+ * WHICH VIEWPORTS THIS RUN WALKS: both, unless `--viewport mobile|desktop` names one.
+ *
+ * One viewport is how CI splits the full gallery into two jobs that run side by side, because walking
+ * both one after the other made it the longest job CI ran. They are separate JOBS, not two Chromes in one: run at once in one job, three software-rendered Chromes on four cores timed the
+ * gallery out in 3 of 7 runs under load (#598). Every tally below is owed PER VIEWPORT, so a one-viewport
+ * run owes exactly its viewport's share and both runs together owe what one unsplit run does.
+ *
+ * A value that is not a viewport is refused rather than read as "both": a typo would otherwise walk
+ * twice the frames and owe twice the tally, and pass, which is not the run anybody asked for.
+ */
+const SELECTED_VIEWPORTS: readonly (typeof VIEWPORTS)[number][] = (() => {
+  const at = process.argv.indexOf('--viewport');
+  if (at === -1) return VIEWPORTS;
+  const wanted = process.argv[at + 1];
+  const viewport = VIEWPORTS.find(candidate => candidate.name === wanted);
+  if (viewport === undefined) {
+    process.stderr.write(
+      `❌ --viewport takes one of ${VIEWPORTS.map(candidate => candidate.name).join(', ')}, not ${wanted ?? 'nothing'}\n`,
+    );
+    process.exit(2);
+  }
+  return [viewport];
+})();
+
+/** Whether this run walks `name`'s viewport. */
+const walks = (name: ViewportName): boolean => SELECTED_VIEWPORTS.some(viewport => viewport.name === name);
+
+/** What a per-viewport tally owes over the viewports this run walks: both shares unsplit, one share split. */
+const owedOver = (tally: Readonly<Record<ViewportName, number>>): number =>
+  SELECTED_VIEWPORTS.reduce((sum, viewport) => sum + tally[viewport.name], 0);
+
+/** The run's viewports, for its closing lines: a split run's log says which share it proved. */
+const VIEWPORT_LABEL = SELECTED_VIEWPORTS.map(viewport => viewport.name).join(' + ');
 
 /** A real phone context: a 390px desktop is not the mobile journey this UI serves. */
 const PHONE_CONTEXT = {
@@ -175,8 +213,10 @@ const WALKS_SETTINGS = !(
 /**
  * HOW MANY SIDEWAYS-SCROLL CHECKS A RUN THAT WALKS SETTINGS OWES, and the number is the gate.
  *
- * One hundred and fifty-nine: fifty-seven MACHINES frames on a desktop and fifty-eight on a phone, plus
- * forty-four other frames across the two viewports (57 + 58 + 44). Of the extras at each viewport, one is the
+ * Owed PER VIEWPORT, as measured: ninety-eight on a phone and ninety-five on a desktop, one hundred and
+ * ninety-three for a run that walks both. The phone's three more are its MOBILE-ONLY bottom sheets, below.
+ * A `--viewport` run owes its own share and nothing else, so the two CI legs cannot both pass while
+ * either one skips a frame. Of the extras at each viewport, one is the
  * open per-device capabilities disclosure inside Add a device, one is the unlock screen a locked machine
  * shows, two are the Security settings block's loosening sentence and out-of-bounds sentence, and two
  * are the Files panel and its Edit as YAML sheet showing a refused save's located issues.
@@ -214,11 +254,12 @@ const WALKS_SETTINGS = !(
  * chose over committed golden images: one integer per intentional change, versus a re-baselined
  * directory of PNGs whose diff nobody can review.
  */
-const SETTINGS_SIDEWAYS_CHECKS = 193;
+const SETTINGS_SIDEWAYS_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 98, desktop: 95 };
 
 /**
- * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`): one per
- * Machines frame, at each viewport — fifty-five frames (the section itself is measured once
+ * HOW MANY MACHINES GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertMachinesGeometry`), per
+ * viewport as the sideways checks are — sixty-four at each, measured. One per Machines frame —
+ * fifty-five frames (the section itself is measured once
  * its Runtimes tab has loaded), less the Machines list on a phone, which is a screen of its own outside any
  * machine: 55 + 54 (P3 added an environment login's quota page). Profile scope (P7) added six: a profile's Advanced part open, a mixed profile, a refused
  * mixed draft, the Settings list's scope badges, and instructions rendered as Markdown and as source. Profiles
@@ -229,7 +270,7 @@ const SETTINGS_SIDEWAYS_CHECKS = 193;
  * that stops being reached reads exactly like a check that passed — so a Machines frame added or removed
  * edits this, and the pull request says which frames the gate covers.
  */
-const MACHINES_GEOMETRY_CHECKS = 128;
+const MACHINES_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = { mobile: 64, desktop: 64 };
 
 /**
  * HOW MANY TERMINAL GEOMETRY CHECKS A RUN THAT WALKS SETTINGS OWES (`assertTerminalGeometry`): one per
@@ -237,7 +278,30 @@ const MACHINES_GEOMETRY_CHECKS = 128;
  * measured light and dark. Same tripwire as the two numbers above: a family added to the catalogue, or
  * a loop that stops early, changes the count rather than quietly measuring less.
  */
-const TERMINAL_GEOMETRY_CHECKS = THEME_FAMILIES.length * 2;
+const TERMINAL_GEOMETRY_CHECKS: Readonly<Record<ViewportName, number>> = {
+  mobile: THEME_FAMILIES.length,
+  desktop: THEME_FAMILIES.length,
+};
+
+/**
+ * WHICH VIEWPORT'S RUN OWES EACH PASS THAT OPENS ITS OWN CONTEXTS after the viewport loop. They pick
+ * their own widths, so they are not split; each is owed in full by exactly one viewport, so a split run
+ * owes it once between its two legs and an unsplit run owes all three. The safe-area and sessions-page
+ * passes measure phones only; the session layout is mostly 1100–1920px desktops, so it is the desktop's.
+ */
+const PASS_OWNER = {
+  sessionLayout: 'desktop',
+  safeArea: 'mobile',
+  sessionsPage: 'mobile',
+} as const satisfies Record<string, ViewportName>;
+
+/**
+ * The closing line for a pass another viewport's run owes. It is still printed, with the owner named,
+ * so the CI script can demand all five lines of every leg: a leg that skipped a pass it owed prints a
+ * short tally and fails, and a leg that never reached the end prints neither line.
+ */
+const notOwedHere = (pass: string, owner: ViewportName): string =>
+  `✅ ${pass} checks: 0/0 in ${SCHEME} at ${VIEWPORT_LABEL} — owed by the ${owner} run\n`;
 
 /** The theme families the profile-scope frames are also captured in, beside the run's own scheme. */
 const PROFILE_SCOPE_THEMES = ['blueprint-dark', 'phosphor-light', 'broadsheet-light'] as const;
@@ -2227,7 +2291,7 @@ try {
   try {
     for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY
       ? []
-      : VIEWPORTS) {
+      : SELECTED_VIEWPORTS) {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -4223,8 +4287,8 @@ try {
     }
 
     // THE SESSION PAGE'S LAYOUT — conversation width, the tab strip, nothing under a split pane — in
-    // every theme family. Its own contexts and viewports, so it runs after both viewport passes.
-    const owesSessionLayout = WALKS_SETTINGS || SESSION_LAYOUT_ONLY;
+    // every theme family. Its own contexts and viewports, so it runs after the viewport passes.
+    const owesSessionLayout = (WALKS_SETTINGS && walks(PASS_OWNER.sessionLayout)) || SESSION_LAYOUT_ONLY;
     const sessionLayoutChecks = owesSessionLayout
       ? await runSessionLayoutGeometry({
           browser,
@@ -4244,10 +4308,11 @@ try {
       process.stdout.write(
         `✅ session layout geometry checks: ${sessionLayoutChecks}/${SESSION_LAYOUT_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
+    else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('session layout geometry', PASS_OWNER.sessionLayout));
 
     // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
     // down, and rotated. Its own contexts, so it runs after the viewport passes.
-    const owesSafeArea = WALKS_SETTINGS || SAFE_AREA_ONLY;
+    const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea)) || SAFE_AREA_ONLY;
     const safeAreaChecks = owesSafeArea
       ? await runSafeAreaGeometry({
           browser,
@@ -4267,6 +4332,7 @@ try {
       process.stdout.write(
         `✅ safe-area geometry checks: ${safeAreaChecks}/${SAFE_AREA_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
+    else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('safe-area geometry', PASS_OWNER.safeArea));
 
     // THE BOTTOM OF THE APP ACROSS THE DEVICE MATRIX, each in its own engine. A WebKit row with no WebKit on
     // this machine is reported as skipped, never counted as passed.
@@ -4294,7 +4360,7 @@ try {
     }
 
     // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
-    const owesSessionsPage = WALKS_SETTINGS || SESSIONS_PAGE_ONLY;
+    const owesSessionsPage = (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage)) || SESSIONS_PAGE_ONLY;
     const sessionsPageChecks = owesSessionsPage
       ? await runSessionsPageGeometry({ browser, rootUrl: server.url.toString(), scheme: SCHEME, fail })
       : 0;
@@ -4307,13 +4373,14 @@ try {
       process.stdout.write(
         `✅ sessions page geometry checks: ${sessionsPageChecks}/${SESSIONS_PAGE_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
+    else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('sessions page geometry', PASS_OWNER.sessionsPage));
 
-    // THE CLOSING LINE, and the only one the CI script insists on. It is reached after both viewports
-    // have completed, so a run that died halfway prints nothing here and the job goes red on a
+    // THE CLOSING LINE, and the only one the CI script insists on. It is reached after every viewport
+    // this run walks has completed, so a run that died halfway prints nothing here and the job goes red on a
     // missing sentinel rather than on a green summary nobody re-reads. A tally that is short is the
     // same failure as an assertion that broke: in both cases a surface this gate is supposed to be
     // measuring was not measured.
-    const owed = WALKS_SETTINGS ? SETTINGS_SIDEWAYS_CHECKS : 0;
+    const owed = WALKS_SETTINGS ? owedOver(SETTINGS_SIDEWAYS_CHECKS) : 0;
     if (sidewaysChecks !== owed)
       fail(
         `the run made ${sidewaysChecks} sideways-scroll checks instead of the ${owed} this mode owes — ` +
@@ -4324,7 +4391,7 @@ try {
             : `a narrow mode reached the Settings block and left it part-way, which means it no longer ` +
               `skips Settings cleanly`),
       );
-    const owedGeometry = WALKS_SETTINGS ? MACHINES_GEOMETRY_CHECKS : 0;
+    const owedGeometry = WALKS_SETTINGS ? owedOver(MACHINES_GEOMETRY_CHECKS) : 0;
     if (machinesGeometryChecks !== owedGeometry)
       fail(
         `the run made ${machinesGeometryChecks} Machines geometry checks instead of the ${owedGeometry} this mode ` +
@@ -4333,9 +4400,9 @@ try {
       );
     if (WALKS_SETTINGS)
       process.stdout.write(
-        `✅ settings sideways-scroll checks: ${sidewaysChecks}/${SETTINGS_SIDEWAYS_CHECKS} in ${SCHEME}\n`,
+        `✅ settings sideways-scroll checks: ${sidewaysChecks}/${owed} in ${SCHEME} at ${VIEWPORT_LABEL}\n`,
       );
-    const owedTerminal = WALKS_SETTINGS ? TERMINAL_GEOMETRY_CHECKS : 0;
+    const owedTerminal = WALKS_SETTINGS ? owedOver(TERMINAL_GEOMETRY_CHECKS) : 0;
     if (terminalGeometryChecks !== owedTerminal)
       fail(
         `the run made ${terminalGeometryChecks} terminal geometry checks instead of the ${owedTerminal} this mode ` +
@@ -4343,11 +4410,11 @@ try {
       );
     if (WALKS_SETTINGS)
       process.stdout.write(
-        `✅ machines geometry checks: ${machinesGeometryChecks}/${MACHINES_GEOMETRY_CHECKS} in ${SCHEME}\n`,
+        `✅ machines geometry checks: ${machinesGeometryChecks}/${owedGeometry} in ${SCHEME} at ${VIEWPORT_LABEL}\n`,
       );
     if (WALKS_SETTINGS)
       process.stdout.write(
-        `✅ terminal geometry checks: ${terminalGeometryChecks}/${TERMINAL_GEOMETRY_CHECKS} in ${SCHEME}\n`,
+        `✅ terminal geometry checks: ${terminalGeometryChecks}/${owedTerminal} in ${SCHEME} at ${VIEWPORT_LABEL}\n`,
       );
     if (trustedTypesViolations.length > 0)
       fail(`Trusted Types refused ${trustedTypesViolations.length} write(s):\n${trustedTypesViolations.join('\n')}`);

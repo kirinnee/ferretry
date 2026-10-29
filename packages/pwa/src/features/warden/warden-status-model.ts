@@ -16,6 +16,7 @@
 
 import type {
   WardenAccount,
+  WardenCap,
   WardenAnomaly,
   WardenFailoverAccountView,
   WardenLogin,
@@ -116,6 +117,15 @@ export const wardenNeedsYouCount = (status: WardenStatusView): number => {
   return sessions.size;
 };
 
+/**
+ * When a cap reached only for this hour is back, `07:00 UTC` — or undefined when the cap is not
+ * paced (reached for the day, or not reached). A daemon from before pacing never says so.
+ */
+export const wardenPacedUntil = (status: Pick<WardenStatusView, 'spend'>, cap: WardenCap): string | undefined => {
+  if (!(status.spend.capsPaced ?? []).includes(cap)) return undefined;
+  return status.spend.pacedUntil === undefined ? 'the next hour' : `${status.spend.pacedUntil.slice(11, 16)} UTC`;
+};
+
 /** Why a layer the owner switched on is off right now, in a few words. */
 const LAYER_OFF: Readonly<Record<Exclude<WardenTriageReason, 'configured' | 'disabled'>, string>> = {
   jev_cap: 'Jev cap hit',
@@ -131,9 +141,16 @@ export const wardenTriageLabel = (status: WardenStatusView): string => {
   const { triage } = status;
   if (!status.config.enabled || triage.jev.reason === 'disabled' || triage.llm.reason === 'disabled') return 'Off';
   const label = layersLabel({ jev: triage.jev.active, llm: triage.llm.active });
+  const paced = (reason: keyof typeof LAYER_OFF): string | undefined => {
+    const cap = reason === 'jev_cap' ? 'jev' : reason === 'investigation_cap' ? 'investigation' : undefined;
+    const until = cap === undefined ? undefined : wardenPacedUntil(status, cap);
+    return until === undefined
+      ? undefined
+      : `${cap === 'jev' ? 'Jev' : 'full checks'} paused until ${until.replace(' UTC', '')}`;
+  };
   const off = [triage.jev, triage.llm]
     .map(layer => layer.reason)
     .filter((reason): reason is keyof typeof LAYER_OFF => reason in LAYER_OFF)
-    .map(reason => LAYER_OFF[reason]);
+    .map(reason => paced(reason) ?? LAYER_OFF[reason]);
   return off.length === 0 ? label : `${label} (${off.join(', ')})`;
 };

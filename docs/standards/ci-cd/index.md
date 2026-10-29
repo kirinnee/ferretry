@@ -28,12 +28,14 @@ critical path, and nothing goes there that is free and about as fast on GitHub.
 
 **`main` runs on GitHub.** A `main` run re-proves a tree its pull request already proved, nobody
 waits on it but `Release`, and it was 40% of the Namespace bill (330 of the 1,219 runs that used Namespace, Oct 19–28). Its
-jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except two. `Build Checks`
-stays on Namespace because it is the job that refreshes the cache volume (below). `PWA Full Gallery
-(dark)` stays because "nobody waits" is not quite true: `Release` waits for the slowest job, and the
-unsplit gallery takes 643s on GitHub, ~3 minutes more than any other `main` job. A matrix entry says
-so with `main: namespace`. A job only moves to GitHub when Namespace buys it close to nothing: the
-time it adds to the run, its queue, its cache.
+jobs take the `ubuntu-latest` branch of the same `runs-on` expression, except `Build Checks`,
+which stays on Namespace because it is the job that refreshes the cache volume (below). "Nobody
+waits" is not quite true: `Release` waits for the slowest job, so a job that would hold it back keeps
+Namespace on `main` too. The unsplit full gallery did, with a `main: namespace` matrix key — 643s on
+GitHub, ~3 minutes more than any other `main` job — until it was split into one leg per viewport, each
+about half that, and the key went with it (on a pull request the legs stay on Namespace 4x8, below). A job
+only moves to GitHub when Namespace buys it close to nothing: the time it adds to the run, its queue,
+its cache.
 
 **`vars.CI_RUNNER_POOL`** is the switch. Set the repository variable to `github` and every Namespace
 job, `Build Checks` and the E2E shards included, runs on `ubuntu-latest` from the next run on: no
@@ -57,18 +59,18 @@ did before Namespace.
 **Where each job runs** on a pull request, with the busy cores measured by sampling `/proc/stat`
 every second, and the GitHub times from the last runs before Namespace (p50):
 
-| Job                                              | Runner        | Measured                           | Why                                                         |
-| ------------------------------------------------ | ------------- | ---------------------------------- | ----------------------------------------------------------- |
-| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores           | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path    |
-| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8       | knip needs more than a 2x4's 4GB; a 4x8 bought 16s          |
-| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                         | `bun test` runs one file at a time                          |
-| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                         | short builds; `Build Checks` also refreshes the cache       |
-| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                         | well inside the critical path                               |
-| `PWA Full Gallery (dark)`                        | Namespace 4x8 | ~427s; 643s on GitHub, ~3.3GB peak | past a 2x4's memory; GitHub would make it the critical path |
-| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB                     | one journey at a time                                       |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                       | free; seven groups keep the slowest near five minutes       |
-| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell              | billed a whole minute and a cache attachment on Namespace   |
-| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
+| Job                                              | Runner        | Measured                     | Why                                                       |
+| ------------------------------------------------ | ------------- | ---------------------------- | --------------------------------------------------------- |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores     | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path  |
+| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8 | knip needs more than a 2x4's 4GB; a 4x8 bought 16s        |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                   | `bun test` runs one file at a time                        |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                   | short builds; `Build Checks` also refreshes the cache     |
+| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                   | well inside the critical path                             |
+| `PWA Full Gallery (dark, <viewport>)`            | Namespace 4x8 | RAM peaks 5–7GB a viewport   | PR: GitHub legs wait in its queue (p90 ~11 min vs ~8)     |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB               | one journey at a time                                     |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                 | free; seven groups keep the slowest near five minutes     |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell        | billed a whole minute and a cache attachment on Namespace |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                            | free; macOS and arm64 have no Namespace equivalent here   |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
   with `cache: nix` mounts a persistent `/nix` BEFORE the [Nix install](#installing-nix), so the dev shell
@@ -166,7 +168,7 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 | `unit-ledger`    | `./scripts/ci/coverage-ledger.sh unit --groups <dir>`                            | `needs: test`; the unit tier's 100% ledger                                    |
 | `int`            | `nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"`                     | matrix over `config/test-groups.json`                                         |
 | `int-ledger`     | `./scripts/ci/coverage-ledger.sh int --groups <dir>`                             | `needs: int`; the int tier's 100% ledger                                      |
-| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | Settings geometry in light, plus the full gallery (Settings included) in dark |
+| `pwa-screenshot` | `nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE"`    | Settings geometry in light; the full gallery in dark, as one leg per viewport |
 | `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                       |
 | `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                      |
 | `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one runner per build target                                 |

@@ -497,6 +497,40 @@ describe('a relayed session, browser to daemon, through the real rendezvous', ()
     should(identity.daemonId.startsWith('fy_daemon_')).be.true();
   });
 
+  it('should carry several photo-sized uploads and a poll at once on one session, every one answered', async () => {
+    // The owner's failure, 2026-10-29: a batch of phone photos over the tunnel ended the session
+    // "too many records waiting on credit" and every upload in it failed at once.
+    const identity = await newDaemonIdentity();
+    const bridge = new RelayBridge();
+    const received = new Map<string, number>();
+    await bridge.admitDaemon(identity, async request => {
+      received.set(request.path, (await request.text()).length);
+      return await answered('{"ok":true}')(request);
+    });
+    const session: RelayClientSession = await openRelaySession({
+      crypto,
+      dial: () => bridge.dial(identity.daemonId),
+      daemon: daemonConnection({ daemonId: identity.daemonId, baseUrl: DAEMON_URL, deviceId: DEVICE_ID }),
+      method: { kind: 'relay', relayUrl: RELAY_URL, operator: 'hosted' },
+      heartbeat: () => () => undefined,
+      mode: AUTH,
+    });
+    // About three MiB of base64 each: forty-odd parts, more than one credit window.
+    const photo = (index: number): string => JSON.stringify({ base64: String(index).repeat(3 * 1024 * 1024) });
+    const uploads = [1, 2, 3].map(index =>
+      session.request(
+        relayTunnelRequest(`${DAEMON_URL}/v1/upload-${String(index)}`, { method: 'POST', body: photo(index) }),
+      ),
+    );
+    const poll = session.request(relayTunnelRequest(`${DAEMON_URL}/v1/sessions`));
+    const answers = await Promise.all([...uploads, poll]);
+    await bridge.settle();
+
+    should(answers.map(answer => answer.status)).eql([200, 200, 200, 200]);
+    should(session.live()).be.true();
+    for (const index of [1, 2, 3]) should(received.get(`/v1/upload-${String(index)}`)).equal(photo(index).length);
+  }, 60_000);
+
   it('should refuse a daemon whose key is not the one the pairing pinned, without proving anything', async () => {
     const identity = await newDaemonIdentity();
     const impostor = await newDaemonIdentity();

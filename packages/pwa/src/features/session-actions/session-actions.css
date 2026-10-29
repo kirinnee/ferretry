@@ -506,3 +506,86 @@
   background: var(--nav-hover, var(--surface-2));
   color: var(--fg);
 }
+
+/* The list drawer (action-drawer.tsx): a right-hand drawer on a desktop, the whole screen on a phone. The
+   wrapper is the modal layer and the backdrop dims everything behind it, header included; its padding-top
+   starts the panel under the app header. The body is the drawer's ONE scroll area. */
+.fy-action-drawer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+.fy-action-drawer__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  padding: 0;
+  background: var(--scrim);
+  cursor: default;
+}
+.fy-action-drawer__panel {
+  position: relative;
+  display: flex;
+  width: 420px;
+  max-width: 100%;
+  min-height: 0;
+  flex-direction: column;
+  border-radius: 0;
+  border-width: 0 0 0 var(--stroke-panel, 1px);
+  border-style: solid;
+  border-color: var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover);
+  color: var(--fg);
+  font-family: var(--font-ui);
+  padding-bottom: var(--safe-bottom, 0px);
+}
+.fy-action-drawer__panel:focus {
+  outline: none;
+}
+.fy-action-drawer[data-compact] .fy-action-drawer__panel {
+  width: 100%;
+  border-left-width: 0;
+}
+.fy-action-drawer__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  border-bottom: var(--divider-width, 1px) solid var(--border-soft);
+  padding: var(--gap-sm) var(--gap-sm) var(--gap-sm) 14px;
+}
+.fy-action-drawer[data-compact] .fy-action-drawer__head {
+  padding-top: calc(var(--gap-sm) + var(--inset-top, 0px));
+}
+.fy-action-drawer__title {
+  margin: 0;
+  min-width: 0;
+  font-family: var(--font-display);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+  text-transform: var(--display-transform, none);
+}
+.fy-action-drawer__close {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  justify-content: center;
+  border-color: transparent;
+}
+.fy-action-drawer[data-compact] .fy-action-drawer__close {
+  width: 44px;
+  height: 44px;
+}
+.fy-action-drawer__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 12px 14px 14px;
+}

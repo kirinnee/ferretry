@@ -753,6 +753,18 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
      * (the target cannot check it). The bundle's own `machine` is only the name the source gave itself.
      */
     source: z.strictObject({ daemonId: NonEmptyStringSchema }).optional(),
+    /**
+     * "Default runtime for new agents" after the copy: the SOURCE's name for one of the agent runtimes the
+     * bundle brings (the target maps it through any rename), or `null` to leave it unset. Left out, the
+     * target keeps its own default when the copy leaves it standing, and otherwise picks a valid one and
+     * says so — a copy never leaves a default that names a runtime it removed.
+     */
+    defaultRuntime: NonEmptyStringSchema.nullable().optional(),
+    /**
+     * What this browser calls the two machines, for the sentences the target writes (`Liftoff EC2`, not
+     * the hostname). Display only: nothing is matched against them.
+     */
+    names: z.strictObject({ source: NonEmptyStringSchema.max(120), target: NonEmptyStringSchema.max(120) }).optional(),
   }),
 ]);
 export type FleetAccountChange = z.infer<typeof FleetAccountChangeSchema>;

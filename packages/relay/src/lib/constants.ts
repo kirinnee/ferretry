@@ -172,9 +172,19 @@ export const RELAY_FEATURES_PARAM = 'features' as const;
  * `fy-ping` cannot answer that. It is answered by Cloudflare's auto-responder, which consults neither
  * the stored rendezvous state nor the object's code, so a daemon whose claim the state no longer names
  * kept passing every heartbeat for sixteen minutes while every phone was told `4404`.
+ *
+ * `claim-handover`: a daemon whose socket dropped reclaims its OWN rendezvous at once.
+ *
+ * Without it a daemon that redials after a drop that never reached the rendezvous is refused `4409`
+ * until the sweep evicts the dead socket — up to the heartbeat grace window. With it, `claimed` carries a
+ * `handover` token, and a verified claim that names it in `replaces` supersedes the socket it was issued
+ * to. The token travels only over the holder's own TLS socket, so a second copy of the key never holds it.
  */
-export const RELAY_FEATURES = ['claim-probe'] as const;
+export const RELAY_FEATURES = ['claim-probe', 'claim-handover'] as const;
 export type RelayFeature = (typeof RELAY_FEATURES)[number];
+
+/** Random bytes in a `claim-handover` token: unguessable, and only ever sent over the holder's own socket. */
+export const HANDOVER_TOKEN_BYTES = 32 as const;
 
 /**
  * WebSocket close codes.

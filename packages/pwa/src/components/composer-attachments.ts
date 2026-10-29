@@ -5,6 +5,12 @@
  * already holds it and the send only names ids. A file the browser can already tell is unusable — empty,
  * too large, a type nothing reads — is refused locally with the curated copy and never travels.
  *
+ * AT MOST {@link MAX_CONCURRENT_UPLOADS} GO AT ONCE, and the rest wait their turn. Twenty-one phone
+ * photos used to start together: twenty-one base64 copies in the tab's memory, all queued on one
+ * connection, so the first drop failed every one of them. A failure a moment can change — a dropped
+ * connection, a busy machine — is tried again on its own, {@link UPLOAD_ATTEMPTS} times in all, and
+ * the chip says so while it waits; only what is still failing after that asks the reader to act.
+ *
  * Image previews are object URLs, and every one is revoked when its file leaves: on remove, on a
  * successful send, on a session change and on unmount. A leaked object URL is a leaked copy of the
  * file in this tab's memory.
@@ -16,12 +22,29 @@ import {
   attachmentErrorCopy,
   attachmentErrorMessage,
   isImageMime,
+  isTransientUploadFailure,
+  UPLOAD_QUEUED_COPY,
+  uploadRetryingCopy,
   validateAttachmentFile,
 } from '../lib/attachments.ts';
 import type { PendingAttachment } from './session-chat-model.ts';
 
 /** Uploads one file to the session this composer belongs to. */
 export type ComposerAttachmentUploader = (file: File) => Promise<AttachmentView>;
+
+/** Uploads in flight at once; the rest wait, in the order they were added. */
+export const MAX_CONCURRENT_UPLOADS = 3;
+
+/** Attempts per file, the first included, before a transient failure is shown as a failure. */
+export const UPLOAD_ATTEMPTS = 4;
+
+/** The wait before attempt `n + 1`: long enough for a phone to find its connection again. */
+export const UPLOAD_RETRY_DELAYS_MS: readonly number[] = [1_000, 3_000, 8_000];
+
+/** How the hook waits between attempts; injected so a test does not sleep. */
+export type RetryWait = (milliseconds: number) => Promise<void>;
+
+const sleep: RetryWait = async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds));
 
 /** Object URLs are a browser facility; a renderer with none previews nothing rather than failing. */
 const previewUrl = (file: File): string | undefined => {
@@ -48,25 +71,89 @@ interface ComposerAttachments {
   readonly clear: () => void;
 }
 
-export function useComposerAttachments(upload: ComposerAttachmentUploader | undefined, scopeKey: string) {
+export function useComposerAttachments(
+  upload: ComposerAttachmentUploader | undefined,
+  scopeKey: string,
+  wait: RetryWait = sleep,
+) {
   const [entries, setEntries] = useState<readonly PendingAttachment[]>([]);
   const live = useRef(entries);
   live.current = entries;
   const sequence = useRef(0);
+  /** Files waiting for a slot, oldest first, and how many slots are taken. */
+  const queue = useRef<PendingAttachment[]>([]);
+  const running = useRef(0);
+  /** Bumped by every reset, so an upload that outlives its scope cannot write into the next one. */
+  const generation = useRef(0);
+  /** Files removed or reset away; an upload still running for one is not retried and not reported. */
+  const gone = useRef(new Set<string>());
 
   const patch = useCallback((localId: string, next: Partial<PendingAttachment>) => {
     setEntries(current => current.map(entry => (entry.localId === localId ? { ...entry, ...next } : entry)));
   }, []);
 
+  const settle = useCallback(
+    (localId: string, next: Partial<PendingAttachment>) =>
+      setEntries(current =>
+        current.map(entry => {
+          if (entry.localId !== localId) return entry;
+          const { note: _note, error: _error, ...rest } = entry;
+          return { ...rest, ...next };
+        }),
+      ),
+    [],
+  );
+
+  const attempt = useCallback(
+    async (entry: PendingAttachment, uploader: ComposerAttachmentUploader, epoch: number): Promise<void> => {
+      const current = (): boolean => epoch === generation.current && !gone.current.has(entry.localId);
+      for (let tried = 1; ; tried += 1) {
+        if (!current()) return;
+        // A file that waited for a slot stops saying so the moment it starts.
+        if (tried === 1) settle(entry.localId, {});
+        try {
+          const view = await uploader(entry.file);
+          if (current()) settle(entry.localId, { status: 'ready', view });
+          return;
+        } catch (error) {
+          if (!current()) return;
+          if (tried >= UPLOAD_ATTEMPTS || !isTransientUploadFailure(error)) {
+            settle(entry.localId, { status: 'failed', error: attachmentErrorMessage(error) });
+            return;
+          }
+          patch(entry.localId, { note: uploadRetryingCopy(tried + 1, UPLOAD_ATTEMPTS) });
+          await wait(UPLOAD_RETRY_DELAYS_MS[tried - 1] ?? UPLOAD_RETRY_DELAYS_MS.at(-1) ?? 0);
+        }
+      }
+    },
+    [patch, settle, wait],
+  );
+
+  const pump = useCallback(() => {
+    if (upload === undefined) return;
+    while (running.current < MAX_CONCURRENT_UPLOADS) {
+      const next = queue.current.shift();
+      if (next === undefined) return;
+      if (gone.current.has(next.localId)) continue;
+      running.current += 1;
+      const epoch = generation.current;
+      void attempt(next, upload, epoch).finally(() => {
+        // A slot freed by an upload from before a reset belongs to nothing any more.
+        if (epoch !== generation.current) return;
+        running.current -= 1;
+        pump();
+      });
+    }
+  }, [attempt, upload]);
+
   const start = useCallback(
     (entry: PendingAttachment) => {
       if (upload === undefined) return;
-      upload(entry.file).then(
-        view => patch(entry.localId, { status: 'ready', view }),
-        (error: unknown) => patch(entry.localId, { status: 'failed', error: attachmentErrorMessage(error) }),
-      );
+      queue.current.push(entry);
+      if (running.current >= MAX_CONCURRENT_UPLOADS) patch(entry.localId, { note: UPLOAD_QUEUED_COPY });
+      pump();
     },
-    [patch, upload],
+    [patch, pump, upload],
   );
 
   const add = useCallback(
@@ -94,6 +181,7 @@ export function useComposerAttachments(upload: ComposerAttachmentUploader | unde
 
   const remove = useCallback((entry: PendingAttachment) => {
     revoke(entry);
+    gone.current.add(entry.localId);
     setEntries(current => current.filter(candidate => candidate.localId !== entry.localId));
   }, []);
 
@@ -102,7 +190,7 @@ export function useComposerAttachments(upload: ComposerAttachmentUploader | unde
       setEntries(current =>
         current.map(candidate => {
           if (candidate.localId !== entry.localId) return candidate;
-          const { error: _error, ...rest } = candidate;
+          const { error: _error, note: _note, ...rest } = candidate;
           return { ...rest, status: 'uploading' as const };
         }),
       );
@@ -113,6 +201,10 @@ export function useComposerAttachments(upload: ComposerAttachmentUploader | unde
 
   const clear = useCallback(() => {
     for (const entry of live.current) revoke(entry);
+    generation.current += 1;
+    queue.current = [];
+    running.current = 0;
+    gone.current = new Set();
     setEntries([]);
   }, []);
 

@@ -239,6 +239,8 @@ function harness(
     /** When this device's key is due for replacement; absent means the directory has no opinion at all. */
     readonly rotateBy?: (deviceId: string) => number | undefined;
     readonly lease?: AccessLeasePolicy;
+    /** The `claim-handover` token (§5) a previous socket of this daemon was issued, offered as `replaces`. */
+    readonly replaces?: string;
   } = {},
 ): Harness {
   const sent = wire();
@@ -284,6 +286,7 @@ function harness(
     },
     clock: extra.now === undefined ? TEST_CLOCK : { now: extra.now },
     ...(extra.lease === undefined ? {} : { lease: extra.lease }),
+    ...(extra.replaces === undefined ? {} : { replaces: extra.replaces }),
     scheduler: {
       after: (milliseconds, action) => {
         const timer: FakeTimer = { milliseconds, fire: action, cancelled: false };
@@ -487,6 +490,40 @@ describe('claiming a rendezvous', () => {
     should(sent.frames.map(controlOf)).deepEqual([{ t: 'probe' }]);
     should(sent.frames[0]?.sessionId.text).equal(RENDEZVOUS_SESSION_ID.text);
     should(link.report()).containDeep({ claimed: true, claimProbe: true, held: 2 });
+  });
+
+  it('should report the handover token only from a rendezvous that echoed claim-handover', async () => {
+    const token = 'A'.repeat(43);
+    const limits = { maxFrameBytes: 65_536, creditWindowFrames: 32, maxSessions: 8, heartbeatSeconds: 30 } as const;
+    const handing = harness();
+    await handing.link.receiveBinary(
+      control({ t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits, features: ['claim-handover'], handover: token }),
+    );
+    const silent = harness();
+    await silent.link.receiveBinary(
+      control({ t: 'claimed', protocol: RELAY_PROTOCOL_ID, limits, features: ['claim-probe'], handover: token }),
+    );
+    const plain = harness();
+    await plain.link.receiveBinary(claimed());
+
+    should(handing.link.report().handover).equal(token);
+    should(silent.link.report().handover).be.undefined();
+    should(plain.link.report().handover).be.undefined();
+  });
+
+  it('should offer the token it was given as `replaces` in the claim, and claim plainly without one', async () => {
+    const token = 'B'.repeat(43);
+    const offering = harness(undefined, undefined, undefined, undefined, { replaces: token });
+    const plain = harness();
+
+    await offering.link.receiveBinary(challenge());
+    await plain.link.receiveBinary(challenge());
+
+    const offered = controlOf(offering.wire.frames[0]);
+    const unoffered = controlOf(plain.wire.frames[0]);
+    if (offered?.t !== 'claim' || unoffered?.t !== 'claim') throw new Error('the daemon did not claim');
+    should(offered.replaces).equal(token);
+    should('replaces' in unoffered).be.false();
   });
 
   it('should sign the challenge for the host it dialled, and say what it claimed', async () => {

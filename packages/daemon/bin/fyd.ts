@@ -460,7 +460,12 @@ import {
   TmuxPaneQueue,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { LOOP_PARSE_PACING, NodeTranscriptImageFiles, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import {
+  LOOP_PARSE_PACING,
+  NodeTranscriptFileRuntime,
+  NodeTranscriptImageFiles,
+  NodeTranscriptSource,
+} from '../src/adapters/transcript/index.ts';
 import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
   FileSessionAttachmentCopier,
@@ -613,8 +618,10 @@ import {
   CodexTranscriptParser,
   type ConversationAdopter,
   type ConversationConvert,
+  ConversationDigestError,
   type ConversationFilesPort,
   ConversationImportService,
+  ConversationIndex,
   type ConversationLinker,
   type ConversionCheckPort,
   type ConversionSummary as ConvertedConversationSummary,
@@ -3937,6 +3944,8 @@ interface WardenParts {
   readonly livenessSample: (target: LivenessTarget) => Promise<LivenessSample>;
   /** Close the browsers a ferret launched that still run under its pane, read afresh; how many closed. */
   readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
+  /** This machine's name, as pairing gave it: every Warden notification says which machine it is about. */
+  readonly machineName: () => string | undefined;
 }
 
 /**
@@ -4056,7 +4065,6 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
               waitingSince: item.waitingSince,
               howToResolve: item.howToResolve,
               raisedBy: item.raisedBy,
-              ...(item.raisedByName === null ? {} : { raisedByName: item.raisedByName }),
               ...(item.sourceRef === null ? {} : { sourceRef: item.sourceRef }),
             })),
           };
@@ -4065,6 +4073,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       fleet: {
         fleet: async () =>
           await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view, liveness))),
+        // A monitor that has stopped seeing is ONE fault of this daemon, never one per ferret.
+        monitorStalled: () => liveness.stalled(),
       },
       spawner: {
         spawn: async request => {
@@ -4133,9 +4143,14 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
                 context: request.context,
                 waitingSince: request.waitingSince,
                 howToResolve: request.howToResolve,
-                // NO STRUCTURED ASK. This is an instruction, not a question: the daemon has nothing
-                // to do with an answer, and a bare `resolve` is what a person needs to be able to
-                // reach for once they have acted.
+                // A plain notification from the Warden: no ask and no answers — reading it is acting on
+                // it, and it opens the ferret's chat. Old apps read it as an `info` card.
+                notice: request.notice,
+                ping: request.ping,
+                title: request.title,
+                kind: 'info',
+                premise: request.premise,
+                ...(request.terms === undefined ? {} : { terms: [...request.terms] }),
               },
               WARDEN_ESCALATION_ACTOR,
             )
@@ -4170,6 +4185,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       wardenCwd: parts.wardenRoot,
       supervisesMonitors: true,
       mayAct: false,
+      machineName: parts.machineName,
     },
   );
   // The loop drives a WRAPPED service so the holder is refreshed by the timer's sweeps as well as by
@@ -4329,6 +4345,9 @@ async function wardenFleetSession(
     // Watched when the liveness monitor has looked at it recently — see `WardenLivenessMonitor.watching`.
     hasLiveMonitor: liveness.watching(view.config.id),
     ...(liveness.frozenAt(view.config.id) === undefined ? {} : { frozenAt: liveness.frozenAt(view.config.id) }),
+    // Silence is measured from when this daemon began watching — and a ferret no tick has reached yet is
+    // being watched from now: a restart judges nothing on silence it did not see.
+    observedSince: liveness.observedSince(view.config.id) ?? new Date().toISOString(),
     ...(liveness.leftoverBrowserSince(view.config.id) === undefined
       ? {}
       : { leftoverBrowserSince: liveness.leftoverBrowserSince(view.config.id) }),
@@ -7265,6 +7284,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     new NodeTranscriptSource(codexTranscriptParser),
   ];
   /**
+   * Every session's addressable conversation, folded once and extended by what was appended — one for
+   * the daemon, so a page of a long session costs its appended bytes rather than the whole file. See
+   * `ConversationIndex` for what is proved before a held fold is extended.
+   */
+  const conversationIndex = new ConversationIndex(
+    transcriptSources,
+    new NodeTranscriptFileRuntime(),
+    LOOP_PARSE_PACING,
+  );
+  /**
    * A separate read surface for conversations that existed before Ferretry.
    *
    * It shares the exact parser instances used by managed sessions, but its filesystem capability
@@ -7326,6 +7355,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       transcriptSources,
       resolver,
       new StorageTranscriptDigestJournal(storage),
+      conversationIndex,
     );
     return {
       read: async sessionId => {
@@ -7340,10 +7370,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         if (provenance === undefined || provenance.identity === 'undiscovered' || provenance.file !== file)
           return { kind: 'unresolved' };
 
-        const rows = await reader
-          .portableRowsFromFile({ sessionId, harness: config.data.harness }, file)
-          .catch(() => undefined);
-        if (rows === undefined) return { kind: 'unreadable' };
+        // A refusal keeps its reason: "could not read completely" alone cannot tell a damaged record
+        // from a missing journal from a file replaced mid-read, and the operator needs to know which.
+        let rows: Awaited<ReturnType<SessionTranscriptReader['portableRowsFromFile']>>;
+        try {
+          rows = await reader.portableRowsFromFile({ sessionId, harness: config.data.harness }, file);
+        } catch (error) {
+          return {
+            kind: 'unreadable',
+            reason: error instanceof ConversationDigestError ? error.message : 'an unexpected error stopped its read',
+          };
+        }
+        if (rows === undefined) return { kind: 'unreadable', reason: 'no transcript source speaks its harness' };
         return {
           kind: 'read',
           context: { sessionId, incarnation: config.data.incarnation, provenance },
@@ -10315,6 +10353,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         secrets,
         warden: createWardenSubsystem({
+          machineName: () => analyticsMachineName ?? hostname(),
           activities,
           sessions,
           documents: createSessionDirectorySubsystem(paths, storage),

@@ -404,6 +404,20 @@ Settings → Setup → **Clone from another machine**. **Source** → **Preview*
   **Doesn't copy** (_n_ sign-ins — "A refresh token on two machines would sign one of them out. Each
   becomes an empty slot on _target_; sign in there. Runtimes keep pointing at their slot." — and History); **Check after copying** (paths, E30); a note when a
   harness is missing on the target (E29).
+- **Default runtime for new agents** (Preview and Existing setup): a select over the agent runtimes the
+  copy brings, plus "None (automatic)" and, on a plain copy, "Keep what it has now". Rule T makes the
+  default name an agent runtime that exists, and Replace deletes the target's runtimes while its machine
+  settings stay, so a default left alone would dangle and the target could no longer read its own
+  configuration. The choice is therefore always concrete and always shown: the person's pick; else the
+  source's own default when its runtime is copied (the "controls" item); else the target's own default when
+  a plain copy leaves it standing; else `claude-default`, then a runtime of the replaced default's family,
+  then the first by name (`suggestCloneDefault`, one function for the app and the planner). It travels on
+  `clone.import` as `defaultRuntime` (a source runtime name, `null` for none, absent to let the planner
+  decide with the same rule) and is mapped through any `-2` rename. The planner keeps rule T as the guard:
+  a `defaultRuntime` that is not a copied agent runtime is refused with the runtimes to pick from, and the
+  copy's description says when the target's default was replaced. After the fleet copy the "controls" item
+  re-reads this machine's default instead of re-applying the source's, so it cannot undo the choice. The
+  sentences name machines by the person's name for them (`names` on the change), never a hostname.
 - **Existing setup**: Add alongside / Replace (E28). Replace is a danger button "Replace and copy".
 - **Done**: what was copied, how many names got `-2`, **Sign in to use them** (each slot with "used
   by _n_ runtimes"), and a primary **Sign in once for _n_ runtimes** on the slot with the most

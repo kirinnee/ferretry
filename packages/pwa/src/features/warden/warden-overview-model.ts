@@ -31,7 +31,12 @@ import type {
   WardenStatusView,
   WardenVerdictKind,
 } from '@ferretry/protocol';
-import { wardenAccountLabel, wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
+import {
+  wardenAccountLabel,
+  wardenInvestigationHead,
+  wardenLoginProblem,
+  wardenPacedUntil,
+} from './warden-status-model.ts';
 import { ANOMALY_CHIPS, chip, layersLabel, type WardenChip } from './warden-vocabulary.ts';
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────────────────────────
@@ -139,15 +144,25 @@ export const investigatorLabel = (status: Pick<WardenStatusView, 'config' | 'fai
   return head?.model ?? (head === undefined ? 'no login' : wardenAccountLabel(head));
 };
 
+/** What becomes of a new flag while Jev is paused, in plain words: a full check, or the owner. */
+const pausedTo = (status: WardenStatusView): string =>
+  status.triage.llm.active ? 'go to a full check' : 'wait for you';
+
 /** What becomes of a flag Jev did not clear: an investigation while that layer runs, the owner otherwise. */
 const passedTo = (status: WardenStatusView): string =>
   status.triage.llm.active ? 'goes to an investigation' : 'waits for you';
 
 const guardWarning = (status: WardenStatusView, now: number): string | undefined => {
   const { jev, llm } = status.triage;
+  const llmPaced = wardenPacedUntil(status, 'investigation');
+  if (llm.reason === 'investigation_cap' && llmPaced !== undefined)
+    return `Full checks paused until ${llmPaced} — new flags wait for you`;
   if (llm.reason === 'investigation_cap') return 'LLM cap hit — flags wait for you until midnight UTC';
   if (llm.reason === 'no_login')
     return `${wardenLoginProblem(status.login, status.failover?.accounts ?? []) ?? 'No investigation login'} — investigations are off until you choose one in Settings › Warden`;
+  const jevPaced = wardenPacedUntil(status, 'jev');
+  if (jev.reason === 'jev_cap' && jevPaced !== undefined)
+    return `Jev paused until ${jevPaced} — new flags ${pausedTo(status)}`;
   if (jev.reason === 'jev_cap') return `Jev cap hit — every flag ${passedTo(status)} until midnight UTC`;
   if (!jev.configured) return undefined;
   if (status.triage.guardFailure?.code === 'not_set') return `No Jev key — every flag ${passedTo(status)}`;

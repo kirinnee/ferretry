@@ -120,7 +120,7 @@ else's is written and held. An agent never confirms.
 
 | Layer             | Key          | What it does to a flag                                                                   | Spends         |
 | ----------------- | ------------ | ---------------------------------------------------------------------------------------- | -------------- |
-| Rules             | — (always)   | deterministic checks raise it; shown to you in Insights › Warden › Needs you             | nothing        |
+| Rules             | — (always)   | deterministic checks raise it; what nothing settles reaches you as a Warden notification | nothing        |
 | Jev               | `layers.jev` | Jev answers first: leaves it, acts on it alone when sure enough, or hands it on          | Jev            |
 | LLM investigation | `layers.llm` | a read-only investigation (an assigned warden), rotated across `accounts`, as kteam does | investigations |
 
@@ -150,11 +150,31 @@ the nudge itself — no message, no nudge. What happens next:
 | failover                                               | handed on — Jev cannot name the login to move to                          |
 | unsure, below the bar, or any failure                  | handed on                                                                 |
 
-**Handed on** means an investigation while `layers.llm` is on and under its cap, and otherwise **Needs you**.
+**Handed on** means an investigation while `layers.llm` is on and under its cap, and otherwise **you**, as a
+Warden notification (below).
 Every failure hands on — no key, a timeout, a refusal, an answer it cannot read, the Jev cap, a provider
 back-off, an act that did not take — so an unsure or broken Jev costs money or your attention and never acts on
-noise or hides a stuck ferret. An investigation that fails leaves the flag standing in Needs you. Without a Jev
-key every flag is handed on.
+noise or hides a stuck ferret. An investigation that fails tells you, as a Warden notification.
+Without a Jev key every flag is handed on.
+
+**When the Warden needs you, it sends a notification** from "Warden" — a plain notification in your Inbox
+(an Attention item marked `notice`, with `ping` so the phone buzzes), on the machine the ferret lives on, so
+the Inbox shows every paired machine's. It is sent whenever a standing flag is yours to decide: an
+investigation's explicit `Verdict: NEEDS_HUMAN`, a confident act held for your yes, an investigation that
+finished without a readable verdict, a flag Jev handed on with no investigation to follow (the layer is off,
+capped or has no login), or one nothing could look at. It is **one per ferret and kind of trouble**
+(`warden:ask:<kind>`, on that ferret, so a tap opens its chat), refreshed while it is open rather than
+repeated; a fault that names several ferrets — a daemon or liveness monitor that watches none, a provider
+outage — is **one for the machine** (`warden:ask:fleet:<kind>:<key>`). It says which ferret on which machine,
+what was seen, why now ("Jev was 42% sure", "today's investigation budget is spent") and the recommended
+remedy in plain words ("The Warden recommends a nudge"); it has no answers — you act from the ferret's chat.
+**It is sent once per episode**: reading it clears it, and the Warden remembers it told you
+(`notified` in its state) for as long as the flag keeps a reason, so it says nothing more until the flag
+clears and comes back. It clears itself the moment the flag clears, the ferret finishes, or the Warden is
+handling it again (blessed, investigating), and none is sent while the Warden is off. **Before notifications**,
+an explicit NEEDS_HUMAN verdict wrote a durable item (`warden:<kind>`); the first sweep after upgrading
+resolves any still open, with a note, and tells you as a notification instead. Insights › Warden links to the
+Inbox's Warden notifications; nothing else lists them.
 
 **How sure Jev must be to act alone** is `jevActs`, one bar per act, from 0.80 to 1 — riskier acts higher by
 default: `nudge` 0.90, `resume` 0.93, `restart` 0.95, `stop` 0.98. **`1` means Jev never does that act
@@ -186,7 +206,7 @@ touches the ferret — see below.)
 `restart` relaunches a dead or frozen process with its conversation intact — the resume path, replacing a
 pane that still looks alive — when the report recommends `RESTART`; a file that names `resume` but not
 `restart` gives `restart` the same answer. An act it may not
-do alone is held and listed under Needs you for you to decide. Every act, every hold and every Jev leave is
+do alone is held, and a Warden notification tells you what it recommends. Every act, every hold and every Jev leave is
 listed under Recent actions and in the journal with who decided it — Jev's with how sure it was and why.
 
 **Which login investigates.** `accounts` is the order of logins, head first, and `failover.policy` says how
@@ -205,7 +225,14 @@ rewritten to hide it. A login is always spelled by its **runtime name** (`claude
 `caps.investigationUsdPerDay` (default $2) the investigations'; `caps.maxInvestigationsPerHour` (default 6)
 spaces investigations. A cap that is reached turns off **only its own layer** until midnight UTC — with the
 Jev cap hit, flags go straight to an investigation; with the investigation cap hit, Jev still clears what it
-can and the rest wait for you — and the Warden page says so. Jev is priced at
+can and the rest wait for you — and the Warden page says so.
+
+**Paced through the day.** No layer may spend more than **a quarter of its daily cap in one UTC hour**
+($0.125 of Jev's default $0.50, $0.50 of the investigations' $2), so one burst of flags cannot spend the
+day before most of it has happened. A layer that reaches its share is off until the top of the next hour —
+the status lists it in `spend.capsPaced` with `pacedUntil`, and the Warden page says _Jev paused until 07:00 UTC — new flags go to a full check_
+rather than _until midnight_. An investigation it holds back is queued, never dropped; a flag Jev is not
+asked about is passed on as it would be with the cap hit. Jev is priced at
 `guard.usdPerMillionInputTokens` (published prices disagree, so it is a setting). An investigation is
 priced from its own transcript once analytics has read it; until then it counts at the average priced
 investigation, for the cap only. The status's savings line — (Jev's leaves + the acts it did alone) × that
@@ -238,14 +265,21 @@ Warden's supervision of that ferret off for a while ([grants.md](grants.md)).
 **The liveness check.** Every 30 s the Warden looks at each working ferret — a digest of its screen and
 of its transcript tail, the work counters its harness paints, and which processes run under its pane — and
 keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and stuck-command
-rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been able to see
-for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
+rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret that **three on-time looks in a
+row** could not see is flagged `dead_monitor`. It is counted in looks, not minutes: a ferret started since the
+last tick has missed no look, and a tick the host starved (one that started or finished well late) or one
+blind to every ferret at once is the monitor's failure, not the ferrets' — when no tick has seen anything for
+five minutes (ten ticks) the sweep raises **one** `dead_monitor` for the whole daemon (`daemon:liveness-stalled`) instead
+of one per ferret. Jev is never asked about `dead_monitor`: it is a fact about the daemon that no transcript
+can confirm, so it goes straight to an investigation or to you. A ferret with no sign of life of any kind for its
 `nudgeAfterSeconds` (default 300) is nudged once — only while `mayActAlone.nudge` is on — and one with no
 transcript, counter or subprocess sign for its `killAfterSeconds` (default 900; read as "frozen", since the
 Warden never kills) after that is flagged **frozen**: a restart candidate that goes through the layers like
 any other flag. A ferret parked with `signal waiting`, an interactive ferret, or a tick that ran late on a
 starved host is never nudged or flagged. The ledger is kept in memory: a restarted daemon starts every
-clock again rather than judging silence it did not see.
+clock again rather than judging silence it did not see — the long-think and stuck-command rules measure
+silence from no earlier than the daemon's **first look** at the ferret, so a restart never flags a ferret on
+the last-output time its documents carried over from before it.
 
 **What counts as a running command.** Only a **tool command**: what the harness runs for the agent through
 a shell (`zsh -c …`, `bash -c …`), and everything under it. The harness's own **helpers** — `fy mcp serve`,
@@ -258,7 +292,7 @@ episode, so one short command after another never reads as one long one.
 **Waiting on you is never investigated.** While a ferret's turn is over (`your-turn`) with no command of
 its own still running, or it is parked on a question or permission prompt (`needs-input`), no long-think or
 stuck-command flag is raised — and it is never nudged — because the next move is yours; a question nobody
-answers is `unattended_question`, which Needs you owns. Detection resumes by itself once it works again. A
+answers is `unattended_question`, which reaches you as a Warden notification unless its board already asks you. Detection resumes by itself once it works again. A
 turn that ended while a command it started still runs is **not** waiting on you: it is waiting on that
 command, and a command that can never finish is exactly what the stuck rule is for.
 
@@ -300,8 +334,8 @@ accounts:
 `POST /v1/warden/investigate {sessionId, note?}` is the owner asking for an investigation: it skips Jev
 and the blessing, joins the queue ahead of the sweep's own flags, and still waits for a slot and counts
 against today's cap — even with the LLM layer off, because the owner asked. `GET /v1/warden/attention` is
-the Needs-you feed: the session attention boards, the verdicts that ask for you, the flags nothing has
-cleared and the acts held for you.
+a thin read of the Warden's own open notifications on this machine's live ferrets — never a second list —
+with a degraded banner when a board, the reports or the sweep could not be read.
 
 ## Copy and Export
 
