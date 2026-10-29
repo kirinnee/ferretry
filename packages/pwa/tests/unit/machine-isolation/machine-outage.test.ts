@@ -99,3 +99,34 @@ describe('machineOutage and a blip', () => {
     expect(machineOutage('M', blip, { status: 'error', error: 'HTTP 500' })?.chip).toBe('Relay down · retrying');
   });
 });
+
+describe('machineOutage on a saturated disk', () => {
+  const disk = { someAvg10: 52, fullAvg10: 46, saturated: true };
+  const SENTENCE = 'Disk is saturated (io pressure 46% full) — the daemon is slow, not dead';
+
+  it('tells a not-answering or refresh-failed machine to wait, not to wake it', () => {
+    const silent = machineOutage(
+      'Liftoff EC2',
+      { kind: 'connected' },
+      { status: 'error', error: `request ${NOT_ANSWERING_MARK} 20s` },
+      { disk },
+    );
+    const failed = machineOutage('Liftoff EC2', { kind: 'connected' }, { status: 'error', error: 'boom' }, { disk });
+    expect(silent?.advice).toBe(SENTENCE);
+    expect(failed?.advice).toBe(SENTENCE);
+  });
+
+  it('keeps the offline advice, which is about this device and not the disk', () => {
+    const outage = machineOutage(
+      'Liftoff EC2',
+      reconnecting('device-offline'),
+      { status: 'error', error: 'x' },
+      { disk },
+    );
+    expect(outage?.advice).toBe('Check Wi-Fi or mobile data. Ferretry reconnects on its own.');
+  });
+
+  it('is still nothing while the machine answers, disk or not', () => {
+    expect(machineOutage('Liftoff EC2', { kind: 'connected' }, { status: 'ready', error: null }, { disk })).toBeNull();
+  });
+});

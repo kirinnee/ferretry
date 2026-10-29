@@ -491,3 +491,150 @@ describe('status of a daemon serving outside its service manager', () => {
     should(stopped).have.property('orphan', false);
   });
 });
+
+describe('disk saturation', () => {
+  const saturated = { someAvg10: 52, fullAvg10: 46, saturated: true };
+  const calmEventLoop = { lagMs: 0, maxLagMs: 0, stalls: 0 };
+  const diskStall = {
+    at: '2026-10-21T08:00:00.000Z',
+    durationMs: 5_000,
+    during: [],
+    cause: 'disk' as const,
+    io: saturated,
+  };
+
+  it('should say the disk is saturated when the daemon reports it now, under a serving daemon', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health(),
+        liveness({ status: 'ok', eventLoop: { ...calmEventLoop, io: saturated } }),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(actual).containEql('  disk is saturated (io pressure 46% full) — the daemon is slow, not dead');
+  });
+
+  it('should say the last stall was the disk when nothing is saturated now', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health(),
+        liveness({
+          status: 'ok',
+          eventLoop: {
+            lagMs: 0,
+            maxLagMs: 5_000,
+            stalls: 1,
+            lastStall: diskStall,
+            io: { someAvg10: 1, saturated: false },
+          },
+        }),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(actual).containEql(
+      '  disk was saturated during a stall (io pressure 46% full) — the daemon was slow, not dead',
+    );
+  });
+
+  it('should fall back to the worst stall, and say nothing when no stall named the disk', () => {
+    // Act
+    const worst = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health(),
+        liveness({
+          status: 'ok',
+          eventLoop: {
+            lagMs: 0,
+            maxLagMs: 5_000,
+            stalls: 2,
+            lastStall: { ...diskStall, cause: undefined, io: undefined },
+            worstStall: diskStall,
+          },
+        }),
+      ),
+      'fy',
+    );
+    const none = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        health(),
+        liveness({
+          status: 'ok',
+          eventLoop: {
+            lagMs: 0,
+            maxLagMs: 900,
+            stalls: 1,
+            lastStall: { ...diskStall, cause: undefined, io: undefined },
+          },
+        }),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(worst).containEql('disk was saturated during a stall');
+    should(none).not.containEql('disk');
+  });
+
+  it('should say it for a busy daemon whose own report timed out', () => {
+    // Act
+    const actual = renderDaemonStatus(
+      decideDaemonStatus(
+        'fyd',
+        runningReport,
+        undefined,
+        liveness({ status: 'ok', eventLoop: { ...calmEventLoop, io: saturated } }),
+      ),
+      'fy',
+    );
+
+    // Assert
+    should(actual).containEql('disk is saturated (io pressure 46% full) — the daemon is slow, not dead');
+  });
+
+  it('should say it for a silent process when this host reads a saturated disk, and advise waiting', () => {
+    // Act
+    const view = decideDaemonStatus('fyd', runningReport, undefined, undefined, {
+      some: { avg10: 52, avg60: 51, avg300: 51 },
+      full: { avg10: 46, avg60: 45, avg300: 44 },
+    });
+    const actual = renderDaemonStatus(view, 'fy');
+
+    // Assert
+    should(view.localIo).deepEqual(saturated);
+    should(actual).startWith(
+      'fyd process exists (pid 4242) but answered nothing in time — disk is saturated (io pressure 46% full) — the daemon is slow, not dead',
+    );
+    should(actual).containEql('waiting is safer than restarting');
+    should(actual).not.containEql('replaces it');
+  });
+
+  it('should keep the plain wedged wording when this host reads no pressure or a calm disk', () => {
+    // Act
+    const calm = renderDaemonStatus(
+      decideDaemonStatus('fyd', runningReport, undefined, undefined, {
+        some: { avg10: 1, avg60: 1, avg300: 1 },
+      }),
+      'fy',
+    );
+    const absent = renderDaemonStatus(decideDaemonStatus('fyd', runningReport, undefined, undefined, undefined), 'fy');
+
+    // Assert
+    should(calm).startWith('fyd process exists (pid 4242) but answered nothing in time — its event loop looks stalled');
+    should(calm).containEql('`fy daemon restart` replaces it');
+    should(absent).not.containEql('disk');
+  });
+});

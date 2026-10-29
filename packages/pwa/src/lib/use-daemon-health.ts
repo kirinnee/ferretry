@@ -11,7 +11,12 @@ import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonHealthRead } from './daemon-health.ts';
 import { useDaemonClient } from './store.tsx';
 
-export function useDaemonHealth(daemon: DaemonConnection | undefined): DaemonHealthRead {
+/**
+ * @param refreshMs Read again on this period while the page is open, for a caller whose answer changes
+ *   without anything on the page happening — the disk filling or draining. Omitted, only a machine change
+ *   or the page returning to the foreground re-reads.
+ */
+export function useDaemonHealth(daemon: DaemonConnection | undefined, refreshMs?: number): DaemonHealthRead {
   const createClient = useDaemonClient();
   const [state, setState] = useState<{ readonly daemonId: string; readonly read: DaemonHealthRead } | null>(null);
   const [reread, setReread] = useState(0);
@@ -26,6 +31,12 @@ export function useDaemonHealth(daemon: DaemonConnection | undefined): DaemonHea
     document.addEventListener('visibilitychange', onVisible);
     return () => document.removeEventListener('visibilitychange', onVisible);
   }, []);
+
+  useEffect(() => {
+    if (refreshMs === undefined) return;
+    const timer = setInterval(() => setReread(count => count + 1), refreshMs);
+    return () => clearInterval(timer);
+  }, [refreshMs]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: `reread` is the re-read trigger
   useEffect(() => {

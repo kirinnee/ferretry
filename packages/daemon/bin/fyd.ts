@@ -84,6 +84,7 @@ import {
   TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
   type WardenGuardConfig,
+  ioPressureView,
 } from '@ferretry/protocol';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
@@ -417,6 +418,7 @@ import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
+import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import {
   FileTaskBoardRepository,
   NodeTaskBoardCredentialIssuer,
@@ -752,6 +754,9 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
+  type IoPressurePort,
+  type IoPressureSourcePort,
+  NO_IO_PRESSURE,
   NO_STACK_SAMPLER,
   NO_WATCHDOG,
   NotificationService,
@@ -1195,6 +1200,8 @@ export interface DaemonWorld {
      * the labelled work around it; `undefined` where the runtime cannot sample or it is switched off.
      */
     readonly stackSampler?: () => Promise<StackSamplerPort | undefined>;
+    /** The disk's pressure, kept fresh while the daemon runs, so a stall can say it was the disk. */
+    readonly ioPressure?: IoPressureSourcePort;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -6066,12 +6073,17 @@ function createHealthSubsystem(
   health: SessionHealthService,
   scratch: ScratchReclamation,
   sessionWorkers: () => SessionWorkerPool,
+  ioPressure: IoPressurePort,
 ): DaemonHealthSubsystem {
   return {
     report: async () => await health.report(),
     pid: process.pid,
     scratch,
     sessionWorkers,
+    io: () => {
+      const pressure = ioPressure.current();
+      return pressure === undefined ? undefined : ioPressureView(pressure);
+    },
   };
 }
 
@@ -6518,6 +6530,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * opens a window (`fy daemon profile`), so it stays wired in permanently.
    */
   const profilerProbe = new PerformanceRecorder();
+  const ioPressure = new ProcIoPressure();
   const activities = new ActivityLedger(millisecondClock, new AsyncActivityScope(), (label, wallMs) =>
     profilerProbe.activity(label, wallMs),
   );
@@ -7639,6 +7652,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       watchdog: limitMs => new WorkerLoopWatchdog({ limitMs, prefix: `${DAEMON_NAME} ` }),
       stackSampler: async () =>
         stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
+      ioPressure,
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -9595,7 +9609,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             clock,
           ),
         },
-        health: createHealthSubsystem(health, scratch, sessionWorkerPool),
+        health: createHealthSubsystem(health, scratch, sessionWorkerPool, ioPressure),
         performance: {
           profiles: new PerformanceProfiler({
             recorder: profilerProbe,
@@ -10348,6 +10362,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    */
   const activities = world.boot.activities;
   const progress = world.boot.beginProgress();
+  const ioPressure = world.boot.ioPressure ?? NO_IO_PRESSURE;
+  const stopIoPressure = world.boot.ioPressure?.start();
   const meter = new EventLoopLagMeter(
     world.clock,
     activities,
@@ -10360,6 +10376,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       (await world.boot.stackSampler?.()) ?? NO_STACK_SAMPLER,
       world.boot.performance ?? NO_PERFORMANCE_PROBE,
     ),
+    ioPressure,
   );
   const watchdog = world.boot.watchdogLimitMs > 0 ? world.boot.watchdog(world.boot.watchdogLimitMs) : NO_WATCHDOG;
   const lagTicks = setInterval(() => {
@@ -10375,6 +10392,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       : instrumentChildProcesses(world.boot.performance, world.clock, Bun, () => activities.current());
   cleanups.push(() => {
     clearInterval(lagTicks);
+    stopIoPressure?.();
     watchdog.stop();
     uncountChildren();
   });

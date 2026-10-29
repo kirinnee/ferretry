@@ -501,6 +501,63 @@ describe('summariseStacks', () => {
   });
 });
 
+describe('EventLoopLagMeter disk pressure', () => {
+  const reading = (some: number, full: number) => ({
+    some: { avg10: some, avg60: some, avg300: some },
+    full: { avg10: full, avg60: full, avg300: full },
+  });
+
+  it('should blame the disk for a stall recorded while it was saturated, and say so in the view', () => {
+    // Arrange
+    const clock = manualClock();
+    const stalls: LoopStall[] = [];
+    const meter = new EventLoopLagMeter(
+      clock,
+      new ActivityLedger(clock),
+      DEFAULT_EVENT_LOOP_LAG_POLICY,
+      stall => stalls.push(stall),
+      undefined,
+      { current: () => reading(52, 46) },
+    );
+
+    // Act
+    clock.advance(5_250);
+    meter.tick();
+
+    // Assert
+    const io = { someAvg10: 52, fullAvg10: 46, saturated: true };
+    should(stalls[0]?.cause).equal('disk');
+    should(stalls[0]?.io).deepEqual(io);
+    should(meter.view().io).deepEqual(io);
+    should(describeLoopStall(stalls[0] as LoopStall)).endWith(
+      ' — disk is saturated (io pressure 46% full) — the daemon is slow, not dead',
+    );
+  });
+
+  it('should record the pressure but name no cause when the disk was calm', () => {
+    // Arrange
+    const clock = manualClock();
+    const stalls: LoopStall[] = [];
+    const meter = new EventLoopLagMeter(
+      clock,
+      new ActivityLedger(clock),
+      DEFAULT_EVENT_LOOP_LAG_POLICY,
+      stall => stalls.push(stall),
+      undefined,
+      { current: () => reading(1, 0) },
+    );
+
+    // Act
+    clock.advance(5_250);
+    meter.tick();
+
+    // Assert
+    should(stalls[0]).not.have.property('cause');
+    should(stalls[0]?.io?.saturated).be.false();
+    should(describeLoopStall(stalls[0] as LoopStall)).not.containEql('disk');
+  });
+});
+
 describe('stall and watchdog wording', () => {
   it('should say how long the loop stalled and the innermost work, or that nothing named was', () => {
     // Act / Assert

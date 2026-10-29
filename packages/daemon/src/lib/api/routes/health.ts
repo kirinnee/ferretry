@@ -29,6 +29,8 @@ const stallView = (stall: LoopStall): LoopStallView => ({
   during: [...stall.during],
   innermost: [...stall.innermost],
   stacks: stall.stacks.map(({ stack, share }) => ({ stack, share })),
+  ...(stall.cause === undefined ? {} : { cause: stall.cause }),
+  ...(stall.io === undefined ? {} : { io: { ...stall.io } }),
 });
 
 /** The liveness body, shared by the mounted route and the boot-time surface that serves it alone. */
@@ -64,6 +66,7 @@ export function livenessView(
             stalls: loop.stalls,
             ...(loop.lastStall === undefined ? {} : { lastStall: stallView(loop.lastStall) }),
             ...(loop.worstStall === undefined ? {} : { worstStall: stallView(loop.worstStall) }),
+            ...(loop.io === undefined ? {} : { io: { ...loop.io } }),
           },
         }),
   };

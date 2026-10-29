@@ -1,4 +1,4 @@
-import type { HealthView, LivenessView } from '@ferretry/protocol';
+import type { HealthView, IoPressure, LivenessView } from '@ferretry/protocol';
 import type { DaemonManagerKind } from './layout.ts';
 
 /** The result of one external command. */
@@ -94,6 +94,15 @@ export interface IDaemonHealthPort {
    * Optional so a probe that cannot ask still reports what it can.
    */
   liveness?(): Promise<LivenessView | undefined>;
+}
+
+/**
+ * This host's disk pressure, for a daemon that cannot say how it is doing: a loop stalled on a saturated
+ * disk answers nothing, and "wedged" is the wrong word for it. `undefined` where the host reports none
+ * (macOS, a kernel without pressure-stall information); the read never throws.
+ */
+export interface IIoPressurePort {
+  read(): Promise<IoPressure | undefined>;
 }
 
 /**

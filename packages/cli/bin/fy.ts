@@ -28,6 +28,7 @@ import { readDaemonToken } from '../src/adapters/daemon/api-token';
 import { SystemMillisecondClock } from '../src/adapters/daemon/clock';
 import { readDaemonConfigDocument } from '../src/adapters/daemon/daemon-config-file';
 import { type HealthApiClient, ProtocolDaemonHealth } from '../src/adapters/daemon/health';
+import { ProcIoPressureReader } from '../src/adapters/daemon/io-pressure';
 import { FileDaemonLifecycleLock } from '../src/adapters/daemon/lifecycle-lock';
 import { TailDaemonLog } from '../src/adapters/daemon/log-stream';
 import { NixStoreGcRoot } from '../src/adapters/daemon/nix-gc-root';
@@ -681,6 +682,7 @@ function buildDaemonController(world: CliWorld, client: SharedDaemonClient): Dae
      * `FY_URL` reported a stranger's counts and handed its pid to a local SIGTERM.
      */
     health: localDaemonHealth(world, layout.stateHome),
+    ioPressure: new ProcIoPressureReader(),
     logs: new TailDaemonLog(),
     nix: new NixStoreGcRoot(processes),
     // The claim reads the same clock the readiness and shutdown waits do, so the bound a caller waits
