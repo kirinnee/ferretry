@@ -482,4 +482,53 @@ describe('the image thumbnail', () => {
       restore();
     }
   });
+
+  it('reads a transcript picture outside a provider through the transcript route, by its handle', async () => {
+    const restore = withVisibleObserver();
+    const original = URL.createObjectURL;
+    const revoke = URL.revokeObjectURL;
+    URL.createObjectURL = (() => 'blob:standalone/transcript') as typeof URL.createObjectURL;
+    URL.revokeObjectURL = (() => undefined) as typeof URL.revokeObjectURL;
+    const fetched = globalThis.fetch;
+    const requested: string[] = [];
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      requested.push(String(input instanceof Request ? input.url : input));
+      return new Response(
+        JSON.stringify({
+          image: { handle: '4096.2048.0', mediaType: 'image/png', byteLength: 3 },
+          base64: btoa('png'),
+        }),
+        { headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+    try {
+      const view = await mount(
+        <TranscriptAttachmentGallery
+          daemon={daemon}
+          images={[
+            {
+              kind: 'transcript',
+              sessionId: 'gallery-session',
+              handle: '4096.2048.0',
+              mediaType: 'image/png',
+              alt: 'a screenshot',
+            },
+          ]}
+        />,
+      );
+      expect(requested).toHaveLength(1);
+      expect(requested[0]).toContain('gallery-session');
+      expect(requested[0]).toContain('4096.2048.0');
+      expect(requested[0]).not.toContain('/attachments/');
+      expect(must(view.container.querySelector('img'), 'the picture').getAttribute('src')).toBe(
+        'blob:standalone/transcript',
+      );
+      await view.unmount();
+    } finally {
+      globalThis.fetch = fetched;
+      URL.createObjectURL = original;
+      URL.revokeObjectURL = revoke;
+      restore();
+    }
+  });
 });

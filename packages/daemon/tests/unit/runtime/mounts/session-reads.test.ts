@@ -844,6 +844,24 @@ describe('the transcript image route', () => {
     should(jsonBody(response)).have.property('code', 'no_transcript');
   });
 
+  it('should answer 500 without leaking the cause when the reader fails for a reason that is no refusal', async () => {
+    // Arrange
+    const broken = {
+      lookup: async () => {
+        throw new Error('disk /var/secret-transcripts is on fire');
+      },
+    } as unknown as TranscriptImageReader;
+    const dispatch = fixture({ images: broken });
+
+    // Act
+    const response = await dispatch({ path: at(transcript.handle(1, 0)), headers: human });
+
+    // Assert
+    should(response.status).equal(500);
+    should(jsonBody(response)).have.property('code', 'internal_error');
+    should(JSON.stringify(jsonBody(response))).not.containEql('secret-transcripts');
+  });
+
   it('should refuse the warden and an anonymous caller exactly as it refuses them for /logs', async () => {
     // Arrange
     const dispatch = fixture({ images: images() });

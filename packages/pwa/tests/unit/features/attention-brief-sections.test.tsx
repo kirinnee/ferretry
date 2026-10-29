@@ -49,6 +49,60 @@ describe('the brief sections', () => {
   });
 });
 
+describe('the described options', () => {
+  const described = attentionItem('A2', {
+    subject: 'Which database should keep the board’s finished items?',
+    ask: {
+      kind: 'multiple-choice',
+      options: [
+        { label: 'SQLite', description: 'No server to run.' },
+        { label: 'Postgres', description: 'Shared.' },
+      ],
+    },
+  });
+  const rowOf = (root: ParentNode, label: string): Element | null =>
+    root.querySelector(`[data-attention-option-detail="${label}"]`);
+
+  test('badge the recommended option on the board, where the recommendation section is not the only mark', async () => {
+    view = await mount(
+      <AttentionBriefSections
+        item={{ ...described, recommendation: { decision: 'SQLite', why: 'No server to run.' } }}
+        renderProse={text => text}
+      />,
+    );
+    const container = must(view.container, 'view');
+    expect(rowOf(container, 'SQLite')?.querySelector('[data-attention-recommended]')).not.toBeNull();
+    expect(rowOf(container, 'Postgres')?.querySelector('[data-attention-recommended]')).toBeNull();
+  });
+
+  test('badge the recommended option when no recommendation section is drawn to carry the mark', async () => {
+    view = await mount(
+      <AttentionBriefSections
+        collapsible={false}
+        item={{ ...described, questions: [{ question: 'Which database?', recommended: 'SQLite' }] }}
+        renderProse={text => text}
+      />,
+    );
+    const container = must(view.container, 'view');
+    expect(recommendationOf(container)).toBeNull();
+    expect(rowOf(container, 'SQLite')?.querySelector('[data-attention-recommended]')).not.toBeNull();
+    expect(rowOf(container, 'Postgres')?.querySelector('[data-attention-recommended]')).toBeNull();
+  });
+
+  test('leave the option unbadged when the recommendation section already says which one', async () => {
+    view = await mount(
+      <AttentionBriefSections
+        collapsible={false}
+        item={{ ...described, recommendation: { decision: 'SQLite' } }}
+        renderProse={text => text}
+      />,
+    );
+    const container = must(view.container, 'view');
+    expect(rowOf(container, 'SQLite')?.querySelector('[data-attention-recommended]')).toBeNull();
+    expect(recommendationOf(container)?.querySelector('[data-attention-recommended]')).not.toBeNull();
+  });
+});
+
 describe('the brief sections, by card', () => {
   const terms = [
     { term: 'CI', meaning: 'the automatic tests on every change' },
