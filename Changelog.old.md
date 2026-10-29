@@ -1,3 +1,22 @@
+## [4.98.0](https://github.com/kirinnee/ferretry/compare/v4.97.2...v4.98.0) (2026-10-29)
+
+### Features
+
+* **pwa:** let dictation insert straight into the composer, with Undo ([#852](https://github.com/kirinnee/ferretry/issues/852)) ([61aab0f](https://github.com/kirinnee/ferretry/commit/61aab0faab38b28b9ed5d8a036b005f63343299c))
+
+## [4.97.2](https://github.com/kirinnee/ferretry/compare/v4.97.1...v4.97.2) (2026-10-29)
+
+### Fixes
+
+* **daemon:** read memory usage again when Bun reports it interrupted ([#841](https://github.com/kirinnee/ferretry/issues/841)) ([6ad30ce](https://github.com/kirinnee/ferretry/commit/6ad30cef12a2782f61eda67a47d61353ac7484c6))
+* **test:** stop requiring the newest releases to show changes in the in-app list ([#851](https://github.com/kirinnee/ferretry/issues/851)) ([006a643](https://github.com/kirinnee/ferretry/commit/006a64301e117a7ac8f88a33b2a3eb04d8eba642))
+
+## [4.97.1](https://github.com/kirinnee/ferretry/compare/v4.97.0...v4.97.1) (2026-10-29)
+
+### Fixes
+
+* **ci:** hold the compiled binaries' download to a manifest ([#842](https://github.com/kirinnee/ferretry/issues/842)) ([06ca66e](https://github.com/kirinnee/ferretry/commit/06ca66e1d52e8c89b6fe2f32ff206ff46a01d913)), closes [actions/download-artifact#454](https://github.com/actions/download-artifact/issues/454)
+
 ## [4.97.0](https://github.com/kirinnee/ferretry/compare/v4.96.1...v4.97.0) (2026-10-29)
 
 ### Features

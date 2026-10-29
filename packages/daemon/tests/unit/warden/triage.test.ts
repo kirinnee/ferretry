@@ -11,7 +11,6 @@ import {
   prunePassedOn,
   guardBackingOff,
   guardHealthAfter,
-  guardOutcome,
   investigationsInLastHour,
   newFlagCount,
   recordGuardDecision,
@@ -40,7 +39,7 @@ const record = (overrides: Partial<WardenInvestigationRecord> = {}): WardenInves
 });
 
 const decision = (overrides: Partial<TriageDecision> = {}): TriageDecision => ({
-  verdict: 'skip',
+  verdict: 'leave',
   confidence: 0.9,
   model: 'jev-latest',
   inputTokens: 400,
@@ -204,34 +203,6 @@ describe('the flags Jev passed on', () => {
   });
 });
 
-describe('what the guard’s answer means', () => {
-  it('should believe a skip at or above the threshold', () => {
-    // Act / Assert
-    should(guardOutcome(decision({ confidence: 0.85 }), 0.85)).deepEqual({ kind: 'skip', confidence: 0.85 });
-  });
-
-  it('should count a skip below the threshold as investigate: unsure fails toward looking', () => {
-    // Act / Assert
-    should(guardOutcome(decision({ confidence: 0.84 }), 0.85)).deepEqual({ kind: 'investigate', confidence: 0.84 });
-  });
-
-  it('should investigate whatever it answers investigate', () => {
-    // Act / Assert
-    should(guardOutcome(decision({ verdict: 'investigate', confidence: 0.99 }), 0.7)).deepEqual({
-      kind: 'investigate',
-      confidence: 0.99,
-    });
-  });
-
-  it('should investigate on any failure, naming it', () => {
-    // Act
-    const actual = guardOutcome(decision({ verdict: 'investigate', confidence: 0, failure: { code: 'timeout' } }), 0.7);
-
-    // Assert
-    should(actual).deepEqual({ kind: 'investigate', confidence: 0, failure: 'timeout' });
-  });
-});
-
 describe('the guard’s health', () => {
   it('should clear the last failure on a real answer', () => {
     // Act
@@ -276,7 +247,7 @@ describe('the guard’s health', () => {
 describe('counting a decision', () => {
   it('should count a real answer, a skip and its cost', () => {
     // Act
-    const actual = recordGuardDecision(TODAY, decision(), { kind: 'skip', confidence: 0.9 });
+    const actual = recordGuardDecision(TODAY, decision(), { kind: 'leave', confidence: 0.9 });
 
     // Assert
     should(actual).match({ day: TODAY.day, flags: 3, jevDecisions: 3, jevSkips: 2 });
@@ -286,7 +257,8 @@ describe('counting a decision', () => {
   it('should not count a failure as a decision, nor an unpriced one as spend', () => {
     // Act
     const actual = recordGuardDecision(TODAY, decision({ failure: { code: 'timeout' }, costUsd: undefined }), {
-      kind: 'investigate',
+      kind: 'escalate',
+      why: 'failed',
       confidence: 0,
     });
 

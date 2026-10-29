@@ -74,7 +74,7 @@ export class ScriptedTriageGuard implements TriageGuardPort {
 
   constructor(
     private readonly decision: TriageDecision = {
-      verdict: 'skip',
+      verdict: 'leave',
       confidence: 0.95,
       model: 'jev-latest',
       inputTokens: 120,

@@ -43,7 +43,7 @@ export interface Blessing {
   readonly expiresAt: string;
   /** The warden that issued the clearance, for provenance in the journal. */
   readonly wardenId?: string;
-  /** Who judged it healthy: an investigation, Jev's confident skip, or the owner. Absent means a warden. */
+  /** Who judged it healthy: an investigation, Jev's confident leave, or the owner. Absent means a warden. */
   readonly by?: WardenClearedBy;
   /** How many clears of these flags in a row came before this one: its lifetime doubled that often. */
   readonly streak?: number;

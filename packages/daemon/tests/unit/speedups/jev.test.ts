@@ -5,6 +5,9 @@ import {
   boundedTriageState,
   buildJevRequestBody,
   JevTriageGuard,
+  NUDGE_INSTRUCTIONS,
+  NUDGE_MESSAGES,
+  offeredVerdicts,
   parseJevReply,
   TRIAGE_CRITERIA,
   TRIAGE_INSTRUCTIONS,
@@ -16,8 +19,9 @@ import {
 import { ScriptedAuthorizer, SteppingClock } from './fakes.ts';
 
 /**
- * Jev as the Warden's triage guard. The rule every case defends: the guard never acts, and anything
- * that is not a confident, readable `skip` is an investigation.
+ * Jev as the Warden's first responder. The rules every case defends: this module never acts, it offers
+ * only the answers the caller allowed, and anything that is not a readable answer among them is
+ * `unsure` at no confidence.
  */
 
 const snapshot: TriageSnapshot = {
@@ -32,7 +36,7 @@ const reply = (choice: string, extra: Record<string, unknown> = {}): AuthorizedO
   kind: 'completion',
   payload: {
     model: 'jev-2026-09',
-    answers: { triage: { type: 'choice', choice, probabilities: { skip: 0.9, investigate: 0.1 }, confidence: 0.9 } },
+    answers: { triage: { type: 'choice', choice, probabilities: { leave: 0.9, unsure: 0.1 }, confidence: 0.9 } },
     usage: { input_tokens: 400, output_tokens: 1 },
     ...extra,
   },
@@ -41,17 +45,41 @@ const reply = (choice: string, extra: Record<string, unknown> = {}): AuthorizedO
 const context = { model: 'jev-latest', latencyMs: 75 };
 
 describe('the Jev request', () => {
-  it('should ask one choice question with skip and investigate as the only options', () => {
+  it('should offer only leave and unsure when no act fits, and ask no nudge question', () => {
     // Act
     const actual = buildJevRequestBody(snapshot, 'jev-latest');
 
     // Assert
     should(actual.model).equal('jev-latest');
     should(actual.questions).deepEqual({
-      triage: { type: 'choice', instructions: TRIAGE_INSTRUCTIONS, criteria: TRIAGE_CRITERIA },
+      triage: {
+        type: 'choice',
+        instructions: TRIAGE_INSTRUCTIONS,
+        criteria: { leave: TRIAGE_CRITERIA.leave, unsure: TRIAGE_CRITERIA.unsure },
+      },
     });
-    should(Object.keys(TRIAGE_CRITERIA)).deepEqual(['skip', 'investigate']);
     should(actual.state).deepEqual(boundedTriageState(snapshot));
+  });
+
+  it('should offer the acts that fit, in a fixed order, and ask which message a nudge would send', () => {
+    // Arrange
+    const stuck: TriageSnapshot = { ...snapshot, acts: ['stop', 'nudge', 'restart'] };
+
+    // Act
+    const actual = buildJevRequestBody(stuck, 'jev-latest') as {
+      questions: {
+        triage: { criteria: Record<string, string> };
+        nudge: { type: string; instructions: string; criteria: Record<string, string> };
+      };
+    };
+
+    // Assert
+    should(offeredVerdicts(stuck)).deepEqual(['leave', 'nudge', 'restart', 'stop', 'unsure']);
+    should(Object.keys(actual.questions.triage.criteria)).deepEqual(['leave', 'nudge', 'restart', 'stop', 'unsure']);
+    should(actual.questions.nudge.type).equal('choice');
+    should(actual.questions.nudge.instructions).equal(NUDGE_INSTRUCTIONS);
+    should(Object.keys(actual.questions.nudge.criteria)).deepEqual([...Object.keys(NUDGE_MESSAGES), 'none']);
+    should(boundedTriageState(stuck)).not.have.property('acts');
   });
 
   it('should bound every part of the snapshot, keeping the newest turns and tails', () => {
@@ -93,24 +121,24 @@ describe('the Jev request', () => {
 describe('reading a Jev reply', () => {
   it('should read the choice, confidence, model and input tokens', () => {
     // Act
-    const actual = parseJevReply((reply('skip') as { payload: unknown }).payload);
+    const actual = parseJevReply((reply('leave') as { payload: unknown }).payload);
 
     // Assert
-    should(actual).deepEqual({ choice: 'skip', confidence: 0.9, model: 'jev-2026-09', inputTokens: 400 });
+    should(actual).deepEqual({ choice: 'leave', confidence: 0.9, model: 'jev-2026-09', inputTokens: 400 });
   });
 
   it('should fall back to the chosen probability, and refuse an answer with neither', () => {
     // Act
     const actual = {
       probability: parseJevReply({
-        answers: { triage: { choice: 'investigate', probabilities: { investigate: 0.6 } } },
+        answers: { triage: { choice: 'unsure', probabilities: { unsure: 0.6 } } },
       }),
-      neither: parseJevReply({ answers: { triage: { choice: 'skip' } } }),
-      outOfRange: parseJevReply({ answers: { triage: { choice: 'skip', confidence: 1.5 } } }),
+      neither: parseJevReply({ answers: { triage: { choice: 'leave' } } }),
+      outOfRange: parseJevReply({ answers: { triage: { choice: 'leave', confidence: 1.5 } } }),
     };
 
     // Assert
-    should(actual.probability).deepEqual({ choice: 'investigate', confidence: 0.6, inputTokens: 0 });
+    should(actual.probability).deepEqual({ choice: 'unsure', confidence: 0.6, inputTokens: 0 });
     should(actual.neither).be.undefined();
     should(actual.outOfRange).be.undefined();
   });
@@ -132,7 +160,7 @@ describe('reading a Jev reply', () => {
   it('should treat a malformed usage block as zero tokens rather than a guess', () => {
     // Act
     const actual = parseJevReply({
-      answers: { triage: { choice: 'skip', confidence: 0.8 } },
+      answers: { triage: { choice: 'leave', confidence: 0.8 } },
       usage: { input_tokens: -2 },
     });
 
@@ -142,43 +170,86 @@ describe('reading a Jev reply', () => {
 });
 
 describe('the triage decision', () => {
-  it('should skip only on an explicit skip, carrying its confidence and the reported model', () => {
+  it('should carry the answer, its confidence, its criterion as the reason, and the reported model', () => {
     // Act
-    const actual = triageDecision(reply('skip'), context);
+    const actual = triageDecision(reply('leave'), context);
 
     // Assert
     should(actual).deepEqual({
-      verdict: 'skip',
+      verdict: 'leave',
       confidence: 0.9,
+      reason: TRIAGE_CRITERIA.leave,
       model: 'jev-2026-09',
       inputTokens: 400,
       latencyMs: 75,
     });
   });
 
-  it('should investigate on investigate, and on an option it never offered with zero confidence', () => {
+  it('should read an answer outside what was offered as unsure at zero confidence, with no reason', () => {
     // Act
     const actual = {
-      investigate: triageDecision(reply('investigate'), context),
+      unsure: triageDecision(reply('unsure'), context),
       unknown: triageDecision(reply('kill'), context),
+      notOffered: triageDecision(reply('stop'), { ...context, offered: ['leave', 'nudge', 'unsure'] }),
     };
 
     // Assert
-    should(actual.investigate.verdict).equal('investigate');
-    should(actual.investigate.confidence).equal(0.9);
-    should(actual.unknown).containDeep({ verdict: 'investigate', confidence: 0 });
+    should(actual.unsure).containDeep({ verdict: 'unsure', confidence: 0.9, reason: TRIAGE_CRITERIA.unsure });
+    should(actual.unknown).containDeep({ verdict: 'unsure', confidence: 0 });
+    should(actual.unknown).not.have.property('reason');
+    should(actual.notOffered).containDeep({ verdict: 'unsure', confidence: 0 });
+  });
+
+  it('should carry a nudge message only on a nudge, and only one from the library', () => {
+    // Arrange
+    const nudge = (message: unknown): AuthorizedOutcome => ({
+      kind: 'completion',
+      payload: {
+        answers: {
+          triage: { choice: 'nudge', confidence: 0.95 },
+          ...(message === undefined ? {} : { nudge: message }),
+        },
+      },
+    });
+
+    // Act
+    const actual = {
+      chosen: triageDecision(nudge({ choice: 'stuck_command', confidence: 0.92 }), context),
+      none: triageDecision(nudge({ choice: 'none', confidence: 0.99 }), context),
+      invented: triageDecision(nudge({ choice: 'please hurry', confidence: 0.99 }), context),
+      unanswered: triageDecision(nudge(undefined), context),
+      notANudge: triageDecision(
+        {
+          kind: 'completion',
+          payload: {
+            answers: { triage: { choice: 'stop', confidence: 0.99 }, nudge: { choice: 'lost_track', confidence: 1 } },
+          },
+        },
+        context,
+      ),
+    };
+
+    // Assert
+    should(actual.chosen.nudge).deepEqual({
+      id: 'stuck_command',
+      message: NUDGE_MESSAGES.stuck_command,
+      confidence: 0.92,
+    });
+    should(actual.chosen.verdict).equal('nudge');
+    for (const decision of [actual.none, actual.invented, actual.unanswered, actual.notANudge])
+      should(decision).not.have.property('nudge');
   });
 
   it('should price a decision only when a price was configured', () => {
     // Act
-    const actual = triageDecision(reply('skip', { model: undefined }), { ...context, usdPerMillionInputTokens: 0.5 });
+    const actual = triageDecision(reply('leave', { model: undefined }), { ...context, usdPerMillionInputTokens: 0.5 });
 
     // Assert
     should(actual.costUsd).equal(0.0002);
     should(actual.model).equal('jev-latest');
   });
 
-  it('should fail toward investigating on every outcome that is not a readable answer', () => {
+  it('should fail toward unsure on every outcome that is not a readable answer', () => {
     // Arrange
     const outcomes: [AuthorizedOutcome, string][] = [
       [{ kind: 'secret_missing' }, 'not_set'],
@@ -197,9 +268,9 @@ describe('the triage decision', () => {
 
     // Assert
     should(actual.map(decision => decision.failure?.code)).deepEqual(outcomes.map(([, code]) => code));
-    should(actual.every(decision => decision.verdict === 'investigate' && decision.confidence === 0)).be.true();
+    should(actual.every(decision => decision.verdict === 'unsure' && decision.confidence === 0)).be.true();
     should(actual[0]).deepEqual({
-      verdict: 'investigate',
+      verdict: 'unsure',
       confidence: 0,
       model: 'jev-latest',
       inputTokens: 0,
@@ -231,7 +302,7 @@ describe('the triage decision', () => {
 describe('the Jev guard', () => {
   it('should send the bounded snapshot to the configured endpoint under the Jev key, and time it', async () => {
     // Arrange
-    const authorizer = new ScriptedAuthorizer(reply('skip'));
+    const authorizer = new ScriptedAuthorizer(reply('leave'));
     const guard = new JevTriageGuard(authorizer, new SteppingClock([100, 160]));
 
     // Act
@@ -239,8 +310,9 @@ describe('the Jev guard', () => {
 
     // Assert
     should(actual).deepEqual({
-      verdict: 'skip',
+      verdict: 'leave',
       confidence: 0.9,
+      reason: TRIAGE_CRITERIA.leave,
       model: 'jev-2026-09',
       inputTokens: 400,
       latencyMs: 60,
@@ -259,7 +331,7 @@ describe('the Jev guard', () => {
 
   it('should take endpoint, model, hosts, timeout and price from its options', async () => {
     // Arrange
-    const authorizer = new ScriptedAuthorizer(reply('investigate', { model: undefined }));
+    const authorizer = new ScriptedAuthorizer(reply('unsure', { model: undefined }));
     const guard = new JevTriageGuard(authorizer, new SteppingClock([5, 1]), {
       endpoint: 'https://jev.internal.example/v1/systemone',
       model: 'jev-pinned',
@@ -273,8 +345,9 @@ describe('the Jev guard', () => {
 
     // Assert
     should(actual).deepEqual({
-      verdict: 'investigate',
+      verdict: 'unsure',
       confidence: 0.9,
+      reason: TRIAGE_CRITERIA.unsure,
       model: 'jev-pinned',
       inputTokens: 400,
       latencyMs: 0,
@@ -282,5 +355,19 @@ describe('the Jev guard', () => {
     });
     should(authorizer.calls[0]?.hosts).deepEqual(['jev.internal.example']);
     should(authorizer.calls[0]?.request.timeoutMs).equal(900);
+  });
+});
+
+describe('what the guard offers', () => {
+  it('should refuse an act the request did not offer even when the guard is sure of it', async () => {
+    // Arrange
+    const authorizer = new ScriptedAuthorizer(reply('stop'));
+    const guard = new JevTriageGuard(authorizer, new SteppingClock([0, 1]));
+
+    // Act
+    const actual = await guard.decide({ ...snapshot, acts: ['nudge'] });
+
+    // Assert
+    should(actual).containDeep({ verdict: 'unsure', confidence: 0 });
   });
 });

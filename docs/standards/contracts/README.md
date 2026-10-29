@@ -40,6 +40,7 @@ laundered a defect into something every gate was right to pass.
 | `daemon-scope.sh`             | `a-daemon-scope`                         | no PWA surface can read one daemon's data as another's                          |
 | `executable-shells.sh`        | `a-enforce-exec`                         | every tracked `*.sh` is executable                                              |
 | `fetch-binding.sh`            | `a-fetch-binding`                        | no unbound `fetch` builtin is stored, and no PWA network call skips the carrier |
+| `macos-relevance.sh`          | `a-macos-relevance`, `task test:gate`    | the optional macOS jobs' path lists cover every input their scripts read        |
 | `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their three teaching files             |
 | `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code names no legacy state, and package source no owner fleet wrapper   |
 | `pages-config.sh`             | `task test:gate`                         | the PWA build and Pages deployment publish the same directory                   |

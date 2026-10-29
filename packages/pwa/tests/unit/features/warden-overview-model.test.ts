@@ -107,6 +107,72 @@ describe('vocabulary helpers', () => {
   });
 });
 
+describe('a Jev action', () => {
+  it('should read as Jev’s with its confidence, apart from an investigation’s', () => {
+    // Arrange
+    const jevNudge = wardenAction({ action: 'nudge', by: 'jev', confidence: 0.94 });
+    const verdictNudge = wardenAction({ action: 'nudge', by: 'warden' });
+
+    // Act / Assert
+    expect(actionChip(jevNudge)).toEqual({ label: 'nudged', tone: 'accent' });
+    expect(actionRows(wardenStatus({ actions: [jevNudge] }))[0]?.chips).toEqual([
+      { label: 'nudged', tone: 'accent' },
+      { label: 'Jev · 94% sure', tone: 'accent' },
+    ]);
+    expect(actionRows(wardenStatus({ actions: [verdictNudge] }))[0]?.chips).toEqual([
+      { label: 'nudged', tone: 'accent' },
+    ]);
+  });
+
+  it('should read “Jev recommends …” when it is held for the owner', () => {
+    // Arrange
+    const held = wardenAction({ action: 'stop', outcome: 'held', by: 'jev', confidence: 0.99 });
+    const heldVerdict = wardenAction({ action: 'stop', outcome: 'held', by: 'warden' });
+
+    // Act / Assert
+    expect(actionChip(held)).toEqual({ label: 'Jev recommends stop · asks you', tone: 'warn' });
+    expect(actionChip(heldVerdict)).toEqual({ label: 'stop · asks you', tone: 'warn' });
+    expect(actionRows(wardenStatus({ actions: [held] }))[0]?.chips).toContainEqual({
+      label: 'Jev · 99% sure',
+      tone: 'accent',
+    });
+  });
+
+  it('should name Jev without a number when no confidence was recorded, and keep a bless in its own chip', () => {
+    // Arrange
+    const bare = wardenAction({ action: 'restart', by: 'jev' });
+    const bless = wardenAction({ action: 'bless', by: 'jev', confidence: 0.96 });
+
+    // Act / Assert
+    expect(actionRows(wardenStatus({ actions: [bare] }))[0]?.chips.map(entry => entry.label)).toEqual([
+      'restarted',
+      'Jev',
+    ]);
+    expect(actionRows(wardenStatus({ actions: [bless] }))[0]?.chips.map(entry => entry.label)).toEqual([
+      'blessed by Jev 96%',
+    ]);
+  });
+
+  it('should show Jev’s reason on a quieter line when it gave one, and nothing when it did not', () => {
+    // Arrange
+    const reasoned = wardenAction({
+      action: 'resume',
+      by: 'jev',
+      confidence: 0.95,
+      reason: 'The turn died with no error and the pane is idle.',
+    });
+    const plain = wardenAction({ action: 'resume', by: 'jev', confidence: 0.95 });
+
+    // Act
+    const [withReason] = actionRows(wardenStatus({ actions: [reasoned] }));
+    const [without] = actionRows(wardenStatus({ actions: [plain] }));
+
+    // Assert
+    expect(withReason?.detail).toBe('Jev’s reason: The turn died with no error and the pane is idle.');
+    expect(without?.detail).toBeUndefined();
+  });
+});
+
 describe('time labels', () => {
   it('should say how long ago, or nothing for an unreadable instant', () => {
     // Arrange / Act / Assert
@@ -300,6 +366,20 @@ describe('wardenSavingsLine', () => {
     expect(wardenSavingsLine(status)).toBe('Today: 9 flags · 7 cleared by Jev ($0.02) · the rest shown to you');
   });
 
+  it('should say how many flags Jev settled itself, when the daemon counted them', () => {
+    // Arrange
+    const spend = { ...wardenStatus().spend, jevUsd: 0.03, investigationUsd: 1.2 };
+    const savings = { ...wardenStatus().savings, flags: 41, jevSkips: 30, investigations: 4, jevActions: 7 };
+
+    // Act / Assert
+    expect(wardenSavingsLine(jevStatus({ spend, savings }))).toBe(
+      'Today: 41 flags · 30 cleared by Jev ($0.03) · Jev handled 7 itself · 4 investigated ($1.20)',
+    );
+    expect(wardenSavingsLine(jevOnlyStatus({ spend, savings }))).toBe(
+      'Today: 41 flags · 30 cleared by Jev ($0.03) · Jev handled 7 itself · the rest shown to you',
+    );
+  });
+
   it('should give the Jev saving only when the daemon priced it', () => {
     // Arrange
     const spend = { ...wardenStatus().spend, jevUsd: 0.03, investigationUsd: 1.2 };
@@ -320,7 +400,8 @@ describe('wardenHowItWorks', () => {
     // Arrange / Act / Assert
     expect(wardenHowItWorks({ jev: false, llm: false })).toContain('No AI runs and nothing is spent.');
     expect(wardenHowItWorks({ jev: false, llm: true })).not.toContain('Jev');
-    expect(wardenHowItWorks({ jev: false, llm: true })).toContain('Only that verdict ever acts');
+    expect(wardenHowItWorks({ jev: false, llm: true })).toContain('Stopping asks you unless you allowed it');
+    expect(wardenHowItWorks({ jev: true, llm: true })).toContain('does a simple fix itself when it is very sure');
     expect(wardenHowItWorks({ jev: true, llm: true })).toContain('anything else goes on');
     expect(wardenHowItWorks({ jev: true, llm: false })).toContain('anything else is shown to you');
     expect(wardenHowItWorks({ jev: true, llm: false })).toContain('No investigation runs.');

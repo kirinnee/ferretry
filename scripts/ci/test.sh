@@ -22,6 +22,9 @@ cd "${root_dir}"
 # can fail for them — `bun test` never reads a wrangler config or a workflow's shell. This is the
 # only place CI looks at them.
 ./scripts/validate/relay-config.sh
+# The macOS jobs a pull request runs only when their inputs change: the path lists must cover every
+# input of the scripts those jobs run, or a macOS break reaches `main` unseen.
+./scripts/validate/macos-relevance.sh
 
 # The per-test budget, ON THE COMMAND LINE. `[test] timeout` in a bunfig is ignored by
 # Bun, so a tier that needs longer than the 5-second default has to say so here. The

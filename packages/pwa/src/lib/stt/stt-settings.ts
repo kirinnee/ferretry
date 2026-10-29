@@ -5,9 +5,11 @@
  * around a module-level singleton and a `kteam-stt-v1` key.
  *
  * Kept from kteam, deliberately:
- *   - VERSIONED. A shape change bumps the version and the old payload is
- *     discarded rather than half-read. That is a clean migration point instead
- *     of a crash on a shape this build has never seen.
+ *   - VERSIONED. A shape change bumps the version. A payload from a version this build
+ *     does not know is discarded rather than half-read, which is a clean migration point
+ *     instead of a crash on a shape it has never seen. A version it DOES know
+ *     (`READABLE_VERSIONS`) is read field by field and rewritten at the current version
+ *     on the next save, so adding a field never costs anyone their dictionary or engine.
  *   - DEFENSIVE AND CAPPED. Any malformed, wrong-version, oversized or hostile
  *     payload degrades to the defaults, field by field. Parsing never throws.
  *   - STORAGE DENIAL IS NORMAL. Private windows, disabled storage and quota
@@ -45,7 +47,9 @@ import { type DictionaryParse, MAX_USER_CONTEXT_CHARS, parseDictionary } from '.
 import { ON_DEVICE_MODEL_IDS, type OnDeviceModelId } from './model-catalog.ts';
 
 export const STT_SETTINGS_KEY = 'fy-stt-v1';
-export const STT_SETTINGS_VERSION = 1;
+export const STT_SETTINGS_VERSION = 2;
+/** v1 predates `afterDictation`; it parses with that field defaulted, so nothing else is lost. */
+const READABLE_VERSIONS: readonly number[] = [1, STT_SETTINGS_VERSION];
 
 /**
  * Dictionary caps, mirrored from `enhancement.ts` so a textarea can refuse
@@ -97,6 +101,22 @@ export const isOnDeviceEngine = (engine: DictationEngineId | null | undefined): 
 
 export const isRemoteEnhancementProvider = (id: EnhancementProviderId): id is RemoteEnhancementProviderId =>
   id !== 'local';
+
+/**
+ * What happens to the cleaned-up text when dictation finishes. `review` parks it in the panel for the
+ * person to read and press Insert; `insert` puts it at the caret straight away and offers Undo. Either
+ * way nothing is ever sent for the person.
+ */
+export const AFTER_DICTATION_OPTIONS = [
+  { id: 'review', label: 'Review first', description: 'Read the text in the panel, then press Insert.' },
+  {
+    id: 'insert',
+    label: 'Insert straight away',
+    description: 'The text goes into your draft at the caret as soon as it is ready, with Undo.',
+  },
+] as const;
+
+export type AfterDictationId = (typeof AFTER_DICTATION_OPTIONS)[number]['id'];
 
 /**
  * The free-text context cap, re-exported so the settings textarea can carry
@@ -153,6 +173,8 @@ export interface SttSettings {
    * and only a choice made after this shipped can turn it on. Browser voice is always live.
    */
   readonly liveWordsOptIn: boolean;
+  /** Review the finished text first, or insert it straight away. Push-to-talk follows it too. */
+  readonly afterDictation: AfterDictationId;
 }
 
 export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
@@ -166,6 +188,7 @@ export const DEFAULT_STT_SETTINGS: SttSettings = Object.freeze({
   shortcut: DEFAULT_DICTATION_SHORTCUT,
   engine: null,
   liveWordsOptIn: false,
+  afterDictation: 'review',
 });
 
 const SHORTCUT_MODIFIERS = ['Meta', 'Control', 'Alt', 'Shift'] as const;
@@ -213,6 +236,9 @@ const parseProvider = (value: unknown): EnhancementProviderId =>
 const parseEngine = (value: unknown): DictationEngineId | null =>
   DICTATION_ENGINES.find(engine => engine === value) ?? null;
 
+const parseAfterDictation = (value: unknown): AfterDictationId =>
+  AFTER_DICTATION_OPTIONS.find(option => option.id === value)?.id ?? DEFAULT_STT_SETTINGS.afterDictation;
+
 const parseModel = (value: unknown): string => {
   if (typeof value !== 'string') return DEFAULT_STT_SETTINGS.enhancementModel;
   const model = value.trim().slice(0, MAX_ENHANCEMENT_MODEL_CHARS);
@@ -228,7 +254,8 @@ export const parseSttSettings = (raw: string | null): SttSettings => {
   } catch {
     return DEFAULT_STT_SETTINGS;
   }
-  if (!isRecord(parsed) || parsed.v !== STT_SETTINGS_VERSION) return DEFAULT_STT_SETTINGS;
+  if (!isRecord(parsed) || typeof parsed.v !== 'number' || !READABLE_VERSIONS.includes(parsed.v))
+    return DEFAULT_STT_SETTINGS;
   return {
     v: STT_SETTINGS_VERSION,
     enabled: typeof parsed.enabled === 'boolean' ? parsed.enabled : DEFAULT_STT_SETTINGS.enabled,
@@ -241,6 +268,7 @@ export const parseSttSettings = (raw: string | null): SttSettings => {
     engine: parseEngine(parsed.engine),
     liveWordsOptIn:
       typeof parsed.liveWordsOptIn === 'boolean' ? parsed.liveWordsOptIn : DEFAULT_STT_SETTINGS.liveWordsOptIn,
+    afterDictation: parseAfterDictation(parsed.afterDictation),
   };
 };
 

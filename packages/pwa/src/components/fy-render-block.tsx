@@ -70,6 +70,12 @@ import {
   isFyRenderMediaBlock,
   type FyRenderBlock as ParsedBlock,
 } from '../lib/fy-render.ts';
+import {
+  isNarrowColumn,
+  mermaidDisplayWidth,
+  mermaidNaturalSize,
+  verticalizeMermaid,
+} from '../lib/fy-render-mermaid-layout.ts';
 import { mermaidThemeVariables, paletteKey, type ResolvedTheme } from '../lib/fy-render-palette.ts';
 import { FyRenderChart, type FyRenderChartModules } from './fy-render-chart.tsx';
 import { FyRenderFragment } from './fy-render-fragment.tsx';
@@ -110,6 +116,16 @@ const prefersReducedMotion = (): boolean => {
 
 /** The app's theme name: what a theme switch changes, and so what a repaint is keyed on. */
 const themeName = documentThemeName;
+
+/**
+ * A diagram wider than its column pans sideways inside its own box, so that box is a named region and a tab
+ * stop: a keyboard reaches it and a screen reader says what it is.
+ */
+const SCROLLING_DIAGRAM = {
+  'aria-label': 'Diagram, scrolls sideways',
+  role: 'region',
+  tabIndex: 0,
+} as const;
 
 const TRANSPARENT = new Set(['', 'transparent', 'rgba(0, 0, 0, 0)']);
 
@@ -278,6 +294,8 @@ export function FyRenderBlock({
     /** The palette it was painted in, as the shell echoed it. */
     readonly palette: string;
     readonly source: string;
+    /** The text that was compiled: the authored payload, or its top-to-bottom form for a narrow column. */
+    readonly drawn: string;
   } | null>(null);
 
   /**
@@ -339,6 +357,51 @@ export function FyRenderBlock({
   const sandboxPalette =
     resolved === null ? undefined : { key: resolved.key, variables: mermaidThemeVariables(resolved.theme) };
 
+  /**
+   * THE COLUMN A DIAGRAM LIVES IN, measured from this block's own element (content box, so the fullscreen
+   * overlay's padding is not counted) together with the body text size around it. `null` until the first
+   * reading, and a diagram is not compiled before then so its direction is decided once, not twice.
+   *
+   * WHETHER THE COLUMN IS A PHONE'S (`narrow`) is decided only from the inline column. Entering fullscreen
+   * widens the host, and a diagram that flipped direction because the reader enlarged it would be a
+   * surprise; the decision stays what the message showed, and moves again only on resize or rotation.
+   */
+  const mermaidBlock = presentation === 'sandbox' && block.type === 'mermaid';
+  const [column, setColumn] = useState<{ readonly px: number; readonly bodyPx: number } | null>(null);
+  const [narrow, setNarrow] = useState(false);
+  useEffect(() => {
+    if (!mermaidBlock || !near) return;
+    const element = hostRef.current;
+    const settle = (px: number, bodyPx: number): void => {
+      setColumn(previous => (previous?.px === px && previous.bodyPx === bodyPx ? previous : { bodyPx, px }));
+      if (!fullscreen) setNarrow(isNarrowColumn(px));
+    };
+    /** The content box and the body text size, read now. A node that is not a laid-out element reads as 0. */
+    const read = (): void => {
+      try {
+        if (element === null) {
+          settle(0, 14);
+          return;
+        }
+        const style = getComputedStyle(element);
+        const body = Number.parseFloat(style.fontSize);
+        const inner =
+          element.clientWidth -
+          (Number.parseFloat(style.paddingLeft) || 0) -
+          (Number.parseFloat(style.paddingRight) || 0);
+        settle(Math.max(0, Math.round(inner)), Number.isFinite(body) && body > 0 ? body : 14);
+      } catch {
+        settle(0, 14);
+      }
+    };
+    read();
+    if (element === null || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [mermaidBlock, near, fullscreen]);
+  const diagramSource = mermaidBlock && narrow ? verticalizeMermaid(block.payload) : block.payload;
+
   const [paint, setPaint] = useState<FyRenderHtmlPaint>(() => paintFrom(null, mode));
   // biome-ignore lint/correctness/useExhaustiveDependencies: `theme` is the repaint trigger; the read is the DOM's
   useEffect(() => {
@@ -388,9 +451,9 @@ export function FyRenderBlock({
       }
       // THE SHELL'S OWN THEME, never the document's: a switch during the compile
       // must not be recorded as the theme this diagram was drawn for.
-      setCompiled({ palette, source, svg: admitted.svg, theme: drawnFor });
+      setCompiled({ drawn: diagramSource, palette, source, svg: admitted.svg, theme: drawnFor });
     },
-    [fail, source],
+    [diagramSource, fail, source],
   );
 
   const noop = useCallback((): void => undefined, []);
@@ -407,8 +470,17 @@ export function FyRenderBlock({
     live &&
     mermaid &&
     resolved !== null &&
-    (compiled === null || compiled.source !== source || (compiled.palette !== resolved.key && visible));
+    column !== null &&
+    (compiled === null ||
+      compiled.source !== source ||
+      ((compiled.palette !== resolved.key || compiled.drawn !== diagramSource) && visible));
   const diagram = mermaid && fallback === null && compiled !== null;
+  /** The compiled image's size on screen, once its natural size and the column are both known. */
+  const natural = diagram && compiled !== null ? mermaidNaturalSize(compiled.svg) : null;
+  const shown =
+    natural === null || column === null
+      ? null
+      : mermaidDisplayWidth({ bodyPx: column.bodyPx, columnPx: column.px, fullscreen, naturalWidth: natural.width });
   const lottie = live && presentation === 'sandbox' && block.type === 'lottie';
   const fragment = live && presentation === 'fragment';
   /**
@@ -614,14 +686,28 @@ export function FyRenderBlock({
     ) : (
       <>
         {diagram ? (
-          <img
-            alt={block.alt}
-            className="fy-render-image"
-            data-fy-render-diagram="true"
-            key={`diagram:${generation.current}`}
-            onError={onDecodeFailure(generation.current)}
-            src={svgDataUrl(compiled?.svg as string)}
-          />
+          /**
+           * AT A READABLE SIZE, not the column's. The compiled image has no size of its own, so left alone it is
+           * stretched or squeezed to the column and its 16px text goes with it. Its width is set from its
+           * `viewBox` (`fy-render-mermaid-layout.ts`); wider than the column, it pans sideways in this box
+           * rather than shrinking, and the box is a tab stop so a keyboard can pan it too.
+           */
+          <div
+            className="fy-render-diagram"
+            data-fy-render-scrolls={shown?.scrolls ? 'true' : 'false'}
+            {...(shown?.scrolls ? SCROLLING_DIAGRAM : {})}
+          >
+            <img
+              alt={block.alt}
+              className="fy-render-image"
+              data-fy-render-diagram="true"
+              data-fy-render-sized={shown === null ? 'false' : 'true'}
+              key={`diagram:${generation.current}`}
+              onError={onDecodeFailure(generation.current)}
+              src={svgDataUrl(compiled?.svg as string)}
+              style={shown === null ? undefined : { width: `${shown.width}px` }}
+            />
+          </div>
         ) : near || presentation === 'map' || presentation === 'chart' ? (
           // A diagram's first draw holds a quiet plane rather than nothing, so the
           // prose below does not jump twice. A map holds its plane from the start, for the same reason.
@@ -636,7 +722,8 @@ export function FyRenderBlock({
           <div aria-hidden="true" className="fy-render-offstage">
             <FyRenderSandbox
               block={block}
-              key={`frame:${generation.current}:${revision}:${resolved?.key}`}
+              key={`frame:${generation.current}:${revision}:${resolved?.key}:${diagramSource === block.payload ? 'authored' : 'vertical'}`}
+              diagramSource={diagramSource}
               onCompiled={onCompiled}
               onFailed={fail}
               onRendered={noop}

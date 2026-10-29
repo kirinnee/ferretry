@@ -672,7 +672,7 @@ describe('the fleet warden under Jev', () => {
     const second = await subject.service.run({ force: false });
 
     // Assert
-    should(first.message).equal('Jev judged every flag healthy; nothing to investigate');
+    should(first.message).equal('Jev settled every flag; nothing to investigate');
     should(second.message).equal('no anomalies to escalate');
     should(subject.guarded).have.length(1);
     should(subject.spawns).be.empty();

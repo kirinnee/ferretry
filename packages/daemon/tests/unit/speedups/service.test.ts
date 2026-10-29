@@ -183,7 +183,7 @@ describe('a speed-up Test', () => {
     const actual = await Promise.all(
       failures.map(async ([failure]) => {
         const decision: TriageDecision = {
-          verdict: 'investigate',
+          verdict: 'unsure',
           confidence: 0,
           model: 'jev-latest',
           inputTokens: 0,

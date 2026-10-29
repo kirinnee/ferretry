@@ -128,6 +128,18 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # A pull request runs Containment, Sandbox Shell (Safari) and the macos-15 Harness Contract only when
+    # their inputs change. The lists live in scripts/ci/macos-relevance.sh; this holds them to the
+    # scripts and test files those jobs actually run, and ci.yaml to the decision.
+    a-macos-relevance = {
+      enable = true;
+      name = "macOS job relevance";
+      entry = validator "scripts/validate/macos-relevance.sh";
+      files = "^(scripts/(ci/(macos-relevance|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/workflows/ci\\.yaml|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # The hosted relay is the one subsystem whose configuration meets its code only in production:
     # no test reads a wrangler config or a workflow's shell. Includes the adapter sources because
     # the gate cross-checks the routes and Durable Object classes they declare against the two.

@@ -271,6 +271,30 @@ const workerFor = async (profile: Profile, scope: string, script: string): Promi
   throw new Error(`no running worker for ${script}`);
 };
 
+/**
+ * The release mark a worker carries (`undefined` before the new release), or `null` once it is gone.
+ *
+ * A worker the browser stops stays in `serviceWorkers()` until it closes, and Playwright (1.62) never
+ * settles an `evaluate` sent to it in that gap — not even with an error, so a `.catch` alone waits
+ * forever. An update stops the worker it replaces a few milliseconds before closing it; a poll that
+ * landed there hung the test for its whole two minutes. Its `close` answers instead.
+ */
+const releaseOf = async (worker: Worker): Promise<unknown> => {
+  let gone = (): void => undefined;
+  const closed = new Promise<null>(resolveGone => {
+    gone = () => resolveGone(null);
+    worker.once('close', gone);
+  });
+  try {
+    return await Promise.race([
+      worker.evaluate(() => (globalThis as unknown as { __release?: number }).__release).catch(() => null),
+      closed,
+    ]);
+  } finally {
+    worker.off('close', gone);
+  }
+};
+
 /** What the worker did with the tap: the windows it brought forward, and the ones it opened. */
 interface Tap {
   readonly focused: readonly string[];
@@ -576,12 +600,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
         browserProfile.context
           .serviceWorkers()
           .filter(worker => worker.url() === `${origin()}${MACHINES.beta.script}`)
-          .map(
-            async worker =>
-              await worker
-                .evaluate(() => (globalThis as unknown as { __release?: number }).__release)
-                .catch(() => null),
-          ),
+          .map(releaseOf),
       );
     try {
       await workerFor(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);

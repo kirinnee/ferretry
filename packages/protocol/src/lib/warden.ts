@@ -8,12 +8,15 @@ import { SessionStatusSchema } from './session.ts';
  *
  * LAYERS, AND ONLY ONE OF THEM ACTS. Free deterministic RULES flag anomalies whenever the Warden is on.
  * Two optional layers decide what becomes of a flag: JEV — TypeSafe AI's cheap decision model — clears
- * the flags it is confident are healthy, and an LLM INVESTIGATION by an assigned warden looks at the
- * rest. JEV IS ONLY A GUARD: its whole answer is `skip` (healthy: bless the anomaly for a while) or
- * `investigate`, and anything below the owner's threshold, or any failure, passes the flag on. With
- * investigations off, a flag Jev did not clear goes to the owner, never to a spawn. Every real action —
- * nudge, resume, fail over, stop — comes from the verdict of a read-only assigned warden, filtered by
- * what the owner let it do alone, and stop is never on that list unless the owner put it there.
+ * the flags it is confident about, and an LLM INVESTIGATION by an assigned warden looks at the rest.
+ * JEV IS THE FIRST RESPONDER: it answers `leave` (healthy: bless the anomaly for a while), one act —
+ * `nudge`, `resume`, `restart`, `failover`, `stop` — or `unsure`. An act is carried out only when
+ * Jev is at least as sure as the owner's threshold for THAT act ({@link WardenJevActsSchema}) and the
+ * owner lets the Warden do it alone; everything else — unsure, not sure enough, not allowed alone, any
+ * failure, or a second act on a situation Jev already acted on — goes to an investigation when that
+ * layer is on, and to the owner when it is off. An investigation's verdict acts the same way, through
+ * the same remedies, filtered by the same `mayActAlone`; stop is never on that list unless the owner
+ * put it there.
  *
  * A CLEARED FLAG IS LEFT ALONE FOR A WHILE, and each consecutive re-clear doubles the while, up to four
  * hours; the owner can leave a ferret alone for longer still.
@@ -88,13 +91,21 @@ export const LEGACY_TRIAGE_LAYERS: Readonly<Record<LegacyWardenTriage, WardenLay
  * - a whole `mayActAlone` with no `closeLeftovers` takes its default, on;
  * - a `mayActAlone` with no `restart` takes the owner's `resume` answer, because a restart is a resume
  *   that relaunches the agent: what the owner let the Warden do to a dead turn, it may do to a dead or
- *   frozen agent.
+ *   frozen agent;
+ * - a whole document with no `jevActs` takes {@link DEFAULT_WARDEN_JEV_ACTS}, so settings from before
+ *   Jev could act still read (a partial file is filled by the file loader's merge instead).
  *
  * Anything that is not an object passes through untouched.
  */
 export function migrateLegacyWardenSettings(value: unknown): unknown {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return value;
-  return withCloseLeftovers(withRestart(withLayers(value as Record<string, unknown>)));
+  return withJevActs(withCloseLeftovers(withRestart(withLayers(value as Record<string, unknown>))));
+}
+
+/** A whole document from before Jev could act takes the default bars. A partial one is left to its merge. */
+function withJevActs(value: Record<string, unknown>): Record<string, unknown> {
+  if ('jevActs' in value || !('mayActAlone' in value) || !('guard' in value)) return value;
+  return { ...value, jevActs: DEFAULT_WARDEN_JEV_ACTS };
 }
 
 function withLayers(value: Record<string, unknown>): Record<string, unknown> {
@@ -130,7 +141,7 @@ export const WARDEN_SWEEP_INTERVALS = [1, 2, 5, 10, 15] as const;
 export const WardenSweepIntervalSchema = z.literal(WARDEN_SWEEP_INTERVALS);
 export type WardenSweepInterval = z.infer<typeof WardenSweepIntervalSchema>;
 
-/** The skip threshold's range: Jev may skip a flag only when it is at least this sure. */
+/** The leave bar's range: Jev may leave a flag alone only when it is at least this sure. */
 export const WARDEN_GUARD_THRESHOLD_RANGE = { min: 0.7, max: 0.95 } as const;
 
 /**
@@ -159,7 +170,31 @@ export const WardenCapsSchema = z.object({
 export type WardenCaps = z.infer<typeof WardenCapsSchema>;
 
 /**
- * What an investigation's verdict may do without asking. `stop` is off unless the owner turns it on.
+ * How sure Jev must be to carry out each act ALONE — riskier acts ask for more. Jev may leave a flag at
+ * `guard.threshold`; every act here is held to its own, higher, bar. `1` means Jev never does that act
+ * alone (the flag goes on to an investigation or to the owner). There is no failover row: Jev cannot
+ * name the login to move to, so a failover it recommends always goes on.
+ */
+export const WARDEN_JEV_ACT_THRESHOLD_RANGE = { min: 0.8, max: 1 } as const;
+const JevActThresholdSchema = z
+  .number()
+  .min(WARDEN_JEV_ACT_THRESHOLD_RANGE.min)
+  .max(WARDEN_JEV_ACT_THRESHOLD_RANGE.max);
+
+export const WardenJevActsSchema = z.object({
+  nudge: JevActThresholdSchema,
+  resume: JevActThresholdSchema,
+  restart: JevActThresholdSchema,
+  stop: JevActThresholdSchema,
+});
+export type WardenJevActs = z.infer<typeof WardenJevActsSchema>;
+export type WardenJevAct = keyof WardenJevActs;
+
+/** The bars a new machine — or a settings document from before they existed — holds Jev to. */
+export const DEFAULT_WARDEN_JEV_ACTS: WardenJevActs = { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 0.98 };
+
+/**
+ * What an investigation's verdict — or Jev, when it is sure enough — may do without asking. `stop` is off unless the owner turns it on.
  * `restart` relaunches a dead or frozen process with its conversation intact; it defaults to whatever
  * the owner said about `resume`.
  */
@@ -204,6 +239,8 @@ const WardenConfigShape = z.object({
   guard: WardenGuardConfigSchema,
   caps: WardenCapsSchema,
   mayActAlone: WardenMayActAloneSchema,
+  /** How sure Jev must be to do each act alone. */
+  jevActs: WardenJevActsSchema,
   events: WardenEventTriggersSchema,
   investigation: WardenInvestigationConfigSchema,
   /** The owner's failover order. EMPTY means "not chosen": the machine's default runtime, resolved at read time. */
@@ -237,6 +274,7 @@ export const WardenConfigPatchSchema = z.strictObject({
   guard: WardenGuardConfigSchema.strict().partial().optional(),
   caps: WardenCapsSchema.strict().partial().optional(),
   mayActAlone: WardenMayActAloneSchema.strict().partial().optional(),
+  jevActs: WardenJevActsSchema.strict().partial().optional(),
   events: WardenEventTriggersSchema.strict().partial().optional(),
   investigation: WardenInvestigationConfigSchema.strict().partial().optional(),
   /** `[]` hands the choice back to the machine's default runtime. */
@@ -260,6 +298,7 @@ export const WARDEN_CONFIG_SECTIONS = [
   'guard',
   'caps',
   'mayActAlone',
+  'jevActs',
   'events',
   'investigation',
   'failover',
@@ -570,10 +609,12 @@ export const WardenSavingsSchema = z.object({
   flags: NonNegativeIntegerSchema,
   jevDecisions: NonNegativeIntegerSchema,
   jevSkips: NonNegativeIntegerSchema,
+  /** Flags Jev settled by acting alone — a nudge, a resume, a restart or a stop — instead of an investigation. Absent from an older daemon. */
+  jevActions: NonNegativeIntegerSchema.optional(),
   investigations: NonNegativeIntegerSchema,
   /** The average priced investigation, when at least one has been priced. Never a guess. */
   averageInvestigationUsd: NonNegativeFiniteSchema.optional(),
-  /** Skips × the average investigation, minus Jev's own cost. Absent when no investigation was ever priced. */
+  /** (Skips + Jev's own actions) × the average investigation, minus Jev's own cost. Absent when no investigation was ever priced. */
   savedUsd: NonNegativeFiniteSchema.optional(),
 });
 export type WardenSavings = z.infer<typeof WardenSavingsSchema>;
@@ -635,14 +676,19 @@ export const WardenActionSchema = z.object({
   sessionId: z.string().min(1),
   action: WardenActionKindSchema,
   outcome: WardenActionOutcomeSchema,
-  /** `jev` only ever blesses, and so does `owner` (Leave it longer). Every other action is an investigation's verdict. */
+  /**
+   * `warden` is an investigation's verdict or a rule; `jev` is Jev acting as first responder (a
+   * bless, or an act it was sure enough about); `owner` only ever blesses (Leave it longer).
+   */
   by: WardenClearedBySchema,
   anomalyKind: WardenAnomalyKindSchema.optional(),
   /** One plain sentence: what happened and why. */
   detail: z.string().min(1),
   reportPath: z.string().min(1).optional(),
-  /** Jev's confidence in a skip. */
+  /** Jev's confidence in what it chose. Present exactly on Jev's own actions. */
   confidence: z.number().min(0).max(1).optional(),
+  /** Why, in the words of the option Jev chose. Jev's actions only: an investigation's reason is in its report. */
+  reason: z.string().min(1).max(500).optional(),
   /** The account a failover moved to. */
   agent: z.string().min(1).optional(),
 });

@@ -187,7 +187,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'dictation',
     label: 'Voice',
     description:
-      'Dictation into an editable message draft, never sent for you. Choose how this device turns speech into text — Parakeet on this device (a one-time download) or phone/browser voice — plus clean-up with a dictionary and context that fix misheard names and jargon.',
+      'Dictation into an editable message draft, never sent for you. Choose how this device turns speech into text — Parakeet on this device (a one-time download) or phone/browser voice — whether to review the text first or insert it straight away, plus clean-up with a dictionary and context that fix misheard names and jargon.',
     keywords: [
       'voice',
       'speech',
@@ -198,6 +198,14 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'transcription',
       'talk',
       'push to talk',
+      'after dictating',
+      'review first',
+      'review',
+      'preview',
+      'insert straight away',
+      'insert',
+      'inject',
+      'undo',
       'shortcut',
       'hotkey',
       'alt',

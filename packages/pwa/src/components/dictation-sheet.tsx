@@ -188,6 +188,8 @@ export interface DictationSheetProps {
   readonly errorMessage?: string;
   /** The finished take, present in stage `review`. */
   readonly review?: DictationReview | null;
+  /** The device setting "Insert straight away": a clean take goes into the draft without a review. */
+  readonly insertsDirectly?: boolean;
   /** Hide only. Recording and transcription continue in the background. */
   onDismiss(): void;
   /** Stop recording; the hook finishes and parks the transcript for review. */
@@ -238,8 +240,12 @@ export function dictationStripStatus(
   failure: DictationFailureCopy,
   engine: StripEngine = 'browser',
   livePaused = false,
+  insertsDirectly = false,
 ): string {
   const preview = liveText.trim();
+  const afterwards = insertsDirectly
+    ? 'The result goes into your draft when it is ready.'
+    : 'You will review the result before it reaches your draft.';
   const onDevice = isOnDeviceEngine(engine);
   const paused = onDevice && livePaused;
   switch (stage) {
@@ -252,10 +258,8 @@ export function dictationStripStatus(
       if (onDevice)
         return preview
           ? `Finishing on this device and correcting once… Last heard: ${preview}`
-          : 'Transcribing on this device and correcting once… You will review the result before it reaches your draft.';
-      return `Finishing in your browser and correcting once… ${
-        preview ? `Last heard: ${preview}` : 'You will review the result before it reaches your draft.'
-      }`;
+          : `Transcribing on this device and correcting once… ${afterwards}`;
+      return `Finishing in your browser and correcting once… ${preview ? `Last heard: ${preview}` : afterwards}`;
     case 'review':
       return 'Review the text, then insert it into your draft.';
     case 'empty':
@@ -318,6 +322,7 @@ export function DictationSheet({
   onDetails,
   onDismiss,
   review = null,
+  insertsDirectly = false,
   onStop,
   onInsert,
   onDiscard,
@@ -345,7 +350,7 @@ export function DictationSheet({
             : stage === 'empty'
               ? "Didn't catch that"
               : 'Opening microphone';
-  const status = dictationStripStatus(stage, liveText, errorMessage, failure, engine, livePaused);
+  const status = dictationStripStatus(stage, liveText, errorMessage, failure, engine, livePaused, insertsDirectly);
   const caption = splitLiveCaption(liveText, liveInterim);
   const showCaption = stage === 'recording' && caption.settled + caption.interim !== '';
 
@@ -514,7 +519,9 @@ export function DictationSheet({
         {onDevice
           ? `${modelName(engine)} transcribes on this device: audio never leaves it, and Ferretry never sends it to your daemon.`
           : 'Ferretry never sends microphone audio to your daemon, but your browser sends it to its vendor’s servers to transcribe it.'}{' '}
-        Nothing reaches your draft until you press Insert, and dictation is never sent automatically.
+        {insertsDirectly
+          ? 'A finished take goes into your draft at the caret; dictation is never sent automatically.'
+          : 'Nothing reaches your draft until you press Insert, and dictation is never sent automatically.'}
       </span>
     </section>
   );

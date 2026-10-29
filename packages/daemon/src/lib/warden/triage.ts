@@ -2,13 +2,32 @@
  * The TRIAGE tier: what happens to a flag between the free sweep and the expensive investigation, and
  * the daily budget that bounds it.
  *
- * ═══ JEV IS ONLY A GUARD ═══
+ * ═══ JEV IS THE FIRST RESPONDER ═══
  *
- * Jev answers one question about a flag — "is this worth a full investigation?" — and its whole
- * vocabulary is `skip` or `investigate`. It never acts on a ferret. A skip is believed only at or above
- * the owner's threshold; anything else, a failure included, is an investigation. So a broken, unsure or
- * unreachable guard costs money and never hides a stuck ferret — the doctrine's direction: on missing
- * evidence, refuse to bless. With investigations off, "investigate" means the owner is shown the flag.
+ * Jev answers one question about a flag — "what should happen now?" — and its vocabulary is `leave`,
+ * one of the acts that fit the flag ({@link JEV_ACTS_BY_KIND}: nudge, resume, restart, failover, stop),
+ * or `unsure` (`speedups/jev.ts`). What it says is believed only as far as {@link firstResponse} allows:
+ *
+ * - `leave` at or above `guard.threshold` clears the flag, exactly as an investigation's LEAVE does;
+ * - an act is CARRIED OUT only when Jev is at least as sure as the owner's bar for that act
+ *   (`jevActs`, riskier acts higher, `1` meaning never) AND the owner lets the Warden do it alone
+ *   (`mayActAlone`). It goes through the same remedies, the same permissions and the same records as
+ *   an investigation's verdict (`remedy.ts`). A nudge also needs a message Jev chose just as surely;
+ * - EVERYTHING ELSE ESCALATES: unsure, not sure enough, an act the owner keeps for themselves, a
+ *   failover (Jev cannot name the login to move to), and every failure — no key, a timeout, a refusal,
+ *   an unreadable answer, the cap, a provider back-off. Escalating means an investigation while that
+ *   layer is on and under its cap, and otherwise the owner's Needs you ({@link jevRoute}); a confident
+ *   recommendation the Warden could not carry out is put in front of the owner as held. An
+ *   investigation that fails leaves the flag standing, which is the owner's Needs you too.
+ *
+ * So a broken, unsure or unreachable Jev costs money or the owner's attention and never acts on noise or
+ * hides a stuck ferret — the doctrine's direction: on missing evidence, refuse to bless or act.
+ *
+ * ═══ ONE TRY ═══
+ *
+ * Jev acts on a SUBJECT (`backoff.ts`: this turn's episode, or this stuck command) at most once. The
+ * act is given the backoff's first rung to land; if the same subject is still flagged after that, Jev
+ * is not asked again — the flag escalates. A new subject is a new situation and Jev may act on it.
  *
  * ═══ NO UNATTENDED SPEND BY SURPRISE ═══
  *
@@ -38,7 +57,8 @@ import type {
   WardenLayerStatus,
   WardenTriageReason,
 } from '@ferretry/protocol';
-import type { TriageDecision, TriageSnapshot } from '../speedups/jev.ts';
+import type { WardenJevAct, WardenJevActs, WardenMayActAlone } from '@ferretry/protocol';
+import type { TriageActVerdict, TriageDecision, TriageSnapshot } from '../speedups/jev.ts';
 import { type WardenAnomaly, type WardenAnomalyKind, wardenAnomalySubject } from './detect.ts';
 import { instantMs } from './time.ts';
 import type { WardenVerdictKind } from './verdicts.ts';
@@ -57,6 +77,8 @@ export interface WardenTriageDay {
   readonly flags: number;
   readonly jevDecisions: number;
   readonly jevSkips: number;
+  /** Flags Jev settled by acting alone. Absent in a day recorded before Jev could act. */
+  readonly jevActions?: number;
   readonly jevUsd: number;
 }
 
@@ -201,20 +223,127 @@ export function effectiveLayers(
   return { jev: layerStatus(layers.jev, jevOff), llm: layerStatus(layers.llm, llmOff) };
 }
 
-/** What the guard's answer means for one flag, after the owner's threshold. */
+/**
+ * The acts that fit each kind of flag: what Jev is offered beside `leave` and `unsure`. A kind with
+ * none — a question waiting on the owner, wreckage of a ferret that has finished, a fault of the daemon
+ * or of a provider rather than of one ferret — is never acted on by Jev, only left or handed on.
+ */
+export const JEV_ACTS_BY_KIND: Readonly<Record<WardenAnomalyKind, readonly TriageActVerdict[]>> = {
+  sus_thinking: ['nudge', 'restart', 'failover', 'stop'],
+  sus_subprocess: ['nudge', 'restart', 'stop'],
+  agent_frozen: ['nudge', 'restart', 'failover', 'stop'],
+  quota_reset_passed: ['resume'],
+  declared_wait_overdue: ['nudge'],
+  peer_wait_unanswerable: ['nudge', 'stop'],
+  unattended_question: [],
+  abandoned_wreckage: [],
+  dead_monitor: [],
+  provider_unavailable: ['failover'],
+  owner_request: [],
+};
+
+/** The acts Jev is offered for one flag. A flag about several ferrets is no one ferret's to act on. */
+export function jevActsFor(
+  anomaly: Pick<WardenAnomaly, 'kind' | 'fleetKey' | 'affectedSessionIds'>,
+): readonly TriageActVerdict[] {
+  if (anomaly.fleetKey !== undefined || anomaly.affectedSessionIds !== undefined) return [];
+  return JEV_ACTS_BY_KIND[anomaly.kind];
+}
+
+/** Why Jev's answer was handed on instead of carried out. */
+export type JevEscalation =
+  /** Jev chose `unsure`. */
+  | 'unsure'
+  /** Jev was less sure than the bar for what it chose. */
+  | 'not_sure_enough'
+  /** The owner's bar for this act is 1: Jev never does it alone. */
+  | 'never_alone'
+  /** The owner has not let the Warden do this act alone. */
+  | 'not_allowed'
+  /** A nudge without a message Jev chose as surely. */
+  | 'no_message'
+  /** A failover: Jev cannot name the login to move to. */
+  | 'cannot_choose_login'
+  /** No real answer came back — or none was asked for (cap, back-off, unredactable snapshot). */
+  | 'failed'
+  /** Jev already acted on this subject, and it is still flagged. */
+  | 'already_acted';
+
+/** What Jev's answer means for one flag, after the owner's bars and permissions. */
 export type WardenGuardOutcome =
-  | { readonly kind: 'skip'; readonly confidence: number }
-  | { readonly kind: 'investigate'; readonly confidence: number; readonly failure?: WardenGuardFailureCode };
+  | { readonly kind: 'leave'; readonly confidence: number; readonly reason?: string }
+  | {
+      readonly kind: 'act';
+      readonly act: WardenJevAct;
+      readonly confidence: number;
+      readonly reason: string;
+      /** The nudge's message. */
+      readonly message?: string;
+    }
+  | {
+      readonly kind: 'escalate';
+      readonly why: JevEscalation;
+      readonly confidence: number;
+      /** An act Jev was sure of and the Warden could not carry out alone: shown to the owner as held. */
+      readonly recommends?: TriageActVerdict;
+      readonly reason?: string;
+      readonly failure?: WardenGuardFailureCode;
+    };
+
+/** The owner's settings {@link firstResponse} applies. */
+export interface JevResponderPolicy {
+  /** `guard.threshold`: how sure Jev must be to leave a flag. */
+  readonly leaveThreshold: number;
+  readonly acts: WardenJevActs;
+  readonly mayActAlone: WardenMayActAlone;
+}
+
+const isJevAct = (verdict: TriageActVerdict): verdict is WardenJevAct => verdict !== 'failover';
 
 /**
- * A skip is believed only at or above the threshold. Below it — and on any failure — Jev's answer is
- * an investigation: when the guard is unsure, it fails toward looking.
+ * What one answer of Jev's means — the decision table of the first responder. Total and pure.
+ *
+ * An act's own bar comes first, then the owner's permission, then (for a nudge) its message. An act
+ * whose bar is `1`, or that is not allowed alone, or a failover, is still worth showing the owner when
+ * Jev was sure of it — at its bar, or at the leave bar for one Jev never does alone — so it carries
+ * `recommends`. Anything Jev was not sure of carries nothing: it is no recommendation.
  */
-export function guardOutcome(decision: TriageDecision, threshold: number): WardenGuardOutcome {
-  if (decision.failure !== undefined) return { kind: 'investigate', confidence: 0, failure: decision.failure.code };
-  if (decision.verdict === 'skip' && decision.confidence >= threshold)
-    return { kind: 'skip', confidence: decision.confidence };
-  return { kind: 'investigate', confidence: decision.confidence };
+export function firstResponse(decision: TriageDecision, policy: JevResponderPolicy): WardenGuardOutcome {
+  const { confidence, verdict } = decision;
+  const reason = decision.reason === undefined ? {} : { reason: decision.reason };
+  if (decision.failure !== undefined)
+    return { kind: 'escalate', why: 'failed', confidence: 0, failure: decision.failure.code };
+  if (verdict === 'unsure') return { kind: 'escalate', why: 'unsure', confidence, ...reason };
+  if (verdict === 'leave')
+    return confidence >= policy.leaveThreshold
+      ? { kind: 'leave', confidence, ...reason }
+      : { kind: 'escalate', why: 'not_sure_enough', confidence, ...reason };
+  const bar = isJevAct(verdict) ? policy.acts[verdict] : 1;
+  const never = bar >= 1;
+  if (confidence < (never ? policy.leaveThreshold : bar))
+    return { kind: 'escalate', why: 'not_sure_enough', confidence, ...reason };
+  const recommend = { kind: 'escalate', confidence, recommends: verdict, ...reason } as const;
+  if (!isJevAct(verdict)) return { ...recommend, why: 'cannot_choose_login' };
+  if (never) return { ...recommend, why: 'never_alone' };
+  if (!policy.mayActAlone[verdict]) return { ...recommend, why: 'not_allowed' };
+  if (verdict === 'nudge' && (decision.nudge === undefined || decision.nudge.confidence < bar))
+    return { kind: 'escalate', why: 'no_message', confidence, ...reason };
+  return {
+    kind: 'act',
+    act: verdict,
+    confidence,
+    reason: decision.reason ?? verdict,
+    ...(verdict === 'nudge' && decision.nudge !== undefined ? { message: decision.nudge.message } : {}),
+  };
+}
+
+/** Where a flag goes after Jev: left, acted on, or handed on to an investigation or to the owner. */
+export type JevRoute = 'leave' | 'act' | 'investigation' | 'owner';
+
+/** An escalation is an investigation while that layer is on and under its cap, and the owner otherwise. */
+export function jevRoute(outcome: WardenGuardOutcome, investigating: boolean): JevRoute {
+  if (outcome.kind !== 'escalate') return outcome.kind;
+  return investigating ? 'investigation' : 'owner';
 }
 
 /** The failures that ask the guard to wait before it is called again. */
@@ -259,9 +388,14 @@ export function recordGuardDecision(
   return {
     ...today,
     jevDecisions: today.jevDecisions + (decision.failure === undefined ? 1 : 0),
-    jevSkips: today.jevSkips + (outcome.kind === 'skip' ? 1 : 0),
+    jevSkips: today.jevSkips + (outcome.kind === 'leave' ? 1 : 0),
     jevUsd: today.jevUsd + (decision.costUsd ?? 0),
   };
+}
+
+/** Count one act Jev carried out alone into today's counters. */
+export function recordJevAction(today: WardenTriageDay): WardenTriageDay {
+  return { ...today, jevActions: (today.jevActions ?? 0) + 1 };
 }
 
 /**
@@ -273,7 +407,10 @@ export function newFlagCount(previous: readonly WardenAnomaly[], current: readon
   return current.filter(anomaly => !seen.has(`${anomaly.kind}\u0000${anomaly.sessionId}`)).length;
 }
 
-/** Today's savings line. `savedUsd` exists only when an investigation has ever been priced. */
+/**
+ * Today's savings line. `savedUsd` exists only when an investigation has ever been priced: every flag
+ * Jev left or acted on alone is an investigation not bought.
+ */
 export function wardenSavings(
   today: WardenTriageDay,
   records: readonly WardenInvestigationRecord[],
@@ -285,10 +422,14 @@ export function wardenSavings(
     flags: today.flags,
     jevDecisions: today.jevDecisions,
     jevSkips: today.jevSkips,
+    ...(today.jevActions === undefined ? {} : { jevActions: today.jevActions }),
     investigations: startedOn(records, today.day).length,
     ...(avg === undefined
       ? {}
-      : { averageInvestigationUsd: avg, savedUsd: Math.max(0, today.jevSkips * avg - today.jevUsd) }),
+      : {
+          averageInvestigationUsd: avg,
+          savedUsd: Math.max(0, (today.jevSkips + (today.jevActions ?? 0)) * avg - today.jevUsd),
+        }),
   };
 }
 
@@ -313,12 +454,14 @@ export function triageSnapshotOf(anomaly: WardenAnomaly, evidence: WardenTriageE
     ...(anomaly.affectedSessionIds === undefined ? {} : { affectedSessions: anomaly.affectedSessionIds.length }),
     ...(anomaly.provider === undefined ? {} : { provider: anomaly.provider }),
   };
+  const acts = jevActsFor(anomaly);
   return {
     anomaly: anomaly.kind,
     summary: anomaly.detail,
     facts,
     recentTurns: evidence.recentTurns,
     ...(evidence.paneTail === undefined ? {} : { paneTail: evidence.paneTail }),
+    ...(acts.length === 0 ? {} : { acts }),
   };
 }
 
@@ -347,6 +490,7 @@ export async function redactTriageSnapshot(
       facts,
       recentTurns: snapshot.recentTurns.map(turn => scrub.text(turn)),
       ...(snapshot.paneTail === undefined ? {} : { paneTail: scrub.text(snapshot.paneTail) }),
+      ...(snapshot.acts === undefined ? {} : { acts: snapshot.acts }),
     };
   });
 }
