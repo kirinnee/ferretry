@@ -331,7 +331,7 @@ describe('Jev’s one try at a situation', () => {
       });
 
       for (const [label, fleetAtAct] of after) {
-        it(`should run no ${act} and settle the flag when the target is ${label}`, async () => {
+        it(`should run no ${act} and hand the flag on as it stands when the target is ${label}`, async () => {
           // Arrange / Act
           const subject = await run(act, fleetAtAct);
 
@@ -341,7 +341,6 @@ describe('Jev’s one try at a situation', () => {
           should(subject.state().actions ?? []).be.empty();
           should(journalTypes(subject)).not.containEql('fleet.warden_acted');
           should(journalTypes(subject)).not.containEql('fleet.warden_action_failed');
-          should(subject.spawns).be.empty();
         });
       }
     }

@@ -1535,9 +1535,6 @@ export class WardenSweepService {
       return { state: next, outcome, decided, settled: true };
     }
     if (outcome.kind === 'act') {
-      // A ferret that has gone or finished since is not acted on: the flag is handed on as it stands.
-      if (target === undefined || isTerminalStatus(target.state.status))
-        return { state: next, outcome, decided, settled: false };
       const act: WardenVerdictAct = { action: outcome.act, reason: outcome.reason };
       const sure = `Jev, ${Math.round(outcome.confidence * 100)}% sure`;
       const done = await this.carryOut(
