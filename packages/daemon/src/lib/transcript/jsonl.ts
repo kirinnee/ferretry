@@ -231,7 +231,9 @@ export function parseTranscriptJsonl(
   // cannot answer where a record starts in a file. Evidence is emitted only on that path.
   const sourceBytes = input.bytes;
   const records =
-    sourceBytes === undefined ? textRecords(input.text, bufferByteOffset) : byteRecords(sourceBytes, bufferByteOffset);
+    sourceBytes === undefined
+      ? textRecords(input.text ?? '', bufferByteOffset)
+      : byteRecords(sourceBytes, bufferByteOffset);
   const rawRecords: TranscriptRawRecord[] | undefined = sourceBytes === undefined ? undefined : [];
 
   let remainder = '';

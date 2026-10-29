@@ -449,7 +449,7 @@ import {
   TmuxPaneQueue,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { LOOP_PARSE_PACING, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
   FileSessionAttachmentCopier,
@@ -769,6 +769,7 @@ import {
   OperatorReadService,
   OutboundProviderAuthorizer,
   overriddenBy,
+  PacedTranscriptParser,
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
@@ -7212,6 +7213,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const claudeTranscriptParser = new ClaudeTranscriptParser();
   const codexTranscriptParser = new CodexTranscriptParser();
+  /**
+   * The same two parsers, paced by the daemon's loop, for the readers that hold a whole transcript as
+   * text: a history listing parses every file up to 32 MiB whole, and in one call it held the loop.
+   */
+  const pacedTranscriptParsers = {
+    claude: new PacedTranscriptParser(claudeTranscriptParser, LOOP_PARSE_PACING),
+    codex: new PacedTranscriptParser(codexTranscriptParser, LOOP_PARSE_PACING),
+  };
   const transcriptSources = [
     new NodeTranscriptSource(claudeTranscriptParser),
     new NodeTranscriptSource(codexTranscriptParser),
@@ -7223,10 +7232,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * has no mutation method and it is deliberately not backed by the session store: a foreign JSONL
    * has neither a Ferretry journal nor a live pane and must never be presented as resumable.
    */
-  const foreignHistory = new ForeignHistoryImporter(new NodeForeignHistoryFiles(), foreignHistoryRoots(userHome), {
-    claude: claudeTranscriptParser,
-    codex: codexTranscriptParser,
-  });
+  const foreignHistory = new ForeignHistoryImporter(
+    new NodeForeignHistoryFiles(),
+    foreignHistoryRoots(userHome),
+    pacedTranscriptParsers,
+  );
   /**
    * A session's own transcript, over the provenance its start recorded.
    *
@@ -8703,7 +8713,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             userHome,
           }),
         ],
-        { claude: claudeTranscriptParser, codex: codexTranscriptParser },
+        pacedTranscriptParsers,
         new StorageConversationOwners(storage),
         createConversationAdopter(
           storage,
