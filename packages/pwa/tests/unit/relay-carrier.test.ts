@@ -878,26 +878,29 @@ describe('the carrier router', () => {
 
   it('should give up on a relayed request at its deadline and carry the next one on a fresh session', async () => {
     // Arrange — a relay whose daemon end has gone quiet: its first request is never answered, while the
-    // rendezvous keeps the socket open. This is how a phone's send and ledger reads hung for good.
+    // rendezvous keeps the socket open. This is how a phone's send and ledger reads hung for good. The
+    // deadline passes once the daemon HOLDS the request, which is the silence this case is about; a
+    // wall-clock deadline could pass during the handshake instead, which is the next case.
     let asked = 0;
+    const deadline = new AbortController();
     const { router, daemon, carriers } = await routerFor({
       relay: RELAY,
       reach: relayOnly,
       answer: {
         respond: () => {
           asked += 1;
-          return asked === 1 ? new Promise<never>(() => undefined) : { status: 200, body: 'fresh' };
+          if (asked > 1) return { status: 200, body: 'fresh' };
+          queueMicrotask(() => deadline.abort(new DOMException('the deadline passed', 'TimeoutError')));
+          return new Promise<never>(() => undefined);
         },
       },
     });
 
     // Act
-    const reason = await router
-      .send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`, { signal: AbortSignal.timeout(30) })
-      .then(
-        () => undefined,
-        (thrown: unknown) => thrown,
-      );
+    const reason = await router.send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`, { signal: deadline.signal }).then(
+      () => undefined,
+      (thrown: unknown) => thrown,
+    );
     const next = await router.send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`);
 
     // Assert
@@ -905,6 +908,40 @@ describe('the carrier router', () => {
     should(await next.text()).equal('fresh');
     // The silent session was retired, so the next request walked the set again and opened a new one.
     should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example', DIRECT_HOST, 'relay.example']);
+  });
+
+  it('should keep the session when the deadline passed before the request ever left', async () => {
+    // Arrange — the walk and the handshake took the caller's whole budget, so the daemon was never asked.
+    let asked = 0;
+    const { router, daemon, carriers } = await routerFor({
+      relay: RELAY,
+      reach: relayOnly,
+      answer: {
+        respond: () => {
+          asked += 1;
+          return { status: 200, body: 'kept' };
+        },
+      },
+    });
+
+    // Act
+    const reason = await router
+      .send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`, {
+        signal: AbortSignal.abort(new DOMException('the deadline passed', 'TimeoutError')),
+      })
+      .then(
+        () => undefined,
+        (thrown: unknown) => thrown,
+      );
+    const next = await router.send(daemon, `${DAEMON_URL}/v1/sessions/one/sends`);
+
+    // Assert — the caller is told its own deadline, and the session it opened carries the next request.
+    should((reason as Error).name).equal('TimeoutError');
+    should(await next.text()).equal('kept');
+    should(asked).equal(1);
+    // Nothing answered the first walk, so no winner was chosen and the next one tries direct again — but
+    // the relay is not dialled a second time: the session it opened is still the one held for it.
+    should(carriers.hosts()).eql([DIRECT_HOST, 'relay.example', DIRECT_HOST]);
   });
 
   it('should keep the session when its caller cancels a request rather than running out of time', async () => {

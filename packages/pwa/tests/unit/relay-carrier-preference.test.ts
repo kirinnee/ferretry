@@ -41,6 +41,13 @@ const TUNNEL: ConnectionMethod = { kind: 'tunnel', tunnelUrl: TUNNEL_URL };
 const DIRECT: ConnectionMethod = { kind: 'direct', daemonUrl: DAEMON_URL };
 const DEVICE_ID = 'fy_device_id_preferenceTestDevice0001';
 const device = await testDevice(DEVICE_ID);
+/**
+ * The network a router reads a daemon's liveness route over, offline. A router given none uses the real
+ * `fetch`, and a walk whose direct socket failed then dialled `studio.example` from the test runner.
+ */
+const offline = async (): Promise<Response> => {
+  throw new TypeError('Failed to fetch');
+};
 
 type Reach = 'live' | 'refuse' | 'silent';
 
@@ -115,9 +122,7 @@ const setup = async (options: Setup = {}) => {
     deviceKey: async () => device.claim.key,
     dial,
     heartbeat: options.heartbeat ?? (() => () => undefined),
-    network: async () => {
-      throw new TypeError('Failed to fetch');
-    },
+    network: offline,
     preference: typeof preference === 'function' ? preference : () => preference,
     ...(options.dialers === undefined ? {} : { dialers: options.dialers }),
     ...(options.tunnelService === undefined
@@ -545,6 +550,7 @@ describe('WebRTC', () => {
         return refused;
       },
       heartbeat: () => () => undefined,
+      network: offline,
       dialers: { webrtc: webrtc.dialer },
       preference: () => 'auto',
       hostedRelay: async () => HOSTED.relayUrl,
@@ -673,6 +679,7 @@ describe('signalling over the introducers', () => {
       deviceKey: async () => device.claim.key,
       dial: () => new ScriptedSocket(),
       heartbeat: () => () => undefined,
+      network: offline,
       preference: () => 'webrtc',
       dialers: {
         webrtc: async context => {
@@ -772,6 +779,7 @@ describe('changing the preference', () => {
       dial: () => rejecting.dial(),
       preference: () => 'auto',
       heartbeat: () => () => undefined,
+      network: offline,
     });
     router2.resolvePaired(() => [refused.daemon]);
     await should(router2.send(refused.daemon, `${DAEMON_URL}/v1/projects`)).be.rejected();
@@ -921,6 +929,7 @@ describe('carrier control (GET/PUT /v1/tunnel, §15)', () => {
       dial: () => rejecting.dial(),
       preference: () => 'auto',
       heartbeat: () => () => undefined,
+      network: offline,
     });
     router.resolvePaired(() => [refused.daemon]);
     await should(router.send(refused.daemon, `${DAEMON_URL}/v1/projects`)).be.rejected();

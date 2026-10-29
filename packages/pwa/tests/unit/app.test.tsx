@@ -519,6 +519,16 @@ const appStore = async (
       const sessionId = decodeURIComponent(attentionRoute[1]);
       return Response.json(options.attention?.(sessionId) ?? attentionSnapshot(sessionId));
     }
+    // The Processes tab's list, which the open session reads for the count on its tab: nothing runs.
+    const processesRoute = new URL(url).pathname.match(/^\/v1\/sessions\/([^/]+)\/processes$/u);
+    if (processesRoute?.[1] !== undefined) {
+      return Response.json({
+        sessionId: decodeURIComponent(processesRoute[1]),
+        observedAt: new Date().toISOString(),
+        available: true,
+        processes: [],
+      });
+    }
     if (url.endsWith('/terminals')) return Response.json(terminalListing);
     // The durable registry, and ONLY when a test supplies one. The default
     // stays the empty document every other page gets, because the registry's

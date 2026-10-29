@@ -17,7 +17,17 @@
  * an action, not a tab.
  */
 
-import { FileText, Globe, type LucideIcon, MessageSquare, Plus, SquareTerminal, Terminal, X } from 'lucide-react';
+import {
+  FileText,
+  Globe,
+  ListTree,
+  type LucideIcon,
+  MessageSquare,
+  Plus,
+  SquareTerminal,
+  Terminal,
+  X,
+} from 'lucide-react';
 import { type KeyboardEvent, useLayoutEffect, useRef, useState } from 'react';
 import { useInputModality } from '../../../hooks/use-input-modality.ts';
 import { cn } from '../../../lib/class-names.ts';
@@ -29,6 +39,7 @@ import { centredScrollLeft, type PhoneTab, type PhoneTabKind } from './phone-tab
 const KIND_ICON: Readonly<Record<PhoneTabKind, LucideIcon>> = {
   chat: MessageSquare,
   console: Terminal,
+  processes: ListTree,
   terminal: SquareTerminal,
   browser: Globe,
   file: FileText,

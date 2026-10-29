@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { type PhoneTab } from '../../../../../src/features/workspace/phone/phone-tab.ts';
+import type { PhoneTab } from '../../../../../src/features/workspace/phone/phone-tab.ts';
 import {
   type PhoneTabRenderContext,
   PhoneWorkspace,
@@ -56,10 +56,10 @@ describe('PhoneWorkspace', () => {
     const root = must(mounted.container.querySelector('[data-phone-workspace]'), 'workspace');
     expect(root.firstElementChild?.getAttribute('data-header')).toBe('');
     const panels = [...root.querySelectorAll<HTMLElement>('[role="tabpanel"]')];
-    expect(panels.map(panel => panel.textContent)).toEqual(['Chat', 'Console', 'dev', 'app']);
+    expect(panels.map(panel => panel.textContent)).toEqual(['Chat', 'Console', 'Processes', 'dev', 'app']);
     expect(panels.filter(panel => !panel.hidden).map(panel => panel.textContent)).toEqual(['app']);
     const selected = must(root.querySelector('[role="tab"][aria-selected="true"]'), 'selected chip');
-    expect(panels[3]?.getAttribute('aria-labelledby')).toBe(selected.id);
+    expect(panels[4]?.getAttribute('aria-labelledby')).toBe(selected.id);
     expect(contexts.get('b1')?.active).toBe(true);
     expect(contexts.get('chat')?.active).toBe(false);
   });
@@ -126,6 +126,6 @@ describe('PhoneWorkspace', () => {
     await swipe(content, 120);
     await mounted.render(workspace({ activeId: 'chat', onSelect: id => picked.push(id) }));
     await swipe(must(mounted.container.querySelector('[data-content="chat"]'), 'chat'), 120);
-    expect(picked).toEqual(['t1', 'chat']);
+    expect(picked).toEqual(['processes', 'chat']);
   });
 });

@@ -1,0 +1,383 @@
+/* The Processes tab: a grouped list of what runs under the agent, and one process opened below it.
+   Theme tokens only (themes.css). The 16 terminal colours are derived from the theme's own status and
+   accent hues, so a process's red is this theme's red in every family, light and dark, and always
+   readable on the code surface it is drawn on. */
+
+.fy-proc {
+  --fy-ansi-0: color-mix(in srgb, var(--code-fg) 55%, var(--code-bg));
+  --fy-ansi-1: var(--err);
+  --fy-ansi-2: var(--ok);
+  --fy-ansi-3: var(--warn);
+  --fy-ansi-4: var(--accent);
+  --fy-ansi-5: color-mix(in srgb, var(--accent) 55%, var(--err));
+  --fy-ansi-6: color-mix(in srgb, var(--accent) 45%, var(--ok));
+  --fy-ansi-7: var(--code-fg);
+  --fy-ansi-8: color-mix(in srgb, var(--code-fg) 40%, var(--code-bg));
+  --fy-ansi-9: color-mix(in srgb, var(--err) 80%, var(--code-fg));
+  --fy-ansi-10: color-mix(in srgb, var(--ok) 80%, var(--code-fg));
+  --fy-ansi-11: color-mix(in srgb, var(--warn) 80%, var(--code-fg));
+  --fy-ansi-12: color-mix(in srgb, var(--accent) 80%, var(--code-fg));
+  --fy-ansi-13: color-mix(in srgb, var(--fy-ansi-5) 80%, var(--code-fg));
+  --fy-ansi-14: color-mix(in srgb, var(--fy-ansi-6) 80%, var(--code-fg));
+  --fy-ansi-15: var(--fg);
+
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface);
+  color: var(--fg);
+}
+
+/* ---- list ---------------------------------------------------------------- */
+.fy-proc-listpane {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 46%;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-bottom: var(--stroke) solid var(--border);
+}
+.fy-proc:not([data-open]) .fy-proc-listpane {
+  flex: 1 1 0;
+  max-height: none;
+  border-bottom: 0;
+}
+.fy-proc[data-open][data-compact] .fy-proc-listpane {
+  max-height: none;
+  flex: 0 0 auto;
+}
+
+.fy-proc-banner {
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  background: var(--warn-bg);
+  color: var(--warn);
+  border-bottom: var(--stroke) solid var(--warn-border);
+}
+.fy-proc-empty {
+  margin: 0;
+  padding: var(--gap-md);
+  font-size: var(--text-base);
+  overflow-wrap: anywhere;
+}
+
+.fy-proc-group + .fy-proc-group {
+  margin-top: var(--gap-xs);
+}
+.fy-proc-group__heading {
+  margin: 0;
+  padding: var(--gap-md) var(--gap-md) var(--gap-xs);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--muted);
+}
+.fy-proc-group__heading[data-quiet] {
+  font-weight: 500;
+  color: var(--faint);
+}
+.fy-proc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.fy-proc-item[data-child] .fy-proc-row {
+  padding-left: calc(var(--gap-md) + 22px);
+}
+
+.fy-proc-row {
+  display: flex;
+  align-items: stretch;
+  min-width: 0;
+  padding: 0 var(--gap-sm) 0 var(--gap-xs);
+}
+.fy-proc-row[data-open] {
+  background: var(--accent-soft);
+}
+.fy-proc-expander {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-width: 28px;
+  padding: 0 var(--gap-xs);
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.fy-proc-expander--none {
+  cursor: default;
+}
+.fy-proc-expander svg {
+  transition: transform 120ms ease;
+}
+.fy-proc-expander[data-expanded] svg {
+  transform: rotate(90deg);
+}
+.fy-proc-select {
+  display: flex;
+  flex: 1 1 0;
+  align-items: center;
+  gap: var(--gap-md);
+  min-width: 0;
+  min-height: 34px;
+  padding: var(--gap-xs) var(--gap-xs);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fy-proc-select:hover {
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+}
+.fy-proc-expander:focus-visible,
+.fy-proc-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.fy-proc-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-dot);
+  background: var(--faint);
+}
+.fy-proc-dot[data-tone='ok'] {
+  background: var(--ok);
+}
+.fy-proc-dot[data-tone='muted'] {
+  background: var(--muted);
+}
+.fy-proc-dot[data-tone='warn'] {
+  background: var(--warn);
+}
+.fy-proc-dot[data-tone='err'] {
+  background: var(--err);
+}
+.fy-proc-dot[data-tone='ended'] {
+  background: transparent;
+  border: var(--stroke-heavy) solid var(--faint);
+}
+.fy-proc-command {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-base);
+}
+.fy-proc-meta {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--gap-sm);
+  white-space: nowrap;
+}
+.fy-proc-elapsed[data-failed] {
+  color: var(--err);
+}
+.fy-proc-chip {
+  padding: 0 6px;
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-badge);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 16px;
+}
+.fy-proc-chip[data-kind='server'] {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.fy-proc-chip[data-kind='helper'] {
+  color: var(--faint);
+}
+
+/* ---- detail -------------------------------------------------------------- */
+.fy-proc-detail {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--surface);
+}
+.fy-proc-detail__head {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  gap: var(--gap-md);
+  padding: var(--gap-sm) var(--gap-md);
+  border-bottom: var(--stroke) solid var(--border-soft);
+}
+.fy-proc-detail__heading {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.fy-proc-detail__command {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+  overflow-wrap: anywhere;
+  max-height: 4.8em;
+  overflow: auto;
+}
+.fy-proc-detail__raw {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+}
+.fy-proc-detail__facts {
+  margin: 2px 0 0;
+}
+.fy-proc-detail__actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+
+.fy-proc-output {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+}
+.fy-proc-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-xs) var(--gap-md);
+  border-bottom: var(--stroke) solid var(--border-soft);
+}
+.fy-proc-note {
+  font-size: var(--text-xs);
+  color: var(--muted);
+}
+.fy-proc-note--warn {
+  color: var(--warn);
+}
+.fy-proc-note-block {
+  margin: 0;
+  padding: var(--gap-md);
+  font-size: var(--text-base);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.fy-proc-find {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: var(--gap-xs) var(--gap-md);
+  border-bottom: var(--stroke) solid var(--border-soft);
+  background: var(--surface-2);
+}
+.fy-proc-find__input {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 4px 8px;
+  border: var(--stroke-control) solid var(--border);
+  border-radius: var(--radius-input);
+  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-base);
+}
+.fy-proc-find__count {
+  white-space: nowrap;
+}
+
+.fy-proc-body-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 0;
+  min-height: 0;
+  background: var(--code-bg);
+}
+.fy-proc-body {
+  flex: 1 1 0;
+  min-width: 0;
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--code-bg);
+  color: var(--code-fg);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  tab-size: 8;
+}
+.fy-proc-body:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.fy-proc-line {
+  min-height: 1.45em;
+  white-space: pre;
+}
+.fy-proc-jump {
+  position: absolute;
+  right: var(--gap-md);
+  bottom: var(--gap-md);
+  box-shadow: var(--shadow-control);
+}
+
+.fy-ansi-bold {
+  font-weight: 700;
+}
+.fy-ansi-dim {
+  opacity: 0.65;
+}
+.fy-ansi-italic {
+  font-style: italic;
+}
+.fy-ansi-underline {
+  text-decoration: underline;
+}
+.fy-ansi-strike {
+  text-decoration: line-through;
+}
+.fy-ansi-underline.fy-ansi-strike {
+  text-decoration: underline line-through;
+}
+.fy-proc-match {
+  background: color-mix(in srgb, var(--warn) 35%, transparent);
+  color: inherit;
+  border-radius: var(--radius-badge);
+}
+.fy-proc-match--current {
+  background: var(--warn);
+  color: var(--bg);
+  outline: 1px solid var(--warn);
+}
+
+/* ---- a phone: every target 44px, the list is just the open row plus Back ---- */
+.fy-proc[data-compact] .fy-proc-select {
+  min-height: 44px;
+}
+.fy-proc[data-compact] .fy-proc-expander {
+  min-width: 44px;
+  min-height: 44px;
+}
+.fy-proc[data-compact] .fy-proc-toolbar .kt-btn,
+.fy-proc[data-compact] .fy-proc-find .kt-btn,
+.fy-proc[data-compact] .fy-proc-detail__actions .kt-btn,
+.fy-proc[data-compact] .fy-proc-jump {
+  min-height: 44px;
+  min-width: 44px;
+}
+.fy-proc[data-compact] .fy-proc-find__input {
+  min-height: 44px;
+}
+.fy-proc[data-compact] .fy-proc-item[data-child] .fy-proc-row {
+  padding-left: var(--gap-md);
+}

@@ -86,6 +86,7 @@ import {
   type WardenGuardConfig,
 } from '@ferretry/protocol';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
+import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 // One WebCrypto binding of the relay's crypto port serves the daemon, the browser and the Worker that
 // verifies the claim. Two implementations that agree about a primitive and disagree about an encoding
 // is the class of bug this removes.
@@ -120,6 +121,12 @@ import {
 import { armAttentionNudge, StorageAttentionNudgeSessions } from '../src/adapters/attention/storage-attention-nudge.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
+import {
+  HarnessProcessProvenance,
+  processTreeFor,
+  RegularOutputFile,
+  SigtermProcessSignal,
+} from '../src/adapters/session/processes/index.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
@@ -10134,6 +10141,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessionAttach,
         // The Console types into the pane the attach proof names, on the same private tmux server.
         sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),
+        // The Processes tab walks the pane that same attach proof names — that subtree and nothing else —
+        // and scrubs every command line and every byte of output with the vault redactor, failing closed.
+        sessionProcesses: new SessionProcessService({
+          panes: sessionAttach,
+          tree: processTreeFor(),
+          provenance: new HarnessProcessProvenance(CLIENT_NAME, new ProjectMcpServers()),
+          files: new RegularOutputFile(),
+          signals: new SigtermProcessSignal(),
+          transcript: createSessionTranscriptTail(storage),
+          redactor: secretRedactor,
+          history: new ProcessHistory(),
+          clock: { nowMs: () => Date.now() },
+          refusedOutputRoots: [paths.home],
+        }),
         // A permission answer re-reads and types into that same proved pane, and nothing else.
         sessionPermission: (() => {
           const typing = new SessionConsoleService(sessionAttach, launchTmuxCommands);

@@ -704,6 +704,15 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   ),
   sessionAttach: attachSubsystem(),
   sessionConsole: consoleSubsystem(),
+  sessionProcesses: {
+    list: async sessionId => ({ sessionId, observedAt: '2026-10-29T00:00:00.000Z', available: true, processes: [] }),
+    output: async () => {
+      throw new Error('not exercised by the surface table');
+    },
+    stop: async () => {
+      throw new Error('not exercised by the surface table');
+    },
+  },
   sessionPermission: permissionSubsystem(),
   sessionDialog: dialogSubsystem(),
   fleetEvents: fleetEventSubsystem(),
@@ -782,7 +791,8 @@ describe('the mounted daemon surface', () => {
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
       2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
       1 + // handing a web address to this computer's own browser (loopback caller only)
-      3; // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
+      3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
+      3; // a ferret's processes: the list, one process's output, and Stop
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1116,6 +1126,9 @@ describe('the mounted daemon surface', () => {
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
       'POST /v1/sessions/:sessionId/console/input',
+      'GET /v1/sessions/:sessionId/processes',
+      'GET /v1/sessions/:sessionId/processes/:processId/output',
+      'POST /v1/sessions/:sessionId/processes/:processId/stop',
       'POST /v1/sessions/:sessionId/permission',
       'POST /v1/sessions/:sessionId/dialog',
     ]);
