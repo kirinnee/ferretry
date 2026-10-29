@@ -201,22 +201,36 @@ export interface AttentionBriefProps {
   readonly renderProse: AttentionProse;
   /** Present only when the item is answered one answer per question. */
   readonly picker?: QuestionAnswers;
+  /** Every section starts open: the card is open, so it shows everything it holds. */
+  readonly expanded?: boolean;
+  /** The card already says its recommendation above the detail; drawing it again would be noise. */
+  readonly showRecommendation?: boolean;
+  /** Drawn right after Context: the body and steps, which read as the context's continuation. */
+  readonly children?: ReactNode;
 }
 
 /** The brief's sections, in order. `null` for an item with none, so an old item stays minimal. */
-export function AttentionBriefSections({ item, renderProse, picker }: AttentionBriefProps) {
+export function AttentionBriefSections({
+  item,
+  renderProse,
+  picker,
+  expanded = false,
+  showRecommendation = true,
+  children,
+}: AttentionBriefProps) {
   const context = item.context?.trim() ? item.context : null;
   const questions = item.questions ?? [];
   const several = questions.length > 1;
   return (
     <div className="fy-attn-secs">
       {context === null ? null : (
-        <Section name="context" title="Context">
+        <Section name="context" open={expanded} title="Context">
           <div className="fy-attn-prose">{renderProse(context)}</div>
         </Section>
       )}
+      {children}
       {item.terms === undefined ? null : (
-        <Section name="terms" title={`Terms (${item.terms.length})`}>
+        <Section name="terms" open={expanded} title={`Terms (${item.terms.length})`}>
           <dl className="fy-attn-terms">
             {item.terms.map(entry => (
               <div className="fy-attn-terms__row" key={entry.term}>
@@ -243,7 +257,7 @@ export function AttentionBriefSections({ item, renderProse, picker }: AttentionB
                 </li>
               ) : (
                 <li className="fy-attn-q__item" data-attention-question={index} key={question.question}>
-                  <details className="fy-attn-sec fy-attn-sec--nested">
+                  <details className="fy-attn-sec fy-attn-sec--nested" open={expanded}>
                     <summary className="fy-attn-sec__title">
                       <ChevronRight aria-hidden="true" className="fy-attn-sec__chevron" size={14} />
                       {`${index + 1}. ${question.question}`}
@@ -267,8 +281,8 @@ export function AttentionBriefSections({ item, renderProse, picker }: AttentionB
           </ol>
         </Section>
       )}
-      {item.recommendation === undefined ? null : (
-        <Section name="recommendation" title="Recommendation">
+      {item.recommendation === undefined || !showRecommendation ? null : (
+        <Section name="recommendation" open={expanded} title="Recommendation">
           <p className="fy-attn-prose">
             <strong>{item.recommendation.decision}</strong>
             {item.recommendation.why === undefined ? null : <> — {item.recommendation.why}</>}
@@ -276,7 +290,7 @@ export function AttentionBriefSections({ item, renderProse, picker }: AttentionB
         </Section>
       )}
       {item.impact === undefined && item.urgency === undefined ? null : (
-        <Section name="impact" title="Impact">
+        <Section name="impact" open={expanded} title="Impact">
           {item.impact === undefined ? null : <PointForm className="fy-attn-prose" text={item.impact} />}
           {item.urgency === undefined ? null : (
             <p className="fy-attn-prose">
@@ -286,7 +300,7 @@ export function AttentionBriefSections({ item, renderProse, picker }: AttentionB
         </Section>
       )}
       {item.links === undefined ? null : (
-        <Section name="links" title={`Links (${item.links.length})`}>
+        <Section name="links" open={expanded} title={`Links (${item.links.length})`}>
           <ul className="fy-attn-links">
             {item.links.map(link => (
               <li key={`${link.label ?? ''}\u0000${link.target}`}>

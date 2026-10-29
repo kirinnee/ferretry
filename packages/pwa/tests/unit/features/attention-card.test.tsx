@@ -40,13 +40,13 @@ const sections = (root: ParentNode): string[] =>
   [...root.querySelectorAll('[data-attention-section]')].map(node => node.getAttribute('data-attention-section') ?? '');
 
 describe('AttentionCard sections', () => {
-  test('a rich item draws its sections in order, only the first question open', async () => {
+  test('a rich item draws every section, in order, all open — the card shows everything to decide', async () => {
     view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual(['context', 'terms', 'questions', 'recommendation', 'impact', 'links']);
+    expect(sections(view.container)).toEqual(['context', 'terms', 'questions', 'impact', 'links']);
     const open = [...view.container.querySelectorAll('[data-attention-section]')]
       .filter(node => node.hasAttribute('open'))
       .map(node => node.getAttribute('data-attention-section'));
-    expect(open).toEqual(['questions']);
+    expect(open).toEqual(['context', 'terms', 'questions', 'impact', 'links']);
     expect(view.container.textContent).toContain('Urgency:');
   });
 
@@ -77,7 +77,7 @@ describe('AttentionCard sections', () => {
     expect(view.container.querySelector('[data-attention-recommended]')).toBeNull();
   });
 
-  test('the title is the conversation name, with ferret · machine beneath', async () => {
+  test('the header names the ferret and machine, then the title, ask and recommendation stand above the detail', async () => {
     view = await mount(
       <AttentionCard
         item={rich}
@@ -85,24 +85,28 @@ describe('AttentionCard sections', () => {
         origin={{ ferret: 'Kai', task: 'Release train', machine: 'Laptop', href: '/x', onNavigate: () => {} }}
       />,
     );
-    expect(view.container.querySelector('.fy-attn-card__origin-title')?.textContent).toBe('Release train');
-    expect(view.container.querySelector('.fy-attn-card__origin-sub')?.textContent).toBe('Kai · Laptop');
+    expect(view.container.querySelector('.fy-attn-card__origin-title')?.textContent).toBe('Kai');
+    expect(view.container.querySelector('.fy-attn-card__origin-sub')?.textContent).toBe('Laptop');
+    expect(view.container.querySelector('[data-attention-title]')?.textContent).toBeTruthy();
+    expect(view.container.querySelector('[data-attention-recommendation]')?.textContent).toContain('Use SQLite');
+    expect(view.container.querySelector('[data-attention-scroll] [data-attention-recommendation]')).toBeNull();
   });
 });
 
 describe('AttentionCard recommended option', () => {
-  test('marks the recommended option of a single question with a visible badge', async () => {
+  test('a choice puts the recommended option on the right, as the primary answer', async () => {
     const single = attentionItem('A3', {
       subject: 'Pick',
       questions: [{ question: 'Which?', options: [{ label: 'SQLite' }, { label: 'Postgres' }], recommended: 'SQLite' }],
       ask: choices('SQLite', 'Postgres'),
     });
     view = await mount(<AttentionCard item={single} onAct={() => {}} />);
-    const marked = [...view.container.querySelectorAll('[data-attention-option]')].filter(
-      node => node.querySelector('[data-attention-recommended]') !== null,
+    const right = must(view.container.querySelector('[data-attention-answer="right"]'), 'right answer');
+    expect(right.getAttribute('data-attention-option')).toBe('SQLite');
+    expect(right.getAttribute('data-variant')).toBe('primary');
+    expect(view.container.querySelector('[data-attention-answer="left"]')?.getAttribute('data-attention-option')).toBe(
+      'Postgres',
     );
-    expect(marked.map(node => node.getAttribute('data-attention-option'))).toEqual(['SQLite']);
-    expect(marked[0]?.textContent).toContain('Recommended');
   });
 });
 

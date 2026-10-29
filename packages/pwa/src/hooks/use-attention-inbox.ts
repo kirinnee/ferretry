@@ -88,7 +88,7 @@ const runInboxAction = async (
   action: InboxAction,
 ): Promise<void> => {
   const scope = daemonSessionScope(connection, card.view.config.id);
-  if (action.kind === 'respond') await client.respond(connection, scope, card.item.id, action.response);
+  if (action.kind === 'respond') await client.respond(connection, scope, card.item.id, action.response, action.note);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, card.item.id, action.note);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, card.item.id, action.note);
   else await client.resolve(connection, scope, card.item.id, action.note);
