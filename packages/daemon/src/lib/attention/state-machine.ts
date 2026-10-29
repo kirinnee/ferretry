@@ -2,11 +2,13 @@ import {
   ATTENTION_SCHEMA_VERSION,
   type AttentionAsk,
   type AttentionBrief,
+  type AttentionCardAnswer,
   type AttentionErrorCode,
   type AttentionHistoryEntry,
   type AttentionId,
   type AttentionItem,
   AttentionItemSchema,
+  type AttentionKind,
   type AttentionResponse,
   type AttentionSnapshot,
   type AttentionSource,
@@ -49,8 +51,15 @@ export interface AttentionLedger {
   readonly updatedAt: string;
 }
 
-/** A raise carries the item's structured brief (summary is the `subject`) alongside its ask. */
-export interface RaiseAttentionRequest extends AttentionBrief {
+/** The card an item is: what it is about, its kind and its answers by direction (all derived when absent). */
+export interface AttentionCardFields {
+  readonly title?: string;
+  readonly kind?: AttentionKind;
+  readonly answers?: AttentionCardAnswer[];
+}
+
+/** A raise carries the item's card and structured brief (the ask line is the `subject`) alongside its ask. */
+export interface RaiseAttentionRequest extends AttentionBrief, AttentionCardFields {
   readonly source: AttentionSource;
   readonly sourceRef: string | null;
   readonly sourceSeq?: number;
@@ -62,9 +71,10 @@ export interface RaiseAttentionRequest extends AttentionBrief {
   readonly ask?: AttentionAsk;
 }
 
-/** The writing an edit may change: never the ask, the reason or who raised the item. */
+/** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
 export interface EditAttentionPatch extends AttentionBrief {
   readonly subject?: string;
+  readonly title?: string;
   readonly context?: string | null;
 }
 
@@ -303,8 +313,11 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
   if (request.sourceRef !== null && actor.kind !== 'daemon') {
     return failure('forbidden', 'stable attention source references are reserved for trusted daemon producers');
   }
-  if (request.ask === undefined && actor.kind !== 'daemon') {
-    return failure('invalid', 'human and agent attention must declare one of the four structured ask kinds');
+  if (request.ask === undefined && request.kind !== 'info' && actor.kind !== 'daemon') {
+    return failure(
+      'invalid',
+      'human and agent attention must declare a structured ask, or be kind info (something to know, no ask)',
+    );
   }
   if (request.sourceSeq !== undefined && request.source !== 'agent-raised') {
     return failure('invalid', 'sourceSeq is valid only for agent-raised attention');
@@ -352,6 +365,7 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
       waitingSince: actor.kind === 'daemon' && request.waitingSince !== undefined ? request.waitingSince : command.at,
       howToResolve: request.howToResolve,
       ...(request.ask === undefined ? {} : { ask: request.ask }),
+      ...cardFieldsOf(request),
       ...attentionBriefOf(request),
     },
     actor,
@@ -389,6 +403,10 @@ function refreshStable(
     howToResolve: request.howToResolve,
     ...(request.ask === undefined ? { ask: undefined } : { ask: request.ask }),
     ...(request.sourceSeq === undefined ? { sourceSeq: undefined } : { sourceSeq: request.sourceSeq }),
+    // The card is part of what a refresh restates: a title, kind or answers left out are cleared too.
+    title: request.title,
+    kind: request.kind,
+    answers: request.answers,
     // A refresh replaces the brief whole: a field the new request leaves out is cleared, not kept.
     terms: request.terms,
     questions: request.questions,
@@ -559,8 +577,18 @@ function sameRequest(item: AttentionItem, request: RaiseAttentionRequest): boole
     (item.context ?? null) === (request.context ?? null) &&
     item.howToResolve === request.howToResolve &&
     JSON.stringify(item.ask ?? null) === JSON.stringify(request.ask ?? null) &&
+    JSON.stringify(cardFieldsOf(item)) === JSON.stringify(cardFieldsOf(request)) &&
     JSON.stringify(attentionBriefOf(item)) === JSON.stringify(attentionBriefOf(request))
   );
+}
+
+/** Just the card fields a request or item carries, in one fixed key order, the absent ones left out. */
+function cardFieldsOf(value: AttentionCardFields): AttentionCardFields {
+  return {
+    ...(value.title === undefined ? {} : { title: value.title }),
+    ...(value.kind === undefined ? {} : { kind: value.kind }),
+    ...(value.answers === undefined ? {} : { answers: value.answers }),
+  };
 }
 
 function sameOrigin(left: AttentionActor, right: AttentionActor): boolean {
@@ -643,6 +671,7 @@ function failure(code: AttentionErrorCode, message: string): AttentionMutation {
 
 const EDITABLE_FIELDS = [
   'subject',
+  'title',
   'context',
   'terms',
   'questions',
@@ -693,6 +722,7 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
       : {}),
     ...(stepsDone === undefined || stepsChanged ? {} : { stepsDone }),
     ...(patch.subject === undefined ? {} : { subject: patch.subject }),
+    ...(patch.title === undefined ? {} : { title: patch.title }),
     ...(patch.context === undefined ? {} : { context: patch.context }),
     ...(patch.terms === undefined ? {} : { terms: patch.terms }),
     ...(patch.questions === undefined ? {} : { questions: patch.questions }),

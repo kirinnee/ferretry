@@ -79,7 +79,7 @@ export const runPanelAction = async (
   id: AttentionId,
   action: InboxAction,
 ): Promise<void> => {
-  if (action.kind === 'respond') await client.respond(connection, scope, id, action.response);
+  if (action.kind === 'respond') await client.respond(connection, scope, id, action.response, action.note);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);
   else await client.resolve(connection, scope, id, action.note);

@@ -1,9 +1,12 @@
-import type {
-  AttentionAsk,
-  AttentionId,
-  AttentionItem,
-  AttentionSnapshot,
-  ResolvedAttentionItem,
+import {
+  type AttentionDirection,
+  type AttentionId,
+  type AttentionItem,
+  type AttentionSnapshot,
+  attentionCardAnswers,
+  hasOwnTitle,
+  type ResolvedAttentionItem,
+  unswipedChoices,
 } from '@ferretry/protocol';
 import { describeAnswer } from './answer.ts';
 import { attentionOrdinal, attentionReference } from './reference.ts';
@@ -29,21 +32,19 @@ function actor(by: 'human' | 'agent' | 'daemon', name: string | null): string {
   return name === null ? 'agent' : `agent ${name}`;
 }
 
-/** What the human has to do to clear the item. */
-function askLine(ask: AttentionAsk | undefined): string | undefined {
-  if (ask === undefined) return undefined;
-  switch (ask.kind) {
-    case 'permission':
-      return 'answer: approve or reject';
-    case 'multiple-choice':
-      return `answer: pick one of ${ask.options.map(option => `"${compact(option.label, OPTION_WIDTH)}"`).join(' | ')}`;
-    case 'answer-review':
-      return 'answer: good, or ask to clarify';
-    case 'open-question':
-      return 'answer: write a full answer';
-    case 'task':
-      return 'to do: mark it done, or ask for more information';
-  }
+const ARROWS: Readonly<Record<AttentionDirection, string>> = { left: '←', up: '↑', right: '→' };
+
+/**
+ * The answers a card gives, laid out as the swipes point — `← No · → Yes`. An old item's options past the
+ * third have no swipe; they are named after the arrows so nothing the owner could pick is hidden.
+ */
+function answersLine(item: AttentionItem): string {
+  const answers = attentionCardAnswers(item);
+  // Only a card asked in words has no answers to swipe.
+  if (answers.length === 0) return 'answer: write a full answer';
+  const swipes = answers.map(answer => `${ARROWS[answer.direction]} ${compact(answer.label, OPTION_WIDTH)}`);
+  const rest = unswipedChoices(item).map(option => `"${compact(option.label, OPTION_WIDTH)}"`);
+  return `answers: ${swipes.join(' · ')}${rest.length === 0 ? '' : ` · also ${rest.join(' | ')}`}`;
 }
 
 /**
@@ -64,9 +65,13 @@ function newestFirst(left: ResolvedAttentionItem, right: ResolvedAttentionItem):
 }
 
 function itemLines(item: AttentionItem): string[] {
-  const lines = [`  ${attentionReference(item.id)}  [${item.source}]  ${compact(item.subject)}`];
-  const ask = askLine(item.ask);
-  if (ask !== undefined) lines.push(`${INDENT}${ask}`);
+  // A card with a title of its own is headed by it, the ask under it; an old item's ask is its heading.
+  const titled = hasOwnTitle(item);
+  const lines = [
+    `  ${attentionReference(item.id)}  [${item.source}]  ${compact(titled ? (item.title ?? '') : item.subject)}`,
+  ];
+  if (titled) lines.push(`${INDENT}ask: ${compact(item.subject)}`);
+  lines.push(`${INDENT}${answersLine(item)}`);
   if (item.context !== null && item.context !== undefined && item.context.trim() !== '') {
     lines.push(`${INDENT}context: ${compact(item.context)}`);
   }
@@ -213,13 +218,6 @@ function writingAdvice(warnings: readonly string[] | undefined, id: AttentionId 
     `Reads hard for someone who hasn't followed — fix it with \`${fix}\`:`,
     ...warnings.map(warning => `  - ${warning}`),
   ];
-}
-
-/** Confirmation for a direct notification. Zero devices is worth saying: the message went nowhere. */
-export function renderNotification(delivered: number): string {
-  const devices = delivered === 1 ? '1 device' : `${delivered} devices`;
-  if (delivered === 0) return 'notification sent to 0 devices — no registered device wants this kind';
-  return `notification sent to ${devices}`;
 }
 
 /** Confirmation for "Send now": which held answers went, or that nothing was held. */

@@ -62,7 +62,9 @@ export function responseWords(response: AttentionResponse): string {
  * item the owner has already settled: the board resolved, the panel cleared, and the ferret's own chat
  * never said so (the live defect this replaced kept a bare done or dismiss silent, to spare a finished
  * ferret one turn). An answer carries the owner's words; a done or a dismiss says which it was, with
- * the owner's note when there is one.
+ * the owner's note when there is one. An answer the owner worded themselves (`Always allow — <reply>`, a
+ * "Skip") reaches the ferret as the note under the answer's own effect, so what was decided and what was
+ * said are both read.
  */
 export function boardReplyMessage(item: ResolvedAttentionItem): string {
   const note = item.resolutionNote?.trim() ?? '';
@@ -72,7 +74,9 @@ export function boardReplyMessage(item: ResolvedAttentionItem): string {
   }
   if (item.disposition === 'dismissed')
     return `[dismissed ${named(item)}] ${note === '' ? 'The owner dismissed this without an answer.' : note}`;
-  return note === '' ? `[done ${named(item)}] The owner marked this done.` : `[answer to ${named(item)}] ${note}`;
+  return note === ''
+    ? `[done ${named(item)}] The owner marked this done.`
+    : `[answer to ${named(item)}] Done.\n\nNote: ${note}`;
 }
 
 /**

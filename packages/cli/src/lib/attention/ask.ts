@@ -1,24 +1,33 @@
 import {
   type AttentionAsk,
   AttentionAskSchema,
+  type AttentionKind,
+  askForKind,
+  kindOfAsk,
   MAX_ATTENTION_ASK_OPTION_LENGTH,
-  MAX_ATTENTION_ASK_OPTIONS,
+  MAX_ATTENTION_CARD_ANSWERS,
 } from '@ferretry/protocol';
 
-/** What the human is asked to DO, keyed by the short names the flag accepts. */
-const KINDS = new Map<string, AttentionAsk['kind']>([
-  ['permission', 'permission'],
-  ['choice', 'multiple-choice'],
-  ['multiple-choice', 'multiple-choice'],
-  ['review', 'answer-review'],
-  ['answer-review', 'answer-review'],
-  ['open', 'open-question'],
-  ['open-question', 'open-question'],
+/** The kinds a card is raised as, keyed by the names `--kind` accepts — the older spellings included. */
+const KINDS = new Map<string, AttentionKind>([
   ['task', 'task'],
+  ['yesno', 'yesno'],
+  ['permission', 'permission'],
+  ['choice', 'choice'],
+  ['multiple-choice', 'choice'],
+  ['review', 'review'],
+  ['answer-review', 'review'],
+  ['info', 'info'],
+  ['reply', 'reply'],
+  ['open', 'reply'],
+  ['open-question', 'reply'],
 ]);
 
-/** The names `--kind` accepts, for help text and error messages. */
-export const ASK_KIND_NAMES = ['permission', 'choice', 'review', 'open', 'task'] as const;
+/** The names `--kind` is documented with, for help text and error messages. */
+export const ASK_KIND_NAMES = ['task', 'yesno', 'permission', 'choice', 'review', 'info', 'reply'] as const;
+
+/** Why a card cannot offer more than three answers, and what to do instead. */
+export const TOO_MANY_ANSWERS = `a card offers at most ${MAX_ATTENTION_CARD_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;
 
 /** The flags that shape an ask. */
 export interface AskFlags {
@@ -28,40 +37,54 @@ export interface AskFlags {
   readonly task?: boolean;
 }
 
+/** The kind a card is raised as and the ask that kind carries (`info` carries none). */
+export interface CardAsk {
+  readonly kind: AttentionKind;
+  readonly ask: AttentionAsk | undefined;
+}
+
+/** The kind `--kind` names, or nothing when it is absent or blank. */
+export function parseKind(raw: string | undefined): AttentionKind | undefined {
+  const named = raw?.trim() ?? '';
+  if (named === '') return undefined;
+  const kind = KINDS.get(named);
+  if (kind === undefined) throw new Error(`unknown --kind "${named}" — use ${ASK_KIND_NAMES.join(', ')}`);
+  return kind;
+}
+
 /**
- * Build the ask an `attention add` describes.
+ * Build the kind and the ask an `attention add` describes.
  *
  * Supplying `--option` without `--kind` implies a choice, because that is the only kind options mean
- * anything for — and a permission or review ask carrying options is a mistake worth naming rather
- * than silently dropping.
+ * anything for — and any other kind carrying options is a mistake worth naming rather than silently
+ * dropping. Exactly Yes and No is a `yesno`; a `yesno` brings its own two options, so it refuses any.
+ * A card offers at most three answers, so a choice takes two or three options.
  */
-export function parseAsk(flags: AskFlags): AttentionAsk {
+export function parseAsk(flags: AskFlags): CardAsk {
   const options = (flags.option ?? []).map(option => option.trim()).filter(option => option.length > 0);
-  const kind = askKind(flags.kind, options.length > 0);
+  const named = parseKind(flags.kind);
+  const kind = named ?? (options.length > 0 ? 'choice' : 'reply');
 
-  if (kind !== 'multiple-choice') {
-    if (options.length > 0) {
-      throw new Error(`--option only makes sense with --kind choice, not ${kind}`);
-    }
-    return { kind };
+  if (kind === 'yesno' && options.length > 0) {
+    throw new Error('--kind yesno brings its own Yes and No: drop --option (or use --kind choice for other options)');
+  }
+  if (kind !== 'choice') {
+    if (options.length > 0) throw new Error(`--option only makes sense with --kind choice, not ${kind}`);
+    return { kind, ask: askForKind(kind) };
   }
 
-  const parsed = AttentionAskSchema.safeParse({ kind, options: options.map(label => ({ label })) });
+  if (options.length > MAX_ATTENTION_CARD_ANSWERS) throw new Error(TOO_MANY_ANSWERS);
+  const parsed = AttentionAskSchema.safeParse(
+    askForKind(
+      'choice',
+      options.map(label => ({ label })),
+    ),
+  );
   if (!parsed.success) {
     throw new Error(
-      `a choice ask needs 2 to ${MAX_ATTENTION_ASK_OPTIONS} distinct --option labels, ` +
+      `a choice card needs 2 to ${MAX_ATTENTION_CARD_ANSWERS} distinct --option labels, ` +
         `each one line of at most ${MAX_ATTENTION_ASK_OPTION_LENGTH} characters`,
     );
   }
-  return parsed.data;
-}
-
-function askKind(raw: string | undefined, hasOptions: boolean): AttentionAsk['kind'] {
-  const named = raw?.trim() ?? '';
-  if (named === '') return hasOptions ? 'multiple-choice' : 'open-question';
-  const kind = KINDS.get(named);
-  if (kind === undefined) {
-    throw new Error(`unknown --kind "${named}" — use ${ASK_KIND_NAMES.join(', ')}`);
-  }
-  return kind;
+  return { kind: named ?? kindOfAsk(parsed.data), ask: parsed.data };
 }

@@ -3959,7 +3959,7 @@ describe('the fleet notification watch', () => {
     // through the subscription the shell handed over.
     expect(store.fleet.getSnapshot().daemons.get(alpha.daemonId)?.sessions?.length).toBe(1);
 
-    await moveTo('awaiting_question');
+    await moveTo('failed');
 
     // Delivered, and named after the session rather than the daemon: this is the
     // only assertion in the file that proves the whole chain — fleet diff, the
@@ -3972,7 +3972,7 @@ describe('the fleet notification watch', () => {
   it('stays silent on the same transition while the reader is looking at the page', async () => {
     const { moveTo, view } = await watchingShell(false);
 
-    await moveTo('awaiting_question');
+    await moveTo('failed');
 
     // Nothing about the transition changed — only `document.hidden`. So a
     // notification here would mean the watch is reading some other visibility,

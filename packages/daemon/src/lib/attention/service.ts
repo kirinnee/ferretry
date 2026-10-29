@@ -15,10 +15,19 @@ import {
   agentConfinedTo,
   applyAttentionCommandToSession,
   attentionSnapshot,
+  type DaemonAttentionCause,
   type EditAttentionPatch,
   emptyAttentionLedger,
   type RaiseAttentionRequest,
 } from './state-machine.ts';
+
+/** The heading of an item the daemon raised without wording one: plain words, never an id. */
+const DAEMON_TITLES: Readonly<Record<DaemonAttentionCause, string>> = {
+  'source-reconciliation': 'Needs your attention',
+  'warden-escalation': 'A ferret needs a human',
+  system: 'Needs your attention',
+  'harness-prompt': 'The ferret is waiting on you',
+};
 
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/u;
 
@@ -107,7 +116,11 @@ export class AttentionService {
   }
 
   async raise(sessionId: string, request: RaiseAttentionRequest, actor: AttentionActor): Promise<AttentionMutation> {
-    return this.apply(sessionId, { action: 'raise', actor, request, at: this.clock.now() });
+    const titled =
+      actor.kind === 'daemon' && request.title === undefined
+        ? { ...request, title: DAEMON_TITLES[actor.cause] }
+        : request;
+    return this.apply(sessionId, { action: 'raise', actor, request: titled, at: this.clock.now() });
   }
 
   async answer(

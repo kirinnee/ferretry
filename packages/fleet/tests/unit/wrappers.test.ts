@@ -839,7 +839,7 @@ describe('the appended system prompt of a real agent runtime, for every combinat
 
       // Assert — the binary is named by the wrapper's own command, never a hard-coded name
       should(prompt).containEql(ATTENTION_INSTRUCTION('fy'));
-      should(prompt).containEql('`fy attention add "<summary>"`');
+      should(prompt).containEql('`fy attention add --title "<what it is about>" "<the ask>"`');
     },
   );
 

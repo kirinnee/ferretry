@@ -123,8 +123,8 @@ export function attentionNudgeMessage(
   const already = raised > 0 ? ` You raised ${raised} this turn; raise the rest.` : '';
   const how =
     mode === 'interactive'
-      ? `\`${binary} attention add "<summary>" --step …\` (a to-do) or with \`--question\`/\`--option\` (a choice), or your question tool`
-      : `\`${binary} attention add "<summary>" --step …\` (a to-do) or with \`--question\`/\`--option\` (a choice)`;
+      ? `\`${binary} attention add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice), or your question tool`
+      : `\`${binary} attention add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice)`;
   return `${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n${listed}\nThe owner reads the Attention board, not every reply.${already} Raise each as its own Attention item — ${how} — or, if an open item already covers it or it needs no owner, say why not in one line.`;
 }
 

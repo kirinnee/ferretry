@@ -1,21 +1,8 @@
-import {
-  type AttentionItem,
-  type AttentionSnapshot,
-  type DirectNotificationRequest,
-  DirectNotificationResponseSchema,
-} from '@ferretry/protocol';
-import {
-  type AttentionActor,
-  type AttentionRaisedObserver,
-  agentConfinedTo,
-  isAttentionSessionId,
-} from '../attention/index.ts';
+import type { AttentionItem, AttentionSnapshot } from '@ferretry/protocol';
+import type { AttentionRaisedObserver } from '../attention/index.ts';
 import {
   attentionNotificationAttribution,
   attentionNotificationPayload,
-  decideNotificationReplay,
-  directNotificationFingerprint,
-  directNotificationPayload,
   moreInfoNotificationPayload,
   notificationKey,
 } from './policy.ts';
@@ -24,7 +11,6 @@ import {
   type NotificationDeliveryLedger,
   type NotificationPushDispatcher,
   NotificationRecordSchema,
-  type NotificationResult,
   type NotificationSerialExecutor,
   type NotificationSessionDirectory,
 } from './types.ts';
@@ -46,105 +32,13 @@ export class NotificationService implements AttentionRaisedObserver {
     return (await this.options.push.list()).length;
   }
 
-  async notifyDirect(
-    sessionId: string,
-    request: DirectNotificationRequest,
-    actor: AttentionActor,
-    attribution: string,
-    requestId: string,
-  ): Promise<NotificationResult> {
-    if (!isAttentionSessionId(sessionId)) {
-      return failure('invalid', `not a valid attention session id: ${sessionId}`);
-    }
-    if (!agentConfinedTo(actor, sessionId)) {
-      return failure('forbidden', 'an agent may notify only its own session');
-    }
-    const logicalId = requestId.trim();
-    if (logicalId === '') return failure('invalid', 'a notification request id must not be empty');
-    const key = notificationKey({ origin: 'direct', requestId: logicalId });
-    const incoming = directNotificationFingerprint(sessionId, request, attribution, logicalId);
-
-    try {
-      return await this.options.serial.run(key, async () => {
-        const decision = decideNotificationReplay(await this.options.ledger.find(key), incoming);
-        if (decision.decision === 'refuse') return decision.result;
-        if (decision.decision === 'replay') {
-          return {
-            ok: true,
-            value: DirectNotificationResponseSchema.parse({
-              sessionId: decision.sessionId,
-              delivered: decision.delivered,
-            }),
-          };
-        }
-
-        const session = await this.options.sessions.describe(sessionId);
-        if (session === undefined) return failure('not-found', `no such session ${sessionId}`);
-        const payload = directNotificationPayload(sessionId, session.name, request);
-        const enrolled = (await this.options.push.list()).length;
-        await this.options.ledger.append(
-          NotificationRecordSchema.parse({
-            v: 1,
-            phase: 'requested',
-            key,
-            at: this.options.clock.now(),
-            origin: 'direct',
-            attribution,
-            sessionId,
-            request: incoming.request,
-            sent: {
-              kind: payload.kind,
-              interactive: session.interactive,
-              title: payload.title,
-              body: payload.body,
-            },
-            enrolled,
-          }),
-        );
-
-        let delivered: number;
-        let failed: number;
-        try {
-          ({ delivered, failed } = await this.options.push.notify({ payload }));
-        } catch (error) {
-          const message = errorText(error);
-          const at = this.options.clock.now();
-          await this.options.ledger
-            .append(
-              NotificationRecordSchema.parse({
-                v: 1,
-                phase: 'outcome',
-                key,
-                at,
-                delivered: 0,
-                failed: 0,
-                error: message,
-              }),
-            )
-            .catch(() => undefined);
-          return failure('corrupt', `notification delivery failed at ${at}: ${message}`);
-        }
-
-        await this.options.ledger
-          .append(
-            NotificationRecordSchema.parse({
-              v: 1,
-              phase: 'outcome',
-              key,
-              at: this.options.clock.now(),
-              delivered,
-              failed,
-            }),
-          )
-          .catch(() => undefined);
-        return {
-          ok: true,
-          value: DirectNotificationResponseSchema.parse({ sessionId, delivered }),
-        };
-      });
-    } catch (error) {
-      return failure('corrupt', `notification delivery state is unavailable: ${errorText(error)}`);
-    }
+  /**
+   * How many devices accepted the push an item's raise made, as the ledger recorded it; zero when nothing
+   * was pushed (no device, an unreadable ledger, or an item that never announced).
+   */
+  async attentionDelivered(sessionId: string, attentionId: string): Promise<number> {
+    const entry = await this.options.ledger.find(notificationKey({ sessionId, attentionId })).catch(() => undefined);
+    return entry?.outcome?.error === undefined ? (entry?.outcome?.delivered ?? 0) : 0;
   }
 
   /** Attention observer entry point; it is total even when every collaborator rejects. */
@@ -166,7 +60,6 @@ export class NotificationService implements AttentionRaisedObserver {
     infoRequest?: number,
   ): Promise<void> {
     const key = notificationKey({
-      origin: 'attention',
       sessionId,
       attentionId: item.id,
       ...(infoRequest === undefined ? {} : { infoRequest }),
@@ -178,8 +71,8 @@ export class NotificationService implements AttentionRaisedObserver {
         if (session === undefined) return;
         const payload =
           infoRequest === undefined
-            ? attentionNotificationPayload(sessionId, session, item, snapshot)
-            : moreInfoNotificationPayload(sessionId, session, item, snapshot, infoRequest);
+            ? attentionNotificationPayload(sessionId, item, snapshot)
+            : moreInfoNotificationPayload(sessionId, item, snapshot, infoRequest);
         const enrolled = (await this.options.push.list()).length;
         await this.options.ledger.append(
           NotificationRecordSchema.parse({
@@ -236,10 +129,6 @@ export class NotificationService implements AttentionRaisedObserver {
       })
       .catch(() => undefined);
   }
-}
-
-function failure(code: 'invalid' | 'forbidden' | 'not-found' | 'corrupt', message: string): NotificationResult<never> {
-  return { ok: false, error: { code, message } };
 }
 
 function errorText(error: unknown): string {

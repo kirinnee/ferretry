@@ -107,11 +107,100 @@ describe('Attention in a conversation', () => {
     // Act / Assert
     should(boardReplyMessage(answered)).equal('[answer to !A2 «Rebase onto main now?»] Wait');
     should(boardReplyMessage(answeredWithNote)).equal('[answer to !A3 «Which region?»] eu-west-1\n\nNote: cheapest');
-    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Only after 6pm');
+    should(boardReplyMessage(replied)).equal('[answer to !A4 «Deploy?»] Done.\n\nNote: Only after 6pm');
     should(boardReplyMessage(bareDone)).equal('[done !A5 «Look at the flaky test»] The owner marked this done.');
     should(boardReplyMessage(dismissed)).equal('[dismissed !A5 «Look at the flaky test»] No longer needed');
     should(boardReplyMessage(bareDismiss)).equal(
       '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
+    );
+  });
+
+  it('should deliver the answer AND the owner’s reply for every action, with and without a reply', () => {
+    // Arrange
+    const asked = (note?: string) =>
+      item('A5', {
+        waitingOn: 'ferret',
+        askedAt: AT,
+        infoRequests: 1,
+        history: [{ at: AT, kind: 'needs-info', ...(note === undefined ? {} : { note }) }],
+      });
+    const choose = (note?: string) =>
+      closed(CHOICE, {
+        response: { kind: 'multiple-choice', choice: 'Rebase now' },
+        ...(note === undefined ? {} : { resolutionNote: note }),
+      });
+    const permission = (decision: 'approve' | 'reject', note?: string) =>
+      closed(PERMISSION, {
+        response: { kind: 'permission', decision },
+        ...(note === undefined ? {} : { resolutionNote: note }),
+      });
+    const REVIEW = item('A6', { subject: 'Is the summary right?', ask: { kind: 'answer-review' } });
+    const review = (note?: string) =>
+      closed(REVIEW, {
+        response: { kind: 'answer-review', verdict: 'good' },
+        ...(note === undefined ? {} : { resolutionNote: note }),
+      });
+    const done = (note?: string) => closed(PLAIN, note === undefined ? {} : { resolutionNote: note });
+    const dismiss = (note?: string) =>
+      closed(PLAIN, { disposition: 'dismissed', ...(note === undefined ? {} : { resolutionNote: note }) });
+
+    // Act
+    const lines = {
+      choose: boardReplyMessage(choose()),
+      chooseNote: boardReplyMessage(choose('after lunch')),
+      approve: boardReplyMessage(permission('approve')),
+      approveNote: boardReplyMessage(permission('approve', 'only for this repo')),
+      reject: boardReplyMessage(permission('reject')),
+      rejectNote: boardReplyMessage(permission('reject', 'use the staging account')),
+      good: boardReplyMessage(review()),
+      goodNote: boardReplyMessage(review('nice and short')),
+      done: boardReplyMessage(done()),
+      doneNote: boardReplyMessage(done('merged it myself')),
+      dismiss: boardReplyMessage(dismiss()),
+      dismissNote: boardReplyMessage(dismiss('not this week')),
+      needsInfo: needsInfoMessage(asked()),
+      needsInfoNote: needsInfoMessage(asked('which account?')),
+    };
+
+    // Assert
+    should(lines).deepEqual({
+      choose: '[answer to !A2 «Rebase onto main now?»] Rebase now',
+      chooseNote: '[answer to !A2 «Rebase onto main now?»] Rebase now\n\nNote: after lunch',
+      approve: '[answer to !A4 «Deploy?»] Approved.',
+      approveNote: '[answer to !A4 «Deploy?»] Approved.\n\nNote: only for this repo',
+      reject: '[answer to !A4 «Deploy?»] Rejected.',
+      rejectNote: '[answer to !A4 «Deploy?»] Rejected.\n\nNote: use the staging account',
+      good: '[answer to !A6 «Is the summary right?»] Your answer is good.',
+      goodNote: '[answer to !A6 «Is the summary right?»] Your answer is good.\n\nNote: nice and short',
+      done: '[done !A5 «Look at the flaky test»] The owner marked this done.',
+      doneNote: '[answer to !A5 «Look at the flaky test»] Done.\n\nNote: merged it myself',
+      dismiss: '[dismissed !A5 «Look at the flaky test»] The owner dismissed this without an answer.',
+      dismissNote: '[dismissed !A5 «Look at the flaky test»] not this week',
+      needsInfo: '[needs more info !A5 «Ask A5?»] The owner needs more information.',
+      needsInfoNote: '[needs more info !A5 «Ask A5?»] which account?',
+    });
+  });
+
+  it('should read a non-default answer label as the start of the owner’s reply, after the answer', () => {
+    // Arrange — the app words an answer that is not its kind's default as the note's first words:
+    // permission ↑ "Always allow" is an approve, task ↑ "Skip" is a dismiss.
+    const always = closed(PERMISSION, {
+      response: { kind: 'permission', decision: 'approve' },
+      resolutionNote: 'Always allow — it is the same repo every time',
+    });
+    const alwaysBare = closed(PERMISSION, {
+      response: { kind: 'permission', decision: 'approve' },
+      resolutionNote: 'Always allow',
+    });
+    const skip = closed(PLAIN, { disposition: 'dismissed', resolutionNote: 'Skip — the owner of that test is away' });
+
+    // Act / Assert
+    should(boardReplyMessage(always)).equal(
+      '[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow — it is the same repo every time',
+    );
+    should(boardReplyMessage(alwaysBare)).equal('[answer to !A4 «Deploy?»] Approved.\n\nNote: Always allow');
+    should(boardReplyMessage(skip)).equal(
+      '[dismissed !A5 «Look at the flaky test»] Skip — the owner of that test is away',
     );
   });
 

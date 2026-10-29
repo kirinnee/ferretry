@@ -536,18 +536,3 @@
     display: none;
   }
 }
-
-/* ---- A phone's swipeable row ------------------------------------------------------------------- */
-.fy-attn-swiperow {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.75rem;
-  border: var(--stroke-panel) solid var(--border);
-  border-radius: var(--radius-panel);
-  background: var(--surface, var(--bg));
-}
-.fy-attn-swiperow__actions {
-  display: flex;
-  gap: 0.5rem;
-}

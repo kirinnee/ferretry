@@ -229,8 +229,14 @@ export class DaemonAttentionClient {
     return this.#mutate(daemon, scope, { action: 'resolve', id, ...(note === undefined ? {} : { note }) });
   }
 
-  respond(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, response: AttentionResponse): Promise<void> {
-    return this.#mutate(daemon, scope, { action: 'resolve', id, response });
+  respond(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    response: AttentionResponse,
+    note?: string,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'resolve', id, response, ...(note === undefined ? {} : { note }) });
   }
 
   dismiss(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {

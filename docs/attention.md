@@ -2,7 +2,8 @@
 
 **Notifications are Attention.** A ferret that needs the owner to decide or do something raises an
 Attention item. That one act notifies the owner. The item then stays until it is answered, done or
-dismissed. A ferret that is only waiting, or has just finished, pushes nothing.
+dismissed. A ferret that is only waiting, or has just finished, pushes nothing — and every notification a
+ferret sends IS an Attention item: `fy attention notify` raises an `info` card too.
 
 This document is the contract for that loop. The board's own rules are in
 `packages/daemon/src/lib/attention/state-machine.ts`, and the wire shapes are in
@@ -12,7 +13,7 @@ This document is the contract for that loop. The board's own rules are in
 
 | Step            | Who                                                                                 | What happens                                                                                                                                                                                                                                                                                                                      |
 | --------------- | ----------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Raise           | the ferret: `fy attention add "<summary>"`                                          | One push to every enrolled device, titled with the conversation, saying what is needed (see below). The session's row turns **unread**.                                                                                                                                                                                           |
+| Raise           | the ferret: `fy attention add --title "<what>" "<ask>"`                             | One push to every enrolled device: the card's title as the heading, its ask as the text (see below). The session's row turns **unread**.                                                                                                                                                                                          |
 | Answer          | the owner: the board, the inbox or a push tap                                       | The item resolves. A few seconds later the ferret receives `[answer to !A3 «<ask>»] <answer>`, in one message with any other answers given meanwhile.                                                                                                                                                                             |
 | Reply in chat   | the owner writes `!A3 …` in that ferret's chat                                      | That message is the answer: it is delivered prefixed `[answer to !A3 «<ask>»]`, and once it is accepted the item resolves in the owner's name.                                                                                                                                                                                    |
 | Plain chat      | the owner writes without referencing an item                                        | Nothing resolves. The message ends with one line naming the open items, so the ferret can resolve one itself if the message settled it.                                                                                                                                                                                           |
@@ -97,6 +98,51 @@ This document is the contract for that loop. The board's own rules are in
   prints `Warning: no device will be notified (0 enrolled)` under its confirmation. The item is on the
   board either way.
 
+## The card
+
+Every item is drawn as ONE self-contained card. The owner can answer it from the card alone, with a
+swipe, a tap or an arrow key, and add words when they want to. The wire shapes are `AttentionCardShape`
+in `packages/protocol/src/lib/attention.ts`; every reader goes through
+`packages/protocol/src/lib/attention-card.ts`, so the CLI, the daemon's push and the app agree.
+
+| Part    | Field                    | What it holds                                                                                                                       |
+| ------- | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Title   | `title`                  | What the item is about, in a few plain words, under 40 characters. **The push's heading.** Required by `fy attention add --title`.  |
+| Ask     | `subject`                | The one question or action, one line under 120 characters. **The push's text.** (The wire keeps its old name; `ask` is the object.) |
+| Kind    | `kind`                   | `task`, `yesno`, `permission`, `choice`, `review`, `info` — or `reply`, a question only words answer.                               |
+| Answers | `answers[]` (at most 3)  | `{direction: left·up·right, label, does, description?}`. `does` is what the answer does: see below.                                 |
+| Reply   | the action's `note`      | Optional words on EVERY card, sent with whichever answer is given. Open by default on a `reply` card.                               |
+| Detail  | the brief (next section) | Context, recommendation, body (Markdown and fy-render media), steps, links, terms, impact, urgency, history: all shown when open.   |
+
+**Directions.** The answer the owner swipes left IS the button on the left. The bar lays answers out
+left · up · right, each with its arrow, and the swipe stamps the same label. The recommended answer is
+always on the right. The defaults per kind (`defaultAttentionAnswers`):
+
+| Kind       | ←              | ↑ (optional, `--up`)  | →                   |
+| ---------- | -------------- | --------------------- | ------------------- |
+| task       | Need more info | e.g. Skip (dismisses) | Done                |
+| yesno      | No             |                       | Yes                 |
+| permission | Deny           | e.g. Always allow     | Allow               |
+| choice, 2  | the other      |                       | the recommended one |
+| choice, 3  | the third      | the second            | the recommended one |
+| review     | Needs changes  |                       | Looks good          |
+| info       |                |                       | Got it              |
+
+- **What an answer does** (`does`): `choose` answers a choice with that option; `approve`/`reject` a
+  permission; `good`/`clarify` a review (`clarify` needs the reply's words); `done` resolves, `needs-info`
+  asks the ferret for more and keeps the item open, `dismiss` closes it unanswered. An answer whose label
+  is not its effect's default (↑ "Always allow", ↑ "Skip") reaches the ferret with that label first:
+  `Always allow — <reply>`.
+- **At most three answers.** `fy attention add` refuses a fourth option and says to split the item or to
+  let the owner answer in words (`--kind reply`). A choice with no recommendation recommends its first
+  option. A `yesno` card's options are exactly Yes and No.
+- **Old items.** An item raised before cards has no `title`, `kind` or `answers`. Nothing is migrated on
+  disk: `attentionCardKind` reads the kind from its ask, `attentionCardAnswers` gives it its kind's
+  defaults (its brief's recommendation on the right), and `attentionTitle` titles it with the start of its
+  ask cut at a word. An old choice with more than three options keeps the rest as plain buttons.
+- **Isolated.** The card is read alone, often days later. Everything needed to decide is ON it; links are
+  extras. The writing check below warns about anything that points elsewhere.
+
 ## What an item says
 
 The owner reads an item cold, often on a phone, often days later. So an item is **structured**, and every
@@ -106,7 +152,7 @@ before the structure existed still reads.
 
 | Part             | Field                                               | What it holds                                                                                                                                                                   |
 | ---------------- | --------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Summary          | `subject`                                           | One line: what is needed. Drawn bold, once — never repeated as a title or `why`.                                                                                                |
+| Title / ask      | `title`, `subject`                                  | See "The card": what it is about, and the one question or action. Each drawn once.                                                                                              |
 | Context          | `context`                                           | What is happening and why it matters, in a few sentences. Markdown.                                                                                                             |
 | Terms            | `terms[]` `{term, meaning}`                         | Every codename or term of art the item uses, spelled out. At most 12.                                                                                                           |
 | Questions        | `questions[]`                                       | One per decision: `question`, optional `options`, `recommended` and `why`. ≤ 6.                                                                                                 |
@@ -131,10 +177,10 @@ before the structure existed still reads.
   `multiple-choice` ask between them, and several questions an `open-question`. So only a single-question
   item has options the swipe deck can map. Several questions are answered one by one, and the board sends
   them as ONE open answer, numbered by question.
-- **Where it is drawn.** The inbox card, the in-ferret panel and the item page title an item with its
-  **conversation's name** (the session's task title). The ferret and the machine are the subtitle. Then
-  comes the summary in bold, and collapsible Context · Terms · Questions · Recommendation · Impact · Links.
-  The recommended option is marked "Recommended".
+- **Where it is drawn.** The inbox card and the in-ferret panel draw the same card: a header line
+  (kind · ferret · machine · age), the title, the ask, the recommendation, then every detail the item
+  carries in a scrolling region, and the answer bar pinned at the bottom (left · up · right, then
+  "Reply…").
 - **Nothing open, nothing drawn.** A chat with no open item shows nothing above its composer: no "all
   clear" line and no resolved history. Open items are the pinned card and an accent count in the chat
   header. The history is one step away: the header's Actions menu has an "N resolved" entry (only when
@@ -152,24 +198,31 @@ ferret the same rules, with a good and a bad example:
 
 - **Self-contained.** The reader has not followed the conversation. No ticket or PR ids, codenames,
   file paths or unexplained capitals. A needed term goes in `terms` with its meaning.
-- **Point form.** One idea per bullet. The summary is one plain sentence under 90 characters, answer
-  first. `context` and `impact` take a list (`-c` repeated, or a JSON array) and are stored as
+- **A title and an ask.** The title says what the item is about in a few plain words, under 40
+  characters, with no ids. The ask is one plain sentence under 120 characters, answer first.
+- **Point form.** One idea per bullet. `context` and `impact` take a list (`-c` repeated, or a JSON array) and are stored as
   `- point` lines; the app draws them as a bullet list, collapsed as before.
 - **Instructions in the item.** When the owner must DO something, give every step with `--step "<markdown>"`
   (repeat, in order; or `steps` in the JSON body), or one `--body-file <path|->` document: exact commands,
   where to click, what to paste where, never a secret value. Commands and paths inside `steps` and `body`
   are legitimate, so the writing check does not read them. The item alone must be enough to finish the task.
   `fy attention ls` prints them numbered, `✓` on done ones; `fy attention step <id> <n> [--undo]` ticks one.
-- **Concrete questions.** Two to four short options, and a recommendation with its reason in one line.
+- **Concrete questions.** Two or three short options that each say what choosing them does, and a
+  recommendation with its reason in one line. More than three is refused: split the item.
+- **Never point elsewhere.** No "as above", "as discussed", "the earlier PR": say the thing itself.
 
 The daemon checks this on every `fy attention add` and `fy attention edit`. It **warns, never refuses**:
 the item is already on the board. The warnings come back on the response (`warnings` on the snapshot)
-and the CLI prints them under the confirmation with the fix to run. It flags a summary over 90
-characters, ticket-like ids (`ABC-123`, `#1234`), URLs, file paths, and ALL-CAPS words not defined in
-`terms` (`packages/daemon/src/lib/attention/writing-lint.ts`).
+and the CLI prints them under the confirmation with the fix to run. It flags a missing title, a title
+over 40 characters, an ask over 120, words that point at an earlier message ("as above", "as discussed",
+"the previous PR"), ticket-like ids (`ABC-123`, `#1234`) unless followed by what they are in brackets
+(`#812 (the push worker fix)`), URLs, file paths, ALL-CAPS words not defined in `terms`, and choice
+options that name nothing ("A", "Option 2") with no description
+(`packages/daemon/src/lib/attention/writing-lint.ts`). The CLI itself refuses a raise with no title or
+with more than three options.
 
 **`fy attention edit <id>`** rewords an open item the ferret raised: summary, context, terms, the
-questions' words (same count and options, in order), recommendation, impact, urgency, links, steps and body. It
+questions' words (same count and options, in order), title, recommendation, impact, urgency, links, steps and body. It
 never changes the ask, who raised it or the question options, and it does not push again — except an
 edit that answers an open Need more info request, which pushes once (see "The loop").
 
@@ -180,8 +233,8 @@ edit that answers an open Need more info request, which pushes once (see "The lo
   second renderer. Code spans and fences in an item get a Copy button.
 - `steps` are a checklist. A tick sends `{action:'progress', id, step, done}`; it shows at once and rolls
   back with a message if the board refuses. When every step is ticked, Done is the primary action.
-- A `task` item has no reply box: Done and Need more info (optional note). On a phone, swipe right is Done
-  and swipe left is Need more info, on the deck and on rows. An item with `waitingOn:'ferret'` shows
+- A `task` card answers Done (→) and Need more info (←), plus an optional ↑ such as Skip, and takes an
+  optional reply like every card. An item with `waitingOn:'ferret'` shows
   "Waiting on <ferret>" with no Done until the ferret edits it. Both actions ride the batched-delivery
   countdown. The history line ("You asked for more info 10:42 · updated 10:44") is local time.
 
@@ -283,14 +336,12 @@ as its badge. The badge is the mono logomark on transparent, because Android pai
 alpha alone. iOS has no badge and ignores it. The manifest also names the badge as its `monochrome`
 icon, and its home-screen icons are maskable (the art carries its own safe zone).
 
-**What an Attention push says.** A concise summary, nothing else. The title is the conversation's
-name, plain, trimmed to 40 characters at a word boundary: `OCI work login`. It is the ferret's
-name when the session has no name of its own. The body is the item's **summary only**, at most 110
-characters, trimmed at a word boundary with `…`. It never carries the context, the options or the
-recommendation. When the summary is empty or only repeats the title, the first question stands in,
-trimmed the same way.
+**What an Attention push says.** The card's title as the heading and its ask as the text, nothing
+else. The title is trimmed to 40 characters at a word boundary; an item from before titles uses the
+start of its ask (`attentionTitle`). The body is the ask, at most 120 characters, trimmed at a word
+boundary with `…`. It never carries the context, the options or the recommendation.
 
-A session's name is an agent's own words, so it must never read as the daemon's new-device alert
+A title is an agent's own words, so it must never read as the daemon's new-device alert
 title. Titles used to be quoted always (`“Ferretry”`), which guarded one case by marking every push.
 Now only a name that reads as that alert is labelled, as `Ferret “…”`. That covers any spelling, case
 or punctuation, and Cyrillic, Greek and accented look-alikes (`attentionNotificationTitle`). Every
@@ -312,26 +363,23 @@ notifications as Ferretry, with the mono mark in the status bar.
 
 ## Every automatic push, and why it stays or goes
 
-| Path                                              | Where                                      | Decision                                                                                                                                                                     |
-| ------------------------------------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| An Attention item is created                      | daemon `NotificationService`               | **The** notification. Once per item (the key is session + item).                                                                                                             |
-| A ferret adds the information the owner asked for | daemon `NotificationService.moreInfoAdded` | **One more push** for that request: same title and link, "Updated: more info added — <summary>". Once per item + request (key `…:info-<n>`); an ordinary edit never pushes.  |
-| `fy attention notify` (push without an item)      | daemon `POST …/notify`                     | Kept for compatibility. It is explicit and audited, and the prompt does not advertise it. A tap opens the conversation it came from.                                         |
-| Enrolment confirmation                            | daemon `PushService.register`              | Kept. One push, only to the browser that just enrolled.                                                                                                                      |
-| A new device was paired                           | daemon audit log                           | Kept. This is a security alert.                                                                                                                                              |
-| A harness parks on its own prompt                 | daemon `HarnessPromptAttention`            | **An item** like any other: one push per wait.                                                                                                                               |
-| A session starts, finishes or idles               | daemon                                     | Never pushed (unchanged).                                                                                                                                                    |
-| Your turn / `awaiting_user` (a ferret waiting)    | PWA page watcher (`notification-ledger`)   | **Removed.** Waiting is not an ask.                                                                                                                                          |
-| `completed` (a ferret finished)                   | PWA page watcher                           | **Removed.** Finishing is not an ask.                                                                                                                                        |
-| `needs-input` / `awaiting_question`               | PWA page watcher                           | **Now doubles the item above.** The daemon raises an item for this wait, and that item pushes. Removing the page-watcher notification is a follow-up for the app (see GAPs). |
-| `failed` / `stalled` / `kill_failed`              | PWA page watcher                           | Kept. A dead ferret cannot raise an item.                                                                                                                                    |
-| Notifications a device's own filter hides         | push worker                                | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Now carries the mark.                                                    |
+| Path                                              | Where                                      | Decision                                                                                                                                                                    |
+| ------------------------------------------------- | ------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An Attention item is created                      | daemon `NotificationService`               | **The** notification. Once per item (the key is session + item).                                                                                                            |
+| A ferret adds the information the owner asked for | daemon `NotificationService.moreInfoAdded` | **One more push** for that request: same title and link, "Updated: more info added — <summary>". Once per item + request (key `…:info-<n>`); an ordinary edit never pushes. |
+| `fy attention notify`                             | CLI and daemon `POST …/notify`             | **Now an item.** It raises an `info` card (→ Got it), so its push is the Attention push. `--kind completed` / `failed` is refused: progress and finishing never notify.     |
+| Enrolment confirmation                            | daemon `PushService.register`              | Kept. One push, only to the browser that just enrolled.                                                                                                                     |
+| A new device was paired                           | daemon audit log                           | Kept. This is a security alert.                                                                                                                                             |
+| A harness parks on its own prompt                 | daemon `HarnessPromptAttention`            | **An item** like any other: one push per wait.                                                                                                                              |
+| A session starts, finishes or idles               | daemon                                     | Never pushed (unchanged).                                                                                                                                                   |
+| Your turn / `awaiting_user` (a ferret waiting)    | PWA page watcher (`notification-ledger`)   | **Removed.** Waiting is not an ask.                                                                                                                                         |
+| `completed` (a ferret finished)                   | PWA page watcher                           | **Removed.** Finishing is not an ask.                                                                                                                                       |
+| `needs-input` / `awaiting_question`               | PWA page watcher                           | **Removed.** The daemon raises an item for this wait, and that item pushes.                                                                                                 |
+| `failed` / `stalled` / `kill_failed`              | PWA page watcher                           | Kept. A dead ferret cannot raise an item.                                                                                                                                   |
+| Notifications a device's own filter hides         | push worker                                | Kept as one quiet, silent line per machine (a push that shows nothing gets a subscription revoked). Now carries the mark.                                                   |
 
 ## GAPs
 
-- **The page watcher still announces `needs-input` / `awaiting_question`.** The daemon now raises an
-  item for that wait, which pushes, so a device with the app open is told twice. The app should drop
-  that local notification.
 - **A console prompt can only be answered in the Console.** Its item has no ask: answering a permission
   prompt or a dialog from the board is not driven yet.
 - **A chat reply to a question item is not typed into the form.** The words reach the ferret as a

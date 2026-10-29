@@ -3,10 +3,6 @@ import {
   AttentionActionRequestSchema,
   type AttentionSnapshot,
   AttentionSnapshotSchema,
-  type DirectNotificationRequest,
-  DirectNotificationRequestSchema,
-  type DirectNotificationResponse,
-  DirectNotificationResponseSchema,
 } from '@ferretry/protocol';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
 import type { AttentionApiClient, IAttentionGateway } from './ports.ts';
@@ -19,11 +15,6 @@ export function attentionBoardPath(sessionId: string): string {
 /** The daemon route that delivers a ferret's held answers now ("Send now"). */
 export function repliesPath(sessionId: string): string {
   return `${attentionBoardPath(sessionId)}/replies`;
-}
-
-/** The daemon route that pushes a direct notification to the human's devices. */
-export function notifyPath(sessionId: string): string {
-  return `/v1/sessions/${encodeURIComponent(sessionId)}/notify`;
 }
 
 const jsonPost = (body: unknown, headers: Record<string, string>): RequestInit => ({
@@ -80,14 +71,5 @@ export class ProtocolAttentionGateway implements IAttentionGateway {
 
   async sendReplies(sessionId: string): Promise<AttentionSnapshot> {
     return await this.client.request(repliesPath(sessionId), AttentionSnapshotSchema, jsonPost({}, this.#headers));
-  }
-
-  async notify(sessionId: string, request: DirectNotificationRequest): Promise<DirectNotificationResponse> {
-    const body = DirectNotificationRequestSchema.parse(request);
-    return await this.client.request(
-      notifyPath(sessionId),
-      DirectNotificationResponseSchema,
-      jsonPost(body, this.#headers),
-    );
   }
 }

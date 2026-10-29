@@ -21,13 +21,13 @@ import {
   AttentionIdSchema,
   type AttentionItem,
   type AttentionQuestion,
-  type AttentionResponse,
   type AttentionSnapshot,
   MAX_ATTENTION_DETAIL_LENGTH,
   type ResolvedAttentionItem,
   type SessionAttentionSummary,
   type SessionView,
 } from '@ferretry/protocol';
+import { answerActions, type InboxAction, swipeTargets } from './attention-answers.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { daemonSessionPath } from './pages/routes.ts';
 
@@ -157,6 +157,8 @@ export const inboxCards = (
   );
 };
 
+export type { InboxAction };
+
 /** One resolved item in the inbox's Resolved filter: the record, its conversation and its machine. */
 export interface InboxResolved {
   readonly key: string;
@@ -216,13 +218,6 @@ export const sessionsToReadForResolved = (
     .map(entry => ({ daemonId: entry.daemonId, sessionId: entry.view.config.id }));
 };
 
-/** What answering a card does, as the daemon is asked to do it. */
-export type InboxAction =
-  | { readonly kind: 'respond'; readonly label: string; readonly response: AttentionResponse }
-  | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'needs-info'; readonly label: string; readonly note?: string };
-
 export const DONE_ACTION: InboxAction = { kind: 'resolve', label: 'Done' };
 export const DISMISS_ACTION: InboxAction = { kind: 'dismiss', label: 'Dismiss' };
 export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
@@ -231,19 +226,10 @@ export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
 };
 
 /** A to-do: the owner does something, nothing to choose. Its answers are Done and Need more info. */
-export const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
+const isTask = (item: Pick<AttentionItem, 'ask'>): boolean => item.ask?.kind === 'task';
 
 /** The ferret was asked for more information and has not yet edited the item. */
 export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
-
-/** How many of an item's steps are ticked, out of how many; `complete` only when it has steps and all are. */
-export const stepsProgress = (
-  item: Pick<AttentionItem, 'steps' | 'stepsDone'>,
-): { readonly done: number; readonly total: number; readonly complete: boolean } => {
-  const total = item.steps?.length ?? 0;
-  const done = item.stepsDone?.length ?? 0;
-  return { done, total, complete: total > 0 && done >= total };
-};
 
 /** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
 export const tickedSteps = (
@@ -289,31 +275,11 @@ export const updatedSinceAsked = (
 };
 
 /**
- * The item's answers in the order a swipe takes them: an affirmative answer first (Approve, "The answer
- * is good"), then the options as the agent listed them, then a negative one (Reject).
+ * The item's answers as actions, the recommended one first: the card's right, up and left answers, then
+ * an old choice's options past the third (buttons only). The answers are the card's own
+ * (`attentionCardAnswers`); see `attention-answers.ts`.
  */
-export const inboxOptions = (item: Pick<AttentionItem, 'ask'>): readonly InboxAction[] => {
-  const ask = item.ask;
-  if (ask === undefined) return [];
-  switch (ask.kind) {
-    case 'permission':
-      return [
-        { kind: 'respond', label: 'Approve', response: { kind: 'permission', decision: 'approve' } },
-        { kind: 'respond', label: 'Reject', response: { kind: 'permission', decision: 'reject' } },
-      ];
-    case 'multiple-choice':
-      return ask.options.map(option => ({
-        kind: 'respond' as const,
-        label: option.label,
-        response: { kind: 'multiple-choice' as const, choice: option.label },
-      }));
-    case 'answer-review':
-      return [{ kind: 'respond', label: 'Looks good', response: { kind: 'answer-review', verdict: 'good' } }];
-    case 'open-question':
-    case 'task':
-      return [];
-  }
-};
+export const inboxOptions = (item: Parameters<typeof answerActions>[0]): readonly InboxAction[] => answerActions(item);
 
 /** Whether an item carries any of the structured brief; an old item carries none. */
 export const hasAttentionBrief = (item: AttentionBrief): boolean =>
@@ -394,14 +360,16 @@ export type SwipeDirection = 'right' | 'left' | 'up';
 export type SwipeMap = Readonly<Partial<Record<SwipeDirection, InboxAction>>>;
 
 /**
- * What each swipe does to a card: right is Done, left is Dismiss — or, on a to-do, Need more info. A swipe
- * never picks between a card's options — those are buttons — and `up` stays free for a later gesture.
+ * What each swipe does to a card: the card's own answers by direction, carrying `reply` as their note.
+ * A direction with no answer is absent and never commits; a review's "Needs changes" is absent until
+ * the reply has text, because it IS that text (`swipeTargets` keeps it, for the stamp and the box).
  */
-export const swipeMap = (item: Pick<AttentionItem, 'ask' | 'questions' | 'waitingOn'>): SwipeMap => {
-  if (!isTask(item)) return { right: DONE_ACTION, left: DISMISS_ACTION };
-  // A to-do waiting on its ferret cannot be done yet, and asking again is the same request.
-  return isWaitingOnFerret(item) ? { left: DISMISS_ACTION } : { right: DONE_ACTION, left: NEEDS_INFO_ACTION };
-};
+export const swipeMap = (item: Parameters<typeof swipeTargets>[0], reply = ''): SwipeMap =>
+  Object.fromEntries(
+    Object.entries(swipeTargets(item, reply)).flatMap(([direction, target]) =>
+      target.action === null ? [] : [[direction, target.action]],
+    ),
+  );
 
 /**
  * Which swipe, if any, an answer sits on — matched by meaning, because `inboxOptions` builds its
@@ -437,7 +405,12 @@ export interface SwipeIntent {
  * Reads a drag of `(dx, dy)` on a card `width` wide. The dominant axis wins; a drag down means nothing,
  * because the deck scrolls that way. A direction with no action never commits.
  */
-export const swipeIntent = (dx: number, dy: number, width: number, map: SwipeMap): SwipeIntent => {
+export const swipeIntent = (
+  dx: number,
+  dy: number,
+  width: number,
+  map: Readonly<Partial<Record<SwipeDirection, unknown>>>,
+): SwipeIntent => {
   const threshold = swipeThreshold(width);
   const horizontal = Math.abs(dx) >= Math.abs(dy);
   const distance = horizontal ? Math.abs(dx) : -dy;

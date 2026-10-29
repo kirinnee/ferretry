@@ -28,7 +28,7 @@ const scopeA = daemonSessionScope({ daemonId: daemonA }, 'ses-1');
 const scopeB = daemonSessionScope({ daemonId: daemonB }, 'ses-1');
 
 const questionSpec = (scope = scopeA) =>
-  buildNotification(scope, sessionView(scope.sessionId, { state: { status: 'awaiting_question' } }), 'question', 3);
+  buildNotification(scope, sessionView(scope.sessionId, { state: { status: 'failed' } }), 'failed', 3);
 
 const payload = (over: Partial<NotificationPayload> = {}): NotificationPayload => ({
   ...notificationPayload(questionSpec()),
@@ -94,7 +94,7 @@ describe('notificationPayload', () => {
     should(result.version).equal(NOTIFICATION_PAYLOAD_VERSION);
     should(result.daemonId).equal(daemonA);
     should(result.sessionId).equal('ses-1');
-    should(result.kind).equal('question');
+    should(result.kind).equal('failed');
     should(result.tag).equal(spec.tag);
     should(result.url).equal(spec.url);
     should(result.count).equal(3);
@@ -138,10 +138,10 @@ describe('planNotificationPresentation', () => {
     should(plan.action).equal('show');
     if (plan.action !== 'show') return;
     should(plan.count).equal(6);
-    should(plan.body).equal('Asked you a question.\n+5 more');
+    should(plan.body).equal('Failed.\n+5 more');
     should(plan.data.daemonId).equal(daemonA);
     should(plan.data.sessionId).equal('ses-1');
-    should(plan.data.latestBody).equal('Asked you a question.');
+    should(plan.data.latestBody).equal('Failed.');
   });
 
   it('keeps its own count when the payload already counts higher', () => {
@@ -240,7 +240,7 @@ describe('showNotification', () => {
 
     should(await showNotification(broken, payload({ count: 2 }))).equal('shown');
     should(log.created).have.length(1);
-    should(log.created[0]?.body).equal('Asked you a question.\n+1 more');
+    should(log.created[0]?.body).equal('Failed.\n+1 more');
 
     const page = last();
     page.onclick?.call(page, {});
