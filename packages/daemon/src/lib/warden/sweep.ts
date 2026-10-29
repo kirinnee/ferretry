@@ -254,6 +254,9 @@ export interface WardenSpawnRequest {
   readonly teammate?: string;
 }
 
+/** Every one of the 16,777,215 investigator names is held — a fleet no machine will hold, refused rather than looped. */
+const NO_INVESTIGATOR_NAME = new Error('every warden-xxxxxx name is in use');
+
 /** The spawner's answer when the callsign it was asked to claim is already held. */
 export class WardenCallsignTakenError extends Error {
   constructor(readonly callsign: string) {
@@ -2334,8 +2337,7 @@ export class WardenSweepService {
     const issued = await this.issueInvestigator(next);
     next = issued.state;
     let investigator = issued.name;
-    if (investigator === undefined)
-      return { state: next, exhausted: false, error: new Error('every warden-xxxxxx name is in use') };
+    if (investigator === undefined) return { state: next, exhausted: false, error: NO_INVESTIGATOR_NAME };
     for (let attempt = 0; attempt < attempts; attempt += 1) {
       const picked = await this.pickAccount(accounts, config, next, tried);
       next = picked.state;

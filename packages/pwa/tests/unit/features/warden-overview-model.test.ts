@@ -375,6 +375,30 @@ describe('watchingRows', () => {
     expect(by.get('quiet')?.chips).toContainEqual({ label: 'cleared', tone: 'ok' });
   });
 
+  it('should chip an older daemon’s flag being judged by its kind, or as flagged when it names none', () => {
+    // Arrange
+    const status = wardenStatus();
+    const attention = wardenAttention({
+      outcome: 'items',
+      items: [
+        attentionItem({
+          sessionId: 'kind',
+          source: 'warden-anomaly',
+          anomalyKind: 'sus_thinking',
+          judgement: { state: 'pending', reason: 'r' },
+        }),
+        attentionItem({ sessionId: 'bare', source: 'warden-anomaly', judgement: { state: 'queued', reason: 'r' } }),
+      ],
+    });
+
+    // Act
+    const by = new Map(watchingRows(status, attention, NOW).map(row => [row.sessionId, row]));
+
+    // Assert
+    expect(by.get('kind')?.chips[0]).toEqual({ label: 'long think', tone: 'warn' });
+    expect(by.get('bare')?.chips[0]).toEqual({ label: 'flagged', tone: 'warn' });
+  });
+
   it('should explain a blessing whose action is no longer listed', () => {
     // Arrange
     const status = wardenStatus({

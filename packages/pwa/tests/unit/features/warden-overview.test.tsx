@@ -215,6 +215,27 @@ describe('WardenOverview', () => {
     }
   });
 
+  it('should keep the last Warden notification count after a failed refresh and say it is stale', async () => {
+    // Arrange
+    const view = await render({
+      attention: {
+        status: 'stale',
+        view: wardenAttention({ outcome: 'items', items: [attentionItem({ sessionId: 'sess-a' })] }),
+        reason: 'offline',
+      },
+    });
+    try {
+      // Act
+      const text = view.container.textContent ?? '';
+
+      // Assert
+      expect(text).toContain('1 Warden notification in Inbox');
+      expect(text).toContain('Couldn’t refresh; this is the last count.');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('should keep a stale status on screen and say so', async () => {
     // Arrange
     const view = await render({

@@ -64,4 +64,15 @@ describe('system callsigns', () => {
     ).equal(2);
     should(nextSystemCallsignSequence(-5, new Set())).equal(1);
   });
+
+  it('should give no id when every one is in use', () => {
+    // Arrange: a set that holds every id, without building one of 16,777,215 entries
+    const everyId: ReadonlySet<number> = { has: () => true } as unknown as ReadonlySet<number>;
+
+    // Act
+    const next = nextSystemCallsignSequence(41, everyId);
+
+    // Assert
+    should(next).be.undefined();
+  });
 });
