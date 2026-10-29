@@ -1,43 +1,32 @@
 /**
- * THE ATTENTION PAGE — everything every ferret on every paired machine is waiting on the reader for,
- * newest needing you first.
+ * THE INBOX — everything every ferret on every paired machine is waiting on the reader for, grouped by FERRET.
  *
- * - ONE COMPACT HEADER ROW: the title and count, a quiet "Updating" mark while boards are read, Open /
- *   Resolved, a machine filter (once there is more than one machine) and Find.
- * - A DENSE LIST GROUPED BY CONVERSATION: each group's header says the conversation once ("diene-migrate
- *   · Johnnie · 10") and folds; each row is headed by its ITEM — its title, else the start of its ask —
- *   never by the conversation's name, with the ask on one line and the kind, reference and age under it.
- * - A WIDER SCREEN puts the selected item's CARD beside the list, the whole pane tall: its detail scrolls
- *   inside it, its answer bar stays pinned at the bottom, and a "Last messages from <ferret>" fold shows
- *   what the ferret said last. ↑/↓ (and j/k) move the selection; answering an item selects the next one.
- * - WHERE A POINTER DRIVES IT (wide AND a fine pointer) swiping does not matter, so the item is drawn FLAT
- *   — no card, no swipe arrows, a text column of about 720px — and the list is a slim column that folds
- *   to a rail of icons and counts (the choice is kept on this device; ↑/↓ and j/k still walk the items).
- * - A PHONE gets the same list, and a tapped row opens its card full screen as the swipe deck — the
- *   items after it next in line, so each answer deals the next card.
+ * - THREE SECTIONS, in the order to look: "Stopped on you" (a ferret idle until you answer), "Needs you"
+ *   (items on your turn), then "With ferrets" (items on the ferret's turn — nothing for you to do, so it is
+ *   COLLAPSED until asked for). A ferret's group says who it is and where once, then lists its items and,
+ *   below them, its plain notifications (a line, a time, Clear). The badge counts items on your turn and the
+ *   notifications you have not cleared.
+ * - A TAP OPENS THE CHAT AT THE ITEM: every row is a real link to that ferret's conversation with the item's
+ *   full card (`?attention=<id>`), so there is no second card pane to keep in step with the chat. A tapped
+ *   notification opens the chat and clears itself. There is no right-hand pane and no list rail: the list is
+ *   the page, one calm column.
+ * - A PHONE ALSO GETS "Answer quickly": the items on your turn as the swipe deck, one answer per card, into
+ *   the same undo window. A wide screen walks the rows with j/k (or ↑/↓); Enter opens the one focused.
+ * - FILTERS: Open / Resolved, a machine filter (once there is more than one machine), Find, and — from
+ *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
  *
  * The page renders off the shell's `AttentionInbox` alone, so it render-tests with a fake one; reading a
  * ferret's last messages and ticking a step are the host's (`readRecent`, `onProgress`).
  */
 
 import { attentionCardAnswers, DISCUSS_LABEL } from '@ferretry/protocol';
-import {
-  ArrowLeft,
-  ArrowRight,
-  CheckCheck,
-  ChevronRight,
-  MessagesSquare,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Search,
-  SkipForward,
-  X,
-} from 'lucide-react';
+import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
-import { useFinePointer } from '../../hooks/use-attention-flat.ts';
+
 import type { AttentionInbox } from '../../hooks/use-attention-inbox.ts';
-import { canDiscussNow, kindWord } from '../../lib/attention-answers.ts';
+import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
+import { CLEAR_ACTION, canDiscussNow, kindWord } from '../../lib/attention-answers.ts';
 import {
   actionSentence,
   attentionConversationPath,
@@ -45,33 +34,33 @@ import {
   type InboxAction,
   type InboxCard,
   type InboxResolved,
-  isInDiscussion,
   RESOLVED_READ_LIMIT,
-  waitingSentence,
 } from '../../lib/attention-inbox.ts';
 import {
+  type FerretGroup,
   filterInboxCards,
   filterInboxResolved,
-  type InboxGroup,
+  groupCards,
   type InboxListFilter,
-  inboxGroups,
+  type InboxSource,
   inboxMachines,
   inboxRowAsk,
   inboxRowTitle,
+  inboxSections,
   nextSelection,
   QUEUE_END,
   skipSelection,
   stepSelection,
 } from '../../lib/attention-inbox-list.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
-import { daemonAttentionPath } from '../../lib/pages/routes.ts';
+import { daemonAttentionPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import type { RecentMessage } from '../../lib/recent-messages.ts';
 import { AttentionCountBadge } from '../../shell/app-bar.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
-import { attentionAge, attentionKindMeta, attentionReference } from './attention-board.tsx';
+import { AgendaStatusPill } from './agenda-status-pill.tsx';
+import { attentionAge, attentionReference } from './attention-board.tsx';
 import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
-import { useAttentionListRail } from './attention-collapse.ts';
 import { AttentionRecentMessages } from './attention-recent-messages.tsx';
 import { ResolvedRow } from './attention-resolved.tsx';
 import { AttentionSwipeDeck } from './attention-swipe-deck.tsx';
@@ -110,13 +99,11 @@ interface CardHostProps {
   readonly readRecent?: ((card: InboxCard) => Promise<readonly RecentMessage[]>) | undefined;
   readonly onProgress?: ((card: InboxCard, step: number, done: boolean) => Promise<void>) | undefined;
   readonly recentOpen?: boolean | undefined;
-  /** The item is drawn flat, not as a card (a wide screen driven by a pointer). */
-  readonly flat?: boolean | undefined;
 }
 
 /** One card, answering into the undo window. */
 const renderInboxCard = (
-  { inbox, onNavigate, now, readRecent, onProgress, recentOpen, flat }: CardHostProps,
+  { inbox, onNavigate, now, readRecent, onProgress, recentOpen }: CardHostProps,
   card: InboxCard,
   act: (action: InboxAction) => void,
   swipeHints: boolean,
@@ -128,7 +115,6 @@ const renderInboxCard = (
       error={failureFor(inbox.deferredState.failed, card.key)}
       item={card.item}
       key={card.key}
-      {...(flat === true ? { flat: true } : {})}
       {...(onSkip === undefined ? {} : { onSkip })}
       onAct={act}
       origin={origin}
@@ -243,7 +229,7 @@ function InboxReading({ words = 'Reading what your ferrets asked…' }: { readon
   );
 }
 
-/** Find or the machine filter left nothing: say so, and offer the way back. */
+/** Find, the machine filter or the Warden chip left nothing: say so, and offer the way back. */
 function NothingMatches({ onClear }: { readonly onClear: () => void }) {
   return (
     <div className="fy-attn-inbox__none" data-attention-no-match="">
@@ -281,6 +267,22 @@ function InboxFilterBar({
         </button>
       ))}
     </div>
+  );
+}
+
+/** "From Warden ✕": the filter `/inbox?from=warden` set, and the one press that lifts it. */
+function SourceChip({ onClear }: { readonly onClear: () => void }) {
+  return (
+    <button
+      className="fy-attn-inbox__chip"
+      data-attention-from-chip="warden"
+      onClick={onClear}
+      title="Show everything"
+      type="button"
+    >
+      From Warden
+      <X aria-hidden="true" size={13} />
+    </button>
   );
 }
 
@@ -339,7 +341,7 @@ const resolvedOrigin = (row: InboxResolved, onNavigate: (to: string) => void) =>
 export interface AttentionInboxPageProps {
   readonly inbox: AttentionInbox;
   readonly onNavigate: (to: string) => void;
-  /** A phone gets the list, then a tapped item's card full screen; a wider screen gets list and card side by side. */
+  /** A phone gets "Answer quickly" (the swipe deck); a wider screen walks the rows with j/k. */
   readonly phone: boolean;
   /** The clock card ages read; the browser's otherwise. */
   readonly now?: number;
@@ -353,303 +355,198 @@ export interface AttentionInboxPageProps {
   readonly onProgress?: (card: InboxCard, step: number, done: boolean) => Promise<void>;
   /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
-  /** Whether the primary pointer is fine (mouse, trackpad); the browser's own answer otherwise. */
-  readonly finePointer?: boolean;
-  /** Starts the selected card's "Last messages" fold open (a harness). */
+  /** Starts the deck card's "Last messages" fold open (a harness). */
   readonly recentOpen?: boolean;
-  /** On a phone, the item whose card starts open (a harness); the list otherwise. */
+  /** On a phone, the item whose deck card starts open (a harness); the list otherwise. */
   readonly initialOpen?: string;
+  /** Only what this source raised (`/inbox?from=warden`); everything otherwise. */
+  readonly from?: InboxSource | null;
+  /** Lifts the source filter: the host drops `?from=` from the address. */
+  readonly onClearFrom?: () => void;
+  /** Starts the "With ferrets" section open (a harness). */
+  readonly withFerretsOpen?: boolean;
 }
 
-/** One row of the list: the item's title and age, its ask on one line, and its kind and reference. */
-function Row({
+/** Everything a row needs besides the card itself. */
+interface RowEnv {
+  readonly inbox: AttentionInbox;
+  readonly now: number | undefined;
+  readonly onNavigate: (to: string) => void;
+  readonly selectedKey: string | null;
+  readonly rowRef: (key: string) => (element: HTMLAnchorElement | null) => void;
+}
+
+/** One item: its title and age, its ask on one line, and under it where it stands, its kind and its reference. */
+function ItemRow({
   card,
-  selected,
-  now,
-  onSelect,
-  rowRef,
+  group,
+  env,
 }: {
   readonly card: InboxCard;
-  readonly selected: boolean;
-  readonly now: number | undefined;
-  readonly onSelect: (key: string) => void;
-  readonly rowRef: (element: HTMLButtonElement | null) => void;
+  readonly group: FerretGroup;
+  readonly env: RowEnv;
 }) {
-  const kind = attentionKindMeta(card.item);
-  const KindIcon = kind.icon;
+  const { now, onNavigate, selectedKey, rowRef } = env;
   const ask = inboxRowAsk(card.item);
+  const status = agendaStatus(card.item, group.ferret, now);
+  const author = agendaAuthor(card.item, group.ferret);
   return (
-    <button
-      aria-current={selected || undefined}
-      className="fy-attn-row kt-attn"
-      data-attention-row={card.key}
-      data-kind={kind.tone}
-      data-selected={selected || undefined}
-      onClick={() => onSelect(card.key)}
-      ref={rowRef}
-      type="button"
-    >
-      <span className="fy-attn-row__top">
-        <span className="fy-attn-row__title" data-attention-row-title="">
-          {inboxRowTitle(card.item)}
+    <li>
+      <RouteLink
+        aria-current={selectedKey === card.key || undefined}
+        className="fy-inbox-row"
+        data-attention-row={card.key}
+        data-dimmed={status?.dimmed || undefined}
+        data-selected={selectedKey === card.key || undefined}
+        onNavigate={onNavigate}
+        ref={rowRef(card.key)}
+        to={attentionConversationPath(card.daemonId, card.view.config.id, card.item.id)}
+      >
+        <span className="fy-inbox-row__top">
+          <span className="fy-inbox-row__title" data-attention-row-title="">
+            {inboxRowTitle(card.item)}
+          </span>
+          <span className="fy-inbox-row__age">{shortAge(card.item.waitingSince, now)}</span>
         </span>
-        <span className="fy-attn-row__age">{shortAge(card.item.waitingSince, now)}</span>
-      </span>
-      {ask === null ? null : <span className="fy-attn-row__summary">{ask}</span>}
-      <span className="fy-attn-row__meta">
-        <KindIcon aria-hidden="true" className="fy-attn-row__kind" size={11} />
-        <span>{kindWord(card.item)}</span>
-        <span aria-hidden="true">·</span>
-        <span>{attentionReference(card.item.id)}</span>
-        {isInDiscussion(card.item) ? (
-          <>
-            <span aria-hidden="true">·</span>
-            <span className="fy-attn-row__state" data-attention-row-discussion="">
-              <MessagesSquare aria-hidden="true" size={11} />
-              {waitingSentence(card.item)}
-            </span>
-          </>
-        ) : null}
-      </span>
-    </button>
-  );
-}
-
-/** The list: one collapsible header per conversation, its items under it. */
-function GroupedList({
-  groups,
-  selectedKey,
-  collapsed,
-  onToggle,
-  onSelect,
-  now,
-  showMachine,
-  rowRefs,
-}: {
-  readonly groups: readonly InboxGroup[];
-  readonly selectedKey: string | null;
-  readonly collapsed: ReadonlySet<string>;
-  readonly onToggle: (key: string) => void;
-  readonly onSelect: (key: string) => void;
-  readonly now: number | undefined;
-  readonly showMachine: boolean;
-  readonly rowRefs: Map<string, HTMLButtonElement>;
-}) {
-  return (
-    <ul aria-label="Waiting on you" className="fy-attn-inbox__list" data-attention-list="">
-      {groups.map(group => {
-        const open = !collapsed.has(group.key);
-        const rowsId = `attention-group-${encodeURIComponent(group.key)}`;
-        return (
-          <li className="fy-attn-group" data-attention-group={group.key} key={group.key}>
-            <button
-              aria-controls={rowsId}
-              aria-expanded={open}
-              className="fy-attn-group__head"
-              data-attention-group-toggle=""
-              onClick={() => onToggle(group.key)}
-              type="button"
-            >
-              <ChevronRight
-                aria-hidden="true"
-                className="fy-attn-group__chevron"
-                data-open={open || undefined}
-                size={14}
-              />
-              <span className="fy-attn-group__name">
-                <span className="fy-attn-group__title">{group.title}</span>
-                {group.ferret === null ? null : <span className="fy-attn-group__ferret"> · {group.ferret}</span>}
-                {showMachine ? <span className="fy-attn-group__machine"> · {group.machineName}</span> : null}
-              </span>
-              <span className="fy-attn-group__count" data-attention-group-count="">
-                {group.cards.length}
-              </span>
-            </button>
-            {open ? (
-              <ul className="fy-attn-group__rows" id={rowsId}>
-                {group.cards.map(card => (
-                  <li key={card.key}>
-                    <Row
-                      card={card}
-                      now={now}
-                      onSelect={onSelect}
-                      rowRef={element => {
-                        if (element === null) rowRefs.delete(card.key);
-                        else rowRefs.set(card.key, element);
-                      }}
-                      selected={selectedKey === card.key}
-                    />
-                  </li>
-                ))}
-              </ul>
-            ) : null}
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-/** The collapse key of the In discussion group: never a conversation's `(daemonId, sessionId)` key. */
-const DISCUSSION_GROUP = 'in-discussion';
-
-/** The list's fold control: a slim column becomes a rail of icons, and back. */
-function ListRailToggle({ rail, onToggle }: { readonly rail: boolean; readonly onToggle: () => void }) {
-  const Icon = rail ? PanelLeftOpen : PanelLeftClose;
-  const label = rail ? 'Show the list' : 'Fold the list to icons';
-  return (
-    <button
-      aria-label={label}
-      aria-pressed={rail}
-      className="fy-attn-rail__toggle"
-      data-attention-rail-toggle=""
-      onClick={onToggle}
-      title={label}
-      type="button"
-    >
-      <Icon aria-hidden="true" size={16} />
-    </button>
+        {ask === null ? null : <span className="fy-inbox-row__ask">{ask}</span>}
+        <span className="fy-inbox-row__meta">
+          {status === null ? null : <AgendaStatusPill status={status} />}
+          <span>{kindWord(card.item)}</span>
+          <span aria-hidden="true">·</span>
+          <span>{attentionReference(card.item.id)}</span>
+          {author === group.ferret ? null : (
+            <>
+              <span aria-hidden="true">·</span>
+              <span data-attention-row-author="">From {author}</span>
+            </>
+          )}
+        </span>
+      </RouteLink>
+    </li>
   );
 }
 
 /**
- * The folded list: one button per conversation, drawn as its first item's kind icon and a count. The
- * group's name is its `title`, so a hover names it; pressing it selects the group's first item. The
- * discussion group is the same with a speech icon.
+ * One plain notification: a line and a time, nothing to answer. Tapping it opens the chat and clears it;
+ * Clear alone clears it where it is. Both go through the undo window, so a slip is one press from undone.
  */
-function GroupRail({
-  groups,
-  talking,
-  selectedKey,
-  onSelect,
-  onSelectTalking,
-}: {
-  readonly groups: readonly InboxGroup[];
-  readonly talking: readonly InboxCard[];
-  readonly selectedKey: string | null;
-  readonly onSelect: (key: string) => void;
-  readonly onSelectTalking: (key: string) => void;
-}) {
-  const entries = [
-    ...groups.flatMap(group => {
-      const [first] = group.cards;
-      return first === undefined
-        ? []
-        : [
-            {
-              key: group.key,
-              name: group.ferret === null ? group.title : `${group.title} · ${group.ferret}`,
-              cards: group.cards,
-              Icon: attentionKindMeta(first.item).icon,
-              select: onSelect,
-            },
-          ];
-    }),
-    ...(talking.length === 0
-      ? []
-      : [
-          {
-            key: DISCUSSION_GROUP,
-            name: 'In discussion',
-            cards: talking,
-            Icon: MessagesSquare,
-            select: onSelectTalking,
-          },
-        ]),
-  ];
+function NoticeRow({ card, env }: { readonly card: InboxCard; readonly env: RowEnv }) {
+  const { inbox, now, onNavigate, selectedKey, rowRef } = env;
+  const clear = (): void => inbox.deferred.schedule(card, CLEAR_ACTION);
   return (
-    <ul aria-label="Waiting on you" className="fy-attn-rail" data-attention-rail="">
-      {entries.map(entry => {
-        // Pressing a group walks its items: the first, then the next after the selected one, round again.
-        const at = entry.cards.findIndex(card => card.key === selectedKey);
-        const target = entry.cards[(at + 1) % entry.cards.length];
-        const holdsSelected = at >= 0;
-        return (
-          <li key={entry.key}>
-            <button
-              aria-current={holdsSelected || undefined}
-              aria-label={`${entry.name}, ${entry.cards.length} waiting`}
-              className="fy-attn-rail__group"
-              data-attention-rail-group={entry.key}
-              data-selected={holdsSelected || undefined}
-              onClick={() => target !== undefined && entry.select(target.key)}
-              title={entry.name}
-              type="button"
-            >
-              <entry.Icon aria-hidden="true" size={16} />
-              <span className="fy-attn-rail__count">{entry.cards.length}</span>
-            </button>
-          </li>
-        );
-      })}
-    </ul>
+    <li className="fy-inbox-notice" data-attention-notice={card.key}>
+      <RouteLink
+        aria-current={selectedKey === card.key || undefined}
+        className="fy-inbox-notice__link"
+        data-attention-row={card.key}
+        data-selected={selectedKey === card.key || undefined}
+        onNavigate={to => {
+          clear();
+          onNavigate(to);
+        }}
+        ref={rowRef(card.key)}
+        to={attentionConversationPath(card.daemonId, card.view.config.id, card.item.id)}
+      >
+        <span className="fy-inbox-notice__summary">{inboxRowTitle(card.item)}</span>
+        <span className="fy-inbox-row__age">{shortAge(card.item.waitingSince, now)}</span>
+      </RouteLink>
+      <button
+        aria-label={`Clear: ${inboxRowTitle(card.item)}`}
+        className="fy-inbox-notice__clear"
+        data-attention-clear={card.key}
+        onClick={clear}
+        type="button"
+      >
+        Clear
+      </button>
+    </li>
   );
 }
 
-/**
- * The items the owner asked to talk through, under one "In discussion" header below the list: they wait on
- * the ferret's reply, not on the owner, so they are out of the count and the swipe deck, but still one tap
- * away. The header says whose they are on each row's line, since they come from every conversation.
- */
-function DiscussionGroup({
-  cards,
-  selectedKey,
+/** One ferret: who and where on its header (a link to the chat), its items, then its notifications. */
+function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: RowEnv }) {
+  return (
+    <li className="fy-inbox-group" data-attention-group={group.key}>
+      <RouteLink
+        className="fy-inbox-group__head"
+        data-attention-group-link=""
+        onNavigate={env.onNavigate}
+        to={daemonSessionPath(group.daemonId, group.view.config.id)}
+      >
+        <span className="fy-inbox-group__ferret">{group.ferret}</span>
+        {group.task === null ? null : <span className="fy-inbox-group__task"> · {group.task}</span>}
+        <span className="fy-inbox-group__machine"> · {group.machineName}</span>
+      </RouteLink>
+      <ul aria-label={`${group.ferret}'s items`} className="fy-inbox-group__rows">
+        {group.items.map(card => (
+          <ItemRow card={card} env={env} group={group} key={card.key} />
+        ))}
+        {group.notices.map(card => (
+          <NoticeRow card={card} env={env} key={card.key} />
+        ))}
+      </ul>
+    </li>
+  );
+}
+
+/** One section: a sentence-case heading with its count, then its ferrets. A collapsible one folds under its heading. */
+function Section({
+  id,
+  title,
+  groups,
+  env,
   open,
   onToggle,
-  onSelect,
-  now,
-  rowRefs,
 }: {
-  readonly cards: readonly InboxCard[];
-  readonly selectedKey: string | null;
-  readonly open: boolean;
-  readonly onToggle: () => void;
-  readonly onSelect: (key: string) => void;
-  readonly now: number | undefined;
-  readonly rowRefs: Map<string, HTMLButtonElement>;
+  readonly id: string;
+  readonly title: string;
+  readonly groups: readonly FerretGroup[];
+  readonly env: RowEnv;
+  /** Present when the section folds. */
+  readonly open?: boolean;
+  readonly onToggle?: () => void;
 }) {
-  const rowsId = useId();
-  return (
-    <ul aria-label="In discussion" className="fy-attn-inbox__list" data-attention-discussion-list="">
-      <li className="fy-attn-group" data-attention-group={DISCUSSION_GROUP}>
+  const bodyId = useId();
+  const count = groups.reduce((total, group) => total + group.items.length + group.notices.length, 0);
+  const shown = open ?? true;
+  const heading =
+    onToggle === undefined ? (
+      <h2 className="fy-inbox-section__title">
+        {title}
+        <span className="fy-inbox-section__count">{count}</span>
+      </h2>
+    ) : (
+      <h2 className="fy-inbox-section__title">
         <button
-          aria-controls={rowsId}
-          aria-expanded={open}
-          className="fy-attn-group__head"
-          data-attention-group-toggle=""
+          aria-controls={bodyId}
+          aria-expanded={shown}
+          className="fy-inbox-section__toggle"
+          data-attention-section-toggle={id}
           onClick={onToggle}
           type="button"
         >
-          <ChevronRight aria-hidden="true" className="fy-attn-group__chevron" data-open={open || undefined} size={14} />
-          <MessagesSquare aria-hidden="true" className="fy-attn-group__icon" size={12} />
-          <span className="fy-attn-group__name">
-            <span className="fy-attn-group__title">In discussion</span>
-            <span className="fy-attn-group__ferret"> · waiting on the ferret</span>
-          </span>
-          <span className="fy-attn-group__count" data-attention-group-count="">
-            {cards.length}
-          </span>
+          <ChevronRight
+            aria-hidden="true"
+            className="fy-attn-group__chevron"
+            data-open={shown || undefined}
+            size={14}
+          />
+          {title}
+          <span className="fy-inbox-section__count">{count}</span>
         </button>
-        {open ? (
-          <ul className="fy-attn-group__rows" id={rowsId}>
-            {cards.map(card => (
-              <li key={card.key}>
-                <Row
-                  card={card}
-                  now={now}
-                  onSelect={onSelect}
-                  rowRef={element => {
-                    if (element === null) rowRefs.delete(card.key);
-                    else rowRefs.set(card.key, element);
-                  }}
-                  selected={selectedKey === card.key}
-                />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </li>
-    </ul>
+      </h2>
+    );
+  return (
+    <section className="fy-inbox-section" data-attention-section={id}>
+      {heading}
+      {shown ? (
+        <ul className="fy-inbox-section__groups" id={bodyId}>
+          {groups.map(group => (
+            <GroupView env={env} group={group} key={group.key} />
+          ))}
+        </ul>
+      ) : null}
+    </section>
   );
 }
 
@@ -677,8 +574,7 @@ export const swipeHintFor = (card: InboxCard | undefined): string => {
 const ownedElsewhere = (target: EventTarget | null): boolean => {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
-  if (target.closest('input, textarea, select, [role="menu"], [role="dialog"], [role="listbox"]') !== null) return true;
-  return target.closest('[data-attention-pane]') !== null;
+  return target.closest('input, textarea, select, [role="menu"], [role="dialog"], [role="listbox"]') !== null;
 };
 
 /** The header's Find box. */
@@ -687,7 +583,7 @@ function FindBox({ query, onChange }: { readonly query: string; readonly onChang
     <label className="fy-attn-inbox__find">
       <Search aria-hidden="true" size={14} />
       <input
-        aria-label="Find in Attention"
+        aria-label="Find in Inbox"
         className="fy-attn-inbox__find-input"
         data-attention-find=""
         onChange={event => onChange(event.target.value)}
@@ -717,49 +613,49 @@ export function AttentionInboxPage({
   reducedMotion,
   recentOpen,
   initialOpen,
-  finePointer,
+  from = null,
+  onClearFrom,
+  withFerretsOpen = false,
 }: AttentionInboxPageProps) {
   const headingId = useId();
-  const pointerIsFine = useFinePointer();
-  // Flat is a wide screen a pointer drives; a phone, or a touch-first screen, keeps the swipe card.
-  const flat = !phone && (finePointer ?? pointerIsFine);
-  const [rail, toggleRail] = useAttentionListRail();
-  const railed = flat && rail;
-  const [chosen, setChosen] = useState<string | null>(initialOpen ?? null);
-  const [opened, setOpened] = useState<boolean>(initialOpen !== undefined);
+  const [cursor, setCursor] = useState<string | null>(null);
+  const [deckAt, setDeckAt] = useState<string | null>(initialOpen ?? null);
+  const [deckOpen, setDeckOpen] = useState<boolean>(initialOpen !== undefined);
   const [filter, setFilter] = useState<InboxFilter>('open');
   const [machine, setMachine] = useState<DaemonId | null>(null);
   const [query, setQuery] = useState('');
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
-  const rowRefs = useRef(new Map<string, HTMLButtonElement>()).current;
+  const [withFerretsShown, setWithFerretsShown] = useState(withFerretsOpen);
+  const rowRefs = useRef(new Map<string, HTMLAnchorElement>()).current;
   const focusRow = useRef(false);
 
-  const machines = useMemo(() => inboxMachines(inbox.cards, inbox.resolved), [inbox.cards, inbox.resolved]);
+  const machines = useMemo(
+    () => inboxMachines([...inbox.cards, ...inbox.withFerret], inbox.resolved),
+    [inbox.cards, inbox.withFerret, inbox.resolved],
+  );
   const machineFilter = machines.some(entry => entry.daemonId === machine) ? machine : null;
-  const listFilter: InboxListFilter = { machine: machineFilter, query };
+  const listFilter: InboxListFilter = { machine: machineFilter, query, from };
   const visible = filterInboxCards(inbox.cards, listFilter);
-  const talking = filterInboxCards(inbox.discussing, listFilter);
-  const groups = inboxGroups(visible);
-  const talkingOpen = !collapsed.has(DISCUSSION_GROUP);
-  // The queue is what waits on the owner; a discussion is picked from its own group and never dealt next.
-  const order = groups.flatMap(group => group.cards.map(card => card.key));
-  // A folded rail lists no rows, so the keys walk every item then; otherwise only the rows that are showing.
-  const navigable = [
-    ...groups.flatMap(group => (!railed && collapsed.has(group.key) ? [] : group.cards.map(card => card.key))),
-    ...(railed || talkingOpen ? talking.map(card => card.key) : []),
-  ];
+  const withFerret = filterInboxCards(inbox.withFerret, listFilter);
+  const sections = useMemo(() => inboxSections(visible, withFerret), [visible, withFerret]);
+  const filtered = machineFilter !== null || query !== '' || from !== null;
 
-  // The selection follows the reader's pick while it is listed, and the item after it once it leaves.
+  // The deck deals what waits on the owner, in the order the page lists it.
+  const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
+  const order = deckCards.map(card => card.key);
+  // j/k walk the rows that are showing: the owner's sections, and With ferrets only once it is open.
+  const navigable = [...order, ...(withFerretsShown ? groupCards(sections.withFerrets).map(card => card.key) : [])];
+  const selectedKey = cursor !== null && navigable.includes(cursor) ? cursor : null;
+
+  // The deck follows the reader's place while it is listed, and the card after it once it leaves.
   const lastOrder = useRef<readonly string[]>(order);
-  const queued = nextSelection(lastOrder.current, chosen, order);
-  const selectedKey = chosen !== null && talking.some(card => card.key === chosen) ? chosen : queued;
+  const deckPlace = nextSelection(lastOrder.current, deckAt, order);
   const orderKey = order.join('\u0001');
   useEffect(() => {
     lastOrder.current = orderKey === '' ? [] : orderKey.split('\u0001');
-    if (selectedKey !== chosen) setChosen(selectedKey);
-    if (orderKey === '') setOpened(false);
-  }, [orderKey, selectedKey, chosen]);
-  const selected = [...visible, ...talking].find(card => card.key === selectedKey);
+    if (deckPlace !== deckAt) setDeckAt(deckPlace);
+    if (orderKey === '') setDeckOpen(false);
+  }, [orderKey, deckPlace, deckAt]);
+  const deckSelected = deckCards.find(card => card.key === deckPlace);
 
   const choose = (next: InboxFilter): void => {
     setFilter(next);
@@ -768,27 +664,10 @@ export function AttentionInboxPage({
   const clearFilters = (): void => {
     setQuery('');
     setMachine(null);
-  };
-  const toggleGroup = (key: string): void =>
-    setCollapsed(current => {
-      const next = new Set(current);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return next;
-    });
-  const select = (key: string): void => {
-    setChosen(key);
-    if (phone) setOpened(true);
-  };
-  /** A discussion row: the card beside the list on a wide screen; on a phone, the conversation it is in. */
-  const selectTalking = (key: string): void => {
-    const card = talking.find(each => each.key === key);
-    if (phone && card !== undefined)
-      onNavigate(attentionConversationPath(card.daemonId, card.view.config.id, card.item.id));
-    else select(key);
+    if (from !== null) onClearFrom?.();
   };
 
-  // ↑/↓ and j/k walk the open rows on a wider screen, unless the reader is typing or inside the card.
+  // j/k and ↑/↓ walk the rows on a wider screen, unless the reader is typing.
   const keyState = useRef({ navigable, selectedKey });
   keyState.current = { navigable, selectedKey };
   const keysLive = !phone && filter === 'open';
@@ -803,7 +682,7 @@ export function AttentionInboxPage({
       if (next === null) return;
       event.preventDefault();
       focusRow.current = true;
-      setChosen(next);
+      setCursor(next);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -817,28 +696,34 @@ export function AttentionInboxPage({
   }, [selectedKey, rowRefs]);
 
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
-  const empty = inbox.cards.length === 0 && inbox.discussing.length === 0;
+  const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
+  const nothingForYou = inbox.cards.length === 0;
   const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
-  const host: CardHostProps = {
-    inbox,
-    onNavigate,
-    now,
-    readRecent,
-    onProgress,
-    recentOpen,
-    flat,
+  const host: CardHostProps = { inbox, onNavigate, now, readRecent, onProgress, recentOpen };
+  const atEnd = deckPlace === QUEUE_END;
+  const skip = (): void => setDeckAt(skipSelection(order, deckPlace));
+  const review = (): void => setDeckAt(order[0] ?? null);
+  const startDeck = (): void => {
+    setDeckAt(order[0] ?? null);
+    setDeckOpen(true);
   };
-  const atEnd = selectedKey === QUEUE_END;
-  const skip = (): void => setChosen(skipSelection(order, selectedKey));
-  const review = (): void => setChosen(order[0] ?? null);
-  // A phone deals only what waits on the owner; a discussion opens its conversation instead.
-  const cardOpen =
-    phone && opened && filter === 'open' && ((selected !== undefined && visible.includes(selected)) || atEnd);
+  const cardOpen = phone && deckOpen && filter === 'open' && (deckSelected !== undefined || atEnd);
+
+  const env: RowEnv = {
+    inbox,
+    now,
+    onNavigate,
+    selectedKey,
+    rowRef: key => element => {
+      if (element === null) rowRefs.delete(key);
+      else rowRefs.set(key, element);
+    },
+  };
 
   const header = (
     <header className="fy-attn-inbox__head">
       <h1 className="fy-attn-inbox__title" id={headingId}>
-        Attention
+        Inbox
         <AttentionCountBadge count={count} />
       </h1>
       {updating ? (
@@ -849,6 +734,7 @@ export function AttentionInboxPage({
       ) : null}
       <InboxFilterBar filter={filter} onChange={choose} />
       <div className="fy-attn-inbox__tools">
+        {from === 'warden' && onClearFrom !== undefined ? <SourceChip onClear={onClearFrom} /> : null}
         {machines.length > 1 ? (
           <select
             aria-label="Machine"
@@ -870,80 +756,69 @@ export function AttentionInboxPage({
     </header>
   );
 
-  const openBody = empty ? (
-    inbox.reading ? (
-      <InboxReading />
+  const nothingShown = sections.stopped.length + sections.needsYou.length + sections.withFerrets.length === 0;
+  const openBody =
+    empty && !filtered ? (
+      inbox.reading ? (
+        <InboxReading />
+      ) : (
+        <InboxEmpty />
+      )
+    ) : nothingShown ? (
+      <NothingMatches onClear={clearFilters} />
     ) : (
-      <InboxEmpty />
-    )
-  ) : visible.length === 0 && talking.length === 0 ? (
-    <NothingMatches onClear={clearFilters} />
-  ) : (
-    <div className="fy-attn-inbox__body">
-      <div className="fy-attn-inbox__lists" data-attention-lists={railed ? 'rail' : 'full'}>
-        {flat ? <ListRailToggle onToggle={toggleRail} rail={rail} /> : null}
-        {railed ? (
-          <GroupRail
-            groups={groups}
-            onSelect={select}
-            onSelectTalking={selectTalking}
-            selectedKey={selectedKey}
-            talking={talking}
+      <div className="fy-inbox-body" data-attention-lists="">
+        {phone && order.length > 0 ? (
+          <button className="kt-btn fy-inbox-quick" data-attention-quick="" onClick={startDeck} type="button">
+            <Zap aria-hidden="true" size={15} />
+            Answer quickly
+            <span className="fy-inbox-quick__count">{order.length}</span>
+          </button>
+        ) : null}
+        {nothingForYou && !filtered ? (
+          <p className="fy-inbox-calm" data-attention-empty="">
+            Nothing needs you right now.
+          </p>
+        ) : null}
+        {sections.stopped.length === 0 ? null : (
+          <Section env={env} groups={sections.stopped} id="stopped" title="Stopped on you" />
+        )}
+        {sections.needsYou.length === 0 ? null : (
+          <Section env={env} groups={sections.needsYou} id="needs-you" title="Needs you" />
+        )}
+        {sections.withFerrets.length === 0 ? null : (
+          <Section
+            env={env}
+            groups={sections.withFerrets}
+            id="with-ferrets"
+            onToggle={() => setWithFerretsShown(shown => !shown)}
+            open={withFerretsShown}
+            title="With ferrets"
           />
-        ) : (
-          <>
-            {groups.length === 0 ? null : (
-              <GroupedList
-                collapsed={collapsed}
-                groups={groups}
-                now={now}
-                onSelect={select}
-                onToggle={toggleGroup}
-                rowRefs={rowRefs}
-                selectedKey={phone ? null : selectedKey}
-                showMachine={machines.length > 1}
-              />
-            )}
-            {talking.length === 0 ? null : (
-              <DiscussionGroup
-                cards={talking}
-                now={now}
-                onSelect={selectTalking}
-                onToggle={() => toggleGroup(DISCUSSION_GROUP)}
-                open={talkingOpen}
-                rowRefs={rowRefs}
-                selectedKey={phone ? null : selectedKey}
-              />
-            )}
-          </>
+        )}
+        {phone ? null : (
+          <p className="fy-attn-inbox__hint" data-attention-keys="">
+            j / k to move · Enter to open
+          </p>
         )}
       </div>
-      {phone ? null : atEnd ? (
-        <section aria-label="Skipped items" className="fy-attn-inbox__pane" data-attention-pane="end">
-          <QueueEnd onReview={review} remaining={visible.length} />
-        </section>
-      ) : selected === undefined ? null : (
-        <section
-          aria-label={`${inboxRowTitle(selected.item)} — selected item`}
-          className="fy-attn-inbox__pane"
-          data-attention-pane={selected.key}
-        >
-          {renderInboxCard(host, selected, action => inbox.deferred.schedule(selected, action), false, skip)}
-        </section>
-      )}
-    </div>
-  );
+    );
 
   if (cardOpen) {
-    // The phone's full-screen card: the chosen item on top, the ones AFTER it next in line — never the
-    // ones before it, so the queue only moves forward; past the last one, the skipped ones are offered.
-    const deck = selected === undefined ? [] : visible.slice(Math.max(0, visible.indexOf(selected)));
+    // The phone's quick answers: the card the reader started at on top, the ones AFTER it next in line —
+    // never the ones before it, so the queue only moves forward; past the last, the skipped ones are offered.
+    const deck = deckSelected === undefined ? [] : deckCards.slice(Math.max(0, deckCards.indexOf(deckSelected)));
     return (
       <main aria-labelledby={headingId} className="fy-attn-inbox" data-attention-inbox="card">
         <header className="fy-attn-inbox__cardbar">
-          <button className="fy-attn-inbox__back" data-attention-back="" onClick={() => setOpened(false)} type="button">
+          <button
+            className="fy-attn-inbox__back"
+            data-attention-back=""
+            onClick={() => setDeckOpen(false)}
+            type="button"
+          >
             <ArrowLeft aria-hidden="true" size={16} />
-            <span id={headingId}>Attention</span>
+            <span id={headingId}>Inbox</span>
             <AttentionCountBadge count={count} />
           </button>
           {updating ? (
@@ -957,7 +832,7 @@ export function AttentionInboxPage({
         {atEnd ? (
           // The end sits where the card did, at its height: the deck's peek gap and hint line are kept.
           <div className="fy-attn-inbox__deck fy-attn-inbox__deck--end">
-            <QueueEnd onReview={review} remaining={visible.length} />
+            <QueueEnd onReview={review} remaining={deckCards.length} />
             <p aria-hidden="true" className="fy-attn-inbox__hint" />
           </div>
         ) : (
@@ -967,7 +842,7 @@ export function AttentionInboxPage({
               onAct={(card, action) => inbox.deferred.schedule(card, action)}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
               renderCard={(card, act) =>
-                renderInboxCard(host, card, act, true, card.key === selectedKey ? skip : undefined)
+                renderInboxCard(host, card, act, true, card.key === deckPlace ? skip : undefined)
               }
             />
             <p className="fy-attn-inbox__hint">
@@ -982,12 +857,7 @@ export function AttentionInboxPage({
   }
 
   return (
-    <main
-      aria-labelledby={headingId}
-      className="fy-attn-inbox"
-      data-attention-flat={flat || undefined}
-      data-attention-inbox={phone ? 'list' : 'panes'}
-    >
+    <main aria-labelledby={headingId} className="fy-attn-inbox" data-attention-inbox={phone ? 'list' : 'panes'}>
       {header}
       {banner}
       <OrphanedFailures inbox={inbox} />

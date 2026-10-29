@@ -154,7 +154,7 @@ export const resolvedActionContribution = (
           kind: 'form',
           id: ATTENTION_RESOLVED_ACTION_ID,
           label: resolvedWords(records.length),
-          title: 'Resolved Attention',
+          title: 'Resolved in Inbox',
           icon: CheckCheck,
           render: (): ReactNode => (
             <AttentionResolvedList highlighted={highlighted} panelId={panelId} records={records} />

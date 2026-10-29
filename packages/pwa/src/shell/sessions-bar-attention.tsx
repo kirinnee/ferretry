@@ -36,12 +36,12 @@ export function SessionsBarAttention({
     return (
       <RouteLink
         aria-current={current ? 'page' : undefined}
-        aria-label={total > 0 ? `Attention — ${attentionWords(total)}` : 'Attention — nothing waiting'}
+        aria-label={total > 0 ? `Inbox — ${attentionWords(total)}` : 'Inbox — nothing waiting'}
         className="fy-sbar__icon fy-sbar__attention-icon"
         data-sbar-attention=""
         data-sbar-attention-count={total}
         onNavigate={onNavigate}
-        title={total > 0 ? `Attention — ${attentionWords(total)}` : 'Attention'}
+        title={total > 0 ? `Inbox — ${attentionWords(total)}` : 'Inbox'}
         to={href}
       >
         <Inbox aria-hidden="true" size={16} />
@@ -59,7 +59,7 @@ export function SessionsBarAttention({
       to={href}
     >
       <Inbox aria-hidden="true" size={15} />
-      <span className="fy-sbar__attention-name">Attention</span>
+      <span className="fy-sbar__attention-name">Inbox</span>
       {total > 0 ? <UnreadBadge count={total} /> : <span className="fy-sbar__attention-calm">Nothing waiting</span>}
     </RouteLink>
   );

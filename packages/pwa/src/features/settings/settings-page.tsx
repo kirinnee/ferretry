@@ -495,7 +495,7 @@ export function SettingsPage({
           checked={device.groupNeedsYou}
           onChange={groupNeedsYou => controls.setDeviceControls({ groupNeedsYou })}
           label="Group Needs you at the top"
-          description="Off keeps those sessions in their project group, with just the Attention badge."
+          description="Off keeps those sessions in their project group, with just the Inbox badge."
         />
       ),
       'message-marks': <MessageMarksLegend />,

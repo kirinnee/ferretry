@@ -4,10 +4,13 @@ import type { InboxResolved } from '../../src/lib/attention-inbox.ts';
 import {
   filterInboxCards,
   filterInboxResolved,
-  inboxGroups,
+  groupCards,
   inboxMachines,
   inboxRowAsk,
   inboxRowTitle,
+  inboxSections,
+  inboxSourceFromSearch,
+  isFromWarden,
   NO_FILTER,
   nextSelection,
   QUEUE_END,
@@ -35,24 +38,91 @@ const a3 = inboxCard(
 );
 const a9 = inboxCard(attentionItem('A9', { title: 'Keep CI?', subject: 'Keep the CI workflow?' } as never), MIGRATE);
 
-describe('inboxGroups', () => {
-  it('groups by conversation in the order of each group’s first card, keeping card order inside', () => {
-    const groups = inboxGroups([a10, a3, a9]);
-    expect(groups.map(group => [group.title, group.ferret, group.cards.map(card => card.item.id)])).toEqual([
-      ['diene-migrate', 'Johnnie', ['A10', 'A9']],
-      ['Relay advertisement', 'Hadi', ['A3']],
+const stoppedView = (id: string) =>
+  sessionView(id, {
+    config: { teammate: 'moe', name: undefined },
+    state: { attention: { open: 1, first: 'A1', ask: 'Go?', latestAt: '2026-08-01T11:00:00.000Z', stopped: true } },
+  } as never);
+
+describe('inboxSections', () => {
+  it('groups by ferret in the order of each group’s most urgent item, keeping the agenda order inside', () => {
+    const { needsYou } = inboxSections([a10, a3, a9], []);
+    expect(needsYou.map(group => [group.ferret, group.task, group.items.map(card => card.item.id)])).toEqual([
+      ['Johnnie', 'diene-migrate', ['A10', 'A9']],
+      ['Hadi', 'Relay advertisement', ['A3']],
     ]);
-    expect(groups[1]?.machineName).toBe('laptop');
+    expect(needsYou[1]?.machineName).toBe('laptop');
   });
 
   it('keeps two machines’ same-id conversations apart', () => {
     const elsewhere = inboxCard(attentionItem('A1'), MIGRATE, 'laptop', LAPTOP);
-    expect(inboxGroups([a10, elsewhere])).toHaveLength(2);
+    expect(inboxSections([a10, elsewhere], []).needsYou).toHaveLength(2);
   });
 
   it('names a conversation with no label by its ferret alone', () => {
     const bare = inboxCard(attentionItem('A1'), sessionView('x', { config: { teammate: 'moe', name: undefined } }));
-    expect(inboxGroups([bare])[0]).toMatchObject({ title: 'Moe', ferret: null });
+    expect(inboxSections([bare], []).needsYou[0]).toMatchObject({ ferret: 'Moe', task: null });
+  });
+
+  it('puts a stopped ferret first, a ferret on its turn last, and a notice beside its items', () => {
+    const stopped = inboxCard(attentionItem('A1'), stoppedView('halt'));
+    const notice = inboxCard(attentionItem('N1', { notice: true } as never), MIGRATE);
+    const waitingOnFerret = inboxCard(attentionItem('F1', { waitingOn: 'ferret', waitingFor: 'info' } as never), RELAY);
+    const sections = inboxSections([a10, stopped, notice], [waitingOnFerret]);
+    expect(sections.stopped.map(group => group.ferret)).toEqual(['Moe']);
+    expect(sections.needsYou.map(group => group.ferret)).toEqual(['Johnnie']);
+    expect(sections.needsYou[0]?.items.map(card => card.item.id)).toEqual(['A10']);
+    expect(sections.needsYou[0]?.notices.map(card => card.item.id)).toEqual(['N1']);
+    expect(sections.withFerrets.map(group => [group.ferret, group.stopped])).toEqual([['Hadi', false]]);
+    expect(groupCards(sections.needsYou).map(card => card.item.id)).toEqual(['A10', 'N1']);
+  });
+});
+
+describe('the Warden filter', () => {
+  const warden = inboxCard(
+    attentionItem('W1', { raisedBy: 'daemon', sourceRef: 'warden:ask:fleet:spend:laptop' } as never),
+    MIGRATE,
+  );
+  const wardenKind = inboxCard(
+    attentionItem('W2', { raisedBy: 'daemon', sourceRef: 'warden:ask:spend' } as never),
+    RELAY,
+    'laptop',
+    LAPTOP,
+  );
+  const daemonOther = inboxCard(attentionItem('D1', { raisedBy: 'daemon', sourceRef: 'schedule:7' } as never), MIGRATE);
+  const agentNamingIt = inboxCard(attentionItem('G1', { sourceRef: 'warden:ask:spend' } as never), MIGRATE);
+
+  it('reads ?from=warden, and nothing else', () => {
+    expect(inboxSourceFromSearch('?from=warden')).toBe('warden');
+    expect(inboxSourceFromSearch('?from=other')).toBeNull();
+    expect(inboxSourceFromSearch('')).toBeNull();
+  });
+
+  it('wants the daemon’s hand AND a warden: source', () => {
+    expect(isFromWarden(warden.item)).toBe(true);
+    expect(isFromWarden(wardenKind.item)).toBe(true);
+    expect(isFromWarden(daemonOther.item)).toBe(false);
+    expect(isFromWarden(agentNamingIt.item)).toBe(false);
+  });
+
+  it('keeps only Warden items across every machine, and lifts with the filter', () => {
+    const all = [warden, wardenKind, daemonOther, agentNamingIt, a10];
+    const kept = filterInboxCards(all, { machine: null, query: '', from: 'warden' });
+    expect(kept.map(card => card.item.id)).toEqual(['W1', 'W2']);
+    expect(filterInboxCards(all, NO_FILTER)).toHaveLength(5);
+  });
+
+  it('filters resolved rows the same way', () => {
+    const row = (card: typeof warden): InboxResolved =>
+      ({
+        key: card.key,
+        daemonId: card.daemonId,
+        machineName: card.machineName,
+        view: card.view,
+        record: { ...card.item, resolvedAt: '2026-08-01T00:00:00.000Z' },
+      }) as never;
+    const rows = [row(warden), row(daemonOther)];
+    expect(filterInboxResolved(rows, { machine: null, query: '', from: 'warden' })).toHaveLength(1);
   });
 });
 

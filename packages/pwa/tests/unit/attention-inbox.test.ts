@@ -17,8 +17,6 @@ import {
   DISMISS_ACTION,
   DONE_ACTION,
   directionOfAction,
-  discussingCards,
-  discussingSessions,
   historyLine,
   type InboxCard,
   inboxCardKey,
@@ -41,7 +39,8 @@ import {
   unreadSessions,
   unreadTotal,
   updatedSinceAsked,
-  waitingSentence,
+  withFerretCards,
+  withFerretSessions,
 } from '../../src/lib/attention-inbox.ts';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -295,14 +294,9 @@ describe('Discuss', () => {
     expect(actionSentence({ kind: 'discuss', label: 'Discuss' }, 'A3')).toBe('Asked to discuss !A3');
   });
 
-  test('reads "In discussion" with or without the ferret, and "Waiting on" otherwise', () => {
-    const discussing = { waitingOn: 'ferret', waitingFor: 'discussion' } as const;
-    expect(isInDiscussion(discussing)).toBe(true);
+  test("reads a discussion as the ferret's turn on a discussion, and nothing else", () => {
+    expect(isInDiscussion({ waitingOn: 'ferret', waitingFor: 'discussion' })).toBe(true);
     expect(isInDiscussion({ waitingOn: 'ferret', waitingFor: 'info' })).toBe(false);
-    expect(waitingSentence(discussing)).toBe('In discussion');
-    expect(waitingSentence(discussing, 'Piper')).toBe('In discussion with Piper');
-    expect(waitingSentence({ waitingOn: 'ferret', waitingFor: 'info' }, 'Piper')).toBe('Waiting on Piper');
-    expect(waitingSentence({ waitingOn: 'ferret' })).toBe('Waiting on the ferret');
   });
 
   test('puts "You asked to discuss" in the history line', () => {
@@ -528,7 +522,7 @@ describe('items in discussion', () => {
       ['s', 'A1'],
     ]);
     expect(
-      discussingCards(discussingSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
+      withFerretCards(withFerretSessions(sources), boardFor).map(card => [card.view.config.id, card.item.id]),
     ).toEqual([
       ['s', 'A2'],
       ['only', 'A1'],
@@ -555,7 +549,7 @@ describe('items in discussion', () => {
   });
 
   test('should list the sessions that hold a discussion, whether or not they also need the owner', () => {
-    expect(discussingSessions(sources).map(entry => entry.view.config.id)).toEqual(['s', 'only']);
+    expect(withFerretSessions(sources).map(entry => entry.view.config.id)).toEqual(['s', 'only']);
   });
 
   test('should move the summary key when a discussion starts or ends', () => {

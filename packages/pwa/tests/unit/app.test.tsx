@@ -2340,40 +2340,20 @@ describe('AppShell', () => {
     }
   });
 
-  it('mounts the selected item as its card beside the inbox, with no chat around it', async () => {
-    const posts: string[] = [];
+  it('lists the item under its ferret in the inbox as a link into that ferret’s chat at the item', async () => {
     const todo = { ...externalAttentionItem, ask: { kind: 'task' }, steps: ['Plug the key in', 'Approve it'] };
-    const { view } = await renderShell(`/d/${ALPHA}/attention`, [alpha.daemonId], {
+    const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
       sessions: ['shared'],
       listedAttention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' },
       sessionState: { attention: { open: 1, first: 'A3', ask: 'task', latestAt: '2026-07-31T11:30:00.000Z' } },
       attention: sessionId => attentionSnapshot(sessionId, [todo as typeof externalAttentionItem]),
-      attentionPosts: posts,
-      messages: () => [
-        { role: 'assistant', text: 'Paired the laptop.' },
-        { role: 'user', text: 'ok' },
-        { role: 'assistant', text: 'Raised !A3 for the key.' },
-      ],
     });
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
-      const pane = must(view.container.querySelector<HTMLElement>('[data-attention-pane]'), 'the card pane');
-      expect(pane.querySelector('[data-attention-card]')?.getAttribute('data-attention-card')).toBe('A3');
+      const row = must(view.container.querySelector<HTMLAnchorElement>('[data-attention-row]'), 'the item row');
+      expect(row.getAttribute('href')).toBe(`/d/${ALPHA}/session/shared?attention=A3`);
+      expect(view.container.querySelector('[data-attention-pane]')).toBeNull();
       expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
-      // The fold reads the ferret's own words through the session messages route.
-      await interact(() =>
-        must(pane.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'the fold').click(),
-      );
-      for (let turn = 0; turn < 4; turn += 1) await settle();
-      expect([...pane.querySelectorAll('[data-attention-recent-message]')].map(message => message.textContent)).toEqual(
-        ['Paired the laptop.', 'Raised !A3 for the key.'],
-      );
-      // A step ticks on the machine the card came from.
-      await interact(() =>
-        must(pane.querySelector<HTMLInputElement>('input[type="checkbox"]'), 'the first step').click(),
-      );
-      for (let turn = 0; turn < 4; turn += 1) await settle();
-      expect(posts.some(post => post.startsWith('shared:') && post.includes('"progress"'))).toBe(true);
     } finally {
       await view.unmount();
     }
@@ -2412,7 +2392,7 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/warden`, 'Sessions, Warden'],
       [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
       [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
-      [`/d/${ALPHA}/attention`, 'Sessions, Attention'],
+      [`/d/${ALPHA}/inbox`, 'Sessions, Inbox'],
       [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
       [`/d/${ALPHA}/session/one`, 'Sessions, one'],
     ] as const) {

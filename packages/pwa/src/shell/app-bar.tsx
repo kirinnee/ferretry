@@ -5,11 +5,11 @@
  * LEVEL ONE OF THE APP'S NAVIGATION HAS ITS OWN LOOK (the approved usability proposal): plain text
  * links with the current page underlined, never the outlined capital-letter buttons it used to be —
  * those looked exactly like the actions on every page under them. Find is a search box, because it
- * searches. On a phone the same places are a bottom bar — Sessions, Attention, Projects, Find, Settings
+ * searches. On a phone the same places are a bottom bar — Sessions, Inbox, Projects, Find, Settings
  * and More — above the home indicator, so the top of a phone screen is the page's own.
  *
- * ATTENTION IS A PLACE, NOT A SETTING. It carries a count badge wherever it is drawn (the phone bar, the
- * wide row) — the number of open items across every paired machine, the same number every Attention
+ * THE INBOX IS A PLACE, NOT A SETTING. It carries a count badge wherever it is drawn (the phone bar, the
+ * wide row) — the number of open items across every paired machine, the same number every Inbox
  * badge shows — because the point of it is that the reader sees something is waiting before they look.
  *
  * Three deliberate departures from kteam, all forced by this app's shape:
@@ -111,7 +111,7 @@ export const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning p
 export const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions and graph daily usage' } as const;
 export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
 export const ATTENTION_ENTRY = {
-  label: 'Attention',
+  label: 'Inbox',
   title: 'Everything your ferrets are waiting on you for, across every machine',
 } as const;
 
@@ -258,7 +258,7 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
 }
 
 /**
- * The Attention count on a PLACE (a tab, a nav link, a heading): THE unread pill the rows draw
+ * The Inbox count on a PLACE (a tab, a nav link, a heading): THE unread pill the rows draw
  * (`UnreadBadge`), and nothing at zero — a calm place is the good news.
  */
 export function AttentionCountBadge({ count, className }: { readonly count: number; readonly className?: string }) {
@@ -399,7 +399,7 @@ export interface AppBarProps {
    * the bar keeps a Find button of its own, so the app's search is never more than one tap away.
    */
   readonly tabBarShown?: boolean;
-  /** Open Attention items across every paired machine: the Attention place's badge. */
+  /** Open Inbox items across every paired machine: the Inbox place's badge. */
   readonly attentionCount?: number;
 }
 
@@ -547,7 +547,7 @@ export interface AppTabBarProps {
   readonly onNavigate?: (to: string) => void;
   /** Find opens the same palette as the desktop's search box. */
   readonly onOpenPalette: () => void;
-  /** Open Attention items across every paired machine: the Attention tab's badge. */
+  /** Open Attention items across every paired machine: the Inbox tab's badge. */
   readonly attentionCount?: number;
 }
 

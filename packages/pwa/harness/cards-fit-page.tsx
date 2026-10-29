@@ -9,8 +9,8 @@ import type { AttentionItem } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import { AttentionNeedsYou } from '../src/features/attention/attention-inbox-page.tsx';
 import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
-import { DeferredAttentionActions, inboxCardKey } from '../src/lib/attention-inbox.ts';
 import type { InboxCard } from '../src/lib/attention-inbox.ts';
+import { DeferredAttentionActions, inboxCardKey } from '../src/lib/attention-inbox.ts';
 import { daemonId } from '../src/lib/daemon-connection.ts';
 import { sessionView } from '../tests/support/sessions.ts';
 
@@ -65,7 +65,7 @@ const inbox: AttentionInbox = {
   unread: [],
   total: 1,
   cards: [card],
-  discussing: [],
+  withFerret: [],
   reading: false,
   resolved: [],
   resolvedReading: false,

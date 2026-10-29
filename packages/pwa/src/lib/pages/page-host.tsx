@@ -30,7 +30,7 @@ export interface PageHostSlots {
   readonly Warden: ComponentType<DaemonPageProps>;
   readonly Analytics: ComponentType<DaemonPageProps>;
   readonly Learning: ComponentType<DaemonPageProps>;
-  /** The Attention inbox: every open item across every paired machine. */
+  /** The Inbox: every open item across every paired machine. */
   readonly Attention?: ComponentType<DaemonPageProps>;
   readonly ImportedHistory?: ComponentType<DaemonPageProps>;
   /** One machine's full-screen first run. */

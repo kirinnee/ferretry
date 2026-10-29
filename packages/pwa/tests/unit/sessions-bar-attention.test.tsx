@@ -112,9 +112,9 @@ describe('unread rows in the sessions bar', () => {
     const many = must(view.container.querySelector('[data-sbar-session="many"]'), 'the busy row');
     expect(many.hasAttribute('data-sbar-unread')).toBe(true);
     expect(many.querySelector('[data-unread-badge]')?.textContent).toContain('99+');
-    expect(many.querySelector('.sr-only')?.textContent).toBe('150 open Attention items');
+    expect(many.querySelector('.sr-only')?.textContent).toBe('150 open Inbox items');
     const one = must(view.container.querySelector('[data-sbar-session="one"]'), 'the single-item row');
-    expect(one.querySelector('.sr-only')?.textContent).toBe('1 open Attention item');
+    expect(one.querySelector('.sr-only')?.textContent).toBe('1 open Inbox item');
     const calmRow = must(view.container.querySelector('[data-sbar-session="calm-1"]'), 'the calm row');
     expect(calmRow.hasAttribute('data-sbar-unread')).toBe(false);
     expect(calmRow.querySelector('[data-unread-badge]')).toBeNull();
@@ -187,8 +187,8 @@ describe('the pure model', () => {
     expect(hasAttention(calm('calm'))).toBe(false);
     expect(sessionRowPath(DAEMON, loud)).toBe('/d/alpha/session/loud?attention=A4');
     expect(sessionRowPath(DAEMON, calm('calm'))).toBe('/d/alpha/session/calm');
-    expect(attentionWords(1)).toBe('1 open Attention item');
-    expect(attentionWords(3)).toBe('3 open Attention items');
+    expect(attentionWords(1)).toBe('1 open Inbox item');
+    expect(attentionWords(3)).toBe('3 open Inbox items');
   });
 
   test('rowPreview prefers the Attention ask, collapses whitespace and falls back to the parked question', () => {
@@ -240,10 +240,10 @@ describe('the collapsed rail', () => {
     view = await mount(element);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
     expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'New-1 — 1 open Attention item',
-      'Tie-A — 1 open Attention item',
-      'Tie-B — 1 open Attention item',
-      'Old-1 — 2 open Attention items',
+      'New-1 — 1 open Inbox item',
+      'Tie-A — 1 open Inbox item',
+      'Tie-B — 1 open Inbox item',
+      'Old-1 — 2 open Inbox items',
       'Calm-1',
     ]);
     expect(dots[3]?.querySelector('[data-unread-badge]')?.textContent).toBe('2');
@@ -266,9 +266,9 @@ describe('the Attention entry', () => {
     const { element, calls } = bar({ attentionHref: '/d/alpha/attention', attentionTotal: 7 });
     view = await mount(element);
     const entry = must(view.container.querySelector('a[data-sbar-attention]'), 'the Attention entry');
-    expect(entry.textContent).toContain('Attention');
+    expect(entry.textContent).toContain('Inbox');
     expect(entry.querySelector('[data-unread-badge]')?.textContent).toContain('7');
-    expect(entry.querySelector('.sr-only')?.textContent).toBe('7 open Attention items');
+    expect(entry.querySelector('.sr-only')?.textContent).toBe('7 open Inbox items');
     expect(entry.hasAttribute('aria-current')).toBe(false);
     await click(entry, 'the entry');
     expect(calls.at(-1)).toBe('navigate:/d/alpha/attention');
@@ -310,7 +310,7 @@ describe('the Attention entry', () => {
     });
     view = await mount(element);
     const entry = must(view.container.querySelector('a[data-sbar-attention]'), 'the rail entry');
-    expect(entry.getAttribute('aria-label')).toBe('Attention — 5 open Attention items');
+    expect(entry.getAttribute('aria-label')).toBe('Inbox — 5 open Inbox items');
     expect(entry.querySelector('[data-unread-badge]')?.textContent).toBe('5');
     await click(entry, 'the rail entry');
     expect(calls.at(-1)).toBe('navigate:/d/alpha/attention');

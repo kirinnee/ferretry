@@ -4,7 +4,7 @@
  * an undo brings it back, and nothing is "sent" until the test turns the clock past the window.
  */
 
-import type { AttentionAsk, AttentionItem, SessionView } from '@ferretry/protocol';
+import { type AttentionAsk, type AttentionItem, attentionTurn, type SessionView } from '@ferretry/protocol';
 import { type ReactElement, useSyncExternalStore } from 'react';
 import type { AttentionInbox } from '../../src/hooks/use-attention-inbox.ts';
 import {
@@ -13,7 +13,6 @@ import {
   type InboxAction,
   type InboxCard,
   inboxCardKey,
-  isInDiscussion,
 } from '../../src/lib/attention-inbox.ts';
 import { type DaemonId, daemonId } from '../../src/lib/daemon-connection.ts';
 import { interact, must } from './dom.ts';
@@ -139,10 +138,10 @@ export function InboxHarness({
   const shown = cards.filter(card => !hidden.has(card.key));
   const inbox: AttentionInbox = {
     unread: [],
-    total: cards.filter(card => !isInDiscussion(card.item)).length,
-    // Split as the shell splits them: an item in discussion waits on its ferret, not in the list.
-    discussing: shown.filter(card => isInDiscussion(card.item)),
-    cards: shown.filter(card => !isInDiscussion(card.item)),
+    total: cards.filter(card => attentionTurn(card.item) === 'owner').length,
+    // Split as the shell splits them: by whose turn the item is on.
+    withFerret: shown.filter(card => attentionTurn(card.item) === 'ferret'),
+    cards: shown.filter(card => attentionTurn(card.item) === 'owner'),
     reading,
     resolved,
     resolvedReading,

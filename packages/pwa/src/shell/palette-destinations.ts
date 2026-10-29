@@ -147,7 +147,7 @@ export const destinationExists = (href: string): boolean => {
   const pathname = (href.split('#')[0] ?? '').split('?')[0] ?? '';
   if (!pathname.startsWith('/')) return false;
   const route = parseRoute(pathname);
-  if (route.kind === 'legacy-tasks-redirect') return false;
+  if (route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect') return false;
   return routePath(route) === pathname;
 };
 

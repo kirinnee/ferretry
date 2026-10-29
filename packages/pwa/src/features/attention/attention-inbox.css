@@ -1,4 +1,4 @@
-/* THE ATTENTION INBOX: the page, the phone's swipe deck, the Sessions page's Needs-you deck, the undo
+/* THE INBOX: the page, the phone's swipe deck, the Sessions page's Needs-you deck, the undo
    toast, and where the count badge sits on each place. The card itself is attention-card.css; the
    badge is the rows' own `.fy-unread-badge` (sessions-bar.css). */
 
@@ -17,7 +17,7 @@
   outline: var(--stroke-heavy) solid var(--surface);
 }
 /* SIX PLACES SHARE 390px (65px each), so a label is capped at 12px however large the family's phone
-   ramp sets --text-xs: "Attention" in bold is the longest, and it must fit whole, never wrap or clip. */
+   ramp sets --text-xs: "Inbox" in bold is the longest, and it must fit whole, never wrap or clip. */
 .kt-tabbar__label {
   max-width: 100%;
   overflow: hidden;
@@ -41,11 +41,11 @@
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: var(--gap-sm);
+  gap: var(--gap-md);
   margin: 0 auto;
   width: 100%;
-  max-width: 88rem;
-  padding: 10px 12px calc(96px + var(--safe-bottom, 0px));
+  max-width: 52rem;
+  padding: var(--gap-md) 16px calc(96px + var(--safe-bottom, 0px));
 }
 /* ONE COMPACT ROW: title and count, the quiet "Updating" mark, then the tools pushed to the end. A phone
    wraps the tools onto a second line rather than squeezing them. */
@@ -170,14 +170,17 @@
   .fy-attn-inbox__find {
     width: auto;
     flex: 1 1 8rem;
-    min-height: 36px;
+    min-height: 44px;
   }
   .fy-attn-inbox__find-input,
   .fy-attn-inbox__machine {
     font-size: var(--text-input, 16px);
   }
+  .fy-attn-inbox__filter-button {
+    min-height: 44px;
+  }
   .fy-attn-inbox__machine {
-    min-height: 36px;
+    min-height: 44px;
     max-width: 9rem;
   }
 }
@@ -422,59 +425,268 @@
   }
 }
 
-/* ---- The list and the card pane ------------------------------------------------------------------- */
-.fy-attn-inbox__body {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--gap-md);
-}
-/* What waits on the owner, then what is in discussion: one column that scrolls as one. */
-.fy-attn-inbox__lists {
-  display: flex;
-  min-width: 0;
-  flex-direction: column;
-  gap: var(--gap-md);
-}
-.fy-attn-inbox__list,
-.fy-attn-group__rows {
-  display: flex;
-  margin: 0;
-  min-width: 0;
-  flex-direction: column;
-  padding: 0;
-  list-style: none;
-}
-.fy-attn-inbox__list {
-  gap: var(--gap-sm);
-}
-.fy-attn-group__rows {
-  gap: 2px;
-}
-/* A conversation, said once: "diene-migrate · Johnnie", its count, and a chevron that folds it. */
-.fy-attn-group__head {
+/* ---- The list: sections of ferrets, each ferret's items and notices ------------------------------- */
+/* One calm column, no boxes around boxes: a section is a heading and its ferrets; a ferret is a head
+   and its lines. Spacing does the grouping, never a stripe or a tint. */
+.fy-inbox-body {
   display: flex;
   width: 100%;
   min-width: 0;
-  min-height: 28px;
+  max-width: 48rem;
+  flex-direction: column;
+  gap: var(--gap-lg, 24px);
+  margin-inline: auto;
+}
+.fy-inbox-calm {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-base, var(--text-sm));
+}
+.fy-inbox-quick {
+  min-height: 44px;
+  justify-content: center;
+  gap: var(--gap-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-inbox-quick__count {
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-strong);
+}
+.fy-inbox-section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+}
+.fy-inbox-section__title {
+  display: flex;
+  align-items: baseline;
+  margin: 0;
+  color: var(--fg);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+  font-weight: var(--weight-strong);
+  line-height: 1.3;
+}
+.fy-inbox-section__toggle {
+  display: inline-flex;
+  min-height: 44px;
   align-items: center;
-  gap: 6px;
+  gap: var(--gap-sm);
   border: 0;
   border-radius: var(--radius-control);
   background: transparent;
-  padding: 2px 6px 2px 2px;
-  color: var(--muted);
+  padding: 0 var(--gap-sm) 0 0;
+  color: inherit;
   font: inherit;
-  font-size: var(--text-xs);
-  text-align: left;
   cursor: pointer;
 }
-.fy-attn-group__head:hover {
+.fy-inbox-section__toggle:hover {
+  color: var(--accent);
+}
+.fy-inbox-section__toggle:active {
+  opacity: 0.7;
+}
+.fy-inbox-section__toggle:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+.fy-inbox-section__count {
+  margin-left: var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-strong);
+}
+.fy-inbox-section__groups,
+.fy-inbox-group__rows {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.fy-inbox-section__groups {
+  gap: var(--gap-lg, 24px);
+}
+.fy-inbox-group {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-inbox-group__rows {
+  gap: var(--gap-xs);
+}
+/* The ferret, then what it is working on and where: the name carries the weight. */
+.fy-inbox-group__head {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  align-items: baseline;
+  flex-wrap: wrap;
+  column-gap: 0;
+  border-radius: var(--radius-control);
+  padding: var(--gap-sm) 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-decoration: none;
+}
+.fy-inbox-group__head:hover .fy-inbox-group__ferret {
+  color: var(--accent);
+}
+.fy-inbox-group__head:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+.fy-inbox-group__ferret {
+  color: var(--fg);
+  font-size: var(--text-base, var(--text-sm));
+  font-weight: var(--weight-strong);
+}
+.fy-inbox-group__task,
+.fy-inbox-group__machine {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* A line: the item's title and age, its ask, its kind and reference. A light border and a roomy pad make
+   the target; selection and press fill it. */
+.fy-inbox-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  border: var(--stroke-control, 1px) solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  padding: var(--gap-md) var(--gap-md);
+  color: var(--fg);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+}
+.fy-inbox-row:hover {
+  background: var(--surface-2, var(--accent-soft));
+}
+.fy-inbox-row:active {
+  background: var(--accent-soft);
+}
+.fy-inbox-row:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
+.fy-inbox-row[data-selected] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fy-inbox-row[data-dimmed] {
+  opacity: 0.7;
+}
+.fy-inbox-row__top {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--gap-md);
+}
+.fy-inbox-row__title {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  font-size: var(--text-base, var(--text-sm));
+  font-weight: var(--weight-strong);
+  line-height: 1.35;
+}
+.fy-inbox-row__age {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.fy-inbox-row__ask {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.fy-inbox-row__meta {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs) var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.3;
+}
+/* A notice: one quiet line with its time, and Clear beside it. */
+.fy-inbox-notice {
+  display: flex;
+  min-width: 0;
+  align-items: stretch;
+  gap: var(--gap-xs);
+}
+.fy-inbox-notice__link {
+  display: flex;
+  min-width: 0;
+  min-height: 44px;
+  flex: 1;
+  align-items: center;
+  gap: var(--gap-md);
+  border-radius: var(--radius-control);
+  padding: 0 var(--gap-md);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  text-decoration: none;
+  cursor: pointer;
+}
+.fy-inbox-notice__link:hover {
+  background: var(--surface-2, var(--accent-soft));
   color: var(--fg);
 }
-.fy-attn-group__head:focus-visible {
+.fy-inbox-notice__link:active {
+  background: var(--accent-soft);
+}
+.fy-inbox-notice__link:focus-visible,
+.fy-inbox-notice__clear:focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 1px;
+  outline-offset: 2px;
+}
+.fy-inbox-notice__link[data-selected] {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-inbox-notice__summary {
+  min-width: 0;
+  flex: 1;
+  overflow-wrap: anywhere;
+  line-height: 1.4;
+}
+.fy-inbox-notice__clear {
+  min-width: 44px;
+  min-height: 44px;
+  flex-shrink: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  padding: 0 var(--gap-md);
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.fy-inbox-notice__clear:hover {
+  background: var(--accent-soft);
+}
+.fy-inbox-notice__clear:active {
+  opacity: 0.7;
 }
 .fy-attn-group__chevron {
   flex-shrink: 0;
@@ -483,183 +695,35 @@
 .fy-attn-group__chevron[data-open] {
   transform: rotate(90deg);
 }
-/* The In discussion group's mark, beside its chevron. */
-.fy-attn-group__icon {
-  flex-shrink: 0;
-}
-.fy-attn-group__name {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-attn-group__title {
-  color: var(--fg);
-  font-weight: var(--weight-strong);
-  letter-spacing: 0.01em;
-}
-.fy-attn-group__machine {
-  color: var(--faint);
-}
-.fy-attn-group__count {
-  flex-shrink: 0;
-  min-width: 20px;
+/* The Warden chip: a quiet pill that says what the page is narrowed to, and clears it. */
+.fy-attn-inbox__chip {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: var(--gap-sm);
+  border: var(--stroke-control, 1px) solid var(--border);
   border-radius: var(--radius-pill);
-  background: var(--surface-2, var(--accent-soft));
-  padding: 0 6px;
-  color: var(--muted);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-  text-align: center;
+  background: var(--surface);
+  padding: 0 var(--gap-md);
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.fy-attn-inbox__chip:hover {
+  border-color: var(--accent);
+}
+.fy-attn-inbox__chip:active {
+  background: var(--accent-soft);
+}
+.fy-attn-inbox__chip:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
 }
 @media (prefers-reduced-motion: reduce) {
   .fy-attn-group__chevron {
     transition: none;
-  }
-}
-/* A row: the ITEM's title and age, its ask on one line, its kind and reference. Dense on purpose — the
-   card beside it carries the detail. */
-.fy-attn-row {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-  border: var(--stroke-control, 1px) solid transparent;
-  border-left: var(--stroke-heavy, 3px) solid var(--attn-tone, var(--border));
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  padding: 6px 10px 6px 9px;
-  color: var(--fg);
-  font: inherit;
-  text-align: left;
-  text-decoration: none;
-  cursor: pointer;
-}
-.fy-attn-row:hover {
-  background: var(--accent-soft);
-}
-.fy-attn-row:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 1px;
-}
-.fy-attn-row[data-selected] {
-  border-color: var(--accent);
-  border-left-color: var(--attn-tone, var(--accent));
-  background: var(--accent-soft);
-}
-.fy-attn-row__top {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: var(--gap-sm);
-}
-.fy-attn-row__title {
-  min-width: 0;
-  flex: 1;
-  overflow: hidden;
-  font-size: var(--text-sm);
-  font-weight: var(--weight-strong);
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-attn-row__age {
-  flex-shrink: 0;
-  color: var(--faint);
-  font-size: var(--text-xs);
-  font-variant-numeric: tabular-nums;
-}
-.fy-attn-row__summary {
-  overflow: hidden;
-  color: var(--muted);
-  font-size: var(--text-sm);
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.fy-attn-row__meta {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 4px;
-  overflow: hidden;
-  color: var(--faint);
-  font-size: var(--text-xs);
-  line-height: 1.3;
-  white-space: nowrap;
-}
-.fy-attn-row__kind {
-  flex-shrink: 0;
-  color: var(--attn-tone, var(--faint));
-}
-.fy-attn-row__state {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-  color: var(--muted);
-}
-.fy-attn-inbox__none {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--gap-sm);
-}
-/* WIDE: the page is exactly the screen tall. The list scrolls on its own, and the card fills the rest of
-   the height — its detail scrolls inside it and its answer bar stays pinned at the bottom. */
-@media (min-width: 900px) {
-  .fy-attn-inbox {
-    height: calc(100dvh - 24px);
-    padding-bottom: var(--gap-md);
-  }
-  .fy-attn-inbox__body {
-    min-height: 0;
-    flex: 1;
-    flex-direction: row;
-  }
-  .fy-attn-inbox__lists {
-    width: 360px;
-    flex-shrink: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-    padding: 2px 4px 2px 2px;
-  }
-  .fy-attn-inbox__pane {
-    display: flex;
-    min-width: 0;
-    min-height: 0;
-    flex: 1;
-    flex-direction: column;
-  }
-  .fy-attn-inbox__pane > .fy-attn-card {
-    min-height: 0;
-    flex: 1 1 auto;
-    max-height: none;
-    padding: 14px 18px;
-  }
-  .fy-attn-inbox__pane > .fy-attn-card > .fy-attn-card__scroll {
-    display: flex;
-    min-height: 0;
-    flex: 1 1 auto;
-    flex-direction: column;
-    gap: var(--gap-sm);
-    overflow-y: auto;
-    overscroll-behavior: contain;
-  }
-  .fy-attn-inbox__pane > .fy-attn-card > .fy-attn-card__scroll > * {
-    flex-shrink: 0;
-  }
-  /* The fade where the detail meets the answer bar, as the deck and the pinned card have it. */
-  .fy-attn-inbox__pane > .fy-attn-card > .fy-attn-card__scroll::after {
-    content: '';
-    position: sticky;
-    bottom: 0;
-    flex-shrink: 0;
-    height: 1.5rem;
-    margin-top: calc(-1 * var(--gap-sm));
-    background: linear-gradient(to bottom, transparent, var(--surface));
-    pointer-events: none;
   }
 }
 
@@ -1006,91 +1070,4 @@
 /* The peeking cards' 22px under a dealt card (attention-inbox.css, the deck). */
 .fy-attn-inbox__deck--end > .fy-attn-end {
   margin-bottom: 22px;
-}
-
-/* ---- Flat page (wide AND a pointer): a slim list that folds to a rail, the item drawn flat ----------- */
-.fy-attn-rail__toggle {
-  display: inline-flex;
-  width: 28px;
-  height: 28px;
-  flex-shrink: 0;
-  align-items: center;
-  justify-content: center;
-  align-self: flex-end;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.fy-attn-rail__toggle:hover {
-  background: var(--accent-soft);
-  color: var(--fg);
-}
-.fy-attn-rail__toggle:focus-visible,
-.fy-attn-rail__group:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 1px;
-}
-.fy-attn-rail {
-  display: flex;
-  margin: 0;
-  flex-direction: column;
-  align-items: center;
-  gap: var(--gap-xs);
-  padding: 0;
-  list-style: none;
-}
-.fy-attn-rail__group {
-  position: relative;
-  display: inline-flex;
-  width: 40px;
-  height: 40px;
-  align-items: center;
-  justify-content: center;
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--muted);
-  cursor: pointer;
-}
-.fy-attn-rail__group:hover {
-  background: var(--accent-soft);
-  color: var(--fg);
-}
-.fy-attn-rail__group[data-selected] {
-  background: var(--accent-soft);
-  color: var(--fg);
-}
-.fy-attn-rail__count {
-  position: absolute;
-  top: 1px;
-  right: 1px;
-  min-width: 16px;
-  border-radius: var(--radius-pill);
-  background: var(--accent);
-  padding: 0 4px;
-  color: var(--accent-fg);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
-  line-height: 16px;
-  text-align: center;
-}
-.fy-attn-inbox[data-attention-flat] .fy-attn-row {
-  border-left-width: var(--stroke-control, 1px);
-}
-@media (min-width: 900px) {
-  .fy-attn-inbox[data-attention-flat] .fy-attn-inbox__lists {
-    width: 300px;
-  }
-  .fy-attn-inbox[data-attention-flat] .fy-attn-inbox__lists[data-attention-lists='rail'] {
-    width: 56px;
-    padding-inline: 4px;
-  }
-  /* The flat item keeps a readable text column. */
-  .fy-attn-inbox[data-attention-flat] .fy-attn-inbox__pane > .fy-attn-card {
-    width: 100%;
-    max-width: 720px;
-    margin-inline: auto;
-  }
 }

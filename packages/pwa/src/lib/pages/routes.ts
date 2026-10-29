@@ -61,7 +61,7 @@ export interface DaemonSessionRoute {
 }
 
 /**
- * The Attention inbox: every open item, across every paired machine, newest first. Addressed under the
+ * The Inbox: every open item, across every paired machine, newest first. Addressed under the
  * machine on screen only because every page is — the deck itself is not one machine's.
  */
 export interface DaemonAttentionRoute {
@@ -130,7 +130,13 @@ export interface LegacyTasksRedirectRoute {
   readonly to: DaemonSessionsRoute;
 }
 
-export type Route = PageRoute | LegacyTasksRedirectRoute;
+/** The Inbox's old `/attention` address, which now redirects to `/inbox` keeping its query. */
+export interface LegacyAttentionRedirectRoute {
+  readonly kind: 'legacy-attention-redirect';
+  readonly to: DaemonAttentionRoute;
+}
+
+export type Route = PageRoute | LegacyTasksRedirectRoute | LegacyAttentionRedirectRoute;
 
 const connectionPicker: ConnectionPickerRoute = { kind: 'connection-picker' };
 const setup: SetupRoute = { kind: 'setup' };
@@ -192,8 +198,8 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   return `${daemonSessionsPath(id)}/session/${encodeURIComponent(scope.sessionId)}`;
 };
 
-/** Builds the Attention inbox pathname, under the machine on screen. */
-export const daemonAttentionPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/attention`;
+/** Builds the Inbox pathname, under the machine on screen. `/attention` is the old spelling and redirects here. */
+export const daemonAttentionPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/inbox`;
 
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
@@ -233,7 +239,9 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'new') return { kind: 'new-session', daemonId: id };
     if (destination === 'projects') return { kind: 'projects', daemonId: id };
     if (destination === 'settings') return { kind: 'settings', daemonId: id };
-    if (destination === 'attention') return { kind: 'attention', daemonId: id };
+    if (destination === 'inbox') return { kind: 'attention', daemonId: id };
+    if (destination === 'attention')
+      return { kind: 'legacy-attention-redirect', to: { kind: 'attention', daemonId: id } };
     if (destination === 'warden') return { kind: 'warden', daemonId: id };
     if (destination === 'analytics') return { kind: 'analytics', daemonId: id };
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
@@ -296,6 +304,7 @@ export const routePath = (route: Route): string => {
     case 'machine-setup':
       return daemonMachineSetupPath(route.daemonId);
     case 'legacy-tasks-redirect':
+    case 'legacy-attention-redirect':
       return routePath(route.to);
   }
 };
@@ -305,7 +314,8 @@ export const routePath = (route: Route): string => {
  * Session keys deliberately share the daemon-session seam used by caches.
  */
 export const routePageKey = (route: Route): string => {
-  if (route.kind === 'legacy-tasks-redirect') return routePageKey(route.to);
+  if (route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect')
+    return routePageKey(route.to);
   if (route.kind === 'connection-picker' || route.kind === 'setup') return route.kind;
   if (route.kind === 'session') return `session:${daemonSessionKey(daemonSessionScope(route, route.sessionId))}`;
   // The two Analytics pages are kept apart, so each keeps its own state while the other is on screen.

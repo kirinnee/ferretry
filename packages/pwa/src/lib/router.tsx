@@ -153,11 +153,11 @@ export function RouterProvider({
   entryRef.current = entry;
 
   useEffect(() => {
-    if (route.kind !== 'legacy-tasks-redirect') return;
-    const canonicalPath = routePath(route);
+    if (route.kind !== 'legacy-tasks-redirect' && route.kind !== 'legacy-attention-redirect') return;
+    const canonicalPath = `${routePath(route)}${browser.location.search}`;
     setEntry(write(canonicalPath, true, entryRef.current));
     setRoute(route.to);
-  }, [route, write]);
+  }, [browser, route, write]);
 
   const navigate = useCallback(
     (to: string, options: NavigateOptions = {}): void => {

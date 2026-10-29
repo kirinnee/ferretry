@@ -23,6 +23,7 @@ import {
   type AttentionQuestion,
   type AttentionSnapshot,
   attentionInDiscussion,
+  attentionTurn,
   MAX_ATTENTION_DETAIL_LENGTH,
   type ResolvedAttentionItem,
   type SessionAttentionSummary,
@@ -124,26 +125,25 @@ export const attentionFirst = <T>(rows: readonly T[], viewOf: (row: T) => Sessio
 };
 
 /**
- * Every conversation with an item in discussion, in the order the sources list them: what the inbox reads
- * boards for, so a discussion is on the machine's record and not on a card until it needs the owner again.
+ * Every conversation with an open item at all, in the order the sources list them: what the inbox reads
+ * boards for, so the items that are with a ferret are on the page (under "With ferrets") and not only counted.
  */
-export const discussingSessions = (sources: readonly AttentionInboxSource[]): readonly UnreadSession[] =>
+export const withFerretSessions = (sources: readonly AttentionInboxSource[]): readonly UnreadSession[] =>
   sources.flatMap(source =>
     (source.sessions ?? []).flatMap(view => {
       const attention = view.state.attention;
-      return attention?.discussing === undefined
-        ? []
-        : [{ daemonId: source.daemonId, machineName: source.name, view, attention }];
+      return attention === undefined ? [] : [{ daemonId: source.daemonId, machineName: source.name, view, attention }];
     }),
   );
 
 /**
  * What a board read is keyed on: the summary's facts. When they move the board moved, so the inbox
  * re-reads exactly that session's board; when they hold still it reads nothing. `discussing` is one of
- * them: a discussion starting or ending moves no other fact, and another device must still re-read.
+ * them: a discussion starting or ending moves no other fact, and another device must still re-read. So is
+ * `stopped`: the ferret going idle on the owner moves its group between sections.
  */
 export const attentionSummaryKey = (summary: SessionAttentionSummary): string =>
-  `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}`;
+  `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}\u0000${summary.stopped === true ? 1 : 0}`;
 
 /** Where a conversation opens AT an item: the session's page, naming the item as the protocol says. */
 export const attentionConversationPath = (daemonId: DaemonId, sessionId: string, id: AttentionId): string =>
@@ -191,23 +191,23 @@ const collectCards = (
 };
 
 /**
- * The deck: every open item that needs the owner, of every unread conversation whose board has been read,
- * newest first. An item in discussion is not in it — it waits on its ferret, and comes back as a card when
- * the ferret updates it. `hidden` holds the keys the reader already answered and may still undo — they
+ * The deck: every open item on the OWNER's turn (a plain notification included), of every unread
+ * conversation whose board has been read, newest first. An item on the ferret's turn is not in it — it
+ * comes back as a card when the ferret updates it. `hidden` holds the keys the reader already answered and may still undo — they
  * leave the deck at once.
  */
 export const inboxCards = (
   entries: readonly UnreadSession[],
   boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
   hidden: ReadonlySet<string> = new Set(),
-): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => !isInDiscussion(item));
+): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => attentionTurn(item) === 'owner');
 
-/** The items in discussion, as cards of the same shape and order as the deck's: what a future "In discussion" group lists. */
-export const discussingCards = (
+/** The items on the FERRET's turn, as cards of the same shape and order as the deck's: the "With ferrets" section. */
+export const withFerretCards = (
   entries: readonly UnreadSession[],
   boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
   hidden: ReadonlySet<string> = new Set(),
-): readonly InboxCard[] => collectCards(entries, boardFor, hidden, isInDiscussion);
+): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => attentionTurn(item) === 'ferret');
 
 export type { InboxAction, SwipeDirection };
 
@@ -280,17 +280,9 @@ export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
 /** The ferret was asked for more information, or to discuss, and has not yet edited the item. */
 export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
 
-/** The owner asked to talk this item through and the ferret has not updated it: it reads "In discussion". */
+/** The owner asked to talk this item through and the ferret has not updated it: the summary counts it apart. */
 export const isInDiscussion = (item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>): boolean =>
   attentionInDiscussion(item);
-
-/** What an item waiting on its ferret says, in a few words: "In discussion with Piper", "Waiting on Piper". */
-export const waitingSentence = (item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>, ferret?: string): string =>
-  isInDiscussion(item)
-    ? ferret === undefined
-      ? 'In discussion'
-      : `In discussion with ${ferret}`
-    : `Waiting on ${ferret ?? 'the ferret'}`;
 
 /** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
 export const tickedSteps = (
@@ -490,6 +482,7 @@ export const actionSentence = (action: InboxAction, id: AttentionId): string => 
   if (action.kind === 'needs-info') return `Asked for more info on !${id}`;
   if (action.kind === 'discuss') return `Asked to discuss !${id}`;
   if (action.label === 'Reply') return `Replied to !${id}`;
+  if (action.kind === 'resolve' && action.label === 'Clear') return `Cleared !${id}`;
   if (action.kind === 'resolve') return `Marked !${id} done`;
   return `Answered !${id}: ${action.label}`;
 };

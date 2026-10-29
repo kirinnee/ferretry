@@ -17,7 +17,7 @@ function RouterProbe() {
   const daemonId =
     route.kind === 'connection-picker' || route.kind === 'setup'
       ? 'none'
-      : route.kind === 'legacy-tasks-redirect'
+      : route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect'
         ? route.to.daemonId
         : route.daemonId;
   return (
@@ -102,6 +102,21 @@ describe('RouterProvider', () => {
     await view.unmount();
   });
 
+  it('redirects the old /attention address to /inbox, keeping the query', async () => {
+    setPath('/d/daemon-a/attention?from=warden');
+    const view = await mount(
+      <RouterProvider>
+        <RouterProbe />
+      </RouterProvider>,
+    );
+
+    const output = view.container.querySelector('output');
+    expect(window.location.pathname).toBe('/d/daemon-a/inbox');
+    expect(window.location.search).toBe('?from=warden');
+    expect(output?.dataset.kind).toBe('attention');
+    await view.unmount();
+  });
+
   it('unsubscribes from browser history when the root unmounts', async () => {
     setPath('/d/daemon-a');
     const view = await mount(
@@ -156,15 +171,18 @@ class FakeBrowser extends EventTarget {
       this.entries[this.index] = { state, url: this.resolve(url) };
     },
   } as unknown as History;
-  readonly location: Pick<Location, 'pathname'>;
+  readonly location: Pick<Location, 'pathname' | 'search'>;
 
   constructor(path: string, state: unknown = null) {
     super();
     this.entries = [{ state, url: new URL(path, 'https://pwa.example.test') }];
-    this.location = Object.defineProperty({}, 'pathname', { get: () => this.current.url.pathname }) as Pick<
-      Location,
-      'pathname'
-    >;
+    this.location = Object.defineProperties(
+      {},
+      {
+        pathname: { get: () => this.current.url.pathname },
+        search: { get: () => this.current.url.search },
+      },
+    ) as Pick<Location, 'pathname' | 'search'>;
     Object.defineProperty(this.history, 'state', { get: () => this.current.state });
   }
 

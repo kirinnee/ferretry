@@ -161,6 +161,7 @@ import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { attentionTargetFromSearch } from './lib/attention-inbox.ts';
+import { inboxSourceFromSearch } from './lib/attention-inbox-list.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
@@ -460,7 +461,7 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
     case 'session':
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
     case 'attention':
-      return [{ href: sessions, label: 'Sessions' }, { label: 'Attention' }];
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Inbox' }];
     case 'settings':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
     case 'warden':
@@ -1899,10 +1900,10 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
 }
 
 /**
- * The Attention inbox. Its cards come from EVERY paired machine (the shell's one inbox), so the
+ * The Inbox. Its cards come from EVERY paired machine (the shell's one inbox), so the
  * machine in the address only decides which machine's chrome surrounds it.
  */
-function AttentionRoute(_: DaemonPageProps) {
+function AttentionRoute({ connection }: DaemonPageProps) {
   const { navigate } = useRouter();
   const store = useAppStore();
   const inbox = useAttentionInbox();
@@ -1921,6 +1922,8 @@ function AttentionRoute(_: DaemonPageProps) {
         />
       }
       inbox={inbox}
+      from={inboxSourceFromSearch(window.location.search)}
+      onClearFrom={() => navigate(daemonAttentionPath(connection.daemonId))}
       onNavigate={navigate}
       phone={phone}
       onProgress={async (card, step, done) => {
@@ -2055,7 +2058,8 @@ export function AppShell() {
   const store = useAppStore();
   const connectionSnapshot = useConnectionSnapshot();
   const { route, navigate, entryKey } = useRouter();
-  const pageRoute: PageRoute = route.kind === 'legacy-tasks-redirect' ? route.to : route;
+  const pageRoute: PageRoute =
+    route.kind === 'legacy-tasks-redirect' || route.kind === 'legacy-attention-redirect' ? route.to : route;
   const connection =
     pageRoute.kind === 'connection-picker' || pageRoute.kind === 'setup'
       ? undefined

@@ -71,7 +71,7 @@ export const sessionRowPath = (daemonId: DaemonId, view: SessionView): string =>
 };
 
 /** What a badge or a link says aloud: "3 open Attention items". */
-export const attentionWords = (count: number): string => `${count} open Attention ${count === 1 ? 'item' : 'items'}`;
+export const attentionWords = (count: number): string => `${count} open Inbox ${count === 1 ? 'item' : 'items'}`;
 
 /** The longest question the list echoes; the row truncates visually, this just keeps the DOM small. */
 const QUESTION_PREVIEW_MAX = 160;

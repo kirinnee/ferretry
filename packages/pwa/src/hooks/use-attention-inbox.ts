@@ -3,7 +3,7 @@
  * boards of exactly the conversations it names, and the answers held for their undo window.
  *
  * Mounted ONCE, by the shell, and handed down through `AttentionInboxContext` — so the phone's
- * Attention tab, the sidebar's entry, the Sessions page's Needs-you deck and the inbox page all count
+ * Inbox tab, the sidebar's entry, the Sessions page's Needs-you deck and the inbox page all count
  * and deal the same cards, and an answer still inside its undo window survives a navigation.
  *
  * A BOARD IS READ WHEN ITS SUMMARY MOVES, and only then. The daemon rewrites `state.attention` on every
@@ -28,8 +28,6 @@ import {
   DeferredAttentionActions,
   type DeferredAttentionState,
   type DeferredTimers,
-  discussingCards,
-  discussingSessions,
   type InboxAction,
   type InboxCard,
   type InboxResolved,
@@ -39,6 +37,8 @@ import {
   type UnreadSession,
   unreadSessions,
   unreadTotal,
+  withFerretCards,
+  withFerretSessions,
 } from '../lib/attention-inbox.ts';
 import type { DaemonConnection, DaemonId } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
@@ -52,14 +52,14 @@ export interface AttentionInboxMachine {
 }
 
 export interface AttentionInbox {
-  /** Conversations with open Attention, newest needing you first. */
+  /** Conversations with something waiting on the owner, newest first. */
   readonly unread: readonly UnreadSession[];
-  /** Open items that need the owner across them (items in discussion excluded): the number every Attention badge shows. */
+  /** Open items on the owner's turn across them, plain notifications included: the number every Inbox badge shows. */
   readonly total: number;
   /** The deck: every read open item, newest first, minus the answers still undoable or in flight. */
   readonly cards: readonly InboxCard[];
-  /** Items in discussion: waiting on their ferret, so not in the deck and not in `total`. */
-  readonly discussing: readonly InboxCard[];
+  /** Items on the ferret's turn: not in the deck and not in `total` — the "With ferrets" section. */
+  readonly withFerret: readonly InboxCard[];
   /** True while an unread conversation's board has not been read yet. */
   readonly reading: boolean;
   /** Resolved items of every conversation whose board is held, newest first: the Resolved filter's list. */
@@ -120,7 +120,7 @@ const runInboxAction = async (
 /**
  * The previous value while `key` holds still. The fleet is re-read every few seconds and every read is
  * a new array of new views; the inbox's consumers (every badge, the sidebar entry, the decks) must not
- * re-render for a read that changed nothing about Attention.
+ * re-render for a read that changed nothing about the Inbox.
  */
 const useStable = <T>(value: T, key: string): T => {
   const held = useRef<{ readonly key: string; readonly value: T } | null>(null);
@@ -200,9 +200,9 @@ export function useAttentionInboxModel(
     [machines],
   );
   const unread = useStable(freshUnread, unreadKey(freshUnread));
-  const freshDiscussing = useMemo(
+  const freshWithFerret = useMemo(
     () =>
-      discussingSessions(
+      withFerretSessions(
         machines.map(machine => ({
           daemonId: machine.connection.daemonId,
           name: machine.name,
@@ -211,14 +211,14 @@ export function useAttentionInboxModel(
       ),
     [machines],
   );
-  const discussingEntries = useStable(freshDiscussing, unreadKey(freshDiscussing));
+  const withFerretEntries = useStable(freshWithFerret, unreadKey(freshWithFerret));
 
-  // Read each conversation's board — one that needs the owner, or one with a discussion open — when its
+  // Read each conversation's board — one that needs the owner, or one with an item on the ferret's turn — when its
   // summary moved since the last read.
   const readKeys = useRef(new Map<string, string>());
   useEffect(() => {
     const seen = new Set<string>();
-    for (const entry of [...unread, ...discussingEntries]) {
+    for (const entry of [...unread, ...withFerretEntries]) {
       const connection = connectionFor(entry.daemonId);
       if (connection === undefined) continue;
       const scope = daemonSessionScope(connection, entry.view.config.id);
@@ -230,7 +230,7 @@ export function useAttentionInboxModel(
       void client.revalidate(connection, scope).catch(() => undefined);
     }
     for (const id of [...readKeys.current.keys()]) if (!seen.has(id)) readKeys.current.delete(id);
-  }, [client, connectionFor, unread, discussingEntries]);
+  }, [client, connectionFor, unread, withFerretEntries]);
 
   const subscribeBoards = useCallback((listener: () => void) => client.store.subscribe(listener), [client]);
   const readBoards = useCallback(() => client.store.getSnapshot(), [client]);
@@ -245,14 +245,14 @@ export function useAttentionInboxModel(
     [unread, boards, deferredState],
   );
   const cards = useStable(freshCards, cardsKey(freshCards));
-  const freshDiscussingCards = useMemo(
+  const freshWithFerretCards = useMemo(
     () =>
-      discussingCards(discussingEntries, (daemonId, sessionId) =>
+      withFerretCards(withFerretEntries, (daemonId, sessionId) =>
         boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
       ),
-    [discussingEntries, boards],
+    [withFerretEntries, boards],
   );
-  const discussing = useStable(freshDiscussingCards, cardsKey(freshDiscussingCards));
+  const withFerret = useStable(freshWithFerretCards, cardsKey(freshWithFerretCards));
   const reading = unread.some(
     entry => !boards.snapshots.has(daemonSessionKey({ daemonId: entry.daemonId, sessionId: entry.view.config.id })),
   );
@@ -298,7 +298,7 @@ export function useAttentionInboxModel(
       unread,
       total: unreadTotal(unread),
       cards,
-      discussing,
+      withFerret,
       reading,
       resolved,
       resolvedReading,
@@ -310,7 +310,7 @@ export function useAttentionInboxModel(
     [
       unread,
       cards,
-      discussing,
+      withFerret,
       reading,
       resolved,
       resolvedReading,

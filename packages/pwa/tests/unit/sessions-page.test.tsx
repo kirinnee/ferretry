@@ -765,7 +765,7 @@ describe('SessionsPage Needs you', () => {
     await settle();
     const deck = must(page.container.querySelector('[data-attention-needs-you]'), 'the Needs you deck');
     expect(deck.querySelector('[data-attention-card="A4"]')).not.toBeNull();
-    expect(deck.querySelector('[data-attention-see-all]')?.getAttribute('href')).toBe('/d/alpha/attention');
+    expect(deck.querySelector('[data-attention-see-all]')?.getAttribute('href')).toBe('/d/alpha/inbox');
     // Above the list, not inside or after it.
     const list = must(page.container.querySelector('main'), 'the dashboard');
     expect(deck.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();

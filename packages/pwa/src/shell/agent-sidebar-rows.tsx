@@ -152,7 +152,7 @@ export function SidebarRow({
   const railIndent = Math.max(0, lineageIndent(childDepth) - lineageIndent(depth));
   const labels = rowLabels(config.label);
   const attentionCount = attentionCountFor?.(config.id) ?? 0;
-  const attentionLabel = `${attentionCount} unresolved attention ${attentionCount === 1 ? 'item' : 'items'}`;
+  const attentionLabel = `${attentionCount} unresolved Inbox ${attentionCount === 1 ? 'item' : 'items'}`;
 
   return (
     <li>

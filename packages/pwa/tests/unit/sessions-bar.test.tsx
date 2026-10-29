@@ -539,11 +539,7 @@ describe('SessionsBar as a rail', () => {
     view = await mount(element);
     expect(view.container.querySelector('[data-sessions-bar="rail"]')).not.toBeNull();
     const dots = [...view.container.querySelectorAll<HTMLAnchorElement>('.fy-sbar__dot')];
-    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'Maryah — 1 open Attention item',
-      'nameless',
-      'Hadi',
-    ]);
+    expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual(['Maryah — 1 open Inbox item', 'nameless', 'Hadi']);
     expect(dots.find(dot => dot.getAttribute('aria-current') === 'page')?.getAttribute('aria-label')).toBe('Hadi');
     expect(view.container.querySelector('[aria-label="Projects"]')?.getAttribute('aria-current')).toBe('page');
     await click(dots[0] ?? null, 'a dot');
@@ -758,8 +754,8 @@ describe('SessionsBar across every machine', () => {
     view = await mount(element);
     const dots = [...view.container.querySelectorAll('.fy-sbar__dot')];
     expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
-      'Ora on kirin-box — 1 open Attention item',
-      'Maryah on work-mac — 1 open Attention item',
+      'Ora on kirin-box — 1 open Inbox item',
+      'Maryah on work-mac — 1 open Inbox item',
       'Hadi on work-mac',
       'nameless on work-mac',
       'Pim on kirin-box',

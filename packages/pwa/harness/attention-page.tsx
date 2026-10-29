@@ -7,12 +7,13 @@
  * held by a real `DeferredAttentionActions` whose commit does nothing.
  */
 
-import type {
-  AttentionId,
-  AttentionItem,
-  AttentionSnapshot,
-  ResolvedAttentionItem,
-  SessionView,
+import {
+  type AttentionId,
+  type AttentionItem,
+  type AttentionSnapshot,
+  attentionTurn,
+  type ResolvedAttentionItem,
+  type SessionView,
 } from '@ferretry/protocol';
 import { Pencil, RotateCw, Square } from 'lucide-react';
 import { type ReactElement, useState, useSyncExternalStore } from 'react';
@@ -29,7 +30,7 @@ import {
 import { ActionsMenu } from '../src/features/session-actions/actions-menu.tsx';
 import { type SessionActionContribution, sessionActionSections } from '../src/features/session-actions/registry.ts';
 import type { AttentionInbox } from '../src/hooks/use-attention-inbox.ts';
-import { DeferredAttentionActions, type InboxCard, inboxCardKey, isInDiscussion } from '../src/lib/attention-inbox.ts';
+import { DeferredAttentionActions, type InboxCard, inboxCardKey } from '../src/lib/attention-inbox.ts';
 import { daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import { daemonAttentionPath } from '../src/lib/pages/routes.ts';
@@ -376,10 +377,10 @@ function Inbox({
   const hidden = deferred.hiddenKeys();
   const inbox: AttentionInbox = {
     unread: [],
-    total: cards.filter(entry => !isInDiscussion(entry.item)).length,
-    // Split as the shell splits them: an item in discussion is listed under "In discussion".
-    cards: cards.filter(entry => !hidden.has(entry.key) && !isInDiscussion(entry.item)),
-    discussing: cards.filter(entry => !hidden.has(entry.key) && isInDiscussion(entry.item)),
+    total: cards.filter(entry => attentionTurn(entry.item) === 'owner').length,
+    // Split as the shell splits them: by whose turn the item is on.
+    cards: cards.filter(entry => !hidden.has(entry.key) && attentionTurn(entry.item) === 'owner'),
+    withFerret: cards.filter(entry => !hidden.has(entry.key) && attentionTurn(entry.item) === 'ferret'),
     reading: false,
     resolved,
     resolvedReading: false,

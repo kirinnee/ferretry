@@ -1,10 +1,10 @@
 /**
  * THE UNREAD COUNT: a filled accent pill with a white number, the way Telegram and WhatsApp mark a chat
  * you have not answered. It is the one place the list says "a ferret filed something for you", so it is
- * drawn by one component wherever a row, a card, a rail dot or the Attention entry carries it.
+ * drawn by one component wherever a row, a card, a rail dot or the Inbox entry carries it.
  *
  * The number is capped at "99+" (`badgeText`) so it never widens a row. The pill itself is decoration;
- * what a screen reader hears is "3 open Attention items", in the row's own accessible name. A host whose
+ * what a screen reader hears is "3 open Inbox items", in the row's own accessible name. A host whose
  * link already names the count (the rail's dot) passes `announce={false}` so it is not read twice. Its
  * styles live in `sessions-bar.css`, which every surface that draws it already loads.
  */
@@ -20,7 +20,7 @@ export function UnreadBadge({
 }: {
   readonly count: number;
   readonly className?: string;
-  /** Say "N open Attention items" to a screen reader. Off where the surrounding link's label already does. */
+  /** Say "N open Inbox items" to a screen reader. Off where the surrounding link's label already does. */
   readonly announce?: boolean;
 }) {
   return (
