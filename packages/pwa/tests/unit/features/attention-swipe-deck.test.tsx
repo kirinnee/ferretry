@@ -212,7 +212,7 @@ describe('attention swipe helpers', () => {
 
 describe('AttentionInboxPage on a phone: the swipe deck', () => {
   it('deals the newest card on top with the next ones peeking, inert, behind it', async () => {
-    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], { initialOpen: threeWay.key }));
     expect(topId(mounted)).toBe('A3');
     const peeks = [...mounted.container.querySelectorAll('.fy-attn-deck__peek')];
     expect(peeks).toHaveLength(2);

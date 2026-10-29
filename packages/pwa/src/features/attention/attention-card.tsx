@@ -87,6 +87,8 @@ export interface AttentionCardProps {
   readonly headerSlot?: ReactNode;
   /** Extra DOM id for scroll targets. */
   readonly id?: string;
+  /** Drawn last inside the scrolling detail — the Attention page's "Last messages" toggle. */
+  readonly detailEnd?: ReactNode;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
@@ -105,6 +107,7 @@ export function AttentionCard({
   id,
   pinned = false,
   headerSlot,
+  detailEnd,
 }: AttentionCardProps) {
   const titleId = useId();
   const draft = useReplyDraft();
@@ -331,6 +334,7 @@ export function AttentionCard({
             {history}
           </p>
         )}
+        {detailEnd}
       </div>
       {error === null ? null : (
         <p className="m-0 text-meta text-err" role="alert">

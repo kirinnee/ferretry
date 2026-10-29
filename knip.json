@@ -40,6 +40,7 @@
         "harness/screenshot.ts",
         "harness/attention-screenshot.ts",
         "harness/attention-page.tsx",
+        "harness/attention-page-screenshot.ts",
         "harness/attention-cards-screenshot.ts",
         "harness/attention-cards-page.tsx",
         "harness/cards-fit-screenshot.ts",

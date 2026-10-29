@@ -2302,7 +2302,7 @@ describe('AppShell', () => {
     }
   });
 
-  it('mounts the selected Needs-you item as a real chat beside the inbox', async () => {
+  it('mounts the selected item as its card beside the inbox, with no chat around it', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/attention`, [alpha.daemonId], {
       sessions: ['shared'],
       listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
@@ -2311,8 +2311,10 @@ describe('AppShell', () => {
     });
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
-      const chat = must(view.container.querySelector<HTMLElement>('[data-attention-chat]'), 'the conversation pane');
-      expect(chat.textContent).not.toBe('');
+      const pane = must(view.container.querySelector<HTMLElement>('[data-attention-pane]'), 'the card pane');
+      expect(pane.querySelector('[data-attention-card]')?.getAttribute('data-attention-card')).toBe('A3');
+      expect(pane.querySelector('[data-attention-recent-toggle]')).not.toBeNull();
+      expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
     } finally {
       await view.unmount();
     }
