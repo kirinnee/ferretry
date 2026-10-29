@@ -10,7 +10,7 @@ import type {
 import { referenceLargeStrings, resolveLargeStrings } from './large-strings.ts';
 import { utf8Length } from './utf8.ts';
 
-type TranscriptRecordParser = Pick<TranscriptParser, 'harness' | 'parseRecord'>;
+type TranscriptRecordParser = Pick<TranscriptParser, 'harness' | 'parseRecord' | 'ignoredRecordKeys'>;
 
 interface NormalizedTranscriptRecord extends TranscriptRecordResult {
   readonly observedInputs: TranscriptParseResult['observedInputs'];
@@ -140,7 +140,11 @@ interface PhysicalTranscriptRecord {
  * Offsets are byte offsets throughout: `byteLength` excludes the terminator, and the next record
  * starts after it.
  */
-function byteRecords(bytes: Uint8Array, startByteOffset: number): readonly PhysicalTranscriptRecord[] {
+function byteRecords(
+  bytes: Uint8Array,
+  startByteOffset: number,
+  ignoredKeys: readonly string[] = [],
+): readonly PhysicalTranscriptRecord[] {
   const decoder = new TextDecoder();
   const records: PhysicalTranscriptRecord[] = [];
   let index = 0;
@@ -151,7 +155,7 @@ function byteRecords(bytes: Uint8Array, startByteOffset: number): readonly Physi
     const sliceEnd = terminated ? feed + 1 : bytes.byteLength;
     const whole = bytes.subarray(index, bodyEnd);
     // Only a complete record: an unterminated one is carried as text and parsed again later.
-    const parsed = terminated ? referenceLargeStrings(whole, startByteOffset + index) : whole;
+    const parsed = terminated ? referenceLargeStrings(whole, startByteOffset + index, ignoredKeys) : whole;
     records.push({
       byteOffset: startByteOffset + index,
       byteLength: bodyEnd - index,
@@ -244,7 +248,7 @@ export function parseTranscriptJsonl(
   const records =
     sourceBytes === undefined
       ? textRecords(input.text ?? '', bufferByteOffset)
-      : byteRecords(sourceBytes, bufferByteOffset);
+      : byteRecords(sourceBytes, bufferByteOffset, parser.ignoredRecordKeys);
   const rawRecords: TranscriptRawRecord[] | undefined = sourceBytes === undefined ? undefined : [];
 
   let remainder = '';

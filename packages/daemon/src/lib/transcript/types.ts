@@ -356,6 +356,11 @@ export interface TranscriptParseResult {
 /** Common parser contract: callers inject this interface and never branch by harness. */
 export interface TranscriptParser {
   readonly harness: TranscriptHarness;
+  /**
+   * Top-level record keys this parser never reads. In a large record their object or array value is
+   * cut to `null` before the record is parsed (`large-strings.ts`), so it is never built in memory.
+   */
+  readonly ignoredRecordKeys?: readonly string[];
   parse(input: TranscriptParseInput, observer?: TranscriptInputObserver): TranscriptParseResult;
   parseRecord(value: unknown, context?: TranscriptRecordContext): TranscriptRecordResult;
   createInputObserver(): TranscriptInputObserver;
