@@ -81,7 +81,7 @@ export const SessionProcessSchema = z.strictObject({
   parentId: SessionProcessIdSchema.optional(),
   /**
    * The command line exactly as the kernel reports it (arguments joined by spaces), with any value of a
-   * stored secret replaced by `‹secret:NAME›`. Cut to {@link SESSION_PROCESS_COMMAND_MAX}.
+   * stored secret replaced by `[redacted:NAME]`. Cut to {@link SESSION_PROCESS_COMMAND_MAX}.
    */
   command: z.string().min(1).max(SESSION_PROCESS_COMMAND_MAX),
   commandTruncated: z.boolean(),
@@ -111,7 +111,7 @@ export const SessionProcessListSchema = z.strictObject({
   observedAt: InstantSchema,
   /**
    * `false` when this host cannot list the pane's processes at all (the ferret is not running, or the
-   * platform cannot be read); `reason` then says which, and `processes` is empty.
+   * platform cannot be read); `reason` then says which, and `processes` holds only recently ended ones.
    */
   available: z.boolean(),
   reason: z.string().min(1).max(300).optional(),
@@ -136,7 +136,7 @@ export const SessionProcessOutputSchema = z.strictObject({
   processId: SessionProcessIdSchema,
   source: SessionProcessOutputSourceSchema,
   reason: z.string().min(1).max(200).optional(),
-  /** UTF-8 text, ANSI escapes kept, stored secret values replaced by `‹secret:NAME›`. */
+  /** UTF-8 text, ANSI escapes kept, stored secret values replaced by `[redacted:NAME]`. */
   text: z.string(),
   start: NonNegativeIntegerSchema,
   end: NonNegativeIntegerSchema,

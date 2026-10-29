@@ -11,7 +11,7 @@ import {
 import { truncateCommand } from './commands.ts';
 import type { EndedProcess, ProcessHistory } from './history.ts';
 import { cpuPercent, type ProcessEntry, parseProcessId, processEntries, stopOrder } from './model.ts';
-import { deliverableLength, leadingContinuationBytes } from './output.ts';
+import { deliverableLength, leadingContinuationBytes, readWindow } from './output.ts';
 import type {
   OutputFilePort,
   ProcessClock,
@@ -133,18 +133,22 @@ export class SessionProcessService {
       if (read.source === 'file' || result === undefined) return read;
     }
     if (result !== undefined) {
-      const bytes = new TextEncoder().encode(result.text);
-      return await this.redactOutput({
+      // A recorded result never changes, so it is scrubbed WHOLE and its offsets count the scrubbed text:
+      // a follower's `after` then slices text no secret can straddle.
+      const bytes = new TextEncoder().encode(await this.deps.redactor.batch(scrub => scrub.text(result.text)));
+      const window = readWindow(bytes.byteLength, after, SESSION_PROCESS_OUTPUT_READ_MAX);
+      const lead = leadingContinuationBytes(bytes.subarray(window.from, window.to), window.skipped);
+      return {
         processId,
         source: 'transcript',
-        text: result.text,
-        start: 0,
-        end: bytes.byteLength,
+        text: new TextDecoder('utf-8', { fatal: false }).decode(bytes.subarray(window.from + lead, window.to)),
+        start: window.from + lead,
+        end: window.to,
         size: bytes.byteLength,
-        skipped: false,
-        reset: after !== undefined && after > bytes.byteLength,
+        skipped: window.skipped,
+        reset: window.reset,
         complete: true,
-      });
+      };
     }
     return none(processId, 'It ended before its output could be kept.', true);
   }
@@ -303,10 +307,15 @@ export class SessionProcessService {
     if (entry.outputPath === undefined)
       return none(processId, entry.output.reason ?? 'Nothing it writes can be read here.', complete);
     const read = await this.deps.files.read(entry.outputPath, after, SESSION_PROCESS_OUTPUT_READ_MAX);
-    if (read.kind === 'gone') return none(processId, 'Its output file is gone.', complete);
+    if (read.kind === 'gone')
+      return none(
+        processId,
+        complete ? 'It ended before its output could be kept.' : 'Its output file is gone.',
+        complete,
+      );
     if (read.kind === 'refused') return none(processId, read.reason, complete);
-    const skipped = read.start > (after ?? 0);
-    const reset = after !== undefined && after > read.size;
+    // The same window the reader cut, so a reset with a long file is also reported as skipping its head.
+    const { skipped, reset } = readWindow(read.size, after, SESSION_PROCESS_OUTPUT_READ_MAX);
     const lead = leadingContinuationBytes(read.bytes, skipped);
     const body = read.bytes.subarray(lead);
     const length = deliverableLength(body, complete);

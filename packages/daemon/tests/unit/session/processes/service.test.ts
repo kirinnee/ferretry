@@ -509,6 +509,27 @@ describe('SessionProcessService.output', () => {
     should(output).have.properties({ source: 'transcript', text: 'ok' });
   });
 
+  it('should follow a recorded result from the offset already read rather than serving it again', async () => {
+    // Arrange
+    const world = processWorld();
+    world.transcript.events = [
+      toolCall('c1', { command: 'bun test' }),
+      toolResult('c1', 'all 3 passed', { timestamp: new Date(NOW).toISOString() }),
+    ];
+    show(world, shell(200, 'bun test'));
+    await world.service.list(SESSION);
+    show(world);
+    const first = await world.service.output(SESSION, ID_200, undefined);
+
+    // Act
+    const again = await world.service.output(SESSION, ID_200, first.end);
+    const partway = await world.service.output(SESSION, ID_200, 4);
+
+    // Assert
+    should(again).have.properties({ source: 'transcript', text: '', start: first.end, end: first.end, reset: false });
+    should(partway).have.properties({ text: '3 passed', start: 4, complete: true });
+  });
+
   it('should say the file is gone, as complete, when an ended command’s file is gone and nothing was recorded', async () => {
     // Arrange
     const world = processWorld();
@@ -520,7 +541,11 @@ describe('SessionProcessService.output', () => {
     const output = await world.service.output(SESSION, ID_200, undefined);
 
     // Assert
-    should(output).have.properties({ source: 'none', reason: 'Its output file is gone.', complete: true });
+    should(output).have.properties({
+      source: 'none',
+      reason: 'It ended before its output could be kept.',
+      complete: true,
+    });
   });
 
   it('should say it ended before its output could be kept when it never had a file and nothing was recorded', async () => {
