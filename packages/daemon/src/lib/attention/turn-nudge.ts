@@ -22,6 +22,11 @@ import { ownerAsks } from './owner-asks.ts';
  *   `attention add|edit`, an `ask_owner` tool or the harness's question tool. A board change made by
  *   somebody else in the same seconds is not evidence that the ferret raised anything.
  *
+ * The same check guards the living summary (docs/attention.md, "A card is a living summary"): when the
+ * turn answered an owner reply about an ask IN DISCUSSION (`[reply about !A5 «title»] …`) and the ferret
+ * neither edited, closed nor surfaced that ask during the turn, the one nudge says so
+ * (`discussionNudgeMessage`) — once per owner reply, and a turn the nudge started never gets another.
+ *
  * Pure except {@link AttentionTurnNudge}, which reads and sends through its ports.
  */
 
@@ -41,6 +46,10 @@ export interface FinishedTurn {
   readonly replyKey: string;
   /** How many Attention items the turn's own tool calls raised or edited. */
   readonly raised: number;
+  /** The items the opener was an owner reply about, in discussion (`[reply about !A5 …]`), without the `!`. */
+  readonly discussed: readonly string[];
+  /** Of those, the ones the turn's own tool calls edited, closed or surfaced. */
+  readonly handled: readonly string[];
 }
 
 /**
@@ -57,6 +66,20 @@ const raises = (event: TranscriptEvent): boolean => {
   if (event.call.name.endsWith('_open') && JSON.stringify(event.call.input).includes('"askOwner"')) return true;
   return RAISING_COMMAND.test(JSON.stringify(event.call.input));
 };
+
+/** The owner's reply about an ask in discussion, as the daemon words it for the ferret (conversation.ts). */
+const REPLY_ABOUT = /\[reply about !(A[1-9][0-9]*)\b/gu;
+
+/** A command that edits, closes or surfaces the item: `attention edit|done|dismiss|surface` naming it. */
+const handles = (event: TranscriptEvent, id: string): boolean =>
+  event.kind === 'tool-call' &&
+  new RegExp(`\\battention\\W+(?:edit|done|dismiss|surface)\\b.{0,400}?\\b!?${id}\\b`, 'u').test(
+    JSON.stringify(event.call.input),
+  );
+
+const discussedIn = (opener: string): string[] => [
+  ...new Set([...opener.matchAll(REPLY_ABOUT)].map(match => match[1] as string)),
+];
 
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 
@@ -79,6 +102,7 @@ export function finishedTurn(events: readonly TranscriptEvent[]): FinishedTurn |
   }
   const opener = start < 0 ? '' : (events[start] as { readonly text: string }).text;
   const turn = events.slice(start + 1);
+  const discussed = discussedIn(opener);
   let lastTool = -1;
   turn.forEach((event, index) => {
     if (event.kind === 'tool-call' || event.kind === 'tool-result') lastTool = index;
@@ -101,6 +125,8 @@ export function finishedTurn(events: readonly TranscriptEvent[]): FinishedTurn |
     reply,
     replyKey: named === undefined ? digest(reply) : digest(named),
     raised: turn.filter(raises).length,
+    discussed,
+    handled: discussed.filter(id => turn.some(event => handles(event, id))),
   };
 }
 
@@ -128,7 +154,17 @@ export function attentionNudgeMessage(
   return `${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n${listed}\nThe owner reads the Attention board, not every reply.${already} Raise each as its own Attention item — ${how} — or, if an open item already covers it or it needs no owner, say why not in one line.`;
 }
 
-/** The nudge for a finished turn, or `undefined` when there is nothing to say. Pure. */
+/** The words of the nudge for asks the ferret discussed and left as they were. Short on purpose. */
+export function discussionNudgeMessage(ids: readonly string[], binary: string): string {
+  const named = ids.map(id => `!${id}`).join(', ');
+  const first = ids[0] as string;
+  return `${ATTENTION_NUDGE_MARK} You discussed ${named} — update its card (\`${binary} attention edit ${first}\`: decided so far, still open, fresh options), surface it (\`${binary} attention surface ${first}\`) or close it (\`${binary} attention done ${first}\`).`;
+}
+
+/**
+ * The nudge for a finished turn, or `undefined` when there is nothing to say. Pure. One message at most:
+ * the discussed-ask line first, then — only when the reply also asked the owner to act — the raise line.
+ */
 export function attentionNudge(
   turn: FinishedTurn,
   subject: NudgeSubject,
@@ -136,9 +172,16 @@ export function attentionNudge(
 ): { readonly asks: readonly string[]; readonly message: string } | undefined {
   if (subject.parent) return undefined;
   if (turn.opener.trimStart().startsWith(ATTENTION_NUDGE_MARK)) return undefined;
+  const left = turn.discussed.filter(id => !turn.handled.includes(id));
   const asks = ownerAsks(turn.reply);
-  if (asks.length === 0 || turn.raised >= asks.length) return undefined;
-  return { asks, message: attentionNudgeMessage(asks, turn.raised, subject.mode, binary) };
+  const toRaise = asks.length > 0 && turn.raised < asks.length;
+  const raise = toRaise ? attentionNudgeMessage(asks, turn.raised, subject.mode, binary) : undefined;
+  if (left.length === 0) return raise === undefined ? undefined : { asks, message: raise };
+  const discussion = discussionNudgeMessage(left, binary);
+  return {
+    asks: [...left.map(id => `discussed !${id}`), ...(toRaise ? asks : [])],
+    message: raise === undefined ? discussion : `${discussion}\n${raise.slice(ATTENTION_NUDGE_MARK.length).trim()}`,
+  };
 }
 
 /** The send id of the one nudge a reply may get. */
