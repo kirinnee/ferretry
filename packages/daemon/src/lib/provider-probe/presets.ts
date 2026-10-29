@@ -6,7 +6,6 @@
  * under — so the whole catalogue may travel to any caller with `fleet.use`.
  */
 import {
-  builtInPresets,
   catalogModelValue,
   type HarnessKind,
   type ModelCatalog,
@@ -15,6 +14,8 @@ import {
   presetCatalog,
   presetHarnesses,
 } from '@ferretry/fleet';
+// Parsed when this build is made, never at boot: `@ferretry/fleet/built-ins` says why.
+import { checkedBuiltInPresets } from '@ferretry/fleet/built-ins' with { type: 'macro' };
 import type {
   FleetCredentialAct,
   FleetCredentialTestAct,
@@ -129,7 +130,7 @@ export class ProviderPresetService {
 
   constructor(
     private readonly machine: MachinePresetSource,
-    builtIns: readonly ProviderPreset[] = builtInPresets(),
+    builtIns: readonly ProviderPreset[] = checkedBuiltInPresets(),
     /** The model catalogs in effect, so a preset shows the models its catalog offers. */
     private readonly catalogs: () => Promise<CatalogsById> = async () => ({}),
   ) {
