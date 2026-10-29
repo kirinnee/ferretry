@@ -686,8 +686,8 @@ export const WardenActionSchema = z.object({
   outcome: WardenActionOutcomeSchema,
   /**
    * `warden` is an investigation's verdict or a rule; `jev` is Jev acting as first responder (a
-   * bless, or an act it was sure enough about); `owner` is the owner — Leave it longer, or an answer on
-   * a Warden card carried out by the Warden.
+   * bless, or an act it was sure enough about); `owner` only ever blesses (Leave it longer): a Warden
+   * notification carries no answers, so the owner never acts through the Warden.
    */
   by: WardenClearedBySchema,
   anomalyKind: WardenAnomalyKindSchema.optional(),
