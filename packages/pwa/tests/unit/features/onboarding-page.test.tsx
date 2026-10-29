@@ -1093,6 +1093,36 @@ describe('with the software keyboard open', () => {
     await view.unmount();
   });
 
+  it('schedules the focused field back into view from the page itself when it opens with the keyboard up', async () => {
+    const frames: FrameRequestCallback[] = [];
+    const original = {
+      request: window.requestAnimationFrame,
+      cancel: window.cancelAnimationFrame,
+    };
+    window.requestAnimationFrame = callback => frames.push(callback);
+    window.cancelAnimationFrame = () => undefined;
+    document.documentElement.setAttribute('data-keyboard', 'open');
+    try {
+      const { view } = await pageWith();
+      const control = must(
+        view.container.querySelector<HTMLButtonElement>('[data-onboarding="setup"] button'),
+        'a focusable control',
+      );
+      const scrolled: ScrollIntoViewOptions[] = [];
+      control.scrollIntoView = (options?: boolean | ScrollIntoViewOptions) => {
+        scrolled.push(typeof options === 'object' ? options : {});
+      };
+      control.focus();
+      for (const frame of frames.splice(0)) frame(0);
+      expect(scrolled).toContainEqual({ block: 'center' });
+      await view.unmount();
+    } finally {
+      document.documentElement.removeAttribute('data-keyboard');
+      window.requestAnimationFrame = original.request;
+      window.cancelAnimationFrame = original.cancel;
+    }
+  });
+
   it('leaves the page alone when the keyboard opens over something unfocused', async () => {
     const { view } = await pageWith();
     await enter(view.container, 'first-time');
