@@ -19,7 +19,7 @@ export function registerInstructionsCommands(
 ): void {
   program
     .command('instructions')
-    .description('show which Ferretry sections (hypermedia, Pack mode, lessons) this ferret launched with')
+    .description('show which Ferretry sections (hypermedia, Pack mode, agenda mode, lessons) this ferret launched with')
     .option('--json', 'print the report as JSON')
     .action((options: { readonly json?: boolean }) => {
       const report = instructionsReport(environment);

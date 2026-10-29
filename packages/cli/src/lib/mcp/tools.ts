@@ -287,6 +287,6 @@ export const MCP_LESSON_TOOLS: readonly (McpToolDefinition & { readonly lessonTo
 export const MCP_INSTRUCTIONS_TOOL: McpToolDefinition = {
   name: 'instructions',
   description:
-    'Which Ferretry sections of your system prompt you launched with (hypermedia, Pack mode, lessons) and how the owner turns each on. Check this before telling the owner a section is missing.',
+    'Which Ferretry sections of your system prompt you launched with (hypermedia, Pack mode, agenda mode, lessons) and how the owner turns each on. Check this before telling the owner a section is missing.',
   inputSchema: object({}),
 };

@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import { SessionAgendaModeSchema } from '@ferretry/protocol';
+import { SessionAgendaModePatchResultSchema, SessionAgendaModeSchema, type SessionView } from '@ferretry/protocol';
 import should from 'should';
 import { NO_GOVERNED_ROUTES_GUARD } from '../../../../src/lib/api/capability.ts';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
@@ -8,9 +8,9 @@ import {
   type SessionAgendaModeSubsystem,
   sessionAgendaModeRoutes,
 } from '../../../../src/lib/runtime/mounts/session-agenda-mode.ts';
-import { SessionAgendaModeError } from '../../../../src/lib/session/agenda-mode/service.ts';
+import { type AgendaModeOutcome, SessionAgendaModeError } from '../../../../src/lib/session/agenda-mode/service.ts';
 import { request } from '../../api/support.ts';
-import { CREDENTIALS, human } from './support.ts';
+import { CREDENTIALS, human, sessionView } from './support.ts';
 
 class FakeAgendaMode implements SessionAgendaModeSubsystem {
   readonly calls: Array<readonly [string, boolean | 'get']> = [];
@@ -23,10 +23,16 @@ class FakeAgendaMode implements SessionAgendaModeSubsystem {
     return { enabled: false, restartRequired: false, note: 'Agenda mode is off.' };
   }
 
-  async set(sessionId: string, enabled: boolean) {
+  async set(
+    sessionId: string,
+    enabled: boolean,
+  ): Promise<{ readonly view: SessionView; readonly outcome: AgendaModeOutcome }> {
     this.calls.push([sessionId, enabled]);
     if (this.refusal !== undefined) throw this.refusal;
-    return { enabled, restartRequired: true, note: 'Agenda mode is on. Takes effect when the ferret restarts.' };
+    return {
+      view: sessionView(sessionId, { agenda: enabled }),
+      outcome: { restartRequired: true, note: 'Agenda mode is on. Takes effect when the ferret restarts.' },
+    };
   }
 }
 
@@ -69,8 +75,8 @@ describe('the session agenda-mode mount', () => {
 
     // Assert
     should(answer.status).equal(200);
-    const result = SessionAgendaModeSchema.parse(JSON.parse(answer.body));
-    should(result.enabled).be.true();
+    const result = SessionAgendaModePatchResultSchema.parse(JSON.parse(answer.body));
+    should(result.view.config.agenda).be.true();
     should(result.restartRequired).be.true();
     should(subsystem.calls).deepEqual([['s1', true]]);
   });

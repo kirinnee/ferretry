@@ -174,6 +174,21 @@ describe('InfoRuntime — learning', () => {
   });
 });
 
+describe('InfoRuntime — agenda mode', () => {
+  it('says notify rule only while the session has no switch', async () => {
+    const root = await show();
+    expect(root.querySelector('[data-info-agenda="off"]')?.textContent).toBe('Off · notify rule only');
+  });
+
+  it('says it keeps an agenda when the owner switched it on', async () => {
+    const root = await show({ view: sessionView('session-a', { config: { agenda: true } }) });
+    expect(must(root.querySelector('[data-info-row="Agenda mode"]'), 'agenda row').textContent).toContain(
+      'On · keeps an agenda of open items',
+    );
+    expect(root.querySelector('[data-info-agenda="on"]')).not.toBeNull();
+  });
+});
+
 describe('InfoRuntime — hypermedia', () => {
   it('reads the switch off the session itself, absent as the mode default', async () => {
     const root = await show({ view: sessionView('session-a', { config: { mode: 'interactive' } }) });

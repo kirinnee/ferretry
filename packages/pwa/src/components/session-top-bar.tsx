@@ -27,7 +27,7 @@
 import type { SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { hypermediaOn, packOn } from '../features/session-info/info-model.ts';
+import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks, type SwitchMarksProps } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { harnessWord } from '../lib/harness-dialogs.ts';
@@ -141,7 +141,10 @@ export function SessionTopBar({
         {attentionOpen > 0 ? <UnreadBadge className="fy-session-bar__attention" count={attentionOpen} /> : null}
         {compact ? null : (
           <SwitchMarks
-            {...(switches ?? { learning: false, hypermedia: hypermediaOn(session), pack: packOn(session) })}
+            {...{
+              agenda: agendaOn(session),
+              ...(switches ?? { learning: false, hypermedia: hypermediaOn(session), pack: packOn(session) }),
+            }}
           />
         )}
         {project === null || compact ? null : <span className="fy-session-bar__project">{project}</span>}

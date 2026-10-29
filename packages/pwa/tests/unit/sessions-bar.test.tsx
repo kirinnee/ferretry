@@ -145,8 +145,10 @@ describe('SessionsBar as a column', () => {
     expect(chip('nameless')).toBeNull();
   });
 
-  test('marks Hypermedia and Pack mode beside the cap, only while each is on', async () => {
-    const told = sessionView('told-1', { config: { teammate: 'ora', mode: 'interactive', cwd: '/work/ferretry' } });
+  test('marks Hypermedia, Pack mode and Agenda mode beside the cap, only while each is on', async () => {
+    const told = sessionView('told-1', {
+      config: { teammate: 'ora', mode: 'interactive', agenda: true, cwd: '/work/ferretry' },
+    });
     const untold = sessionView('untold-1', {
       config: { teammate: 'pim', mode: 'interactive', hypermedia: false, pack: false, cwd: '/work/ferretry' },
     });
@@ -156,7 +158,7 @@ describe('SessionsBar as a column', () => {
       [...(view?.container.querySelectorAll(`[data-sbar-session="${id}"] [data-switch-marks] > *`) ?? [])].map(
         node => node.getAttribute('data-switch-mark') ?? 'learning',
       );
-    expect(marks('told-1')).toEqual(['learning', 'hypermedia', 'pack']);
+    expect(marks('told-1')).toEqual(['learning', 'hypermedia', 'pack', 'agenda']);
     expect(marks('untold-1')).toEqual([]);
     // A row is a link, so its marks are pictures with words, never controls of their own.
     expect(view.container.querySelector('[data-sbar-session="told-1"] button')).toBeNull();

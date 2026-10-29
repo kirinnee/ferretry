@@ -13,6 +13,8 @@ import type { SessionView } from '@ferretry/protocol';
 import { TriangleAlert } from 'lucide-react';
 import type { ReactNode } from 'react';
 import {
+  agendaLabel,
+  agendaOn,
   effortLabel,
   harnessLabel,
   hypermediaLabel,
@@ -169,6 +171,10 @@ export function InfoRuntime({
       </InfoRow>
       <InfoRow hint={INFO_HINT.pack} label="Pack mode">
         <span data-info-pack={packOn(view) ? 'on' : 'off'}>{packLabel(packOn(view))}</span>
+        <span className="fy-info-muted">takes effect at the next launch</span>
+      </InfoRow>
+      <InfoRow hint={INFO_HINT.agenda} label="Agenda mode">
+        <span data-info-agenda={agendaOn(view) ? 'on' : 'off'}>{agendaLabel(agendaOn(view))}</span>
         <span className="fy-info-muted">takes effect at the next launch</span>
       </InfoRow>
     </InfoSection>

@@ -1,22 +1,30 @@
-import { SessionAgendaModePatchSchema, type SessionAgendaMode } from '@ferretry/protocol';
+import {
+  type SessionAgendaMode,
+  type SessionAgendaModePatchResult,
+  SessionAgendaModePatchSchema,
+  type SessionView,
+} from '@ferretry/protocol';
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
-import { SessionAgendaModeError } from '../../session/agenda-mode/service.ts';
+import { type AgendaModeOutcome, SessionAgendaModeError } from '../../session/agenda-mode/service.ts';
 
 /**
  * Reading and switching whether one ferret keeps an agenda: `GET` and `PATCH /v1/sessions/:sessionId/agenda-mode`
- * (docs/agenda.md). The answer is the switch, whether a restart is needed for it to take effect, and that said
- * in words.
+ * (docs/agenda.md). `GET` answers the switch as it reads now; `PATCH` answers, in the shape of the Hypermedia and Pack
+ * switches, the switched `SessionView`, whether a restart is needed for it to take effect, and that said in words.
  *
  * `operator` scope and no capability, like the hypermedia and Pack switches: it is a write to a session's own
  * configuration, it grants nothing, and it changes only what the ferret is told at its next launch.
  */
 export interface SessionAgendaModeSubsystem {
   get(sessionId: string): Promise<SessionAgendaMode>;
-  set(sessionId: string, enabled: boolean): Promise<SessionAgendaMode>;
+  set(
+    sessionId: string,
+    enabled: boolean,
+  ): Promise<{ readonly view: SessionView; readonly outcome: AgendaModeOutcome }>;
 }
 
 function refuse(error: unknown): never {
@@ -34,7 +42,8 @@ function sessionOf(context: RouteContext): string {
 async function patch(subsystem: SessionAgendaModeSubsystem, context: RouteContext): Promise<ApiResponse> {
   const sessionId = sessionOf(context);
   const request = await parseBody(context.request, SessionAgendaModePatchSchema);
-  return jsonResponse(await subsystem.set(sessionId, request.enabled).catch(refuse));
+  const { view, outcome } = await subsystem.set(sessionId, request.enabled).catch(refuse);
+  return jsonResponse({ view, ...outcome } satisfies SessionAgendaModePatchResult);
 }
 
 /** `noStore` because the answer is the live switch. */

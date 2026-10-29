@@ -5,6 +5,7 @@ import { agendaModePath, ProtocolNotifyGateway } from '../../../src/lib/notify/g
 import type { NotifyApiClient } from '../../../src/lib/notify/ports';
 import { composeNoticeRequest } from '../../../src/lib/notify/request';
 import { snapshot } from '../attention/fixtures';
+import { sessionView } from '../session/session-fixtures';
 import { SESSION } from './fixtures';
 
 interface Call {
@@ -66,11 +67,13 @@ describe('protocol notify gateway', () => {
     // Arrange
     const calls: Call[] = [];
     const mode = { enabled: true, restartRequired: true, note: 'Next launch.' };
-    const gateway = new ProtocolNotifyGateway(fakeClient(mode, calls));
+    const result = { view: sessionView({ agenda: true }), restartRequired: true, note: 'Next launch.' };
+    const reader = new ProtocolNotifyGateway(fakeClient(mode, calls));
+    const writer = new ProtocolNotifyGateway(fakeClient(result, calls));
 
     // Act
-    const read = await gateway.agendaMode(SESSION);
-    const patched = await gateway.setAgendaMode(SESSION, true);
+    const read = await reader.agendaMode(SESSION);
+    const patched = await writer.setAgendaMode(SESSION, true);
 
     // Assert
     should(read).deepEqual(mode);
