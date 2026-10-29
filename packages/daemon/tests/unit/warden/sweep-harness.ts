@@ -148,6 +148,8 @@ export function harness(
     readonly feedBoards?: Readonly<Record<string, AttentionBoardInput | undefined>>;
     /** The clock, for the tests that let time pass. Fixed at noon otherwise. */
     readonly now?: () => number;
+    /** Whether the liveness monitor has stopped seeing. The port is absent unless a test sets it. */
+    readonly monitorStalled?: () => boolean;
   } = {},
 ): Harness {
   let configDocument: unknown = options.config ?? defaultWardenConfig;
@@ -206,7 +208,10 @@ export function harness(
       board: async sessionId =>
         options.feedBoards === undefined ? { sessionId, parseErrors: 0, items: [] } : options.feedBoards[sessionId],
     },
-    fleet: { fleet: async () => fleet },
+    fleet: {
+      fleet: async () => fleet,
+      ...(options.monitorStalled === undefined ? {} : { monitorStalled: options.monitorStalled }),
+    },
     spawner: {
       spawn: async request => {
         spawns.push(request);

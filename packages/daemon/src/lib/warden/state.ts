@@ -175,6 +175,11 @@ const TriageDaySchema = z.object({
   jevSkips: z.number().int().min(0),
   jevActions: z.number().int().min(0).optional(),
   jevUsd: z.number().finite().min(0),
+  jevHour: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}T\d{2}$/)
+    .optional(),
+  jevHourUsd: z.number().finite().min(0).optional(),
 }) satisfies z.ZodType<unknown, WardenTriageDay>;
 
 const InvestigationRecordSchema = z.object({

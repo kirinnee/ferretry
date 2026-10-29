@@ -164,6 +164,20 @@ export const ACTIVE_MONITORED: readonly WardenSessionStatus[] = ['running', 'thi
 const WAITING_IDLE: readonly WardenSessionStatus[] = ['awaiting_question', 'awaiting_user', 'waiting'];
 
 /**
+ * The floor the sus classifiers measure silence from: the turn's start, or when this daemon began
+ * watching the ferret, whichever is LATER. Right after a restart the documents still carry the last
+ * transcript instant from before it, and the first look counts as the work indicator moving — judged
+ * from the turn start alone, every working ferret read as "thinking with no output for an hour" two
+ * minutes after the daemon came up (2026-10-29, 05:28).
+ */
+export function susAnchorMs(startedAt: string | undefined, observedSince: string | undefined): number | undefined {
+  const started = instantMs(startedAt);
+  const observed = instantMs(observedSince);
+  if (started === undefined) return observed;
+  return observed === undefined ? started : Math.max(started, observed);
+}
+
+/**
  * True when the view is a warden or descends from one, so it must never be
  * flagged — a warden escalating against its own offspring loops forever.
  *
@@ -366,7 +380,7 @@ export function detectAnomalies(
         susThinkingSeconds: options.susThinkingSeconds,
         susSubprocessSeconds: options.susSubprocessSeconds,
         tickSeconds: config.intervalSeconds,
-        anchorMs: instantMs(state.startedAt),
+        anchorMs: susAnchorMs(state.startedAt, view.observedSince),
         ...(state.turnState === undefined ? {} : { turnState: state.turnState }),
       })) {
         // ANCHOR EVERY SUS ANOMALY. `since` is what downstream consumers use to

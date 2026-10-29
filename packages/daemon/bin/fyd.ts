@@ -4045,6 +4045,8 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       fleet: {
         fleet: async () =>
           await Promise.all((await parts.sessions.list()).map(view => wardenFleetSession(parts, view, liveness))),
+        // A monitor that has stopped seeing is ONE fault of this daemon, never one per ferret.
+        monitorStalled: () => liveness.stalled(),
       },
       spawner: {
         spawn: async request => {
@@ -4309,6 +4311,9 @@ async function wardenFleetSession(
     // Watched when the liveness monitor has looked at it recently — see `WardenLivenessMonitor.watching`.
     hasLiveMonitor: liveness.watching(view.config.id),
     ...(liveness.frozenAt(view.config.id) === undefined ? {} : { frozenAt: liveness.frozenAt(view.config.id) }),
+    // Silence is measured from when this daemon began watching — and a ferret no tick has reached yet is
+    // being watched from now: a restart judges nothing on silence it did not see.
+    observedSince: liveness.observedSince(view.config.id) ?? new Date().toISOString(),
     ...(liveness.leftoverBrowserSince(view.config.id) === undefined
       ? {}
       : { leftoverBrowserSince: liveness.leftoverBrowserSince(view.config.id) }),

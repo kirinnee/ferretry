@@ -13,7 +13,7 @@
 
 import type { GrantsView, WardenStatusView } from '@ferretry/protocol';
 import { usd } from './warden-overview-model.ts';
-import { wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
+import { wardenInvestigationHead, wardenLoginProblem, wardenPacedUntil } from './warden-status-model.ts';
 
 export type AskWardenFocus = 'stuck' | 'failures' | 'recent';
 
@@ -72,6 +72,8 @@ export const askWardenBlocker = (status: WardenStatusView): string | null => {
   if (!status.config.enabled) return 'The Warden is off. Turn it on in Settings › Warden.';
   const login = wardenLoginProblem(status.login, status.failover?.accounts ?? []);
   if (login !== null) return `${login}. Choose one in Settings › Warden.`;
+  const paced = wardenPacedUntil(status, 'investigation');
+  if (paced !== undefined) return `This hour’s share of the investigation cap is spent. Try again at ${paced}.`;
   if (status.spend.capsHit.includes('investigation'))
     return `Today’s ${usd(status.spend.investigationCapUsd)} investigation cap is reached. Raise it in Settings › Warden.`;
   return null;

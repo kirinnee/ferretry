@@ -12,6 +12,9 @@ import {
   guardBackingOff,
   guardHealthAfter,
   investigationsInLastHour,
+  jevJudges,
+  jevUsdThisHour,
+  jevWithinBudget,
   newFlagCount,
   recordGuardDecision,
   redactTriageSnapshot,
@@ -247,23 +250,37 @@ describe('the guard’s health', () => {
 describe('counting a decision', () => {
   it('should count a real answer, a skip and its cost', () => {
     // Act
-    const actual = recordGuardDecision(TODAY, decision(), { kind: 'leave', confidence: 0.9 });
+    const actual = recordGuardDecision(TODAY, decision(), { kind: 'leave', confidence: 0.9 }, NOW);
 
     // Assert
-    should(actual).match({ day: TODAY.day, flags: 3, jevDecisions: 3, jevSkips: 2 });
+    should(actual).match({ day: TODAY.day, flags: 3, jevDecisions: 3, jevSkips: 2, jevHour: '2026-10-16T12' });
     should(actual.jevUsd).be.approximately(0.102, 1e-9);
+    should(actual.jevHourUsd).be.approximately(0.002, 1e-9);
+  });
+
+  it('should start this hour’s spend afresh when the stored hour is an earlier one', () => {
+    // Arrange
+    const lastHour = { ...TODAY, jevHour: '2026-10-16T11', jevHourUsd: 0.12 };
+
+    // Act
+    const actual = recordGuardDecision(lastHour, decision(), { kind: 'leave', confidence: 0.9 }, NOW);
+
+    // Assert
+    should(actual.jevHourUsd).be.approximately(0.002, 1e-9);
+    should(jevUsdThisHour(lastHour, NOW)).equal(0);
   });
 
   it('should not count a failure as a decision, nor an unpriced one as spend', () => {
     // Act
-    const actual = recordGuardDecision(TODAY, decision({ failure: { code: 'timeout' }, costUsd: undefined }), {
-      kind: 'escalate',
-      why: 'failed',
-      confidence: 0,
-    });
+    const actual = recordGuardDecision(
+      TODAY,
+      decision({ failure: { code: 'timeout' }, costUsd: undefined }),
+      { kind: 'escalate', why: 'failed', confidence: 0 },
+      NOW,
+    );
 
     // Assert
-    should(actual).deepEqual(TODAY);
+    should(actual).deepEqual({ ...TODAY, jevHour: '2026-10-16T12', jevHourUsd: 0 });
   });
 });
 
@@ -392,5 +409,118 @@ describe('the snapshot Jev is shown', () => {
 
     // Assert
     await should(act).be.rejectedWith('the vault is damaged');
+  });
+});
+
+describe('pacing the caps through the day', () => {
+  it('should stop calling Jev once a quarter of its day is spent this hour, and again next hour', () => {
+    // Arrange — $0.50 a day is $0.125 an hour.
+    const caps = { ...CAPS, jevUsdPerDay: 0.5 };
+    const spent = { ...TODAY, jevUsd: 0.2, jevHour: '2026-10-16T12', jevHourUsd: 0.125 };
+
+    // Act / Assert
+    should(jevWithinBudget(spent, caps, NOW)).be.false();
+    should(jevWithinBudget(spent, caps, NOW + 3_600_000)).be.true();
+    should(jevWithinBudget({ ...spent, jevHourUsd: 0.12 }, caps, NOW)).be.true();
+    should(jevWithinBudget({ ...spent, jevUsd: 0.5, jevHourUsd: 0 }, caps, NOW)).be.false();
+  });
+
+  it('should report a cap reached only for this hour as paced, back at the top of the next hour', () => {
+    // Arrange — two $0.30 investigations this hour against a $2 day ($0.50 an hour).
+    const caps = { ...CAPS, investigationUsdPerDay: 2, jevUsdPerDay: 0.5 };
+    const records = [
+      record({ id: 'a', costUsd: 0.3, startedAt: at(0) }),
+      record({ id: 'b', costUsd: 0.3, startedAt: at(0) }),
+    ];
+    const today = { ...TODAY, jevUsd: 0.2, jevHour: '2026-10-16T12', jevHourUsd: 0.13 };
+
+    // Act
+    const actual = wardenSpend({ caps, today, records, nowMs: NOW });
+
+    // Assert
+    should(actual.capsHit).deepEqual(['jev', 'investigation']);
+    should(actual.capsPaced).deepEqual(['jev', 'investigation']);
+    should(actual.pacedUntil).equal('2026-10-16T13:00:00.000Z');
+  });
+
+  it('should not call a cap reached for the whole day paced', () => {
+    // Arrange
+    const caps = { ...CAPS, investigationUsdPerDay: 0.5 };
+    const records = [record({ id: 'a', costUsd: 0.6 })];
+
+    // Act
+    const actual = wardenSpend({ caps, today: TODAY, records, nowMs: NOW });
+
+    // Assert
+    should(actual.capsHit).deepEqual(['investigation']);
+    should(actual.capsPaced).be.undefined();
+    should(actual.pacedUntil).be.undefined();
+  });
+
+  it('should gate an unpriced investigation this hour at the average one', () => {
+    // Arrange — one unpriced investigation at a $0.60 average is past the $0.50 hour.
+    const caps = { ...CAPS, investigationUsdPerDay: 2 };
+
+    // Act
+    const actual = wardenSpend({
+      caps,
+      today: TODAY,
+      records: [record({ startedAt: at(0) })],
+      average: { count: 1, totalUsd: 0.6 },
+      nowMs: NOW,
+    });
+
+    // Assert
+    should(actual.capsPaced).deepEqual(['investigation']);
+  });
+
+  it('should replay 2026-10-29: the burst that burnt both caps by 11:00 is held to a quarter per hour', () => {
+    // Arrange — 39 Jev calls at $0.005 in the 06:00 hour, and 4 investigations at ~$0.26 in the 01:00 hour.
+    const caps = { ...CAPS, jevUsdPerDay: 0.5, investigationUsdPerDay: 2 };
+    const base = Date.parse('2026-10-29T06:01:37.000Z');
+    let calls = 0;
+    let state = triageDayFor(undefined, base);
+    for (let flag = 0; flag < 39; flag += 1) {
+      const nowMs = base + flag * 10_000;
+      if (!jevWithinBudget(state, caps, nowMs)) continue;
+      calls += 1;
+      state = recordGuardDecision(
+        state,
+        decision({ costUsd: 0.005 }),
+        { kind: 'escalate', why: 'unsure', confidence: 0.5 },
+        nowMs,
+      );
+    }
+    const investigations = [0, 1, 2, 3].map(index =>
+      record({
+        id: `w${index}`,
+        costUsd: 0.26,
+        startedAt: new Date(Date.parse('2026-10-29T01:00:56.000Z') + index * 360_000).toISOString(),
+      }),
+    );
+
+    // Act
+    const spend = wardenSpend({
+      caps,
+      today: state,
+      records: investigations.slice(0, 2),
+      nowMs: Date.parse('2026-10-29T01:09:30.000Z'),
+    });
+
+    // Assert — 25 calls ($0.125) this hour and the rest wait; the third investigation waits for 02:00.
+    should(calls).equal(25);
+    should(state.jevUsd).be.approximately(0.125, 1e-9);
+    should(spend.capsPaced).deepEqual(['investigation']);
+    should(spend.pacedUntil).equal('2026-10-29T02:00:00.000Z');
+  });
+});
+
+describe('which flags Jev is asked about', () => {
+  it('should never ask Jev about a fact of the daemon it cannot see from the turn', () => {
+    // Act / Assert
+    should(jevJudges({ kind: 'dead_monitor' })).be.false();
+    should(jevJudges({ kind: 'owner_request' })).be.false();
+    should(jevJudges({ kind: 'sus_subprocess' })).be.true();
+    should(jevJudges({ kind: 'unattended_question' })).be.true();
   });
 });

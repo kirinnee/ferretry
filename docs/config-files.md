@@ -205,7 +205,14 @@ rewritten to hide it. A login is always spelled by its **runtime name** (`claude
 `caps.investigationUsdPerDay` (default $2) the investigations'; `caps.maxInvestigationsPerHour` (default 6)
 spaces investigations. A cap that is reached turns off **only its own layer** until midnight UTC — with the
 Jev cap hit, flags go straight to an investigation; with the investigation cap hit, Jev still clears what it
-can and the rest wait for you — and the Warden page says so. Jev is priced at
+can and the rest wait for you — and the Warden page says so.
+
+**Paced through the day.** No layer may spend more than **a quarter of its daily cap in one UTC hour**
+($0.125 of Jev's default $0.50, $0.50 of the investigations' $2), so one burst of flags cannot spend the
+day before most of it has happened. A layer that reaches its share is off until the top of the next hour —
+the status lists it in `spend.capsPaced` with `pacedUntil`, and the Warden page says _Jev paused until 07:00 UTC — new flags go to a full check_
+rather than _until midnight_. An investigation it holds back is queued, never dropped; a flag Jev is not
+asked about is passed on as it would be with the cap hit. Jev is priced at
 `guard.usdPerMillionInputTokens` (published prices disagree, so it is a setting). An investigation is
 priced from its own transcript once analytics has read it; until then it counts at the average priced
 investigation, for the cap only. The status's savings line — (Jev's leaves + the acts it did alone) × that
@@ -238,14 +245,21 @@ Warden's supervision of that ferret off for a while ([grants.md](grants.md)).
 **The liveness check.** Every 30 s the Warden looks at each working ferret — a digest of its screen and
 of its transcript tail, the work counters its harness paints, and which processes run under its pane — and
 keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and stuck-command
-rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been able to see
-for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
+rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret that **three on-time looks in a
+row** could not see is flagged `dead_monitor`. It is counted in looks, not minutes: a ferret started since the
+last tick has missed no look, and a tick the host starved (one that started or finished well late) or one
+blind to every ferret at once is the monitor's failure, not the ferrets' — when no tick has seen anything for
+five minutes (ten ticks) the sweep raises **one** `dead_monitor` for the whole daemon (`daemon:liveness-stalled`) instead
+of one per ferret. Jev is never asked about `dead_monitor`: it is a fact about the daemon that no transcript
+can confirm, so it goes straight to an investigation or to you. A ferret with no sign of life of any kind for its
 `nudgeAfterSeconds` (default 300) is nudged once — only while `mayActAlone.nudge` is on — and one with no
 transcript, counter or subprocess sign for its `killAfterSeconds` (default 900; read as "frozen", since the
 Warden never kills) after that is flagged **frozen**: a restart candidate that goes through the layers like
 any other flag. A ferret parked with `signal waiting`, an interactive ferret, or a tick that ran late on a
 starved host is never nudged or flagged. The ledger is kept in memory: a restarted daemon starts every
-clock again rather than judging silence it did not see.
+clock again rather than judging silence it did not see — the long-think and stuck-command rules measure
+silence from no earlier than the daemon's **first look** at the ferret, so a restart never flags a ferret on
+the last-output time its documents carried over from before it.
 
 **What counts as a running command.** Only a **tool command**: what the harness runs for the agent through
 a shell (`zsh -c …`, `bash -c …`), and everything under it. The harness's own **helpers** — `fy mcp serve`,
