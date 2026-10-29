@@ -544,7 +544,12 @@ export class SendUnconfirmed extends Error {
  * repaint: the same send may be tried again. Its own class so a caller can tell it from a refusal that
  * would refuse again.
  */
-export class SendScreenUnreadable extends SendRefused {}
+export class SendScreenUnreadable extends SendRefused {
+  constructor(message: string) {
+    super(message);
+    this.name = 'SendScreenUnreadable';
+  }
+}
 
 /** The session cannot take input at all: a quarantine, an unconfirmed kill, an unanswered question. */
 export class SendUnavailable extends SendRefused {

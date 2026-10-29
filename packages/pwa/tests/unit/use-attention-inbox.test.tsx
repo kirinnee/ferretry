@@ -177,6 +177,31 @@ describe('useAttentionInboxModel', () => {
     expect(reads().filter(entry => entry === 'studio/a')).toHaveLength(3);
   });
 
+  test('reads the board of a conversation whose only open item is in discussion, and deals it apart', async () => {
+    const talking = {
+      ...item('A1', 1),
+      waitingOn: 'ferret',
+      askedAt: at(2),
+      waitingFor: 'discussion',
+    } as AttentionItem;
+    const { client, calls } = fakeClient(new Map([['studio/a', board('a', [talking])]]));
+    const { timers } = manualTimers();
+    let inbox: AttentionInbox | null = null;
+    const machines: readonly AttentionInboxMachine[] = [
+      { connection: studio, name: 'Studio', sessions: [waiting('a', { ...summary(1, 1), discussing: 1 })] },
+    ];
+    view = await mount(
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+    );
+    await settle();
+
+    const read = inbox as unknown as AttentionInbox;
+    expect(calls.filter(call => call.method === 'revalidate').map(call => call.sessionId)).toEqual(['a']);
+    expect(read.total).toBe(0);
+    expect(read.cards).toEqual([]);
+    expect(read.discussing.map(card => `${card.daemonId}/${card.item.id}`)).toEqual(['studio/A1']);
+  });
+
   test('sends a held answer to the right machine, by kind, when the window closes', async () => {
     const boards = new Map([
       ['studio/a', board('a', [item('A1', 1, { kind: 'permission' }), item('A2', 2), item('A3', 3), item('A4', 4)])],

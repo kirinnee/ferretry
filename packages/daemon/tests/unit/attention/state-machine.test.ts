@@ -6,6 +6,7 @@ import type {
   AttentionItem,
   AttentionResponse,
 } from '@ferretry/protocol';
+import { MAX_ATTENTION_PER_SESSION } from '@ferretry/protocol';
 import should from 'should';
 import {
   type AttentionActor,
@@ -1477,6 +1478,27 @@ describe('Attention state machine undelivered', () => {
     should(succeeded(undelivered(discussing.ledger, 2)).changed).be.false();
     should(succeeded(undelivered(updated.ledger, 1)).changed).be.false();
     should(succeeded(undelivered(raised().ledger)).changed).be.false();
+  });
+
+  it('should keep an undelivered answer closed, and say so, when the board has no room to reopen it', () => {
+    // Arrange — one answered item, then the board filled to its limit with open ones.
+    let ledger = succeeded(
+      applyAttentionCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    ).ledger;
+    for (let index = 0; index < MAX_ATTENTION_PER_SESSION; index += 1)
+      ledger = succeeded(
+        applyAttentionCommand(
+          ledger,
+          raiseCommand(DAEMON, { subject: `Full ${index}?`, sourceRef: `full-${index}` }, SECOND),
+        ),
+      ).ledger;
+
+    // Act
+    const refused = failed(undelivered(ledger));
+
+    // Assert
+    should(refused.error.code).equal('full');
+    should(refused.error.message).match(/A1 cannot reopen/);
   });
 
   it('should be the daemon’s word alone, and only about an item a ferret raised', () => {
