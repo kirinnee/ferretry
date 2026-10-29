@@ -83,6 +83,9 @@ class RecordingLauncher implements SessionLifecycleLauncher {
   readyError?: unknown;
   deliverError?: unknown;
   stopError?: unknown;
+  snapshotError?: unknown;
+  /** Set when `deliver` must return without ever running the pre-write admission callback. */
+  skipBeforeWrite = false;
   /** Set when a launch must make the pane appear, as a real tmux launch does. */
   livenessFromLaunch = false;
   /** Set when a *failing* launch still leaves a pane behind — the case retrying must not fight. */
@@ -124,7 +127,7 @@ class RecordingLauncher implements SessionLifecycleLauncher {
     instruction: string,
     beforeWrite?: () => Promise<void>,
   ): Promise<void> {
-    if (beforeWrite !== undefined) {
+    if (beforeWrite !== undefined && !this.skipBeforeWrite) {
       this.order.push('beforeWrite');
       await beforeWrite();
     }
@@ -134,6 +137,7 @@ class RecordingLauncher implements SessionLifecycleLauncher {
 
   async snapshot(): Promise<void> {
     this.record('snapshot');
+    if (this.snapshotError) throw this.snapshotError;
   }
 
   async stop(): Promise<void> {
@@ -1197,5 +1201,89 @@ describe('SessionLifecycleService conversation leases', () => {
 
     // Assert
     should(stopped.state.status).equal('stopped');
+  });
+});
+
+describe('SessionLifecycleService first-turn standing and failure evidence', () => {
+  it('should refuse to relaunch a delivered first turn whose terminal is gone, and leave the record alone', async () => {
+    // Arrange
+    const { effects, launcher, repository, subject } = harness();
+    await subject.create(input());
+    effects.standing = 'settled';
+    launcher.live = false;
+
+    // Act + Assert — launching again would repeat startup, so the operator is told to revive instead.
+    await should(subject.start(ID)).be.rejectedWith(/already delivered its first turn but its terminal is gone/u);
+    should(repository.current().state.status).equal('created');
+    should(launcher.launches()).equal(0);
+    should(repository.events.map(entry => entry.type)).deepEqual(['session.created']);
+  });
+
+  it('should finish a settled first turn on a record a crash left already starting', async () => {
+    // Arrange — the record is `starting` already, so resuming must go straight to `running` rather than
+    // attempting a `starting` -> `starting` transition it can never make.
+    const { effects, launcher, repository, subject } = harness();
+    const created = await subject.create(input());
+    await repository.write(
+      { ...created, state: { ...created.state, status: 'starting' } },
+      { type: 'session.starting', data: {} },
+    );
+    launcher.live = true;
+    effects.standing = 'settled';
+
+    // Act
+    const actual = await subject.start(ID);
+
+    // Assert
+    should(actual.state.status).equal('running');
+    should(launcher.launches()).equal(0);
+    should(repository.events.map(entry => entry.type)).deepEqual([
+      'session.created',
+      'session.starting',
+      'session.running',
+    ]);
+  });
+
+  it('should refuse to type a first turn whose effect id another assignment already holds', async () => {
+    // Arrange — inspection saw it unclaimed; the compare-and-set at the pre-write boundary lost to a
+    // different assignment.
+    const { effects, launcher, repository, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    effects.scriptedBegin = 'conflict';
+
+    // Act + Assert
+    await should(subject.createAndStart(input())).be.rejectedWith(
+      `session ${ID}'s first-turn effect id is held for a different assignment`,
+    );
+    should(repository.current().state.status).equal('failed');
+    should(launcher.calls.filter(call => call.startsWith('deliver:'))).deepEqual([]);
+    should(effects.calls).not.containEql('effect:settle:turn-1');
+  });
+
+  it('should fail a launch whose deliver returned without ever admitting the pane write', async () => {
+    // Arrange — a launcher that skips the pre-write callback would let an assignment be typed with no
+    // durable record that it was.
+    const { effects, launcher, repository, subject } = harness();
+    launcher.livenessFromLaunch = true;
+    launcher.skipBeforeWrite = true;
+
+    // Act + Assert
+    await should(subject.createAndStart(input())).be.rejectedWith(
+      `session ${ID}'s launcher delivered a first turn without durably admitting the pane write`,
+    );
+    should(repository.current().state.status).equal('failed');
+    should(effects.calls).not.containEql('effect:settle:turn-1');
+  });
+
+  it('should still record the failure, and report the original error, when the frame capture fails', async () => {
+    // Arrange
+    const { launcher, repository, subject } = harness({}, { launchAttempts: 1 });
+    launcher.launchErrors = [new Error('the agent binary is missing')];
+    launcher.snapshotError = new Error('the pane is already gone');
+
+    // Act + Assert — the missing frame is the optional artifact, so the real cause is what surfaces.
+    await should(subject.createAndStart(input())).be.rejectedWith('the agent binary is missing');
+    should(repository.current().state).containDeep({ status: 'failed', reason: 'the agent binary is missing' });
+    should(launcher.calls).containEql('snapshot');
   });
 });

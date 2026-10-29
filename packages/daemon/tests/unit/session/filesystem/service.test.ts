@@ -607,6 +607,24 @@ describe('SessionFilesystem.readFile from the working tree', () => {
     should(error.message).match(/changed while its secrets policy/);
   });
 
+  it('should refuse a file that cannot be walked again while its policy was being checked', async () => {
+    // Arrange — the re-walk binding Git's verdict to the descriptor fails outright rather than
+    // returning a different object: the path was removed between the two walks.
+    const { filesystem } = viewer({
+      tree: treeOf(['a.ts', textFile('hello')]),
+      onOpen: (rel, attempt, staged) => {
+        if (rel === 'a.ts' && attempt === 2) staged.delete('a.ts');
+      },
+    });
+
+    // Act
+    const error = await refusalFrom(async () => await filesystem.readFile(CWD, 'a.ts'));
+
+    // Assert — an unanswerable re-walk fails closed, exactly like one that found a different inode.
+    should(error.code).eql('not_found');
+    should(error.message).match(/changed while its secrets policy/);
+  });
+
   it('should run the validation barrier after the walk and before the bytes are read', async () => {
     // Arrange
     const order: string[] = [];

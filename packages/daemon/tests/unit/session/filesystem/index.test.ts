@@ -454,6 +454,59 @@ describe('the session file index outside a Git worktree', () => {
     should(countFor(index.skipped, 'unreadable')).eql(1);
   });
 
+  it('should isolate a directory that opens but cannot be enumerated', async () => {
+    // Arrange — the open succeeds and the listing itself fails, which is a different failure from a
+    // directory that cannot be opened at all and must cost only its own subtree.
+    const { filesystem, pinner } = walked({
+      tree: treeOf(
+        [
+          '',
+          directory([
+            { name: 'broken', type: 'dir' },
+            { name: 'top.md', type: 'file' },
+          ]),
+        ],
+        ['broken', { type: 'dir', entries: [], listError: new Error('the listing failed') }],
+      ),
+    });
+
+    // Act
+    const index = await filesystem.index(CWD);
+
+    // Assert
+    should(index.files.map(file => file.path)).eql(['top.md']);
+    should(index.coverage).eql('partial');
+    should(countFor(index.skipped, 'unreadable')).eql(1);
+    should(pinner.lastRoot.targets.every(target => target.closed)).be.true();
+  });
+
+  it('should count secret-named files and directories as denied rather than serving or entering them', async () => {
+    // Arrange
+    const { filesystem, pinner } = walked({
+      tree: treeOf(
+        [
+          '',
+          directory([
+            { name: '.env', type: 'file' },
+            { name: '.env.d', type: 'dir' },
+            { name: 'deploy.pem', type: 'file' },
+            { name: 'top.md', type: 'file' },
+          ]),
+        ],
+        ['.env.d', directory([{ name: 'inner.md', type: 'file' }])],
+      ),
+    });
+
+    // Act
+    const index = await filesystem.index(CWD);
+
+    // Assert — the denied directory is never opened, so nothing beneath it can surface.
+    should(index.files.map(file => file.path)).eql(['top.md']);
+    should(pinner.lastRoot.opens).eql(['']);
+    should(countFor(index.skipped, 'denied')).eql(3);
+    should(index.coverage).eql('complete');
+  });
+
   it('should never enqueue a denied directory, at any depth', async () => {
     // Arrange
     const { filesystem, pinner } = walked({
