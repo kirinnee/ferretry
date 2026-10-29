@@ -316,8 +316,8 @@ describe('wardenStatusLine', () => {
 
     // Assert
     expect(warnings).toEqual([
-      'This hour’s share of the LLM cap is spent — flags wait until 07:00 UTC',
-      'This hour’s share of the Jev cap is spent — every flag goes to an investigation until 07:00 UTC',
+      'LLM paced to 07:00 UTC — flags wait',
+      'Jev paced to 07:00 UTC — every flag goes to an investigation',
     ]);
   });
 

@@ -151,14 +151,13 @@ const passedTo = (status: WardenStatusView): string =>
 const guardWarning = (status: WardenStatusView, now: number): string | undefined => {
   const { jev, llm } = status.triage;
   const llmPaced = wardenPacedUntil(status, 'investigation');
-  if (llm.reason === 'investigation_cap' && llmPaced !== undefined)
-    return `This hour’s share of the LLM cap is spent — flags wait until ${llmPaced}`;
+  if (llm.reason === 'investigation_cap' && llmPaced !== undefined) return `LLM paced to ${llmPaced} — flags wait`;
   if (llm.reason === 'investigation_cap') return 'LLM cap hit — flags wait for you until midnight UTC';
   if (llm.reason === 'no_login')
     return `${wardenLoginProblem(status.login, status.failover?.accounts ?? []) ?? 'No investigation login'} — investigations are off until you choose one in Settings › Warden`;
   const jevPaced = wardenPacedUntil(status, 'jev');
   if (jev.reason === 'jev_cap' && jevPaced !== undefined)
-    return `This hour’s share of the Jev cap is spent — every flag ${passedTo(status)} until ${jevPaced}`;
+    return `Jev paced to ${jevPaced} — every flag ${passedTo(status)}`;
   if (jev.reason === 'jev_cap') return `Jev cap hit — every flag ${passedTo(status)} until midnight UTC`;
   if (!jev.configured) return undefined;
   if (status.triage.guardFailure?.code === 'not_set') return `No Jev key — every flag ${passedTo(status)}`;
