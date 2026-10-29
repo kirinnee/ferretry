@@ -58,17 +58,16 @@ const chipsOf = (item: AttentionItem, owner: boolean): readonly Chip[] => {
     .sort((a, b) => ORDER[a.direction] - ORDER[b.direction])
     .flatMap(answer => {
       const action = answerAction(answer, '');
-      return action === null
-        ? []
-        : [
-            {
-              key: answer.direction,
-              label: answer.label,
-              description: answer.description,
-              recommended: sameLabel(answer.label, model.recommended),
-              action,
-            },
-          ];
+      if (action === null) return [];
+      return [
+        {
+          key: answer.direction,
+          label: answer.label,
+          description: answer.description,
+          recommended: sameLabel(answer.label, model.recommended),
+          action,
+        },
+      ];
     });
   const fromExtras = model.extras.map((option: AttentionAskOption) => ({
     key: `option:${option.label}`,

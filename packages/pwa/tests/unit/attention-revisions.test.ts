@@ -132,6 +132,8 @@ describe('describePrevious', () => {
     expect(describePrevious('terms', [{ term: 'a', meaning: 'b' }])).toBe('1 term');
     expect(describePrevious('links', [{ target: 'x' }, { target: 'y' }])).toBe('2 entries');
     expect(describePrevious('steps', ['one', 'two'])).toBe('- one\n- two');
+    expect(describePrevious('ask', { decision: 'Postgres' })).toBe('Postgres');
+    expect(describePrevious('ask', { other: 1 })).toBe('Changed');
   });
 });
 

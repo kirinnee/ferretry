@@ -128,3 +128,17 @@ describe('the agenda row', () => {
     await view.unmount();
   });
 });
+
+describe('the agenda row’s chips', () => {
+  it('leaves out an answer that cannot be sent yet (a clarify has no text)', async () => {
+    const view = await row({ ask: { kind: 'answer-review' } });
+    expect(chips(view)).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('draws at most three chips even for an item with more options', async () => {
+    const view = await row({ ask: choices('One', 'Two', 'Three', 'Four', 'Five') });
+    expect(chips(view)).toHaveLength(3);
+    await view.unmount();
+  });
+});
