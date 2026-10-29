@@ -8,6 +8,7 @@ import type { NotifyApiClient } from '../../../src/lib/notify/ports';
 import { Command } from 'commander';
 import { snapshot } from '../../unit/attention/fixtures';
 import { CapturingOutput, SESSION } from '../../unit/notify/fixtures';
+import { sessionView } from '../../unit/session/session-fixtures';
 
 const servers: Array<ReturnType<typeof Bun.serve>> = [];
 afterEach(() => {
@@ -87,7 +88,11 @@ describe('fy notify against a daemon', () => {
   it('should switch agenda mode over PATCH and print the daemon’s note', async () => {
     // Arrange
     const { seen, url } = daemon(() =>
-      Response.json({ enabled: true, restartRequired: true, note: 'Takes effect at its next launch.' }),
+      Response.json({
+        view: sessionView({ agenda: true }),
+        restartRequired: true,
+        note: 'Takes effect at its next launch.',
+      }),
     );
 
     // Act
