@@ -11,6 +11,7 @@ export * from './analytics-pricing.ts';
 export * from './analytics-pricing-api.ts';
 export * from './analytics-query.ts';
 export * from './attention.ts';
+export * from './attention-card.ts';
 export * from './audit.ts';
 export * from './auto-resume.ts';
 export * from './browser.ts';

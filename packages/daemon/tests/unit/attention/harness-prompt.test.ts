@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import {
-  ATTENTION_SUMMARY_TARGET_LENGTH,
+  ATTENTION_ASK_TARGET_LENGTH,
   AttentionItemSchema,
   type PendingQuestion,
   type StructuredQuestionAnswer,
@@ -122,7 +122,7 @@ describe('harnessWait', () => {
       kind: 'multiple-choice',
       options: [{ label: 'eu', description: 'Europe, the smaller fleet' }, { label: 'us' }],
     });
-    should(wait?.request.subject.length).be.belowOrEqual(ATTENTION_SUMMARY_TARGET_LENGTH);
+    should(wait?.request.subject.length).be.belowOrEqual(ATTENTION_ASK_TARGET_LENGTH);
     should(wait?.request.subject.endsWith('…')).be.true();
     should(wait?.request.waitingSince).equal('2026-10-28T09:59:00.000Z');
   });
@@ -166,7 +166,7 @@ describe('harnessWait', () => {
     const wait = harnessWait(
       running({ pendingQuestion: { toolUseId: 't', questions: [{ question: 'x'.repeat(300) }] } }),
     );
-    should(wait?.request.subject).equal(`${'x'.repeat(ATTENTION_SUMMARY_TARGET_LENGTH - 1)}…`);
+    should(wait?.request.subject).equal(`${'x'.repeat(ATTENTION_ASK_TARGET_LENGTH - 1)}…`);
   });
 
   it('should raise a console prompt for a turn that needs input without a question form', () => {

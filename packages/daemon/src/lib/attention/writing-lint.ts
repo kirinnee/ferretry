@@ -1,4 +1,4 @@
-import { ATTENTION_SUMMARY_TARGET_LENGTH, type AttentionBrief } from '@ferretry/protocol';
+import { ATTENTION_ASK_TARGET_LENGTH, type AttentionBrief } from '@ferretry/protocol';
 
 /** What an item says, as the lint reads it: the summary, the context and the structured brief. */
 export interface AttentionWriting extends AttentionBrief {
@@ -92,9 +92,9 @@ export function lintAttentionWriting(item: AttentionWriting): string[] {
   const defined = definedTerms(item);
   const summary = item.subject.trim();
 
-  if (summary.length > ATTENTION_SUMMARY_TARGET_LENGTH) {
+  if (summary.length > ATTENTION_ASK_TARGET_LENGTH) {
     warnings.push(
-      `summary is ${summary.length} characters; keep it under ${ATTENTION_SUMMARY_TARGET_LENGTH}: one plain sentence, answer first, detail in context`,
+      `summary is ${summary.length} characters; keep it under ${ATTENTION_ASK_TARGET_LENGTH}: one plain sentence, answer first, detail in context`,
     );
   }
 

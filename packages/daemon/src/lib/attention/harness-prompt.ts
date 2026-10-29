@@ -1,5 +1,5 @@
 import {
-  ATTENTION_SUMMARY_TARGET_LENGTH,
+  ATTENTION_ASK_TARGET_LENGTH,
   type AttentionAsk,
   AttentionAskSchema,
   type AttentionItem,
@@ -120,9 +120,7 @@ export function harnessQuestionRequest(pending: PendingQuestion, failed = false)
   return {
     source: 'question',
     sourceRef: pending.toolUseId,
-    subject: failed
-      ? 'Your answer did not reach the ferret. Answer again.'
-      : clip(first, ATTENTION_SUMMARY_TARGET_LENGTH),
+    subject: failed ? 'Your answer did not reach the ferret. Answer again.' : clip(first, ATTENTION_ASK_TARGET_LENGTH),
     why: 'The ferret stopped at a question form and cannot go on until it is answered.',
     context: toBullets([
       ...(failed ? ['Your last answer did not go through. The form is still open.'] : []),

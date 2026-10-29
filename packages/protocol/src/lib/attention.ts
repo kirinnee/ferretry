@@ -14,11 +14,19 @@ export const MAX_NOTIFICATION_TITLE_LENGTH = 120;
 export const MAX_NOTIFICATION_BODY_LENGTH = 500;
 export const MAX_ATTENTION_WARNINGS = 12;
 export const MAX_ATTENTION_WARNING_LENGTH = 400;
-/** What an Attention push says, at most: a lock screen shows the title and about a line or two. */
+/**
+ * What an Attention push says, at most: a lock screen shows the title and about a line or two. The
+ * title is the card's own, so it is also how long a card's title should be; past it the lint advises.
+ */
 export const ATTENTION_PUSH_TITLE_LENGTH = 40;
-export const ATTENTION_PUSH_BODY_LENGTH = 110;
-/** The most a summary should say: one plain sentence, answer first. */
-export const ATTENTION_SUMMARY_TARGET_LENGTH = 90;
+/** The push body is the card's ask, so it holds as much as an ask should say (`ATTENTION_ASK_TARGET_LENGTH`). */
+export const ATTENTION_PUSH_BODY_LENGTH = 120;
+/** The longest title an item may carry at all; past the target it is advice, past this a refusal. */
+export const MAX_ATTENTION_TITLE_LENGTH = 60;
+/** The most a card's ASK should say: the one-line question or action, which is the push's text. */
+export const ATTENTION_ASK_TARGET_LENGTH = 120;
+/** The most answers a card offers: one per swipe direction, left, up and right. */
+export const MAX_ATTENTION_CARD_ANSWERS = 3;
 
 const singleLine = (maximum: number) =>
   z
@@ -58,6 +66,117 @@ export const AttentionAskSchema = z.union([
   z.strictObject({ kind: z.literal('task') }),
 ]);
 export type AttentionAsk = z.infer<typeof AttentionAskSchema>;
+
+/**
+ * WHAT KIND OF CARD AN ITEM IS, as the owner sees it — the words a ferret picks (`--kind`) and the
+ * defaults each one answers with (`attention-card.ts`). It sits beside the ask rather than replacing
+ * it, so every daemon and app that reads only the ask still answers the item correctly:
+ *
+ * - `task`: do something, then say Done (the `task` ask).
+ * - `yesno`: a yes-or-no decision (a `multiple-choice` ask of exactly Yes and No).
+ * - `permission`: allow or deny an action (the `permission` ask).
+ * - `choice`: pick one of two or three options (a `multiple-choice` ask).
+ * - `review`: look at something and say whether it is good (the `answer-review` ask).
+ * - `info`: something the owner should know, acknowledged with Got it (no ask).
+ * - `reply`: a question only words answer (the `open-question` ask).
+ */
+export const AttentionKindSchema = z.enum(['task', 'yesno', 'permission', 'choice', 'review', 'info', 'reply']);
+export type AttentionKind = z.infer<typeof AttentionKindSchema>;
+
+/** The way a card is swiped to give one of its answers. Down is never one: the card scrolls that way. */
+export const AttentionDirectionSchema = z.enum(['left', 'up', 'right']);
+export type AttentionDirection = z.infer<typeof AttentionDirectionSchema>;
+
+/**
+ * What giving an answer DOES, as the daemon is asked to do it:
+ *
+ * - `choose`: answer a `multiple-choice` ask with the option of the same label.
+ * - `approve` / `reject`: answer a `permission` ask.
+ * - `good` / `clarify`: answer an `answer-review` ask; `clarify` needs the reply text.
+ * - `done`: resolve the item; `needs-info`: ask the ferret for more and keep it open; `dismiss`: close
+ *   it unanswered. These three fit any card.
+ */
+export const AttentionAnswerEffectSchema = z.enum([
+  'choose',
+  'approve',
+  'reject',
+  'good',
+  'clarify',
+  'done',
+  'needs-info',
+  'dismiss',
+]);
+export type AttentionAnswerEffect = z.infer<typeof AttentionAnswerEffectSchema>;
+
+/**
+ * One answer on a card, bound to the swipe that gives it. Its label is what the button and the swipe
+ * stamp say; for `choose` it IS the option's label, so the button and the recorded answer cannot drift.
+ */
+export const AttentionCardAnswerSchema = z.strictObject({
+  direction: AttentionDirectionSchema,
+  label: singleLine(MAX_ATTENTION_ASK_OPTION_LENGTH),
+  does: AttentionAnswerEffectSchema,
+  description: singleLine(MAX_ATTENTION_ASK_OPTION_DETAIL_LENGTH).optional(),
+});
+export type AttentionCardAnswer = z.infer<typeof AttentionCardAnswerSchema>;
+
+/** The effects each ask may be answered with, beyond the `done`, `needs-info` and `dismiss` every card takes. */
+const ASK_EFFECTS: Readonly<Record<AttentionAsk['kind'] | 'none', readonly AttentionAnswerEffect[]>> = {
+  permission: ['approve', 'reject'],
+  'multiple-choice': ['choose'],
+  'answer-review': ['good', 'clarify'],
+  'open-question': [],
+  task: [],
+  none: [],
+};
+const ANY_CARD_EFFECTS: readonly AttentionAnswerEffect[] = ['done', 'needs-info', 'dismiss'];
+
+/**
+ * Everything wrong with a card's answers against its ask, as `[path, message]` pairs — empty when they
+ * fit: at most three, one per direction, each effect one its ask takes, and every `choose` naming one
+ * of the ask's options. The schemas and the CLI both read it, so one rule refuses in both places.
+ */
+export function attentionAnswerProblems(
+  answers: readonly AttentionCardAnswer[],
+  ask: AttentionAsk | undefined,
+): readonly (readonly [string, string])[] {
+  const problems: (readonly [string, string])[] = [];
+  if (answers.length > MAX_ATTENTION_CARD_ANSWERS) {
+    problems.push([
+      'answers',
+      `a card offers at most ${MAX_ATTENTION_CARD_ANSWERS} answers (left, up, right); split it into several items, or let the reply carry the rest`,
+    ]);
+  }
+  const directions = answers.map(answer => answer.direction);
+  if (new Set(directions).size !== directions.length) {
+    problems.push(['answers', 'each answer needs its own direction: left, up or right, once each']);
+  }
+  const labels = answers.map(answer => answer.label.trim().toLowerCase());
+  if (new Set(labels).size !== labels.length) problems.push(['answers', 'answer labels must be unique']);
+  const allowed = new Set([...ASK_EFFECTS[ask?.kind ?? 'none'], ...ANY_CARD_EFFECTS]);
+  const options = ask?.kind === 'multiple-choice' ? ask.options.map(option => option.label.trim()) : [];
+  answers.forEach((answer, index) => {
+    if (!allowed.has(answer.does)) {
+      problems.push([
+        `answers.${index}.does`,
+        `"${answer.does}" does not answer a ${ask?.kind ?? 'card with no ask'}; use ${[...allowed].join(', ')}`,
+      ]);
+    } else if (answer.does === 'choose' && !options.includes(answer.label.trim())) {
+      problems.push([`answers.${index}.label`, 'a choose answer must name one of the ask options']);
+    }
+  });
+  return problems;
+}
+
+/** The card's own fields: what it is about, what kind it is, and its answers by direction. */
+export const AttentionCardShape = {
+  /** What the item is about, in a few plain words: the card's heading and the push's title. */
+  title: singleLine(MAX_ATTENTION_TITLE_LENGTH).optional(),
+  /** What kind of card it is; derived from the ask when absent (`attentionCardKind`). */
+  kind: AttentionKindSchema.optional(),
+  /** Up to three answers, one per direction; the kind's defaults when absent (`attentionCardAnswers`). */
+  answers: z.array(AttentionCardAnswerSchema).min(1).max(MAX_ATTENTION_CARD_ANSWERS).optional(),
+};
 
 const AnswerReviewResponseSchema = z.discriminatedUnion('verdict', [
   z.strictObject({ kind: z.literal('answer-review'), verdict: z.literal('good') }),
@@ -257,6 +376,7 @@ const AttentionItemBaseShape = {
   waitingSince: InstantSchema,
   howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH),
   ask: AttentionAskSchema.optional(),
+  ...AttentionCardShape,
   ...AttentionBriefShape,
   /** The indices of the steps the owner has ticked: sorted, unique, each below `steps.length`; absent when none. */
   stepsDone: z.array(NonNegativeIntegerSchema).min(1).max(MAX_ATTENTION_STEPS).optional(),
@@ -292,6 +412,9 @@ export const AttentionItemSchema = z
     }),
   ])
   .superRefine((value, context) => {
+    for (const [path, message] of attentionAnswerProblems(value.answers ?? [], value.ask)) {
+      context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
       context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised attention' });
     }
@@ -416,6 +539,7 @@ export type AttentionSnapshot = z.infer<typeof AttentionSnapshotSchema>;
 
 const AddAttentionRequestSchema = z.strictObject({
   action: z.literal('add'),
+  ...AttentionCardShape,
   source: z.literal('agent-raised').default('agent-raised'),
   sourceRef: z.string().max(MAX_ATTENTION_SOURCE_REF_LENGTH).nullable().default(null),
   subject: singleLine(MAX_ATTENTION_SUBJECT_LENGTH),
@@ -426,41 +550,49 @@ const AddAttentionRequestSchema = z.strictObject({
   ...AttentionBriefShape,
 });
 
-export const AttentionActionRequestSchema = z.discriminatedUnion('action', [
-  AddAttentionRequestSchema,
-  /** Reword an open item in place: only the writing, never its ask or who raised it. */
-  z.strictObject({
-    action: z.literal('edit'),
-    id: AttentionIdSchema,
-    subject: singleLine(MAX_ATTENTION_SUBJECT_LENGTH).optional(),
-    context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
-    ...AttentionBriefShape,
-  }),
-  z.strictObject({
-    action: z.literal('resolve'),
-    id: AttentionIdSchema,
-    note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
-    response: AttentionResponseSchema.optional(),
-  }),
-  /** Tick or untick one step of an open item: never resolves it, never pushes, never messages the ferret. */
-  z.strictObject({
-    action: z.literal('progress'),
-    id: AttentionIdSchema,
-    step: NonNegativeIntegerSchema,
-    done: z.boolean(),
-  }),
-  /** The owner asks the raising ferret for more information: the item stays open, marked waiting on the ferret. */
-  z.strictObject({
-    action: z.literal('needs-info'),
-    id: AttentionIdSchema,
-    note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
-  }),
-  z.strictObject({
-    action: z.literal('dismiss'),
-    id: AttentionIdSchema,
-    note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
-  }),
-]);
+export const AttentionActionRequestSchema = z
+  .discriminatedUnion('action', [
+    AddAttentionRequestSchema,
+    /** Reword an open item in place: only the writing, never its ask or who raised it. */
+    z.strictObject({
+      action: z.literal('edit'),
+      id: AttentionIdSchema,
+      subject: singleLine(MAX_ATTENTION_SUBJECT_LENGTH).optional(),
+      title: AttentionCardShape.title,
+      context: z.preprocess(asBullets, z.string().max(MAX_ATTENTION_DETAIL_LENGTH)).nullable().optional(),
+      ...AttentionBriefShape,
+    }),
+    z.strictObject({
+      action: z.literal('resolve'),
+      id: AttentionIdSchema,
+      note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+      response: AttentionResponseSchema.optional(),
+    }),
+    /** Tick or untick one step of an open item: never resolves it, never pushes, never messages the ferret. */
+    z.strictObject({
+      action: z.literal('progress'),
+      id: AttentionIdSchema,
+      step: NonNegativeIntegerSchema,
+      done: z.boolean(),
+    }),
+    /** The owner asks the raising ferret for more information: the item stays open, marked waiting on the ferret. */
+    z.strictObject({
+      action: z.literal('needs-info'),
+      id: AttentionIdSchema,
+      note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    }),
+    z.strictObject({
+      action: z.literal('dismiss'),
+      id: AttentionIdSchema,
+      note: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    }),
+  ])
+  .superRefine((value, context) => {
+    if (value.action !== 'add') return;
+    for (const [path, message] of attentionAnswerProblems(value.answers ?? [], value.ask)) {
+      context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
+  });
 export type AttentionActionRequest = z.infer<typeof AttentionActionRequestSchema>;
 
 export const DirectNotificationRequestSchema = z.strictObject({
