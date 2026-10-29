@@ -2366,6 +2366,41 @@ describe('AppShell', () => {
     }
   });
 
+  it('reads the ferret’s last messages for the phone deck through the machine the item came from', async () => {
+    const restore = patchGlobal(window, 'innerWidth', 390);
+    const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
+      sessions: ['shared'],
+      listedAttention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' },
+      sessionState: { attention: { open: 1, first: 'A3', ask: 'permission', latestAt: '2026-07-31T11:30:00.000Z' } },
+      attention: sessionId => attentionSnapshot(sessionId, [externalAttentionItem]),
+      messages: () => [
+        { role: 'user', text: 'Can you rotate the key?' },
+        { role: 'assistant', text: 'Rotated; waiting on your approval.' },
+      ],
+    });
+    try {
+      for (let turn = 0; turn < 6; turn += 1) await settle();
+      const quick = must(view.container.querySelector<HTMLButtonElement>('[data-attention-quick]'), 'Answer quickly');
+      await interact(() => quick.click());
+      await settle();
+      const toggle = must(
+        view.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'),
+        'the last-messages fold',
+      );
+      await interact(() => toggle.click());
+      for (let turn = 0; turn < 4; turn += 1) await settle();
+      const shown = Array.from(
+        view.container.querySelectorAll('[data-attention-recent-message]'),
+        node => node.textContent ?? '',
+      ).join('\n');
+      expect(shown).toContain('Rotated; waiting on your approval.');
+      expect(shown).not.toContain('Can you rotate the key?');
+    } finally {
+      await view.unmount();
+      restore();
+    }
+  });
+
   it('publishes a lifecycle result and immediately refreshes its daemon-scoped evidence', async () => {
     const { reads, transcriptReads, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
     try {

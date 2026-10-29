@@ -1935,17 +1935,6 @@ function AttentionRoute({ connection }: DaemonPageProps) {
       onClearFrom={() => navigate(daemonAttentionPath(connection.daemonId))}
       onNavigate={navigate}
       phone={phone}
-      onProgress={async (card, step, done) => {
-        const target = inbox.connectionFor(card.daemonId);
-        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
-        await store.attention.progress(
-          target,
-          daemonSessionScope(target, card.view.config.id),
-          card.item.id,
-          step,
-          done,
-        );
-      }}
       readRecent={async card => {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
