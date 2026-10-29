@@ -1,4 +1,5 @@
-import { CONVERSATION_NAME_MAX, type Harness } from '@ferretry/protocol';
+import { CONVERSATION_NAME_MAX } from '@ferretry/protocol/conversation-import';
+import type { Harness } from '@ferretry/protocol/session-base';
 import { truncateText } from './conversation-text.ts';
 
 /**

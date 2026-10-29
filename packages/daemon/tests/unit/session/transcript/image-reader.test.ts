@@ -44,6 +44,35 @@ describe('TranscriptImageReader', () => {
     should((await second.download()).base64).equal(jpegBase64());
   });
 
+  describe('lookupAt', () => {
+    it('should prove an image of a transcript the caller already located, asking no locator', async () => {
+      // Arrange: a transcript the locator knows nothing of
+      const transcript = new MemoryTranscript([claudeText(1), claudeUserImage(2, [pngBase64()])], 'claude', false);
+      const target = { file: '/transcripts/one.jsonl', harness: 'claude' } as const;
+
+      // Act
+      const found = await transcript.reader().lookupAt('s1', transcript.handle(1), target);
+
+      // Assert
+      should(found.image).eql({ handle: transcript.handle(1), mediaType: 'image/png', byteLength: 32 });
+      should((await found.download()).base64).equal(pngBase64());
+      should(await refusal(transcript.reader().lookup('s1', transcript.handle(1)))).equal('no_transcript');
+    });
+
+    it('should refuse a handle that does not parse, even for a located transcript', async () => {
+      // Arrange
+      const transcript = new MemoryTranscript([claudeText(1)]);
+
+      // Act
+      const actual = await refusal(
+        transcript.reader().lookupAt('s1', 'nonsense', { file: '/transcripts/one.jsonl', harness: 'claude' }),
+      );
+
+      // Assert
+      should(actual).equal('invalid_image_handle');
+    });
+  });
+
   it('should serve an image a tool result held, and one big enough that its bytes stayed in the file', async () => {
     // Arrange
     const transcript = new MemoryTranscript([claudeToolResultImage(1, [BIG]), claudeUserImage(2, [BIG])]);

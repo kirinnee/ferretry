@@ -99,9 +99,18 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
   was 5–12 ms for a first request and 1–6 ms from a remembered proof, against the 200 ms budget; for
   comparison the transcript window was 23–108 ms and the history listing 26–41 ms. The guard is the
   image case in `io-pressure-transcript.test.ts`.
-- `fyd --check` lists `session-index` and `analytics-index` with the other workers. If a writer thread
-  fails five times in ten minutes, the daemon writes that index on its main thread instead and says so
-  once in its log.
+- **Transcripts are parsed on their own thread**, the **transcript worker**. That covers reading a
+  window of a transcript, a whole read, a session's tail, the conversation behind a messages page, an
+  image from a transcript, and the history and import listings. The worker runs the same readers the
+  main thread used to, and sends the answer back in small pieces, so the main thread only ever receives
+  one piece at a time. The conversation index (which proves each message against the bytes it came
+  from) is built in the worker too, from the bytes the worker itself read. The thread holds about
+  23 MiB on its own. Measured on a 100 MB transcript without a memory cap, the longest the main thread
+  was held went from 60–130 ms to under 40 ms. The guard is `io-pressure-transcript.test.ts`, which
+  also runs with memory capped and prints each path's longest block on a `TRANSCRIPT-BUDGET` line.
+- `fyd --check` lists `session-index`, `analytics-index` and `transcript-parse` with the other workers.
+  If one of these threads fails five times in ten minutes, the daemon does its work on the main thread
+  instead and says so once in its log.
 
 The guards are `packages/daemon/tests/integration/runtime/io-pressure-index.test.ts` and
 `io-pressure-analytics.test.ts`. They make every disk write take 1.5 s, and check that the event loop

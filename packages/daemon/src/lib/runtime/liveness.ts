@@ -1,4 +1,10 @@
-import { classifyStallCause, describeDiskSaturation, type IoPressureView, ioPressureView } from '@ferretry/protocol';
+// The one module, not the protocol barrel: the barrel is every schema the daemon speaks, ~65 MB loaded.
+import {
+  classifyStallCause,
+  describeDiskSaturation,
+  type IoPressureView,
+  ioPressureView,
+} from '@ferretry/protocol/io-pressure';
 import type { MillisecondClockPort } from './boot.ts';
 import { type IoPressurePort, NO_IO_PRESSURE } from './io-pressure.ts';
 

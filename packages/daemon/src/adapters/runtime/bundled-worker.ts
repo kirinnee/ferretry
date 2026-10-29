@@ -22,7 +22,8 @@ export type BundledWorkerName =
   | 'housekeeping'
   | 'pdf-decrypt'
   | 'session'
-  | 'session-index';
+  | 'session-index'
+  | 'transcript-parse';
 
 /**
  * The URL to start the worker `name` from. `moduleUrl` is this module's own unless a test asks how a

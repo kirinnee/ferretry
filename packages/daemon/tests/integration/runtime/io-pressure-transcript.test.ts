@@ -56,6 +56,8 @@ const modulePath = (relative: string): string => JSON.stringify(resolve(import.m
 interface PathMeasurement {
   readonly path: string;
   readonly maxLagMs: number;
+  /** The whole process — both threads — once the path finished. */
+  readonly rssMib: number;
   readonly events: number;
   readonly stacks: readonly { readonly stack: string; readonly share: number }[];
 }
@@ -157,29 +159,48 @@ async function claudeTranscript(file: string, megabytes: number): Promise<string
   return firstScreenshot;
 }
 
-/** The child's whole program: each main-thread parse path, one after another, each under its own probe. */
+/**
+ * The child's whole program: each transcript parse path, one after another, each under its own probe —
+ * built exactly as the daemon builds it, so each is parsed on the transcript worker and the probe times
+ * what the MAIN thread is still held for: asking, and receiving the answer page by page.
+ */
 const program = (transcript: string, userHome: string, imageHandle: string, baselineOnly = false): string => `
   import { join } from 'node:path';
   import { JscStackSampler } from ${modulePath('../../../src/adapters/runtime/stall-attribution.ts')};
   import { summariseStacks } from ${modulePath('../../../src/lib/runtime/liveness.ts')};
-  import { LOOP_PARSE_PACING, NodeTranscriptSource } from ${modulePath('../../../src/adapters/transcript/index.ts')};
+  import { LOOP_PARSE_PACING, NodeTranscriptFileRuntime, NodeTranscriptSource } from ${modulePath('../../../src/adapters/transcript/file-source.ts')};
+  import {
+    TranscriptParseWorker,
+    WorkerConversationDescriber,
+    WorkerConversationIndex,
+    WorkerForeignTranscriptReader,
+    WorkerTranscriptImages,
+    WorkerTranscriptSource,
+  } from ${modulePath('../../../src/adapters/transcript/parse-worker/client.ts')};
   import { NodeConversationFiles } from ${modulePath('../../../src/adapters/imports/node-conversation-files.ts')};
   import { NodeForeignHistoryFiles } from ${modulePath('../../../src/adapters/imports/node-foreign-history-files.ts')};
+  import { FileConversationDescriber } from ${modulePath('../../../src/lib/imports/conversation-describer.ts')};
   import { ConversationImportService } from ${modulePath('../../../src/lib/imports/conversations.ts')};
-  import { ForeignHistoryImporter } from ${modulePath('../../../src/lib/imports/foreign-history.ts')};
+  import { FileForeignTranscriptReader, ForeignHistoryImporter } from ${modulePath('../../../src/lib/imports/foreign-history.ts')};
+  import { ConversationIndex } from ${modulePath('../../../src/lib/session/transcript/conversation-index.ts')};
   import { TranscriptImageReader } from ${modulePath('../../../src/lib/session/transcript/image-reader.ts')};
   import { NodeTranscriptImageFiles } from ${modulePath('../../../src/adapters/transcript/image-files.ts')};
   import { tailTranscriptEvents } from ${modulePath('../../../src/lib/session/transcript/reader.ts')};
-  import { ClaudeTranscriptParser, CodexTranscriptParser, PacedTranscriptParser } from ${modulePath('../../../src/lib/transcript/index.ts')};
+  import { ClaudeTranscriptParser } from ${modulePath('../../../src/lib/transcript/claude.ts')};
+  import { CodexTranscriptParser } from ${modulePath('../../../src/lib/transcript/codex.ts')};
+  import { PacedTranscriptParser } from ${modulePath('../../../src/lib/transcript/sliced.ts')};
   const file = ${JSON.stringify(transcript)};
   const home = ${JSON.stringify(userHome)};
   const claude = new ClaudeTranscriptParser();
-  const source = new NodeTranscriptSource(claude);
   const paced = {
     claude: new PacedTranscriptParser(claude, LOOP_PARSE_PACING),
     codex: new PacedTranscriptParser(new CodexTranscriptParser(), LOOP_PARSE_PACING),
   };
+  const worker = new TranscriptParseWorker();
+  const source = new WorkerTranscriptSource('claude', worker, new NodeTranscriptSource(claude));
   const sampler = await JscStackSampler.start();
+  // The thread is started, and its program loaded, before the baseline: it is part of what the daemon holds.
+  await worker.ask({ op: 'foreign', candidate: { harness: 'claude', source: join(home, 'missing.jsonl') }, withEvents: false }, 'start');
   if (${String(baselineOnly)}) {
     Bun.gc(true);
     process.stdout.write('BASELINE ' + String(process.memoryUsage.rss()) + '\\n');
@@ -203,7 +224,8 @@ const program = (transcript: string, userHome: string, imageHandle: string, base
     // One more turn of the probe, so a block that ended the run is seen before the probe stops.
     await new Promise(done => setTimeout(done, 40));
     clearInterval(probe);
-    measurements.push({ path, maxLagMs: Math.round(maxLagMs), events, stacks });
+    if (!worker.available) throw new Error(path + ' left the transcript worker unavailable: it ran on the main thread');
+    measurements.push({ path, maxLagMs: Math.round(maxLagMs), events, stacks, rssMib: Math.round(process.memoryUsage.rss() / 2 ** 20) });
   };
   // A window from long before the transcript began: every bounded read of it, partial lines carried across.
   await measure('window', async () => {
@@ -218,14 +240,23 @@ const program = (transcript: string, userHome: string, imageHandle: string, base
   });
   await measure('read', async () => (await source.read(file, { sessionId: ${JSON.stringify(SESSION)} })).events.length);
   await measure('tail', async () => (await tailTranscriptEvents(source, file, ${JSON.stringify(SESSION)}, 400)).length);
+  // What a messages read folds: every record's raw bytes chained in the worker, and only the rows sent here.
+  await measure('conversation index', async () => {
+    const inline = new ConversationIndex([new NodeTranscriptSource(claude)], new NodeTranscriptFileRuntime(), LOOP_PARSE_PACING);
+    const index = new WorkerConversationIndex(worker, inline);
+    return (await index.rows({ sessionId: ${JSON.stringify(SESSION)}, harness: 'claude' }, file))?.length ?? 0;
+  });
   await measure('history listing', async () => {
     const roots = { claudeProjects: join(home, '.claude', 'projects'), codexSessions: join(home, '.codex', 'sessions') };
-    const listing = await new ForeignHistoryImporter(new NodeForeignHistoryFiles(), roots, paced).list();
+    const files = new NodeForeignHistoryFiles();
+    const reader = new WorkerForeignTranscriptReader(worker, new FileForeignTranscriptReader(files, paced));
+    const listing = await new ForeignHistoryImporter(files, roots, reader).list();
     return listing.conversations.reduce((sum, row) => sum + row.eventCount, 0);
   });
   // One multi-megabyte screenshot record, from its handle to the JSON a client receives: the proof (read, one
   // record's parse, the charset pass), then the bytes read back and the response's own serialisation.
-  const images = new TranscriptImageReader({ locate: async () => ({ file, harness: 'claude' }) }, new NodeTranscriptImageFiles(), paced);
+  const locator = { locate: async () => ({ file, harness: 'claude' }) };
+  const images = new WorkerTranscriptImages(worker, locator, new TranscriptImageReader(locator, new NodeTranscriptImageFiles(), paced));
   await measure('transcript image', async () => {
     const found = await images.lookup(${JSON.stringify(SESSION)}, ${JSON.stringify(imageHandle)});
     return JSON.stringify(await found.download()).length;
@@ -234,10 +265,11 @@ const program = (transcript: string, userHome: string, imageHandle: string, base
     const found = await images.lookup(${JSON.stringify(SESSION)}, ${JSON.stringify(imageHandle)});
     return JSON.stringify(await found.download()).length;
   });
+  const conversationFiles = new NodeConversationFiles();
   const imports = new ConversationImportService(
-    new NodeConversationFiles(),
+    conversationFiles,
     [{ harness: 'claude', home: join(home, '.claude'), source: 'computer' }],
-    paced,
+    new WorkerConversationDescriber(worker, new FileConversationDescriber(conversationFiles, paced)),
     { owners: async () => new Map() },
     { adopt: async () => { throw new Error('this measurement adopts nothing'); } },
   );
@@ -279,18 +311,44 @@ async function measured(prefix: readonly string[] = []): Promise<readonly PathMe
   return JSON.parse(line.slice('MEASUREMENT '.length)) as readonly PathMeasurement[];
 }
 
+/**
+ * One `TRANSCRIPT-BUDGET` line per run, whether it passes or fails: each path's longest block and the
+ * process's RSS after it, and the baseline and cap a throttled run was held to (`null` unthrottled).
+ *
+ * Printed always, not only on a failure, because these numbers are the measurement the budget stands
+ * for: a CI log is where they are read across runs and hosts, and a passing run's margin is as much a
+ * result as a failing run's stacks.
+ */
+function report(
+  run: 'unthrottled' | 'throttled',
+  measurements: readonly PathMeasurement[],
+  memory: { readonly baselineMib: number; readonly capMib: number } | undefined,
+): void {
+  const paths = measurements.map(({ path, maxLagMs, rssMib }) => ({ path, maxLagMs, rssMib }));
+  console.log(
+    `TRANSCRIPT-BUDGET ${JSON.stringify({
+      run,
+      budgetMs: BLOCK_BUDGET_MS,
+      baselineMib: memory?.baselineMib ?? null,
+      capMib: memory?.capMib ?? null,
+      paths,
+    })}`,
+  );
+}
+
 /** Every path ran over real records, and none held the loop past the budget; a failure names the stacks. */
 function assertWithinBudget(measurements: readonly PathMeasurement[]): void {
   should(measurements.map(each => each.path)).deepEqual([
     'window',
     'read',
     'tail',
+    'conversation index',
     'history listing',
     'transcript image',
     'transcript image again',
     'import listing',
   ]);
-  for (const each of measurements.slice(0, 6)) should(each.events).be.above(0, `${each.path} parsed nothing`);
+  for (const each of measurements.slice(0, 7)) should(each.events).be.above(0, `${each.path} parsed nothing`);
   const over = measurements.filter(each => each.maxLagMs >= BLOCK_BUDGET_MS);
   should(over).deepEqual([]);
 }
@@ -326,6 +384,7 @@ describe('main-thread transcript parsing over a transcript past one bounded read
   it(`should never block the event loop for ${String(BLOCK_BUDGET_MS)} ms`, async () => {
     // Act
     const measurements = await measured();
+    report('unthrottled', measurements, undefined);
 
     // Assert
     assertWithinBudget(measurements);
@@ -335,10 +394,13 @@ describe('main-thread transcript parsing over a transcript past one bounded read
     `should never block the event loop for ${String(BLOCK_BUDGET_MS)} ms while memory is capped ${String(HEADROOM_MIB)} MiB above its baseline`,
     async () => {
       // Arrange
-      const throttle = await memoryThrottle((await childBaselineMib()) + HEADROOM_MIB);
+      const baselineMib = await childBaselineMib();
+      const capMib = baselineMib + HEADROOM_MIB;
+      const throttle = await memoryThrottle(capMib);
 
       // Act
       const measurements = await measured(throttle);
+      report('throttled', measurements, { baselineMib, capMib });
 
       // Assert
       assertWithinBudget(measurements);

@@ -26,8 +26,13 @@ import {
   StorageTranscriptClaims,
   SystemClock,
 } from '../../../src/adapters/index.ts';
-import { ConversationImportService, conversationKey, parseSessionId } from '../../../src/lib/index.ts';
 import { LOOP_PARSE_PACING } from '../../../src/adapters/transcript/index.ts';
+import {
+  ConversationImportService,
+  conversationKey,
+  FileConversationDescriber,
+  parseSessionId,
+} from '../../../src/lib/index.ts';
 import {
   ClaudeTranscriptParser,
   CodexTranscriptParser,
@@ -107,17 +112,18 @@ describe('discovering conversations on disk', () => {
   it('should list a fake home’s Claude and Codex conversations without following a link', async () => {
     // Arrange
     const { home } = await fakeHome();
+    const files = new NodeConversationFiles();
     const service = new ConversationImportService(
-      new NodeConversationFiles(),
+      files,
       [
         { harness: 'claude', home: join(home, '.claude'), source: 'computer' },
         { harness: 'codex', home: join(home, '.codex'), source: 'computer' },
         { harness: 'codex', home: join(home, 'absent'), source: 'ferretry' },
       ],
-      {
+      new FileConversationDescriber(files, {
         claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), LOOP_PARSE_PACING),
         codex: new PacedTranscriptParser(new CodexTranscriptParser(), LOOP_PARSE_PACING),
-      },
+      }),
       { owners: async () => new Map() },
       { adopt: async () => ({ kind: 'refused', code: 'failed', reason: 'not under test' }) },
     );
