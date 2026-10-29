@@ -103,6 +103,25 @@ describe('observeTurn', () => {
     should(observeTurn(evidence({ pane: BUSY, transcript: 'ended' }))).deepEqual({ state: 'working', confirmed: true });
   });
 
+  it('should let the transcript end a turn a spinner-shaped line alone still calls working', () => {
+    // Arrange — a spinner shape with no status line beside it: what an idle feedback-draft panel drew.
+    const spinnerOnly: TurnPaneEvidence = { ...BUSY, spinnerOnly: true };
+
+    // Act
+    const actual = {
+      ended: observeTurn(evidence({ pane: spinnerOnly, transcript: 'ended' })),
+      midTurn: observeTurn(evidence({ pane: spinnerOnly, transcript: 'working' })),
+      noRecord: observeTurn(evidence({ pane: spinnerOnly, transcript: 'unknown' })),
+    };
+
+    // Assert — weak both ways: the end still needs two looks, and only a proved end overrules the shape.
+    should(actual).deepEqual({
+      ended: { state: 'your-turn', confirmed: false },
+      midTurn: { state: 'working', confirmed: true },
+      noRecord: { state: 'working', confirmed: true },
+    });
+  });
+
   it('should confirm your-turn at once when the pane and transcript agree, and not when they disagree', () => {
     should(observeTurn(evidence({ pane: IDLE, transcript: 'ended' }))).deepEqual({
       state: 'your-turn',

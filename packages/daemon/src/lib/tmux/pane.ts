@@ -80,12 +80,17 @@ const CLAUDE_ELAPSED = /\(\s*(?:\d+\s*h\s*)?(?:\d+\s*m\s*)?\d+\s*s\s*[·•∙]/
 const TOKEN_COUNTER = /[\d.,]+k?\s*tokens\s*[·•∙]/;
 
 /** Spinner glyph plus an animated verb ellipsis — `✻ Lollygagging…`, `✢ Fixing stall detection…`.
- *  The verb phrase can run to several words, so the bound is on length, not on word count. */
-const SPINNER_PHRASE = /[✻✳✶✽✢∗][^\n…]{1,120}…/u;
+ *  The verb phrase can run to several words, so the bound is on length, not on word count.
+ *
+ *  Anchored to the START of a line: the spinner is drawn at the left edge, never inside a box. Claude
+ *  2.1.281's feedback-draft panel titles itself `│ ✻ Bug report drafted: <title>… │` and stays on an
+ *  IDLE screen; unanchored, its truncation ellipsis read as a spinner and held a finished session at
+ *  "working" for hours. */
+const SPINNER_PHRASE = /^[^\S\n]*[✻✳✶✽✢∗][^\n…]{1,120}…/mu;
 
 /** `⏺` also prefixes tool-RESULT lines whose truncation ellipsis must not read as busy, so it keeps
- *  the strict single-word form only the spinner produces. */
-const SPINNER_MARK = /⏺\s*\S+…/u;
+ *  the strict single-word form only the spinner produces — at the left edge, like the phrase. */
+const SPINNER_MARK = /^[^\S\n]*⏺\s*\S+…/mu;
 
 /** Codex's post-interrupt banner. The turn is stopped and the composer is editable, so this screen
  *  is READY — and another interrupt keystroke sent into it would quit the TUI entirely. */
@@ -117,10 +122,22 @@ export function parsePaneMetadata(value: string): PaneMetadata {
  * finished, or failed — every caller that is about to send a key asks this first.
  */
 export function paneShowsActiveWork(pane: string): boolean {
+  return paneActiveWork(pane) !== undefined;
+}
+
+/**
+ * HOW the visible pane shows active work, or `undefined` when it does not.
+ *
+ * `status` is the harness's live status line — an interrupt hint, an elapsed clock or a token counter,
+ * which both harnesses print for as long as a turn runs. `spinner` is a spinner-shaped line and nothing
+ * else: a running turn shows it too, but so can something on an idle screen that merely looks like one,
+ * so it is the one reading a transcript that says the turn ENDED may overrule.
+ */
+export function paneActiveWork(pane: string): 'status' | 'spinner' | undefined {
   const lower = pane.toLowerCase();
-  if (INTERRUPT_HINTS.some(marker => lower.includes(marker))) return true;
-  if (CODEX_ELAPSED.test(lower) || CLAUDE_ELAPSED.test(lower) || TOKEN_COUNTER.test(lower)) return true;
-  return SPINNER_PHRASE.test(pane) || SPINNER_MARK.test(pane);
+  if (INTERRUPT_HINTS.some(marker => lower.includes(marker))) return 'status';
+  if (CODEX_ELAPSED.test(lower) || CLAUDE_ELAPSED.test(lower) || TOKEN_COUNTER.test(lower)) return 'status';
+  return SPINNER_PHRASE.test(pane) || SPINNER_MARK.test(pane) ? 'spinner' : undefined;
 }
 
 /**
