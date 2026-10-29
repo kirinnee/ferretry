@@ -137,6 +137,14 @@ describe('the address bar', () => {
     expect(resolveBrowserAddress('   ')).toEqual({ kind: 'error', message: 'Enter a URL or search terms.' });
   });
 
+  it('will not turn a search into an address when the caller’s base is malformed', () => {
+    expect(resolveBrowserAddress('best terminal font', 'not a base')).toEqual({
+      kind: 'error',
+      message: 'Enter a URL or search terms.',
+    });
+    expect(resolveBrowserAddress('best terminal font', 'https://app.example.test/')).toMatchObject({ kind: 'search' });
+  });
+
   it('treats a half-typed scheme as unfinished, not as a search', () => {
     for (const typed of ['https:', 'https:/', 'https://'])
       expect(resolveBrowserAddress(typed)).toEqual({

@@ -9,7 +9,7 @@ import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import type { RelayStreamRequest } from '../../../src/lib/relay-carrier.ts';
 import type { RelayClientSession, RelayStreamFrame } from '../../../src/lib/relay-session.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
-import { interact, mount } from '../../support/dom.ts';
+import { interact, mount, must } from '../../support/dom.ts';
 import { render, run, runAsync } from '../../support/react.ts';
 
 class FakeSocket implements RemoteBrowserSocket {
@@ -898,6 +898,73 @@ describe('RemoteBrowserViewer input', () => {
     await mounted.unmount();
     if (previousResizeObserver === undefined) Reflect.deleteProperty(globals, 'ResizeObserver');
     else globals.ResizeObserver = previousResizeObserver;
+  });
+});
+
+describe('RemoteBrowserViewer fit without a ResizeObserver', () => {
+  it('re-pins the input surface to the displayed image on a window resize', async () => {
+    const globals = globalThis as typeof globalThis & { ResizeObserver?: unknown };
+    const previousResizeObserver = globals.ResizeObserver;
+    Reflect.deleteProperty(globals, 'ResizeObserver');
+    const socket = new FakeSocket();
+    const mounted = await mount(
+      <RemoteBrowserViewer
+        daemon={daemonA}
+        scope={daemonSessionScope(daemonA, 'session-a')}
+        status={running('session-a')}
+        interactive
+        fit
+        socketFactory={() => socket}
+        createObjectUrl={() => 'blob:fit-frame'}
+        revokeObjectUrl={() => undefined}
+      />,
+    );
+    try {
+      await interact(() => {
+        socket.readyState = 1;
+        socket.emit('open', new Event('open'));
+        socket.emit('message', new MessageEvent('message', { data: frame('page-a') }));
+      });
+      const container = must(
+        mounted.container.querySelector<HTMLElement>('.fy-remote-browser-canvas'),
+        'the frame container',
+      );
+      const image = must(
+        mounted.container.querySelector<HTMLImageElement>('img[alt="Live remote browser frame"]'),
+        'the frame image',
+      );
+      const surface = must(
+        mounted.container.querySelector<HTMLCanvasElement>('.fy-remote-browser-input'),
+        'the input surface',
+      );
+      const rect = (left: number, top: number, width: number, height: number): DOMRect =>
+        ({
+          bottom: top + height,
+          height,
+          left,
+          right: left + width,
+          top,
+          width,
+          x: left,
+          y: top,
+          toJSON: () => ({}),
+        }) as DOMRect;
+      container.getBoundingClientRect = () => rect(0, 0, 800, 400);
+      image.getBoundingClientRect = () => rect(240, 80, 320, 240);
+      await interact(() => window.dispatchEvent(new Event('resize')));
+      expect(surface.style.left).toBe('240px');
+      expect(surface.style.top).toBe('80px');
+      expect(surface.style.width).toBe('320px');
+      expect(surface.style.height).toBe('240px');
+
+      image.getBoundingClientRect = () => rect(120, 40, 560, 320);
+      await interact(() => window.dispatchEvent(new Event('resize')));
+      expect(surface.style.left).toBe('120px');
+      expect(surface.style.width).toBe('560px');
+    } finally {
+      await mounted.unmount();
+      if (previousResizeObserver !== undefined) globals.ResizeObserver = previousResizeObserver;
+    }
   });
 });
 

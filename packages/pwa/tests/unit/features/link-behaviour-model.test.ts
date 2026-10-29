@@ -4,7 +4,6 @@ import {
   decideLinkAction,
   isIosStandalone,
   type LinkDecisionInput,
-  safariHref,
 } from '../../../src/features/browser/link-behaviour-model.ts';
 import type { OpenLinksIn } from '../../../src/lib/controls.ts';
 
@@ -151,15 +150,6 @@ describe('decideLinkAction', () => {
       href: 'x-safari-https://app.example.test/d/docs',
       fallback: 'https://app.example.test/d/docs',
     });
-  });
-});
-
-describe('safariHref', () => {
-  it('prefixes only an HTTP(S) address', () => {
-    expect(safariHref('https://example.test/')).toBe('x-safari-https://example.test/');
-    expect(safariHref('http://example.test/')).toBe('x-safari-http://example.test/');
-    expect(safariHref('mailto:a@example.test')).toBeNull();
-    expect(safariHref('x-safari-https://example.test/')).toBeNull();
   });
 });
 

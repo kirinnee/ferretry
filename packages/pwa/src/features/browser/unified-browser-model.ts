@@ -148,7 +148,7 @@ export const resolveBrowserAddress = (input: string, baseHref?: string): Browser
   const search = new URL('https://duckduckgo.com/');
   search.searchParams.set('q', value);
   const searched = browserDestination(search.href, baseHref);
-  // `browserDestination` cannot refuse a URL this function just built, but the
+  // A malformed caller base makes `browserDestination` refuse even this URL, and the
   // surface must not be handed a null it would render as a blank frame.
   return searched
     ? { kind: 'search', destination: searched }

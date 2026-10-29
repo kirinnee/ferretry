@@ -61,12 +61,6 @@ export interface LinkDecisionInput {
 
 const NATIVE: LinkAction = Object.freeze({ kind: 'native' });
 
-/**
- * `x-safari-https://example.com/a` for `https://example.com/a`: the scheme iOS hands to Safari. Only
- * an HTTP(S) address has one — anything else answers null rather than a scheme Safari would refuse.
- */
-export const safariHref = (href: string): string | null => (/^https?:\/\//iu.test(href) ? `x-safari-${href}` : null);
-
 export const decideLinkAction = (input: LinkDecisionInput): LinkAction => {
   const destination = browserDestination(input.href, input.baseHref);
   if (destination === null || !shouldOpenInApp(input.activation, destination, input.download)) return NATIVE;
@@ -78,10 +72,8 @@ export const decideLinkAction = (input: LinkDecisionInput): LinkAction => {
   const notice: { readonly notice?: LinkNotice } =
     input.setting === 'computer' ? { notice: 'computer-unavailable' } : {};
   if (!input.iosStandalone) return { kind: 'native', ...notice };
-  const safari = safariHref(destination.href);
-  return safari === null
-    ? { kind: 'native', ...notice }
-    : { kind: 'safari', href: safari, fallback: destination.href, ...notice };
+  // `x-safari-https://example.com/a`: the scheme iOS hands to Safari. A destination is always HTTP(S).
+  return { kind: 'safari', href: `x-safari-${destination.href}`, fallback: destination.href, ...notice };
 };
 
 /** The slice of a browser the iOS check reads; injected so a test never mutates a global. */
