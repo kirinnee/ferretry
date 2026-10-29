@@ -82,6 +82,24 @@ describe('AttachmentUnlockPrompt', () => {
     await sheet.unmount();
   });
 
+  test('clears the typed password after a failure that a retry cannot fix', async () => {
+    const sheet = await mount(prompt({ onUnlock: async () => Promise.reject({ code: 'decryption_unavailable' }) }));
+    const input = sheet.container.querySelector('input') as HTMLInputElement;
+    const form = sheet.container.querySelector('form') as HTMLFormElement;
+
+    await typePassword(input, 'hunter2');
+    expect(input.value).toBe('hunter2');
+    await interact(async () => {
+      form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+      await Promise.resolve();
+    });
+
+    expect(sheet.container.querySelector('[role="alert"]')).not.toBeNull();
+    expect(input.getAttribute('aria-invalid')).toBeNull();
+    expect(input.value).toBe('');
+    await sheet.unmount();
+  });
+
   test('does not allow cancellation while the daemon is decrypting', async () => {
     let resolve!: () => void;
     const pending = new Promise<void>(done => {

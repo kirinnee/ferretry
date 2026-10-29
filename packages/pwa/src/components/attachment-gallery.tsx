@@ -286,11 +286,11 @@ const acquireImage = (
     return blob;
   });
 
-/** The cache slot of a stored image, or null for an inline one that carries its own bytes. */
-const imageScope = (daemon: DaemonConnection, image: TranscriptImage): DaemonAttachmentScope | null =>
-  image.kind === 'attachment'
-    ? daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), image.attachmentId)
-    : null;
+/** The cache slot of a stored image. */
+const imageScope = (
+  daemon: DaemonConnection,
+  image: Extract<TranscriptImage, { kind: 'attachment' }>,
+): DaemonAttachmentScope => daemonAttachmentScope(daemonSessionScope(daemon, image.sessionId), image.attachmentId);
 
 interface AttachmentThumbnailProps {
   daemon: DaemonConnection;
@@ -325,8 +325,9 @@ const AttachmentThumbnail = ({ daemon, image, onOpen }: AttachmentThumbnailProps
     }
     setSrc('');
     if (!visible) return;
-    const scope = imageScope(daemonRef.current, imageRef.current);
-    if (!scope) return;
+    const current = imageRef.current;
+    if (current.kind === 'inline') return;
+    const scope = imageScope(daemonRef.current, current);
     let active = true;
     void acquireImage(cache, load, daemonRef.current, scope)
       .then(url => {
@@ -421,7 +422,6 @@ const GalleryViewer = ({ daemon, entries, index, onIndexChange, onClose }: Galle
         continue;
       }
       const scope = imageScope(daemonRef.current, entry.image);
-      if (!scope) continue;
       held.push(scope);
       void acquireImage(cache, load, daemonRef.current, scope)
         .then(url => {
