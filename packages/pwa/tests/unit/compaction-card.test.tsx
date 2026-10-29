@@ -23,29 +23,57 @@ const textOf = (value: unknown): string => {
 };
 
 describe('CompactionCard', () => {
-  test('draws an estimated bar that advances with the compaction’s own clock', () => {
-    const scheduler = manualScheduler(START_MS + 12_000);
-    const view = render(<CompactionCard compaction={running} scheduler={scheduler} />);
+  test('with the harness’s percent, draws that bar and figure, tokens written and the real clock', () => {
+    const scheduler = manualScheduler(START_MS + 434_000);
+    const view = render(
+      <CompactionCard compaction={{ ...running, percent: 49, tokensWritten: 37_400 }} scheduler={scheduler} />,
+    );
     const bar = view.root.findByProps({ role: 'progressbar' });
-    expect(bar.props['aria-valuenow']).toBe(20);
-    expect(bar.props['aria-valuetext']).toBe('About 20 percent, estimated');
-    expect(textOf(view.toJSON())).toContain('~20%');
-    expect(textOf(view.toJSON())).toContain('12s · from 412k tokens');
-    scheduler.advance(18_000);
-    expect(view.root.findByProps({ role: 'progressbar' }).props['aria-valuenow']).toBe(50);
+    expect(bar.props['aria-valuenow']).toBe(49);
+    expect(bar.props['aria-valuetext']).toBe('49 percent');
+    const text = textOf(view.toJSON());
+    expect(text).toContain('49%');
+    expect(text).not.toContain('~');
+    expect(text).not.toContain('about');
+    expect(text).not.toContain('Usually');
+    expect(text).toContain('7m 14s · 37k tokens written · from 412k tokens');
+    expect(view.root.findAllByProps({ 'data-spinner': '' }).length).toBe(0);
+    run(() => scheduler.advance(10_000));
+    expect(textOf(view.toJSON())).toContain('7m 24s');
     run(() => view.unmount());
   });
 
-  test('holds at 95 and flags itself overdue past the expected time', () => {
-    const view = render(<CompactionCard compaction={running} scheduler={manualScheduler(START_MS + 300_000)} />);
-    expect(view.root.findByProps({ role: 'progressbar' }).props['aria-valuenow']).toBe(95);
-    expect(view.root.findByProps({ 'data-compaction': 'running' }).props['data-overdue']).toBe('');
-    expect(textOf(view.toJSON())).toContain('Taking longer than usual');
+  test('with no percent, shows a spinner, the clock and the usual duration — and no percentage at all', () => {
+    const scheduler = manualScheduler(START_MS + 12_000);
+    const view = render(<CompactionCard compaction={running} scheduler={scheduler} />);
+    const text = textOf(view.toJSON());
+    expect(view.root.findAllByProps({ role: 'progressbar' }).length).toBe(0);
+    expect(view.root.findAllByProps({ 'data-spinner': '' }).length).toBeGreaterThan(0);
+    expect(text).not.toContain('%');
+    expect(text).toContain('12s · from 412k tokens');
+    expect(text).toContain('Usually ~60s here');
+    run(() => scheduler.advance(18_000));
+    expect(textOf(view.toJSON())).toContain('30s');
+    expect(view.root.findAllByProps({ role: 'progressbar' }).length).toBe(0);
     run(() => view.unmount());
+  });
+
+  test('flags itself overdue past the usual time only when there is no real percent', () => {
+    const late = manualScheduler(START_MS + 300_000);
+    const bare = render(<CompactionCard compaction={running} scheduler={late} />);
+    expect(bare.root.findByProps({ 'data-compaction': 'running' }).props['data-overdue']).toBe('');
+    expect(textOf(bare.toJSON())).toContain('Taking longer than usual');
+    run(() => bare.unmount());
+
+    const real = render(<CompactionCard compaction={{ ...running, percent: 12 }} scheduler={late} />);
+    expect(real.root.findByProps({ 'data-compaction': 'running' }).props['data-overdue']).toBeUndefined();
+    run(() => real.unmount());
   });
 
   test('runs on the browser’s clock when none is injected', () => {
-    const view = render(<CompactionCard compaction={{ ...running, startedAt: new Date().toISOString() }} />);
+    const view = render(
+      <CompactionCard compaction={{ ...running, startedAt: new Date().toISOString(), percent: 3 }} />,
+    );
     expect(view.root.findByProps({ role: 'progressbar' }).props['aria-valuemax']).toBe(100);
     run(() => view.unmount());
   });
@@ -65,15 +93,23 @@ describe('CompactionStrip', () => {
 });
 
 describe('CompactionChip', () => {
-  test('is the header’s small state', () => {
+  test('is the header’s small state, with the harness’s own figure when it gave one', () => {
+    const view = render(
+      <CompactionChip compaction={{ ...running, percent: 49 }} scheduler={manualScheduler(START_MS + 30_000)} />,
+    );
+    expect(textOf(view.toJSON())).toBe('Compacting 49%');
+    run(() => view.unmount());
+  });
+
+  test('says no percentage when the harness gave none', () => {
     const view = render(<CompactionChip compaction={running} scheduler={manualScheduler(START_MS + 30_000)} />);
-    expect(textOf(view.toJSON())).toBe('Compacting ~50%');
+    expect(textOf(view.toJSON())).toBe('Compacting…');
     run(() => view.unmount());
   });
 
   test('runs on the browser’s clock when none is injected', () => {
     const view = render(<CompactionChip compaction={{ ...running, startedAt: new Date().toISOString() }} />);
-    expect(textOf(view.toJSON())).toBe('Compacting ~0%');
+    expect(textOf(view.toJSON())).toBe('Compacting…');
     run(() => view.unmount());
   });
 });

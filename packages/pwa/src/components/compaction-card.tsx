@@ -1,12 +1,12 @@
 /**
  * THE COMPACTION CARD AND ITS DIVIDER — what the transcript shows while a harness compacts its context.
  *
- * RUNNING: a card with a progress bar, an "about N%" figure and the clock. Neither harness reports
- * progress, so the figure is an ESTIMATE the daemon's measured timing implies (`lib/compaction-readout.ts`),
- * is labelled as one, and holds below 100 until the end is seen. The clock runs in this page from the
- * compaction's own start, on the same ticker as the working line, and is hidden from assistive technology
- * (a status re-announced every second talks over everything); the bar's `aria-valuetext` is the
- * announcement.
+ * RUNNING, with a real figure: current Claude Code reports its own progress, so the card draws that bar
+ * and "49%" and the tokens written. RUNNING without one (Codex, older Claude Code): a spinner, the real
+ * clock and how long a compaction usually takes here — NO percentage, because none was measured
+ * (`lib/compaction-readout.ts`). The clock runs in this page from the compaction's own start, on the
+ * same ticker as the working line, and is hidden from assistive technology (a status re-announced every
+ * second talks over everything); the bar's `aria-valuetext` is the announcement.
  *
  * DONE: the card collapses to a divider reading `Context compacted · 412k → 38k · freed 374k · 41s`,
  * placed where the compaction happened.
@@ -15,6 +15,7 @@
 import type { SessionCompactionDone, SessionCompactionRunning } from '@ferretry/protocol';
 import { type LiveScheduler, useLiveElapsed } from '../hooks/use-live-counter.ts';
 import { compactionDoneReadout, compactionRunningReadout } from '../lib/compaction-readout.ts';
+import { Spinner } from './spinner.tsx';
 
 export interface CompactionCardProps {
   readonly compaction: SessionCompactionRunning;
@@ -22,33 +23,47 @@ export interface CompactionCardProps {
   readonly scheduler?: LiveScheduler;
 }
 
-/** The running card: bar, estimated percent, clock. */
+/** The running card: the harness's own bar and percent when it gave one, else a spinner and the clock. */
 export function CompactionCard({ compaction, scheduler }: CompactionCardProps) {
   const seconds = useLiveElapsed(Date.parse(compaction.startedAt), scheduler === undefined ? {} : { scheduler });
   const readout = compactionRunningReadout(compaction, seconds ?? 0);
+  const meta = [readout.elapsed, readout.written, readout.from === null ? null : `from ${readout.from}`]
+    .filter(Boolean)
+    .join(' · ');
   return (
-    <div className="fy-compaction-card" data-compaction="running" data-overdue={readout.overdue ? '' : undefined}>
+    <div
+      className="fy-compaction-card"
+      data-compaction="running"
+      data-overdue={readout.overdue ? '' : undefined}
+      data-percent={readout.percent === null ? undefined : ''}
+    >
       <div className="fy-compaction-card__head">
         <b>Compacting context</b>
-        <span aria-hidden="true" className="fy-compaction-card__percent">
-          ~{readout.percent}%
-        </span>
+        {readout.percent === null ? (
+          <Spinner className="fy-compaction-card__spinner" size={14} />
+        ) : (
+          <span aria-hidden="true" className="fy-compaction-card__percent">
+            {readout.percent}%
+          </span>
+        )}
       </div>
-      <div
-        aria-label="Compacting context"
-        aria-valuemax={100}
-        aria-valuemin={0}
-        aria-valuenow={readout.percent}
-        aria-valuetext={readout.valueText}
-        className="fy-compaction-card__bar"
-        role="progressbar"
-      >
-        <span className="fy-compaction-card__fill" style={{ width: `${readout.percent}%` }} />
-      </div>
+      {readout.percent === null ? null : (
+        <div
+          aria-label="Compacting context"
+          aria-valuemax={100}
+          aria-valuemin={0}
+          aria-valuenow={readout.percent}
+          aria-valuetext={readout.valueText}
+          className="fy-compaction-card__bar"
+          role="progressbar"
+        >
+          <span className="fy-compaction-card__fill" style={{ width: `${readout.percent}%` }} />
+        </div>
+      )}
       <p aria-hidden="true" className="fy-compaction-card__meta">
-        {[readout.elapsed, readout.from === null ? null : `from ${readout.from}`].filter(Boolean).join(' · ')}
+        {meta}
       </p>
-      <p className="fy-compaction-card__note">{readout.note}</p>
+      {readout.usual === null ? null : <p className="fy-compaction-card__note">{readout.usual}</p>}
     </div>
   );
 }
@@ -79,13 +94,13 @@ export interface CompactionChipProps {
   readonly scheduler?: LiveScheduler;
 }
 
-/** The small header state: `Compacting ~40%`. */
+/** The small header state: `Compacting 49%` with the harness's own figure, else `Compacting…`. */
 export function CompactionChip({ compaction, scheduler }: CompactionChipProps) {
   const seconds = useLiveElapsed(Date.parse(compaction.startedAt), scheduler === undefined ? {} : { scheduler });
   const readout = compactionRunningReadout(compaction, seconds ?? 0);
   return (
     <span className="fy-compaction-chip" data-compaction-chip="" title={readout.valueText}>
-      Compacting ~{readout.percent}%
+      {readout.percent === null ? 'Compacting…' : `Compacting ${readout.percent}%`}
     </span>
   );
 }

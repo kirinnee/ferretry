@@ -1,53 +1,62 @@
-import {
-  compactionFreed,
-  compactionPercent,
-  type SessionCompactionDone,
-  type SessionCompactionRunning,
-} from '@ferretry/protocol';
+import { compactionFreed, type SessionCompactionDone, type SessionCompactionRunning } from '@ferretry/protocol';
 import { formatElapsedSeconds, formatTokenCount } from './live-counter.ts';
 
 /**
  * WHAT A COMPACTION CARD SAYS, as plain data.
  *
- * Neither harness reports how far a compaction has got, so the percentage here is the protocol's
- * ESTIMATE (`compactionPercent`: elapsed over this daemon's usual duration, capped below 100 until the
- * end is observed) and every sentence calls it one. The components only draw what these functions
- * return, so what the reader is told is decided — and tested — in one place.
+ * A percentage appears only when the harness itself reported one (current Claude Code paints a bar and
+ * a figure; the daemon carries it as `percent`). Without one — Codex, older Claude Code — the card says
+ * only what is measured: a spinner, the real clock and how long a compaction usually takes here. It
+ * never invents a figure from elapsed time. The components only draw what these functions return, so
+ * what the reader is told is decided — and tested — in one place.
  */
 
 export interface CompactionRunningReadout {
-  readonly percent: number;
+  /** The harness's own whole percent; `null` when it reported none (nothing is estimated). */
+  readonly percent: number | null;
   /** The whole-seconds clock, `41s`. */
   readonly elapsed: string;
   /** The context the compaction began from, `412k tokens`; absent when the transcript did not say. */
   readonly from: string | null;
-  /** Where the estimate comes from, or that it has run past it. */
-  readonly note: string;
-  /** The estimate is spent: the compaction is taking longer than this daemon's usual. */
+  /** What the harness says it has written so far, `37k tokens written`; absent when it paints no counter. */
+  readonly written: string | null;
+  /** The usual duration here, `Usually ~60s here`; `null` once a real percent says how far along it is. */
+  readonly usual: string | null;
+  /** The usual duration is spent: the compaction is taking longer. `false` whenever a real percent exists. */
   readonly overdue: boolean;
-  /** What assistive technology reads for the bar. */
+  /** What assistive technology reads. */
   readonly valueText: string;
 }
+
+/** `~45s`, `~2m`: the usual duration, rounded the way a person says it. */
+const approximately = (ms: number): string => {
+  const seconds = Math.max(1, Math.round(ms / 1000));
+  return seconds < 120 ? `~${seconds}s` : `~${Math.round(seconds / 60)}m`;
+};
 
 /** A running compaction after `elapsedSeconds` whole seconds. */
 export const compactionRunningReadout = (
   running: SessionCompactionRunning,
   elapsedSeconds: number,
 ): CompactionRunningReadout => {
-  const elapsedMs = Math.max(0, elapsedSeconds) * 1000;
-  const percent = compactionPercent(running, Date.parse(running.startedAt) + elapsedMs);
-  const overdue = elapsedMs >= running.expectedMs;
+  const percent = running.percent ?? null;
+  const overdue = percent === null && Math.max(0, elapsedSeconds) * 1000 >= running.expectedMs;
+  const usual =
+    percent !== null
+      ? null
+      : overdue
+        ? 'Taking longer than usual — still working'
+        : running.basis === 'history'
+          ? `Usually ${approximately(running.expectedMs)} here`
+          : `Usually ${approximately(running.expectedMs)} — typical timing, no history on this machine yet`;
   return {
     percent,
     elapsed: formatElapsedSeconds(elapsedSeconds),
     from: running.tokensBefore === undefined ? null : `${formatTokenCount(running.tokensBefore)} tokens`,
-    note: overdue
-      ? 'Taking longer than usual — still working'
-      : running.basis === 'history'
-        ? 'Estimate from this machine’s past compactions'
-        : 'Estimate from typical timing — no history on this machine yet',
+    written: running.tokensWritten === undefined ? null : `${formatTokenCount(running.tokensWritten)} tokens written`,
+    usual,
     overdue,
-    valueText: `About ${percent} percent, estimated`,
+    valueText: percent === null ? 'Compacting context' : `${percent} percent`,
   };
 };
 

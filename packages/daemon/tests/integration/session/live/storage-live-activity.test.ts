@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, it } from 'bun:test';
 import { appendFile, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -453,6 +454,29 @@ describe('the live readout of a compaction', () => {
       compaction: { phase: 'running', startedAt: at30, tokensBefore: 140_000, expectedMs: 40_000, basis: 'history' },
     });
     should(SessionLiveActivitySchema.safeParse(sampled).success).be.true();
+  });
+
+  it('should carry the percent and tokens written the pane reports, and none when it paints no bar', async () => {
+    // Arrange
+    const file = await transcriptFile();
+    const sampleOf = async (frame: string) =>
+      subject({
+        file,
+        state: idleState(),
+        pane: pane(frame),
+        tail: { kind: 'read', events: [contextUsage(1, 140_000)] },
+      })
+        .sample()
+        .then(sampled => sampled?.compaction);
+    const real = readFileSync(
+      join(import.meta.dir, '../../../fixtures/compaction/claude-2.1.28x-compacting-progress.txt'),
+      'utf8',
+    );
+
+    // Assert
+    should(await sampleOf(real)).containDeep({ phase: 'running', percent: 49, tokensWritten: 37_400 });
+    should(await sampleOf(COMPACTING_PANE)).not.have.property('percent');
+    should(await sampleOf(COMPACTING_PANE)).not.have.property('tokensWritten');
   });
 
   it('should label the estimate typical for the harness when nothing has been watched yet', async () => {

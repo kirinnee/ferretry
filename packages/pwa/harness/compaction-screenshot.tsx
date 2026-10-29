@@ -1,12 +1,12 @@
 /**
- * The compaction card and its divider, in the real transcript: in progress (about 40%), near the end
- * (about 93%, still short of 100) and done — desktop 1440 and phone 390, light and dark.
+ * The compaction card and its divider, in the real transcript: with the harness's own percentage (49%,
+ * 93%), with none reported (Codex, older Claude Code: spinner, clock, usual duration) and done — desktop
+ * 1440 and phone 390, light and dark.
  *
  *   bun harness/compaction-screenshot.tsx      # writes harness/out/compaction-<state>-<viewport>-<theme>.png
  *
  * It renders the REAL `Transcript`, `CompactionCard`, `CompactionStrip` and `CompactionChip`, fed the
- * `live` frame the daemon would send. The expected duration is set long enough that the percentage
- * holds still for the second a capture takes. It fails if a state scrolls the page sideways.
+ * `live` frame the daemon would send. It fails if a state scrolls the page sideways.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -33,23 +33,26 @@ import { CompactionChip } from '../../src/components/compaction-card.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 
 const params = new URLSearchParams(location.search);
-const state = params.get('state') ?? '40';
-const EXPECTED_MS = 600_000;
+const state = params.get('state') ?? '49';
+const EXPECTED_MS = 60_000;
 const now = Date.now();
 const rows = [
   { id: 'u1', kind: 'user', text: 'Refactor the cache layer so entries expire per tenant, then run the whole suite.', at: now - 900_000 },
   { id: 'a1', kind: 'assistant', text: 'I moved expiry into the tenant scope and updated the 14 call sites. The suite is green except two snapshot tests, which I will refresh next.', at: now - 600_000 },
   { id: 'u2', kind: 'user', text: 'Great, keep going.', at: now - 420_000 },
 ];
-const running = pct => ({
+const running = extra => ({
   phase: 'running',
-  startedAt: new Date(now - Math.round((pct / 100) * EXPECTED_MS)).toISOString(),
+  startedAt: new Date(now - 434_000).toISOString(),
   tokensBefore: 412_000,
   expectedMs: EXPECTED_MS,
   basis: 'history',
+  ...extra,
 });
+const runningFor = state =>
+  state === 'bare' ? running({ startedAt: new Date(now - 26_000).toISOString() }) : running({ percent: Number(state), tokensWritten: 37_400 });
 const done = { phase: 'done', trigger: 'auto', startedAt: new Date(now - 41_000).toISOString(), endedAt: new Date(now - 1_000).toISOString(), tokensBefore: 412_000, tokensAfter: 38_000 };
-const compaction = state === 'done' ? done : running(Number(state));
+const compaction = state === 'done' ? done : runningFor(state);
 const live = { sessionId: 's1', at: new Date(now).toISOString(), compaction };
 
 const root = document.getElementById('root');
@@ -112,7 +115,7 @@ const VIEWPORTS = [
 ] as const;
 
 try {
-  for (const state of ['40', '93', 'done']) {
+  for (const state of ['49', '93', 'bare', 'done']) {
     for (const viewport of VIEWPORTS) {
       for (const scheme of ['light', 'dark'] as const) {
         const theme = `studio-${scheme}`;

@@ -325,6 +325,8 @@ const compactionRunning = {
   phase: 'running',
   startedAt: new Date(now - 240_000).toISOString(),
   tokensBefore: 412_000,
+  percent: 49,
+  tokensWritten: 37_400,
   expectedMs: 600_000,
   basis: 'history',
 };

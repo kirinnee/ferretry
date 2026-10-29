@@ -23,12 +23,15 @@ export type SessionLiveTokensSource = z.infer<typeof SessionLiveTokensSourceSche
 /**
  * A CONTEXT COMPACTION, running or just finished — the second thing a `live` frame can carry.
  *
- * NEITHER HARNESS REPORTS HOW FAR A COMPACTION HAS GOT. Claude Code paints `Compacting conversation…`
- * with only an elapsed clock; Codex writes nothing until the `compacted` record lands. So a running
- * compaction carries FACTS the daemon measured — when it began, the context size it began from, and
- * how long this daemon's past compactions took (`expectedMs`, with the `basis` it came from) — and the
- * percentage is an ESTIMATE every reader derives with {@link compactionPercent}. It is never exact,
- * never reaches 100 before the end is observed, and a reader must say "about" next to it.
+ * CLAUDE CODE REPORTS HOW FAR IT HAS GOT; CODEX DOES NOT. Current Claude Code paints a progress bar with a
+ * whole percentage under its `Compacting conversation…` line, and a `↓ 37.4k tokens` figure in the clock's
+ * parenthetical. When the daemon read them they ride on the frame as `percent` (0–100, the harness's
+ * own reading) and `tokensWritten`. Older Claude Code and Codex paint only a clock, so both are ABSENT
+ * and a reader shows a spinner, the clock and the usual duration (`expectedMs`, with the `basis` it came
+ * from) — it NEVER derives a percentage of its own, because a made-up bar is a lie about a measurement.
+ *
+ * Every running compaction also carries FACTS the daemon measured: when it began and the context size it
+ * began from.
  *
  * `done` is read back off the transcript (the harness's own boundary record), so it survives a
  * reload and a reconnect for as long as the record is inside the tail the daemon reads. `tokensAfter`
@@ -43,7 +46,11 @@ export const SessionCompactionRunningSchema = z.strictObject({
   startedAt: InstantSchema,
   /** The context size the compaction began from, when the transcript stated one. */
   tokensBefore: NonNegativeIntegerSchema.optional(),
-  /** How long a compaction is expected to take, in milliseconds. */
+  /** How far along the harness itself says it is, whole percent 0–100. Absent when the harness paints no bar. */
+  percent: z.number().int().min(0).max(100).optional(),
+  /** Tokens the harness says the compaction has written so far (↓). Absent when it paints no counter. */
+  tokensWritten: NonNegativeIntegerSchema.optional(),
+  /** How long a compaction usually takes here, in milliseconds — shown only when no real percent exists. */
   expectedMs: z.number().int().positive(),
   /** `history`: this daemon's own past compactions. `typical`: no history yet; a fixed prior. */
   basis: SessionCompactionBasisSchema,
@@ -67,16 +74,6 @@ export const SessionCompactionSchema = z.discriminatedUnion('phase', [
   SessionCompactionDoneSchema,
 ]);
 export type SessionCompactionState = z.infer<typeof SessionCompactionSchema>;
-
-/** The highest a running compaction's estimate may read: only an observed end says 100. */
-export const COMPACTION_PERCENT_CAP = 95;
-
-/** The estimated percent of a running compaction at `nowMs`: linear in elapsed time, capped, whole. */
-export const compactionPercent = (running: SessionCompactionRunning, nowMs: number): number => {
-  const startedMs = Date.parse(running.startedAt);
-  const elapsed = Number.isFinite(startedMs) ? Math.max(0, nowMs - startedMs) : 0;
-  return Math.min(COMPACTION_PERCENT_CAP, Math.floor((100 * elapsed) / running.expectedMs));
-};
 
 /** Tokens a finished compaction freed, when both ends are known and the context did shrink. */
 export const compactionFreed = (done: SessionCompactionDone): number | undefined =>
