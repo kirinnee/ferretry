@@ -1,7 +1,7 @@
 /**
  * Screenshots of every Attention surface, at a 390px phone and a 1440px desktop, light and dark:
  *
- *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item chat
+ *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item’s card
  *   panel-phone / panel-desktop   the pinned item above the composer
  *   details-phone / -desktop      the same, Details open
  *   task-*                       a step-by-step to-do: ticked partly / fully, waiting on the ferret, the
