@@ -2,10 +2,9 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { AttentionItem } from '@ferretry/protocol';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import type { InboxAction } from '../../../src/lib/attention-inbox.ts';
+import { withComposerNote } from '../../../src/lib/attention-reply.ts';
 import { attentionItem, choices } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-
-const nativeTextarea = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set;
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -22,22 +21,6 @@ const card = async (item: AttentionItem, options: { swipeHints?: boolean } = {})
 const answer = (root: ParentNode, direction: 'left' | 'up' | 'right'): HTMLButtonElement =>
   must(root.querySelector<HTMLButtonElement>(`[data-attention-answer="${direction}"]`), `the ${direction} answer`);
 
-const box = (root: ParentNode): HTMLTextAreaElement | null => root.querySelector('textarea[data-attention-reply]');
-
-const openReply = async (root: ParentNode): Promise<HTMLTextAreaElement> => {
-  await interact(() =>
-    must(root.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'the Reply toggle').click(),
-  );
-  return must(box(root), 'the reply box');
-};
-
-const type = async (field: HTMLTextAreaElement, text: string): Promise<void> => {
-  await interact(() => {
-    nativeTextarea?.call(field, text);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-};
-
 const review = attentionItem('R1', { subject: 'Is the migration safe?', kind: 'review' });
 const permission = attentionItem('P1', {
   subject: 'Run the deploy script?',
@@ -50,7 +33,7 @@ const permission = attentionItem('P1', {
 });
 
 describe('the card says what it is, at a glance', () => {
-  test('draws the kind, the title, the ask and the recommendation above the detail', async () => {
+  test('draws the kind and the question as the heading, and the recommendation as a tag and a reason line', async () => {
     const item = attentionItem('A1', {
       title: 'Pick the database',
       subject: 'Which database should the board use?',
@@ -60,16 +43,17 @@ describe('the card says what it is, at a glance', () => {
     });
     const { root } = await card(item);
     expect(root.querySelector('[data-attention-kind]')?.textContent).toBe('Choice');
-    expect(root.querySelector('[data-attention-title]')?.textContent).toBe('Pick the database');
-    expect(root.querySelector('[data-attention-ask]')?.textContent).toBe('Which database should the board use?');
-    expect(root.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite');
-    expect(root.querySelector('[data-attention-recommendation]')?.textContent).toContain('No server to run.');
-    const scroll = must(root.querySelector('[data-attention-scroll]'), 'the detail region');
-    expect(scroll.textContent).toContain('The board needs somewhere to keep its tasks.');
-    expect(scroll.querySelector('[data-attention-title]')).toBeNull();
-    expect(scroll.querySelector('[data-attention-section="questions"] [data-attention-ask]')?.textContent).toBe(
-      'Which database should the board use?',
+    expect(root.querySelector('[data-attention-title]')?.textContent).toBe('Which database should the board use?');
+    expect(root.querySelector('[data-attention-ask]')).toBeNull();
+    const tagged = root.querySelector('[data-attention-option="SQLite"] [data-attention-recommended]');
+    expect(tagged?.textContent).toContain('Recommended');
+    expect(root.querySelectorAll('[data-attention-answer] [data-attention-recommended]')).toHaveLength(1);
+    expect(root.querySelector('[data-attention-actions] [data-attention-recommendation]')?.textContent).toBe(
+      'No server to run.',
     );
+    expect(root.querySelector('[data-attention-why]')?.textContent).toBe('Why A1 needs you.');
+    expect(root.querySelector('textarea')).toBeNull();
+    expect(root.textContent).not.toContain('The board needs somewhere to keep its tasks.');
   });
 
   test('an old item with no title is headed by its whole ask, said once', async () => {
@@ -95,7 +79,8 @@ describe('the card says what it is, at a glance', () => {
         ],
       }),
     );
-    expect(root.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite — No server to run.');
+    expect(root.querySelector('[data-attention-recommendation]')?.textContent).toBe('No server to run.');
+    expect(root.querySelector('[data-attention-option="SQLite"] [data-attention-recommended]')).not.toBeNull();
     expect(root.querySelector('[data-attention-question]')).toBeNull();
     expect(root.textContent).not.toContain('Which database should hold the board?');
   });
@@ -109,6 +94,7 @@ describe('the card says what it is, at a glance', () => {
       }),
     );
     expect(root.querySelector('[data-attention-section="questions"]')).not.toBeNull();
+    expect(root.querySelector('input[type="text"], textarea')).toBeNull();
   });
 
   test('draws no empty sections for an item with no detail', async () => {
@@ -212,125 +198,62 @@ describe('the answer bar', () => {
   });
 });
 
-describe('the optional reply', () => {
-  test('is collapsed on an ordinary card, and opens from "Reply…"', async () => {
-    const { root } = await card(permission);
-    expect(box(root)).toBeNull();
-    const toggle = must(root.querySelector('[data-attention-reply-toggle]'), 'toggle');
-    expect(toggle.textContent).toContain('Reply…');
-    expect(toggle.getAttribute('aria-expanded')).toBe('false');
-    const field = await openReply(root);
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    expect(document.activeElement).toBe(field);
+describe('answering is replying', () => {
+  test('the card has no reply box, note link or Other answer, whatever it asks', async () => {
+    for (const item of [permission, review, attentionItem('T1', { ask: { kind: 'task' } })]) {
+      const { root } = await card(item);
+      expect(root.querySelector('textarea')).toBeNull();
+      expect(root.querySelector('[data-attention-reply-toggle]')).toBeNull();
+      expect(root.querySelector('[data-attention-other]')).toBeNull();
+      await view?.unmount();
+    }
   });
 
   test.each([
-    ['right', 'approve', { kind: 'permission', decision: 'approve' }],
-    ['left', 'reject', { kind: 'permission', decision: 'reject' }],
-  ] as const)('rides along as the note of the %s answer (%s)', async (direction, _does, response) => {
+    ['right', { kind: 'permission', decision: 'approve' }, 'Allow'],
+    ['left', { kind: 'permission', decision: 'reject' }, 'Deny'],
+  ] as const)('the %s answer leaves bare; the host adds the composer text', async (direction, response, label) => {
     const { acts, root } = await card(permission);
-    await type(await openReply(root), 'only for staging');
     await interact(() => answer(root, direction).click());
-    expect(acts).toEqual([
-      { kind: 'respond', label: direction === 'right' ? 'Allow' : 'Deny', response, note: 'only for staging' },
-    ]);
-    expect(box(root)?.value).toBe('');
+    expect(acts).toEqual([{ kind: 'respond', label, response }]);
   });
 
-  test('rides along with a resolve, a good verdict and a needs-info', async () => {
+  test('a task: Done resolves and Need more info asks, both bare', async () => {
     const task = await card(attentionItem('T1', { ask: { kind: 'task' } }));
-    await type(await openReply(task.root), 'done at noon');
     await interact(() => answer(task.root, 'right').click());
-    expect(task.acts).toEqual([{ kind: 'resolve', label: 'Done', note: 'done at noon' }]);
-    await view?.unmount();
-
-    const good = await card(review);
-    await type(await openReply(good.root), 'nice work');
-    await interact(() => answer(good.root, 'right').click());
-    expect(good.acts).toEqual([
-      { kind: 'respond', label: 'Looks good', response: { kind: 'answer-review', verdict: 'good' }, note: 'nice work' },
+    await interact(() => answer(task.root, 'left').click());
+    expect(task.acts).toEqual([
+      { kind: 'resolve', label: 'Done' },
+      { kind: 'needs-info', label: 'Need more info' },
     ]);
-    await view?.unmount();
-
-    const ask = await card(attentionItem('T2', { ask: { kind: 'task' } }));
-    await type(await openReply(ask.root), 'which environment?');
-    await interact(() => answer(ask.root, 'left').click());
-    expect(ask.acts).toEqual([{ kind: 'needs-info', label: 'Need more info', note: 'which environment?' }]);
   });
 
-  test('a ferret-worded label leads the note', async () => {
-    const { acts, root } = await card(permission);
-    await type(await openReply(root), 'for this repo');
-    await interact(() => answer(root, 'up').click());
+  test('a review: Looks good answers; Needs changes is no button, the card says to write it in the message box', async () => {
+    const { acts, root } = await card(review);
+    await interact(() => answer(root, 'right').click());
     expect(acts).toEqual([
-      {
-        kind: 'respond',
-        label: 'Always allow',
-        response: { kind: 'permission', decision: 'approve' },
-        note: 'Always allow — for this repo',
-      },
+      { kind: 'respond', label: 'Looks good', response: { kind: 'answer-review', verdict: 'good' } },
     ]);
+    expect(root.querySelector('[data-attention-answer="left"]')).toBeNull();
+    expect(root.querySelector('[data-attention-composer-hint]')?.textContent).toContain('message box');
   });
 
-  test('a ferret-worded label is the note when nothing was typed', async () => {
+  test('a ferret-worded label is the note, and the composer text joins it', async () => {
     const { acts, root } = await card(permission);
     await interact(() => answer(root, 'up').click());
     expect(acts[0]).toMatchObject({ note: 'Always allow' });
+    expect(withComposerNote(acts[0] as InboxAction, 'for this repo')).toMatchObject({
+      note: 'Always allow — for this repo',
+    });
   });
 
-  test('says "Reply added" once there is text, even when the box is shut', async () => {
-    const { root } = await card(permission);
-    await type(await openReply(root), 'hello');
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'toggle').click(),
-    );
-    expect(box(root)).toBeNull();
-    expect(root.querySelector('[data-attention-reply-toggle]')?.textContent).toContain('Reply added');
-  });
-
-  test('"Needs changes" with an empty box opens and focuses the box instead of sending', async () => {
-    const { acts, root } = await card(review);
-    expect(box(root)).toBeNull();
-    await interact(() => answer(root, 'left').click());
-    expect(acts).toEqual([]);
-    const field = must(box(root), 'the reply box');
-    expect(document.activeElement).toBe(field);
-    await type(field, 'rename the flag');
-    await interact(() => answer(root, 'left').click());
-    expect(acts).toEqual([
-      {
-        kind: 'respond',
-        label: 'Needs changes',
-        response: { kind: 'answer-review', verdict: 'clarify', clarification: 'rename the flag' },
-      },
-    ]);
-  });
-
-  test('"Needs changes" with the box already open and empty focuses it again', async () => {
-    const { acts, root } = await card(review);
-    const field = await openReply(root);
-    must(root.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'the Reply toggle').focus();
-    expect(document.activeElement).not.toBe(field);
-    await interact(() => answer(root, 'left').click());
-    expect(acts).toEqual([]);
-    expect(document.activeElement).toBe(field);
-  });
-
-  test('a card that is only a question has the box open with a Send button, and sends the text as the answer', async () => {
-    const { acts, root } = await card(
+  test('a text-only ask has no options and no send button: it says to reply in the message box', async () => {
+    const { root } = await card(
       attentionItem('Q1', { subject: 'What should it be called?', ask: { kind: 'open-question' } }),
     );
-    const field = must(box(root), 'the open reply box');
-    expect(root.querySelector('[data-attention-reply-toggle]')).toBeNull();
-    const send = must(root.querySelector<HTMLButtonElement>('[data-attention-send]'), 'Send');
-    expect(send.disabled).toBe(true);
-    await type(field, 'Ferretry');
-    expect(send.disabled).toBe(false);
-    await interact(() => send.click());
-    expect(acts).toEqual([
-      { kind: 'respond', label: 'Reply', response: { kind: 'open-question', answer: 'Ferretry' } },
-    ]);
-    expect(box(root)?.value).toBe('');
+    expect(root.querySelector('[data-attention-answer]')).toBeNull();
+    expect(root.querySelector('[data-attention-send]')).toBeNull();
+    expect(root.querySelector('[data-attention-composer-hint]')?.textContent).toBe('Reply in the message box below.');
   });
 });
 
@@ -347,5 +270,35 @@ describe('a card answered one answer per question', () => {
     expect(root.querySelector('[data-attention-send-answers]')).not.toBeNull();
     expect(root.querySelector('[data-attention-answer]')).toBeNull();
     expect(root.querySelector('[data-attention-reply-toggle]')).toBeNull();
+    expect(root.querySelector('textarea, input[type="text"]')).toBeNull();
+  });
+
+  test('an open question among them is answered in the message box, and says so', async () => {
+    const item = attentionItem('M2', {
+      ask: { kind: 'open-question' },
+      questions: [{ question: 'Which engine?', options: [{ label: 'SQLite' }] }, { question: 'Who announces it?' }],
+    });
+    const { root } = await card(item);
+    expect(root.querySelector('[data-attention-composer-hint]')?.textContent).toContain('message box');
+  });
+
+  test('Send answers is ready only once at least one answer is picked, then sends them together', async () => {
+    const item = attentionItem('M3', {
+      ask: { kind: 'open-question' },
+      questions: [
+        { question: 'Which engine?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
+        { question: 'Migrate when?', options: [{ label: 'Now' }, { label: 'Later' }] },
+      ],
+    });
+    const { acts, root } = await card(item);
+    const send = must(root.querySelector<HTMLButtonElement>('[data-attention-send-answers]'), 'Send answers');
+    expect(send.disabled).toBe(true);
+    await interact(() =>
+      must(root.querySelector<HTMLButtonElement>('[data-attention-pick="SQLite"]'), 'SQLite').click(),
+    );
+    expect(send.disabled).toBe(false);
+    await interact(() => send.click());
+    expect(acts).toHaveLength(1);
+    expect(acts[0]?.kind).toBe('respond');
   });
 });

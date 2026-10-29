@@ -4,34 +4,30 @@
  * A swipe is an answer, so it is held to the same rules a button is, and then some:
  *
  * - THE MAPPING IS THE CARD'S OWN ANSWERS (`swipeTargets`), never a second one: left, up and right each
- *   give the answer the card put in that direction, carrying the reply typed on the card as its note. A
- *   direction with no answer commits nothing. While the card is dragged the answer it would send is
- *   STAMPED on it — arrow and label, growing with the drag — so the reader sees what they are about to
- *   say before they say it. A review's "Needs changes" with an empty reply box opens the box instead.
+ *   give the answer the card put in that direction. A direction with no answer commits nothing. While the
+ *   card is dragged the answer it would send is STAMPED on it — arrow and label, growing with the drag —
+ *   so the reader sees what they are about to say before they say it. A review's "Needs changes" is
+ *   written in the message box, so it has no swipe: that drag springs back.
  * - IT COMMITS ONLY PAST THE THRESHOLD (`swipeIntent(...).committed`). Short of it the card springs back
  *   and nothing is sent; past it the card flies off and the answer is handed to `onAct` — which, in the
  *   inbox, holds it for the undo window (`DeferredAttentionActions`) rather than posting it.
- * - DOWN IS ALWAYS DISCUSS (`attentionCanDiscuss`, never one of the card's three answers): a deliberate drag
- *   down on a card a ferret raised asks to talk it through. It commits only past the same clear distance
- *   as a sideways swipe (`swipeThreshold`). The Discuss button and ArrowDown are the same answer for a
- *   reader who does not swipe.
+ * - DOWN IS NOTHING: a drag down answers nothing and the card does not follow it; the browser keeps it as a scroll.
  * - A SWIPE STARTS ONLY FROM THE CARD'S HEAD ({@link startsInHandle}): its header and title. The detail
  *   below is its own scroller and the answer bar is for pressing, so a drag there is the reader scrolling
  *   or tapping, never an answer — the card is the full height of the screen, and most of it scrolls.
  * - A SCROLL IS NEVER A SWIPE. `touch-action` on the card hands the browser every direction the card does
  *   not use: with no up answer it keeps vertical panning entirely (`pan-y`), and with one it keeps only
- *   the downward pan (`pan-down`) — the detail inside it scrolls on that rule, and only the parts
- *   outside the detail narrow it for Discuss (above).
+ *   the downward pan (`pan-down`) — the detail inside it scrolls on that rule.
  *   A drag that moved swallows the click it ends in, so a swipe that ends over a button does not also
  *   press it.
  * - KEYBOARD AND SCREEN-READER PARITY: the same answers are the card's own buttons, and a focused card
- *   takes ←, →, ↑ and ↓ for the mapped answer ({@link AttentionCardFrame}), said in an sr-only hint.
+ *   takes ←, → and ↑ for the mapped answer ({@link AttentionCardFrame}), said in an sr-only hint.
  * - REDUCED MOTION (the OS preference, or Settings › Appearance › Motion) drops the fly-off and the
  *   spring: the card is simply gone, or simply back.
  */
 
 import { attentionTitle } from '@ferretry/protocol';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
+import { ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -53,7 +49,6 @@ import {
   swipeMap,
 } from '../../lib/attention-inbox.ts';
 import { usePrefersReducedMotion } from '../../shell/bottom-sheet.tsx';
-import { ReplyDraftContext } from './attention-reply-draft.tsx';
 
 /** How long a committed card takes to leave. The answer is handed over at once; this is only the look. */
 const FLY_MS = 220;
@@ -114,22 +109,20 @@ const KEY_DIRECTION: Readonly<Record<string, SwipeDirection>> = {
   ArrowRight: 'right',
   ArrowLeft: 'left',
   ArrowUp: 'up',
-  ArrowDown: 'down',
 };
 
 const DIRECTION_WORD: Readonly<Record<SwipeDirection, string>> = {
   right: 'right',
   left: 'left',
   up: 'up',
-  down: 'down',
 };
 
-/** The direction a key points, or `null` for a key that is not one of the four arrows. */
+/** The direction a key points, or `null` for a key that is not one of the three arrows. */
 export const attentionKeyDirection = (key: string): SwipeDirection | null => KEY_DIRECTION[key] ?? null;
 
 /** What the arrows do on this card, in words: the sr-only hint a focused card is described by. */
 export const swipeKeyHint = (targets: SwipeTargets): string =>
-  (['left', 'up', 'right', 'down'] as const)
+  (['left', 'up', 'right'] as const)
     .flatMap(direction => {
       const target = targets[direction];
       return target === undefined ? [] : [`Arrow ${DIRECTION_WORD[direction]}: ${target.label}.`];
@@ -152,8 +145,8 @@ interface AttentionCardFrameProps {
 
 /**
  * A card as something the keyboard can answer: focusable, described by what its arrows do, and taking
- * ←/→/↑/↓ for the answer in that direction — only when the CARD is focused, never while focus is in its
- * reply box or on one of its buttons, where the arrows already mean something.
+ * ←/→/↑ for the answer in that direction — only when the CARD is focused, never while focus is in a
+ * field or on one of its buttons, where the arrows already mean something.
  */
 function AttentionCardFrame({ card, targets, onArrow, children }: AttentionCardFrameProps) {
   const hintId = useId();
@@ -186,7 +179,6 @@ const STAMP_ARROW: Readonly<Record<SwipeDirection, ReactNode>> = {
   right: <ArrowRight size={20} aria-hidden="true" />,
   left: <ArrowLeft size={20} aria-hidden="true" />,
   up: <ArrowUp size={20} aria-hidden="true" />,
-  down: <ArrowDown size={20} aria-hidden="true" />,
 };
 
 interface Drag {
@@ -221,7 +213,7 @@ interface Leaving {
 /** Where a drag of `(dx, dy)` draws the card: it follows sideways, and up or down only when that means something. */
 export const dragOffset = (dx: number, dy: number, targets: SwipeTargets): Drag => ({
   dx,
-  dy: dy >= 0 ? (targets.down === undefined ? 0 : dy) : targets.up === undefined ? dy * 0.2 : dy,
+  dy: dy >= 0 ? 0 : targets.up === undefined ? dy * 0.2 : dy,
 });
 
 /** A drag that began inside the card's detail while it overflowed: whether the detail sat at its top, or its bottom. */
@@ -233,16 +225,14 @@ export interface ScrollStart {
 /**
  * The card's swipe targets for a drag that began at `scroll` — `null` for the header, the title or the answer
  * bar, which keep every target. Inside a detail that overflows, a vertical drag is the reader scrolling,
- * except where the detail cannot scroll any further that way: ↓ stays only when it was at its top, ↑ only
- * when it was at its bottom. The sideways answers always stay; a detail never scrolls sideways.
+ * except where the detail cannot scroll any further that way: ↑ stays only when it was at its bottom. The sideways answers always stay; a detail never scrolls sideways.
  */
 export const verticalTargets = (targets: SwipeTargets, scroll: ScrollStart | null): SwipeTargets => {
   if (scroll === null) return targets;
-  const { up, down, ...sideways } = targets;
+  const { up, ...sideways } = targets;
   return {
     ...sideways,
     ...(scroll.atBottom && up !== undefined ? { up } : {}),
-    ...(scroll.atTop && down !== undefined ? { down } : {}),
   };
 };
 
@@ -284,25 +274,22 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
   const reduced = useReducedMotion(reducedMotion);
   const [drag, setDrag] = useState<RawDrag | null>(null);
   const [leaving, setLeaving] = useState<Leaving | null>(null);
-  const [replyText, setReplyText] = useState('');
-  const [focusTick, setFocusTick] = useState(0);
   const gesture = useRef<Gesture | null>(null);
   const deck = useRef<HTMLDivElement | null>(null);
   /** Focus was in the deck when a card left: the next card takes it, so the keyboard keeps its place. */
   const refocus = useRef(false);
   const swallowClick = useRef(false);
   const top = cards[0];
-  const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item, replyText);
+  const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
 
   const topKey = top?.key;
   const room = useDeckRoom(deck, topKey);
-  // A new card on top starts with no drag and no reply — the old one's must never carry over — and
+  // A new card on top starts with no drag — the old one's must never carry over — and
   // takes the focus the card it replaced had.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the card on top changing is the only trigger
   useEffect(() => {
     gesture.current = null;
     setDrag(null);
-    setReplyText('');
     if (!refocus.current) return;
     // The last card leaving forgets the focus too: a card arriving later must not steal it.
     refocus.current = false;
@@ -317,7 +304,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
   }, [leaving]);
 
   const answer = (card: InboxCard, action: InboxAction, from: Drag): void => {
-    const direction = directionOfAction(swipeMap(card.item, replyText), action);
+    const direction = directionOfAction(swipeMap(card.item), action);
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
     setDrag(null);
@@ -325,14 +312,13 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
     onAct(card, action);
   };
 
-  /** A swipe or arrow toward `direction`: its answer goes, or — a "Needs changes" with no text — the box opens. */
+  /** A swipe or arrow toward `direction`: its answer goes; a "Needs changes" has none, so the card springs back. */
   const give = (card: InboxCard, direction: SwipeDirection, from: Drag): void => {
     const target = targets[direction];
-    // Both callers give only a direction the card takes (a committed swipe, a mapped arrow); the guard
-    // keeps a future caller from sending nothing. A "Needs changes" with no words opens the box instead.
+    // Both callers give only a direction the card takes; the guard keeps a future caller from sending
+    // nothing, and a "Needs changes" (written in the message box) has no action to send.
     if (target === undefined || target.action === null) {
       setDrag(null);
-      if (target !== undefined) setFocusTick(tick => tick + 1);
       return;
     }
     answer(card, target.action, from);
@@ -422,7 +408,6 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
         <div
           className="fy-attn-deck__top"
           data-dragging={drag === null ? undefined : ''}
-          data-has-discuss={targets.down === undefined ? undefined : ''}
           data-has-up={targets.up === undefined ? undefined : ''}
           data-swipe-direction={intent?.direction ?? undefined}
           key={top.key}
@@ -450,9 +435,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
             onArrow={direction => give(top, direction, { dx: 0, dy: 0 })}
             targets={targets}
           >
-            <ReplyDraftContext.Provider value={{ text: replyText, setText: setReplyText, focusTick }}>
-              {renderCard(top, action => answer(top, action, { dx: 0, dy: 0 }))}
-            </ReplyDraftContext.Provider>
+            {renderCard(top, action => answer(top, action, { dx: 0, dy: 0 }))}
           </AttentionCardFrame>
           {intent === null || intent.direction === null ? null : (
             <div

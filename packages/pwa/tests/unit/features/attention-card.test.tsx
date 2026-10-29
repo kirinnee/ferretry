@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import { PointForm } from '../../../src/features/attention/attention-brief.tsx';
+import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
+import { AttentionDetail } from '../../../src/features/attention/attention-detail.tsx';
 import type { InboxAction } from '../../../src/lib/attention-inbox.ts';
 import { attentionItem, choices } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
-
-const nativeInput = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
 
 const rich = attentionItem('A1', {
   subject: 'Pick the storage',
@@ -41,18 +40,20 @@ const sections = (root: ParentNode): string[] =>
   [...root.querySelectorAll('[data-attention-section]')].map(node => node.getAttribute('data-attention-section') ?? '');
 
 describe('AttentionCard sections', () => {
-  test('a rich item draws every section, in order, all open — the card shows everything to decide', async () => {
+  test('a rich item draws only what it needs to be answered: the per-question pickers and a recommendation', async () => {
     view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual(['context', 'questions', 'recommendation', 'impact', 'terms', 'links']);
-    // Open means drawn, not folded: no section is a `<details>` the reader has to open.
+    expect(sections(view.container)).toEqual(['questions', 'recommendation']);
     expect(view.container.querySelectorAll('details[data-attention-section]')).toHaveLength(0);
-    expect(view.container.textContent).toContain('Urgency:');
+    expect(view.container.textContent).not.toContain('Urgency:');
   });
 
-  test('the summary is drawn once, and a why that repeats it is not drawn', async () => {
+  test('the summary is drawn once, and a why that repeats it gives way to the first point of the context', async () => {
     view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
     expect(view.container.textContent?.split('Pick the storage').length).toBe(2);
-    expect(view.container.querySelector('[data-attention-why]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-why]')?.textContent).toBe(
+      'We need somewhere to keep the board.',
+    );
+    expect(view.container.querySelector('[data-attention-section="context"]')).toBeNull();
   });
 
   test('a different why is kept', async () => {
@@ -60,23 +61,23 @@ describe('AttentionCard sections', () => {
     expect(view.container.querySelector('[data-attention-why]')?.textContent).toContain('It blocks the release.');
   });
 
-  test('an external link opens safely in a new tab', async () => {
-    view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
+  test('an external link in the detail opens safely in a new tab', async () => {
+    view = await mount(<AttentionDetail item={rich} layout="panel" />);
     const link = must(view.container.querySelector<HTMLAnchorElement>('a[href="https://example.test/spec"]'), 'link');
     expect(link.getAttribute('rel')).toBe('noreferrer noopener');
     expect(link.getAttribute('target')).toBe('_blank');
   });
 
-  test('an old item stays minimal: the summary, its context and its options', async () => {
+  test('an old item stays minimal: the question and its options', async () => {
     const old = attentionItem('A2', { subject: 'Approve?', context: 'Halfway there.', ask: choices('Yes', 'No') });
     view = await mount(<AttentionCard item={old} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual(['context']);
-    expect(view.container.querySelector('[data-attention-section="context"]')?.textContent).toContain('Halfway there.');
+    expect(sections(view.container)).toEqual([]);
+    expect(view.container.querySelector('[data-attention-why]')?.textContent).toBe('Why A2 needs you.');
     expect(view.container.querySelectorAll('[data-attention-option]')).toHaveLength(2);
     expect(view.container.querySelector('[data-attention-recommended]')).toBeNull();
   });
 
-  test('the header names the ferret and machine, the title stands above the detail, the recommendation is one of its sections', async () => {
+  test('the header names the ferret and machine, the title stands above the scroll, the per-question recommendation is a section', async () => {
     view = await mount(
       <AttentionCard
         item={rich}
@@ -115,7 +116,7 @@ describe('AttentionCard recommended option', () => {
 });
 
 describe('AttentionCard per-question answers', () => {
-  test('collects one answer per question and sends them as one open-question reply', async () => {
+  test('collects one picked answer per question and sends them as one open-question reply', async () => {
     const sent: InboxAction[] = [];
     view = await mount(<AttentionCard item={rich} onAct={action => sent.push(action)} />);
     const send = (): HTMLButtonElement =>
@@ -130,14 +131,10 @@ describe('AttentionCard per-question answers', () => {
     expect(view.container.querySelector('[data-attention-pick="SQLite"]')?.getAttribute('aria-pressed')).toBe('true');
     expect(send().disabled).toBe(false);
 
-    // The second question sits behind its own fold; open it and type a free answer.
-    const second = must(view.container.querySelector('[data-attention-question="1"] details'), 'second question');
-    await interact(() => second.setAttribute('open', ''));
-    const field = must(second.querySelector<HTMLInputElement>('input[type="text"]'), 'free text');
-    await interact(() => {
-      nativeInput?.call(field, 'Friday');
-      field.dispatchEvent(new Event('input', { bubbles: true }));
-    });
+    await interact(() =>
+      must(view?.container.querySelector<HTMLButtonElement>('[data-attention-pick="Now"]'), 'Now').click(),
+    );
+    expect(view.container.querySelector('input[type="text"], textarea')).toBeNull();
     await interact(() => send().click());
     expect(sent).toEqual([
       {
@@ -145,7 +142,7 @@ describe('AttentionCard per-question answers', () => {
         label: 'Reply',
         response: {
           kind: 'open-question',
-          answer: '1. Which engine?\n→ SQLite\n\n2. Migrate when?\n→ Friday',
+          answer: '1. Which engine?\n→ SQLite\n\n2. Migrate when?\n→ Now',
         },
       },
     ]);
@@ -159,14 +156,14 @@ describe('AttentionCard per-question answers', () => {
   });
 });
 
-describe('AttentionCard point form', () => {
+describe('AttentionDetail point form', () => {
   test('context and impact written as bullets draw as lists, one point each', async () => {
     const bulleted = {
       ...rich,
       context: '- the login expires\n- two plans fit',
       impact: '- blocks the release\n- costs a day',
     };
-    view = await mount(<AttentionCard item={bulleted} onAct={() => {}} />);
+    view = await mount(<AttentionDetail item={bulleted} layout="panel" />);
     const points = (section: string): string[] =>
       [...(view?.container.querySelectorAll(`[data-attention-section="${section}"] li`) ?? [])].map(
         node => node.textContent ?? '',
@@ -177,9 +174,9 @@ describe('AttentionCard point form', () => {
 
   test('with the plain renderer, prose or a mix of prose and bullets stays a paragraph', async () => {
     view = await mount(
-      <AttentionCard
-        item={{ ...rich, context: 'Intro line.\n- then a point', impact: 'Plain words.' }}
-        onAct={() => {}}
+      <AttentionDetail
+        item={{ ...rich, context: 'Lead.\n\nIntro line.\n- then a point', impact: 'Plain words.' }}
+        layout="panel"
         renderProse={text => <PointForm text={text} />}
       />,
     );

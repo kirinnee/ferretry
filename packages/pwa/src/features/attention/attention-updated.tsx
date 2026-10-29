@@ -1,0 +1,100 @@
+/**
+ * "UPDATED 5 MIN AGO" — what makes a card a living summary of its discussion. The button says when the ferret
+ * last edited the item; pressing it opens a read-only list of the earlier versions (newest first: when, who,
+ * which fields changed and what each said before). It is a disclosure under the button, not a route.
+ * Nothing here edits anything.
+ */
+
+import type { AttentionItem } from '@ferretry/protocol';
+import { ChevronDown, History } from 'lucide-react';
+import { type KeyboardEvent, useId, useRef, useState } from 'react';
+import { decidedSummary, revisionAuthor, revisionList, updatedAgo } from '../../lib/attention-revisions.ts';
+
+/** The one line "3 decided · 2 still open", when the item carries either list. */
+export function AttentionDecidedSummary({ item }: { readonly item: AttentionItem }) {
+  const line = decidedSummary(item);
+  return line === null ? null : (
+    <span className="fy-attn-summary text-meta text-muted" data-attention-summary="">
+      {line}
+    </span>
+  );
+}
+
+const clock = (at: string): string => {
+  const when = new Date(at);
+  return Number.isNaN(when.getTime()) ? at : when.toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
+};
+
+export function AttentionUpdated({
+  item,
+  now,
+  compact = false,
+}: {
+  readonly item: Pick<AttentionItem, 'revisions'>;
+  /** The instant "5 min ago" counts from. Default: when this was first drawn. */
+  readonly now?: number;
+  /** Drawn as a quiet link on a chat message rather than on a card. */
+  readonly compact?: boolean;
+}) {
+  const [drawnAt] = useState(() => Date.now());
+  const [open, setOpen] = useState(false);
+  const listId = useId();
+  const button = useRef<HTMLButtonElement>(null);
+  const label = updatedAgo(item, now ?? drawnAt);
+  if (label === null) return null;
+  const entries = revisionList(item);
+
+  const onKeyDown = (event: KeyboardEvent<HTMLElement>): void => {
+    if (event.key !== 'Escape' || !open) return;
+    event.stopPropagation();
+    setOpen(false);
+    button.current?.focus();
+  };
+
+  return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: the keydown handler only routes Esc to the list inside it
+    <span className="fy-attn-updated" data-compact={compact || undefined} onKeyDown={onKeyDown}>
+      <button
+        aria-controls={open ? listId : undefined}
+        aria-expanded={open}
+        className="kt-btn kt-btn--sm fy-attn-updated__button"
+        data-attention-updated=""
+        onClick={() => setOpen(current => !current)}
+        ref={button}
+        title="See the earlier versions of this item"
+        type="button"
+      >
+        <History aria-hidden="true" size={13} />
+        {label}
+        <ChevronDown aria-hidden="true" className="fy-attn-updated__chevron" size={13} />
+      </button>
+      {open ? (
+        <section aria-label="Earlier versions" className="fy-attn-revisions" data-attention-revisions="" id={listId}>
+          <ol className="fy-attn-revisions__list">
+            {entries.map(entry => (
+              <li
+                className="fy-attn-revisions__item"
+                data-attention-revision={entry.at}
+                key={`${entry.at}-${entry.by}`}
+              >
+                <p className="fy-attn-revisions__head m-0">
+                  <time dateTime={entry.at}>{clock(entry.at)}</time>
+                  <span aria-hidden="true">·</span>
+                  {revisionAuthor(entry.by)} changed {entry.changed.map(change => change.label).join(', ')}
+                </p>
+                <dl className="fy-attn-revisions__fields m-0">
+                  {entry.changed.map(change => (
+                    <div key={change.field}>
+                      <dt>{change.label} was</dt>
+                      <dd className="m-0 whitespace-pre-wrap break-words">{change.before}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </li>
+            ))}
+          </ol>
+        </section>
+      ) : null}
+    </span>
+  );
+}

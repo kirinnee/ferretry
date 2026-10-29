@@ -36,88 +36,80 @@ const full = attentionItem('A1', {
   },
 });
 
-describe('AttentionCard open sections', () => {
-  test('draws every section it has, open, in the one fixed order', async () => {
-    view = await mount(<AttentionCard item={full} onAct={() => {}} />);
-    expect(names(view.container)).toEqual([
-      'premise',
-      'context',
-      'decided',
-      'options',
-      'recommendation',
-      'impact',
-      'steps',
-      'terms',
-      'more',
-      'links',
-    ]);
-    expect(view.container.querySelectorAll('details[data-attention-section]')).toHaveLength(0);
+const longContext = attentionItem('A5', {
+  ...full,
+  context: 'The release is cut on Friday.\n\nAfter that the names are frozen.',
+});
+
+describe('AttentionCard content', () => {
+  test('draws none of the detail sections: they live in Details', async () => {
+    view = await mount(<AttentionCard item={longContext} onAct={() => {}} />);
+    expect(names(view.container)).toEqual([]);
+    expect(view.container.querySelector('table[data-attention-terms]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-steps-count]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-body]')).toBeNull();
   });
 
-  test('premise and context are two blocks with their own headings', async () => {
+  test('the recommendation is a tag and a reason line in the answer bar, never a section', async () => {
     view = await mount(<AttentionCard item={full} onAct={() => {}} />);
-    const premise = must(view.container.querySelector('[data-attention-section="premise"]'), 'premise');
-    const context = must(view.container.querySelector('[data-attention-section="context"]'), 'context');
-    expect(premise).not.toBe(context);
-    expect(premise.contains(context) || context.contains(premise)).toBe(false);
-    expect(premise.querySelector('.fy-attn-sec__heading')?.textContent).toBe('Premise');
-    expect(context.querySelector('.fy-attn-sec__heading')?.textContent).toBe('Context');
-    expect(premise.querySelectorAll('li')).toHaveLength(2);
-    expect(context.textContent).toContain('The release is cut on Friday.');
-    expect(context.textContent).not.toContain('55 repos');
+    expect(names(view.container)).not.toContain('recommendation');
+    const tagged = must(view.container.querySelector('[data-attention-answer] [data-attention-recommended]'), 'tag');
+    expect(tagged.closest('[data-attention-option]')?.getAttribute('data-attention-option')).toBe('Keep ci');
+    expect(tagged.textContent).toContain('Recommended');
+    const reason = must(
+      view.container.querySelector('[data-attention-actions] [data-attention-recommendation]'),
+      'reason',
+    );
+    expect(reason.textContent).toBe('Matches 55 repos.');
   });
 
-  test('an item without a section draws no empty one', async () => {
-    view = await mount(<AttentionCard item={attentionItem('A2', { context: 'Only this.' })} onAct={() => {}} />);
-    expect(names(view.container)).toEqual(['context']);
+  test('the first point of the context is the one plain "why it matters" line', async () => {
+    view = await mount(<AttentionCard item={longContext} onAct={() => {}} />);
+    expect(view.container.querySelector('[data-attention-why]')?.textContent).toBe('The release is cut on Friday.');
     await view.unmount();
+    view = await mount(<AttentionCard item={full} onAct={() => {}} />);
+    expect(view.container.querySelector('[data-attention-why]')?.textContent).toBe('The release is cut on Friday.');
+  });
+
+  test('an item without a why draws no empty line', async () => {
     view = await mount(<AttentionCard item={attentionItem('A3', { subject: 'Same', why: 'Same' })} onAct={() => {}} />);
     expect(names(view.container)).toEqual([]);
+    expect(view.container.querySelector('[data-attention-why]')).toBeNull();
   });
 
-  test('options say which way each swipes and what happens, and terms are one muted line', async () => {
+  test('the heading is the question; a long one gives the heading to the title and leads the body', async () => {
     view = await mount(<AttentionCard item={full} onAct={() => {}} />);
-    const rows = [...view.container.querySelectorAll('[data-attention-option-detail]')];
-    expect(rows).toHaveLength(2);
-    expect(rows[0]?.querySelector('.fy-attn-options__arrow')).not.toBeNull();
-    expect(rows[0]?.textContent).toContain('55 need an edit');
-    const terms = must(view.container.querySelector('[data-attention-terms-line]'), 'terms line');
-    expect(terms.textContent).toBe('CI = continuous integration · PR = pull request');
-  });
-
-  test('a long body starts as a preview behind Show more, a short one is whole', async () => {
-    view = await mount(<AttentionCard item={full} onAct={() => {}} />);
-    expect(view.container.querySelector('[data-attention-body-toggle]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-title]')?.textContent).toBe('Pick the CI name');
     await view.unmount();
-    view = await mount(<AttentionCard item={{ ...full, body: 'line of detail\n'.repeat(40) }} onAct={() => {}} />);
-    const more = must(view.container.querySelector<HTMLButtonElement>('[data-attention-body-toggle]'), 'toggle');
-    expect(more.textContent).toBe('Show more');
-    expect(view.container.querySelector('[data-attention-body][data-folded]')).not.toBeNull();
-    await interact(() => more.click());
-    expect(more.textContent).toBe('Show less');
-    expect(view.container.querySelector('[data-attention-body][data-folded]')).toBeNull();
+    const ask = `${'Should the release train keep going while the checks are red, '.repeat(3)}or stop?`;
+    const long = attentionItem('A6', { ...full, title: 'Release train', subject: ask, why: ask });
+    view = await mount(<AttentionCard item={long} onAct={() => {}} />);
+    expect(view.container.querySelector('[data-attention-title]')?.textContent).toBe('Release train');
+    const first = must(view.container.querySelector('[data-attention-scroll] [data-attention-ask]'), 'ask line');
+    expect(first.textContent).toBe(ask);
+    expect(view.container.querySelector('[data-attention-scroll] [data-attention-section="questions"]')).toBeNull();
   });
 
   test('the pinned card has no Details fold either', async () => {
     view = await mount(<AttentionCard item={full} onAct={() => {}} pinned />);
-    expect(view.container.querySelector('[data-attention-details]')).toBeNull();
-    expect(names(view.container)).toContain('context');
+    expect(view.container.querySelector('details')).toBeNull();
   });
 });
 
 describe('AttentionCard Skip', () => {
-  test('is drawn in the second row, after Discuss, only when the host can skip, and skips', async () => {
+  test('is drawn first in the secondary row, before Details and ⋯, only when the host can skip, and skips', async () => {
     const skipped: string[] = [];
-    const item = attentionItem('A4', { raisedBy: 'agent' });
-    view = await mount(<AttentionCard item={item} onAct={() => {}} onSkip={() => skipped.push('A4')} />);
+    const item = attentionItem('A4', { raisedBy: 'agent', context: 'More to read' });
+    view = await mount(
+      <AttentionCard item={item} onAct={() => {}} onOpenDetail={() => {}} onSkip={() => skipped.push('A4')} />,
+    );
     const skip = must(view.container.querySelector<HTMLButtonElement>('[data-attention-skip]'), 'skip');
     expect(skip.textContent).toContain('Skip');
     const row = skip.closest('.fy-attn-actions__row');
-    expect(row?.querySelector('[data-attention-reply-toggle]')).not.toBeNull();
     const kids = [...(row?.children ?? [])];
-    expect(kids.indexOf(skip)).toBeGreaterThan(
-      kids.indexOf(must(row?.querySelector('[data-attention-reply-toggle]'), 'r')),
-    );
+    expect(kids.indexOf(skip)).toBe(0);
+    expect(kids.indexOf(must(row?.querySelector('[data-attention-details]'), 'details'))).toBe(1);
+    expect(kids.at(-1)?.querySelector('[data-attention-more]')).not.toBeNull();
     await interact(() => skip.click());
     expect(skipped).toEqual(['A4']);
     await view.unmount();

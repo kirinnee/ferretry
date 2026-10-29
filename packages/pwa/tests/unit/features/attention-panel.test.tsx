@@ -258,35 +258,22 @@ describe('AttentionPanel', () => {
     expect(must(view.container, 'view').querySelector('[data-attention-pager]')).toBeNull();
   });
 
-  test("the pinned card carries the deck's answer bar: arrows, Reply… and the ⋯ in the same row", async () => {
+  test("the pinned card carries the deck's answer bar: arrows and the ⋯, with no note box", async () => {
     view = await mount(panel());
     const card = cardOf(must(view.container, 'view'), 'A3');
     const answers = [...card.querySelectorAll<HTMLElement>('[data-attention-answer]')];
     expect(answers.map(answer => answer.getAttribute('data-attention-answer'))).toEqual(['left', 'right']);
     for (const answer of answers) expect(answer.querySelector('svg')).not.toBeNull();
     expect(card.textContent).not.toContain('or swipe');
-    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
-    expect(toggle.textContent).toContain('Reply…');
-    expect(toggle.closest('.fy-attn-actions__row')?.querySelector('[data-attention-more]')).not.toBeNull();
-    expect(card.querySelectorAll('.fy-attn-actions__row')).toHaveLength(1);
+    expect(card.querySelector('[data-attention-reply-toggle], textarea')).toBeNull();
+    expect(card.querySelector('.fy-attn-actions__row [data-attention-more]')).not.toBeNull();
   });
 
-  test('Reply… on the pinned card opens its box', async () => {
-    view = await mount(panel());
-    const card = cardOf(must(view.container, 'view'), 'A3');
-    expect(card.querySelector('textarea')).toBeNull();
-    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
-    await interact(() => toggle.click());
-    expect(card.querySelector('textarea')).not.toBeNull();
-    expect(toggle.getAttribute('aria-expanded')).toBe('true');
-  });
-
-  test('the context is open from the start: there is no Details fold to open', async () => {
+  test('the context is not on the card: it lives in the detail', async () => {
     const rich = item('A3', { context: 'We need storage for the sessions.' });
     view = await mount(panel({ snapshot: board([rich]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
-    expect(card.querySelector('[data-attention-details]')).toBeNull();
-    expect(card.querySelector('[data-attention-section="context"]')?.textContent).toContain('We need storage');
+    expect(card.querySelector('[data-attention-section="context"]')).toBeNull();
   });
 
   test('the answer chip names the item and reports its toggle', async () => {
@@ -356,14 +343,9 @@ describe('AttentionPanel', () => {
     );
   });
 
-  test('Discuss asks to talk it through at once, through discuss, and says so', async () => {
-    const recorded = recordingClient();
-    view = await mount(panel({ client: recorded.client }));
-    await interact(() => buttonNamed(cardOf(must(view?.container, 'view'), 'A3'), 'Discuss').click());
-    expect(recorded.calls).toEqual([{ method: 'discuss', id: 'A3', payload: undefined }]);
-    expect(view.container.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe(
-      'Asked to discuss !A3',
-    );
+  test('has no Discuss button: a reply in the message box is how a discussion carries on', async () => {
+    view = await mount(panel());
+    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-discuss]')).toBeNull();
   });
 
   test('an item the ferret did not raise offers no Discuss', async () => {
@@ -507,9 +489,9 @@ describe('AttentionPanel', () => {
     });
     view = await mount(panel({ snapshot: board([rich]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
-    expect(card.querySelector('[data-attention-section="context"]')?.textContent).toContain('We need storage.');
+    expect(card.querySelector('[data-attention-why]')?.textContent).toBe('We need storage.');
     expect(card.querySelector('[data-attention-section="questions"]')).toBeNull();
-    expect(card.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite');
+    expect(card.querySelector('[data-attention-option="SQLite"] [data-attention-recommended]')).not.toBeNull();
   });
 });
 
