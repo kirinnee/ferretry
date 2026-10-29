@@ -1,3 +1,13 @@
+## [4.105.5](https://github.com/kirinnee/ferretry/compare/v4.105.4...v4.105.5) (2026-10-29)
+
+### Fixes
+
+* **warden:** stop the flag noise that burnt both caps, and pace each cap through the day ([#888](https://github.com/kirinnee/ferretry/issues/888)) ([5e7fdc9](https://github.com/kirinnee/ferretry/commit/5e7fdc9d80cc76828f000975c2f77ec9346e523d))
+
+### Performance
+
+* **transcript:** allocate less per parse step under memory pressure ([#889](https://github.com/kirinnee/ferretry/issues/889)) ([96c8f1f](https://github.com/kirinnee/ferretry/commit/96c8f1f0215078480d375cf071f258031d4dee09))
+
 ## [4.105.4](https://github.com/kirinnee/ferretry/compare/v4.105.3...v4.105.4) (2026-10-29)
 
 ### Fixes
