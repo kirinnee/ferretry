@@ -127,6 +127,15 @@ describe('AnalyticsOverviewPage', () => {
     expect(output).toContain('+1 child');
   });
 
+  it('shows the per-session active time alone when no session recorded its turns', async () => {
+    const renderer = overview(async (_daemon, query) =>
+      rawResponse([rawRow({ id: 'quiet', turns: null, activeDurationMs: 90_000 })], query),
+    );
+    await settle();
+    expect(text(renderer)).toContain('/ session');
+    expect(text(renderer)).not.toContain('/ turn');
+  });
+
   it('switches the measure, the bucketing and the ranking of top sessions', async () => {
     const renderer = overview(fleet());
     await settle();
