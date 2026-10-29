@@ -411,10 +411,11 @@
 .fy-attn-needs {
   display: flex;
   min-width: 0;
-  flex-shrink: 0;
+  min-height: 0;
+  flex: 0 1 auto;
   flex-direction: column;
   gap: var(--gap-sm);
-  padding: var(--gap-sm) 12px var(--gap-md);
+  padding: var(--gap-sm) 4px var(--gap-md);
 }
 @media (min-width: 640px) {
   .fy-attn-needs {
@@ -464,6 +465,49 @@
   .fy-attn-needs__cards > li + li {
     display: none;
   }
+}
+
+/* THE CARD NEVER OUTGROWS THE PAGE. The section shrinks to the room between the page header and the
+   tab bar, and the card inside it gives that room to its detail, which scrolls: the header and the
+   answer bar stay on screen however long the to-do is. A flex chain, not a measured height, so it
+   holds under any inset, keyboard or rotation. */
+.fy-attn-needs__cards,
+.fy-attn-needs__cards > li {
+  min-height: 0;
+}
+@media (max-width: 767.98px) {
+  .fy-attn-needs__cards {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+  }
+  .fy-attn-needs__cards > li {
+    display: flex;
+    flex: 0 1 auto;
+    flex-direction: column;
+  }
+  .fy-attn-needs__cards .fy-attn-card {
+    min-height: 0;
+    flex: 0 1 auto;
+  }
+}
+/* Wide: the cards sit in a grid, so each is capped by the screen instead. */
+@media (min-width: 768px) {
+  .fy-attn-needs__cards .fy-attn-card {
+    max-height: min(80dvh, 46rem);
+  }
+}
+.fy-attn-needs__cards .fy-attn-card > .fy-attn-card__scroll {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fy-attn-needs__cards .fy-attn-card > .fy-attn-card__scroll > * {
+  flex-shrink: 0;
 }
 
 /* ---- The undo toast ------------------------------------------------------------------------------- */

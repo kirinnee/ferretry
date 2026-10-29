@@ -315,7 +315,7 @@ export function AttentionActions({
               }}
               placeholder={replyIsAnswer ? 'Write your answer…' : 'Add a note — sent with your answer'}
               ref={replyRef}
-              rows={2}
+              rows={3}
               value={reply}
             />
             {replyIsAnswer ? (
