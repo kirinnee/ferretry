@@ -576,8 +576,14 @@ export class RelayClientSession {
    * answer is dropped as the stale answer it is, rather than read as one this browser never asked for.
    */
   readonly #abandoned = new Set<number>();
-  /** Records waiting for the peer to return credit. Bounded by one window. */
-  readonly #waiting: Uint8Array[] = [];
+  /**
+   * Records waiting for the peer to return credit. The WHOLE records among them are bounded by one
+   * window; a body's later parts are not counted, because the request that owns them was already
+   * bounded by `MAX_TUNNEL_BODY_BYTES` when it was queued.
+   */
+  readonly #waiting: { readonly plaintext: Uint8Array; readonly part: boolean }[] = [];
+  /** How many of {@link #waiting} are whole records — the number the window bound is asked of. */
+  #waitingWhole = 0;
   /** Serialises everything that assigns a sequence number: a record's nonce IS its sequence, and
    *  two sealers racing would hand one nonce to two records under one key. */
   #outbox: Promise<void> = Promise.resolve();
@@ -1404,13 +1410,16 @@ export class RelayClientSession {
    * envelope.
    */
   #sendRecord(message: RelayTunnelClientMessage, part = false): void {
-    // A body's later parts are exempt: the request that owns them was already bounded by
-    // `MAX_TUNNEL_BODY_BYTES`, and they drain as the daemon returns credit.
-    if (!part && this.#waiting.length >= CREDIT_WINDOW_FRAMES) {
+    // A body's later parts are exempt, and NOT COUNTED EITHER: the request that owns them was already
+    // bounded by `MAX_TUNNEL_BODY_BYTES`, and they drain as the daemon returns credit. Counting them is
+    // what made one phone photo — about eighty parts — end the session the moment a second upload or
+    // any poll queued its first record behind it, failing every upload on the session at once.
+    if (!part && this.#waitingWhole >= CREDIT_WINDOW_FRAMES) {
       this.#fail(RELAY_CLOSE_CODES.protocolError, 'this session has too many records waiting on credit');
       return;
     }
-    this.#waiting.push(encodeTunnelClientMessage(message));
+    this.#waiting.push({ plaintext: encodeTunnelClientMessage(message), part });
+    if (!part) this.#waitingWhole += 1;
     this.#flush();
   }
 
@@ -1426,14 +1435,15 @@ export class RelayClientSession {
     this.#outbox = this.#outbox.then(async () => {
       while (this.#waiting.length > 0 && maySend(this.#send)) {
         const channel = this.#channel;
-        const plaintext = this.#waiting[0];
-        if (channel === undefined || plaintext === undefined) return;
-        const sealed = await sealRecord(this.deps.crypto, channel, plaintext);
+        const next = this.#waiting[0];
+        if (channel === undefined || next === undefined) return;
+        const sealed = await sealRecord(this.deps.crypto, channel, next.plaintext);
         if (!sealed.ok) {
           this.#fail(sealed.code, sealed.reason);
           return;
         }
         this.#waiting.shift();
+        if (!next.part) this.#waitingWhole -= 1;
         // The mirror of the rule in `#onRecord`: this side owns the SEND counter and nothing else.
         // An arriving record may have advanced `receiveSequence` while this seal was awaiting, and
         // writing the whole captured state back would rewind it.
@@ -1470,6 +1480,7 @@ export class RelayClientSession {
     const failure = new RelaySessionError(reason, code);
     this.#failure = failure;
     this.#waiting.length = 0;
+    this.#waitingWhole = 0;
     for (const [, waiting] of this.#pending) waiting.reject(failure);
     this.#pending.clear();
     this.#refused?.(failure);

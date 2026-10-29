@@ -110,9 +110,13 @@ export function PendingAttachmentStrip({
                     ·
                   </span>
                   {entry.status === 'uploading' ? (
-                    <span className="inline-flex shrink-0 items-center gap-1 text-muted">
-                      <Loader2 aria-hidden="true" className="animate-spin motion-reduce:animate-none" size={11} />{' '}
-                      uploading
+                    <span className="inline-flex min-w-0 items-center gap-1 text-muted">
+                      <Loader2
+                        aria-hidden="true"
+                        className="shrink-0 animate-spin motion-reduce:animate-none"
+                        size={11}
+                      />{' '}
+                      <span className="truncate">{entry.note ?? 'uploading'}</span>
                     </span>
                   ) : (
                     <span className="shrink-0 text-ok">ready</span>

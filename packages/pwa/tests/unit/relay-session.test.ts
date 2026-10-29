@@ -17,8 +17,8 @@ import {
   encodeCreditPayload,
   encodeFrame,
   FRAME_KINDS,
-  MAX_PLAINTEXT_BYTES,
   HOSTED_RELAY_BANDWIDTH_REASONS,
+  MAX_PLAINTEXT_BYTES,
   RELAY_CLOSE_CODES,
   RELAY_LIMITS,
   SESSION_PROTOCOL_ID,
@@ -666,6 +666,28 @@ describe('a relay session carrying a body larger than one record', () => {
     should(parts.map(part => part.body).join('')).equal(body);
     await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 204 }));
     should((await answer).status).equal(204);
+  });
+
+  it('should keep the session when requests queue behind a body of more parts than one window', async () => {
+    // The phone-photo case: one upload is far more parts than the window, nothing has been credited
+    // yet, and a second upload and a poll arrive behind it. Counting the parts against the window
+    // used to end the session here and fail every request on it.
+    const { session, socket, daemon } = await serving();
+    const photo = 'p'.repeat(MAX_PLAINTEXT_BYTES * (CREDIT_WINDOW_FRAMES + 8));
+    const first = session.request({ method: 'POST', path: '/v1/one', body: photo });
+    const second = session.request({ method: 'POST', path: '/v1/two', body: photo });
+    const poll = session.request({ method: 'GET', path: '/v1/sessions' });
+    await drain();
+    should(session.live()).be.true();
+    // The window still bounds the wire: no credit came back, so no more than one window left.
+    should(socket.sent.length - 2).be.belowOrEqual(CREDIT_WINDOW_FRAMES);
+    await daemon.receive(socket.sent[1] as Uint8Array);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 3, status: 200, body: '[]' }));
+    should((await poll).status).equal(200);
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 1, status: 201 }));
+    await session.receiveBinary(await daemon.record({ t: 'res', id: 2, status: 201 }));
+    should((await first).status).equal(201);
+    should((await second).status).equal(201);
   });
 
   it('should send a request without a body as one record with no body field', async () => {

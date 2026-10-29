@@ -2,10 +2,19 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { AttachmentView } from '@ferretry/protocol';
 import { attachmentHoldNotice, Composer, type ComposerProps } from '../../src/components/composer.tsx';
 import { ComposerAddMenu } from '../../src/components/composer-add-menu.tsx';
-import type { ComposerAttachmentUploader } from '../../src/components/composer-attachments.ts';
+import {
+  type ComposerAttachmentUploader,
+  MAX_CONCURRENT_UPLOADS,
+  type RetryWait,
+  UPLOAD_ATTEMPTS,
+  UPLOAD_RETRY_DELAYS_MS,
+  useComposerAttachments,
+} from '../../src/components/composer-attachments.ts';
 import { PendingAttachmentStrip } from '../../src/components/session-chat-parts.tsx';
+import { UPLOAD_CONNECTION_DROPPED_COPY, UPLOAD_QUEUED_COPY } from '../../src/lib/attachments.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
+import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
 import '../support/dom.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -177,7 +186,11 @@ describe('composer attachments', () => {
     const { composer, sent, strip, submit, form } = mountComposer({
       upload: file =>
         new Promise((resolve, reject) => {
-          finish = () => (outcome === 'ok' ? resolve(view('att_late', file)) : reject(new Error('relay closed')));
+          // A refusal, not a drop: a dropped connection is retried on its own before it shows as failed.
+          finish = () =>
+            outcome === 'ok'
+              ? resolve(view('att_late', file))
+              : reject(new DaemonResponseError(422, 'the daemon refused it'));
         }),
     });
     const hold = () => composer.root.findAllByProps({ 'data-composer-attachments-hold': '' })[0];
@@ -285,5 +298,123 @@ describe('composer attachments', () => {
     expect(status.findByProps({ 'data-runtime-chips': '' }).children).toEqual(['opus']);
     expect(status.findByProps({ className: 'fy-composer-context' }).children.join('')).toBe('ctx 31%');
     run(() => composer.unmount());
+  });
+});
+
+describe('composer uploads over a connection that drops', () => {
+  type Hook = ReturnType<typeof useComposerAttachments>;
+  const photo = (index: number) => new File([new Uint8Array([index])], `${String(index)}.jpg`, { type: 'image/jpeg' });
+
+  const mountHook = (upload: ComposerAttachmentUploader, wait: RetryWait = async () => undefined) => {
+    const hook: { current?: Hook } = {};
+    const Probe = () => {
+      hook.current = useComposerAttachments(upload, 'scope', wait);
+      return null;
+    };
+    const rendered = render(<Probe />);
+    const state = (): Hook => {
+      if (hook.current === undefined) throw new Error('the hook has not rendered');
+      return hook.current;
+    };
+    return { rendered, state };
+  };
+
+  test(`no more than ${MAX_CONCURRENT_UPLOADS} files upload at once, and the rest say they are waiting`, async () => {
+    let inFlight = 0;
+    let most = 0;
+    const releases: (() => void)[] = [];
+    const { rendered, state } = mountHook(async file => {
+      inFlight += 1;
+      most = Math.max(most, inFlight);
+      await new Promise<void>(resolve => releases.push(resolve));
+      inFlight -= 1;
+      return view(`att_${file.name}`, file);
+    });
+    run(() => state().add(Array.from({ length: 7 }, (_, index) => photo(index))));
+    expect(inFlight).toBe(MAX_CONCURRENT_UPLOADS);
+    expect(state().entries.filter(entry => entry.note === UPLOAD_QUEUED_COPY)).toHaveLength(7 - MAX_CONCURRENT_UPLOADS);
+    while (state().entries.some(entry => entry.status !== 'ready')) {
+      await runAsync(async () => {
+        for (const release of releases.splice(0)) release();
+        await new Promise(resolve => setTimeout(resolve, 0));
+      });
+    }
+    expect(most).toBe(MAX_CONCURRENT_UPLOADS);
+    expect(state().readyIds).toHaveLength(7);
+    expect(state().entries.some(entry => entry.note !== undefined)).toBe(false);
+    run(() => rendered.unmount());
+  });
+
+  test('a dropped connection is retried on its own, saying so, and the file ends ready', async () => {
+    let calls = 0;
+    const waits: number[] = [];
+    const notes: (string | undefined)[] = [];
+    const { rendered, state } = mountHook(
+      async file => {
+        calls += 1;
+        if (calls < 3) throw new Error('the relay socket closed');
+        return view('att_ok', file);
+      },
+      async milliseconds => {
+        waits.push(milliseconds);
+        // Read once React has rendered what the hook set just before it waited.
+        for (let turn = 0; turn < 5; turn += 1) await new Promise(resolve => setTimeout(resolve, 0));
+        notes.push(state().entries[0]?.note);
+      },
+    );
+    run(() => state().add([photo(1)]));
+    await settleUntil(() => state().entries[0]?.status === 'ready', 'the retried upload', runAsync);
+    expect(calls).toBe(3);
+    expect(waits).toEqual(UPLOAD_RETRY_DELAYS_MS.slice(0, 2));
+    expect(notes).toEqual(['connection dropped — retrying (2 of 4)', 'connection dropped — retrying (3 of 4)']);
+    expect(state().entries[0]?.note).toBeUndefined();
+    run(() => rendered.unmount());
+  });
+
+  test('a connection that never comes back fails after every attempt, and says why', async () => {
+    let calls = 0;
+    const { rendered, state } = mountHook(async () => {
+      calls += 1;
+      throw new Error('the relay socket closed');
+    });
+    run(() => state().add([photo(1)]));
+    await settleUntil(() => state().entries[0]?.status === 'failed', 'the upload to give up', runAsync);
+    expect(calls).toBe(UPLOAD_ATTEMPTS);
+    expect(state().entries[0]?.error).toBe(`${UPLOAD_CONNECTION_DROPPED_COPY} — try again`);
+    run(() => rendered.unmount());
+  });
+
+  test('a refusal the daemon gave a reason for is not retried', async () => {
+    let calls = 0;
+    const { rendered, state } = mountHook(async () => {
+      calls += 1;
+      throw new DaemonResponseError(415, 'unsupported image type', 'attachment_unsupported_mime');
+    });
+    run(() => state().add([photo(1)]));
+    await settleUntil(() => state().entries[0]?.status === 'failed', 'the refusal', runAsync);
+    expect(calls).toBe(1);
+    expect(state().entries[0]?.error).toBe("That file type isn't supported");
+    run(() => rendered.unmount());
+  });
+
+  test('a file removed while it waits to retry is never uploaded again', async () => {
+    let calls = 0;
+    let removeNow: (() => void) | undefined;
+    const { rendered, state } = mountHook(
+      async () => {
+        calls += 1;
+        throw new Error('the relay socket closed');
+      },
+      async () => removeNow?.(),
+    );
+    run(() => state().add([photo(1)]));
+    removeNow = () => {
+      const entry = state().entries[0];
+      if (entry !== undefined) state().remove(entry);
+    };
+    await settleUntil(() => state().entries.length === 0, 'the removal', runAsync);
+    await runAsync(async () => await new Promise(resolve => setTimeout(resolve, 0)));
+    expect(calls).toBe(1);
+    run(() => rendered.unmount());
   });
 });

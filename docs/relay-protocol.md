@@ -1822,6 +1822,16 @@ truncated body, because a client that rendered half a session list would show a 
 exist. The daemon reassembles at most four request bodies per session at once. There is no
 `oversize` record any more.
 
+**A client bounds its WHOLE records, not its parts.** The reference client ends a session when more
+than one credit window of records is waiting to leave it, because a deeper queue means the daemon has
+stopped returning credit. Only whole records count: a body's later parts were bounded when their
+request was, and a phone photo alone is some eighty of them. Counting them ended the session the
+moment a second upload — or any poll — queued behind one photo, and failed every request on it at
+once (the owner's batch of 21 photos, 2026-10-29). And because one session is one queue, the reference
+client sends a body large enough to need parts on a **second request session** of its own, so the reads
+every panel polls never wait behind an upload: a poll that missed its deadline there would retire the
+session carrying the uploads. Nothing on the wire changed; it is one more session per device.
+
 Answers carry an `id` because the daemon replies in whatever order its own handlers finish. Sequence
 numbers order the wire; they do not order the work.
 
