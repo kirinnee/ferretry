@@ -266,6 +266,18 @@ describe('ToolGroup', () => {
     expect(html(group.root.findByType('code'))).toContain('stray output');
   });
 
+  test('opens a call that is still waiting on its result to its input alone', () => {
+    const group = render(
+      <ToolGroup calls={[call('a', 'Bash', { command: 'bun test' })]} isLast={false} live={false} />,
+    );
+
+    run(() => group.root.findAllByType('button')[0]?.props.onClick());
+
+    expect(group.root.findAllByType('code').map(plain)).toEqual(['bun test']);
+    expect(textOf(group)).not.toContain('result');
+    expect(textOf(group)).not.toContain('error');
+  });
+
   test('leaves a call with neither body nor result unopenable', () => {
     const group = render(<ToolGroup calls={[call('a', 'mystery', undefined)]} isLast={false} live={false} />);
     const line = group.root.findByType('button');
