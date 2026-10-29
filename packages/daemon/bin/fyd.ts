@@ -175,6 +175,8 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
+  InlineIndexPersister,
+  WorkerIndexPersister,
   bundledWorkerUrl,
   CachedUsageFeed,
   CliUpdateLauncher,
@@ -7609,7 +7611,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new StateFileSystemFactory(),
       new StateHomeLayout(),
       new SqliteHomeLockFactory(),
-      new BunSqliteIndexFactory(),
+      // Read from memory, written by its own thread: no index commit — and no checkpoint `fsync` —
+      // ever runs on the event loop (src/adapters/storage/sqlite-index.ts says why).
+      new BunSqliteIndexFactory(
+        {
+          create: (file, connection) =>
+            new WorkerIndexPersister(file, new InlineIndexPersister(connection), {
+              retired: () =>
+                bootNotices.state(
+                  'the session index writer kept failing, so the index file is written on the main thread until the daemon restarts',
+                ),
+            }),
+        },
+        { persistFailed: error => bootNotices.state(`the session index file is behind: ${error.message}; retrying`) },
+      ),
       clock,
       () => new KeyedSerialExecutor(),
       // A session document a background reader asks for again (`heard`) is watched, so while its directory
@@ -8060,6 +8075,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       await probeBundledWorker('analytics-fold'),
       await probeBundledWorker('session'),
       await probeBundledWorker('housekeeping'),
+      await probeBundledWorker('session-index'),
       { name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) },
     ],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {

@@ -64,6 +64,24 @@ of memory over the main thread, because each thread carries about 14 MB of engin
 
 Restart the daemon after changing the setting: `fy daemon restart`.
 
+## A busy disk
+
+When other programs keep the disk busy, writing a file and waiting for it to reach the disk (`fsync`)
+can take seconds. The daemon keeps that wait off its main thread, so it stays responsive.
+
+- **The session index** (`state/index/sessions.sqlite`) is read from a copy in memory. A separate
+  thread, the **session index writer**, writes changes to the file in batches, a quarter second after
+  they happen (later only while the previous batch is still being written). Before this, one write on a
+  busy disk froze the daemon for up to 38 s.
+- **What a crash or power cut can lose:** only the index's last few writes, never a session's history.
+  Every event is saved in its session's journal first, and that journal is synced to disk. On the next
+  start the daemon checks the index against every journal and fills in anything missing.
+- `fyd --check` lists `session-index` with the other workers. If the writer thread fails five times in
+  ten minutes, the daemon writes the index on its main thread instead and says so once in its log.
+
+The guard is `packages/daemon/tests/integration/runtime/io-pressure-index.test.ts`. It makes every disk
+write take 1.5 s, and checks that the event loop and a health check stay under 200 ms.
+
 ## Safe to share
 
 The report contains no session text, no command arguments, no file contents and no secrets. Each item

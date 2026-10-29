@@ -6,6 +6,8 @@ import {
   type FileSystemPort,
   type FoundationPaths,
   type IndexedSession,
+  type IndexPersister,
+  type IndexWrite,
   indexFiles,
   type JournalFingerprint,
   parseSessionId,
@@ -14,6 +16,9 @@ import {
   type SessionIndex,
   type SessionIndexFactory,
 } from '../../lib/index.ts';
+import { InlineIndexPersister } from './index-persisters.ts';
+import { applyIndexWrite, configureIndexConnection, SESSION_COLUMNS } from './sqlite-index-statements.ts';
+import { WriteBehindSessionIndex, type WriteBehindSessionIndexOptions } from './write-behind-index.ts';
 
 interface SessionRow {
   readonly id: string;
@@ -77,9 +82,6 @@ function eventFromRow(row: EventRow): EventPointer {
   };
 }
 
-const SESSION_COLUMNS = `id, status, created_at, updated_at, last_sequence, journal_line,
-  journal_device, journal_inode, journal_size, journal_mtime_ms`;
-
 const EXPECTED_INDEX_TABLES = ['events', 'sessions'] as const;
 const EXPECTED_SESSION_COLUMNS = [
   'id',
@@ -120,62 +122,25 @@ function indexSchemaShape(database: Database): { readonly hasTables: boolean; re
   };
 }
 
+/**
+ * The session index over one SQLite connection: in the daemon, a copy held in memory.
+ *
+ * Every write runs in its own transaction in {@link IndexWriteMode} `strict`, so a conflict rolls the
+ * whole write back exactly as the file did; {@link WriteBehindSessionIndex} persists what succeeded.
+ */
 export class BunSqliteIndex implements SessionIndex {
   constructor(private readonly database: Database) {}
 
-  private insertSession(session: IndexedSession): void {
-    this.database
-      .query(
-        `INSERT INTO sessions (${SESSION_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(id) DO UPDATE SET
-           status = excluded.status,
-           created_at = excluded.created_at,
-           updated_at = excluded.updated_at,
-           last_sequence = excluded.last_sequence,
-           journal_line = excluded.journal_line,
-           journal_device = excluded.journal_device,
-           journal_inode = excluded.journal_inode,
-           journal_size = excluded.journal_size,
-           journal_mtime_ms = excluded.journal_mtime_ms`,
-      )
-      .run(
-        session.id,
-        session.status ?? null,
-        session.createdAt ?? null,
-        session.updatedAt ?? null,
-        session.lastSequence,
-        session.journalLine,
-        session.journal?.device ?? null,
-        session.journal?.inode ?? null,
-        session.journal?.size ?? null,
-        session.journal?.modifiedAtMs ?? null,
-      );
-  }
-
-  private insertEvent(event: EventPointer): void {
-    this.database
-      .query(
-        `INSERT INTO events (session_id, sequence, time, type, byte_offset, byte_length)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-      )
-      .run(event.sessionId, event.sequence, event.time, event.type, event.byteOffset, event.byteLength);
+  #write(write: IndexWrite): void {
+    this.database.transaction(() => applyIndexWrite(this.database, write, 'strict'))();
   }
 
   replaceAll(plan: RebuildPlan): void {
-    this.database.transaction(() => {
-      this.database.exec('DELETE FROM events');
-      this.database.exec('DELETE FROM sessions');
-      for (const session of plan.sessions) this.insertSession(session);
-      for (const event of plan.events) this.insertEvent(event);
-    })();
+    this.#write({ kind: 'replace-all', sessions: plan.sessions, events: plan.events });
   }
 
   replaceSession(session: IndexedSession, events: readonly EventPointer[]): void {
-    this.database.transaction(() => {
-      this.database.query('DELETE FROM sessions WHERE id = ?').run(session.id);
-      this.insertSession(session);
-      for (const event of events) this.insertEvent(event);
-    })();
+    this.#write({ kind: 'replace-session', session, events });
   }
 
   appendEvent(session: IndexedSession, event: EventPointer): void {
@@ -184,7 +149,7 @@ export class BunSqliteIndex implements SessionIndex {
 
   /** Upserts the metadata row alone; every existing event pointer is preserved. */
   refreshSession(session: IndexedSession): void {
-    this.insertSession(session);
+    this.#write({ kind: 'refresh-session', session });
   }
 
   /**
@@ -192,10 +157,7 @@ export class BunSqliteIndex implements SessionIndex {
    * pointers already stored. Any conflict rolls back the metadata together with every new pointer.
    */
   appendEvents(session: IndexedSession, events: readonly EventPointer[]): void {
-    this.database.transaction(() => {
-      this.insertSession(session);
-      for (const event of events) this.insertEvent(event);
-    })();
+    this.#write({ kind: 'append-events', session, events });
   }
 
   findSession(id: SessionId): IndexedSession | undefined {
@@ -251,24 +213,17 @@ export class BunSqliteIndex implements SessionIndex {
   }
 
   removeSession(id: SessionId): void {
-    this.database.query('DELETE FROM sessions WHERE id = ?').run(id);
+    this.#write({ kind: 'remove-session', id });
   }
 
-  close(): void {
-    try {
-      this.database.exec('PRAGMA wal_checkpoint(TRUNCATE)');
-    } finally {
-      this.database.close();
-    }
+  async close(): Promise<void> {
+    this.database.close();
   }
 }
 
 function configure(database: Database): void {
   database.exec('PRAGMA journal_mode = WAL');
-  // Journals are fsynced before index writes, so the disposable index can safely use NORMAL.
-  database.exec('PRAGMA synchronous = NORMAL');
-  database.exec('PRAGMA foreign_keys = ON');
-  database.exec('PRAGMA busy_timeout = 5000');
+  configureIndexConnection(database);
   database.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -314,7 +269,47 @@ async function openDatabase(paths: FoundationPaths, fileSystem: FileSystemPort):
   return new Database(paths.sessionIndex, { create: true, strict: true });
 }
 
+/**
+ * The file's whole content as a database in memory, read once at open.
+ *
+ * Bytes 18 and 19 of a database header are its read and write format versions, and 2 means WAL: a copy
+ * in memory refuses to open in that mode, so the copy is marked as the rollback journal it then is.
+ * The index is two small tables (a few megabytes on the owner's fleet), so holding it costs little.
+ */
+function inMemoryCopy(database: Database): Database {
+  const bytes = database.serialize();
+  bytes[18] = 1;
+  bytes[19] = 1;
+  const memory = Database.deserialize(bytes, { strict: true });
+  memory.exec('PRAGMA foreign_keys = ON');
+  return memory;
+}
+
+/** Who persists one opened index file, given the connection its open already holds. */
+export interface IndexPersisterFactory {
+  create(file: string, connection: Database): IndexPersister;
+}
+
+/** The writes made on the main thread, through the connection the open used: the fallback, and tests. */
+export const INLINE_INDEX_PERSISTERS: IndexPersisterFactory = {
+  create: (_file, connection) => new InlineIndexPersister(connection),
+};
+
+/**
+ * Opens the index file, then answers from a copy in memory and persists behind it.
+ *
+ * NO READ OR WRITE OF THE INDEX TOUCHES THE DISK ON THE EVENT LOOP after this open. A commit to the file
+ * ends, sooner or later, in SQLite's checkpoint — an `fsync` of the log and of the database — and on a
+ * saturated disk that `fsync` measured over a second here and 38 s on the owner's machine, with the
+ * whole daemon frozen behind it. The file is still written: by {@link IndexPersisterFactory}, in
+ * batches, on the thread the daemon gives it.
+ */
 export class BunSqliteIndexFactory implements SessionIndexFactory {
+  constructor(
+    private readonly persisters: IndexPersisterFactory = INLINE_INDEX_PERSISTERS,
+    private readonly options: WriteBehindSessionIndexOptions = {},
+  ) {}
+
   async open(paths: FoundationPaths, fileSystem: FileSystemPort): Promise<SessionIndex> {
     await fileSystem.ensureDirectory(paths.index, 0o700);
     let database: Database | undefined;
@@ -333,7 +328,8 @@ export class BunSqliteIndexFactory implements SessionIndexFactory {
       for (const file of indexFiles(paths)) {
         if ((await fileSystem.information(file)) !== undefined) await fileSystem.setMode(file, 0o600);
       }
-      return new BunSqliteIndex(database);
+      const memory = new BunSqliteIndex(inMemoryCopy(database));
+      return new WriteBehindSessionIndex(memory, this.persisters.create(paths.sessionIndex, database), this.options);
     } catch (error) {
       database?.close();
       throw error;
