@@ -20,6 +20,19 @@ const anomaly = {
   detail: 'tokens stopped',
 };
 
+const dayStats = {
+  day: '2026-10-16',
+  flags: 12,
+  jevDecisions: 9,
+  investigations: 2,
+  jevUsd: 0.12,
+  investigationUsd: 0.6,
+  moved: { auto: 1, jev: 3, llm: 1 },
+  cleared: { auto: 0, jev: 4, llm: 1, owner: 1 },
+  stopped: { auto: 0, jev: 0, llm: 1 },
+  asked: { auto: 1, jev: 0, llm: 0 },
+};
+
 const wardenVerdict = {
   at: INSTANT,
   verdict: 'needs_human',
@@ -147,6 +160,10 @@ const wardenCases: SchemaCase[] = [
   { name: 'action outcome', schema: warden.WardenActionOutcomeSchema, value: 'held' },
   { name: 'action', schema: warden.WardenActionSchema, value: action },
   { name: 'cleared by', schema: warden.WardenClearedBySchema, value: 'owner' },
+  { name: 'actor', schema: warden.WardenActorSchema, value: 'llm' },
+  { name: 'outcome', schema: warden.WardenOutcomeSchema, value: 'moved' },
+  { name: 'actor counts', schema: warden.WardenActorCountsSchema, value: dayStats.moved },
+  { name: 'day stats', schema: warden.WardenDayStatsSchema, value: dayStats },
   {
     name: 'blessing',
     schema: warden.WardenBlessingViewSchema,
@@ -162,7 +179,13 @@ const wardenCases: SchemaCase[] = [
   {
     name: 'status',
     schema: warden.WardenStatusViewSchema,
-    value: { ...wardenStatusView, nextSweepAt: INSTANT, investigations: [investigation], actions: [action] },
+    value: {
+      ...wardenStatusView,
+      nextSweepAt: INSTANT,
+      investigations: [{ ...investigation, wardenName: 'warden-00002a' }],
+      actions: [action, { ...action, actor: 'llm', investigator: 'warden-00002a' }],
+      history: [dayStats],
+    },
   },
   { name: 'run', schema: warden.WardenRunViewSchema, value: wardenRunView },
   { name: 'run request', schema: warden.WardenRunRequestSchema, value: { spawn: true } },
@@ -461,5 +484,63 @@ describe('settings from before Jev could act', () => {
     should(low.success).be.false();
     should(failover.success).be.false();
     should(merged.jevActs).deepEqual({ ...warden.DEFAULT_WARDEN_JEV_ACTS, stop: 1 });
+  });
+});
+
+describe('warden actors and outcomes', () => {
+  it('should believe a recorded actor and read an older action from what it recorded', () => {
+    // Arrange
+    const base = { by: 'warden' as const };
+
+    // Act + Assert
+    should(warden.wardenActionActor({ ...base, actor: 'auto', reportPath: '/r.md' })).equal('auto');
+    should(warden.wardenActionActor({ by: 'jev' })).equal('jev');
+    should(warden.wardenActionActor({ by: 'owner' })).equal('owner');
+    should(warden.wardenActionActor({ ...base, reportPath: '/r.md' })).equal('llm');
+    should(warden.wardenActionActor(base)).equal('auto');
+  });
+
+  it('should count what an action did, held as asked, and failures and housekeeping as nothing', () => {
+    // Act + Assert
+    should(warden.wardenActionOutcome({ action: 'bless', outcome: 'done' })).equal('cleared');
+    for (const action of ['nudge', 'resume', 'restart', 'failover'] as const)
+      should(warden.wardenActionOutcome({ action, outcome: 'done' })).equal('moved');
+    should(warden.wardenActionOutcome({ action: 'stop', outcome: 'done' })).equal('stopped');
+    should(warden.wardenActionOutcome({ action: 'stop', outcome: 'held' })).equal('asked');
+    should(warden.wardenActionOutcome({ action: 'restart', outcome: 'failed' })).be.undefined();
+    should(warden.wardenActionOutcome({ action: 'close_leftover', outcome: 'done' })).be.undefined();
+  });
+});
+
+describe('warden investigator names', () => {
+  it('should name an investigator with six hex digits, stored lowercase and shown uppercase', () => {
+    // Act
+    const name = warden.wardenInvestigatorName(42);
+
+    // Assert
+    should(name).equal('warden-00002a');
+    should(warden.displaySystemCallsign(name)).equal('warden-00002A');
+    should(warden.wardenInvestigatorName(warden.WARDEN_INVESTIGATOR_MAX_SEQUENCE)).equal('warden-ffffff');
+    should(warden.wardenInvestigatorSequence('Warden-00002A')).equal(42);
+    should(warden.displaySystemCallsign('hadi')).equal('hadi');
+  });
+
+  it('should recognise only its own shape, never a pool name', () => {
+    // Act + Assert
+    should(warden.isSystemCallsign('warden-000001')).be.true();
+    for (const other of ['warden', 'hadi', 'warden-1', 'warden-0000001', 'warden-00000g', 'warden-000000', undefined])
+      should(warden.isSystemCallsign(other)).be.false();
+  });
+
+  it('should count on, wrap after FFFFFF to 1, and step past ids still in use', () => {
+    // Act + Assert
+    should(warden.nextWardenInvestigatorSequence(0, new Set())).equal(1);
+    should(warden.nextWardenInvestigatorSequence(41, new Set())).equal(42);
+    should(warden.nextWardenInvestigatorSequence(41, new Set([42, 43]))).equal(44);
+    should(warden.nextWardenInvestigatorSequence(warden.WARDEN_INVESTIGATOR_MAX_SEQUENCE, new Set())).equal(1);
+    should(
+      warden.nextWardenInvestigatorSequence(warden.WARDEN_INVESTIGATOR_MAX_SEQUENCE - 1, new Set([0xff_ff_ff, 1])),
+    ).equal(2);
+    should(warden.nextWardenInvestigatorSequence(-5, new Set())).equal(1);
   });
 });
