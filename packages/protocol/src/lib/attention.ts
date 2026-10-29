@@ -299,6 +299,11 @@ export const AttentionBriefShape = {
   premise: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** Earlier answers that bear on this one, in point form: what the owner already decided. */
   decided: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
+  /**
+   * What is STILL OPEN after the discussion so far, in point form: it shrinks as `decided` grows, so a card read
+   * after several rounds of talk says where things stand, not where they started.
+   */
+  stillOpen: z.preprocess(asBullets, prose(MAX_ATTENTION_REASON_LENGTH)).optional(),
   /** Jargon the item uses, each spelled out. */
   terms: z.array(AttentionTermSchema).min(1).max(MAX_ATTENTION_TERMS).optional(),
   /** What the owner is asked, one entry per decision. */
@@ -373,6 +378,54 @@ export const AttentionHistoryEntrySchema = z.strictObject({
   note: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
 });
 export type AttentionHistoryEntry = z.infer<typeof AttentionHistoryEntrySchema>;
+
+/** The most revisions an item keeps, oldest dropped. */
+export const MAX_ATTENTION_REVISIONS = 10;
+
+/** The fields an edit can change, by name: what a revision says changed. */
+export const AttentionRevisableFieldSchema = z.enum([
+  'subject',
+  'why',
+  'context',
+  'howToResolve',
+  'ask',
+  'title',
+  'kind',
+  'answers',
+  'premise',
+  'decided',
+  'stillOpen',
+  'terms',
+  'questions',
+  'recommendation',
+  'impact',
+  'urgency',
+  'links',
+  'steps',
+  'body',
+]);
+export type AttentionRevisableField = z.infer<typeof AttentionRevisableFieldSchema>;
+
+/**
+ * ONE EDIT OF AN ITEM, kept so a card that is a living summary of its discussion can show what changed and what
+ * it said before: who edited it, when, which fields changed, and those fields as they were (`previous` — a field
+ * absent there was absent before the edit).
+ */
+export const AttentionRevisionSchema = z.strictObject({
+  at: InstantSchema,
+  by: z.enum(['human', 'agent', 'daemon']),
+  changed: z.array(AttentionRevisableFieldSchema).min(1),
+  previous: z.strictObject({
+    subject: singleLine(MAX_ATTENTION_SUBJECT_LENGTH).optional(),
+    why: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    context: z.string().max(MAX_ATTENTION_DETAIL_LENGTH).nullable().optional(),
+    howToResolve: z.string().trim().min(1).max(MAX_ATTENTION_DETAIL_LENGTH).optional(),
+    ask: AttentionAskSchema.optional(),
+    ...AttentionCardShape,
+    ...AttentionBriefShape,
+  }),
+});
+export type AttentionRevision = z.infer<typeof AttentionRevisionSchema>;
 
 export const AttentionDispositionSchema = z.enum(['done', 'dismissed']);
 export type AttentionDisposition = z.infer<typeof AttentionDispositionSchema>;
@@ -451,6 +504,8 @@ const AttentionItemBaseShape = {
   infoRequests: PositiveIntegerSchema.optional(),
   /** Bounded, oldest first: when the owner asked for more information and when the ferret added it. */
   history: z.array(AttentionHistoryEntrySchema).min(1).max(MAX_ATTENTION_HISTORY).optional(),
+  /** Bounded, oldest first: every edit since the item was raised (`AttentionRevision`). Absent: never edited. */
+  revisions: z.array(AttentionRevisionSchema).min(1).max(MAX_ATTENTION_REVISIONS).optional(),
   /** The owner's last action on this item never reached the ferret; present only on an open item. */
   undelivered: AttentionUndeliveredSchema.optional(),
 };
