@@ -1093,7 +1093,10 @@ export function SessionChatPage({
     focus: attentionFocus,
     onOpenResolved: openResolved,
     repliesSlot:
-      attentionReplies === undefined ? undefined : (
+      attentionReplies === undefined ||
+      (attentionReplies.secondsLeft === null &&
+        !attentionReplies.heldForTurn &&
+        !attentionReplies.heldForComposer) ? undefined : (
         <AttentionRepliesNotice
           ferret={sessionDisplayName(session)}
           heldForComposer={attentionReplies.heldForComposer}

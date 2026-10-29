@@ -20,6 +20,7 @@ import { useAgendaDock } from '../../../src/features/attention/attention-collaps
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import '../../support/dom.ts';
+import { attentionItem } from '../../support/attention-inbox.tsx';
 import { render, run, runAsync } from '../../support/react.ts';
 
 const connection = daemonConnection({ daemonId: 'agenda', baseUrl: 'https://agenda.example.test', deviceId: 'device' });
@@ -27,14 +28,11 @@ const scope = daemonSessionScope(connection, 'chat');
 const otherScope = daemonSessionScope(connection, 'other');
 
 const item = (id: string, extra: Record<string, unknown> = {}): AttentionItem =>
-  ({
-    id: id as AttentionId,
-    source: 'agent-raised',
-    subject: `Ask ${id}`,
-    waitingSince: '2026-07-31T11:30:00.000Z',
+  attentionItem(id, {
     ask: { kind: 'permission' },
+    waitingSince: '2026-07-31T11:30:00.000Z',
     ...extra,
-  }) as unknown as AttentionItem;
+  } as Partial<AttentionItem>);
 
 const board = (
   items: readonly AttentionItem[],

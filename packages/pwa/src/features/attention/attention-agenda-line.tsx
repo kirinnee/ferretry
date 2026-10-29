@@ -192,12 +192,12 @@ export function AttentionReferenceChips({ items, onRemove }: AttentionReferenceC
   return (
     <ul aria-label="This message is about" className="fy-agenda-chips" data-agenda-chips="">
       {items.map(item => (
-        <li className="fy-agenda-chip" data-agenda-chip={item.id} key={item.id}>
-          <span className="fy-agenda-chip__lead">re:</span>
-          <span className="fy-agenda-chip__title">{attentionHeading(item)}</span>
+        <li className="fy-agenda-ref" data-agenda-chip={item.id} key={item.id}>
+          <span className="fy-agenda-ref__lead">re:</span>
+          <span className="fy-agenda-ref__title">{attentionHeading(item)}</span>
           <button
             aria-label={`Stop replying about ${attentionHeading(item)}`}
-            className="fy-agenda-chip__clear"
+            className="fy-agenda-ref__clear"
             data-agenda-chip-clear={item.id}
             onClick={() => onRemove(item.id)}
             type="button"

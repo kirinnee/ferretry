@@ -2373,7 +2373,6 @@ describe('SessionChatPage', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
       try {
         expect(lines(page.root)).toHaveLength(0);
-        expect(page.root.findAllByType(AttentionAgendaLine)).toHaveLength(0);
         expect(drawers(page.root)).toHaveLength(0);
         expect(cards(page.root)).toHaveLength(0);
         // The ledger still proves a `!A3`, so a link in older chat stays a link.

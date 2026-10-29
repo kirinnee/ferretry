@@ -117,6 +117,9 @@ export const answerAction = (answer: AttentionCardAnswer, reply: string): InboxA
   }
 };
 
+/** Clearing a plain notification: reading it was the whole of it, so it resolves with no note. */
+export const CLEAR_ACTION: InboxAction = { kind: 'resolve', label: 'Clear' };
+
 /** The label a retried answer carries (the undo toast says "Marked !A3 done"; the button said "Retry"). */
 export const RETRY_LABEL = 'Retry';
 
@@ -212,7 +215,8 @@ const KIND_WORDS: Readonly<Record<AttentionKind, string>> = {
 };
 
 /** The card's kind in the word its header says. */
-export const kindWord = (item: Pick<AnswerSource, 'kind' | 'ask'>): string => KIND_WORDS[attentionCardKind(item)];
+export const kindWord = (item: Pick<AnswerSource, 'kind' | 'ask'> & { readonly notice?: true | undefined }): string =>
+  item.notice === true ? 'Notification' : KIND_WORDS[attentionCardKind(item)];
 
 /**
  * Whether the card is a text-only ask: it has no answers to give, so the owner answers in the

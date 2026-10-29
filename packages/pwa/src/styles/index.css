@@ -9,10 +9,10 @@
 @import '../features/tasks/task-dag-graph.css';
 @import '../features/attention/attention-board.css';
 @import '../features/attention/attention-card.css';
+@import '../features/attention/attention-agenda.css';
+@import '../features/attention/attention-agenda-chat.css';
 @import '../features/attention/attention-delivery.css';
 @import '../features/attention/attention-updated.css';
-@import '../features/attention/attention-ask-message.css';
-@import '../features/attention/attention-agenda.css';
 @import '../features/attention/attention-panel.css';
 @import '../features/attention/attention-inbox.css';
 @import '../features/workspace/workspace.css';

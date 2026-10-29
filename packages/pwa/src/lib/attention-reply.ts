@@ -1,7 +1,8 @@
 /**
- * REPLYING IS ANSWERING. An open Attention item is answered from the ferret's NORMAL composer: what the owner
- * types goes as a normal message referencing the item ("Replying to: <title>"), and a picked option carries the
- * typed text as its note. These are the pure decisions behind that; the composer and the card do the drawing.
+ * REPLYING IS ANSWERING. An agenda item is answered from the ferret's NORMAL composer: what the owner types
+ * goes as a normal message that names the items it is about (the "re:" chips, as `!A5` references), and a
+ * picked option carries the typed text as its note. These are the pure decisions behind that; the composer and
+ * the card do the drawing.
  */
 
 import type { AttentionItem } from '@ferretry/protocol';
@@ -20,13 +21,6 @@ export const withComposerNote = (action: InboxAction, text: string): InboxAction
   const note = action.note === undefined || action.note.trim() === '' ? typed : `${action.note} — ${typed}`;
   return { ...action, note };
 };
-
-/** The item the composer replies to by default: the newest open one of this conversation, or none. */
-export const defaultReplyTarget = (open: readonly AttentionItem[]): AttentionItem | null =>
-  open.reduce<AttentionItem | null>(
-    (newest, item) => (newest === null || item.waitingSince > newest.waitingSince ? item : newest),
-    null,
-  );
 
 /**
  * A message with the items its "re:" chips name: each as a `!A5` reference at the front, in chip order, each once

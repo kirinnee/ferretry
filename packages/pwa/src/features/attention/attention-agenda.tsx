@@ -22,7 +22,8 @@ import type { AttentionId, AttentionItem, AttentionSnapshot } from '@ferretry/pr
 import { CircleAlert, PanelRight } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
-import { agendaCounts, agendaItems, nextOwnerItem, sortAgenda } from '../../lib/agenda-chat.ts';
+import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
+import { nextOwnerItem, sortAgenda } from '../../lib/agenda-status.ts';
 import type { InboxAction } from '../../lib/attention-answers.ts';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
 import { actionSentence } from '../../lib/attention-inbox.ts';
