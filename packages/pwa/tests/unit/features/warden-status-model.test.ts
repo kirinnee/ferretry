@@ -186,7 +186,7 @@ describe('wardenTriageLabel', () => {
     });
 
     // Act / Assert
-    expect(wardenTriageLabel(paced)).toBe('Rules only (Jev paced to 07:00, LLM cap hit)');
+    expect(wardenTriageLabel(paced)).toBe('Rules only (Jev paused until 07:00, LLM cap hit)');
     expect(wardenPacedUntil(paced, 'jev')).toBe('07:00 UTC');
     expect(wardenPacedUntil(paced, 'investigation')).toBeUndefined();
   });

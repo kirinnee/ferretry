@@ -309,6 +309,7 @@ describe('wardenStatusLine', () => {
     const statuses = [
       jevStatus({ triage: { jev: on, llm: stopped('investigation_cap') }, spend: paced('investigation') }),
       jevStatus({ triage: { jev: stopped('jev_cap'), llm: on }, spend: paced('jev') }),
+      jevOnlyStatus({ triage: { jev: stopped('jev_cap'), llm: off }, spend: paced('jev') }),
     ];
 
     // Act
@@ -316,8 +317,9 @@ describe('wardenStatusLine', () => {
 
     // Assert
     expect(warnings).toEqual([
-      'LLM paced to 07:00 UTC — flags wait',
-      'Jev paced to 07:00 UTC — every flag goes to an investigation',
+      'Full checks paused until 07:00 UTC — new flags wait for you',
+      'Jev paused until 07:00 UTC — new flags go to a full check',
+      'Jev paused until 07:00 UTC — new flags wait for you',
     ]);
   });
 

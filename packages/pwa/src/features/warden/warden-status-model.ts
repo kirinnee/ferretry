@@ -144,7 +144,9 @@ export const wardenTriageLabel = (status: WardenStatusView): string => {
   const paced = (reason: keyof typeof LAYER_OFF): string | undefined => {
     const cap = reason === 'jev_cap' ? 'jev' : reason === 'investigation_cap' ? 'investigation' : undefined;
     const until = cap === undefined ? undefined : wardenPacedUntil(status, cap);
-    return until === undefined ? undefined : `${cap === 'jev' ? 'Jev' : 'LLM'} paced to ${until.replace(' UTC', '')}`;
+    return until === undefined
+      ? undefined
+      : `${cap === 'jev' ? 'Jev' : 'full checks'} paused until ${until.replace(' UTC', '')}`;
   };
   const off = [triage.jev, triage.llm]
     .map(layer => layer.reason)

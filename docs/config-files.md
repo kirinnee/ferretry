@@ -210,7 +210,7 @@ can and the rest wait for you — and the Warden page says so.
 **Paced through the day.** No layer may spend more than **a quarter of its daily cap in one UTC hour**
 ($0.125 of Jev's default $0.50, $0.50 of the investigations' $2), so one burst of flags cannot spend the
 day before most of it has happened. A layer that reaches its share is off until the top of the next hour —
-the status lists it in `spend.capsPaced` with `pacedUntil`, and the Warden page says _Jev paced to 07:00_
+the status lists it in `spend.capsPaced` with `pacedUntil`, and the Warden page says _Jev paused until 07:00 UTC — new flags go to a full check_
 rather than _until midnight_. An investigation it holds back is queued, never dropped; a flag Jev is not
 asked about is passed on as it would be with the cap hit. Jev is priced at
 `guard.usdPerMillionInputTokens` (published prices disagree, so it is a setting). An investigation is
