@@ -147,7 +147,11 @@ button.fy-agenda-line__main:focus-visible {
   min-width: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding-bottom: var(--gap-sm);
+  /* The scroll area ends ABOVE the line: no padding of its own (a sticky fade stops short of padding, and rows
+     would show through under it), a gap to the line, and the room at the foot inside the list. */
+  margin-bottom: var(--gap-sm);
+  padding-bottom: 0;
+  border-bottom: var(--stroke) solid var(--divider-color);
 }
 /* More rows below: a soft fade into the chat's ground at the foot, there only while there is more to scroll to. */
 .fy-agenda-drawer[data-more]::after {
@@ -174,7 +178,7 @@ button.fy-agenda-line__main:focus-visible {
 .fy-agenda-rows {
   display: flex;
   margin: 0;
-  padding: 0;
+  padding: 0 0 var(--gap-sm);
   min-width: 0;
   flex-direction: column;
   gap: var(--gap-md);
@@ -197,7 +201,8 @@ button.fy-agenda-line__main:focus-visible {
 .fy-agenda-ref {
   display: inline-flex;
   min-width: 0;
-  max-width: min(100%, 16rem);
+  /* Compact: two refs share one line above the composer, several wrap. */
+  max-width: min(calc(50% - var(--gap-xs) / 2), 16rem);
   min-height: 32px;
   align-items: center;
   gap: var(--gap-xs);
