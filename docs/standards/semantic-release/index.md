@@ -33,7 +33,7 @@ reappears ([Contracts](../contracts/README.md)).
 | #   | Plugin                                      | Effect                                                         |
 | --- | ------------------------------------------- | -------------------------------------------------------------- |
 | 1   | `@semantic-release/commit-analyzer`         | `conventionalcommits` preset → next version                    |
-| 2   | `@semantic-release/release-notes-generator` | `conventionalcommits` preset → note text                       |
+| 2   | `@semantic-release/release-notes-generator` | `conventionalcommits` preset → note text (see below)           |
 | 3   | `@semantic-release/exec`                    | `prepareCmd: ./scripts/release/backup-changelog.sh`            |
 | 4   | `@semantic-release/changelog`               | prepends the new section to `Changelog.md`                     |
 | 5   | `@semantic-release/exec`                    | `prepareCmd: ./scripts/release/bump.sh ${nextRelease.version}` |
@@ -48,6 +48,39 @@ Committing `Changelog.old.md` is not incidental: CD is a separate workflow that 
 out fresh, so the diff basis has to exist in the tagged commit. The `changelog-asset` contract
 enforces both halves — the asset in `.releaserc.yaml` and the `--release-notes` flag in
 `publish.sh`.
+
+## Release notes
+
+The note text is what a person reads: `Changelog.md`, the GitHub release body and the app's
+**What's new** page (Settings → About). It lists three sections, in this order, one line per change
+with its PR link:
+
+```
+### Features      feat
+### Fixes         fix
+### Performance   perf
+```
+
+A `revert` adds a **Reverts** section and a breaking change adds **⚠ BREAKING CHANGES**. Every other
+type (`docs`, `chore`, `refactor`, `test`, `build`, `ci`, `dep`, `config`, `amend`), the `release:` commit
+and subjects that are not conventional commits at all (GoReleaser's "Brew cask update …") stay out.
+The section names and hidden types are `presetConfig.types` in `.releaserc.yaml`, on the notes
+plugin only.
+
+**`conventional-changelog-conventionalcommits` must stay on the 9.x line.** `release-notes-generator`
+14.x renders with the Handlebars writer (`conventional-changelog-writer` 8.x); the preset's 10.x line
+returns function templates that writer silently ignores, so every release rendered as a bare version
+header and Changelog.md, the GitHub release and the in-app page were empty for 460 releases. Upgrade the
+preset only together with a notes generator that drives function templates. The
+`release-notes-render` contract renders sample commits through the real configuration and fails if
+the notes come out empty.
+
+### Rebuilding history
+
+`bun scripts/release/backfill-changelog.ts --write` re-renders every section of `Changelog.md` from the
+tags with the live configuration (dates and headers are kept). `scripts/release/backfill-release-notes.sh`
+copies those sections onto the already-published GitHub releases; it is a dry run unless `--apply`
+is passed, and is for the owner to run because it edits public releases.
 
 ## Scripts
 
@@ -101,7 +134,8 @@ To see what the version calculation would do without releasing:
 
 ## Rules
 
-- Never hand-edit `Changelog.md`, `Changelog.old.md`, `VERSION`, or the CLI package version.
+- Never hand-edit `Changelog.md`, `Changelog.old.md`, `VERSION`, or the CLI package version (regenerate
+  history with `backfill-changelog.ts`).
   Prettier deliberately skips the changelog files so formatting never churns a release commit.
 - Never add `@semantic-release/github`.
 - Never reorder the plugin chain; the backup-before-changelog order is a contract.

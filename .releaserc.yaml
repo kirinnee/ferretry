@@ -7,8 +7,26 @@ tagFormat: v${version}
 plugins:
   - - '@semantic-release/commit-analyzer'
     - preset: conventionalcommits
+  # The notes are what a reader sees in Changelog.md, the GitHub release and the app's
+  # "What's new" page, so only user-observable types appear, under plain section names. Every
+  # other type (and any subject that is not a conventional commit, e.g. "Brew cask update ...")
+  # stays out. The preset must stay on the 9.x line: 10.x ships function templates that
+  # release-notes-generator's Handlebars writer ignores, which rendered every release empty.
   - - '@semantic-release/release-notes-generator'
     - preset: conventionalcommits
+      presetConfig:
+        types:
+          - { type: feat, section: Features }
+          - { type: fix, section: Fixes }
+          - { type: perf, section: Performance }
+          - { type: revert, section: Reverts }
+          - { type: docs, hidden: true }
+          - { type: style, hidden: true }
+          - { type: chore, hidden: true }
+          - { type: refactor, hidden: true }
+          - { type: test, hidden: true }
+          - { type: build, hidden: true }
+          - { type: ci, hidden: true }
   # Backup must run before the changelog plugin rewrites Changelog.md, so publish.sh can diff
   # this version's section into the release notes.
   - - '@semantic-release/exec'
