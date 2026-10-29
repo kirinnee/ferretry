@@ -30,6 +30,28 @@ describe('the clean-up job card', () => {
   });
 });
 
+describe('the clean-up job card without a model', () => {
+  it('names only the runtime when the run carries no model', async () => {
+    // Arrange
+    const { model: _model, ...withoutModel } = RUNNING_JOB;
+
+    // Act
+    shown = await mount(
+      <CleanUpJobCard
+        connection={alpha}
+        job={withoutModel}
+        nowMs={Date.parse(RUNNING_JOB.startedAt)}
+        readError={null}
+      />,
+    );
+
+    // Assert
+    const line = Array.from(shown.container.querySelectorAll('p')).find(p => p.textContent?.startsWith('On '));
+    expect(line?.textContent).toBe('On codex-main · running for 0s');
+    expect(shown.container.textContent).not.toContain('gpt-6-astra');
+  });
+});
+
 describe('the clean-up review', () => {
   it('says so when the rewrite says exactly what was written', async () => {
     // Act

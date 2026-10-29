@@ -1,17 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ConnectionChoice } from '@ferretry/relay';
-import { type ReactNode, useLayoutEffect, useState } from 'react';
+import { type ReactNode, Suspense, useLayoutEffect, useState } from 'react';
+import { renderToString } from 'react-dom/server';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import type { FleetClientFactory } from '../../../../src/features/fleet/fleet-client.ts';
 import { useSettingsFlow } from '../../../../src/features/fleet/setup/settings-route.ts';
 import type { MachineTabProps, MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../../../../src/features/settings/daemon-settings-frame.tsx';
-import { SettingsPage, SettingsScope } from '../../../../src/features/settings/settings-page.tsx';
+import { SettingsPage, SettingsScope, SettingsSection } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/controls.ts';
 import { type DaemonId, daemonConnection } from '../../../../src/lib/daemon-connection.ts';
+import { settingDefinition } from '../../../../src/features/settings/settings-catalog.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
 import { UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
 import { interact, mount, must } from '../../../support/dom.ts';
@@ -1353,5 +1355,38 @@ describe('SettingsPage Machines section', () => {
       'Machines cannot be shown because this page was opened without a way to reach them.',
     );
     await view.unmount();
+  });
+});
+
+describe('SettingsSection', () => {
+  it('names a setting as this device’s only when the caller says it is, and says nothing otherwise', async () => {
+    const definition = settingDefinition('density');
+    const device = await mount(
+      <SettingsSection definition={definition} deviceOnly>
+        <span>body</span>
+      </SettingsSection>,
+    );
+    expect(device.container.querySelector('[data-setting-scope="device"]')?.textContent).toBe('This device');
+    await device.unmount();
+
+    const shared = await mount(
+      <SettingsSection definition={definition}>
+        <span>body</span>
+      </SettingsSection>,
+    );
+    expect(shared.container.querySelector('[data-setting-scope]')).toBeNull();
+    expect(shared.container.querySelector('h3')?.textContent).toBe(definition.label);
+    expect(shared.container.textContent).toContain('body');
+  });
+});
+
+describe('SettingsPage on the server', () => {
+  it('reads the controls snapshot, then leaves the page to the client rather than failing the document', () => {
+    const markup = renderToString(
+      <Suspense fallback={<p data-client-only="">Loading settings…</p>}>{page()}</Suspense>,
+    );
+
+    expect(markup).toContain('data-client-only');
+    expect(markup).not.toContain('data-settings-section');
   });
 });
