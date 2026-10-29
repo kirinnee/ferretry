@@ -761,3 +761,20 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-deck[data-reduced-motion] .fy-attn-deck__stamp > * {
   transform: none;
 }
+
+/* Each answer is its arrow over its label, so a label has the button's whole width and wraps between
+   words rather than being cut off or split mid-word. */
+.fy-attn-answers > .fy-attn-answer {
+  height: auto;
+  flex-direction: column;
+  gap: 2px;
+  padding-block: 8px;
+  white-space: normal;
+}
+.fy-attn-answers > .fy-attn-answer > svg {
+  order: -1;
+}
+.fy-attn-answers .fy-attn-answer__label {
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}

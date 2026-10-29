@@ -17,6 +17,7 @@ import type { AttentionItem } from '@ferretry/protocol';
 import { attentionTitle, DEFAULT_ANSWER_LABELS, unswipedChoices } from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
+import { ChatProse } from '../../components/chat-prose.tsx';
 import { answerAction, cardAnswers, isTextOnlyAsk, kindWord, optionAction } from '../../lib/attention-answers.ts';
 import {
   answersPerQuestion,
@@ -32,7 +33,7 @@ import {
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
 import { attentionAge, attentionKindMeta, collapsesByDefault } from './attention-board.tsx';
-import { AttentionBriefSections, PointForm, RecommendedBadge } from './attention-brief.tsx';
+import { AttentionBriefSections, RecommendedBadge } from './attention-brief.tsx';
 import { useReplyDraft } from './attention-reply-draft.tsx';
 import { AttentionBody, AttentionSteps } from './attention-steps.tsx';
 
@@ -71,7 +72,7 @@ export interface AttentionCardProps {
   readonly id?: string;
 }
 
-const plainProse = (text: string): ReactNode => <PointForm text={text} />;
+const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
 
 export function AttentionCard({
   item,
@@ -81,7 +82,7 @@ export function AttentionCard({
   swipeHints = false,
   highlighted = false,
   now = Date.now(),
-  renderProse = plainProse,
+  renderProse = markdownProse,
   onAct,
   onProgress,
   id,

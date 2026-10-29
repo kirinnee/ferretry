@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
+import { PointForm } from '../../../src/features/attention/attention-brief.tsx';
 import type { InboxAction } from '../../../src/lib/attention-inbox.ts';
 import { attentionItem, choices } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
@@ -171,11 +172,12 @@ describe('AttentionCard point form', () => {
     expect(points('impact')).toEqual(['blocks the release', 'costs a day']);
   });
 
-  test('prose, or a mix of prose and bullets, stays a paragraph', async () => {
+  test('with the plain renderer, prose or a mix of prose and bullets stays a paragraph', async () => {
     view = await mount(
       <AttentionCard
         item={{ ...rich, context: 'Intro line.\n- then a point', impact: 'Plain words.' }}
         onAct={() => {}}
+        renderProse={text => <PointForm text={text} />}
       />,
     );
     expect(view.container.querySelectorAll('[data-attention-section="context"] li').length).toBe(0);
