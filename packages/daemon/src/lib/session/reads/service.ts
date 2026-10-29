@@ -41,7 +41,8 @@ import type {
   SessionTranscriptMessage,
   SessionTranscriptPage,
 } from '@ferretry/protocol';
-import { ExactConversationMessagePointSchema } from '@ferretry/protocol';
+import { ExactConversationMessagePointSchema, formatTranscriptImageMarker } from '@ferretry/protocol';
+import { markerMediaType, numberRecordImages, type RecordImage } from '../../transcript/images.ts';
 import type { TranscriptEvent } from '../../transcript/types.ts';
 import type { LastSnapshotReader } from '../snapshot/index.ts';
 import { type PortableConversationRow, sameConversationMessagePoint } from '../transcript/digest.ts';
@@ -309,18 +310,58 @@ function stamp(value: string | undefined): string | undefined {
   return `${pad(at.getUTCHours())}:${pad(at.getUTCMinutes())}:${pad(at.getUTCSeconds())}`;
 }
 
-/** The body of one transcript event, as a human reads it. */
-function body(event: TranscriptEvent): string {
+/** Whether a window beginning at `start` would begin inside a record: the event before it shares its bytes. */
+function cutsRecord(events: readonly TranscriptEvent[], start: number): boolean {
+  const before = events[start - 1];
+  const first = events[start];
+  if (first === undefined) return false;
+  if (before === undefined) return false;
+  return (
+    before.byteOffset !== undefined && before.byteOffset === first.byteOffset && before.byteLength === first.byteLength
+  );
+}
+
+/** A number as letters a-j, so the stand-in for a marker holds no digit a masking redactor could eat. */
+const spell = (index: number): string =>
+  String(index).replace(/\d/gu, digit => String.fromCharCode(97 + Number(digit)));
+const unspell = (letters: string): number =>
+  Number(letters.replace(/[a-j]/gu, letter => String(letter.charCodeAt(0) - 97)));
+
+const IMAGE_MARKER = /\[fy-image [0-9.]+ [a-z/-]+\]/gu;
+/** The NUL that fences a lifted marker: no secret a redactor masks can contain it. */
+const NUL = String.fromCharCode(0);
+const LIFTED_MARKER = new RegExp(`${NUL}fy-image-([a-j]+)${NUL}`, 'gu');
+
+const imageMarker = (image: RecordImage): string =>
+  formatTranscriptImageMarker({ handle: image.handle, mediaType: markerMediaType(image) });
+
+/**
+ * The body of one transcript event, as a human reads it.
+ *
+ * `images` are the ones this event holds that a chat can ask for (`numberRecordImages`). An image
+ * attachment keeps its kind word and gains the marker after it; a tool result keeps its text and gains
+ * one marker line per image, in place of the JSON dump that an image-only result used to print — which
+ * was the image's base64 whenever it was small enough to be parsed.
+ */
+function body(event: TranscriptEvent, images: readonly RecordImage[] = []): string {
   switch (event.kind) {
     case 'message':
     case 'reasoning':
       return event.text;
     case 'tool-call':
       return `${event.call.name}(${JSON.stringify(event.call.input)})`;
-    case 'tool-result':
-      return `${event.result.isError ? 'error ' : ''}${event.result.text ?? JSON.stringify(event.result.content)}`;
-    case 'attachment':
+    case 'tool-result': {
+      const prefix = event.result.isError ? 'error ' : '';
+      if (images.length === 0) return `${prefix}${event.result.text ?? JSON.stringify(event.result.content)}`;
+      return [`${prefix}${event.result.text ?? ''}`.trimEnd(), ...images.map(imageMarker)]
+        .filter(line => line !== '')
+        .join('\n');
+    }
+    case 'attachment': {
+      const marker = images[0];
+      if (marker !== undefined) return `${event.attachment.kind} ${imageMarker(marker)}`;
       return `${event.attachment.kind}${event.attachment.kind === 'remote-control' ? ` ${event.attachment.url}` : ''}`;
+    }
     case 'error':
       return `${event.error.code === undefined ? '' : `${event.error.code}: `}${event.error.message}`;
     case 'usage':
@@ -339,13 +380,21 @@ function body(event: TranscriptEvent): string {
  *
  * Multi-line bodies are indented under their own header rather than flattened, so a code block an
  * agent wrote is still readable and a reader can still tell where one event ends and the next begins.
+ *
+ * An image a chat can ask for carries a `[fy-image <handle> <type>]` marker (see
+ * `@ferretry/protocol`'s `transcript-images.ts`). `partialFirstRecord` says the first record may have
+ * lost its leading events to a window cut, so its images cannot be numbered and stay unmarked.
  */
-export function renderTranscript(events: readonly TranscriptEvent[]): string {
+export function renderTranscript(
+  events: readonly TranscriptEvent[],
+  options: { readonly partialFirstRecord?: boolean } = {},
+): string {
+  const images = numberRecordImages(events, options);
   return events
-    .map(event => {
+    .map((event, index) => {
       const when = stamp(event.timestamp);
       const header = `${when === undefined ? '' : `[${when}] `}${event.role}/${event.kind}`;
-      const [first = '', ...rest] = body(event).split('\n');
+      const [first = '', ...rest] = body(event, images[index]).split('\n');
       return [`${header}: ${first}`, ...rest.map(line => `    ${line}`)].join('\n');
     })
     .join('\n');
@@ -501,7 +550,12 @@ export class OperatorReadService {
         'transcript_unreadable',
         `session ${sessionId} has a proved transcript, but this daemon could not read it`,
       );
-    if (turn === undefined) return await this.redactor.redact(renderTranscript(result.events));
+    // A tail of exactly `tail` events may have been cut inside its first record, and a record's images are
+    // numbered from its first event — so that first record stays unmarked rather than named wrongly.
+    if (turn === undefined)
+      return await this.redactKeepingMarkers(
+        renderTranscript(result.events, { partialFirstRecord: result.events.length >= tail }),
+      );
     if (!Number.isSafeInteger(turn) || turn < 0)
       throw new OperatorReadError('invalid_query', 'turn must be a non-negative integer');
     const starts = result.events.flatMap((event, index) =>
@@ -514,7 +568,31 @@ export class OperatorReadService {
         `session ${sessionId}'s transcript has no discernible boundary for turn ${turn}`,
       );
     const end = starts[turn + 1] ?? result.events.length;
-    return await this.redactor.redact(renderTranscript(result.events.slice(start, end).slice(-tail)));
+    const turnEvents = result.events.slice(start, end);
+    return await this.redactKeepingMarkers(
+      renderTranscript(turnEvents.slice(-tail), {
+        partialFirstRecord:
+          turnEvents.length > tail || (start === 0 ? result.events.length >= tail : cutsRecord(result.events, start)),
+      }),
+    );
+  }
+
+  /**
+   * `text` scrubbed, with every image marker carried through untouched.
+   *
+   * A marker is digits and a media type this daemon wrote, not content, but a masked value that happens
+   * to be a run of digits would still reach into it and leave a handle that names nothing. So each marker
+   * is swapped for a token no secret can equal before the scrub and swapped back after it.
+   */
+  private async redactKeepingMarkers(text: string): Promise<string> {
+    const markers: string[] = [];
+    const lifted = text.replace(IMAGE_MARKER, marker => {
+      markers.push(marker);
+      return `${NUL}fy-image-${spell(markers.length - 1)}${NUL}`;
+    });
+    if (markers.length === 0) return await this.redactor.redact(text);
+    const scrubbed = await this.redactor.redact(lifted);
+    return scrubbed.replace(LIFTED_MARKER, (whole, index: string) => markers[unspell(index)] ?? whole);
   }
 
   /**

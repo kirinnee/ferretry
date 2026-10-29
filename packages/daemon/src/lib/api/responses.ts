@@ -80,7 +80,7 @@ export function entityTag(body: string): string {
 }
 
 /** Whether `If-None-Match` names this tag. GET compares weakly (RFC 9110 §13.1.2), so `W/` is ignored. */
-function namesTag(ifNoneMatch: string, etag: string): boolean {
+export function namesTag(ifNoneMatch: string, etag: string): boolean {
   return ifNoneMatch
     .split(',')
     .map(candidate => candidate.trim())

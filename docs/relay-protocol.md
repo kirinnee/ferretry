@@ -1687,6 +1687,13 @@ it sends a validator only for a path it holds, and treats any other `304` as an 
 empty transcript. An unchanged transcript costs its headers, a few hundred bytes. The same headers
 work on the direct path: `if-none-match` is an admitted CORS request header and `etag` an exposed one.
 
+**An image of a transcript is addressed, not embedded.** `/logs` prints `[fy-image <handle> <type>]`
+where an image was, and `GET /v1/sessions/:id/transcript-images/:handle` answers one image as JSON
+(`{ image: { handle, mediaType, byteLength }, base64 }`). The handle names a record by its offset and
+length plus an ordinal, so it never changes for a transcript that is only appended to, and the answer
+is `cache-control: private, max-age=31536000, immutable` with a strong `etag` over session, handle and
+size; a request whose `if-none-match` names it is answered `304`. It is governed exactly like `/logs`.
+
 `GET /v1/sessions` — the fleet list every open app re-reads on a beat, about 25 KB on a real fleet —
 is conditional the same way. Its tag is a digest of the exact JSON served, so it moves when any field
 of any session moves (a status, a name, a turn count, `journalSequence`), and is computed from the
