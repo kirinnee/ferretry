@@ -1,3 +1,9 @@
+## [4.101.2](https://github.com/kirinnee/ferretry/compare/v4.101.1...v4.101.2) (2026-10-29)
+
+### Fixes
+
+* **warden:** give Jev one act per ferret and per situation, not per subject ([#863](https://github.com/kirinnee/ferretry/issues/863)) ([7ea7bff](https://github.com/kirinnee/ferretry/commit/7ea7bff2fe404c4f241447d7d765ffd6e5887cbf))
+
 ## [4.101.1](https://github.com/kirinnee/ferretry/compare/v4.101.0...v4.101.1) (2026-10-29)
 
 ### Fixes
