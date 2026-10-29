@@ -45,6 +45,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `a-macos-relevance`          | the optional macOS jobs' path lists cover every input their scripts read     |
 | `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their three teaching files          |
 | `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers               |
+| `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)              |
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree           |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt    |
 | `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                             |

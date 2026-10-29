@@ -43,6 +43,7 @@ laundered a defect into something every gate was right to pass.
 | `macos-relevance.sh`          | `a-macos-relevance`, `task test:gate`    | the optional macOS jobs' path lists cover every input their scripts read        |
 | `no-fy-render-in-docs.sh`     | `a-no-fy-render-in-docs`                 | `fy-render` fence openers appear only in their three teaching files             |
 | `no-legacy-state.sh`          | `a-no-legacy-state`                      | package code names no legacy state, and package source no owner fleet wrapper   |
+| `no-pattern-kill.sh`          | `a-no-pattern-kill`                      | no test tree kills processes by pattern (`pkill`, `killall`)                    |
 | `pages-config.sh`             | `task test:gate`                         | the PWA build and Pages deployment publish the same directory                   |
 | `pinned-toolchain.sh`         | `task test:gate`, `build-pwa.sh`         | `node` and `bun` resolve inside `/nix/store`, never to the runner image         |
 | `relay-config.sh`             | `a-relay-config`, `task test:gate`       | relay code, bindings, discovery and deployment agree                            |
@@ -320,6 +321,7 @@ policy in [CI/CD](../ci-cd/index.md).
 ./scripts/validate/daemon-scope.sh                # no PWA surface reads another daemon's data
 ./scripts/validate/fetch-binding.sh               # no stored fetch builtin, no direct network call that skips the relay
 ./scripts/validate/no-fy-render-in-docs.sh        # illustrations stay in conversation, out of durable files
+./scripts/validate/no-pattern-kill.sh             # tests kill by pid or exact socket, never by pattern
 ./scripts/validate/closed-set-agreement.sh        # copied cross-package enumerations still agree
 ./scripts/validate/contract-registry.sh           # every contract is documented and wired
 ./scripts/validate/route-agreement.sh             # paths, verbs and declared method debt agree
