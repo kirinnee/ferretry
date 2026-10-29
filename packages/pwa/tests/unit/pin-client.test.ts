@@ -440,4 +440,31 @@ describe('DaemonPinClient', () => {
     expect(client.store.pins(rotatedScope)).toBeUndefined();
     expect(client.store.pins(scopeB)).toBeDefined();
   });
+
+  it('forgets only the unpaired daemon’s mutation revisions so another daemon’s stale hydrate stays fenced', async () => {
+    const staleB = deferred<Response>();
+    const mutationB = deferred<Response>();
+    const client = new DaemonPinClient(undefined, async (input, init) => {
+      const url = String(input);
+      if (url.startsWith('https://b.')) return init?.method === 'POST' ? mutationB.promise : staleB.promise;
+      return response(snapshot('same/session', '2026-07-31T01:00:00.000Z', 'a'));
+    });
+    const hydrateB = client.hydrate(daemonB, scopeB);
+    const mutateB = client.add(daemonB, scopeB, { action: 'add', kind: 'note', text: 'new' });
+    await client.add(daemonA, scopeA, { action: 'add', kind: 'note', text: 'mine' });
+    expect(firstNoteText(client, scopeA)).toBe('a');
+
+    client.clearDaemon(daemonA.daemonId);
+    expect(client.store.pins(scopeA)).toBeUndefined();
+
+    staleB.resolve(response(snapshot('same/session', '2026-07-31T02:00:00.000Z', 'stale')));
+    await hydrateB;
+    expect(client.store.pins(scopeB)).toBeUndefined();
+    mutationB.resolve(response(snapshot('same/session', '2026-07-31T03:00:00.000Z', 'authoritative')));
+    await mutateB;
+    expect(firstNoteText(client, scopeB)).toBe('authoritative');
+
+    await client.hydrate(daemonA, scopeA);
+    expect(firstNoteText(client, scopeA)).toBe('a');
+  });
 });

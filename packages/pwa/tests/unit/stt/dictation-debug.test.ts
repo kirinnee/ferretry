@@ -249,4 +249,24 @@ describe('DictationDebugLog', () => {
     log.setEnabled(true);
     should(log.snapshot().enabled).be.true();
   });
+
+  it('should read a browser whose storage getter throws as having no storage', () => {
+    // Arrange + Act + Assert
+    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+    Object.defineProperty(globalThis, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('storage access refused');
+      },
+    });
+    try {
+      const log = new DictationDebugLog();
+      should(log.snapshot().enabled).be.false();
+      log.setEnabled(true);
+      should(log.snapshot().enabled).be.true();
+    } finally {
+      if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+      else Object.defineProperty(globalThis, 'localStorage', original);
+    }
+  });
 });
