@@ -26,8 +26,10 @@
  * ═══ ONE TRY ═══
  *
  * Jev acts on a SUBJECT (`backoff.ts`: this turn's episode, or this stuck command) at most once. The
- * act is given the backoff's first rung to land; if the same subject is still flagged after that, Jev
- * is not asked again — the flag escalates. A new subject is a new situation and Jev may act on it.
+ * act is given its backoff rung to land, and meanwhile nothing else on that ferret is acted on or
+ * looked at. If the same kind of trouble is still — or again, within a day — flagged on that ferret
+ * after that, Jev is not asked again: the flag escalates. An act changes the subject by its own effect
+ * (a nudge starts a new turn), so a new subject alone is not a new situation.
  *
  * ═══ NO UNATTENDED SPEND BY SURPRISE ═══
  *
@@ -264,6 +266,8 @@ export type JevEscalation =
   | 'no_message'
   /** A failover: Jev cannot name the login to move to. */
   | 'cannot_choose_login'
+  /** An act that was not offered for this flag — never carried out, whoever answered. */
+  | 'not_offered'
   /** No real answer came back — or none was asked for (cap, back-off, unredactable snapshot). */
   | 'failed'
   /** Jev already acted on this subject, and it is still flagged. */
@@ -296,6 +300,8 @@ export interface JevResponderPolicy {
   readonly leaveThreshold: number;
   readonly acts: WardenJevActs;
   readonly mayActAlone: WardenMayActAlone;
+  /** The acts this flag offered ({@link jevActsFor}). An answer outside them is never carried out. */
+  readonly offered: readonly TriageActVerdict[];
 }
 
 const isJevAct = (verdict: TriageActVerdict): verdict is WardenJevAct => verdict !== 'failover';
@@ -318,6 +324,8 @@ export function firstResponse(decision: TriageDecision, policy: JevResponderPoli
     return confidence >= policy.leaveThreshold
       ? { kind: 'leave', confidence, ...reason }
       : { kind: 'escalate', why: 'not_sure_enough', confidence, ...reason };
+  // Defence in depth: the guard is told what it may choose, and this is checked again here.
+  if (!policy.offered.includes(verdict)) return { kind: 'escalate', why: 'not_offered', confidence, ...reason };
   const bar = isJevAct(verdict) ? policy.acts[verdict] : 1;
   const never = bar >= 1;
   if (confidence < (never ? policy.leaveThreshold : bar))
@@ -396,6 +404,16 @@ export function recordGuardDecision(
 /** Count one act Jev carried out alone into today's counters. */
 export function recordJevAction(today: WardenTriageDay): WardenTriageDay {
   return { ...today, jevActions: (today.jevActions ?? 0) + 1 };
+}
+
+/**
+ * Take back an act that did not settle its flag — the same subject was handed on after it — so the
+ * savings line never counts one flag as both an investigation not bought and one bought. Only an act
+ * counted on the same day can be taken back from it.
+ */
+export function retractJevAction(today: WardenTriageDay, actedAtMs: number | undefined): WardenTriageDay {
+  if (actedAtMs === undefined || utcDay(actedAtMs) !== today.day || (today.jevActions ?? 0) === 0) return today;
+  return { ...today, jevActions: (today.jevActions ?? 0) - 1 };
 }
 
 /**
