@@ -15,7 +15,7 @@ The interface says "audio never leaves this device" **only while Parakeet is the
 (`features/settings/voice-engine-choice.tsx`, `components/dictation-sheet.tsx`). Anywhere else it
 would be a promise the active engine does not keep.
 
-## The review box: nothing reaches the draft without Insert
+## The review box: by default, nothing reaches the draft without Insert
 
 Both engines end the same way. While you record, the strip above the composer shows the sound wave
 (and live words only if you switched on the experimental toggle in Settings › Voice) and stays
@@ -32,7 +32,27 @@ non-modal: you can keep typing. On **Stop** the strip becomes a compact **review
 
 A hidden panel reopens when the take lands, so a finished transcript is never stranded. The hook
 (`hooks/use-dictation.ts`) holds the take as `review`; `insert(text)` is the only call that reaches
-`onDraft`, so the draft cannot change without the person pressing Insert.
+`onDraft` for a take, so by default the draft cannot change without the person pressing Insert.
+
+### After dictating: Review first, or Insert straight away
+
+A per-device choice in Settings › Voice (`afterDictation` in `lib/stt/stt-settings.ts`, shown with the
+**This device** badge; the settings palette finds it as "review first", "insert straight away", "preview"
+or "inject"). The default is **Review first**, everything above. The settings payload is version 2; a
+version 1 payload still reads, with the new field defaulting to `review`, and the next save writes
+version 2.
+
+**Insert straight away** changes only what happens when the cleaned text is ready:
+
+- the hook calls the same internal commit that **Insert** uses — same caret, selection and spacing rules,
+  same transcription-log entry — exactly once, and it never sends the message;
+- the panel closes and a small **Inserted · Undo** note (`components/dictation-inserted-toast.tsx`) appears
+  above the composer for a few seconds; **Undo** restores the draft and caret as they were before. If the
+  person has edited the draft since, the note leaves rather than overwrite their typing;
+- anything that is not a clean result still parks the take in the review box with its reason: a failed
+  clean-up (the raw words are shown), an empty take, a recognition or permission error. Words are never
+  inserted silently from a take that went wrong;
+- push-to-talk and the mic button follow the same setting.
 
 ## Parakeet on this device
 

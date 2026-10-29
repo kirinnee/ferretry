@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 import {
   CONTEXT_FETCH_LIMIT,
   conversationFromTranscript,
+  type DictationAutoInsertion,
   type DictationDraftResult,
   type DictationHandle,
   enhancementErrorFrom,
@@ -724,6 +725,121 @@ describe('useDictation review', () => {
     await view.render({ settings: settingsWith({ enabled: false }) });
     expect(view.handle().review).toBeNull();
     expect(view.handle().phase).toBe('idle');
+    await view.unmount();
+  });
+});
+
+describe('useDictation insert straight away', () => {
+  const insertMode = settingsWith({ afterDictation: 'insert' });
+
+  const dictate = async (
+    initial: Partial<UseDictationOptions> = {},
+  ): Promise<{ view: Harness; provider: FakeRecognitionProvider; inserted: DictationAutoInsertion[] }> => {
+    const provider = fakeRecognitionProvider();
+    const inserted: DictationAutoInsertion[] = [];
+    const view = await harness({
+      recognition: provider,
+      settings: insertMode,
+      onAutoInserted: insertion => inserted.push(insertion),
+      ...initial,
+    });
+    await record(view, provider);
+    return { view, provider, inserted };
+  };
+
+  it('puts a clean take in the draft exactly once, with no review, and says what it replaced', async () => {
+    const { view, provider, inserted } = await dictate({ draft: 'typed' });
+    await interact(() => provider.speak('hello world'));
+    await finishTake(view, provider);
+
+    expect(view.drafts).toEqual([{ text: 'typed hello world', caret: 17 }]);
+    expect(inserted).toEqual([
+      { before: { text: 'typed', caret: 5 }, after: { text: 'typed hello world', caret: 17 } },
+    ]);
+    expect(view.handle().phase).toBe('idle');
+    expect(view.handle().review).toBeNull();
+    // Nothing later re-inserts it.
+    await interact(() => view.handle().insert('hello world'));
+    expect(view.drafts).toHaveLength(1);
+    await view.unmount();
+  });
+
+  it('uses the same caret rules as Insert: at the live caret, replacing a selection', async () => {
+    const selectionRef = { current: { selectionStart: 6, selectionEnd: 9 } };
+    const { view, provider, inserted } = await dictate({ draft: 'start end', selectionRef });
+    await interact(() => provider.speak('hello'));
+    await finishTake(view, provider);
+
+    expect(view.drafts[0]?.text).toBe('start hello');
+    expect(inserted[0]?.before).toEqual({ text: 'start end', caret: 6 });
+    await view.unmount();
+  });
+
+  it('never calls onAutoInserted when the person reviews first', async () => {
+    const { view, provider, inserted } = await dictate({ settings: settingsWith({ afterDictation: 'review' }) });
+    await interact(() => provider.speak('hello world'));
+    await finishTake(view, provider);
+
+    expect(view.handle().phase).toBe('review');
+    expect(view.drafts).toEqual([]);
+    expect(inserted).toEqual([]);
+    await interact(() => view.handle().insert('hello world'));
+    expect(view.drafts).toHaveLength(1);
+    expect(inserted).toEqual([]);
+    await view.unmount();
+  });
+
+  it('still parks the take for review, with the reason, when clean-up fails', async () => {
+    const { view, provider, inserted } = await dictate({
+      settings: settingsWith({ afterDictation: 'insert', enhancementProvider: 'groq' }),
+      enhancementFetch: async () =>
+        new Response(JSON.stringify({ code: 'rate_limited', error: 'Slow down.' }), { status: 429 }),
+    });
+    await interact(() => provider.speak('raw words'));
+    await finishTake(view, provider);
+
+    expect(view.drafts).toEqual([]);
+    expect(inserted).toEqual([]);
+    expect(view.handle().phase).toBe('review');
+    expect(view.handle().review?.cleaned).toBe('raw words');
+    expect(view.handle().review?.enhancementError?.code).toBe('enhancement-rate-limit');
+    await view.unmount();
+  });
+
+  it('inserts nothing for a take that captured no speech', async () => {
+    const { view, provider, inserted } = await dictate();
+    await finishTake(view, provider);
+
+    expect(view.drafts).toEqual([]);
+    expect(inserted).toEqual([]);
+    expect(view.handle().phase).toBe('idle');
+    await view.unmount();
+  });
+
+  it('shows a recognition failure as an error rather than inserting anything', async () => {
+    const provider = fakeRecognitionProvider();
+    const view = await harness({ recognition: provider, settings: insertMode });
+    await record(view, provider);
+    await interact(() => provider.fail('not-allowed'));
+
+    expect(view.drafts).toEqual([]);
+    expect(view.handle().phase).toBe('error');
+    await view.unmount();
+  });
+
+  it('follows the setting as it changes between takes', async () => {
+    const { view, provider } = await dictate();
+    await interact(() => provider.speak('first'));
+    await finishTake(view, provider);
+    expect(view.drafts.map(draft => draft.text)).toEqual(['first']);
+
+    await view.render({ settings: settingsWith({ afterDictation: 'review' }), draft: 'first' });
+    await interact(() => view.handle().start());
+    await interact(() => provider.begin());
+    await interact(() => provider.speak('second'));
+    await finishTake(view, provider);
+    expect(view.handle().phase).toBe('review');
+    expect(view.drafts).toHaveLength(1);
     await view.unmount();
   });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import {
+  AFTER_DICTATION_EXPLANATION,
   CEREBRAS_ENHANCEMENT_EXPLANATION,
   DICTATION_DISABLED_EXPLANATION,
   DICTATION_SAFETY_NOTE,
@@ -65,6 +66,49 @@ const engineSection = (container: HTMLElement): HTMLElement =>
 
 const radio = (container: HTMLElement, value: string): HTMLInputElement =>
   must(container.querySelector<HTMLInputElement>(`input[type="radio"][value="${value}"]`), `the ${value} radio`);
+
+describe('<DictationSettings> after dictating', () => {
+  const afterSection = (container: HTMLElement): HTMLElement =>
+    must(container.querySelector('section[aria-label="After dictating"]'), 'the after-dictating section');
+
+  it('offers the two choices, labelled for this device, with Review first selected by default', async () => {
+    const view = await mount(<DictationSettings {...settingsProps()} />);
+    const section = afterSection(view.container);
+    expect(section.textContent).toContain('This device');
+    expect(section.textContent).toContain('Review first');
+    expect(section.textContent).toContain('Insert straight away');
+    expect(section.textContent).toContain(AFTER_DICTATION_EXPLANATION);
+    expect(section.querySelector('[role="radiogroup"]')).not.toBeNull();
+    expect(radio(view.container, 'review').checked).toBe(true);
+    expect(radio(view.container, 'insert').checked).toBe(false);
+    await view.unmount();
+  });
+
+  it('shows the saved choice', async () => {
+    const view = await mount(
+      <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, afterDictation: 'insert' } })} />,
+    );
+    expect(radio(view.container, 'insert').checked).toBe(true);
+    expect(radio(view.container, 'review').checked).toBe(false);
+    await view.unmount();
+  });
+
+  it('records the choice through the one update port, and nothing else', async () => {
+    const patches: SttSettingsPatch[] = [];
+    const view = await mount(<DictationSettings {...settingsProps({ update: patch => patches.push(patch) })} />);
+    await interact(() => radio(view.container, 'insert').click());
+    expect(patches).toEqual([{ afterDictation: 'insert' }]);
+    await view.unmount();
+  });
+
+  it('is hidden with the rest while dictation is switched off', async () => {
+    const view = await mount(
+      <DictationSettings {...settingsProps({ settings: { ...DEFAULT_STT_SETTINGS, enabled: false } })} />,
+    );
+    expect(view.container.querySelector('section[aria-label="After dictating"]')).toBeNull();
+    await view.unmount();
+  });
+});
 
 describe('<DictationSettings>', () => {
   it('offers every catalog model and browser voice side by side, the browser one labelled with where its audio goes', async () => {

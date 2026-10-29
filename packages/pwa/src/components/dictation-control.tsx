@@ -16,12 +16,17 @@
  * nodes, and the host drops them wherever it likes. `DictationControl` is the
  * simple wrapper for mounting them together.
  *
- * THE ONE OUTPUT IS THE DRAFT, AND ONLY ON INSERT. On Stop `useDictation` transcribes once,
+ * THE ONE OUTPUT IS THE DRAFT, AND ONLY ON INSERT. By default, on Stop `useDictation` transcribes once,
  * cleans up once, and parks the result as a review: the panel turns into a mini box and the draft is
  * untouched. Insert calls `onDraft` exactly once with the complete next draft placed at the caret
  * as it is THEN; Discard drops the take. This bundle forwards `draft`/`selectionRef`, adapts the
  * result to the host's `onDraftChange`, closes the panel once the insertion lands, and reopens a
  * hidden panel when a take arrives so a finished transcript is never stranded.
+ *
+ * "INSERT STRAIGHT AWAY" (`settings.afterDictation`, a per-device choice) skips the wait: a clean take
+ * goes through that same Insert path as soon as it is ready, the panel closes, and an "Inserted · Undo"
+ * note (`dictation-inserted-toast.tsx`) offers one-step Undo. A failed clean-up or an empty result is
+ * still parked in the panel with its reason. Push-to-talk follows the same setting.
  *
  * UNAVAILABLE IS VISIBLE. A browser without recognition still gets the mic
  * control; tapping it opens the same panel with an actionable "unavailable
@@ -46,6 +51,7 @@ import {
 } from '../features/settings/dictation-shortcut.ts';
 import { useMachineVoiceCleanup } from '../features/settings/use-machine-voice-cleanup.ts';
 import {
+  type DictationAutoInsertion,
   type DictationDraftResult,
   type DictationHandle,
   type DictationPhase,
@@ -69,6 +75,7 @@ import type { RemoteEnhancementFetch } from '../lib/stt/remote-enhancement.ts';
 import { isOnDeviceEngine, isRemoteEnhancementProvider, type SttSettings } from '../lib/stt/stt-settings.ts';
 import { Button } from '../shell/primitives.tsx';
 import { DictationDebugSheet } from './dictation-debug-sheet.tsx';
+import { DictationInsertedToast } from './dictation-inserted-toast.tsx';
 import { DictationSheet, type DictationStage, dictationStage } from './dictation-sheet.tsx';
 import type { InputWaveformRuntime } from './input-waveform.tsx';
 
@@ -226,6 +233,8 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   const [wasCapturing, setWasCapturing] = useState(false);
   const [detailsFor, setDetailsFor] = useState<string | null>(null);
   const [retryOnParakeet, setRetryOnParakeet] = useState(false);
+  const [autoInserted, setAutoInserted] = useState<DictationAutoInsertion | null>(null);
+  const dismissInserted = useCallback(() => setAutoInserted(null), []);
   const sttStore = useSttSettingsStore();
   const debug = useDictationDebugSnapshot();
   const startedAt = useRef(0);
@@ -269,10 +278,11 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
     ...(props.enhancementFetch === undefined ? {} : { enhancementFetch: props.enhancementFetch }),
     disabled: effectiveDisabled,
     onDraft: result => {
-      // The single, final output, reached only through Insert on the review box.
+      // The single, final output: Insert on the review box, or the automatic insert it stands in for.
       onDraftChange(result);
       closePanel();
     },
+    onAutoInserted: setAutoInserted,
   });
 
   const phase = dictation.phase;
@@ -309,6 +319,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
   const beginRecording = useCallback(() => {
     setElapsedMs(0);
     setWasCapturing(false);
+    setAutoInserted(null);
     startedAt.current = nowRef.current();
     dictation.dismissError();
     dictation.start();
@@ -383,7 +394,11 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
                   : dictation.engine === 'browser'
                     ? 'Your browser’s speech service transcribes it'
                     : 'Choose a voice engine in Settings › Voice first'
-              }; you review the text before it reaches your draft.`
+              }; ${
+                settings.afterDictation === 'insert'
+                  ? 'the text goes into your draft when it is ready, with Undo'
+                  : 'you review the text before it reaches your draft'
+              }.`
             : 'Dictation is unavailable here. Open this control for the browser-specific reason.'
       }
       onClick={openAndRecord}
@@ -413,6 +428,7 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
         {...(visibleError?.code ? { errorCode: visibleError.code } : {})}
         {...(visibleError?.message ? { errorMessage: visibleError.message } : {})}
         review={dictation.review}
+        insertsDirectly={settings.afterDictation === 'insert'}
         {...(debugRecord === undefined ? {} : { onDetails: () => setDetailsFor(debugRecord.id) })}
         onDismiss={dismissPanel}
         onStop={dictation.stop}
@@ -421,6 +437,15 @@ export function useDictationBundle(props: DictationControlProps): DictationBundl
         onCancel={reset}
         onRetry={beginRecording}
         {...(sttStore === null ? {} : { onSwitchEngine: switchToParakeet })}
+      />
+      <DictationInsertedToast
+        insertion={autoInserted}
+        draft={draft}
+        onUndo={insertion => {
+          onDraftChange(insertion.before);
+          setAutoInserted(null);
+        }}
+        onDismiss={dismissInserted}
       />
       {debugRecord !== undefined && detailsFor === debugRecord.id ? (
         <DictationDebugSheet record={debugRecord} onClose={() => setDetailsFor(null)} />

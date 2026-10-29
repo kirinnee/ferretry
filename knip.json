@@ -80,6 +80,7 @@
         "harness/theme-gallery-screenshot.tsx",
         "harness/peer-messages-screenshot.tsx",
         "harness/dictation-review-screenshot.tsx",
+        "harness/dictation-insert-mode-screenshot.tsx",
         "harness/dictation-debug-screenshot.tsx",
         "harness/dictation-no-words-screenshot.tsx",
         "harness/dictation-timing-screenshot.tsx",
