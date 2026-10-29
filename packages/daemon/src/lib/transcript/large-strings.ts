@@ -81,8 +81,12 @@ function isWhitespace(byte: number): boolean {
 function cutsOf(record: Uint8Array, ignored: ReadonlySet<string>): readonly Cut[] {
   const cuts: Cut[] = [];
   let depth = 0;
-  /** The last literal read, and the depth it was read at: a key, if a colon follows. */
-  let lastLiteral: { readonly from: number; readonly to: number; readonly depth: number } | undefined;
+  // The last literal read, and the depth it was read at: a key, if a colon follows. Three numbers rather
+  // than an object, because a record can hold tens of thousands of literals and each one would be an
+  // allocation — on a machine short of memory, the thing the event loop waits on. -1: none.
+  let literalFrom = -1;
+  let literalTo = -1;
+  let literalDepth = -1;
   /** True between an ignored key's colon and its value's first byte. */
   let ignoreNext = false;
   /** Where the ignored value being skipped began, and the depth it closes back to. */
@@ -94,8 +98,8 @@ function cutsOf(record: Uint8Array, ignored: ReadonlySet<string>): readonly Cut[
       if (byte === COLON) {
         ignoreNext =
           skipping === undefined &&
-          lastLiteral?.depth === 1 &&
-          ignored.has(decoder.decode(record.subarray(lastLiteral.from, lastLiteral.to)));
+          literalDepth === 1 &&
+          ignored.has(decoder.decode(record.subarray(literalFrom, literalTo)));
         continue;
       }
       if (byte === OPEN_BRACE || byte === OPEN_BRACKET) {
@@ -109,7 +113,7 @@ function cutsOf(record: Uint8Array, ignored: ReadonlySet<string>): readonly Cut[
         }
       }
       ignoreNext = false;
-      lastLiteral = undefined;
+      literalDepth = -1;
     }
   };
   let position = 0;
@@ -133,7 +137,9 @@ function cutsOf(record: Uint8Array, ignored: ReadonlySet<string>): readonly Cut[
     // A literal that never closes: the record is cut off, and parsing it will say so.
     if (quote < 0) return cuts.filter(cut => cut.kind === 'reference');
     ignoreNext = false;
-    lastLiteral = { from, to: quote, depth };
+    literalFrom = from;
+    literalTo = quote;
+    literalDepth = depth;
     if (skipping === undefined && !escaped && quote - from >= LARGE_STRING_BYTES && isPureBase64(record, from, quote)) {
       cuts.push({ start: from, end: quote, kind: 'reference' });
     }
