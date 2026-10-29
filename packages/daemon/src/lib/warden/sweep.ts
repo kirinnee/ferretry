@@ -78,7 +78,9 @@ import { type AttentionBoardInput, buildWardenAttentionView } from './attention.
 import {
   BACKOFF_CEILING_MS,
   backoffHold,
+  jevActLandingOn,
   jevActStanding,
+  jevSubject,
   reconcileBackoff,
   recordJevAct,
   recordLook,
@@ -181,8 +183,10 @@ import {
   passedOnKey,
   prunePassedOn,
   recordGuardDecision,
+  jevActsFor,
   recordJevAction,
   redactTriageSnapshot,
+  retractJevAction,
   triageDayFor,
   triageSnapshotOf,
   type WardenGuardOutcome,
@@ -643,9 +647,8 @@ export class WardenSweepService {
       const target = byId.get(anomaly.sessionId);
       // A subject a look already cleared is not the owner's to re-judge either, however long ago.
       if (backoffHold(state.backoff ?? {}, anomaly, nowMs, 0)?.cleared === true) return false;
-      // Nor is one Jev just acted on, while its act still has time to land.
-      const base = assignedCooldownMs(stored.config);
-      if (jevActStanding(state.backoff ?? {}, anomaly, nowMs, base)?.standing === 'landing') return false;
+      // Nor is a ferret Jev just acted on, while its act still has time to land.
+      if (jevActLandingOn(state.backoff ?? {}, anomaly.sessionId, nowMs)) return false;
       return target === undefined || !isAnomalyBlessed(blessings, anomaly, target.state.status, nowMs);
     });
     const projection = buildWardenAttentionView({
@@ -1371,13 +1374,14 @@ export class WardenSweepService {
     let capped = false;
     const nowMs = this.ports.nowMs();
     for (const anomaly of anomalies) {
-      const tried = jevActStanding(next.backoff ?? {}, anomaly, nowMs, assignedCooldownMs(config));
+      const key = passedOnKey(anomaly);
+      const tried = jevActStanding(next.backoff ?? {}, anomaly, nowMs);
       if (tried?.standing === 'landing') continue;
       if (tried?.standing === 'escalate') {
         passed.push(anomaly);
+        if (!(next.passedOn ?? []).includes(key)) next = this.handOnAfterAct(next, anomaly, key, nowMs);
         continue;
       }
-      const key = passedOnKey(anomaly);
       if (capped || (next.passedOn ?? []).includes(key)) {
         passed.push(anomaly);
         continue;
@@ -1394,6 +1398,32 @@ export class WardenSweepService {
       if (guarded.decided) next = { ...next, passedOn: [...(next.passedOn ?? []), key] };
     }
     return { state: next, passed };
+  }
+
+  /**
+   * Hand on, once, a flag Jev already acted on: journal it, and — when the act was on this very subject
+   * — take the act back out of today's savings, since the flag it did not settle is now someone else's.
+   */
+  private handOnAfterAct(
+    state: WardenRuntimeState,
+    anomaly: WardenAnomaly,
+    key: string,
+    nowMs: number,
+  ): WardenRuntimeState {
+    const acted = state.backoff?.[`${anomaly.sessionId}|${anomaly.kind}`]?.jevActed;
+    const same = acted?.subject === jevSubject(anomaly);
+    this.ports.journal.record('fleet.warden_jev_handed_on', {
+      sessionId: anomaly.sessionId,
+      kind: anomaly.kind,
+      why: 'already_acted',
+      ...(acted === undefined ? {} : { action: acted.action, actedAt: acted.at, sameSubject: same }),
+    });
+    const today = triageDayFor(state.triageDay, nowMs);
+    return {
+      ...state,
+      passedOn: [...(state.passedOn ?? []), key],
+      triageDay: same ? retractJevAction(today, instantMs(acted?.at)) : today,
+    };
   }
 
   /**
@@ -1459,6 +1489,7 @@ export class WardenSweepService {
       );
     const outcome = firstResponse(decision, {
       leaveThreshold: config.guard.threshold,
+      offered: jevActsFor(anomaly),
       acts: config.jevActs,
       mayActAlone: config.mayActAlone,
     });
@@ -1504,6 +1535,9 @@ export class WardenSweepService {
       return { state: next, outcome, decided, settled: true };
     }
     if (outcome.kind === 'act') {
+      // A ferret that has gone or finished since is not acted on: the flag is handed on as it stands.
+      if (target === undefined || isTerminalStatus(target.state.status))
+        return { state: next, outcome, decided, settled: false };
       const act: WardenVerdictAct = { action: outcome.act, reason: outcome.reason };
       const sure = `Jev, ${Math.round(outcome.confidence * 100)}% sure`;
       const done = await this.carryOut(
@@ -1518,12 +1552,11 @@ export class WardenSweepService {
         },
       );
       next = done.state;
-      if (done.refused) return { state: next, outcome, decided, settled: true };
       if (!done.done) return { state: next, outcome, decided, settled: false };
       next = {
         ...next,
         triageDay: recordJevAction(next.triageDay ?? today),
-        backoff: recordJevAct(next.backoff ?? {}, anomaly, nowMs, outcome.act),
+        backoff: recordJevAct(next.backoff ?? {}, anomaly, nowMs, outcome.act, assignedCooldownMs(config)),
       };
       return { state: next, outcome, decided, settled: true };
     }
@@ -1532,6 +1565,8 @@ export class WardenSweepService {
         targetId: anomaly.sessionId,
         action: outcome.recommends,
         by: 'jev',
+        confidence: outcome.confidence,
+        ...(decision.reason === undefined ? {} : { reason: decision.reason }),
       });
       next = this.recordAction(next, {
         ...base,
@@ -1763,11 +1798,11 @@ export class WardenSweepService {
       readonly nudge: string;
       readonly stopReason: string;
     },
-  ): Promise<{ readonly state: WardenRuntimeState; readonly done: boolean; readonly refused?: true }> {
+  ): Promise<{ readonly state: WardenRuntimeState; readonly done: boolean }> {
     // Read the fleet afresh: the sweep's snapshot is older than the verdict, and nothing else stands in
     // front of these remedies, so a ferret gone or finished since is never restarted, resumed or stopped.
     const target = (await this.ports.fleet.fleet()).find(session => session.config.id === targetId);
-    if (target === undefined || isTerminalStatus(target.state.status)) return { state, done: false, refused: true };
+    if (target === undefined || isTerminalStatus(target.state.status)) return { state, done: false };
     try {
       if (act.action === 'failover') await this.ports.remedies.failover(targetId, act.agent);
       else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
@@ -1776,7 +1811,14 @@ export class WardenSweepService {
       else await this.ports.remedies.stop(targetId, words.stopReason);
     } catch (error) {
       const message = failureMessage(error);
-      this.ports.journal.record('fleet.warden_action_failed', { targetId, action: act.action, by: base.by, message });
+      this.ports.journal.record('fleet.warden_action_failed', {
+        targetId,
+        action: act.action,
+        by: base.by,
+        message,
+        ...(base.confidence === undefined ? {} : { confidence: base.confidence }),
+        ...(base.reason === undefined ? {} : { reason: base.reason }),
+      });
       return {
         state: this.recordAction(state, { ...base, outcome: 'failed', detail: words.detail('failed', message) }),
         done: false,
@@ -1867,21 +1909,25 @@ export class WardenSweepService {
 
     const budget = this.budget(config, state, nowMs, input.login.usable);
     const investigating = force || budget.layers.llm.active;
-    // While an investigation could follow, the free gates go first: a flag they would hold back anyway
-    // is not paid for. With investigations off there is nothing to hold back, and Jev still clears
-    // what it can, so the owner is shown only the rest.
-    const held = investigating ? this.spawnHeldBack(config, state, input.fleet, budget, nowMs, force) : undefined;
-    if (held !== undefined) return { state, outcome: { message: held } };
-
+    // Jev answers first: as the first responder it acts whatever the investigation gates say. A ferret an
+    // assigned warden is investigating or waiting for is not Jev's to touch — those flags go on unasked.
     const guarded = !force && budget.layers.jev.active;
     let anomalies: readonly WardenAnomaly[] = unblessed;
     if (guarded) {
-      const jev = await this.passThroughJev(unblessed, config, state, byId, investigating);
+      const investigated = new Set([
+        ...Object.keys(state.assignments ?? {}),
+        ...(state.assignedQueue ?? []).map(anomaly => anomaly.sessionId),
+      ]);
+      const askable = unblessed.filter(anomaly => !investigated.has(anomaly.sessionId));
+      const jev = await this.passThroughJev(askable, config, state, byId, investigating);
       state = jev.state;
-      anomalies = jev.passed;
+      anomalies = [...unblessed.filter(anomaly => investigated.has(anomaly.sessionId)), ...jev.passed];
       if (anomalies.length === 0)
         return { state, outcome: { message: 'Jev settled every flag; nothing to investigate' } };
     }
+    // Only then the free gates on the investigation itself: a flag they hold back is not paid for.
+    const held = investigating ? this.spawnHeldBack(config, state, input.fleet, budget, nowMs, force) : undefined;
+    if (held !== undefined) return { state, outcome: { message: held } };
     if (!investigating)
       return { state, outcome: { message: investigationsOffMessage(budget.layers, anomalies.length) } };
 

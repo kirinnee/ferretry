@@ -130,6 +130,13 @@ export type AttentionCommand =
       readonly at: string;
     }
   | {
+      readonly action: 'discuss';
+      readonly actor: AttentionActor;
+      readonly id: AttentionId;
+      readonly note?: string | null;
+      readonly at: string;
+    }
+  | {
       readonly action: 'resolve-source';
       readonly actor: AttentionActor;
       readonly source: AttentionSource;
@@ -148,6 +155,7 @@ export type AttentionChange =
   | 'refreshed'
   | 'progressed'
   | 'needs-info'
+  | 'discussing'
   | 'info-added'
   | 'answered'
   | 'resolved'
@@ -293,6 +301,8 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
       return progress(ledger, command);
     case 'needs-info':
       return needsInfo(ledger, command);
+    case 'discuss':
+      return discuss(ledger, command);
     case 'resolve-source':
       return resolveSource(ledger, command);
   }
@@ -303,6 +313,7 @@ type AddressCommand = Extract<AttentionCommand, { action: 'answer' | 'resolve' |
 type EditCommand = Extract<AttentionCommand, { action: 'edit' }>;
 type ProgressCommand = Extract<AttentionCommand, { action: 'progress' }>;
 type NeedsInfoCommand = Extract<AttentionCommand, { action: 'needs-info' }>;
+type DiscussCommand = Extract<AttentionCommand, { action: 'discuss' }>;
 type ResolveSourceCommand = Extract<AttentionCommand, { action: 'resolve-source' }>;
 
 function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutation {
@@ -535,7 +546,7 @@ function addressed(
   change: Extract<AttentionChange, 'answered' | 'resolved' | 'dismissed'>,
   response?: AttentionResponse,
 ): AttentionMutation {
-  const { waitingOn: _waitingOn, askedAt: _askedAt, ...open } = target.item;
+  const { waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...open } = target.item;
   const item = withResolvedBy(
     {
       ...open,
@@ -709,7 +720,7 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
   if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
     return failure('invalid', 'questions may be reworded but not added, removed or given other options');
   }
-  const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, ...kept } = target.item;
+  const { stepsDone, waitingOn: _waitingOn, askedAt: _askedAt, waitingFor: _waitingFor, ...kept } = target.item;
   const stepsChanged = patch.steps !== undefined && !sameSteps(target.item.steps, patch.steps);
   const keepsWaiting = target.item.waitingOn === undefined || command.actor.kind !== 'agent';
   const item: AttentionItem = {
@@ -718,6 +729,7 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
       ? {
           waitingOn: target.item.waitingOn,
           ...(target.item.askedAt === undefined ? {} : { askedAt: target.item.askedAt }),
+          ...(target.item.waitingFor === undefined ? {} : { waitingFor: target.item.waitingFor }),
         }
       : {}),
     ...(stepsDone === undefined || stepsChanged ? {} : { stepsDone }),
@@ -733,7 +745,9 @@ function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation 
     ...(patch.steps === undefined ? {} : { steps: patch.steps }),
     ...(patch.body === undefined ? {} : { body: patch.body }),
   };
-  const before = keepsWaiting ? target.item : (({ waitingOn: _w, askedAt: _a, ...rest }) => rest)(target.item);
+  const before = keepsWaiting
+    ? target.item
+    : (({ waitingOn: _w, askedAt: _a, waitingFor: _f, ...rest }) => rest)(target.item);
   if (sortedJson(item) === sortedJson(before)) return unchanged(ledger);
   // The ferret's edit that answers an open request clears the mark and says so in the history.
   const answers = !keepsWaiting;
@@ -747,7 +761,7 @@ function replaceItem(
   ledger: AttentionLedger,
   item: AttentionItem,
   at: string,
-  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'info-added'>,
+  change: Extract<AttentionChange, 'refreshed' | 'needs-info' | 'discussing' | 'info-added'>,
 ): AttentionMutation {
   const next: AttentionLedger = {
     ...ledger,
@@ -799,6 +813,34 @@ function needsInfo(ledger: AttentionLedger, command: NeedsInfoCommand): Attentio
     history: withHistory(target.item.history, { at: command.at, kind: 'needs-info', ...(note === '' ? {} : { note }) }),
   };
   return replaceItem(ledger, item, command.at, 'needs-info');
+}
+
+/**
+ * The owner wants to talk an item through before answering it — they do not understand it, or its premise
+ * is wrong. The item stays OPEN, waiting on the ferret FOR a discussion (`waitingFor: 'discussion'`), and
+ * the request is counted on the same counter as a request for more information (`infoRequests`), so its
+ * delivery is exactly once. The ferret's edit ends it like it ends a request for information; so does any
+ * closing. Asking again while it is still in discussion is the same request; asking while the ferret owes
+ * more information turns that wait into a discussion, a new request.
+ */
+function discuss(ledger: AttentionLedger, command: DiscussCommand): AttentionMutation {
+  if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner may ask to discuss an item');
+  const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
+  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target.item.raisedBy !== 'agent') {
+    return failure('invalid', 'only an item a ferret raised can be discussed: nobody else would hear it');
+  }
+  if (target.item.waitingOn !== undefined && target.item.waitingFor === 'discussion') return unchanged(ledger);
+  const note = command.note?.trim() ?? '';
+  const item: AttentionItem = {
+    ...target.item,
+    waitingOn: 'ferret',
+    askedAt: command.at,
+    waitingFor: 'discussion',
+    infoRequests: (target.item.infoRequests ?? 0) + 1,
+    history: withHistory(target.item.history, { at: command.at, kind: 'discuss', ...(note === '' ? {} : { note }) }),
+  };
+  return replaceItem(ledger, item, command.at, 'discussing');
 }
 
 function stepRange(id: AttentionId, count: number, step: number): string {

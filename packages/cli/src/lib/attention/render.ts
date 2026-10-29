@@ -4,6 +4,7 @@ import {
   type AttentionItem,
   type AttentionSnapshot,
   attentionCardAnswers,
+  attentionInDiscussion,
   hasOwnTitle,
   type ResolvedAttentionItem,
   unswipedChoices,
@@ -79,7 +80,9 @@ function itemLines(item: AttentionItem): string[] {
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
-  if (item.waitingOn !== undefined) {
+  if (attentionInDiscussion(item)) {
+    lines.push(`${INDENT}in discussion: the owner asked to talk this through ${item.askedAt ?? ''}`.trimEnd());
+  } else if (item.waitingOn !== undefined) {
     lines.push(`${INDENT}waiting on the ferret: more information asked ${item.askedAt ?? ''}`.trimEnd());
   }
   return lines;

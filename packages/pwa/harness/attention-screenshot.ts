@@ -1,7 +1,7 @@
 /**
  * Screenshots of every Attention surface, at a 390px phone and a 1440px desktop, light and dark:
  *
- *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item chat
+ *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item’s card
  *   panel-phone / panel-desktop   the pinned item above the composer
  *   details-phone / -desktop      the same, Details open
  *   task-*                       a step-by-step to-do: ticked partly / fully, waiting on the ferret, the
@@ -160,6 +160,13 @@ try {
       }
       page = await open(desktop, theme, 'task-inbox-desktop');
       await shot(page, scheme, 'task-inbox-desktop', true);
+      await page.close();
+      // An item the owner asked to discuss: the row says "In discussion"; the card stays answerable.
+      page = await open(phone, theme, 'discuss-inbox-phone');
+      await shot(page, scheme, 'discuss-inbox-phone');
+      await page.close();
+      page = await open(desktop, theme, 'discuss-inbox-desktop');
+      await shot(page, scheme, 'discuss-inbox-desktop', true);
       await page.close();
       for (const [direction, sign] of [
         ['right', 1],

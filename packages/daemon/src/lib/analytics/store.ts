@@ -88,7 +88,8 @@ export interface AnalyticsIndexStore {
   status(): AnalyticsStoreStatus;
   /** Discard the whole materialization. The next pass rebuilds it from the durable records. */
   drop(): void;
-  close(): void;
+  /** Persists every write still queued, then releases the store. */
+  close(): Promise<void>;
 }
 
 /** What opening the analytics store produced, and whether anything survived the open. */

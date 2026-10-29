@@ -64,6 +64,43 @@ of memory over the main thread, because each thread carries about 14 MB of engin
 
 Restart the daemon after changing the setting: `fy daemon restart`.
 
+## A busy disk
+
+When other programs keep the disk busy, writing a file and waiting for it to reach the disk (`fsync`)
+can take seconds. The daemon keeps that wait off its main thread, so it stays responsive.
+
+- **The session index** (`state/index/sessions.sqlite`) is read from a copy in memory. A separate
+  thread, the **session index writer**, writes changes to the file in batches, a quarter second after
+  they happen (later only while the previous batch is still being written). Before this, one write on a
+  busy disk froze the daemon for up to 38 s.
+- **The analytics index** (`state/index/analytics.sqlite`) works the same way, with its own thread, the
+  **analytics writer**. It is read from a copy in memory, and the sweep that ingests finished sessions
+  writes its rows there at once. The file is written a quarter second later, a whole batch in one
+  transaction, so a batch lands completely or not at all. Before this, one sweep on a busy disk held
+  the daemon for the length of its commit (CI saw 307 ms at boot; 1.5 s commits froze it for 1.5 s).
+  It is a separate thread from the session index writer on purpose: a slow analytics commit never
+  holds up the session index, and a failure in one never retires the other. The thread keeps no file
+  open between batches, so it ends itself after a minute without work.
+- **What a crash or power cut can lose:** only the index's last few writes, never a session's history.
+  Every event is saved in its session's journal first, and that journal is synced to disk. On the next
+  start the daemon checks the index against every journal and fills in anything missing.
+- **What a crash loses from analytics:** the rows of sessions that finished in the last few seconds.
+  The analytics index is disposable. Every row is rebuilt from the session's own records and
+  transcript, and the next start's sweep writes again each one that is missing, so a crash costs one
+  re-ingestion of those sessions and nothing else.
+- **Screenshots in a transcript** are not read into memory. A pasted image is one record of several
+  megabytes, nearly all of it base64. The daemon remembers where those bytes are in the file instead of
+  loading them; nothing it shows today displays them.
+- `fyd --check` lists `session-index` and `analytics-index` with the other workers. If a writer thread
+  fails five times in ten minutes, the daemon writes that index on its main thread instead and says so
+  once in its log.
+
+The guards are `packages/daemon/tests/integration/runtime/io-pressure-index.test.ts` and
+`io-pressure-analytics.test.ts`. They make every disk write take 1.5 s, and check that the event loop
+(and, for the session index, a health check) stays under 200 ms. For the analytics index the same
+test shows the old behaviour first: a 1,500-row sweep committing on the main thread stalled the loop
+for 1,520 ms; with the writer thread the longest stall was about 85 ms.
+
 ## Safe to share
 
 The report contains no session text, no command arguments, no file contents and no secrets. Each item

@@ -98,7 +98,9 @@ const BackoffSchema = z.object({
   count: z.number().int().min(1),
   lastAt: Instant,
   cleared: z.literal(true).optional(),
-  jevActed: z.object({ action: WardenJevActsSchema.keyof(), at: Instant }).optional(),
+  jevActed: z
+    .object({ action: WardenJevActsSchema.keyof(), at: Instant, subject: z.string().min(1), landsBy: Instant })
+    .optional(),
 }) satisfies z.ZodType<unknown, InvestigationBackoff>;
 
 const BlessingSchema = z.object({

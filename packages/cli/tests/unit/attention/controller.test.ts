@@ -657,6 +657,33 @@ describe('attention controller send-now', () => {
   });
 });
 
+describe('attention controller discuss', () => {
+  it('should ask to discuss with the note, and say the item stays open', async () => {
+    // Arrange
+    const { controller, gateway, out } = build(SESSION, snapshot([humanItem('A1', 'log in')]));
+
+    // Act
+    await controller.discuss('?A1', { note: '  Why this account?  ' });
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'discuss', id: 'A1', note: 'Why this account?' });
+    should(out.messages[0]).containEql('asked to discuss !A1');
+  });
+
+  it('should send no note when none was given, and reject a bad reference before the daemon', async () => {
+    // Arrange
+    const { controller, gateway } = build(SESSION, snapshot([]));
+
+    // Act
+    await controller.discuss('A1', {});
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'discuss', id: 'A1' });
+    await should(controller.discuss('nope', {})).be.rejected();
+    should(gateway.applied).have.length(1);
+  });
+});
+
 describe('attention controller needs-info', () => {
   it('should ask for more information with the note, and say the item stays open', async () => {
     // Arrange

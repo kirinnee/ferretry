@@ -115,7 +115,13 @@ describe('LoadSafeWorker', () => {
 
   it('should survive ending every bundled worker while it is still loading', async () => {
     // Arrange — the shape that crashed Bun 1.3: a boot starts its threads and is stopped at once.
-    const names: readonly BundledWorkerName[] = ['session', 'housekeeping', 'analytics-fold', 'pdf-decrypt'];
+    const names: readonly BundledWorkerName[] = [
+      'session',
+      'housekeeping',
+      'analytics-fold',
+      'analytics-index',
+      'pdf-decrypt',
+    ];
     const closed: Promise<void>[] = [];
 
     // Act

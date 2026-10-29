@@ -61,6 +61,7 @@ export function moreInfoNotificationPayload(
   item: AttentionItem,
   snapshot: AttentionSnapshot,
   request: number,
+  discussion = false,
 ): SessionNotificationPayload {
   return PushNotificationPayloadSchema.parse({
     version: 1,
@@ -68,7 +69,10 @@ export function moreInfoNotificationPayload(
     sessionId,
     kind: 'attention',
     title: attentionNotificationTitle(attentionTitle(item)),
-    body: clipAtWord(`Updated: ${oneLine(item.subject)}`, ATTENTION_PUSH_BODY_LENGTH),
+    body: clipAtWord(
+      `${discussion ? 'Updated after your discussion' : 'Updated'}: ${oneLine(item.subject)}`,
+      ATTENTION_PUSH_BODY_LENGTH,
+    ),
     tag: `attention-${sessionId}`,
     url: attentionNotificationPath(sessionId, item.id),
     count: snapshot.count,

@@ -1,19 +1,21 @@
 import { describe, expect, it } from 'bun:test';
+import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import {
   AttentionInboxPage,
   type AttentionInboxPageProps,
 } from '../../../src/features/attention/attention-inbox-page.tsx';
 import {
+  AttentionSwipeDeck,
   attentionKeyDirection,
   deckRoom,
   dragOffset,
+  scrollStartOf,
   swipeKeyHint,
+  verticalTargets,
 } from '../../../src/features/attention/attention-swipe-deck.tsx';
-import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import { AttentionUndoToast } from '../../../src/features/attention/attention-undo-toast.tsx';
-import { AttentionSwipeDeck } from '../../../src/features/attention/attention-swipe-deck.tsx';
-import { type InboxCard, swipeIntent, swipeMap } from '../../../src/lib/attention-inbox.ts';
 import { swipeTargets } from '../../../src/lib/attention-answers.ts';
+import { type InboxCard, swipeIntent, swipeMap } from '../../../src/lib/attention-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   attentionItem,
@@ -142,6 +144,16 @@ const review = inboxCard(
   sessionView('sess-4', { config: { teammate: 'kai', name: 'Review it' } }),
 );
 
+const ownerCard = inboxCard(
+  attentionItem('A5', {
+    subject: 'My own reminder',
+    ask: choices('Ship', 'Hold'),
+    raisedBy: 'human',
+    raisedBySession: null,
+    raisedByName: null,
+  } as never),
+);
+
 const typeReply = async (mounted: Mounted, text: string): Promise<HTMLTextAreaElement> => {
   const box = must(
     deckTop(mounted).querySelector<HTMLTextAreaElement>('textarea[data-attention-reply]'),
@@ -162,25 +174,27 @@ const openReply = async (mounted: Mounted): Promise<void> => {
 const pendingActions = (fake: FakeInbox) => fake.deferred.getSnapshot().pending.map(entry => entry.action);
 
 describe('attention swipe helpers', () => {
-  it('maps only the three arrow keys to a direction', () => {
+  it('maps only the four arrow keys to a direction', () => {
     expect(attentionKeyDirection('ArrowRight')).toBe('right');
     expect(attentionKeyDirection('ArrowLeft')).toBe('left');
     expect(attentionKeyDirection('ArrowUp')).toBe('up');
-    expect(attentionKeyDirection('ArrowDown')).toBeNull();
+    expect(attentionKeyDirection('ArrowDown')).toBe('down');
     expect(attentionKeyDirection('Enter')).toBeNull();
   });
 
   it('says what each arrow does, in words, in the order the swipes point', () => {
-    expect(swipeKeyHint(swipeTargets(bare.item))).toBe('Arrow right: Got it.');
-    expect(swipeKeyHint(swipeTargets(twoWay.item))).toBe('Arrow left: Hold. Arrow right: Ship.');
+    expect(swipeKeyHint(swipeTargets(bare.item))).toBe('Arrow right: Got it. Arrow down: Discuss.');
+    expect(swipeKeyHint(swipeTargets(twoWay.item))).toBe('Arrow left: Hold. Arrow right: Ship. Arrow down: Discuss.');
     expect(swipeKeyHint(swipeTargets(threeWay.item))).toBe(
-      'Arrow left: Skip. Arrow up: Wait. Arrow right: Rebase now.',
+      'Arrow left: Skip. Arrow up: Wait. Arrow right: Rebase now. Arrow down: Discuss.',
     );
+    expect(swipeKeyHint(swipeTargets({ ...bare.item, raisedBy: 'human' }))).toBe('Arrow right: Got it.');
   });
 
-  it('follows the finger sideways, up only where up means something, and never down', () => {
+  it('follows the finger sideways, up only where up means something, and down only where it discusses', () => {
     const three = swipeTargets(threeWay.item);
-    expect(dragOffset(40, 30, three)).toEqual({ dx: 40, dy: 0 });
+    expect(dragOffset(40, 30, three)).toEqual({ dx: 40, dy: 30 });
+    expect(dragOffset(40, 30, swipeTargets({ ...threeWay.item, raisedBy: 'human' }))).toEqual({ dx: 40, dy: 0 });
     expect(dragOffset(0, -100, three)).toEqual({ dx: 0, dy: -100 });
     expect(dragOffset(0, -100, swipeTargets(twoWay.item))).toEqual({ dx: 0, dy: -20 });
   });
@@ -198,7 +212,7 @@ describe('attention swipe helpers', () => {
 
 describe('AttentionInboxPage on a phone: the swipe deck', () => {
   it('deals the newest card on top with the next ones peeking, inert, behind it', async () => {
-    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare]));
+    const mounted = await mount(page(fakeInbox(), [threeWay, twoWay, bare], { initialOpen: threeWay.key }));
     expect(topId(mounted)).toBe('A3');
     const peeks = [...mounted.container.querySelectorAll('.fy-attn-deck__peek')];
     expect(peeks).toHaveLength(2);
@@ -215,7 +229,7 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
     expect(stamp(mounted)?.getAttribute('data-attention-stamp')).toBe('right');
     expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(false);
     expect(stamp(mounted)?.hasAttribute('data-empty')).toBe(false);
-    expect(deckTop(mounted).style.transform).toContain('translate3d(60px, 0px, 0)');
+    expect(deckTop(mounted).style.transform).toContain('translate3d(60px, 4px, 0)');
 
     await release(target, 60, 4);
     expect(pending(fake)).toEqual([]);
@@ -268,9 +282,9 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
     await mounted.unmount();
   });
 
-  it('never commits a direction with no answer, says so, and reads a drag down as nothing', async () => {
+  it('never commits a direction with no answer, says so, and reads a drag down as nothing on a card nobody can discuss', async () => {
     const fake = fakeInbox();
-    const mounted = await mount(deckPage(fake, [twoWay]));
+    const mounted = await mount(deckPage(fake, [ownerCard]));
     expect(deckTop(mounted).style.touchAction).toBe('pan-y');
     const target = await dragBy(mounted, 0, -300);
     expect(stamp(mounted)?.getAttribute('data-attention-stamp')).toBe('up');
@@ -281,7 +295,7 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
 
     await swipe(mounted, 0, 300);
     expect(pending(fake)).toEqual([]);
-    expect(topId(mounted)).toBe('A2');
+    expect(topId(mounted)).toBe('A5');
     await mounted.unmount();
   });
 
@@ -449,7 +463,7 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
     const card = frame(mounted, 'A3');
     expect(card.tabIndex).toBe(0);
     const hint = must(document.getElementById(must(card.getAttribute('aria-describedby'), 'hint id')), 'the hint');
-    expect(hint.textContent).toBe('Arrow left: Skip. Arrow up: Wait. Arrow right: Rebase now.');
+    expect(hint.textContent).toBe('Arrow left: Skip. Arrow up: Wait. Arrow right: Rebase now. Arrow down: Discuss.');
     card.focus();
     await interact(() => pressKey(card, 'ArrowRight'));
     expect(pending(fake)).toEqual(['Rebase now']);
@@ -505,5 +519,242 @@ describe('the room the top card is given', () => {
     const deck = must(mounted.container.querySelector<HTMLElement>('[data-attention-deck]'), 'the deck');
     expect(deck.style.getPropertyValue('--deck-room')).toMatch(/^\d+px$/u);
     await mounted.unmount();
+  });
+});
+
+describe('Discuss: the fixed answer that is always down', () => {
+  it('reads a downward drag as Discuss, with the stamp saying so, and commits it past the threshold', () => {
+    expect(swipeIntent(0, 300, 360, swipeMap(threeWay.item))).toMatchObject({ direction: 'down', committed: true });
+    expect(swipeIntent(0, 300, 360, swipeMap(ownerCard.item))).toMatchObject({ direction: 'down', committed: false });
+    expect(swipeIntent(0, 4, 360, swipeMap(threeWay.item)).direction).toBeNull();
+  });
+
+  it('swipes down to Discuss, stamped "Discuss", held for undo as "Asked to discuss", and posted as a discuss', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const target = await dragBy(mounted, 0, 200);
+    expect(stamp(mounted)?.getAttribute('data-attention-stamp')).toBe('down');
+    expect(stamp(mounted)?.textContent).toBe('Discuss');
+    expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(true);
+    await release(target, 0, 200);
+    expect(pendingActions(fake)).toEqual([{ kind: 'discuss', label: 'Discuss' }]);
+    expect(topId(mounted)).toBe('A2');
+    expect(toast(mounted).textContent).toContain('Asked to discuss !A3');
+    await advance(fake, 5_000);
+    expect(fake.commits.map(commit => [commit.card.item.id, commit.action.kind])).toEqual([['A3', 'discuss']]);
+    await mounted.unmount();
+  });
+
+  it('sends the reply typed on the card as the note of a swipe down', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    await openReply(mounted);
+    await typeReply(mounted, 'is the premise right?');
+    await swipe(mounted, 0, 200);
+    expect(pendingActions(fake)).toEqual([{ kind: 'discuss', label: 'Discuss', note: 'is the premise right?' }]);
+    await mounted.unmount();
+  });
+
+  it('sends nothing for a short drag down, and springs back', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const target = await dragBy(mounted, 0, 60);
+    expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(false);
+    await release(target, 0, 60);
+    expect(pendingActions(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  /** The top card's detail, made to overflow (900 px of content in 200 px) and scrolled to `scrollTop`. */
+  const overflowingDetail = (mounted: Mounted, scrollTop: number): HTMLElement => {
+    const scroller = must(deckTop(mounted).querySelector<HTMLElement>('[data-attention-scroll]'), 'the detail');
+    Object.defineProperty(scroller, 'scrollHeight', { configurable: true, value: 900 });
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 200 });
+    Object.defineProperty(scroller, 'scrollTop', { configurable: true, value: scrollTop });
+    return scroller;
+  };
+
+  it('does not take a drag down or up that began mid-way through an overflowing detail: that is the reader scrolling', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const scroller = overflowingDetail(mounted, 300);
+    const down = await dragBy(mounted, 0, 300, scroller);
+    expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(false);
+    await release(down, 0, 300);
+    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
+    expect(pendingActions(fake)).toEqual([]);
+    expect(topId(mounted)).toBe('A3');
+    await mounted.unmount();
+  });
+
+  it('discusses from a drag down that began in an overflowing detail already scrolled to its top', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const scroller = overflowingDetail(mounted, 0);
+    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
+    expect(pendingActions(fake)).toEqual([]);
+    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
+    expect(pendingActions(fake).map(action => action.kind)).toEqual(['discuss']);
+    await mounted.unmount();
+  });
+
+  it('gives the up answer from a drag up that began in an overflowing detail already scrolled to its bottom', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const scroller = overflowingDetail(mounted, 700);
+    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
+    expect(pendingActions(fake)).toEqual([]);
+    await release(await dragBy(mounted, 0, -300, scroller), 0, -300);
+    expect(pendingActions(fake)).toHaveLength(1);
+    expect(pendingActions(fake)[0]?.kind).not.toBe('discuss');
+    await mounted.unmount();
+  });
+
+  it('takes a vertical swipe from the title whatever the detail is scrolled to, past the same clear distance', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    overflowingDetail(mounted, 300);
+    const short = await dragBy(mounted, 0, 60);
+    await release(short, 0, 60);
+    expect(pendingActions(fake)).toEqual([]);
+    await swipe(mounted, 0, 300);
+    expect(pendingActions(fake).map(action => action.kind)).toEqual(['discuss']);
+    await mounted.unmount();
+  });
+
+  it('still discusses from a drag that starts in a detail that does not overflow', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay]));
+    const scroller = must(deckTop(mounted).querySelector<HTMLElement>('[data-attention-scroll]'), 'the detail');
+    await release(await dragBy(mounted, 0, 300, scroller), 0, 300);
+    expect(pendingActions(fake).map(action => action.kind)).toEqual(['discuss']);
+    await mounted.unmount();
+  });
+
+  it('flies a discussed card off downward with motion', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay, twoWay], { reducedMotion: false }));
+    await swipe(mounted, 0, 300);
+    expect(mounted.container.querySelector('.fy-attn-deck__leaving')?.getAttribute('data-direction')).toBe('down');
+    await mounted.unmount();
+  });
+
+  it('marks the card so the CSS lets only the head and the bar be dragged down, and not the scrolling detail', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay, ownerCard]));
+    expect(deckTop(mounted).getAttribute('data-has-discuss')).toBe('');
+    expect(deckTop(mounted).getAttribute('data-has-up')).toBe('');
+    await mounted.unmount();
+    const plain = await mount(deckPage(fakeInbox(), [ownerCard]));
+    expect(deckTop(plain).hasAttribute('data-has-discuss')).toBe(false);
+    await plain.unmount();
+  });
+
+  it('discusses from ArrowDown on the focused card, carrying the reply, and leaves ArrowDown to the reply box', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    await openReply(mounted);
+    const box = await typeReply(mounted, 'wait, why?');
+    box.focus();
+    await interact(() => pressKey(box, 'ArrowDown'));
+    expect(pendingActions(fake)).toEqual([]);
+    const card = frame(mounted, 'A3');
+    card.focus();
+    await interact(() => pressKey(card, 'ArrowDown'));
+    expect(pendingActions(fake)).toEqual([{ kind: 'discuss', label: 'Discuss', note: 'wait, why?' }]);
+    await mounted.unmount();
+  });
+
+  it('ignores ArrowDown on a card nobody can discuss', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [ownerCard]));
+    const card = frame(mounted, 'A5');
+    card.focus();
+    await interact(() => pressKey(card, 'ArrowDown'));
+    expect(pendingActions(fake)).toEqual([]);
+    await mounted.unmount();
+  });
+
+  it('has a visible, Tab-reachable Discuss button with an accessible name, posting a discuss with the note', async () => {
+    const fake = fakeInbox();
+    const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
+    const button = must(deckTop(mounted).querySelector<HTMLButtonElement>('[data-attention-discuss]'), 'Discuss');
+    expect(button.tagName).toBe('BUTTON');
+    expect(button.tabIndex).toBe(0);
+    expect(button.disabled).toBe(false);
+    expect(button.getAttribute('aria-label')).toMatch(/^Discuss/u);
+    expect(button.textContent).toContain('Discuss');
+    await openReply(mounted);
+    await typeReply(mounted, 'not sure I follow');
+    const again = must(deckTop(mounted).querySelector<HTMLButtonElement>('[data-attention-discuss]'), 'Discuss');
+    await interact(() => again.click());
+    expect(pendingActions(fake)).toEqual([{ kind: 'discuss', label: 'Discuss', note: 'not sure I follow' }]);
+    await mounted.unmount();
+  });
+
+  it('hides the Discuss button (does not disable it) on a card nobody can discuss, or already in discussion', async () => {
+    const inDiscussion = inboxCard(
+      attentionItem('A6', {
+        ask: choices('Yes', 'No'),
+        waitingOn: 'ferret',
+        askedAt: '2026-08-01T11:30:00.000Z',
+        waitingFor: 'discussion',
+      }),
+    );
+    for (const card of [ownerCard, inDiscussion]) {
+      const mounted = await mount(deckPage(fakeInbox(), [card]));
+      expect(mounted.container.querySelector('[data-attention-discuss]')).toBeNull();
+      await mounted.unmount();
+    }
+  });
+});
+
+describe('verticalTargets', () => {
+  const targets = swipeTargets(threeWay.item, '');
+
+  it('keeps every answer for a drag from the header, the title or the answer bar', () => {
+    expect(verticalTargets(targets, null)).toEqual(targets);
+  });
+
+  it('keeps only the sideways answers mid-way through a scrolling detail, and each vertical one at its own edge', () => {
+    expect(Object.keys(verticalTargets(targets, { atTop: false, atBottom: false })).sort()).toEqual(['left', 'right']);
+    expect(Object.keys(verticalTargets(targets, { atTop: true, atBottom: false })).sort()).toEqual([
+      'down',
+      'left',
+      'right',
+    ]);
+    expect(Object.keys(verticalTargets(targets, { atTop: false, atBottom: true })).sort()).toEqual([
+      'left',
+      'right',
+      'up',
+    ]);
+  });
+
+  it('never adds a direction the card does not take', () => {
+    const { up: _up, down: _down, ...sideways } = targets;
+    expect(verticalTargets(sideways, { atTop: true, atBottom: true })).toEqual(sideways);
+  });
+});
+
+describe('scrollStartOf', () => {
+  const detail = (scrollHeight: number, clientHeight: number, scrollTop: number): HTMLElement => {
+    const scroller = document.createElement('div');
+    scroller.setAttribute('data-attention-scroll', '');
+    for (const [key, value] of Object.entries({ scrollHeight, clientHeight, scrollTop }))
+      Object.defineProperty(scroller, key, { configurable: true, value });
+    const inside = document.createElement('p');
+    scroller.append(inside);
+    return inside;
+  };
+
+  it('is null outside a detail, and for a detail that fits whole', () => {
+    expect(scrollStartOf(document.createElement('p'))).toBeNull();
+    expect(scrollStartOf(null)).toBeNull();
+    expect(scrollStartOf(detail(200, 200, 0))).toBeNull();
+  });
+
+  it('says whether an overflowing detail sat at its top or its bottom', () => {
+    expect(scrollStartOf(detail(900, 200, 0))).toEqual({ atTop: true, atBottom: false });
+    expect(scrollStartOf(detail(900, 200, 300))).toEqual({ atTop: false, atBottom: false });
+    expect(scrollStartOf(detail(900, 200, 700))).toEqual({ atTop: false, atBottom: true });
   });
 });

@@ -84,6 +84,15 @@ export interface TranscriptToolResultEvent extends TranscriptEventMetadata {
   };
 }
 
+/**
+ * Where a payload too large to hold sits in the transcript file: the bytes of a base64 string literal,
+ * which are its value, since it holds no escape (`large-strings.ts`).
+ */
+export interface TranscriptBytesRef {
+  readonly byteOffset: number;
+  readonly byteLength: number;
+}
+
 export type TranscriptAttachment =
   | {
       readonly kind: 'image';
@@ -91,6 +100,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
     }
   | {
       readonly kind: 'audio';
@@ -98,6 +109,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
     }
   | {
       readonly kind: 'document';
@@ -105,6 +118,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
       readonly text?: string;
     }
   | {
@@ -113,6 +128,8 @@ export type TranscriptAttachment =
       readonly mediaType?: string;
       readonly uri?: string;
       readonly data?: string;
+      /** In place of `data` when the payload was too large to read into memory. */
+      readonly dataRef?: TranscriptBytesRef;
     }
   | {
       readonly kind: 'remote-control';
@@ -251,28 +268,32 @@ export interface ObservedHumanInput {
   readonly shapeVersion: number;
 }
 
-export interface TranscriptParseInput {
-  readonly text: string;
+interface TranscriptParseInputCommon {
   readonly source?: string;
   readonly sessionId?: string;
   /** Whether the final unterminated line is known to be the end of the input. */
   readonly endOfInput?: boolean;
-  /** One-based line number assigned to the first line in `text`. */
+  /** One-based line number assigned to the first line of the input. */
   readonly startLine?: number;
-  /** Zero-based file byte offset assigned to the first byte in `text`. */
+  /** Zero-based file byte offset assigned to the first byte of the input. */
   readonly startByteOffset?: number;
   /** Adapter-supplied read time used only when a proof record has no harness timestamp. */
   readonly observedAt?: string;
-  /**
-   * The exact bytes `text` was decoded from, whose first byte is at `startByteOffset`.
-   *
-   * Supplied so the parser — the one owner of where a physical record starts and ends — can emit
-   * each record's exact byte slice from the same read. A decoded string cannot stand in for it:
-   * re-encoding is only lossless while the input was valid UTF-8, and evidence that changes meaning
-   * on a malformed byte is evidence about the decoder rather than about the file.
-   */
-  readonly bytes?: Uint8Array;
 }
+
+/**
+ * What a parser reads: decoded text, or the exact bytes of a read.
+ *
+ * BYTES WIN WHEN BOTH ARE GIVEN. They are supplied so the parser — the one owner of where a physical
+ * record starts and ends — can emit each record's exact byte slice from the same read, and it then
+ * decodes each bounded record itself. A decoded string cannot stand in for them: re-encoding is only
+ * lossless while the input was valid UTF-8, and evidence that changes meaning on a malformed byte is
+ * evidence about the decoder rather than about the file. So a caller holding bytes passes only them:
+ * decoding a whole read to `text` as well was a second full copy of up to 32 MiB the parser never looked
+ * at, made in one synchronous call on the daemon's event loop.
+ */
+export type TranscriptParseInput = TranscriptParseInputCommon &
+  ({ readonly text: string; readonly bytes?: Uint8Array } | { readonly text?: undefined; readonly bytes: Uint8Array });
 
 /**
  * One complete physical record of a transcript file, exactly as it was read.

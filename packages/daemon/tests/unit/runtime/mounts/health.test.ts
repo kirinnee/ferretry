@@ -188,6 +188,19 @@ describe('the daemon health mount', () => {
     ]);
   });
 
+  it('should report the disk pressure the composition root reads, and none where the host has none', async () => {
+    // Arrange
+    const io = { someAvg10: 52, fullAvg10: 46, saturated: true };
+
+    // Act
+    const reported = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem({ io }))).body));
+    const absent = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));
+
+    // Assert
+    should(reported.io).deepEqual(io);
+    should(absent.io).be.undefined();
+  });
+
   it('should answer a caller holding no token at all', async () => {
     // Not an oversight: `fy daemon status` has to report whether the daemon is up BEFORE a token
     // exists, which is exactly the state a fresh `fy daemon install` leaves a host in. The CLI's

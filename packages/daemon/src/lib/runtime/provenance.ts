@@ -46,6 +46,7 @@ const REPORTED_KEYS = [
   'healthIntervalSeconds',
   'transcriptReconcileSeconds',
   'sessionWorkers',
+  'attention',
   'usage',
   'analyticsPricing',
   'projectRoots',

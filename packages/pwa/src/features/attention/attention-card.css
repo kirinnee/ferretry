@@ -14,6 +14,13 @@
   padding: 12px 14px;
   color: var(--fg);
 }
+/* A phone has little width to spare: the card hugs the page edge and keeps a tighter inside. */
+@media (max-width: 767.98px) {
+  .fy-attn-card {
+    gap: 6px;
+    padding: 8px 10px;
+  }
+}
 .fy-attn-card[data-highlighted] {
   outline: var(--stroke-heavy) solid var(--accent);
   outline-offset: 2px;
@@ -286,6 +293,17 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-sec--nested > .fy-attn-sec__body {
   padding-left: 20px;
 }
+@media (max-width: 767.98px) {
+  .fy-attn-sec__body,
+  .fy-attn-sec--nested > .fy-attn-sec__body {
+    padding-left: 8px;
+  }
+  .fy-attn-sec__body .md ul,
+  .fy-attn-sec__body .md ol,
+  .fy-attn-points {
+    padding-left: 1.1em;
+  }
+}
 .fy-attn-prose {
   margin: 0;
   min-width: 0;
@@ -434,13 +452,20 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   min-width: 0;
   flex: 1;
 }
-.fy-attn-reply__box {
+.fy-attn-reply .fy-attn-reply__box {
   width: 100%;
-  min-height: 36px;
-  max-height: 8rem;
+  /* Three lines of room when it opens, growing to six before it scrolls. */
+  min-height: calc(3lh + 2 * var(--pad-row-y));
+  max-height: calc(6lh + 2 * var(--pad-row-y));
   padding-right: 40px;
   resize: none;
   field-sizing: content;
+}
+/* 16px: iOS zooms the page into any smaller field it focuses. */
+@media (max-width: 767.98px) {
+  .fy-attn-reply .fy-attn-reply__box {
+    font-size: max(16px, var(--text-input));
+  }
 }
 .fy-attn-reply__send {
   position: absolute;
@@ -729,6 +754,13 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-reply-toggle__chevron[data-open] {
   transform: rotate(180deg);
 }
+/* Discuss: a quiet button beside Reply — the fixed fourth answer, the downward swipe. */
+.fy-attn-discuss {
+  min-height: 36px;
+  flex-shrink: 0;
+  gap: 6px;
+  color: var(--muted);
+}
 .fy-attn-actions__row--end {
   justify-content: flex-end;
 }
@@ -780,6 +812,16 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-deck__peek .fy-attn-card {
   max-height: none;
   height: 100%;
+}
+
+/* DISCUSS IS THE DOWNWARD SWIPE. The card's detail is its own scroller and keeps vertical panning (the
+   deck's inline `touch-action`); the header, title and answer bar are the parts a drag down can be read
+   from, so they hand the browser nothing vertical the card uses. */
+.fy-attn-deck__top[data-has-discuss] .fy-attn-card > :not(.fy-attn-card__scroll) {
+  touch-action: pan-up;
+}
+.fy-attn-deck__top[data-has-discuss][data-has-up] .fy-attn-card > :not(.fy-attn-card__scroll) {
+  touch-action: none;
 }
 
 /* The stamp: arrow and label, opaque, growing as the drag nears the threshold. */

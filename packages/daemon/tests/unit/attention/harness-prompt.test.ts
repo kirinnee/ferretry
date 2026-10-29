@@ -507,7 +507,7 @@ function answering(harness: FakeHarness, journalFails = false, raiseFails = fals
       },
     },
   );
-  const reply = new AttentionReplyDelivery({ add: async (_sessionId, _id, message) => void sent.push(message) });
+  const reply = new AttentionReplyDelivery({ add: async (_sessionId, _id, message) => void sent.push(message) }, 'fy');
   const built = board({ delivery, reply });
   service = built.service;
   return { ...built, failures, sent };

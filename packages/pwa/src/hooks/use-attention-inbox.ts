@@ -100,7 +100,7 @@ export const useInboxMachines = (
 
 /** Sends one inbox answer through the ONE attention client, to the machine the card came from. */
 const runInboxAction = async (
-  client: Pick<DaemonAttentionClient, 'respond' | 'resolve' | 'dismiss' | 'needsInfo'>,
+  client: Pick<DaemonAttentionClient, 'respond' | 'resolve' | 'dismiss' | 'needsInfo' | 'discuss'>,
   connection: DaemonConnection,
   card: InboxCard,
   action: InboxAction,
@@ -109,6 +109,7 @@ const runInboxAction = async (
   if (action.kind === 'respond') await client.respond(connection, scope, card.item.id, action.response, action.note);
   else if (action.kind === 'dismiss') await client.dismiss(connection, scope, card.item.id, action.note);
   else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, card.item.id, action.note);
+  else if (action.kind === 'discuss') await client.discuss(connection, scope, card.item.id, action.note);
   else await client.resolve(connection, scope, card.item.id, action.note);
 };
 

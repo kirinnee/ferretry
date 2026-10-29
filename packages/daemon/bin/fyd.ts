@@ -84,6 +84,7 @@ import {
   TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
   type WardenGuardConfig,
+  ioPressureView,
 } from '@ferretry/protocol';
 import { processIncarnationFor } from '@ferretry/protocol/process-incarnation';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
@@ -100,6 +101,8 @@ import pkg from '../package.json' with { type: 'json' };
 import {
   BunSqliteAnalyticsStoreFactory,
   HttpAnalyticsPricingFeed,
+  InlineAnalyticsPersister,
+  WorkerAnalyticsPersister,
   readAnalyticsTranscriptEvidence,
   WorkerTranscriptFolds,
 } from '../src/adapters/analytics/index.ts';
@@ -175,6 +178,8 @@ import {
   BunSecretChildRunner,
   BunSecretShell,
   BunSqliteIndexFactory,
+  InlineIndexFile,
+  WorkerIndexFile,
   bundledWorkerUrl,
   CachedUsageFeed,
   CliUpdateLauncher,
@@ -417,6 +422,7 @@ import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
+import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import {
   FileTaskBoardRepository,
   NodeTaskBoardCredentialIssuer,
@@ -445,7 +451,7 @@ import {
   TmuxPaneQueue,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { LOOP_PARSE_PACING, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
   FileSessionAttachmentCopier,
@@ -706,6 +712,7 @@ import {
   harnessQuirks,
   InitialAttachmentError,
   InstructionRefresh,
+  instructionsReplyKey,
   InvalidDeadlineRefused,
   isControlAttachable,
   isQuestionScopedRequestId,
@@ -752,6 +759,9 @@ import {
   NameAllocator,
   type NameClaim,
   type NameSubsystem,
+  type IoPressurePort,
+  type IoPressureSourcePort,
+  NO_IO_PRESSURE,
   NO_STACK_SAMPLER,
   NO_WATCHDOG,
   NotificationService,
@@ -762,6 +772,7 @@ import {
   OperatorReadService,
   OutboundProviderAuthorizer,
   overriddenBy,
+  PacedTranscriptParser,
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
@@ -1195,6 +1206,8 @@ export interface DaemonWorld {
      * the labelled work around it; `undefined` where the runtime cannot sample or it is switched off.
      */
     readonly stackSampler?: () => Promise<StackSamplerPort | undefined>;
+    /** The disk's pressure, kept fresh while the daemon runs, so a stall can say it was the disk. */
+    readonly ioPressure?: IoPressureSourcePort;
   };
   readonly config: DaemonConfigStore;
   /** What this invocation said on the command line, overriding the document for this run only. */
@@ -1667,6 +1680,8 @@ export interface DaemonWorld {
      * the document's `sessionWorkers`, read by `start` like every other configured value.
      */
     sessionWorkers: DaemonConfig['sessionWorkers'],
+    /** How long the owner's attention answers are held before they reach the ferret (`attention` block). */
+    attention: DaemonConfig['attention'],
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -3016,10 +3031,11 @@ function createSessionSendSubsystem(
    */
   conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
   /**
-   * The always-on instructions that changed since the ferret launched, told once with a PERSON's next
-   * message (`InstructionRefresh`, docs/launch-settings.md). A teammate's message never carries them.
+   * The always-on instructions that changed since the ferret launched, queued once as a message of their
+   * own when a PERSON writes (`InstructionRefresh`, docs/launch-settings.md). A teammate's message never
+   * triggers it, and the person's words are never changed.
    */
-  instructions: Pick<InstructionRefresh, 'prepare' | 'settle'>,
+  instructions: Pick<InstructionRefresh, 'queueIfStale'>,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -3050,12 +3066,11 @@ function createSessionSendSubsystem(
             });
       const person = request.senderSessionId === undefined;
       const turn = person ? await conversation.prepare(id, request.message) : { message: request.message, answers: [] };
-      const refreshed = person ? await instructions.prepare(id, turn.message) : { message: turn.message, told: [] };
       const outcome = await service
         .send({
           id,
           sendId: request.sendId,
-          message: messageWithAttachments(refreshed.message, delivered),
+          message: messageWithAttachments(turn.message, delivered),
           ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
           ...(request.now === undefined ? {} : { now: request.now }),
           ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
@@ -3065,7 +3080,7 @@ function createSessionSendSubsystem(
       // Resolved only once the words were accepted: an item must never read as answered by a message the
       // ferret was not given.
       if (turn.answers.length > 0) await conversation.settle(id, turn, request.message);
-      await instructions.settle(id, refreshed);
+      if (person) await instructions.queueIfStale(id);
       return {
         ...(await view(id, 'took the message')),
         disposition: outcome.disposition,
@@ -6066,12 +6081,17 @@ function createHealthSubsystem(
   health: SessionHealthService,
   scratch: ScratchReclamation,
   sessionWorkers: () => SessionWorkerPool,
+  ioPressure: IoPressurePort,
 ): DaemonHealthSubsystem {
   return {
     report: async () => await health.report(),
     pid: process.pid,
     scratch,
     sessionWorkers,
+    io: () => {
+      const pressure = ioPressure.current();
+      return pressure === undefined ? undefined : ioPressureView(pressure);
+    },
   };
 }
 
@@ -6518,6 +6538,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * opens a window (`fy daemon profile`), so it stays wired in permanently.
    */
   const profilerProbe = new PerformanceRecorder();
+  const ioPressure = new ProcIoPressure();
   const activities = new ActivityLedger(millisecondClock, new AsyncActivityScope(), (label, wallMs) =>
     profilerProbe.activity(label, wallMs),
   );
@@ -7197,6 +7218,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   const claudeTranscriptParser = new ClaudeTranscriptParser();
   const codexTranscriptParser = new CodexTranscriptParser();
+  /**
+   * The same two parsers, paced by the daemon's loop, for the readers that hold a whole transcript as
+   * text: a history listing parses every file up to 32 MiB whole, and in one call it held the loop.
+   */
+  const pacedTranscriptParsers = {
+    claude: new PacedTranscriptParser(claudeTranscriptParser, LOOP_PARSE_PACING),
+    codex: new PacedTranscriptParser(codexTranscriptParser, LOOP_PARSE_PACING),
+  };
   const transcriptSources = [
     new NodeTranscriptSource(claudeTranscriptParser),
     new NodeTranscriptSource(codexTranscriptParser),
@@ -7208,10 +7237,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    * has no mutation method and it is deliberately not backed by the session store: a foreign JSONL
    * has neither a Ferretry journal nor a live pane and must never be presented as resumable.
    */
-  const foreignHistory = new ForeignHistoryImporter(new NodeForeignHistoryFiles(), foreignHistoryRoots(userHome), {
-    claude: claudeTranscriptParser,
-    codex: codexTranscriptParser,
-  });
+  const foreignHistory = new ForeignHistoryImporter(
+    new NodeForeignHistoryFiles(),
+    foreignHistoryRoots(userHome),
+    pacedTranscriptParsers,
+  );
   /**
    * A session's own transcript, over the provenance its start recorded.
    *
@@ -7609,14 +7639,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new StateFileSystemFactory(),
       new StateHomeLayout(),
       new SqliteHomeLockFactory(),
-      new BunSqliteIndexFactory(),
+      // Read from memory, written by its own thread: no index commit — and no checkpoint `fsync` —
+      // ever runs on the event loop (src/adapters/storage/sqlite-index.ts says why).
+      new BunSqliteIndexFactory(
+        {
+          create: file =>
+            new WorkerIndexFile(file, new InlineIndexFile(file), {
+              retired: () =>
+                bootNotices.state(
+                  'the session index writer kept failing, so the index file is written on the main thread until the daemon restarts',
+                ),
+            }),
+        },
+        { persistFailed: error => bootNotices.state(`the session index file is behind: ${error.message}; retrying`) },
+      ),
       clock,
       () => new KeyedSerialExecutor(),
       // A session document a background reader asks for again (`heard`) is watched, so while its directory
       // is watched live and quiet it is answered without the identity `stat` each read cost.
       { subscribe: (path, listener) => fileEvents.subscribe(path, () => listener()) },
     ),
-    analyticsIndexes: new BunSqliteAnalyticsStoreFactory(),
+    // Read from memory, written by its own thread, like the session index above: the boot sweep's one
+    // upsert no longer commits — or checkpoints — on the event loop.
+    analyticsIndexes: new BunSqliteAnalyticsStoreFactory(
+      {
+        create: (file, connection) =>
+          new WorkerAnalyticsPersister(file, new InlineAnalyticsPersister(connection), {
+            retired: () =>
+              bootNotices.state(
+                'the analytics store writer kept failing, so the analytics file is written on the main thread until the daemon restarts',
+              ),
+          }),
+      },
+      { persistFailed: error => bootNotices.state(`the analytics file is behind: ${error.message}; retrying`) },
+    ),
     worktrees: new ManagedWorktreeAdapter(
       gateway,
       files,
@@ -7639,6 +7695,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       watchdog: limitMs => new WorkerLoopWatchdog({ limitMs, prefix: `${DAEMON_NAME} ` }),
       stackSampler: async () =>
         stackSamplerEnabled(process.env[STACK_SAMPLER_VARIABLE]) ? await JscStackSampler.start() : undefined,
+      ioPressure,
     },
     // An operator's own document when they named one, and the state home's otherwise. The confined
     // filesystem port refuses every path outside the home, which is right for the daemon's own state
@@ -8060,6 +8117,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       await probeBundledWorker('analytics-fold'),
       await probeBundledWorker('session'),
       await probeBundledWorker('housekeeping'),
+      await probeBundledWorker('session-index'),
+      await probeBundledWorker('analytics-index'),
       { name: 'pdf-decrypt', ...(await probePdfDecryptWorker()) },
     ],
     createDirectCarrier: async (dispatch, sockets, devices, pairing) => {
@@ -8153,6 +8212,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       harnessDiscovery,
       browserLauncher,
       sessionWorkers,
+      attentionConfig,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
       // read from the configuration this boot loaded, and the adapters are built before that happens.
@@ -8673,7 +8733,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             userHome,
           }),
         ],
-        { claude: claudeTranscriptParser, codex: codexTranscriptParser },
+        pacedTranscriptParsers,
         new StorageConversationOwners(storage),
         createConversationAdopter(
           storage,
@@ -8741,6 +8801,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new KeyedAttentionReplyTimers(),
         new KeyedSerialExecutor(),
         { now: () => clock.now() },
+        {
+          settleMs: attentionConfig.replySettleSeconds * 1_000,
+          capMs: attentionConfig.replyMaxWaitSeconds * 1_000,
+        },
+        // A batch that falls due while the ferret is mid-turn waits for the turn to end. Unreadable state
+        // is not busy, so a damaged document never holds an answer.
+        {
+          busy: async sessionId => {
+            const id = tryParseSessionId(sessionId);
+            if (id === undefined) return false;
+            const state = SessionStateSchema.safeParse(await storage.readState(id));
+            return state.success && state.data.turnState === 'working';
+          },
+        },
       );
       // Answers held across a restart are delivered, in the background, once the daemon is up.
       void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
@@ -8785,7 +8859,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           attentionProjection,
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
-          new AttentionReplyDelivery(attentionReplies),
+          new AttentionReplyDelivery(attentionReplies, CLIENT_NAME),
           // The ferret's edit that answers the owner's request for more information: pushed once more.
           new AttentionMoreInfoPush(notifications),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
@@ -9595,7 +9669,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             clock,
           ),
         },
-        health: createHealthSubsystem(health, scratch, sessionWorkerPool),
+        health: createHealthSubsystem(health, scratch, sessionWorkerPool, ioPressure),
         performance: {
           profiles: new PerformanceProfiler({
             recorder: profilerProbe,
@@ -9871,9 +9945,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                   attachmentRoot: attachmentOriginals(sessionId),
                 });
           },
-          new AttentionConversation(attention, CLIENT_NAME),
+          new AttentionConversation(attention),
           new InstructionRefresh({
             sections: () => ALWAYS_ON_SECTIONS(CLIENT_NAME),
+            queue: async (sessionId, digest, note) =>
+              await attentionReplies.add(sessionId, instructionsReplyKey(digest), note),
             recorded: async sessionId => {
               const id = tryParseSessionId(sessionId);
               if (id === undefined) return undefined;
@@ -10348,6 +10424,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    */
   const activities = world.boot.activities;
   const progress = world.boot.beginProgress();
+  const ioPressure = world.boot.ioPressure ?? NO_IO_PRESSURE;
+  const stopIoPressure = world.boot.ioPressure?.start();
   const meter = new EventLoopLagMeter(
     world.clock,
     activities,
@@ -10360,6 +10438,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       (await world.boot.stackSampler?.()) ?? NO_STACK_SAMPLER,
       world.boot.performance ?? NO_PERFORMANCE_PROBE,
     ),
+    ioPressure,
   );
   const watchdog = world.boot.watchdogLimitMs > 0 ? world.boot.watchdog(world.boot.watchdogLimitMs) : NO_WATCHDOG;
   const lagTicks = setInterval(() => {
@@ -10375,6 +10454,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
       : instrumentChildProcesses(world.boot.performance, world.clock, Bun, () => activities.current());
   cleanups.push(() => {
     clearInterval(lagTicks);
+    stopIoPressure?.();
     watchdog.stop();
     uncountChildren();
   });
@@ -10404,7 +10484,15 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     }
     throw error;
   }
-  cleanups.push(() => opened.storage.close());
+  // Live sockets end BEFORE storage closes, and cleanups run in registration order. A terminal stream
+  // polls the pane through the lifecycle service, which reads storage: closed first, a poll in flight
+  // fails and the viewer is told 1011 "terminal redraw failed" instead of the 1000 "daemon shutting
+  // down" it is owed. The host does not exist yet, so this is bound once it does.
+  let closeLiveSockets: () => void = () => {};
+  cleanups.push(() => {
+    closeLiveSockets();
+    return opened.storage.close();
+  });
   world.notices.step('state home opened', opened.paths.home);
 
   progress.enter('loading configuration');
@@ -10499,10 +10587,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(refusal.message);
     return refusal.exitCode;
   }
-  // Sockets BEFORE the host, and both registered rather than relying on `stop` alone: a live
-  // terminal stream holds a redraw timer armed against its socket, so the handler must be told the
-  // stream is over while the socket it writes to still exists.
-  cleanups.push(() => server.closeSockets());
+  // Sockets are closed by the cleanup registered ahead of storage (see `closeLiveSockets`); the host
+  // stops after, so a live terminal stream's redraw timer is told it is over while its socket exists.
+  closeLiveSockets = () => server.closeSockets();
   cleanups.push(() => server.stop());
   world.notices.step('listening', `${config.bindUrl} — answering /healthz while the boot continues`);
   /**
@@ -10763,6 +10850,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     harnessDiscovery,
     world.browserLauncher,
     config.sessionWorkers,
+    config.attention,
   );
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must

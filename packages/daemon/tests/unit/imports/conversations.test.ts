@@ -25,7 +25,12 @@ import {
   conversationLinkFailure,
   conversationResumeArguments,
 } from '../../../src/lib/imports/index.ts';
-import { ClaudeTranscriptParser, CodexTranscriptParser } from '../../../src/lib/transcript/index.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  PacedTranscriptParser,
+  type TranscriptParsePacing,
+} from '../../../src/lib/transcript/index.ts';
 
 const CLAUDE_ID = '11111111-1111-4111-8111-111111111111';
 const CLAUDE_OLD = '22222222-2222-4222-8222-222222222222';
@@ -129,7 +134,12 @@ class FakeFiles implements ConversationFiles {
 
 const CODEX_NAMED = '44444444-4444-4444-8444-444444444444';
 
-const parsers = { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() };
+/** A clock that never advances, so a parse never yields and every test stays one deterministic step. */
+const UNPACED: TranscriptParsePacing = { now: () => 0, yieldToLoop: async () => undefined };
+const parsers = {
+  claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), UNPACED),
+  codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED),
+};
 
 const tree: Tree = {
   host: {

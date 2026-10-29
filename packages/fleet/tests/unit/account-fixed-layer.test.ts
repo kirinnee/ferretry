@@ -684,27 +684,30 @@ describe('ATTENTION_INSTRUCTION', () => {
     should(text).containEql('every notification is an Attention item (never progress)');
     // Every human action is its own item, raised before the reply ends — never prose alone.
     should(text).containEql(
-      'Before ending a reply that asks them to decide or DO anything ("Next steps: You: …"), raise each ask as its OWN item',
+      'Before ending a reply that asks them to decide or DO anything, raise each ask as its OWN item',
     );
     should(text).containEql('prose alone reaches nobody');
     // A card: a title that is the push heading, and a one-line ask that is its text.
     should(text).containEql('`zz attention add --title "<what it is about>" "<the ask>"`');
-    should(text).containEql('Title ≤40 chars = push heading; ask, one line ≤120 = its text.');
+    should(text).containEql('Title ≤40 chars = push heading; ask ≤120, one line.');
     // Isolated: the reader has not followed the conversation.
-    should(text).containEql('Cards stand alone, read cold: no "as above"/"as discussed"');
+    should(text).containEql('Cards read cold: no "as above"/"as discussed"');
     should(text).containEql('ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
     // Kinds, at most three directional answers, the recommendation on the right.
     should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
-    should(text).containEql('A choice: 2–3 `--option`s that say what each does');
+    should(text).containEql('A choice: 2–3 `--option`s saying what each does');
     should(text).containEql('`--recommend <pick> --recommend-why <line>` puts it on the right');
     should(text).containEql('`--up "<label>"` adds a third answer (task, permission)');
     should(text).containEql('each step via `--step "<markdown>"`');
     should(text).containEql('no secrets');
     should(text).containEql('"[answer to !A3 …]"');
     // The need-more-info loop: expand the same item.
-    should(text).containEql('On "[needs more info !A3 …]", add it with `zz attention edit <id>`');
-    should(text).containEql('say in the item why not');
+    should(text).containEql('On "[needs more info !A3 …]" add it with `zz attention edit <id>`');
+    should(text).containEql('say in it why not');
+    // The discussion loop: talk first, then update or close; open items are read on demand.
+    should(text).containEql('On "[discuss !A3 …]" reply in chat, then edit or done');
+    should(text).containEql('Open items: `zz attention ls`');
     should(text).containEql('Moot? `zz attention done <id>`');
     should(text).not.containEql('notify');
     should(text).not.containEql('fy ');

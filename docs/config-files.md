@@ -162,11 +162,14 @@ alone.** A bar is only half the permission: the matching `mayActAlone` must be o
 default, so out of the box a confident stop is a recommendation, not an act. Lowering a bar lets Jev act on
 less certainty, so an edit that lowers one is held until you confirm it, like any loosening.
 
-**One try per situation.** Jev acts on a flag's **subject** (see below — this episode, or this stuck command)
-once. The act is given the first rung of the backoff (`assignedCooldownMinutes`, at least 10 minutes) to land,
-and meanwhile the flag is not shown to you or looked at. If the same subject is still flagged after that, Jev is
-not asked again: it goes to an investigation, or to you. A new subject is a new situation, and Jev may act on
-it.
+**One try per situation.** Jev acts on a ferret once per situation. The act is given its rung of the backoff
+(`assignedCooldownMinutes` the first time, at least 10 minutes) to land, and meanwhile **nothing on that
+ferret** is acted on, looked at or shown to you — whatever kind of flag it is. After that, the same kind of
+trouble on that ferret is not put to Jev again: on the same **subject** (see below) for as long as the ferret
+lives, and on a new one for a day — an act changes the subject by its own effect (a nudge starts a new turn),
+so a ferret that stalls again soon after Jev's act needs someone stronger, not the same act again. It goes to
+an investigation, or to you. Jev does not touch a ferret an assigned warden is investigating or waiting to.
+An act that did not settle its flag is taken back out of the savings line.
 
 **What leaves the machine.** With Jev on, a short summary of the flagged ferret — the anomaly, the sweep's
 one sentence, its recent transcript lines and the tail of its screen — is sent to TypeSafe AI (Jev). Every

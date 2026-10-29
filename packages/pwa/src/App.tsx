@@ -214,6 +214,7 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
+import { RECENT_MESSAGE_COUNT, type RecentMessagesMemory, readRecentMessages } from './lib/recent-messages.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
@@ -1903,7 +1904,10 @@ function LearningSettingsTabSurface({ connection }: { readonly connection: Daemo
  */
 function AttentionRoute(_: DaemonPageProps) {
   const { navigate } = useRouter();
+  const store = useAppStore();
   const inbox = useAttentionInbox();
+  // Each conversation's walk to its last messages, kept while the page is open so a re-read is one page.
+  const recentWalks = useRef<RecentMessagesMemory>(new Map()).current;
   const phone = useLayoutMode() === 'drawer';
   const machineNotifications = usePairedMachineNotifications();
   return inbox === null ? null : (
@@ -1919,15 +1923,27 @@ function AttentionRoute(_: DaemonPageProps) {
       inbox={inbox}
       onNavigate={navigate}
       phone={phone}
-      renderChat={card => {
+      onProgress={async (card, step, done) => {
         const target = inbox.connectionFor(card.daemonId);
-        return target === undefined ? null : (
-          <SessionRoute
-            attentionOverride={card.item.id}
-            connection={target}
-            key={card.key}
-            scope={daemonSessionScope(target, card.view.config.id)}
-          />
+        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
+        await store.attention.progress(
+          target,
+          daemonSessionScope(target, card.view.config.id),
+          card.item.id,
+          step,
+          done,
+        );
+      }}
+      readRecent={async card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
+        const scope = daemonSessionScope(target, card.view.config.id);
+        return await readRecentMessages(
+          await store.clients.client(target),
+          card.view.config.id,
+          RECENT_MESSAGE_COUNT,
+          recentWalks,
+          daemonSessionKey(scope),
         );
       }}
     />

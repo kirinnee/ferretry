@@ -7,15 +7,13 @@ import type {
   TranscriptRawRecord,
   TranscriptRecordResult,
 } from './types.ts';
+import { referenceLargeStrings, resolveLargeStrings } from './large-strings.ts';
+import { utf8Length } from './utf8.ts';
 
 type TranscriptRecordParser = Pick<TranscriptParser, 'harness' | 'parseRecord'>;
 
 interface NormalizedTranscriptRecord extends TranscriptRecordResult {
   readonly observedInputs: TranscriptParseResult['observedInputs'];
-}
-
-function utf8Length(value: string): number {
-  return new TextEncoder().encode(value).byteLength;
 }
 
 const BYTE_ORDER_MARK = '\uFEFF';
@@ -124,6 +122,8 @@ interface PhysicalTranscriptRecord {
   readonly terminated: boolean;
   /** The verbatim slice, terminator INCLUDED, present only when raw bytes were supplied. */
   readonly bytes?: Uint8Array;
+  /** True when `body` holds placeholders for large base64 strings (`large-strings.ts`). */
+  readonly referenced?: boolean;
 }
 
 /**
@@ -149,11 +149,15 @@ function byteRecords(bytes: Uint8Array, startByteOffset: number): readonly Physi
     const terminated = feed >= 0;
     const bodyEnd = terminated ? feed : bytes.byteLength;
     const sliceEnd = terminated ? feed + 1 : bytes.byteLength;
+    const whole = bytes.subarray(index, bodyEnd);
+    // Only a complete record: an unterminated one is carried as text and parsed again later.
+    const parsed = terminated ? referenceLargeStrings(whole, startByteOffset + index) : whole;
     records.push({
       byteOffset: startByteOffset + index,
       byteLength: bodyEnd - index,
-      body: decoder.decode(bytes.subarray(index, bodyEnd)),
+      body: decoder.decode(parsed),
       terminated,
+      ...(parsed === whole ? {} : { referenced: true }),
       // Copied, not viewed: evidence must not change meaning if the read buffer is reused, and a
       // terminal record is retained exactly as long as it is, with no terminator invented for it.
       bytes: bytes.slice(index, sliceEnd),
@@ -178,8 +182,9 @@ function textRecords(text: string, startByteOffset: number): readonly PhysicalTr
     const newline = text.indexOf('\n', characterOffset);
     const terminated = newline >= 0;
     const body = text.slice(characterOffset, terminated ? newline : text.length);
-    records.push({ byteOffset, byteLength: utf8Length(body), body, terminated });
-    byteOffset += utf8Length(body) + (terminated ? 1 : 0);
+    const byteLength = utf8Length(body);
+    records.push({ byteOffset, byteLength, body, terminated });
+    byteOffset += byteLength + (terminated ? 1 : 0);
     characterOffset = terminated ? newline + 1 : text.length;
   }
   return records;
@@ -201,7 +206,13 @@ export function parseTranscriptJsonl(
   let line = startLine;
   const bufferByteOffset = Number.isFinite(startByteOffset) ? Math.max(0, Math.floor(startByteOffset)) : 0;
 
-  const consume = (rawLine: string, complete: boolean, byteOffset: number, byteLength: number): boolean => {
+  const consume = (
+    rawLine: string,
+    complete: boolean,
+    byteOffset: number,
+    byteLength: number,
+    referenced: boolean,
+  ): boolean => {
     const withoutReturn = rawLine.endsWith('\r') ? rawLine.slice(0, -1) : rawLine;
     // A byte-order mark is legal UTF-8 but illegal JSON whitespace, so an editor-written transcript
     // would otherwise lose its first record to a syntax error.
@@ -219,8 +230,8 @@ export function parseTranscriptJsonl(
     }
 
     const result = normalizeParsedRecord(parser, input, value, line, byteOffset, byteLength, observer);
-    events.push(...result.events);
-    observedInputs.push(...result.observedInputs);
+    events.push(...(referenced ? resolveLargeStrings(result.events) : result.events));
+    observedInputs.push(...(referenced ? resolveLargeStrings(result.observedInputs) : result.observedInputs));
     issues.push(...result.issues);
     parsedRecords += 1;
     if (!result.recognized) ignoredRecords += 1;
@@ -231,7 +242,9 @@ export function parseTranscriptJsonl(
   // cannot answer where a record starts in a file. Evidence is emitted only on that path.
   const sourceBytes = input.bytes;
   const records =
-    sourceBytes === undefined ? textRecords(input.text, bufferByteOffset) : byteRecords(sourceBytes, bufferByteOffset);
+    sourceBytes === undefined
+      ? textRecords(input.text ?? '', bufferByteOffset)
+      : byteRecords(sourceBytes, bufferByteOffset);
   const rawRecords: TranscriptRawRecord[] | undefined = sourceBytes === undefined ? undefined : [];
 
   let remainder = '';
@@ -248,7 +261,13 @@ export function parseTranscriptJsonl(
     // to a file that does not exist.
     if (rawRecords !== undefined && record.bytes !== undefined)
       rawRecords.push({ byteOffset: record.byteOffset, bytes: record.bytes });
-    const parsed = consume(record.body, record.terminated, record.byteOffset, record.byteLength);
+    const parsed = consume(
+      record.body,
+      record.terminated,
+      record.byteOffset,
+      record.byteLength,
+      record.referenced === true,
+    );
     if (record.terminated) line += 1;
     else if (!parsed) remainder = record.body;
   }

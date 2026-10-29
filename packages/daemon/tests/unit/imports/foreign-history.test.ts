@@ -6,6 +6,10 @@ import {
 } from '../../../src/lib/imports/foreign-history.ts';
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
+import { PacedTranscriptParser, type TranscriptParsePacing } from '../../../src/lib/transcript/sliced.ts';
+
+/** A clock that never advances, so a parse never yields and every test stays one deterministic step. */
+const UNPACED: TranscriptParsePacing = { now: () => 0, yieldToLoop: async () => undefined };
 
 class FixtureFiles implements ForeignHistoryFiles {
   constructor(
@@ -49,7 +53,10 @@ function importer(files: ForeignHistoryFiles) {
   return new ForeignHistoryImporter(
     files,
     { claudeProjects: CLAUDE_ROOT, codexSessions: CODEX_ROOT },
-    { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() },
+    {
+      claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), UNPACED),
+      codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED),
+    },
   );
 }
 
@@ -156,15 +163,18 @@ describe('ForeignHistoryImporter', () => {
   test('never lists a transcript whose parser reports a partial record, even with no issue named', async () => {
     const source = `${CLAUDE_ROOT}/project/partial.jsonl`;
     const real = new ClaudeTranscriptParser();
-    const partial = {
-      harness: real.harness,
-      parse: (input: Parameters<ClaudeTranscriptParser['parse']>[0]) => ({
-        ...real.parse(input),
-        remainder: '{"type":"user"',
-      }),
-      parseRecord: real.parseRecord.bind(real),
-      createInputObserver: real.createInputObserver.bind(real),
-    };
+    const partial = new PacedTranscriptParser(
+      {
+        harness: real.harness,
+        parse: (input: Parameters<ClaudeTranscriptParser['parse']>[0]) => ({
+          ...real.parse(input),
+          remainder: '{"type":"user"',
+        }),
+        parseRecord: real.parseRecord.bind(real),
+        createInputObserver: real.createInputObserver.bind(real),
+      },
+      UNPACED,
+    );
     const history = new ForeignHistoryImporter(
       new FixtureFiles(
         {
@@ -174,7 +184,7 @@ describe('ForeignHistoryImporter', () => {
         { [source]: `${validClaude}\n` },
       ),
       { claudeProjects: CLAUDE_ROOT, codexSessions: CODEX_ROOT },
-      { claude: partial, codex: new CodexTranscriptParser() },
+      { claude: partial, codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED) },
     );
 
     await expect(history.list()).resolves.toEqual({

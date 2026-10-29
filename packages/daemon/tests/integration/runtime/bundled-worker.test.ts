@@ -62,6 +62,10 @@ describe('probeBundledWorker', () => {
     should(await probeBundledWorker('analytics-fold')).deepEqual({ name: 'analytics-fold', ready: true });
   });
 
+  it('should start the real analytics index writer and hear it answer', async () => {
+    should(await probeBundledWorker('analytics-index')).deepEqual({ name: 'analytics-index', ready: true });
+  });
+
   it('should start the real session worker and hear it answer', async () => {
     should(await probeBundledWorker('session')).deepEqual({ name: 'session', ready: true });
   });

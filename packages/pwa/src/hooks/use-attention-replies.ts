@@ -22,6 +22,8 @@ export interface AttentionReplies {
   /** Whole seconds until the daemon sends the held answers; `null` when nothing is held. */
   readonly secondsLeft: number | null;
   readonly pending: readonly string[];
+  /** The batch is due but held: the ferret is mid-turn, and it is sent when the turn ends. */
+  readonly heldForTurn: boolean;
   readonly sending: boolean;
   readonly sendNow: () => void;
 }
@@ -32,10 +34,16 @@ export const secondsUntil = (dueAt: string, now: number): number | null => {
   return Number.isNaN(due) ? null : Math.max(0, Math.ceil((due - now) / 1000));
 };
 
+/** How often the board is read again while the daemon holds a due batch for the ferret's turn. */
+export const HELD_REREAD_MS = 10_000;
+
 /**
  * The daemon holds a ferret's answers for a settle window; this counts it down from the board's `replies`
  * and offers "Send now". A daemon that never sends `replies` delivers at once, so this stays empty for it.
- * When the window passes, the board is read again once, so the held answers are seen to have left.
+ * When the window passes, the board is read again once, so the held answers are seen to have left. When
+ * the daemon says it is holding them for the ferret's turn, the notice stays up and the board is read again
+ * every {@link HELD_REREAD_MS}: nothing on the board changes when the turn ends and the batch goes, so
+ * without the re-read the notice would say "waiting" after the answers had left.
  */
 export const useAttentionReplies = (
   client: DaemonAttentionClient,
@@ -57,12 +65,21 @@ export const useAttentionReplies = (
 
   const secondsLeft = dueAt === undefined ? null : secondsUntil(dueAt, now);
   const expired = dueAt !== undefined && secondsLeft === 0;
+  const heldForTurn = replies?.heldForTurn === true;
 
   useEffect(() => {
-    if (!expired || scope === null || dueAt === undefined || rereadFor.current === dueAt) return;
+    if (!expired || heldForTurn || scope === null || dueAt === undefined || rereadFor.current === dueAt) return;
     rereadFor.current = dueAt;
     void client.revalidate(connection, scope).catch(() => {});
-  }, [expired, dueAt, client, connection, scope]);
+  }, [expired, heldForTurn, dueAt, client, connection, scope]);
+
+  useEffect(() => {
+    if (!heldForTurn || scope === null) return undefined;
+    const reread = (): void => {
+      void client.revalidate(connection, scope).catch(() => {});
+    };
+    return clock.every(reread, HELD_REREAD_MS);
+  }, [heldForTurn, client, connection, scope, clock]);
 
   const sendNow = (): void => {
     if (scope === null || sending) return;
@@ -75,7 +92,8 @@ export const useAttentionReplies = (
 
   return {
     secondsLeft: expired ? null : secondsLeft,
-    pending: expired ? [] : (replies?.pending ?? []),
+    pending: expired && !heldForTurn ? [] : (replies?.pending ?? []),
+    heldForTurn,
     sending,
     sendNow,
   };

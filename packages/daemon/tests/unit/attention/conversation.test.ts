@@ -11,6 +11,7 @@ import {
   boardReplyMessage,
   conversationResponse,
   conversationTurn,
+  discussMessage,
   needsInfoMessage,
   referencedAttention,
   responseWords,
@@ -217,7 +218,7 @@ describe('Attention in a conversation', () => {
 
   it('should prefix a message that references open items and answer them', () => {
     // Arrange / Act
-    const turn = conversationTurn('!A3 eu-west-1, and !A2 Wait', [CHOICE, OPEN], 'fy');
+    const turn = conversationTurn('!A3 eu-west-1, and !A2 Wait', [CHOICE, OPEN]);
 
     // Assert
     should(turn.message).equal(
@@ -226,20 +227,20 @@ describe('Attention in a conversation', () => {
     should(turn.answers.map(each => each.id)).deepEqual(['A2', 'A3']);
   });
 
-  it('should tell the ferret which items are open, without resolving any, for a plain message', () => {
-    // Arrange / Act
-    const turn = conversationTurn('How is it going?', [CHOICE, OPEN], 'fy');
-    const empty = conversationTurn('How is it going?', [], 'fy');
+  it('should deliver a plain message exactly as typed, however many items are open, and resolve none', () => {
+    // Arrange
+    const open = [CHOICE, OPEN, PERMISSION, PLAIN, item('A6'), item('A7')];
+
+    // Act
+    const turn = conversationTurn('How is it going?', open);
+    const empty = conversationTurn('How is it going?', []);
 
     // Assert
-    should(turn.message).equal(
-      'How is it going?\n\n[open attention: !A2 «Rebase onto main now?»; !A3 «Which region?» — if this message settles one, resolve it with `fy attention done <id>`]',
-    );
-    should(turn.answers).deepEqual([]);
+    should(turn).deepEqual({ message: 'How is it going?', answers: [] });
     should(empty).deepEqual({ message: 'How is it going?', answers: [] });
   });
 
-  it('should leave a harness prompt out of the footer, while a reference still answers it', () => {
+  it('should still answer a harness prompt the message references, and leave an unreferenced one alone', () => {
     // Arrange
     const harness = item('A6', {
       source: 'question',
@@ -252,15 +253,11 @@ describe('Attention in a conversation', () => {
     } as Partial<AttentionItem>);
 
     // Act
-    const alone = conversationTurn('How is it going?', [harness], 'fy');
-    const mixed = conversationTurn('How is it going?', [harness, OPEN], 'fy');
-    const answered = conversationTurn('!A6 eu', [harness], 'fy');
+    const plain = conversationTurn('How is it going?', [harness, OPEN]);
+    const answered = conversationTurn('!A6 eu', [harness]);
 
     // Assert
-    should(alone).deepEqual({ message: 'How is it going?', answers: [] });
-    should(mixed.message).endWith(
-      '[open attention: !A3 «Which region?» — if this message settles one, resolve it with `fy attention done <id>`]',
-    );
+    should(plain).deepEqual({ message: 'How is it going?', answers: [] });
     should(answered.answers.map(each => each.id)).deepEqual(['A6']);
   });
 
@@ -326,5 +323,48 @@ describe('needsInfoMessage', () => {
     should(needsInfoMessage(asked('Which account?'))).equal('[needs more info !A5 «Ask A5?»] Which account?');
     should(needsInfoMessage(asked())).equal('[needs more info !A5 «Ask A5?»] The owner needs more information.');
     should(needsInfoMessage(item('A5'))).equal('[needs more info !A5 «Ask A5?»] The owner needs more information.');
+  });
+});
+
+describe('discussMessage', () => {
+  const discussing = (note?: string, overrides: Partial<AttentionItem> = {}) =>
+    item('A14', {
+      waitingOn: 'ferret',
+      askedAt: AT,
+      waitingFor: 'discussion',
+      infoRequests: 1,
+      history: [{ at: AT, kind: 'discuss', ...(note === undefined ? {} : { note }) }],
+      ...overrides,
+    });
+
+  it('should name the item by its title, carry the note and say what to run, with the binary it was given', () => {
+    // Arrange
+    const titled = discussing('I do not understand the premise', { title: 'Release window' });
+
+    // Act
+    const message = discussMessage(titled, 'ferret');
+
+    // Assert
+    should(message).equal(
+      '[discuss !A14 «Release window»] The owner wants to talk this through before answering: I do not understand the premise. Reply in chat to clear it up; then update the item (`ferret attention edit A14`) or close it if the premise was wrong (`ferret attention done A14`).',
+    );
+  });
+
+  it('should fall back to the subject and to "no note", and use the latest discuss note', () => {
+    // Arrange
+    const noNote = discussing();
+    const latest = discussing('second', {
+      history: [
+        { at: AT, kind: 'discuss', note: 'first' },
+        { at: AT, kind: 'updated' },
+        { at: AT, kind: 'discuss', note: 'second' },
+      ],
+    });
+
+    // Act + Assert
+    should(discussMessage(noNote, 'fy')).startWith(
+      '[discuss !A14 «Ask A14?»] The owner wants to talk this through before answering: no note. ',
+    );
+    should(discussMessage(latest, 'fy')).containEql('before answering: second. ');
   });
 });

@@ -102,6 +102,8 @@ const shot = async (page: Page, scheme: string, name: string): Promise<void> => 
 };
 
 const KINDS = ['task', 'choice', 'yesno', 'permission', 'review', 'info', 'reply'] as const;
+// The Discuss states: the in-discussion card, and the replies notice counting down and held for a turn.
+const DISCUSS_VIEWS = ['in-discussion', 'replies-countdown', 'replies-held'] as const;
 
 try {
   for (const scheme of ['light', 'dark'] as const) {
@@ -113,11 +115,27 @@ try {
         ['phone', phone],
         ['desktop', desktop],
       ] as const) {
-        for (const kind of KINDS) {
+        for (const kind of [...KINDS, ...DISCUSS_VIEWS]) {
           const page = await open(context, theme, kind);
           await shot(page, scheme, `${kind}-${label}`);
           await page.close();
         }
+        // Dragged down from the title (a link would start a native drag), held short of the threshold: the stamp says Discuss.
+        const down = await open(context, theme, 'discuss-swipe');
+        const downBox = await down.locator('.fy-attn-deck__top').boundingBox();
+        if (downBox === null) fail('no deck card to swipe down');
+        else {
+          const x = downBox.x + downBox.width / 2;
+          const y = downBox.y + 72;
+          await down.mouse.move(x, y);
+          await down.mouse.down();
+          await down.mouse.move(x, y + 50, { steps: 4 });
+          await down.mouse.move(x, y + 100, { steps: 4 });
+          await down.waitForTimeout(250);
+          await shot(down, scheme, `discuss-swipe-down-${label}`);
+          await down.mouse.up();
+        }
+        await down.close();
         // Dragged up, held short of the threshold: the stamp names the third answer and the card follows.
         const page = await open(context, theme, 'task-swipe');
         const box = await page.locator('.fy-attn-deck__top').boundingBox();

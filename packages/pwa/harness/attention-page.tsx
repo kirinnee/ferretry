@@ -218,6 +218,102 @@ const CARDS: readonly InboxCard[] = [
   card(RICH, ferret('rc', 'ottilie', 'Ledger storage'), 'studio'),
 ];
 
+// THE ATTENTION PAGE AS THE OWNER MET IT: ten items in two conversations on two machines — seven from one
+// ferret working one project, so every row used to read "diene-migrate".
+const MIGRATE = ferret('dm', 'johnnie', 'diene-migrate');
+const RELAY = ferret('ra', 'hadi', 'Relay advertisement');
+const titled = (id: string, minutes: number, title: string, patch: Partial<AttentionItem>): AttentionItem =>
+  item(id, minutes, { title, raisedByName: 'johnnie', ...patch } as Partial<AttentionItem>);
+const ORG_SETUP = titled('A10', 420, 'Finish the ProtoDurian org setup', {
+  subject: 'Do the org settings only an owner should: invites, teams, 2FA',
+  why: 'Only an org owner can change these, and the migration is blocked on them.',
+  body: 'Each of these is a settings page on GitHub; none needs a terminal.',
+  steps: [
+    'Require two-factor login: https://github.com/organizations/ProtoDurian/settings/security',
+    'Invite ching-atomi and speedykrab',
+    'Create teams fleet-admin (admin), atomi and ketone (maintain)',
+    'Allow fine-grained tokens under Personal access tokens',
+    'Install the namespace-cloud app on ProtoDurian too (only namespace-managed-runners is installed)',
+  ],
+  ask: { kind: 'task' },
+});
+const MIGRATE_ITEMS: readonly AttentionItem[] = [
+  ORG_SETUP,
+  titled('A9', 421, 'Keep the required CI workflow?', {
+    subject: 'I set the engine to require the workflow named CI from ProtoDurian/diene.all. Keep it, or name another?',
+    ask: { kind: 'multiple-choice', options: [{ label: 'Keep CI' }, { label: 'Name another' }] },
+  }),
+  titled('A8', 425, 'Review the moved repos', {
+    subject:
+      "I moved 5 more repos, cancelled 159 Dependabot runs, and copied AtomiCloud's Actions settings. Anything look off?",
+    ask: { kind: 'answer-review' },
+  }),
+  titled('A7', 430, 'Pick a fix for the 16-core runner', {
+    subject: 'The 16-core runner size never starts on the Developer plan. Which fix?',
+    ask: {
+      kind: 'multiple-choice',
+      options: [{ label: 'Upgrade the plan' }, { label: 'Use 8-core' }, { label: 'Self-host' }],
+    },
+    waitingOn: 'ferret',
+    waitingFor: 'discussion',
+    askedAt: ago(60),
+  } as Partial<AttentionItem>),
+  titled('A6', 433, 'Create two read-only tokens', {
+    subject: 'Create two read-only tokens so the ratchet and corpus CI can read each other',
+    ask: { kind: 'task' },
+    steps: ['Create the ratchet token', 'Create the corpus token', 'Store both with fy secret set'],
+  }),
+  titled('A5', 436, 'Point Infisical at ProtoDurian?', {
+    subject: 'Does Infisical push secrets into GitHub? If yes, point it at ProtoDurian',
+    ask: { kind: 'permission' },
+  }),
+  // A legacy item from before titles: its row is headed by the start of its ask, never the project name.
+  item('A4', 440, {
+    subject:
+      'The old org still has 12 webhooks pointing at the staging relay; delete them now or leave them until the cut-over?',
+    why: 'They fire on every push and the relay logs each one as an error.',
+    ask: { kind: 'multiple-choice', options: [{ label: 'Delete now' }, { label: 'Leave them' }] },
+    raisedByName: 'johnnie',
+  }),
+];
+const RELAY_ITEMS: readonly AttentionItem[] = [
+  titled('A3', 18, 'Restart the staging relay?', {
+    subject: 'Can I restart the staging relay? It drops live sessions for ~10 seconds.',
+    why: 'The relay is serving a stale advertisement.',
+    ask: { kind: 'permission' },
+    raisedByName: 'hadi',
+  }),
+  titled('A2', 95, 'Which region for the relay?', {
+    subject: 'Pick the staging region for the relay: eu-west or us-east?',
+    ask: { kind: 'multiple-choice', options: [{ label: 'eu-west' }, { label: 'us-east' }] },
+    raisedByName: 'hadi',
+  }),
+  titled('A1', 600, 'Rotate the relay key', {
+    subject: 'Rotate the relay key on the laptop before the release cut',
+    ask: { kind: 'task' },
+    steps: ['Store the new key: `fy secret set RELAY_KEY`', 'Restart the relay: `fy daemon restart`'],
+    raisedByName: 'hadi',
+  }),
+];
+const PAGE_CARDS: readonly InboxCard[] = [
+  ...MIGRATE_ITEMS.map(entry => card(entry, MIGRATE, 'Liftoff EC2')),
+  ...RELAY_ITEMS.map(entry => card(entry, RELAY, 'laptop', LAPTOP)),
+].sort((left, right) => Date.parse(right.item.waitingSince) - Date.parse(left.item.waitingSince));
+const RECENT = [
+  {
+    text: 'Moved diene.ratchet and diene.corpus to ProtoDurian; both builds are green on the new org.',
+    timestamp: ago(440),
+  },
+  {
+    text: 'The 16-core runner never starts on the Developer plan — I raised !A7 with three ways out.',
+    timestamp: ago(430),
+  },
+  {
+    text: 'Everything left needs an org owner. I put the five owner-only settings in !A10, with links, and will pick up the CI ratchet as soon as two-factor is on.',
+    timestamp: ago(421),
+  },
+] as const;
+
 // Answers are held for the real undo window, then "sent" nowhere.
 const deferred = new DeferredAttentionActions(async () => undefined);
 
@@ -225,10 +321,14 @@ function Inbox({
   phone,
   cards = CARDS,
   resolved = [],
+  recentOpen = false,
+  initialOpen,
 }: {
   readonly phone: boolean;
   readonly cards?: readonly InboxCard[];
   readonly resolved?: AttentionInbox['resolved'];
+  readonly recentOpen?: boolean;
+  readonly initialOpen?: string;
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const hidden = deferred.hiddenKeys();
@@ -251,15 +351,11 @@ function Inbox({
           inbox={inbox}
           now={NOW}
           onNavigate={() => undefined}
+          onProgress={async () => undefined}
           phone={phone}
-          renderChat={selected => (
-            <div className="min-h-0 flex-1">
-              <ChatPane
-                board={boardOf(...(selected.item.id === 'A3' ? [selected.item] : [selected.item, REBASE]))}
-                target={selected.item.id}
-              />
-            </div>
-          )}
+          readRecent={async () => RECENT}
+          recentOpen={recentOpen}
+          {...(initialOpen === undefined ? {} : { initialOpen })}
         />
       </div>
       {phone ? (
@@ -279,6 +375,23 @@ const TASK_CARDS: readonly InboxCard[] = [
   card(taskWith([0, 1]), ferret('fr', 'ottilie', 'Attention inbox wiring'), 'studio'),
   card(WAITING, SESSIONS[1] as SessionView, 'studio'),
   card(REBASE, SESSIONS[0] as SessionView, 'studio'),
+];
+
+const DISCUSSING = item('A7', 6, {
+  subject: 'Which database should keep the board’s finished items across restarts?',
+  why: 'The board forgets every finished item when the app restarts.',
+  ask: { kind: 'multiple-choice', options: [{ label: 'SQLite' }, { label: 'Postgres' }, { label: 'Keep memory' }] },
+  kind: 'choice',
+  waitingOn: 'ferret',
+  waitingFor: 'discussion',
+  askedAt: ago(4),
+  history: [{ at: ago(4), kind: 'discuss', note: 'Why not just keep the board in memory?' }],
+} as Partial<AttentionItem>);
+
+const DISCUSS_CARDS: readonly InboxCard[] = [
+  card(DISCUSSING, SESSIONS[0] as SessionView, 'studio'),
+  card(REBASE, SESSIONS[1] as SessionView, 'studio'),
+  card(DEPLOY, SESSIONS[0] as SessionView, 'studio'),
 ];
 
 const BOARD: AttentionSnapshot = {
@@ -362,7 +475,7 @@ function ChatPane({
       <div className="p-panel">
         <AttentionPanel
           chip={{ on: chip, onChange: setChip }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
           connection={CONNECTION}
           focus={target === null ? null : { target: target as AttentionId, seq: 1 }}
           id="attention-panel"
@@ -528,7 +641,7 @@ function QuietChat({ open }: { readonly open: readonly AttentionItem[] }): React
       <div className="p-panel">
         <AttentionPanel
           chip={{ on: true, onChange: () => undefined }}
-          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, progress: noop }}
+          client={{ respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop }}
           connection={CONNECTION}
           focus={null}
           id="attention-panel"
@@ -579,7 +692,15 @@ const view = new URLSearchParams(location.search).get('view') ?? 'inbox-phone';
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  view === 'inbox-phone' ? (
+  view === 'page' ? (
+    <Inbox cards={PAGE_CARDS} phone={window.innerWidth < 768} />
+  ) : view === 'page-recent' ? (
+    <Inbox cards={PAGE_CARDS} phone={window.innerWidth < 768} recentOpen />
+  ) : view === 'page-card' ? (
+    <Inbox cards={PAGE_CARDS} initialOpen={(PAGE_CARDS[2] as InboxCard).key} phone />
+  ) : view === 'page-card-recent' ? (
+    <Inbox cards={PAGE_CARDS} initialOpen={(PAGE_CARDS[2] as InboxCard).key} phone recentOpen />
+  ) : view === 'inbox-phone' ? (
     <Inbox phone />
   ) : view === 'inbox-desktop' ? (
     <Inbox phone={false} />
@@ -592,9 +713,13 @@ createRoot(root).render(
   ) : view === 'task-waiting' ? (
     <Panel board={boardOf(WAITING)} target="A9" />
   ) : view === 'task-inbox-phone' ? (
-    <Inbox cards={TASK_CARDS} phone />
+    <Inbox cards={TASK_CARDS} initialOpen={(TASK_CARDS[0] as InboxCard).key} phone />
   ) : view === 'task-inbox-desktop' ? (
     <Inbox cards={TASK_CARDS} phone={false} />
+  ) : view === 'discuss-inbox-phone' ? (
+    <Inbox cards={DISCUSS_CARDS} initialOpen={(DISCUSS_CARDS[0] as InboxCard).key} phone />
+  ) : view === 'discuss-inbox-desktop' ? (
+    <Inbox cards={DISCUSS_CARDS} phone={false} />
   ) : view === 'overload' ? (
     <Panel board={OVERLOAD_BOARD} target={null} />
   ) : view === 'rich' ? (

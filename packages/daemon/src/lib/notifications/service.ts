@@ -47,9 +47,14 @@ export class NotificationService implements AttentionRaisedObserver {
   }
 
   /** The one push an edit makes: the ferret added what the owner asked for. Total, once per request. */
-  async moreInfoAdded(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void> {
+  async moreInfoAdded(
+    sessionId: string,
+    item: AttentionItem,
+    snapshot: AttentionSnapshot,
+    discussion = false,
+  ): Promise<void> {
     if (item.infoRequests === undefined) return;
-    await this.attentionRaised(sessionId, item, snapshot, item.infoRequests);
+    await this.attentionRaised(sessionId, item, snapshot, item.infoRequests, discussion);
   }
 
   /** Announces one committed item at most once under its durable board identity. */
@@ -58,6 +63,7 @@ export class NotificationService implements AttentionRaisedObserver {
     item: AttentionItem,
     snapshot: AttentionSnapshot,
     infoRequest?: number,
+    discussion = false,
   ): Promise<void> {
     const key = notificationKey({
       sessionId,
@@ -72,7 +78,7 @@ export class NotificationService implements AttentionRaisedObserver {
         const payload =
           infoRequest === undefined
             ? attentionNotificationPayload(sessionId, item, snapshot)
-            : moreInfoNotificationPayload(sessionId, item, snapshot, infoRequest);
+            : moreInfoNotificationPayload(sessionId, item, snapshot, infoRequest, discussion);
         const enrolled = (await this.options.push.list()).length;
         await this.options.ledger.append(
           NotificationRecordSchema.parse({

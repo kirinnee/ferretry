@@ -1,16 +1,28 @@
-import { type AttentionId, type AttentionReplies, InstantSchema, MAX_ATTENTION_RESOLUTIONS } from '@ferretry/protocol';
+import {
+  AttentionIdSchema,
+  type AttentionId,
+  type AttentionReplies,
+  InstantSchema,
+  MAX_ATTENTION_RESOLUTIONS,
+} from '@ferretry/protocol';
 import { z } from 'zod';
 import type { SerialExecutor } from '../ports.ts';
 
 /**
  * THE OWNER'S ANSWERS, BATCHED PER FERRET (docs/attention.md § The loop).
  *
- * Answering wakes the ferret: the delivered message starts its next turn. One message per closed item
- * turned five quick answers into five turns, so the answers to one ferret are held in its OUTBOX for a
- * short settle window and delivered as ONE message listing every answer:
+ * Answering wakes the ferret: the delivered message starts its next turn, and every message is read again
+ * on every later turn. One message per closed item turned five quick answers into five turns, so the
+ * answers to one ferret are held in its OUTBOX for a settle window and delivered as ONE message listing
+ * every answer:
  *
  * - The window is `settleMs` after the last answer, capped at `capMs` after the first, so a steady
  *   stream of answers still reaches the ferret.
+ * - HELD WHILE THE FERRET IS MID-TURN. A batch that falls due while the ferret is working stays pending
+ *   (later answers keep joining it) and is re-checked every `recheckMs`; it goes once the turn ends. The
+ *   hold is bounded: `holdCeilingMs` past its due time it goes through the ordinary send path, which
+ *   queues natively, so a ferret that never reports its turn over cannot hold an answer forever. A state
+ *   that cannot be read is not busy.
  * - EXACTLY ONCE PER ITEM. An item delivered (or being delivered) is never queued again, and a batch is
  *   sent under a send id made of its item ids, so a batch re-sent after a restart is one message.
  * - DURABLE. The outbox is a file beside the board, so a daemon restarted inside the window delivers
@@ -19,26 +31,35 @@ import type { SerialExecutor } from '../ports.ts';
  */
 
 /** How long the outbox waits after the last answer before delivering. */
-export const ATTENTION_REPLY_SETTLE_MS = 8_000;
+export const ATTENTION_REPLY_SETTLE_MS = 60_000;
 /** The longest the first answer in a batch can wait, however many follow it. */
-export const ATTENTION_REPLY_CAP_MS = 30_000;
+export const ATTENTION_REPLY_CAP_MS = 180_000;
+/** How often a batch that is due but held for a working ferret looks again. */
+export const ATTENTION_REPLY_RECHECK_MS = 5_000;
+/** The longest a due batch is held for a working ferret before it is sent anyway. */
+export const ATTENTION_REPLY_HOLD_CEILING_MS = 15 * 60_000;
 /** The most answers one batch holds: a board's whole resolution history. A full outbox is sent before it takes more. */
 export const MAX_ATTENTION_PENDING_REPLIES = MAX_ATTENTION_RESOLUTIONS;
 /** How many delivered item ids the outbox remembers, newest kept. Ids are never reused on a board. */
 const MAX_DELIVERED_IDS = 256;
 
 /**
- * What the outbox remembers a delivery by: the item's id for an answer (`A3`), and the id plus the request
- * counter for a request for more information (`A3~2`). An item is answered once, but may be asked for more
- * information again after the ferret replied, and each ask is its own delivery.
+ * What the outbox remembers a delivery by: the item's id for an answer (`A3`), the id plus the request
+ * counter for a request for more information or to discuss (`A3~2`), and `instructions~<digest>` for the
+ * note that the always-on instructions changed — which belongs to no item. An item is answered once, but
+ * may be asked about again after the ferret replied, and each ask is its own delivery.
  */
-const ReplyKeySchema = z.string().regex(/^A[1-9][0-9]*(~[1-9][0-9]*)?$/u);
+const ReplyKeySchema = z.string().regex(/^(A[1-9][0-9]*(~[1-9][0-9]*)?|instructions~[0-9a-f]{14})$/u);
 export type ReplyKey = z.infer<typeof ReplyKeySchema>;
 
-/** The key of one request for more information on an item. */
+/** The key of one request for more information, or to discuss, on an item. */
 export const needsInfoReplyKey = (id: AttentionId, request: number): ReplyKey => `${id}~${request}`;
 
-const itemOfKey = (key: ReplyKey): AttentionId => key.split('~')[0] as AttentionId;
+/** The key of the note that the instructions changed to the words with this digest. */
+export const instructionsReplyKey = (digest: string): ReplyKey => `instructions~${digest}`;
+
+/** The item a key belongs to, or `undefined` for a key that is not about one. */
+const itemOfKey = (key: ReplyKey): AttentionId | undefined => AttentionIdSchema.safeParse(key.split('~')[0]).data;
 
 const PendingReplySchema = z.strictObject({
   /** A reply key (an item id for an answer); the field keeps its name so an outbox written before is read. */
@@ -156,6 +177,20 @@ export interface AttentionReplyQueue {
   add(sessionId: string, key: ReplyKey, message: string): Promise<void>;
 }
 
+/** Whether a ferret is mid-turn, so a batch is not dropped into the turn it would be re-read on. */
+export interface AttentionFerretActivity {
+  /** `true` while the ferret is working; `false` for anything else, including a state that cannot be read. */
+  busy(sessionId: string): Promise<boolean>;
+}
+
+/** How long the outbox waits, and how it holds a due batch for a working ferret. */
+export interface AttentionReplyWindow {
+  readonly settleMs: number;
+  readonly capMs: number;
+  readonly recheckMs?: number;
+  readonly holdCeilingMs?: number;
+}
+
 /** The outbox's state for the owner's screen, and the owner skipping the wait. */
 export interface AttentionRepliesSubsystem {
   /** The answers held for this ferret and when they go, or `undefined` when nothing is held. */
@@ -180,10 +215,11 @@ export class AttentionReplyBatcher implements AttentionReplyQueue, AttentionRepl
     private readonly timers: AttentionReplyTimers,
     private readonly serial: Pick<SerialExecutor, 'run'>,
     private readonly clock: { now(): string },
-    private readonly window: { readonly settleMs: number; readonly capMs: number } = {
+    private readonly window: AttentionReplyWindow = {
       settleMs: ATTENTION_REPLY_SETTLE_MS,
       capMs: ATTENTION_REPLY_CAP_MS,
     },
+    private readonly activity: AttentionFerretActivity = { busy: async () => false },
   ) {}
 
   async add(sessionId: string, key: ReplyKey, message: string): Promise<void> {
@@ -202,10 +238,12 @@ export class AttentionReplyBatcher implements AttentionReplyQueue, AttentionRepl
   async pending(sessionId: string): Promise<AttentionReplies | undefined> {
     const outbox = (await this.outboxes.read(sessionId)) ?? emptyAttentionOutbox(sessionId);
     const due = this.dueAt(outbox);
-    if (due === undefined) return undefined;
+    const items = [...new Set(outbox.pending.flatMap(each => itemOfKey(each.id) ?? []))];
+    if (due === undefined || items.length === 0) return undefined;
     return {
-      pending: [...new Set(outbox.pending.map(each => itemOfKey(each.id)))],
+      pending: items,
       dueAt: new Date(due).toISOString(),
+      ...((await this.heldForTurn(sessionId, outbox)) ? { heldForTurn: true as const } : {}),
     };
   }
 
@@ -215,8 +253,15 @@ export class AttentionReplyBatcher implements AttentionReplyQueue, AttentionRepl
     if (batch !== undefined) void this.deliver(sessionId, batch);
   }
 
-  /** Delivers what is held for one ferret; what the timer runs. */
+  /** Delivers what is held for one ferret, unless it is mid-turn; what the timer runs. */
   async flush(sessionId: string): Promise<void> {
+    const outbox = await this.outboxes.read(sessionId);
+    if (outbox !== null && (await this.heldForTurn(sessionId, outbox))) {
+      this.timers.schedule(sessionId, this.window.recheckMs ?? ATTENTION_REPLY_RECHECK_MS, () => {
+        void this.flush(sessionId).catch(() => undefined);
+      });
+      return;
+    }
     const batch = await this.begin(sessionId);
     if (batch !== undefined) await this.deliver(sessionId, batch);
   }
@@ -256,6 +301,15 @@ export class AttentionReplyBatcher implements AttentionReplyQueue, AttentionRepl
     if (due === undefined) return;
     const delay = Math.max(0, due - Date.parse(this.clock.now()));
     this.timers.schedule(sessionId, delay, () => void this.flush(sessionId).catch(() => undefined));
+  }
+
+  /** Due, still inside the hold's ceiling, and the ferret is working: the batch waits for the turn to end. */
+  private async heldForTurn(sessionId: string, outbox: AttentionOutbox): Promise<boolean> {
+    const due = this.dueAt(outbox);
+    if (due === undefined) return false;
+    const now = Date.parse(this.clock.now());
+    if (now < due || now >= due + (this.window.holdCeilingMs ?? ATTENTION_REPLY_HOLD_CEILING_MS)) return false;
+    return await this.activity.busy(sessionId).catch(() => false);
   }
 
   private dueAt(outbox: AttentionOutbox): number | undefined {

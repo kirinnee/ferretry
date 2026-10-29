@@ -67,7 +67,7 @@ const board = (
 });
 
 interface Call {
-  readonly method: 'respond' | 'resolve' | 'dismiss' | 'needs-info' | 'progress';
+  readonly method: 'respond' | 'resolve' | 'dismiss' | 'needs-info' | 'discuss' | 'progress';
   readonly id: string;
   readonly payload: unknown;
 }
@@ -101,6 +101,13 @@ const recordingClient = (settle: (call: Call) => Promise<void> = async () => und
       expect(at).toBe(daemon);
       expect(where).toBe(scope);
       const call: Call = { method: 'needs-info', id, payload: note };
+      calls.push(call);
+      await settle(call);
+    },
+    discuss: async (at, where, id, note) => {
+      expect(at).toBe(daemon);
+      expect(where).toBe(scope);
+      const call: Call = { method: 'discuss', id, payload: note };
       calls.push(call);
       await settle(call);
     },
@@ -213,9 +220,27 @@ describe('AttentionPanel', () => {
     expect(must(view.container, 'view').querySelector('[data-attention-pager]')).toBeNull();
   });
 
-  test('keeps the reply to the composer: no reply form on the pinned card', async () => {
+  test("the pinned card carries the deck's answer bar: arrows, Reply… and the ⋯ in the same row", async () => {
     view = await mount(panel());
-    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('textarea')).toBeNull();
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    const answers = [...card.querySelectorAll<HTMLElement>('[data-attention-answer]')];
+    expect(answers.map(answer => answer.getAttribute('data-attention-answer'))).toEqual(['left', 'right']);
+    for (const answer of answers) expect(answer.querySelector('svg')).not.toBeNull();
+    expect(card.textContent).not.toContain('or swipe');
+    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
+    expect(toggle.textContent).toContain('Reply…');
+    expect(toggle.closest('.fy-attn-actions__row')?.querySelector('[data-attention-more]')).not.toBeNull();
+    expect(card.querySelectorAll('.fy-attn-actions__row')).toHaveLength(1);
+  });
+
+  test('Reply… on the pinned card opens its box', async () => {
+    view = await mount(panel());
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    expect(card.querySelector('textarea')).toBeNull();
+    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
+    await interact(() => toggle.click());
+    expect(card.querySelector('textarea')).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });
 
   test('Details unfolds the context and brief, and folds it again', async () => {
@@ -297,6 +322,22 @@ describe('AttentionPanel', () => {
     expect(view.container.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe(
       'Answered !A3: Allow',
     );
+  });
+
+  test('Discuss asks to talk it through at once, through discuss, and says so', async () => {
+    const recorded = recordingClient();
+    view = await mount(panel({ client: recorded.client }));
+    await interact(() => buttonNamed(cardOf(must(view?.container, 'view'), 'A3'), 'Discuss').click());
+    expect(recorded.calls).toEqual([{ method: 'discuss', id: 'A3', payload: undefined }]);
+    expect(view.container.querySelector('[role="status"][aria-live="polite"]')?.textContent).toBe(
+      'Asked to discuss !A3',
+    );
+  });
+
+  test('an item the ferret did not raise offers no Discuss', async () => {
+    const human = item('A3', { raisedBy: 'human', raisedBySession: null, raisedByName: null } as never);
+    view = await mount(panel({ snapshot: board([human]) }));
+    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('[data-attention-discuss]')).toBeNull();
   });
 
   test('Done resolves and Dismiss dismisses, each with no note', async () => {

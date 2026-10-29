@@ -318,7 +318,6 @@ import { machineSetupAnswer } from './machine-setup-fixture.ts';
 import { HARNESS_MACHINE_TABS } from './machine-tabs.tsx';
 import { McpSignInFrameHarness, mcpSignInFrame } from './mcp-sign-in.tsx';
 import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
-import { isWhatsNewPage, WhatsNewHarness } from './whats-new.tsx';
 import { harnessPerformanceClient, harnessRecorder } from './performance-fixture.ts';
 import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
@@ -330,6 +329,7 @@ import {
   WARDEN_FIXTURE_STATUS,
   wardenFixtureRequest,
 } from './warden-fixture.ts';
+import { isWhatsNewPage, WhatsNewHarness } from './whats-new.tsx';
 
 const daemon = daemonConnection({
   daemonId: 'harness-daemon',
@@ -3979,6 +3979,7 @@ function AttentionPanelHarness() {
       resolve: async () => undefined,
       dismiss: async () => undefined,
       needsInfo: async () => undefined,
+      discuss: async () => undefined,
       progress: async () => undefined,
     }),
     [],

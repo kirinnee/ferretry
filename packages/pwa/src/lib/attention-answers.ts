@@ -30,9 +30,12 @@ import {
   type AttentionItem,
   type AttentionKind,
   type AttentionResponse,
+  attentionCanDiscuss,
   attentionCardAnswers,
   attentionCardKind,
+  attentionInDiscussion,
   DEFAULT_ANSWER_LABELS,
+  DISCUSS_LABEL,
   GOT_IT_LABEL,
   unswipedChoices,
 } from '@ferretry/protocol';
@@ -47,13 +50,18 @@ export type InboxAction =
     }
   | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
   | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'needs-info'; readonly label: string; readonly note?: string };
+  | { readonly kind: 'needs-info'; readonly label: string; readonly note?: string }
+  | { readonly kind: 'discuss'; readonly label: string; readonly note?: string };
 
 /** The item fields the answers are read from. */
-export type AnswerSource = AttentionCardSource & Pick<AttentionItem, 'waitingOn'>;
+export type AnswerSource = AttentionCardSource &
+  Pick<AttentionItem, 'waitingOn' | 'waitingFor'> & { readonly raisedBy?: AttentionItem['raisedBy'] };
 
 /** The three ways a card can be swiped, which are also the three arrows of its answer bar. */
 export type AnswerDirection = AttentionDirection;
+
+/** The four ways a card can be swiped: its three answers' directions, and DOWN, which is always Discuss. */
+export type SwipeDirection = AnswerDirection | 'down';
 
 const withNote = (note: string | undefined): { readonly note?: string } => (note === undefined ? {} : { note });
 
@@ -109,6 +117,16 @@ export const answerAction = (answer: AttentionCardAnswer, reply: string): InboxA
   }
 };
 
+/** Whether the owner can ask to discuss this item now: a ferret raised it, and it is not already in discussion. */
+export const canDiscussNow = (item: AnswerSource): boolean =>
+  item.raisedBy !== undefined && attentionCanDiscuss({ raisedBy: item.raisedBy }) && !attentionInDiscussion(item);
+
+/** The fixed Discuss answer: never one of the card's three, carrying the reply as its note. */
+export const discussAction = (reply: string): InboxAction => {
+  const note = reply.trim();
+  return { kind: 'discuss', label: DISCUSS_LABEL, ...(note === '' ? {} : { note }) };
+};
+
 /** An old choice's option past the third, as an action: a button only, never a swipe. */
 export const optionAction = (option: AttentionAskOption, reply: string): InboxAction =>
   answerAction({ direction: 'left', does: 'choose', label: option.label }, reply) as InboxAction;
@@ -119,7 +137,8 @@ export const optionAction = (option: AttentionAskOption, reply: string): InboxAc
  */
 export const cardAnswers = (item: AnswerSource): readonly AttentionCardAnswer[] => {
   const answers = attentionCardAnswers(item);
-  const waiting = item.ask?.kind === 'task' && item.waitingOn === 'ferret';
+  // A card in discussion stays fully answerable: only a plain "need more info" wait takes Done away.
+  const waiting = item.ask?.kind === 'task' && item.waitingOn === 'ferret' && !attentionInDiscussion(item);
   return waiting ? answers.filter(answer => answer.does !== 'done' && answer.does !== 'needs-info') : answers;
 };
 
@@ -127,15 +146,16 @@ export const cardAnswers = (item: AnswerSource): readonly AttentionCardAnswer[] 
 export interface SwipeTarget {
   readonly label: string;
   readonly description?: string;
-  readonly answer: AttentionCardAnswer;
+  /** The card's own answer; absent on DOWN, the fixed Discuss. */
+  readonly answer?: AttentionCardAnswer;
   readonly action: InboxAction | null;
 }
 
-export type SwipeTargets = Readonly<Partial<Record<AnswerDirection, SwipeTarget>>>;
+export type SwipeTargets = Readonly<Partial<Record<SwipeDirection, SwipeTarget>>>;
 
-/** Each direction the card answers, with what it would send carrying `reply`. */
-export const swipeTargets = (item: AnswerSource, reply = ''): SwipeTargets =>
-  Object.fromEntries(
+/** Each direction the card answers, with what it would send carrying `reply`; DOWN is Discuss where it applies. */
+export const swipeTargets = (item: AnswerSource, reply = ''): SwipeTargets => ({
+  ...Object.fromEntries(
     cardAnswers(item).map(answer => [
       answer.direction,
       {
@@ -145,7 +165,9 @@ export const swipeTargets = (item: AnswerSource, reply = ''): SwipeTargets =>
         action: answerAction(answer, reply),
       } satisfies SwipeTarget,
     ]),
-  );
+  ),
+  ...(canDiscussNow(item) ? { down: { label: DISCUSS_LABEL, action: discussAction(reply) } } : {}),
+});
 
 /** The answers in the order a button list takes them: the recommended (right) first, then up, then left. */
 const BUTTON_ORDER: readonly AnswerDirection[] = ['right', 'up', 'left'];

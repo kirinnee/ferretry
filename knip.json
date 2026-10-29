@@ -14,6 +14,8 @@
         "bin/*.ts",
         "tests/**/*.test.ts",
         "tests/integration/support/housekeeping-run.ts",
+        "tests/integration/support/slow-index-writer.worker.ts",
+        "tests/integration/support/slow-analytics-writer.worker.ts",
         "tests/integration/support/worker-rss.ts"
       ],
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
@@ -38,8 +40,13 @@
         "harness/screenshot.ts",
         "harness/attention-screenshot.ts",
         "harness/attention-page.tsx",
+        "harness/attention-page-screenshot.ts",
         "harness/attention-cards-screenshot.ts",
         "harness/attention-cards-page.tsx",
+        "harness/cards-fit-screenshot.ts",
+        "harness/cards-fit-page.tsx",
+        "harness/attention-collapse-screenshot.ts",
+        "harness/attention-collapse-page.tsx",
         "harness/processes-tab-screenshot.tsx",
         "harness/notifications-screenshot.ts",
         "harness/notifications-page.tsx",

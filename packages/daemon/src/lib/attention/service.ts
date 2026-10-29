@@ -164,6 +164,16 @@ export class AttentionService {
     return this.apply(sessionId, { action: 'needs-info', actor, id, note, at: this.clock.now() });
   }
 
+  /** The owner wants to talk an item through before answering: it stays open, in discussion with the ferret. */
+  async discuss(
+    sessionId: string,
+    id: AttentionId,
+    actor: AttentionActor,
+    note?: string | null,
+  ): Promise<AttentionMutation> {
+    return this.apply(sessionId, { action: 'discuss', actor, id, note, at: this.clock.now() });
+  }
+
   async resolve(
     sessionId: string,
     id: AttentionId,

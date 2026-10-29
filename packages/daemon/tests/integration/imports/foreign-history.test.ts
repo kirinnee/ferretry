@@ -6,7 +6,12 @@ import should from 'should';
 import { NodeForeignHistoryFiles } from '../../../src/adapters/imports/index.ts';
 import { ForeignHistoryImporter } from '../../../src/lib/imports/index.ts';
 import { foreignHistoryRoutes } from '../../../src/lib/runtime/mounts/foreign-history.ts';
-import { ClaudeTranscriptParser, CodexTranscriptParser } from '../../../src/lib/transcript/index.ts';
+import { LOOP_PARSE_PACING } from '../../../src/adapters/transcript/index.ts';
+import {
+  ClaudeTranscriptParser,
+  CodexTranscriptParser,
+  PacedTranscriptParser,
+} from '../../../src/lib/transcript/index.ts';
 import { request } from '../../unit/api/support.ts';
 
 const temporaryDirectories: string[] = [];
@@ -54,7 +59,10 @@ describe('foreign harness history integration', () => {
       new NodeForeignHistoryFiles(),
       // Codex's root is intentionally absent: a person who has not used one harness has no error.
       { claudeProjects, codexSessions: join(root, 'fixture-home', '.codex', 'sessions') },
-      { claude: new ClaudeTranscriptParser(), codex: new CodexTranscriptParser() },
+      {
+        claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), LOOP_PARSE_PACING),
+        codex: new PacedTranscriptParser(new CodexTranscriptParser(), LOOP_PARSE_PACING),
+      },
     );
 
     // Act

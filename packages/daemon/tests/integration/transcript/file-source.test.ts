@@ -1179,6 +1179,40 @@ describe('NodeTranscriptSource bounded reads', () => {
     }
   });
 
+  it('should measure the pending limit against the new partial line alone, not the one it just completed', async () => {
+    // Arrange — a carried partial line and the next one each fit the limit; together they would not.
+    const temporary = await temporaryDirectory();
+    const file = join(temporary, 'carried.jsonl');
+    const first = jsonl(userRecord('the carried record'));
+    const second = jsonl(userRecord('the next record'));
+    const cut = 40;
+    await writeFile(file, first.slice(0, cut));
+    const subject = new NodeTranscriptSource(new ClaudeTranscriptParser(), new NodeTranscriptFileRuntime(), undefined, {
+      maxPendingBytes: Math.max(cut, Buffer.byteLength(second) - 1),
+    });
+    const iterator = subject.follow(file, { pollIntervalMs: 20 })[Symbol.asyncIterator]();
+
+    try {
+      const carried = await nextBatch(iterator, 'carried partial line');
+
+      // Act
+      await appendFile(file, `${first.slice(cut)}${second.slice(0, -1)}`);
+      const completed = await nextBatch(iterator, 'completed record and a new partial line');
+      await appendFile(file, '\n');
+      const next = await nextBatch(iterator, 'the new partial line completed');
+
+      // Assert
+      should(carried.cursor.pendingBytes).equal(cut);
+      should(completed.events).containDeep([{ kind: 'message', text: 'the carried record' }]);
+      should(completed.issues.map(issue => issue.code)).deepEqual(['incomplete-line']);
+      should(completed.cursor.pendingBytes).equal(Buffer.byteLength(second) - 1);
+      should(next.events).containDeep([{ kind: 'message', text: 'the next record' }]);
+      should(next.issues).be.empty();
+    } finally {
+      await iterator.return?.(undefined);
+    }
+  });
+
   it('should refuse to buffer an oversized trailing record when a cursor starts at the end', async () => {
     // Arrange
     const temporary = await temporaryDirectory();

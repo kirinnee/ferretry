@@ -24,7 +24,15 @@ import {
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
-import { answerAction, cardAnswers, isTextOnlyAsk, kindWord, optionAction } from '../../lib/attention-answers.ts';
+import {
+  answerAction,
+  canDiscussNow,
+  cardAnswers,
+  discussAction,
+  isTextOnlyAsk,
+  kindWord,
+  optionAction,
+} from '../../lib/attention-answers.ts';
 import {
   answersPerQuestion,
   hasAttentionBrief,
@@ -35,6 +43,7 @@ import {
   replyAction,
   updatedSinceAsked,
   visibleWhy,
+  waitingSentence,
 } from '../../lib/attention-inbox.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
@@ -72,10 +81,14 @@ export interface AttentionCardProps {
   readonly onAct: (action: InboxAction) => void;
   /** Ticks or unticks one step on the machine; a rejection rolls the tick back. Absent: the steps are read-only. */
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
-  /** Pinned above the composer: no origin, the detail folded behind "Details", the reply left to the composer. */
+  /** Pinned above the composer: no origin, the detail folded behind "Details". */
   readonly pinned?: boolean;
+  /** A control at the end of the header, after the age — the pinned card's fold button. */
+  readonly headerSlot?: ReactNode;
   /** Extra DOM id for scroll targets. */
   readonly id?: string;
+  /** Drawn last inside the scrolling detail — the Attention page's "Last messages" toggle. */
+  readonly detailEnd?: ReactNode;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
@@ -93,6 +106,8 @@ export function AttentionCard({
   onProgress,
   id,
   pinned = false,
+  headerSlot,
+  detailEnd,
 }: AttentionCardProps) {
   const titleId = useId();
   const draft = useReplyDraft();
@@ -134,7 +149,6 @@ export function AttentionCard({
       ? undefined
       : { decision: lone.recommended, ...(lone.why === undefined ? {} : { why: lone.why }) });
   const hasDismissAnswer = answers.some(answer => answer.does === 'dismiss');
-  const ferret = origin?.ferret ?? 'the ferret';
   const focusRequests = (draft?.focusTick ?? 0) + localTick;
 
   const openReply = (): void => {
@@ -246,6 +260,7 @@ export function AttentionCard({
             ? attentionAge(item.waitingSince, now).replace(/^waiting /, '')
             : attentionAge(item.waitingSince, now)}
         </span>
+        {headerSlot}
       </header>
       <h3 className="fy-attn-card__title" data-attention-title="" id={titleId}>
         {title}
@@ -319,6 +334,7 @@ export function AttentionCard({
             {history}
           </p>
         )}
+        {detailEnd}
       </div>
       {error === null ? null : (
         <p className="m-0 text-meta text-err" role="alert">
@@ -347,9 +363,10 @@ export function AttentionCard({
         replyIsAnswer={textOnly && !perQuestion}
         replyOpen={replyOpen}
         replyRef={replyRef}
-        showReply={!pinned && !perQuestion}
+        arrows={swipeHints || pinned}
         swipeHints={swipeHints}
-        {...(isWaitingOnFerret(item) ? { waitingOn: ferret } : {})}
+        {...(isWaitingOnFerret(item) ? { waiting: waitingSentence(item, origin?.ferret) } : {})}
+        {...(canDiscussNow(item) ? { onDiscuss: () => give(discussAction(reply)) } : {})}
         {...(perQuestion ? { sendAnswers: { ready: sendable !== null, onSend: sendAnswers } } : {})}
       />
       {origin === undefined || pinned ? null : (

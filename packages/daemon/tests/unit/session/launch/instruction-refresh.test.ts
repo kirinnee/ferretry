@@ -107,62 +107,91 @@ describe('recordTold', () => {
 });
 
 describe('InstructionRefresh', () => {
-  const harness = (recorded: SessionLaunchInstructions | undefined, failing = false) => {
+  const harness = (
+    recorded: SessionLaunchInstructions | undefined,
+    failing: 'read' | 'write' | 'queue' | false = false,
+  ) => {
     let stored = recorded;
+    const queued: Array<{ sessionId: string; digest: string; note: string }> = [];
     const ports: InstructionRefreshPorts = {
       sections: () => NOW,
       recorded: async () => {
-        if (failing) throw new Error('unreadable');
+        if (failing === 'read') throw new Error('unreadable');
         return stored;
       },
       record: async (_id, update) => {
-        if (failing) throw new Error('unwritable');
+        if (failing === 'write') throw new Error('unwritable');
         stored = update(stored) ?? stored;
       },
+      queue: async (sessionId, digest, note) => {
+        if (failing === 'queue') throw new Error('outbox unwritable');
+        queued.push({ sessionId, digest, note });
+      },
     };
-    return { refresh: new InstructionRefresh(ports), stored: () => stored };
+    return { refresh: new InstructionRefresh(ports), stored: () => stored, queued };
   };
 
-  it('should append the note to the owner’s next message once, then carry nothing', async () => {
+  it('should queue the note once as its own message, then queue nothing on the next call', async () => {
     // Arrange
-    const { refresh, stored } = harness(launched('Attention: an older rule.'));
+    const { refresh, stored, queued } = harness(launched('Attention: an older rule.'));
 
     // Act
-    const first = await refresh.prepare('s-1', 'please continue');
-    await refresh.settle('s-1', first);
-    const second = await refresh.prepare('s-1', 'and then this');
+    await refresh.queueIfStale('s-1');
+    await refresh.queueIfStale('s-1');
 
     // Assert
-    should(first.message).startWith(`please continue\n\n${INSTRUCTIONS_UPDATED_MARK}`);
-    should(first.message).endWith('Attention: raise every ask as an item.');
-    should(second).deepEqual({ message: 'and then this', told: [] });
+    should(queued).have.length(1);
+    should(queued[0]?.sessionId).equal('s-1');
+    should(queued[0]?.note).startWith(INSTRUCTIONS_UPDATED_MARK);
+    should(queued[0]?.note).endWith('Attention: raise every ask as an item.');
+    should(queued[0]?.digest).equal(instructionDigest(queued[0]?.note ?? ''));
     should(stored()?.sections.find(section => section.id === 'attention')?.digest).equal(
       instructionDigest('Attention: raise every ask as an item.'),
     );
   });
 
-  it('should leave the message as written when the record cannot be read, and never fail a settle', async () => {
+  it('should queue nothing for a ferret on the current words', async () => {
     // Arrange
-    const { refresh } = harness(launched('old'), true);
+    const { refresh, queued } = harness(launched('Attention: raise every ask as an item.'));
 
     // Act
-    const actual = await refresh.prepare('s-1', 'hello');
-    await refresh.settle('s-1', { message: 'hello', told: NOW });
+    await refresh.queueIfStale('s-1');
 
     // Assert
-    should(actual).deepEqual({ message: 'hello', told: [] });
+    should(queued).be.empty();
   });
 
-  it('should write nothing when nothing was told, or the record vanished meanwhile', async () => {
+  it('should queue nothing, and never fail, when the record cannot be read', async () => {
     // Arrange
-    const quiet = harness(launched('Attention: raise every ask as an item.'));
+    const { refresh, queued } = harness(launched('old'), 'read');
+
+    // Act + Assert
+    await should(refresh.queueIfStale('s-1')).be.fulfilled();
+    should(queued).be.empty();
+  });
+
+  it('should not record the note as told when it could not be queued, so the next message offers it again', async () => {
+    // Arrange
+    const { refresh, stored } = harness(launched('Attention: an older rule.'), 'queue');
+
+    // Act
+    await should(refresh.queueIfStale('s-1')).be.fulfilled();
+
+    // Assert
+    should(changedInstructions(stored(), NOW).map(section => section.id)).deepEqual(['attention']);
+  });
+
+  it('should never fail when the record cannot be written, and write nothing for a vanished record', async () => {
+    // Arrange
+    const unwritable = harness(launched('old'), 'write');
     const vanished = harness(undefined);
 
     // Act
-    await quiet.refresh.settle('s-1', { message: 'x', told: [] });
-    await vanished.refresh.settle('s-1', { message: 'x', told: NOW });
+    await should(unwritable.refresh.queueIfStale('s-1')).be.fulfilled();
+    await vanished.refresh.queueIfStale('s-1');
 
     // Assert
+    should(unwritable.queued).have.length(1);
     should(vanished.stored()).be.undefined();
   });
 });

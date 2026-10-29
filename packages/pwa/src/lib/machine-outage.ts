@@ -12,7 +12,9 @@
  * Pure: the health model's fact, the fleet slice's last read, and the machine's name in; words out.
  */
 
+import type { IoPressureView } from '@ferretry/protocol';
 import type { CarrierFailure, ConnectionHealthState, LikelyCause } from './connection-health.ts';
+import { diskPressureSentence } from './daemon-health.ts';
 import type { DaemonFleetSlice } from './fleet-store.ts';
 
 /** Why this machine's rows are not live, in the vocabulary the chip and the Details sheet share. */
@@ -79,12 +81,15 @@ export const NOT_ANSWERING_MARK = 'did not answer within';
  * back in a moment is a blip, not news — the same rule the connection pill keeps. The all-machines list
  * passes `immediate`, because its reach already greys a machine from the first measurement and its
  * heading should say why.
+ *
+ * `disk` is the last report of a saturated disk: a machine that is slow for that reason is not asleep or
+ * broken, and its advice says to wait rather than to wake or restart it.
  */
 export const machineOutage = (
   name: string,
   health: ConnectionHealthState,
   slice: Pick<DaemonFleetSlice, 'status' | 'error' | 'readAt'>,
-  { immediate = false }: { readonly immediate?: boolean } = {},
+  { immediate = false, disk }: { readonly immediate?: boolean; readonly disk?: IoPressureView } = {},
 ): MachineOutage | null => {
   const reconnecting = health.kind === 'reconnecting' ? health : null;
   const failed = slice.status === 'error' || (slice.status === 'loading' && slice.error !== null);
@@ -97,7 +102,7 @@ export const machineOutage = (
       : listError.includes(NOT_ANSWERING_MARK)
         ? 'not-answering'
         : 'refresh-failed';
-  return describe(name, reason, reconnecting, slice);
+  return describe(name, reason, reconnecting, slice, disk);
 };
 
 /**
@@ -114,6 +119,7 @@ const describe = (
   reason: OutageReason,
   reconnecting: Reconnecting | null,
   slice: Pick<DaemonFleetSlice, 'error' | 'readAt'>,
+  disk?: IoPressureView,
 ): MachineOutage => {
   const listError = slice.error ?? '';
   const retrying = reconnecting !== null;
@@ -126,7 +132,7 @@ const describe = (
     reason,
     chip: retrying ? `${CHIP_WORD[reason]} · retrying` : CHIP_WORD[reason],
     headline: headlineFor(reason, name),
-    advice: ADVICE[reason],
+    advice: disk !== undefined && reason !== 'device-offline' ? diskPressureSentence(disk) : ADVICE[reason],
     retrying,
     since: reconnecting?.since ?? null,
     attempt: reconnecting?.attempt ?? null,

@@ -2,6 +2,7 @@ import type { FoundationPaths } from './paths.ts';
 import type { SessionId } from './session-id.ts';
 import type { StateHomeInput } from './state-home.ts';
 import type { EventPointer, IndexedSession, JournalFingerprint, RebuildPlan } from './storage-types.ts';
+import type { IndexWrite } from './index-writes.ts';
 
 export interface EnvironmentPort {
   stateHomeInput(): StateHomeInput;
@@ -121,7 +122,21 @@ export interface SessionIndex {
   fleetEventPointers(limit: number): readonly EventPointer[];
   countEvents(id: SessionId): number;
   removeSession(id: SessionId): void;
-  close(): void;
+  /** Persists every write still queued, then releases the index. */
+  close(): Promise<void>;
+}
+
+/**
+ * Where the session index's writes are made durable, behind the reads that are answered from memory.
+ *
+ * `persist` applies one batch, in order, as one transaction: all of it lands or none of it does. It may
+ * be asked to apply a batch it already applied — a thread presumed stuck can have committed before it
+ * was replaced — so every write must be idempotent on the disk side.
+ */
+export interface IndexPersister {
+  persist(writes: readonly IndexWrite[]): Promise<void>;
+  /** Checkpoints and closes the file. Nothing is persisted after it. */
+  close(): Promise<void>;
 }
 
 export interface SessionIndexFactory {
