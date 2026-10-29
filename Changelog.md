@@ -1,3 +1,9 @@
+## [4.105.4](https://github.com/kirinnee/ferretry/compare/v4.105.3...v4.105.4) (2026-10-29)
+
+### Fixes
+
+* **fleet:** keep a valid default runtime when copying settings ([#887](https://github.com/kirinnee/ferretry/issues/887)) ([7a81ac2](https://github.com/kirinnee/ferretry/commit/7a81ac2b5d7d0c8cb116c6ff7192530fb5cf3d86))
+
 ## [4.105.3](https://github.com/kirinnee/ferretry/compare/v4.105.2...v4.105.3) (2026-10-29)
 
 ### Fixes
