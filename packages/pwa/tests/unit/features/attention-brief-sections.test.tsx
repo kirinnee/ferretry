@@ -26,6 +26,16 @@ describe('the brief sections', () => {
     expect(section.textContent).toContain('SQLite — No server to run.');
   });
 
+  test('leave a lone question out where the card already draws the ask, and keep several', async () => {
+    const lone = { ...item, questions: [{ question: 'Which database should hold the board?' }] };
+    view = await mount(<AttentionBriefSections askShown item={lone} renderProse={text => text} />);
+    expect(must(view.container, 'view').querySelector('[data-attention-section="questions"]')).toBeNull();
+    await view.unmount();
+    const several = { ...item, questions: [{ question: 'Which day?' }, { question: 'Who announces it?' }] };
+    view = await mount(<AttentionBriefSections askShown item={several} renderProse={text => text} />);
+    expect(must(view.container, 'view').querySelector('[data-attention-section="questions"]')).not.toBeNull();
+  });
+
   test('leave the recommendation out where the card draws it under its ask', async () => {
     view = await mount(<AttentionBriefSections item={item} renderProse={text => text} showRecommendation={false} />);
     expect(recommendationOf(must(view.container, 'view'))).toBeNull();

@@ -14,7 +14,13 @@
  */
 
 import type { AttentionItem } from '@ferretry/protocol';
-import { attentionTitle, DEFAULT_ANSWER_LABELS, hasOwnTitle, unswipedChoices } from '@ferretry/protocol';
+import {
+  attentionTitle,
+  DEFAULT_ANSWER_LABELS,
+  hasOwnTitle,
+  singleAttentionQuestion,
+  unswipedChoices,
+} from '@ferretry/protocol';
 import { ArrowRight } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
@@ -119,7 +125,14 @@ export function AttentionCard({
   // repeat its first words above it. (A push still cuts one, to fit a lock screen: `attentionTitle`.)
   const title = hasOwnTitle(item) ? attentionTitle(item) : item.subject.trim();
   const showAsk = item.subject.trim() !== title;
-  const recommendation = item.recommendation;
+  // `fy attention add --recommend` puts a lone question's pick ON the question: the card says it under the
+  // ask all the same, so the banner never depends on where the ferret wrote it.
+  const lone = singleAttentionQuestion(item);
+  const recommendation =
+    item.recommendation ??
+    (lone?.recommended === undefined
+      ? undefined
+      : { decision: lone.recommended, ...(lone.why === undefined ? {} : { why: lone.why }) });
   const hasDismissAnswer = answers.some(answer => answer.does === 'dismiss');
   const ferret = origin?.ferret ?? 'the ferret';
   const focusRequests = (draft?.focusTick ?? 0) + localTick;
@@ -275,6 +288,7 @@ export function AttentionCard({
             expanded={!pinned}
             item={item}
             renderProse={renderProse}
+            askShown
             showRecommendation={false}
             {...(picker === undefined ? {} : { picker })}
           >

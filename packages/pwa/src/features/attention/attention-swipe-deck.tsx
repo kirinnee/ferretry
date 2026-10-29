@@ -50,6 +50,55 @@ import { ReplyDraftContext } from './attention-reply-draft.tsx';
 /** How long a committed card takes to leave. The answer is handed over at once; this is only the look. */
 const FLY_MS = 220;
 
+/** The least the top card is given, so a short screen still shows its head and its answer bar. */
+const MIN_ROOM_PX = 320;
+/** Breathing room under the card, beyond the peeking cards' own padding. */
+const ROOM_MARGIN_PX = 8;
+
+/**
+ * How tall the top card may be: from the deck's top edge to the bottom of what the reader can see,
+ * less whatever the host draws under the deck (the inbox's hint) and the peeks' padding — never less
+ * than {@link MIN_ROOM_PX}. Pure, so the arithmetic is proved without a layout engine.
+ */
+export const deckRoom = (deckTop: number, visibleBottom: number, below: number, peekPadding: number): number =>
+  Math.max(MIN_ROOM_PX, Math.floor(visibleBottom - deckTop - below - peekPadding - ROOM_MARGIN_PX));
+
+/** The bottom edge of what the reader can see of `element`: its nearest scrolling ancestor, else the window. */
+const visibleBottomOf = (element: HTMLElement): number => {
+  for (let parent = element.parentElement; parent !== null; parent = parent.parentElement) {
+    const overflow = getComputedStyle(parent).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return parent.getBoundingClientRect().bottom;
+  }
+  return window.visualViewport?.height ?? window.innerHeight;
+};
+
+/** The room a mounted deck has, read off the layout. */
+const roomOf = (element: HTMLElement): number => {
+  const below = element.nextElementSibling?.getBoundingClientRect().height ?? 0;
+  const padding = Number.parseFloat(getComputedStyle(element).paddingBottom) || 0;
+  return deckRoom(element.getBoundingClientRect().top, visibleBottomOf(element), below, padding);
+};
+
+/**
+ * The room the deck has, measured, as the `--deck-room` its top card is capped by — so the card's
+ * detail grows into the screen it has rather than a guess at it. Re-measured when the window resizes
+ * and when a new card comes on top.
+ */
+const useDeckRoom = (deck: { readonly current: HTMLDivElement | null }, topKey: string | undefined): number | null => {
+  const [room, setRoom] = useState<number | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a new card on top is a reason to measure again
+  useEffect(() => {
+    const measure = (): void => {
+      const element = deck.current;
+      if (element !== null) setRoom(roomOf(element));
+    };
+    measure();
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [topKey]);
+  return room;
+};
+
 /** How many cards peek out behind the top one. */
 const PEEKS = 2;
 
@@ -189,6 +238,7 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
   const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item, replyText);
 
   const topKey = top?.key;
+  const room = useDeckRoom(deck, topKey);
   // A new card on top starts with no drag and no reply — the old one's must never carry over — and
   // takes the focus the card it replaced had.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the card on top changing is the only trigger
@@ -289,7 +339,13 @@ export function AttentionSwipeDeck({ cards, renderCard, onAct, reducedMotion }: 
   const peeks = cards.slice(1, 1 + PEEKS);
 
   return (
-    <div className="fy-attn-deck" data-attention-deck="" data-reduced-motion={reduced || undefined} ref={deck}>
+    <div
+      className="fy-attn-deck"
+      data-attention-deck=""
+      data-reduced-motion={reduced || undefined}
+      ref={deck}
+      style={room === null ? undefined : ({ '--deck-room': `${room}px` } as CSSProperties)}
+    >
       {peeks
         .map((card, index) => (
           <div aria-hidden="true" className="fy-attn-deck__peek" data-depth={index + 1} inert key={card.key}>

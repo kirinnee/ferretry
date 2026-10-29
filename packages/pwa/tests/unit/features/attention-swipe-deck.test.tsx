@@ -5,6 +5,7 @@ import {
 } from '../../../src/features/attention/attention-inbox-page.tsx';
 import {
   attentionKeyDirection,
+  deckRoom,
   dragOffset,
   swipeKeyHint,
 } from '../../../src/features/attention/attention-swipe-deck.tsx';
@@ -460,6 +461,33 @@ describe('AttentionInboxPage on a phone: the swipe deck', () => {
     card.focus();
     await interact(() => pressKey(card, 'ArrowUp'));
     expect(pendingActions(fake)).toMatchObject([{ label: 'Wait', note: 'note' }]);
+    await mounted.unmount();
+  });
+});
+
+describe('the room the top card is given', () => {
+  it('is everything from the deck down to the bottom of the screen, less what sits under it', () => {
+    expect(deckRoom(300, 1600, 60, 22)).toBe(1210);
+    // Never so little that the head and the answer bar cannot both show.
+    expect(deckRoom(900, 1000, 60, 22)).toBe(320);
+  });
+
+  it('is measured against the window when nothing around the deck scrolls, and again on a resize', async () => {
+    const mounted = await mount(deckPage(fakeInbox(), [threeWay]));
+    const deck = must(mounted.container.querySelector<HTMLElement>('[data-attention-deck]'), 'the deck');
+    const room = Number.parseFloat(deck.style.getPropertyValue('--deck-room'));
+    expect(room).toBeGreaterThanOrEqual(320);
+    await interact(() => window.dispatchEvent(new Event('resize')));
+    expect(Number.parseFloat(deck.style.getPropertyValue('--deck-room'))).toBe(room);
+    await mounted.unmount();
+  });
+
+  it('is measured against the nearest scrolling ancestor when there is one', async () => {
+    const mounted = await mount(
+      <div style={{ overflowY: 'auto', height: 400 }}>{deckPage(fakeInbox(), [threeWay])}</div>,
+    );
+    const deck = must(mounted.container.querySelector<HTMLElement>('[data-attention-deck]'), 'the deck');
+    expect(deck.style.getPropertyValue('--deck-room')).toMatch(/^\d+px$/u);
     await mounted.unmount();
   });
 });

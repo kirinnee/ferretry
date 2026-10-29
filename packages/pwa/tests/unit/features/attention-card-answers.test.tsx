@@ -76,6 +76,38 @@ describe('the card says what it is, at a glance', () => {
     expect(root.querySelector('[data-attention-ask]')).toBeNull();
   });
 
+  test('says a lone question’s recommendation under the ask, and does not repeat the question below', async () => {
+    const { root } = await card(
+      attentionItem('A1', {
+        title: 'Board database',
+        subject: 'Which database should keep the board’s finished items?',
+        ask: choices('SQLite', 'Postgres'),
+        questions: [
+          {
+            question: 'Which database should hold the board?',
+            options: [{ label: 'SQLite' }, { label: 'Postgres' }],
+            recommended: 'SQLite',
+            why: 'No server to run.',
+          },
+        ],
+      }),
+    );
+    expect(root.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite — No server to run.');
+    expect(root.querySelector('[data-attention-section="questions"]')).toBeNull();
+    expect(root.textContent).not.toContain('Which database should hold the board?');
+  });
+
+  test('still draws several questions, each answered on the card', async () => {
+    const { root } = await card(
+      attentionItem('A1', {
+        subject: 'Two things before the release',
+        ask: { kind: 'open-question' },
+        questions: [{ question: 'Which day should it ship?' }, { question: 'Who should announce it?' }],
+      }),
+    );
+    expect(root.querySelector('[data-attention-section="questions"]')).not.toBeNull();
+  });
+
   test('draws no empty sections for an item with no detail', async () => {
     const { root } = await card(attentionItem('A1', { subject: 'Heads up' }));
     expect(root.querySelectorAll('[data-attention-section]')).toHaveLength(0);

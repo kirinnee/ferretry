@@ -205,6 +205,12 @@ export interface AttentionBriefProps {
   readonly expanded?: boolean;
   /** The card already says its recommendation above the detail; drawing it again would be noise. */
   readonly showRecommendation?: boolean;
+  /**
+   * The card already draws the ask, the recommendation and the options as its answers: a LONE question
+   * would only say the ask again in other words, so its section is left out. Several questions, or one
+   * answered here (a picker), still draw.
+   */
+  readonly askShown?: boolean;
   /** Drawn right after Context: the body and steps, which read as the context's continuation. */
   readonly children?: ReactNode;
 }
@@ -216,11 +222,13 @@ export function AttentionBriefSections({
   picker,
   expanded = false,
   showRecommendation = true,
+  askShown = false,
   children,
 }: AttentionBriefProps) {
   const context = item.context?.trim() ? item.context : null;
-  const questions = item.questions ?? [];
-  const several = questions.length > 1;
+  const all = item.questions ?? [];
+  const several = all.length > 1;
+  const questions = askShown && !several && picker === undefined ? [] : all;
   return (
     <div className="fy-attn-secs">
       {context === null ? null : (

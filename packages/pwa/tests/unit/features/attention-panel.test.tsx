@@ -422,7 +422,7 @@ describe('AttentionPanel', () => {
     expect(calls.map(call => call.method)).toEqual(['dismiss']);
   });
 
-  test('Details on a rich item opens its brief with the first question open', async () => {
+  test('Details on a rich item opens its brief, with a lone question said once, under the ask', async () => {
     const rich = item('A3', {
       subject: 'Pick a database',
       why: 'Pick a database',
@@ -435,7 +435,8 @@ describe('AttentionPanel', () => {
     view = await mount(panel({ snapshot: board([rich]) }));
     const card = cardOf(must(view.container, 'view'), 'A3');
     await interact(() => must(card.querySelector<HTMLButtonElement>('[data-attention-details]'), 'details').click());
-    expect(card.querySelector('[data-attention-section="questions"]')?.hasAttribute('open')).toBe(true);
-    expect(card.querySelector('[data-attention-section="questions"]')?.textContent).toContain('Which one?');
+    expect(card.querySelector('[data-attention-section="context"]')?.textContent).toContain('We need storage.');
+    expect(card.querySelector('[data-attention-section="questions"]')).toBeNull();
+    expect(card.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite');
   });
 });
