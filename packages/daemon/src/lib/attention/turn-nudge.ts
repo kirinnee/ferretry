@@ -19,12 +19,12 @@ import { ownerAsks } from './owner-asks.ts';
  * - **Only replies the owner reads.** A sub-ferret's reply goes to the ferret that started it, which
  *   raises what the owner must do, so a session with a parent is never checked (Pack mode).
  * - **Evidence over inference.** The turn's own tool calls are what count as "raised": a command running
- *   `attention add|edit`, an `ask_owner` tool or the harness's question tool. A board change made by
+ *   `agenda add|edit` or `notify`, an `ask_owner` tool or the harness's question tool. A board change made by
  *   somebody else in the same seconds is not evidence that the ferret raised anything.
  *
- * The same check guards the living summary (docs/attention.md, "A card is a living summary"): when the
- * turn answered an owner reply about an ask IN DISCUSSION (`[reply about !A5 «title»] …`) and the ferret
- * neither edited, closed nor surfaced that ask during the turn, the one nudge says so
+ * The same check guards the living summary (docs/agenda.md, "A card is a living summary"): when the
+ * turn answered an owner message about items (`[re !A5 «title»] …`, the ferret's turn) and the ferret
+ * neither edited, closed nor surfaced one of them during the turn, the one nudge says so
  * (`discussionNudgeMessage`) — once per owner reply, and a turn the nudge started never gets another.
  *
  * Pure except {@link AttentionTurnNudge}, which reads and sends through its ports.
@@ -53,11 +53,11 @@ export interface FinishedTurn {
 }
 
 /**
- * A tool call that raises or edits an Attention item: a shell command running `attention add` / `edit`
+ * A tool call that raises, edits or notifies: a shell command running `agenda add` / `edit` / `notify`
  * (the CLI, under whatever binary name), a Ferretry `*_ask_owner` tool, or the harness's own question tool,
  * which the daemon raises as an item itself (`harness-prompt.ts`).
  */
-const RAISING_COMMAND = /\battention["',\s]+(?:add|edit)\b/u;
+const RAISING_COMMAND = /\b(?:(?:attention|agenda)["',\s]+(?:add|edit)|notify)\b/u;
 const RAISING_TOOL = /(?:^|_)ask_owner$|^AskUserQuestion$/u;
 
 const raises = (event: TranscriptEvent): boolean => {
@@ -67,18 +67,19 @@ const raises = (event: TranscriptEvent): boolean => {
   return RAISING_COMMAND.test(JSON.stringify(event.call.input));
 };
 
-/** The owner's reply about an ask in discussion, as the daemon words it for the ferret (conversation.ts). */
-const REPLY_ABOUT = /\[reply about !(A[1-9][0-9]*)\b/gu;
+/** The opener the daemon words for a chat message that names items: `[re !A5 «title», !A7 «title»] …` (conversation.ts). */
+const RE_OPENER = /^\s*\[re ((?:[^\]]|\](?!\s))*)\]/u;
+const RE_ID = /!(A[1-9][0-9]*)\b/gu;
 
-/** A command that edits, closes or surfaces the item: `attention edit|done|dismiss|surface` naming it. */
+/** A command that edits, closes or surfaces the item: `agenda edit|done|dismiss|surface` naming it. */
 const handles = (event: TranscriptEvent, id: string): boolean =>
   event.kind === 'tool-call' &&
-  new RegExp(`\\battention\\W+(?:edit|done|dismiss|surface)\\b.{0,400}?\\b!?${id}\\b`, 'u').test(
+  new RegExp(`\\b(?:attention|agenda)\\W+(?:edit|done|dismiss|surface)\\b.{0,400}?\\b!?${id}\\b`, 'u').test(
     JSON.stringify(event.call.input),
   );
 
 const discussedIn = (opener: string): string[] => [
-  ...new Set([...opener.matchAll(REPLY_ABOUT)].map(match => match[1] as string)),
+  ...new Set([...(RE_OPENER.exec(opener)?.[1] ?? '').matchAll(RE_ID)].map(match => match[1] as string)),
 ];
 
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
@@ -136,29 +137,34 @@ export interface NudgeSubject {
   readonly parent: boolean;
   /** An interactive ferret may also ask with its question tool; an auto one has none. */
   readonly mode: 'interactive' | 'auto';
+  /** Agenda mode is on for the session (its launch settings): the fix is an agenda item, else a notice. */
+  readonly agenda: boolean;
 }
 
 /** The words of one nudge. Short on purpose: it starts a turn. */
 export function attentionNudgeMessage(
   asks: readonly string[],
   raised: number,
-  mode: NudgeSubject['mode'],
+  subject: Pick<NudgeSubject, 'mode' | 'agenda'>,
   binary: string,
 ): string {
   const listed = asks.map(ask => `- ${ask}`).join('\n');
   const already = raised > 0 ? ` You raised ${raised} this turn; raise the rest.` : '';
+  if (!subject.agenda) {
+    return `${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n${listed}\nThe owner reads notifications, not every reply.${already} Send each as its own notice — \`${binary} notify "<summary>"\` — or, if it needs no owner, say why not in one line.`;
+  }
   const how =
-    mode === 'interactive'
-      ? `\`${binary} attention add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice), or your question tool`
-      : `\`${binary} attention add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice)`;
-  return `${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n${listed}\nThe owner reads the Attention board, not every reply.${already} Raise each as its own Attention item — ${how} — or, if an open item already covers it or it needs no owner, say why not in one line.`;
+    subject.mode === 'interactive'
+      ? `\`${binary} agenda add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice), or your question tool`
+      : `\`${binary} agenda add --title "<what>" "<the ask>" --step …\` (a to-do) or with \`--kind choice --option\` (a choice)`;
+  return `${ATTENTION_NUDGE_MARK} Your last reply asked the owner to:\n${listed}\nThe owner reads the agenda, not every reply.${already} Raise each as its own agenda item — ${how} — or, if an open item already covers it or it needs no owner, say why not in one line.`;
 }
 
-/** The words of the nudge for asks the ferret discussed and left as they were. Short on purpose. */
+/** The words of the nudge for items the owner wrote about and the ferret answered in chat only. Short on purpose. */
 export function discussionNudgeMessage(ids: readonly string[], binary: string): string {
   const named = ids.map(id => `!${id}`).join(', ');
   const first = ids[0] as string;
-  return `${ATTENTION_NUDGE_MARK} You discussed ${named} — update its card (\`${binary} attention edit ${first}\`: decided so far, still open, fresh options), surface it (\`${binary} attention surface ${first}\`) or close it (\`${binary} attention done ${first}\`).`;
+  return `${ATTENTION_NUDGE_MARK} The owner wrote about ${named} and it is your turn — update its card (\`${binary} agenda edit ${first}\`: decided so far, still open, fresh options), hand it back (\`${binary} agenda surface ${first}\`) or close it (\`${binary} agenda done ${first}\`).`;
 }
 
 /**
@@ -175,7 +181,7 @@ export function attentionNudge(
   const left = turn.discussed.filter(id => !turn.handled.includes(id));
   const asks = ownerAsks(turn.reply);
   const toRaise = asks.length > 0 && turn.raised < asks.length;
-  const raise = toRaise ? attentionNudgeMessage(asks, turn.raised, subject.mode, binary) : undefined;
+  const raise = toRaise ? attentionNudgeMessage(asks, turn.raised, subject, binary) : undefined;
   if (left.length === 0) return raise === undefined ? undefined : { asks, message: raise };
   const discussion = discussionNudgeMessage(left, binary);
   return {

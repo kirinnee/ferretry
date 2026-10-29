@@ -38,11 +38,11 @@ import { analyticsIdQuery } from '../../features/analytics/session-analytics-que
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import {
   type AttentionActionClient,
-  AttentionPanel,
-  type AttentionPanelFocus,
+  type AttentionFocus,
   attentionLedgerIds,
-  shownAttentionItem,
-} from '../../features/attention/attention-panel.tsx';
+  useAttentionAgenda,
+} from '../../features/attention/attention-agenda.tsx';
+import { useFinePointer } from '../../hooks/use-attention-flat.ts';
 import { AttentionRepliesNotice } from '../../features/attention/attention-replies-notice.tsx';
 import {
   ATTENTION_RESOLVED_ACTION_ID,
@@ -108,9 +108,9 @@ import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
-import { withAnswerPrefix } from '../answer-chip.ts';
+import { withReferencePrefix } from '../answer-chip.ts';
 import type { DaemonAttentionClient } from '../attention-client.ts';
-import { isInDiscussion, needsYouItems, unreadCount } from '../attention-inbox.ts';
+import { needsYouItems, unreadCount } from '../attention-inbox.ts';
 import type { AttentionLoadStatus } from '../attention-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
@@ -259,8 +259,7 @@ export interface SessionChatPageProps {
   readonly attentionReplies?: AttentionReplies;
   /**
    * The item the conversation was opened AT (`?attention=A3`, from a notification or an unread row):
-   * the Attention panel opens, scrolls to it and rings it. A new value re-targets; a session change
-   * forgets it. Absent or `null`, the panel starts folded.
+   * the agenda opens that item's full card. A new value re-targets; a session change forgets it.
    */
   readonly attentionTarget?: AttentionId | null;
   /**
@@ -513,19 +512,14 @@ export function SessionChatPage({
   );
   const skills = useSessionSkills(connection, scope, referenceFetch);
   const attentionId = useId();
-  // THE ATTENTION PANEL'S TWO FACTS: whether it is unfolded, and the latest request to be shown
-  // somewhere in it (a `?attention=` link, a `!A3` click, the header's count). Both belong to this
-  // session and reset with it.
-  const [attentionSelected, setAttentionSelected] = useState<AttentionId | null>(null);
-  const [answerChipOn, setAnswerChipOn] = useState(true);
-  const [attentionFocus, setAttentionFocus] = useState<AttentionPanelFocus | null>(null);
+  // THE LATEST REQUEST TO SHOW ONE ITEM (a `?attention=` link, a `!A3` click): the agenda opens its card.
+  // It belongs to this session and resets with it.
+  const [attentionFocus, setAttentionFocus] = useState<AttentionFocus | null>(null);
   const showAttention = useCallback((target: AttentionId | null): void => {
-    if (target !== null) setAttentionSelected(target);
     setAttentionFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
   }, []);
   // The resolved item a link named, so the list the header menu opens rings it. Cleared with the form.
   const [resolvedTarget, setResolvedTarget] = useState<AttentionId | null>(null);
-  const chipRef = useRef<{ id: AttentionId | null; on: boolean }>({ id: null, on: false });
   const openAttentionReference = useCallback((id: AttentionId): void => showAttention(id), [showAttention]);
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
   const entriesRef = useRef(entries);
@@ -621,7 +615,7 @@ export function SessionChatPage({
         // it anywhere to go, and an opener alone would link an unproved id — so
         // a host that has not subscribed leaves the token as prose, which the
         // reference standard calls the only honest state. A proved click opens
-        // the Attention panel at that item.
+        // the agenda's card for that item.
         ...(attention === undefined ? {} : { onAttentionOpen: openAttentionReference }),
       }),
     [
@@ -675,11 +669,9 @@ export function SessionChatPage({
     setPendingAction(null);
     setActionError(null);
     setActionNotice(null);
-    // Attention belongs to the session that raised it. Carrying an unfolded
-    // panel — or worse, a requested `!A3` — across a navigation would ring one
-    // session's id on another session's board, so both reset with the pairing
-    // and the session id.
-    setAttentionSelected(null);
+    // An agenda belongs to the session that raised it. Carrying a requested `!A3` across a navigation
+    // would open one session's id on another session's board, so it resets with the pairing and the
+    // session id.
     setAttentionFocus(null);
     setResolvedTarget(null);
   }, [connection, session.config.id]);
@@ -1089,6 +1081,36 @@ export function SessionChatPage({
     setResolvedTarget(id);
     setActionForm(ATTENTION_RESOLVED_ACTION_ID);
   }, []);
+  const finePointer = useFinePointer();
+  const wide = formFactor === 'desktop' && finePointer;
+  const agendaMode = attention !== undefined && session.state.attention?.agendaMode === true;
+  const agenda = useAttentionAgenda({
+    agendaMode,
+    client: attention?.client,
+    connection,
+    desktop: wide,
+    ferret: sessionDisplayName(session),
+    focus: attentionFocus,
+    onOpenResolved: openResolved,
+    repliesSlot:
+      attentionReplies === undefined ||
+      (attentionReplies.secondsLeft === null &&
+        !attentionReplies.heldForTurn &&
+        !attentionReplies.heldForComposer) ? undefined : (
+        <AttentionRepliesNotice
+          ferret={sessionDisplayName(session)}
+          heldForComposer={attentionReplies.heldForComposer}
+          heldForTurn={attentionReplies.heldForTurn}
+          onSendNow={attentionReplies.sendNow}
+          secondsLeft={attentionReplies.secondsLeft}
+          sending={attentionReplies.sending}
+        />
+      ),
+    scope,
+    snapshot: attention?.snapshot ?? null,
+    status: attention?.status ?? 'idle',
+    swipeable: !finePointer,
+  });
   const changeActionForm = useCallback((next: string | null): void => {
     setActionForm(next);
     if (next !== ATTENTION_RESOLVED_ACTION_ID) setResolvedTarget(null);
@@ -1290,6 +1312,7 @@ export function SessionChatPage({
                 healthy, a word and Reconnect once it is not — on a phone too, which is where a screen
                 lock or a Wi-Fi roam most often drops the socket. */}
             {liveStream === undefined ? null : <LiveStreamIndicator {...liveStream} compact={compact} quiet />}
+            {agenda.dockButton}
           </>
         }
         {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
@@ -1333,13 +1356,13 @@ export function SessionChatPage({
   );
   // The text column and the composer share one measure (`.kt-chat-surface`, styles/index.css); the
   // composer's row reserves the transcript scrollbar's width so both centre on one axis.
-  const shownAttention = shownAttentionItem(attention?.snapshot ?? null, attentionSelected);
-  // An item in discussion waits on its ferret: the next message is never offered as its answer.
-  chipRef.current = {
-    id: shownAttention === undefined || isInDiscussion(shownAttention) ? null : shownAttention.id,
-    on: answerChipOn,
-  };
-  const composerClient = useMemo(() => withAnswerPrefix(client, () => chipRef.current), [client]);
+  const { references: agendaReferences, composer: agendaComposer } = agenda;
+  const agendaSent = agendaComposer.onSent;
+  const onSentWithAgenda = useCallback(() => {
+    agendaSent();
+    onSent();
+  }, [agendaSent, onSent]);
+  const composerClient = useMemo(() => withReferencePrefix(client, agendaReferences), [client, agendaReferences]);
   const chat = (
     <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
       {/* A zero-height row, so the pill overlays the top of the transcript without moving a line of it. */}
@@ -1367,40 +1390,13 @@ export function SessionChatPage({
           {...(readingPosition === undefined ? {} : { readingPosition })}
           sessionId={session.config.id}
         />
+        {agenda.card}
       </div>
       <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
         <div className="fy-chat-input__column">
-          {/* THE PINNED ASK, above the composer: the open item as a block, always visible. Keyed on the
-              scope, so a card busy state or refusal never survives into another session. */}
-          {attention === undefined ? null : (
-            <AttentionPanel
-              chip={{ on: answerChipOn, onChange: setAnswerChipOn }}
-              client={attention.client}
-              connection={connection}
-              ferret={sessionDisplayName(session)}
-              focus={attentionFocus}
-              id={attentionId}
-              repliesSlot={
-                attentionReplies === undefined ? undefined : (
-                  <AttentionRepliesNotice
-                    ferret={sessionDisplayName(session)}
-                    heldForComposer={attentionReplies.heldForComposer}
-                    heldForTurn={attentionReplies.heldForTurn}
-                    onSendNow={attentionReplies.sendNow}
-                    secondsLeft={attentionReplies.secondsLeft}
-                    sending={attentionReplies.sending}
-                  />
-                )
-              }
-              key={`${connection.daemonId}:${session.config.id}`}
-              onOpenResolved={openResolved}
-              onSelect={setAttentionSelected}
-              scope={scope}
-              selectedId={attentionSelected}
-              snapshot={attention.snapshot}
-              status={attention.status}
-            />
-          )}
+          {/* THE AGENDA: the drawer, the line and the "re:" chips, all siblings above the composer, so the
+              composer's own box never moves. */}
+          {agenda.above}
           {permissionRequest === undefined || !canControl ? null : (
             <ApprovalCard
               agentName={sessionDisplayName(session)}
@@ -1471,7 +1467,9 @@ export function SessionChatPage({
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-              onSent={onSent}
+              onDraftChange={agenda.composer.onDraftChange}
+              clearSignal={agenda.composer.clearSignal}
+              onSent={onSentWithAgenda}
               connectionLive={connectionState?.kind === 'connected'}
               quota={quota}
               sessionId={session.config.id}
@@ -1485,6 +1483,17 @@ export function SessionChatPage({
       </div>
     </div>
   );
+
+  // The wrapper stays for as long as the agenda can dock, so docking never remounts the conversation.
+  const chatWithAgenda =
+    wide && agendaMode ? (
+      <div className="fy-agenda-split">
+        {chat}
+        {agenda.side}
+      </div>
+    ) : (
+      chat
+    );
 
   return (
     // Every Markdown reader inside the conversation — transcript prose, notices, file previews in the
@@ -1511,7 +1520,9 @@ export function SessionChatPage({
                 // The in-app browser host around the chat: under Settings › Appearance › "Open links in" ›
                 // Ferretry side panel, a tapped link opens BESIDE the conversation on a desktop, and as a
                 // sheet over it on a tablet or phone, where two columns would leave the chat unreadable.
-                chat={<InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chat}</InAppBrowserWorkspace>}
+                chat={
+                  <InAppBrowserWorkspace compact={formFactor !== 'desktop'}>{chatWithAgenda}</InAppBrowserWorkspace>
+                }
                 connection={connection}
                 driving={driving}
                 formFactor={formFactor}

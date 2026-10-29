@@ -194,7 +194,7 @@ describe('attention writing lint: premise and isolation', () => {
 
     should(actual).have.length(1);
     should(actual[0]).match(/^a reader opening this cold cannot tell what is going on — add --premise points/u);
-    should(actual[0]).match(/attention edit <id> --premise/u);
+    should(actual[0]).match(/agenda edit <id> --premise/u);
   });
 
   it('should warn for each kind of decision: permission, choice, yes/no, open question and questions', () => {

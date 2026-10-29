@@ -5,6 +5,7 @@ import {
   type AttentionSnapshot,
   attentionCardAnswers,
   attentionInDiscussion,
+  attentionTurn,
   hasOwnTitle,
   type ResolvedAttentionItem,
   unswipedChoices,
@@ -85,18 +86,31 @@ function itemLines(item: AttentionItem): string[] {
   if (item.stillOpen !== undefined && item.stillOpen.trim() !== '') {
     lines.push(`${INDENT}still open: ${compact(item.stillOpen)}`);
   }
-  lines.push(...briefLines(item), ...instructionLines(item));
+  lines.push(...agendaLines(item), ...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
   lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
-  if (attentionInDiscussion(item)) {
+  if (item.notice === true) {
+    lines.push(`${INDENT}notice: read, not answered${item.ping === true ? ' (pinged)' : ''}`);
+  } else if (attentionInDiscussion(item)) {
     lines.push(
-      `${INDENT}in discussion: not on the owner's queue yet, talk it through in chat ${item.askedAt ?? ''}`.trimEnd(),
+      `${INDENT}ferret's turn: the owner wrote about this — \`agenda edit\` it, \`agenda surface\` it back, or \`agenda done\` it ${item.askedAt ?? ''}`.trimEnd(),
     );
   } else if (item.waitingOn !== undefined) {
-    lines.push(`${INDENT}waiting on the ferret: more information asked ${item.askedAt ?? ''}`.trimEnd());
+    lines.push(`${INDENT}ferret's turn: more information asked ${item.askedAt ?? ''}`.trimEnd());
+  } else if (attentionTurn(item) === 'owner') {
+    lines.push(`${INDENT}owner's turn`);
   }
   return lines;
+}
+
+/** What the item blocks: stopped now, a named thing, and when it is needed — each only when set. */
+function agendaLines(item: AttentionItem): string[] {
+  return [
+    ...(item.blockingNow === true ? [`${INDENT}blocking now: the ferret is stopped until this is answered`] : []),
+    ...(item.willBlock === undefined ? [] : [`${INDENT}will block: ${compact(item.willBlock, SHORT_WIDTH)}`]),
+    ...(item.neededBy === undefined ? [] : [`${INDENT}needed by: ${item.neededBy}`]),
+  ];
 }
 
 /** The structured brief, one line per part: questions, the recommendation, the stakes, terms and links. */
@@ -160,18 +174,18 @@ function parseErrorWarning(snapshot: AttentionSnapshot): string | undefined {
   return `Warning: ${entries} on this board could not be read; the list below may be incomplete.`;
 }
 
-/** The unresolved board as a human reads it. */
+/** The unresolved agenda as a human reads it. */
 export function renderAttentionList(snapshot: AttentionSnapshot): string {
   const warning = parseErrorWarning(snapshot);
   const preamble = warning === undefined ? [] : [warning];
-  if (snapshot.items.length === 0) return [...preamble, 'Nothing needs attention.'].join('\n');
+  if (snapshot.items.length === 0) return [...preamble, 'Nothing on the agenda.'].join('\n');
 
   const header = `${pluralItems(snapshot.count)} in ${snapshot.sessionId} — oldest first`;
   const body = [...snapshot.items].sort(oldestFirst).flatMap(itemLines);
   return [...preamble, header, ...body].join('\n');
 }
 
-/** One item as `attention show` prints it: the open item's full brief, or the line its resolution left. */
+/** One item as `agenda show` prints it: the open item's full brief, or the line its resolution left. */
 export function renderAttentionItem(item: AttentionItem | ResolvedAttentionItem): string {
   return 'resolvedAt' in item ? resolutionLine(item) : itemLines(item).join('\n');
 }
@@ -223,11 +237,11 @@ function enrolmentWarning(enrolled: number | undefined): string[] {
 
 /**
  * The daemon's advice on how the item reads. Never a refusal — the owner has already been told — so it
- * says what to change and how: reword it with `attention edit`.
+ * says what to change and how: reword it with `agenda edit`.
  */
 function writingAdvice(warnings: readonly string[] | undefined, id: AttentionId | undefined): string[] {
   if (warnings === undefined || warnings.length === 0) return [];
-  const fix = id === undefined ? 'attention edit <id>' : `attention edit ${attentionReference(id)}`;
+  const fix = id === undefined ? 'agenda edit <id>' : `agenda edit ${attentionReference(id)}`;
   return [
     `Reads hard for someone who hasn't followed — fix it with \`${fix}\`:`,
     ...warnings.map(warning => `  - ${warning}`),

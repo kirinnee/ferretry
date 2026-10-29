@@ -28,8 +28,8 @@ function run(argv: string[], result = board) {
 describe('attention command surface', () => {
   it('should refuse a first word that is not a verb, and raise nothing', async () => {
     // Arrange + Act — `fy attention show A6` once raised a real item "show A6" and notified the owner.
-    const mistyped = run(['attention', 'frobnicate', 'A6'], afterAdd);
-    const sentence = run(['attention', 'pick', 'a', 'cluster'], afterAdd);
+    const mistyped = run(['agenda', 'frobnicate', 'A6'], afterAdd);
+    const sentence = run(['agenda', 'pick', 'a', 'cluster'], afterAdd);
 
     // Assert
     await should(mistyped.parsed).be.rejectedWith(
@@ -43,24 +43,24 @@ describe('attention command surface', () => {
 
   it('should name the add verb as the way to raise an item when a word is refused', async () => {
     // Arrange + Act
-    const { parsed } = run(['attention', 'approve', 'the', 'deploy']);
+    const { parsed } = run(['agenda', 'approve', 'the', 'deploy']);
 
     // Assert
-    await should(parsed).be.rejectedWith(/attention add --title "<what>" "<the ask>"/u);
+    await should(parsed).be.rejectedWith(/agenda add --title "<what>" "<the ask>"/u);
   });
 
   it('should refuse a bare `attention` rather than raise an empty item', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention']);
+    const { parsed, gateway } = run(['agenda']);
 
     // Assert
-    await should(parsed).be.rejectedWith(/attention needs a command\. Did you mean: add/u);
+    await should(parsed).be.rejectedWith(/agenda needs a command\. Did you mean: add/u);
     should(gateway.applied).be.empty();
   });
 
   it('should refuse a mistyped verb even when flags follow it', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'raise', 'the deploy', '--kind', 'permission'], afterAdd);
+    const { parsed, gateway } = run(['agenda', 'raise', 'the deploy', '--kind', 'permission'], afterAdd);
 
     // Assert
     await should(parsed).be.rejected();
@@ -69,7 +69,7 @@ describe('attention command surface', () => {
 
   it('should print one open item in full on show, without writing anything', async () => {
     // Arrange + Act
-    const { parsed, gateway, out } = run(['attention', 'show', 'A1']);
+    const { parsed, gateway, out } = run(['agenda', 'show', 'A1']);
     await parsed;
 
     // Assert
@@ -81,9 +81,9 @@ describe('attention command surface', () => {
 
   it('should print a resolved item on show, accepting a sigil-less or ?-prefixed reference', async () => {
     // Arrange + Act
-    const bang = run(['attention', 'show', '!A9']);
+    const bang = run(['agenda', 'show', '!A9']);
     await bang.parsed;
-    const question = run(['attention', 'show', '?A9']);
+    const question = run(['agenda', 'show', '?A9']);
     await question.parsed;
 
     // Assert
@@ -93,7 +93,7 @@ describe('attention command surface', () => {
 
   it('should print the item itself as JSON on show --json', async () => {
     // Arrange + Act
-    const { parsed, out } = run(['attention', 'show', 'A1', '--json']);
+    const { parsed, out } = run(['agenda', 'show', 'A1', '--json']);
     await parsed;
 
     // Assert
@@ -102,16 +102,16 @@ describe('attention command surface', () => {
 
   it('should say so when show names an item the board does not hold', async () => {
     // Arrange + Act
-    const { parsed, out } = run(['attention', 'show', 'A404']);
+    const { parsed, out } = run(['agenda', 'show', 'A404']);
 
     // Assert
-    await should(parsed).be.rejectedWith(/no attention item !A404 in /u);
+    await should(parsed).be.rejectedWith(/no agenda item !A404 in /u);
     should(out.messages).be.empty();
   });
 
   it('should accept the explicit add verb', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'add', 'pick a cluster', '--title', 'Pick a cluster'], afterAdd);
+    const { parsed, gateway } = run(['agenda', 'add', 'pick a cluster', '--title', 'Pick a cluster'], afterAdd);
     await parsed;
 
     // Assert
@@ -121,7 +121,7 @@ describe('attention command surface', () => {
   it('should collect repeated --option into a choice ask', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['attention', 'add', 'which cluster', '--title', 'Cluster', '--option', 'staging', '--option', 'prod'],
+      ['agenda', 'add', 'which cluster', '--title', 'Cluster', '--option', 'staging', '--option', 'prod'],
       afterAdd,
     );
     await parsed;
@@ -141,7 +141,7 @@ describe('attention command surface', () => {
     // Arrange + Act
     const { parsed, gateway } = run(
       [
-        'attention',
+        'agenda',
         'add',
         'approve the deploy',
         '--title',
@@ -172,7 +172,7 @@ describe('attention command surface', () => {
     // Arrange + Act
     const { parsed, gateway } = run(
       [
-        'attention',
+        'agenda',
         'add',
         'choose',
         '-t',
@@ -200,9 +200,9 @@ describe('attention command surface', () => {
 
   it('should list unresolved items on ls and its alias', async () => {
     // Arrange + Act
-    const first = run(['attention', 'ls']);
+    const first = run(['agenda', 'ls']);
     await first.parsed;
-    const second = run(['attention', 'list']);
+    const second = run(['agenda', 'list']);
     await second.parsed;
 
     // Assert
@@ -212,9 +212,9 @@ describe('attention command surface', () => {
 
   it('should show the audit on history and its alias', async () => {
     // Arrange + Act
-    const first = run(['attention', 'history']);
+    const first = run(['agenda', 'history']);
     await first.parsed;
-    const second = run(['attention', 'resolved']);
+    const second = run(['agenda', 'resolved']);
     await second.parsed;
 
     // Assert
@@ -224,9 +224,9 @@ describe('attention command surface', () => {
 
   it('should resolve with a reference and an answer flag in either order', async () => {
     // Arrange + Act — kteam needed a recovery hack because its own parser swallowed the id here.
-    const before = run(['attention', 'done', '--approve', '!A1'], snapshot([]));
+    const before = run(['agenda', 'done', '--approve', '!A1'], snapshot([]));
     await before.parsed;
-    const after = run(['attention', 'done', '!A1', '--approve'], snapshot([]));
+    const after = run(['agenda', 'done', '!A1', '--approve'], snapshot([]));
     await after.parsed;
 
     // Assert
@@ -240,7 +240,7 @@ describe('attention command surface', () => {
 
   it('should keep the reference when a value-taking flag precedes it', async () => {
     // Arrange + Act — `done --note x !A1` was broken in the source: the note swallowed the id.
-    const { parsed, gateway } = run(['attention', 'done', '--note', 'shipped', '!A1'], snapshot([]));
+    const { parsed, gateway } = run(['agenda', 'done', '--note', 'shipped', '!A1'], snapshot([]));
     await parsed;
 
     // Assert
@@ -249,7 +249,7 @@ describe('attention command surface', () => {
 
   it('should accept resolve as an alias of done', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'resolve', 'A1', '--good'], snapshot([]));
+    const { parsed, gateway } = run(['agenda', 'resolve', 'A1', '--good'], snapshot([]));
     await parsed;
 
     // Assert
@@ -258,15 +258,15 @@ describe('attention command surface', () => {
 
   it('should carry every answer flag', async () => {
     // Arrange + Act
-    const choice = run(['attention', 'done', 'A1', '--choice', 'staging'], snapshot([]));
+    const choice = run(['agenda', 'done', 'A1', '--choice', 'staging'], snapshot([]));
     await choice.parsed;
-    const clarify = run(['attention', 'done', 'A1', '--clarify', 'which one?'], snapshot([]));
+    const clarify = run(['agenda', 'done', 'A1', '--clarify', 'which one?'], snapshot([]));
     await clarify.parsed;
-    const answer = run(['attention', 'done', 'A1', '--answer', 'use staging'], snapshot([]));
+    const answer = run(['agenda', 'done', 'A1', '--answer', 'use staging'], snapshot([]));
     await answer.parsed;
-    const reject = run(['attention', 'done', 'A1', '--reject'], snapshot([]));
+    const reject = run(['agenda', 'done', 'A1', '--reject'], snapshot([]));
     await reject.parsed;
-    const other = run(['attention', 'done', 'A1', '--other', 'neither of those'], snapshot([]));
+    const other = run(['agenda', 'done', 'A1', '--other', 'neither of those'], snapshot([]));
     await other.parsed;
 
     // Assert
@@ -279,16 +279,19 @@ describe('attention command surface', () => {
 
   it('should dismiss with a note', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'dismiss', 'A1', '-n', 'stale'], snapshot([]));
+    const { parsed, gateway } = run(['agenda', 'dismiss', 'A1', '-n', 'stale'], snapshot([]));
     await parsed;
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'dismiss', id: 'A1', note: 'stale' });
   });
 
-  it('should raise an info item for a notification', async () => {
+  it('should raise a notice for a notification', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'notify', 'the', 'build', 'is', 'green', '-t', 'CI'], afterAdd);
+    const { parsed, gateway } = run(
+      ['attention', 'notify', 'the', 'build', 'is', 'green', '-t', 'CI', '--ping'],
+      afterAdd,
+    );
     await parsed;
 
     // Assert
@@ -297,6 +300,8 @@ describe('attention command surface', () => {
       kind: 'info',
       title: 'CI',
       subject: 'the build is green',
+      notice: true,
+      ping: true,
     });
   });
 
@@ -311,9 +316,9 @@ describe('attention command surface', () => {
 
   it('should honour --session on the group and on the subcommand', async () => {
     // Arrange + Act
-    const onGroup = run(['attention', '--session', 'elsewhere', 'ls']);
+    const onGroup = run(['agenda', '--session', 'elsewhere', 'ls']);
     await onGroup.parsed;
-    const onSubcommand = run(['attention', 'ls', '--session', 'elsewhere']);
+    const onSubcommand = run(['agenda', 'ls', '--session', 'elsewhere']);
     await onSubcommand.parsed;
 
     // Assert
@@ -323,7 +328,7 @@ describe('attention command surface', () => {
 
   it('should honour --json', async () => {
     // Arrange + Act
-    const { parsed, out } = run(['attention', 'ls', '--json']);
+    const { parsed, out } = run(['agenda', 'ls', '--json']);
     await parsed;
 
     // Assert
@@ -332,16 +337,16 @@ describe('attention command surface', () => {
 
   it('should surface a controller failure as a rejection the composition root can report', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'done', 'not-a-reference']);
+    const { parsed, gateway } = run(['agenda', 'done', 'not-a-reference']);
 
     // Assert
-    await should(parsed).be.rejectedWith(/is not an attention reference/u);
+    await should(parsed).be.rejectedWith(/is not an agenda reference/u);
     should(gateway.applied).be.empty();
   });
 
   it('should reject done without a reference', async () => {
     // Arrange + Act
-    const { parsed } = run(['attention', 'done']);
+    const { parsed } = run(['agenda', 'done']);
 
     // Assert
     await should(parsed).be.rejected();
@@ -361,7 +366,7 @@ describe('attention command surface', () => {
     registerAttentionCommands(program, new AttentionController(gateway, new CapturingOutput(), SESSION));
 
     // Act
-    await should(program.parseAsync(['node', 'fy', 'attention', '--help'])).be.rejected();
+    await should(program.parseAsync(['node', 'fy', 'agenda', '--help'])).be.rejected();
 
     // Assert — the reader of an attention item has not been following the session; the help says so.
     should(help).containEql('The reader has NOT been following this session');
@@ -381,7 +386,7 @@ describe('attention command surface', () => {
     registerAttentionCommands(program, new AttentionController(gateway, new CapturingOutput(), SESSION));
 
     // Act
-    await should(program.parseAsync(['node', 'fy', 'attention', '--help'])).be.rejected();
+    await should(program.parseAsync(['node', 'fy', 'agenda', '--help'])).be.rejected();
 
     // Assert — items never time out on their own, but must not outlive their reason. Answering or
     // dismissing on the board already resolves it; a blocker cleared some other way still needs the
@@ -407,7 +412,7 @@ describe('attention command surface', () => {
     registerAttentionCommands(program, new AttentionController(gateway, new CapturingOutput(), SESSION));
 
     // Act
-    await should(program.parseAsync(['node', 'fy', 'attention', 'add', '--help'])).be.rejected();
+    await should(program.parseAsync(['node', 'fy', 'agenda', 'add', '--help'])).be.rejected();
 
     // Assert
     should(help).containEql('--kind says what the human DOES');
@@ -428,11 +433,11 @@ describe('attention command surface', () => {
     );
 
     // Act
-    await should(program.parseAsync(['node', 'fy', 'attention', 'dismiss', '--help'])).be.rejected();
+    await should(program.parseAsync(['node', 'fy', 'agenda', 'dismiss', '--help'])).be.rejected();
 
     // Assert
-    should(help).containEql('Agents may dismiss only attention items they raised themselves');
-    should(help).containEql('A human may dismiss any attention item');
+    should(help).containEql('Agents may dismiss only agenda items they raised themselves');
+    should(help).containEql('A human may dismiss any agenda item');
     should(help).containEql('Every dismissal remains in the resolution audit');
     should(help).match(/an agent may mutate only its own\s+session/u);
   });
@@ -442,7 +447,7 @@ describe('attention writing flags', () => {
   it('should collect repeated --context and --impact into bullet points on add', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['attention', 'add', 'pick', '-t', 'Pick', '-c', 'one', '-c', 'two', '--impact', 'blocks', '--impact', 'costs'],
+      ['agenda', 'add', 'pick', '-t', 'Pick', '-c', 'one', '-c', 'two', '--impact', 'blocks', '--impact', 'costs'],
       afterAdd,
     );
     await parsed;
@@ -454,25 +459,11 @@ describe('attention writing flags', () => {
   it('should collect repeated --premise and --decided into bullet points on add and edit', async () => {
     // Arrange + Act
     const added = run(
-      [
-        'attention',
-        'add',
-        'pick',
-        '-t',
-        'Pick',
-        '--premise',
-        'a',
-        '--premise',
-        'b',
-        '--decided',
-        'c',
-        '--decided',
-        'd',
-      ],
+      ['agenda', 'add', 'pick', '-t', 'Pick', '--premise', 'a', '--premise', 'b', '--decided', 'c', '--decided', 'd'],
       afterAdd,
     );
     await added.parsed;
-    const edited = run(['attention', 'edit', '!A1', '--premise', 'e', '--premise', 'f', '--decided', 'g']);
+    const edited = run(['agenda', 'edit', '!A1', '--premise', 'e', '--premise', 'f', '--decided', 'g']);
     await edited.parsed;
 
     // Assert
@@ -488,11 +479,11 @@ describe('attention writing flags', () => {
   it('should collect repeated --still-open into bullet points on add and edit', async () => {
     // Arrange + Act
     const added = run(
-      ['attention', 'add', 'pick', '-t', 'Pick', '--still-open', 'rollback plan', '--still-open', 'who signs'],
+      ['agenda', 'add', 'pick', '-t', 'Pick', '--still-open', 'rollback plan', '--still-open', 'who signs'],
       afterAdd,
     );
     await added.parsed;
-    const edited = run(['attention', 'edit', '!A1', '--still-open', 'who signs']);
+    const edited = run(['agenda', 'edit', '!A1', '--still-open', 'who signs']);
     await edited.parsed;
 
     // Assert
@@ -502,7 +493,7 @@ describe('attention writing flags', () => {
 
   it('should reword an item with edit', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'edit', '!A1', '--summary', 'Plain ask', '-c', 'a', '-c', 'b']);
+    const { parsed, gateway } = run(['agenda', 'edit', '!A1', '--summary', 'Plain ask', '-c', 'a', '-c', 'b']);
     await parsed;
 
     // Assert
@@ -523,7 +514,7 @@ describe('attention writing flags', () => {
     registerAttentionCommands(program, new AttentionController(gateway, new CapturingOutput(), SESSION));
 
     // Act
-    await program.parseAsync(['node', 'fy', 'attention', 'edit', '--help']).catch(() => undefined);
+    await program.parseAsync(['node', 'fy', 'agenda', 'edit', '--help']).catch(() => undefined);
 
     // Assert
     should(help).containEql('--summary');
@@ -534,11 +525,11 @@ describe('attention writing flags', () => {
 describe('attention step flags', () => {
   it('should raise with repeated --step, edit with them, and tick with step', async () => {
     // Arrange + Act
-    const added = run(['attention', 'add', 'Log in', '--title', 'Log in', '--step', 'Run it', '--step', 'Paste it']);
+    const added = run(['agenda', 'add', 'Log in', '--title', 'Log in', '--step', 'Run it', '--step', 'Paste it']);
     await added.parsed;
-    const edited = run(['attention', 'edit', '!A1', '--step', 'Only this']);
+    const edited = run(['agenda', 'edit', '!A1', '--step', 'Only this']);
     await edited.parsed;
-    const ticked = run(['attention', 'step', '!A1', '2', '--undo']);
+    const ticked = run(['agenda', 'step', '!A1', '2', '--undo']);
     await ticked.parsed;
 
     // Assert
@@ -551,7 +542,7 @@ describe('attention step flags', () => {
 describe('attention send-now command', () => {
   it('should deliver the target session’s held answers', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'send-now', '--session', 'other-session']);
+    const { parsed, gateway } = run(['agenda', 'send-now', '--session', 'other-session']);
     await parsed;
 
     // Assert
@@ -562,7 +553,7 @@ describe('attention send-now command', () => {
 describe('attention discuss command', () => {
   it('should send the owner’s request to talk it through, with its note', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'discuss', '!A1', '--note', 'Why this account?'], snapshot([]));
+    const { parsed, gateway } = run(['agenda', 'discuss', '!A1', '--note', 'Why this account?'], snapshot([]));
     await parsed;
 
     // Assert
@@ -573,9 +564,9 @@ describe('attention discuss command', () => {
 describe('attention surface command', () => {
   it('should send the surface request with its why, and without one when none is given', async () => {
     // Arrange + Act
-    const withWhy = run(['attention', 'surface', '!A1', '--why', 'Still open: which region'], snapshot([]));
+    const withWhy = run(['agenda', 'surface', '!A1', '--why', 'Still open: which region'], snapshot([]));
     await withWhy.parsed;
-    const bare = run(['attention', 'surface', 'A2'], snapshot([]));
+    const bare = run(['agenda', 'surface', 'A2'], snapshot([]));
     await bare.parsed;
 
     // Assert
@@ -587,23 +578,23 @@ describe('attention surface command', () => {
     should(bare.gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A2' });
   });
 
-  it('should raise straight to the owner queue with add --surface, and start in discussion without it', async () => {
+  it('should no longer take --surface on add: a new ask is the owner’s turn', async () => {
     // Arrange + Act
-    const queued = run(['attention', 'add', 'pick a cluster', '--title', 'Pick a cluster', '--surface'], afterAdd);
-    await queued.parsed;
-    const talked = run(['attention', 'add', 'pick a cluster', '--title', 'Pick a cluster'], afterAdd);
-    await talked.parsed;
+    const { parsed, gateway } = run(
+      ['agenda', 'add', 'pick a cluster', '--title', 'Pick a cluster', '--surface'],
+      afterAdd,
+    );
 
     // Assert
-    should(queued.gateway.applied[0]?.request).match({ surface: true });
-    should(talked.gateway.applied[0]?.request).not.have.property('surface');
+    await should(parsed).be.rejectedWith(/unknown option '--surface'/u);
+    should(gateway.applied).be.empty();
   });
 });
 
 describe('attention needs-info command', () => {
   it('should send the owner’s request with its note', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'needs-info', '!A1', '--note', 'Which account?'], snapshot([]));
+    const { parsed, gateway } = run(['agenda', 'needs-info', '!A1', '--note', 'Which account?'], snapshot([]));
     await parsed;
 
     // Assert
@@ -613,7 +604,7 @@ describe('attention needs-info command', () => {
   it('should raise a to-do with --task', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
-      ['attention', 'add', 'Log in', '--title', 'Log in', '--task', '--step', 'Run it'],
+      ['agenda', 'add', 'Log in', '--title', 'Log in', '--task', '--step', 'Run it'],
       afterAdd,
     );
     await parsed;
@@ -626,7 +617,7 @@ describe('attention needs-info command', () => {
 describe('attention card flags', () => {
   it('should refuse an add with no title', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'add', 'approve the deploy']);
+    const { parsed, gateway } = run(['agenda', 'add', 'approve the deploy']);
 
     // Assert
     await should(parsed).be.rejectedWith(/give the card a title: --title/u);
@@ -635,9 +626,9 @@ describe('attention card flags', () => {
 
   it('should take --ask as the one-line ask and keep --summary working', async () => {
     // Arrange + Act
-    const ask = run(['attention', 'add', '--title', 'Deploy', '--ask', 'Approve the deploy?'], afterAdd);
+    const ask = run(['agenda', 'add', '--title', 'Deploy', '--ask', 'Approve the deploy?'], afterAdd);
     await ask.parsed;
-    const summary = run(['attention', 'add', '--title', 'Deploy', '--summary', 'Approve the deploy?'], afterAdd);
+    const summary = run(['agenda', 'add', '--title', 'Deploy', '--summary', 'Approve the deploy?'], afterAdd);
     await summary.parsed;
 
     // Assert
@@ -649,7 +640,7 @@ describe('attention card flags', () => {
     // Arrange + Act
     const { parsed, gateway } = run(
       [
-        'attention',
+        'agenda',
         'add',
         'Run it?',
         '-t',
@@ -678,7 +669,7 @@ describe('attention card flags', () => {
 
   it('should refuse --up on a kind that has no up answer', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'add', 'Ok?', '-t', 'Ok', '-k', 'yesno', '--up', 'Maybe']);
+    const { parsed, gateway } = run(['agenda', 'add', 'Ok?', '-t', 'Ok', '-k', 'yesno', '--up', 'Maybe']);
 
     // Assert
     await should(parsed).be.rejectedWith(/--up only fits --kind task/u);
@@ -688,7 +679,7 @@ describe('attention card flags', () => {
   it('should refuse more than three options with the split advice', async () => {
     // Arrange + Act
     const { parsed, gateway } = run([
-      'attention',
+      'agenda',
       'add',
       'Which?',
       '-t',
@@ -710,7 +701,7 @@ describe('attention card flags', () => {
 
   it('should refuse --option on a yesno card', async () => {
     // Arrange + Act
-    const { parsed } = run(['attention', 'add', 'Ok?', '-t', 'Ok', '-k', 'yesno', '-o', 'a', '-o', 'b']);
+    const { parsed } = run(['agenda', 'add', 'Ok?', '-t', 'Ok', '-k', 'yesno', '-o', 'a', '-o', 'b']);
 
     // Assert
     await should(parsed).be.rejectedWith(/--kind yesno brings its own Yes and No/u);
@@ -718,7 +709,7 @@ describe('attention card flags', () => {
 
   it('should retitle with edit --title', async () => {
     // Arrange + Act
-    const { parsed, gateway } = run(['attention', 'edit', 'A1', '--title', 'Deploy approval']);
+    const { parsed, gateway } = run(['agenda', 'edit', 'A1', '--title', 'Deploy approval']);
     await parsed;
 
     // Assert
@@ -727,9 +718,9 @@ describe('attention card flags', () => {
 
   it('should answer a yes or no card with done --yes and --no', async () => {
     // Arrange + Act
-    const yes = run(['attention', 'done', 'A1', '--yes'], snapshot([]));
+    const yes = run(['agenda', 'done', 'A1', '--yes'], snapshot([]));
     await yes.parsed;
-    const no = run(['attention', 'done', 'A1', '--no'], snapshot([]));
+    const no = run(['agenda', 'done', 'A1', '--no'], snapshot([]));
     await no.parsed;
 
     // Assert
@@ -748,7 +739,7 @@ describe('attention card flags', () => {
     );
 
     // Act
-    await program.parseAsync(['node', 'fy', 'attention', 'add', '--help']).catch(() => undefined);
+    await program.parseAsync(['node', 'fy', 'agenda', 'add', '--help']).catch(() => undefined);
 
     // Assert
     for (const flag of ['--title', '--ask', '--up', '--up-why']) should(help).containEql(flag);

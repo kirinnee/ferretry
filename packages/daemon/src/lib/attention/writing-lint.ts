@@ -146,7 +146,7 @@ function isCoveredByTerm(word: string, defined: ReadonlySet<string>): boolean {
 
 /**
  * Advice on how an item is written, never a refusal: the item is already on the board and the owner
- * has been told. Each line names what to change, so the ferret can fix the item with `attention edit`.
+ * has been told. Each line names what to change, so the ferret can fix the item with `agenda edit`.
  *
  * The owner reads cold — often on a phone, days later — so THE RULE IS ISOLATION: could the owner answer
  * with nothing else open? Everything needed to decide is on the card. (Premise, the situation, and context,
@@ -165,7 +165,7 @@ export function lintAttentionWriting(item: AttentionWriting): string[] {
 
   if (title === '') {
     warnings.push(
-      `no title: add one with \`attention edit <id> --title "<what this is about>"\` — a few plain words, under ${ATTENTION_PUSH_TITLE_LENGTH} characters; it is the notification heading`,
+      `no title: add one with \`agenda edit <id> --title "<what this is about>"\` — a few plain words, under ${ATTENTION_PUSH_TITLE_LENGTH} characters; it is the notification heading`,
     );
   } else if (title.length > ATTENTION_PUSH_TITLE_LENGTH) {
     warnings.push(
@@ -181,7 +181,7 @@ export function lintAttentionWriting(item: AttentionWriting): string[] {
 
   if (isDecision(item) && isBlank(item.premise) && isBlank(item.context)) {
     warnings.push(
-      'a reader opening this cold cannot tell what is going on — add --premise points (the situation, one bullet each) with `attention edit <id> --premise "<what is going on>"`, and --context for why it matters now',
+      'a reader opening this cold cannot tell what is going on — add --premise points (the situation, one bullet each) with `agenda edit <id> --premise "<what is going on>"`, and --context for why it matters now',
     );
   }
 

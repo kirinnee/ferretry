@@ -77,7 +77,7 @@ export * from '../features/analytics/session-analytics-surface.tsx';
 export * from '../features/analytics/session-cost.ts';
 export * from '../features/attention/attention-answer-controls.tsx';
 export * from '../features/attention/attention-board.tsx';
-export * from '../features/attention/attention-panel.tsx';
+export * from '../features/attention/attention-agenda.tsx';
 export * from '../features/attention/attention-replies-notice.tsx';
 export * from '../features/browser/browser-login-banner.tsx';
 export * from '../features/browser/browser-surface-list.tsx';

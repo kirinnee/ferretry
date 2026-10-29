@@ -2297,6 +2297,15 @@ describe('AppShell', () => {
     try {
       const { store, view } = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId], {
         transcript: 'assistant/message: Review !A3 before continuing.',
+        sessionState: {
+          attention: {
+            open: 1,
+            first: 'A3',
+            ask: 'permission',
+            latestAt: '2026-07-31T11:30:00.000Z',
+            agendaMode: true,
+          },
+        },
         attention: sessionId => {
           attentionReads += 1;
           return attentionSnapshot(sessionId, items);
@@ -2310,8 +2319,9 @@ describe('AppShell', () => {
         await settleUntil(() => store.attention.store.status(scope) === 'ready', 'the first board read', interact);
         expect(store.attention.store.status(scope)).toBe('ready');
         expect(store.attention.store.count(scope)).toBe(0);
-        // Nothing waiting: no pinned "Needs you" block.
+        // Nothing waiting: no agenda line.
         expect(view.container.querySelector('[data-attention-card]')).toBeNull();
+        expect(view.container.querySelector('[data-agenda-line]')).toBeNull();
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')).toBeNull();
 
@@ -2322,13 +2332,10 @@ describe('AppShell', () => {
         expect(attentionReads).toBeGreaterThan(initialAttentionReads);
         expect(store.attention.store.count(scope)).toBe(1);
 
-        // The item is pinned above the composer, never a second chip in the header.
-        const pinned = must(
-          view.container.querySelector<HTMLElement>('[data-attention-panel] [data-attention-card]'),
-          'the refreshed pinned "Needs you" item',
-        );
-        expect(pinned.getAttribute('data-pinned')).toBe('true');
-        expect(view.container.querySelector('section[aria-label="Needs you"][data-attention-panel]')).not.toBeNull();
+        // The item is one line above the composer, never a second chip in the header.
+        const line = must(view.container.querySelector<HTMLElement>('[data-agenda-line]'), 'the refreshed agenda line');
+        expect(line.textContent).toContain('1 need you');
+        expect(line.getAttribute('data-composer-status')).toBe('agenda');
         expect(view.container.querySelector('button[data-needs-you]')).toBeNull();
         expect(view.container.querySelector('[data-fy-reference="attention:A3"]')?.textContent).toBe('!A3');
       } finally {

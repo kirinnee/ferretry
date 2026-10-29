@@ -28,7 +28,7 @@ describe('attention brief composition', () => {
       kind: 'reply',
       why: 'pick a cluster',
       context: null,
-      howToResolve: 'Answer this item on the attention board (it records who answered).',
+      howToResolve: 'Answer this item on the agenda (it records who answered).',
       ask: { kind: 'open-question' },
     });
   });

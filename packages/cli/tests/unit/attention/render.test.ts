@@ -30,7 +30,7 @@ describe('attention listing', () => {
     const actual = renderAttentionList(snapshot([]));
 
     // Assert
-    should(actual).equal('Nothing needs attention.');
+    should(actual).equal('Nothing on the agenda.');
   });
 
   it('should head the listing with a singular count for one item', () => {
@@ -219,7 +219,7 @@ describe('attention listing', () => {
 
     // Assert
     should(row(actual, 0)).containEql('Warning: 1 entry on this board');
-    should(row(actual, 1)).equal('Nothing needs attention.');
+    should(row(actual, 1)).equal('Nothing on the agenda.');
   });
 
   it('should elide a subject longer than the row budget', () => {
@@ -377,7 +377,7 @@ describe('writing advice', () => {
     // Assert
     should(actual.split('\n')).deepEqual([
       `attention A4 recorded — 0 unresolved items in ${SESSION}`,
-      "Reads hard for someone who hasn't followed — fix it with `attention edit !A4`:",
+      "Reads hard for someone who hasn't followed — fix it with `agenda edit !A4`:",
       '  - summary is 120 characters; keep it under 90',
       '  - links ("https://x.example")',
     ]);
@@ -391,7 +391,7 @@ describe('writing advice', () => {
     const actual = renderAttentionMutation('attention recorded', undefined, warned);
 
     // Assert
-    should(actual).containEql('fix it with `attention edit <id>`');
+    should(actual).containEql('fix it with `agenda edit <id>`');
   });
 });
 
@@ -433,13 +433,13 @@ describe('attention to-do items', () => {
 
     // Assert
     should(plain).containEql('answers: ← Need more info · → Done');
-    should(plain).not.containEql('waiting on the ferret');
-    should(waiting).containEql('waiting on the ferret: more information asked 2026-07-31T09:10:00.000Z');
+    should(plain).not.containEql("ferret's turn");
+    should(waiting).containEql("ferret's turn: more information asked 2026-07-31T09:10:00.000Z");
   });
 });
 
-describe('attention items in discussion', () => {
-  it('should say an item is in discussion, and keep "waiting on the ferret" for a request for information', () => {
+describe('agenda turns', () => {
+  it('should say whose turn an item is, and what the ferret can do when the owner wrote about it', () => {
     // Act
     const discussed = renderAttentionList(
       snapshot([
@@ -457,12 +457,35 @@ describe('attention items in discussion', () => {
     );
 
     // Assert
-    should(discussed).containEql(
-      "in discussion: not on the owner's queue yet, talk it through in chat 2026-07-31T09:10:00.000Z",
+    should(discussed).containEql("ferret's turn: the owner wrote about this");
+    should(discussed).containEql('agenda surface');
+    should(asked).containEql("ferret's turn: more information asked");
+    should(asked).not.containEql('the owner wrote about this');
+  });
+
+  it("should say it is the owner's turn on a fresh ask, and print what the item blocks", () => {
+    // Act
+    const fresh = renderAttentionList(
+      snapshot([
+        agentItem('A2', 'approve the deploy', {
+          blockingNow: true,
+          willBlock: 'the 14:00 deploy',
+          neededBy: '2026-07-31T14:00:00.000Z',
+        }),
+      ]),
     );
-    should(discussed).not.containEql('waiting on the ferret');
-    should(asked).containEql('waiting on the ferret: more information asked');
-    should(asked).not.containEql('in discussion');
+    const plain = renderAttentionList(snapshot([agentItem('A3', 'pick a color')]));
+    const notice = renderAttentionList(snapshot([agentItem('A4', 'build is green', { notice: true, ping: true })]));
+
+    // Assert
+    should(fresh).containEql("owner's turn");
+    should(fresh).containEql('blocking now: the ferret is stopped until this is answered');
+    should(fresh).containEql('will block: the 14:00 deploy');
+    should(fresh).containEql('needed by: 2026-07-31T14:00:00.000Z');
+    should(plain).not.containEql('blocking now');
+    should(plain).not.containEql('needed by');
+    should(notice).containEql('notice: read, not answered (pinged)');
+    should(notice).not.containEql("owner's turn");
   });
 });
 
