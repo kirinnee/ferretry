@@ -17,9 +17,15 @@
  *     item on open and returns to the trigger on a keyboard dismiss.
  *   - ESCAPE IS A STACK. Shares the app's escape layers (`use-dialog-focus`) so
  *     a menu opened over a sheet takes Escape without closing the sheet under it.
- *   - DISMISSES on outside pointer, on any scroll, on resize, and on a route
- *     change (popstate) — a menu anchored to a point must not linger once that
- *     point moves or the page navigates.
+ *   - DISMISSES on outside pointer, on resize, on a route change (popstate), and
+ *     on a scroll the READER drove that moved the trigger — a menu anchored to a
+ *     point must not linger once that point moves or the page navigates. It does
+ *     NOT dismiss on any scroll: an auto-following transcript scrolls itself the
+ *     moment a message lands, and that must not close every open "⋯" menu. So a
+ *     scroll of something that does not hold the trigger is ignored (the anchor
+ *     did not move), and a scroll that holds it without a wheel / touch / scroll
+ *     key / outside press just before it carries the menu along with its trigger
+ *     (decideScroll, pure + tested). With no known trigger, any scroll dismisses.
  *   - THE NATIVE MENU IS NOT GLOBALLY SUPPRESSED. The trigger sites decide when
  *     to preventDefault the browser's own contextmenu; this component only draws
  *     the replacement once they ask for it.
@@ -37,6 +43,7 @@ import {
 } from 'react';
 import { isTopEscapeLayer, pushEscapeLayer } from '../hooks/use-dialog-focus.ts';
 import { cn } from '../lib/class-names.ts';
+import { decideScroll, isReaderDriven, type ScrollPoint } from '../lib/context-menu-scroll.ts';
 
 export interface ContextMenuItem {
   readonly key: string;
@@ -127,6 +134,30 @@ export function firstEnabledIndex(items: readonly ContextMenuItem[]): number {
   return index < 0 ? 0 : index;
 }
 
+const SCROLL_KEYS: ReadonlySet<string> = new Set([
+  'PageUp',
+  'PageDown',
+  'Home',
+  'End',
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  ' ',
+  'Spacebar',
+]);
+
+const NO_SHIFT: ScrollPoint = { x: 0, y: 0 };
+
+/** The element the menu is anchored to; the page itself is not an anchor. */
+const anchorElement = (element: HTMLElement | null): HTMLElement | null =>
+  element && element !== document.body && element !== document.documentElement ? element : null;
+
+const pointOf = (element: HTMLElement): ScrollPoint => {
+  const rect = element.getBoundingClientRect();
+  return { x: rect.left, y: rect.top };
+};
+
 export interface ContextMenuProps {
   readonly open: boolean;
   readonly anchor: MenuAnchor;
@@ -151,6 +182,11 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
    */
   const restoreOnClose = useRef(false);
   const restoreTarget = useRef<HTMLElement | null>(null);
+  /** Where the trigger sat when the menu opened, and when the reader last wheeled / touched / keyed / pressed. */
+  const originRef = useRef<ScrollPoint | null>(null);
+  const lastReaderInputAt = useRef<number | null>(null);
+  /** How far the trigger has travelled since opening, so the menu travels with it. */
+  const [shift, setShift] = useState<ScrollPoint>(NO_SHIFT);
 
   const close = useCallback(() => {
     onClose();
@@ -169,15 +205,52 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
       close();
     };
     const dismiss = () => close();
-    document.addEventListener('keydown', onKey);
+    const insideMenu = (target: EventTarget | null) => target instanceof Node && !!menuRef.current?.contains(target);
+    const noteReaderInput = () => {
+      lastReaderInputAt.current = Date.now();
+    };
+    const onScrollKey = (event: globalThis.KeyboardEvent) => {
+      if (SCROLL_KEYS.has(event.key) && !insideMenu(event.target)) noteReaderInput();
+    };
+    const onPointerDown = (event: Event) => {
+      if (!insideMenu(event.target)) noteReaderInput();
+    };
     // Capture, so a scroll in ANY inner scroller (the session list, the
-    // transcript) dismisses — the menu is anchored to a point that just moved.
-    window.addEventListener('scroll', dismiss, true);
+    // transcript) is seen — then decideScroll says whether it moved OUR anchor
+    // and whether a reader or the page itself did it.
+    const onScroll = (event: Event) => {
+      const anchorEl = anchorElement(restoreTarget.current);
+      const target = event.target;
+      // A scroll aimed at the window or the document is the page scrolling: it holds everything.
+      const insideScroller = !(target instanceof Node) || target === document || target.contains(anchorEl);
+      const verdict = decideScroll({
+        trigger: anchorEl ? { connected: anchorEl.isConnected, insideScroller } : null,
+        readerDriven: isReaderDriven(lastReaderInputAt.current, Date.now()),
+        origin: originRef.current,
+        current: anchorEl?.isConnected ? pointOf(anchorEl) : null,
+      });
+      if (verdict.kind === 'dismiss') close();
+      else if (verdict.kind === 'follow') {
+        setShift(current =>
+          current.x === verdict.dx && current.y === verdict.dy ? current : { x: verdict.dx, y: verdict.dy },
+        );
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('keydown', onScrollKey, true);
+    window.addEventListener('wheel', noteReaderInput, { capture: true, passive: true });
+    window.addEventListener('touchmove', noteReaderInput, { capture: true, passive: true });
+    window.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('scroll', onScroll, true);
     window.addEventListener('resize', dismiss);
     window.addEventListener('popstate', dismiss);
     return () => {
       document.removeEventListener('keydown', onKey);
-      window.removeEventListener('scroll', dismiss, true);
+      document.removeEventListener('keydown', onScrollKey, true);
+      window.removeEventListener('wheel', noteReaderInput, true);
+      window.removeEventListener('touchmove', noteReaderInput, true);
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('scroll', onScroll, true);
       window.removeEventListener('resize', dismiss);
       window.removeEventListener('popstate', dismiss);
       release();
@@ -199,6 +272,10 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
     if (opening === null) return;
     restoreTarget.current = triggerRef?.current ?? (document.activeElement as HTMLElement | null);
     restoreOnClose.current = false;
+    const anchorEl = anchorElement(restoreTarget.current);
+    originRef.current = anchorEl?.isConnected ? pointOf(anchorEl) : null;
+    lastReaderInputAt.current = null;
+    setShift(NO_SHIFT);
     setActive(firstEnabledIndex(itemsRef.current));
   }, [opening, triggerRef]);
 
@@ -217,7 +294,10 @@ export function ContextMenu({ open, anchor, items, onClose, ariaLabel, triggerRe
   // what guarantees it is right in the same commit that paints the menu.
   const position =
     open && size && typeof window !== 'undefined'
-      ? clampMenuPosition({ x: anchorX, y: anchorY }, size, { width: window.innerWidth, height: window.innerHeight })
+      ? clampMenuPosition({ x: anchorX + shift.x, y: anchorY + shift.y }, size, {
+          width: window.innerWidth,
+          height: window.innerHeight,
+        })
       : null;
   const positioned = position !== null;
 
