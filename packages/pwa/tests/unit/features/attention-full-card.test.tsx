@@ -2,7 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import { AttentionFullCard } from '../../../src/features/attention/attention-full-card.tsx';
 import type { InboxAction } from '../../../src/lib/attention-answers.ts';
 import { attentionItem, choices } from '../../support/attention-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
 
 const NOW = Date.parse('2026-10-29T10:00:00.000Z');
 
@@ -195,6 +195,141 @@ describe('the full card', () => {
     const view = await card();
     const reply = pick(view, '[data-attention-add-reply]', 'reply');
     expect(reply.getAttribute('aria-label')).toContain('Add to reply');
+    await view.unmount();
+  });
+});
+
+const pointer = (type: string, x: number, y: number, init: PointerEventInit = {}): PointerEvent =>
+  new PointerEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: x,
+    clientY: y,
+    pointerId: 7,
+    pointerType: 'touch',
+    ...init,
+  });
+
+const strip = (view: Mounted): HTMLElement => pick(view, '[data-attention-handle]', 'top strip');
+
+const fire = (target: Element, event: PointerEvent): Promise<void> => interact(() => target.dispatchEvent(event));
+
+describe('the full card swipe', () => {
+  it('answers on a clear horizontal swipe from the top strip', async () => {
+    const calls: Calls = { acts: [], log: [] };
+    const view = await card({}, { swipeable: true }, calls);
+    await fire(strip(view), pointer('pointerdown', 200, 300));
+    await fire(strip(view), pointer('pointermove', 100, 300));
+    expect(strip(view).hasAttribute('data-dragging')).toBe(true);
+    await fire(strip(view), pointer('pointerup', 0, 300));
+    expect(calls.acts).toHaveLength(1);
+    expect(calls.acts[0]?.kind).toBe('respond');
+    expect(strip(view).hasAttribute('data-dragging')).toBe(false);
+    await view.unmount();
+  });
+
+  it('adds the item to the reply on a clear downward swipe', async () => {
+    const calls: Calls = { acts: [], log: [] };
+    const view = await card({}, { swipeable: true }, calls);
+    await fire(strip(view), pointer('pointerdown', 100, 100));
+    await fire(strip(view), pointer('pointermove', 100, 200));
+    await fire(strip(view), pointer('pointerup', 100, 320));
+    expect(calls.log).toEqual(['reply']);
+    expect(calls.acts).toEqual([]);
+    await view.unmount();
+  });
+
+  it('does nothing for a tap, a cancelled drag, another pointer, a right mouse button or a swipe too short to commit', async () => {
+    const calls: Calls = { acts: [], log: [] };
+    const view = await card({}, { swipeable: true }, calls);
+    await fire(strip(view), pointer('pointerup', 100, 100));
+    await fire(strip(view), pointer('pointerdown', 100, 100));
+    await fire(strip(view), pointer('pointerup', 102, 101));
+    await fire(strip(view), pointer('pointerdown', 100, 100));
+    await fire(strip(view), pointer('pointermove', 0, 100, { pointerId: 9 }));
+    expect(strip(view).hasAttribute('data-dragging')).toBe(false);
+    await fire(strip(view), pointer('pointerup', 0, 100, { pointerId: 9 }));
+    await fire(strip(view), pointer('pointermove', 20, 100));
+    await fire(strip(view), pointer('pointerup', 20, 100));
+    await fire(strip(view), pointer('pointerdown', 200, 100));
+    await fire(strip(view), pointer('pointermove', 0, 100));
+    await fire(strip(view), pointer('pointercancel', 0, 100));
+    expect(strip(view).hasAttribute('data-dragging')).toBe(false);
+    await fire(strip(view), pointer('pointerup', 0, 100));
+    await fire(strip(view), pointer('pointerdown', 200, 100, { pointerType: 'mouse', button: 2 }));
+    await fire(strip(view), pointer('pointermove', 0, 100, { pointerType: 'mouse', button: 2 }));
+    await fire(strip(view), pointer('pointerup', 0, 100, { pointerType: 'mouse', button: 2 }));
+    expect(calls.acts).toEqual([]);
+    expect(calls.log).toEqual([]);
+    await view.unmount();
+  });
+
+  it('is not swipeable while busy', async () => {
+    const calls: Calls = { acts: [], log: [] };
+    const view = await mount(
+      <AttentionFullCard
+        busy
+        ferret="Johnnie"
+        item={attentionItem('A5', { subject: 'Which database?', ask: choices('SQLite', 'Postgres') })}
+        now={NOW}
+        onAct={action => calls.acts.push(action)}
+        onAddReply={() => calls.log.push('reply')}
+        onClose={() => undefined}
+        position={{ index: 0, total: 1 }}
+        swipeable
+      />,
+    );
+    expect(view.container.querySelector('[data-swipeable]')).toBeNull();
+    await fire(strip(view), pointer('pointerdown', 200, 300));
+    await fire(strip(view), pointer('pointermove', 0, 300));
+    await fire(strip(view), pointer('pointerup', 0, 300));
+    expect(calls.acts).toEqual([]);
+    await view.unmount();
+  });
+});
+
+describe('the full card around its body', () => {
+  it('closes on Escape', async () => {
+    const calls: Calls = { acts: [], log: [] };
+    const view = await card({}, {}, calls);
+    await interact(() => pressKey(pick(view, '[data-attention-full-card]', 'card'), 'Escape'));
+    expect(calls.log).toEqual(['close']);
+    await interact(() => pressKey(pick(view, '[data-attention-full-card]', 'card'), 'a'));
+    expect(calls.log).toEqual(['close']);
+    await view.unmount();
+  });
+
+  it('says what the owner already asked of the ferret under the detail', async () => {
+    const view = await card({ history: [{ kind: 'needs-info', at: '2026-10-29T09:00:00.000Z' }] });
+    expect(pick(view, '[data-attention-history]', 'history').textContent).toContain('You asked for more info');
+    await view.unmount();
+  });
+
+  it('answers a several-question item with one Send answers, and forgets the picks once sent', async () => {
+    const calls: Calls = { acts: [], log: [] };
+    const view = await card(
+      {
+        ask: { kind: 'open-question' },
+        recommendation: { decision: 'SQLite', why: 'No server.' },
+        questions: [
+          { question: 'Which engine?', options: [{ label: 'SQLite' }, { label: 'Postgres' }] },
+          { question: 'Migrate when?', options: [{ label: 'Now' }, { label: 'Later' }] },
+        ],
+      },
+      {},
+      calls,
+    );
+    const send = pick<HTMLButtonElement>(view, '[data-attention-send-answers]', 'Send answers');
+    expect(send.disabled).toBe(true);
+    await interact(() => send.click());
+    expect(calls.acts).toEqual([]);
+    await interact(() => pick(view, '[data-attention-pick="Postgres"]', 'Postgres').click());
+    await interact(() => pick(view, '[data-attention-pick="Later"]', 'Later').click());
+    expect(send.disabled).toBe(false);
+    await interact(() => send.click());
+    expect(calls.acts).toHaveLength(1);
+    expect(calls.acts[0]?.kind).toBe('respond');
+    expect(pick<HTMLButtonElement>(view, '[data-attention-send-answers]', 'Send answers').disabled).toBe(true);
     await view.unmount();
   });
 });

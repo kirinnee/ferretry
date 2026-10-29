@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AttentionBriefSections, cardLede } from '../../../src/features/attention/attention-brief.tsx';
+import { AttentionBriefSections, cardLede, PointForm } from '../../../src/features/attention/attention-brief.tsx';
+import { revisionHighlight } from '../../../src/lib/attention-revisions.ts';
 import { attentionItem, choices } from '../../support/attention-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
@@ -199,5 +200,42 @@ describe('cardLede', () => {
 
   test('nothing to say gives no line', () => {
     expect(cardLede({}, null)).toEqual({ line: null, context: null });
+  });
+});
+
+describe('PointForm emphasis and the changed context', () => {
+  test('draws **bold**, *italic* and `code` in a paragraph and in a point', async () => {
+    view = await mount(
+      <>
+        <PointForm text="Use **SQLite** with `WAL` and *care*" />
+        <PointForm text={'- keep **it** simple\n- `fsync` often'} />
+      </>,
+    );
+    const root = must(view.container, 'view');
+    expect([...root.querySelectorAll('strong')].map(node => node.textContent)).toEqual(['SQLite', 'it']);
+    expect([...root.querySelectorAll('code')].map(node => node.textContent)).toEqual(['WAL', 'fsync']);
+    expect([...root.querySelectorAll('em')].map(node => node.textContent)).toEqual(['care']);
+  });
+
+  test('marks the new points of "Why it matters" when the last edit added them', async () => {
+    const edited = attentionItem('A1', {
+      subject: 'Which database?',
+      title: 'Database',
+      why: 'Database',
+      context: '- It is one file\n- It needs no server',
+      revisions: [
+        {
+          at: '2026-08-01T11:55:00.000Z',
+          by: 'agent',
+          changed: ['context'],
+          previous: { context: '- It is one file' },
+        },
+      ],
+    } as never);
+    view = await mount(
+      <AttentionBriefSections highlight={revisionHighlight(edited)} item={edited} renderProse={text => text} />,
+    );
+    const fresh = [...must(view.container, 'view').querySelectorAll('[data-attention-changed="new"]')];
+    expect(fresh.map(node => node.textContent)).toEqual(['newIt needs no server']);
   });
 });

@@ -185,3 +185,10 @@ describe('AttentionDetail point form', () => {
     expect(view.container.querySelectorAll('[data-attention-section="impact"] li').length).toBe(0);
   });
 });
+
+describe('AttentionCard error', () => {
+  test('says what was not sent', async () => {
+    view = await mount(<AttentionCard error="offline" item={attentionItem('A2')} onAct={() => {}} />);
+    expect(view.container.querySelector('[role="alert"]')?.textContent).toBe('Not sent: offline');
+  });
+});
