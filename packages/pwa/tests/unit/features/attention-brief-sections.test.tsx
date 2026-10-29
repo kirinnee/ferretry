@@ -48,3 +48,46 @@ describe('the brief sections', () => {
     expect(recommendationOf(must(view.container, 'view'))?.textContent).toContain('Postgres');
   });
 });
+
+describe('the brief sections, by card', () => {
+  const terms = [
+    { term: 'CI', meaning: 'the automatic tests on every change' },
+    { term: 'PR', meaning: 'a proposed change' },
+  ];
+  const heading = (root: ParentNode): string | null | undefined =>
+    root.querySelector('[data-attention-section="questions"] .fy-attn-sec__heading')?.textContent;
+
+  test('the board folds Terms into a list of each term and its meaning', async () => {
+    view = await mount(<AttentionBriefSections item={{ ...item, terms }} renderProse={text => text} />);
+    const section = must(
+      must(view.container, 'view').querySelector('[data-attention-section="terms"]'),
+      'the terms section',
+    );
+    expect(section.textContent).toContain('Terms (2)');
+    expect([...section.querySelectorAll('dt')].map(term => term.textContent)).toEqual(['CI', 'PR']);
+  });
+
+  test('names the ask by what the card is: what happened, a to-do, or a question', async () => {
+    const asked = (patch: Record<string, unknown>) =>
+      attentionItem('A2', { title: 'Heading', subject: 'The ask in full', ...patch });
+    for (const [patch, expected] of [
+      [{ kind: 'info' }, 'What happened'],
+      [{ ask: { kind: 'task' } }, 'To do'],
+      [{ ask: choices('Yes', 'No') }, 'The question'],
+      [{ ask: { kind: 'permission' } }, 'The question'],
+      [{ questions: [{ question: 'Which day?' }, { question: 'Who?' }] }, 'The questions'],
+    ] as const) {
+      view = await mount(
+        <AttentionBriefSections
+          ask="The ask in full"
+          collapsible={false}
+          item={asked(patch)}
+          renderProse={text => text}
+        />,
+      );
+      expect(heading(must(view.container, 'view'))).toContain(expected);
+      await view.unmount();
+      view = null;
+    }
+  });
+});

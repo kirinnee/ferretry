@@ -17,7 +17,7 @@
  */
 
 import type { AttentionItem, AttentionLink, AttentionQuestion, AttentionRecommendation } from '@ferretry/protocol';
-import { recommendedAttentionOption } from '@ferretry/protocol';
+import { attentionCardKind, recommendedAttentionOption } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, ExternalLink } from 'lucide-react';
 import { Fragment, type ReactNode, useId } from 'react';
 
@@ -70,6 +70,16 @@ function RecommendedBadge() {
     </span>
   );
 }
+
+/**
+ * What the ask is called on this card: a note says what happened, a to-do is something to do, and only a
+ * card that asks something calls it a question.
+ */
+const askHeading = (item: Pick<AttentionItem, 'kind' | 'ask'>, several: boolean): string => {
+  if (several) return 'The questions';
+  const kind = attentionCardKind(item);
+  return kind === 'info' ? 'What happened' : kind === 'task' ? 'To do' : 'The question';
+};
 
 function Section({
   name,
@@ -305,7 +315,7 @@ export function AttentionBriefSections({
         </Section>
       )}
       {ask === undefined && questions.length === 0 ? null : (
-        <Section fold={fold} name="questions" open title={several ? 'The questions' : 'The question'}>
+        <Section fold={fold} name="questions" open title={askHeading(item, several)}>
           {ask === undefined ? null : (
             <p className="fy-attn-card__ask" data-attention-ask="">
               {ask}

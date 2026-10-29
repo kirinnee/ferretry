@@ -9,6 +9,7 @@ import {
   attentionLedgerIds,
   attentionPanelItemId,
   locateAttention,
+  shownAttentionItem,
 } from '../../../src/features/attention/attention-panel.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
@@ -168,6 +169,14 @@ afterEach(async () => {
 });
 
 describe('attention panel model', () => {
+  test('the item a message answers: the chosen one, the first while none is, and none once the chosen one left', () => {
+    const snapshot = board([item('A1'), item('A2')]);
+    expect(shownAttentionItem(snapshot, 'A2')?.id).toBe('A2');
+    expect(shownAttentionItem(snapshot, null)?.id).toBe('A1');
+    expect(shownAttentionItem(snapshot, 'A9')).toBeUndefined();
+    expect(shownAttentionItem(null, null)).toBeUndefined();
+  });
+
   test('locates an id as open, resolved, unknown — or pending while the board is unread', () => {
     const snapshot = board([item('A3')], [record('A2', '2026-07-31T11:00:00.000Z')]);
     expect(locateAttention(snapshot, 'A3')).toBe('open');
