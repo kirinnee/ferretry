@@ -1,3 +1,14 @@
+## [4.101.0](https://github.com/kirinnee/ferretry/compare/v4.100.0...v4.101.0) (2026-10-29)
+
+### Features
+
+* **attention:** cards v2 — title and ask, up to three swipe answers plus reply, only Attention notifies ([#860](https://github.com/kirinnee/ferretry/issues/860)) ([8ec884e](https://github.com/kirinnee/ferretry/commit/8ec884e0ca40467fb8c95cb196f7b8b521c699b7))
+* **processes:** show every subprocess a ferret runs, with live output ([#859](https://github.com/kirinnee/ferretry/issues/859)) ([bdf63de](https://github.com/kirinnee/ferretry/commit/bdf63de7c239a8708d4c75140129df77a5a1a582))
+
+### Fixes
+
+* **pwa:** keep a relay session whose request never left before its deadline ([#857](https://github.com/kirinnee/ferretry/issues/857)) ([887083b](https://github.com/kirinnee/ferretry/commit/887083b39cd65832220586aea0a670a089242aec))
+
 ## [4.100.0](https://github.com/kirinnee/ferretry/compare/v4.99.1...v4.100.0) (2026-10-29)
 
 ### Features

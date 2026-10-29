@@ -1,3 +1,9 @@
+## [4.100.0](https://github.com/kirinnee/ferretry/compare/v4.99.1...v4.100.0) (2026-10-29)
+
+### Features
+
+* **pwa:** draw nothing for empty Attention, move resolved out of chat ([#854](https://github.com/kirinnee/ferretry/issues/854)) ([2a9bd89](https://github.com/kirinnee/ferretry/commit/2a9bd89f7968bee5a0219cbd1d4a56a825fe9450))
+
 ## [4.99.1](https://github.com/kirinnee/ferretry/compare/v4.99.0...v4.99.1) (2026-10-29)
 
 ### Fixes
