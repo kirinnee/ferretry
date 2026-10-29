@@ -136,6 +136,8 @@ import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
 import { registerModelsCommands } from '../src/lib/models/commands';
 import { ModelsController } from '../src/lib/models/controller';
+import { registerNotifyCommands } from '../src/lib/notify/commands';
+import { ProtocolNotifyGateway } from '../src/lib/notify/gateway';
 import { registerOnboardCommands } from '../src/lib/onboard/commands';
 import { OnboardController } from '../src/lib/onboard/controller';
 import { ProtocolOnboardRelay } from '../src/lib/onboard/relay';
@@ -830,6 +832,12 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
+  ({ program, world, client, ownSessionId }) =>
+    registerNotifyCommands(program, {
+      gateway: new ProtocolNotifyGateway(client, ownSessionId),
+      out: world.io,
+      ownSessionId,
+    }),
   ({ program, world, client }) => registerAnalyticsCommands(program, new AnalyticsController(client, world.io)),
   ({ program, world, client }) =>
     registerSecretCommands(
