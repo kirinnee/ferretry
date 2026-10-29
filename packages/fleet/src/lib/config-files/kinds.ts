@@ -218,6 +218,14 @@ const WARDEN_ACT_WORDS: Readonly<Record<keyof WardenConfig['mayActAlone'], strin
   closeLeftovers: 'close a browser a finished ferret left running',
 };
 
+/** Jev's acts, in the words a person reads a lowered bar in. */
+const JEV_ACT_WORDS: Readonly<Record<keyof WardenConfig['jevActs'], string>> = {
+  nudge: 'nudge a ferret',
+  resume: 'resume a ferret',
+  restart: 'restart a ferret',
+  stop: 'stop a ferret',
+};
+
 function wardenLoosening(before: WardenConfig, after: WardenConfig): readonly string[] {
   return [
     ...(Object.keys(WARDEN_LAYER_WORDS) as (keyof WardenConfig['layers'])[]).flatMap(layer =>
@@ -229,6 +237,10 @@ function wardenLoosening(before: WardenConfig, after: WardenConfig): readonly st
         after.mayActAlone[act],
         `the Warden may now ${WARDEN_ACT_WORDS[act]} on its own`,
       ),
+    ),
+    // A lower bar lets Jev act alone on less certainty: more of what it may do, so the owner confirms it.
+    ...(Object.keys(JEV_ACT_WORDS) as (keyof WardenConfig['jevActs'])[]).flatMap(act =>
+      lowered(before.jevActs[act], after.jevActs[act], `how sure Jev must be to ${JEV_ACT_WORDS[act]} on its own`),
     ),
     ...raised(before.caps.jevUsdPerDay, after.caps.jevUsdPerDay, 'the daily Jev cap in dollars'),
     ...raised(

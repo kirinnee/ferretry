@@ -61,7 +61,8 @@ export const SPEEDUP_CATALOG: Readonly<Record<SpeedupProvider, SpeedupCatalogEnt
     hosts: Object.freeze([JEV_HOST]),
     purpose:
       'Fast, cheap yes/no decisions. The Warden asks Jev whether a flagged ferret is worth a full AI investigation, and skips the ones Jev is sure are healthy.',
-    costNote: 'Fractions of a cent per decision. Jev never acts on a ferret: it only decides whether to investigate.',
+    costNote:
+      'Fractions of a cent per decision. Jev answers a Warden flag first: it leaves it, acts alone only when sure enough and allowed, or hands it to an investigation or to you.',
     privacyNote:
       'When the Warden uses it, a short, redacted summary of the flagged ferret (its recent turns and screen tail) is sent to TypeSafe AI.',
     keyUrl: 'https://docs.typesafe.ai/introduction/quickstart',

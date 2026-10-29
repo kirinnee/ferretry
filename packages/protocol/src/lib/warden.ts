@@ -141,7 +141,7 @@ export const WARDEN_SWEEP_INTERVALS = [1, 2, 5, 10, 15] as const;
 export const WardenSweepIntervalSchema = z.literal(WARDEN_SWEEP_INTERVALS);
 export type WardenSweepInterval = z.infer<typeof WardenSweepIntervalSchema>;
 
-/** The skip threshold's range: Jev may skip a flag only when it is at least this sure. */
+/** The leave bar's range: Jev may leave a flag alone only when it is at least this sure. */
 export const WARDEN_GUARD_THRESHOLD_RANGE = { min: 0.7, max: 0.95 } as const;
 
 /**

@@ -27,6 +27,7 @@ import {
   WardenGuardFailureCodeSchema,
   type WardenInvestigationOrigin,
   WardenInvestigationOriginSchema,
+  WardenJevActsSchema,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
 import { z } from 'zod';
@@ -97,6 +98,7 @@ const BackoffSchema = z.object({
   count: z.number().int().min(1),
   lastAt: Instant,
   cleared: z.literal(true).optional(),
+  jevActed: z.object({ action: WardenJevActsSchema.keyof(), at: Instant }).optional(),
 }) satisfies z.ZodType<unknown, InvestigationBackoff>;
 
 const BlessingSchema = z.object({
@@ -169,6 +171,7 @@ const TriageDaySchema = z.object({
   flags: z.number().int().min(0),
   jevDecisions: z.number().int().min(0),
   jevSkips: z.number().int().min(0),
+  jevActions: z.number().int().min(0).optional(),
   jevUsd: z.number().finite().min(0),
 }) satisfies z.ZodType<unknown, WardenTriageDay>;
 

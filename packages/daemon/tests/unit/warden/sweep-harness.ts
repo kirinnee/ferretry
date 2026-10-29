@@ -28,15 +28,15 @@ export const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 
 /** Jev, sure the ferret is healthy. */
 export const JEV_SKIP: TriageDecision = {
-  verdict: 'skip',
+  verdict: 'leave',
   confidence: 0.96,
   model: 'jev-latest',
   inputTokens: 500,
   latencyMs: 90,
   costUsd: 0.001,
 };
-/** Jev, wanting an investigation. */
-export const JEV_INVESTIGATE: TriageDecision = { ...JEV_SKIP, verdict: 'investigate', confidence: 0.9 };
+/** Jev, unsure: the flag is handed on. */
+export const JEV_INVESTIGATE: TriageDecision = { ...JEV_SKIP, verdict: 'unsure', confidence: 0.9 };
 export const at = (minutes: number): string => new Date(NOW + minutes * 60_000).toISOString();
 
 const settings = (overrides: Partial<WardenSweepSettings> = {}): WardenSweepSettings => ({
