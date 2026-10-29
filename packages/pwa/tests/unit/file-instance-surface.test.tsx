@@ -276,6 +276,37 @@ describe('a file instance tab body', () => {
     }
   });
 
+  it('says so when a diff has no changed lines to show', async () => {
+    fixture.changes = { repo: true, changes: [] };
+    fixture.diffs = { 'src/api.ts': '' };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      await click(view.container, 'Show git diff for src/api.ts');
+      await settle();
+      expect(view.container.textContent).toContain('No textual changes in this file.');
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('tells the reader how much of a very long diff it shows', async () => {
+    fixture.changes = { repo: true, changes: [] };
+    const body = Array.from({ length: 4_100 }, (_, index) => `+line ${index}`).join('\n');
+    fixture.diffs = { 'src/api.ts': `--- a/src/api.ts\n+++ b/src/api.ts\n@@ -0,0 +1,4100 @@\n${body}\n` };
+    const view = await open(
+      <FileInstanceSurface daemon={daemon} scope={scope} instance={fileInstance('src/api.ts')} />,
+    );
+    try {
+      await click(view.container, 'Show git diff for src/api.ts');
+      await settle();
+      expect(view.container.textContent).toMatch(/Showing the first 4,000 of 4,10\d diff lines\./u);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('hides the diff control when the session is not a repository', async () => {
     fixture.changes = { repo: false, changes: [] };
     const view = await open(
