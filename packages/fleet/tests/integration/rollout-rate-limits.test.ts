@@ -96,6 +96,23 @@ describe('newestRateLimitsInRollout', () => {
     });
   });
 
+  it('should pass over a record that is JSON but not an object', () => {
+    // Arrange — lines that name both markers yet parse to a string, an array and null.
+    const text = [
+      tokenCount('2026-10-13T07:05:00.000Z', limits(20, 2)),
+      JSON.stringify('token_count rate_limits'),
+      JSON.stringify(['token_count', 'rate_limits']),
+      'null',
+      '',
+    ].join('\n');
+
+    // Act
+    const actual = newestRateLimitsInRollout(text, 0);
+
+    // Assert — none of them is an event, so the reading before them is still the newest.
+    should(actual?.fiveHour?.usedPercent).equal(20);
+  });
+
   it('should find nothing in a rollout with no usable reading', () => {
     // Arrange / Act / Assert
     should(newestRateLimitsInRollout(tokenCount('2026-10-13T07:00:00.000Z', { primary: {} }), 0)).be.undefined();
@@ -271,6 +288,26 @@ describe('listRollouts and newestRolloutRateLimits', () => {
 
     // Assert
     should(found?.fiveHour?.usedPercent).equal(31);
+  });
+
+  it('should leave out a rollout it can list but not inspect', async () => {
+    // Arrange — a directory that can be read but not searched names its files and refuses to stat them.
+    const root = await sessions();
+    const readable = join(root, '2026', '10');
+    const listOnly = join(root, '2026', '09');
+    await mkdir(readable, { recursive: true });
+    await mkdir(listOnly, { recursive: true });
+    const kept = join(readable, `rollout-2026-10-13T07-00-00-${CONVERSATION}.jsonl`);
+    await writeFile(kept, '');
+    await writeFile(join(listOnly, `rollout-2026-09-01T07-00-00-${OTHER}.jsonl`), '');
+    await chmod(listOnly, 0o400);
+
+    // Act
+    const actual = await listRollouts(root);
+    await chmod(listOnly, 0o700);
+
+    // Assert
+    should(actual.map(file => file.path)).deepEqual([kept]);
   });
 
   it('should skip a day directory it cannot read', async () => {

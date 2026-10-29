@@ -33,6 +33,7 @@ import {
   CODEX_CREDENTIAL_STORE_KEY,
   hostCodexHome,
   resolveCredentialStore,
+  type StoredCredentialResolution,
 } from '../lib/account/credentials.ts';
 import {
   type HostDocumentRead,
@@ -127,7 +128,7 @@ export class HostHarnessScanner {
       this.#read(claudeJson),
       this.#skills('claude', join(home, 'skills')),
     ]);
-    const login = await this.#login('claude', mcp);
+    const login = await this.#login('claude', mcp, undefined);
     return this.#complete({
       harness: 'claude',
       login,
@@ -165,7 +166,7 @@ export class HostHarnessScanner {
       this.#read(join(home, 'hooks.json')),
       this.#skills('codex', join(home, 'skills')),
     ]);
-    const login = await this.#login('codex', settings);
+    const login = await this.#login('codex', settings, home);
     return this.#complete({
       harness: 'codex',
       login,
@@ -200,9 +201,10 @@ export class HostHarnessScanner {
    * The person's own login: classified through the account model's `host` store, never returned.
    *
    * `document` is the harness's file that names the account (Claude's `.claude.json`) or says where
-   * the login is kept (Codex's `config.toml`).
+   * the login is kept (Codex's `config.toml`). `codexHome` is the Codex home already named for a Codex
+   * scan.
    */
-  async #login(harness: HarnessKind, document: HostDocumentRead): Promise<HostLogin> {
+  async #login(harness: HarnessKind, document: HostDocumentRead, codexHome: string | undefined): Promise<HostLogin> {
     const parsed = parsedRecord(document, harness === 'claude' ? 'json' : 'toml');
     if (harness === 'codex') {
       const kept = parsed?.[CODEX_CREDENTIAL_STORE_KEY];
@@ -213,26 +215,17 @@ export class HostHarnessScanner {
         };
       }
     }
+    // A host store never resolves to an environment login, and the caller only reaches here for Codex
+    // once its home has been named, so what comes back is always a stored credential.
     const resolution = resolveCredentialStore(
       `${harness}-host`,
       { harness, store: 'host' },
       {
         fleetRoot: this.deps.userHome,
         userHome: this.deps.userHome,
-        ...(harness === 'codex'
-          ? (() => {
-              const codexHome = hostCodexHome(this.deps.codexHome, this.deps.userHome);
-              return codexHome === undefined ? {} : { hostCodexHome: codexHome };
-            })()
-          : {}),
+        ...(codexHome === undefined ? {} : { hostCodexHome: codexHome }),
       },
-    );
-    if (resolution.store !== 'host' || 'unavailable' in resolution) {
-      return {
-        state: 'not-shareable',
-        reason: 'unavailable' in resolution ? resolution.unavailable : 'not a host login',
-      };
-    }
+    ) as StoredCredentialResolution;
     let material: CredentialMaterial;
     try {
       material = await this.deps.credentials.storedMaterial(resolution);
