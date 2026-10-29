@@ -65,6 +65,7 @@ const ALTERED_DEVICE_CONTROLS: DeviceControls = {
   includeFinished: true,
   dashboardView: 'table',
   density: 'compact',
+  groupNeedsYou: false,
   chatWidth: 'full',
   composerEnterKey: 'send',
   composerPhoneEnterKey: 'send',
@@ -124,6 +125,7 @@ describe('parseControlsRecord — kteam controls cases, on the new nested shape'
       sessionsList: 'all',
       // Never chosen: the Sessions bar opens on Interactive.
       sessionsMode: null,
+      groupNeedsYou: true,
       // A payload written before the composer fields existed opens suggestions
       // with the @ ladder, offers $ skills and keeps Vim keys off — no version bump.
       suggestionKeys: 'ladder',

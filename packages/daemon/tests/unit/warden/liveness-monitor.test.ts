@@ -55,6 +55,38 @@ describe('the liveness monitor', () => {
     should(monitor.frozenAt('s1')).equal(new Date(NOW + 31 * TICK_MS).toISOString());
   });
 
+  it.each(['your-turn', 'needs-input'] as const)(
+    'should never nudge or freeze a ferret whose turn state is %s — it waits on its owner',
+    async turnState => {
+      // Arrange — the same total silence as above, but the ferret is at its prompt.
+      const { monitor, advance } = subject({ targets: () => [target({ turnState })] });
+      monitor.arm();
+      const events: string[] = [];
+
+      // Act
+      for (let tick = 0; tick <= 42; tick += 1) {
+        events.push(...(await monitor.tick({ nudgeAllowed: true })).map(event => event.kind));
+        advance(TICK_MS);
+      }
+
+      // Assert
+      should(events).deepEqual([]);
+    },
+  );
+
+  it('should remember since when a leftover browser has run under a ferret', async () => {
+    // Arrange
+    const { monitor, advance } = subject({ sample: () => ({ subprocessAlive: false, leftoverBrowser: true }) });
+    await monitor.tick({ nudgeAllowed: true });
+    advance(TICK_MS);
+
+    // Act
+    await monitor.tick({ nudgeAllowed: true });
+
+    // Assert
+    should(monitor.leftoverBrowserSince('s1')).equal(new Date(NOW).toISOString());
+  });
+
   it('should fill the ledger the sweep reads from what changed between looks', async () => {
     // Arrange
     let pane = 'a';

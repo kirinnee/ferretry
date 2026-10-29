@@ -29,7 +29,7 @@ import { createPortal } from 'react-dom';
 import type { OpenLinksIn } from '../../lib/controls.ts';
 import { InAppBrowserContext, type InAppBrowserHost, InAppBrowserSheet } from './in-app-browser.tsx';
 import { type BrowserActivation, type BrowserDestination, browserDestination } from './in-app-browser-model.ts';
-import { decideLinkAction, isIosStandalone } from './link-behaviour-model.ts';
+import { decideLinkAction, isIosStandalone, type LinkNotice } from './link-behaviour-model.ts';
 import type { ComputerLinkPort } from './local-computer.ts';
 
 /** How long the iOS hand-off has to take the reader to Safari before a plain new tab is opened instead. */
@@ -101,6 +101,8 @@ interface LinkBehaviourSettings {
   readonly computer?: ComputerLinkPort;
   /** Absent: the real browser. */
   readonly opener?: LinkOpener;
+  /** Says one sentence to the reader; absent: the fallback is only logged. */
+  readonly notify?: (message: string) => void;
 }
 
 const LinkBehaviourContext = createContext<LinkBehaviourSettings>({ openLinksIn: 'browser' });
@@ -109,17 +111,19 @@ export interface LinkBehaviourProviderProps {
   readonly openLinksIn: OpenLinksIn;
   readonly computer?: ComputerLinkPort;
   readonly opener?: LinkOpener;
+  readonly notify?: (message: string) => void;
   readonly children: ReactNode;
 }
 
-export function LinkBehaviourProvider({ openLinksIn, opener, computer, children }: LinkBehaviourProviderProps) {
+export function LinkBehaviourProvider({ openLinksIn, opener, computer, notify, children }: LinkBehaviourProviderProps) {
   const value = useMemo<LinkBehaviourSettings>(
     () => ({
       openLinksIn,
       ...(opener === undefined ? {} : { opener }),
       ...(computer === undefined ? {} : { computer }),
+      ...(notify === undefined ? {} : { notify }),
     }),
-    [openLinksIn, opener, computer],
+    [openLinksIn, opener, computer, notify],
   );
   return <LinkBehaviourContext.Provider value={value}>{children}</LinkBehaviourContext.Provider>;
 }
@@ -151,7 +155,7 @@ export interface LinkBehaviour {
 }
 
 export function useLinkBehaviour(): LinkBehaviour {
-  const { openLinksIn, opener, computer } = useContext(LinkBehaviourContext);
+  const { openLinksIn, opener, computer, notify } = useContext(LinkBehaviourContext);
   const host = useContext(InAppBrowserContext);
   const [preview, setPreview] = useState<{ readonly destination: BrowserDestination; readonly open: boolean } | null>(
     null,
@@ -169,6 +173,7 @@ export function useLinkBehaviour(): LinkBehaviour {
         iosStandalone: openLinksIn !== 'panel' && browser.iosStandalone(),
         computerAvailable: computer !== undefined,
       });
+      if ('notice' in action && action.notice !== undefined) notify?.(NOTICE_WORDS[action.notice]);
       if (action.kind === 'native') return false;
       click.preventDefault();
       if (action.kind === 'panel') {
@@ -177,14 +182,14 @@ export function useLinkBehaviour(): LinkBehaviour {
         return true;
       }
       if (action.kind === 'computer') {
-        handOffToComputer(computer, browser, action.href);
+        handOffToComputer(computer, browser, action.href, notify);
         return true;
       }
       browser.handOff(action.href);
       browser.unlessLeft(SAFARI_HANDOFF_MS, () => browser.openTab(action.fallback));
       return true;
     },
-    [computer, host, openLinksIn, opener],
+    [computer, host, notify, openLinksIn, opener],
   );
 
   const open = useCallback<LinkBehaviour['open']>(
@@ -251,14 +256,26 @@ const documentBase = (): string | undefined => (typeof document === 'undefined' 
 /**
  * Gives one address to this computer's browser through the daemon, and opens an ordinary new tab if
  * that goes wrong for ANY reason — refused, offline, rate limited, not actually local. The reader asked
- * for a link to open, and a failed convenience must not be the reason it does not. The reason goes to
- * the debug console; the address never does, because a link routinely carries a token in its query.
+ * for a link to open, and a failed convenience must not be the reason it does not. The reader is told
+ * why in a toast and the reason goes to the debug console; the address goes to neither, because a link
+ * routinely carries a token in its query.
  */
-const handOffToComputer = (computer: ComputerLinkPort | undefined, browser: LinkOpener, href: string): void => {
+const handOffToComputer = (
+  computer: ComputerLinkPort | undefined,
+  browser: LinkOpener,
+  href: string,
+  notify: ((message: string) => void) | undefined,
+): void => {
   (computer?.(href) ?? Promise.reject(new Error('no daemon is on this computer'))).catch((error: unknown) => {
-    console.debug('[links] the daemon could not open the link on this computer; opening a tab instead', {
-      reason: error instanceof Error ? error.message : 'unknown',
-    });
+    const reason = error instanceof Error ? error.message : 'unknown';
+    console.debug('[links] the daemon could not open the link on this computer; opening a tab instead', { reason });
+    notify?.(`Could not hand the link to your computer's browser (${reason}). Opened it in this browser instead.`);
     browser.openTab(href);
   });
+};
+
+/** What the reader is told when "Open links in › your computer's default browser" cannot be honoured. */
+const NOTICE_WORDS: Readonly<Record<LinkNotice, string>> = {
+  'computer-unavailable':
+    "Opened in this browser: your computer's default browser needs Ferretry connected directly on that computer.",
 };

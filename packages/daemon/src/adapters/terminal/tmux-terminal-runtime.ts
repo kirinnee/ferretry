@@ -1,5 +1,6 @@
 import type { TerminalSize } from '@ferretry/protocol';
 import type { TerminalRecord, TerminalRuntimePort } from '../../lib/terminal/contracts.ts';
+import type { LoginShellPort } from '../../lib/terminal/login-shell.ts';
 import { decodeTerminalOpener, encodeTerminalOpener } from '../../lib/terminal/ownership.ts';
 import { parseTerminalCapture, type TerminalCapture } from '../../lib/terminal/redraw.ts';
 import {
@@ -52,7 +53,9 @@ function isRecordId(value: string): boolean {
 export class TmuxTerminalRuntime implements TerminalRuntimePort {
   constructor(
     private readonly tmux: TmuxCommandPort,
-    private readonly now: () => number = () => Date.now(),
+    private readonly now: () => number,
+    /** The owner's own shell, which every terminal runs as a login shell so their rc files load. */
+    private readonly loginShell: LoginShellPort,
   ) {}
 
   async list(): Promise<readonly TerminalRecord[]> {
@@ -131,6 +134,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
   async create(input: Parameters<TerminalRuntimePort['create']>[0]): Promise<TerminalRecord> {
     const createdAtMs = this.now();
     const tmuxSession = terminalTmuxSessionName(input.ownerId, input.id);
+    const shell = await this.loginShell.shell();
     const result = await this.tmux.execute([
       'new-session',
       '-d',
@@ -142,7 +146,7 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       String(input.size.cols),
       '-y',
       String(input.size.rows),
-      '/bin/sh',
+      shell,
       '-l',
       ';',
       'set-option',

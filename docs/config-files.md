@@ -26,7 +26,8 @@ wire).
 Every file Ferretry writes starts with `# yaml-language-server: $schema=…`, pointing at
 `config/.schema/<kind>.json`, which the daemon writes from the same zod schemas it checks with
 (`fy config schema <kind>` prints one). `config/daemon.json` and `config/routing.json` live in the same
-directory and are not configuration files in this sense: they are the daemon's own documents.
+directory and are not configuration files in this sense: they are the daemon's own documents. The shell
+terminals open is one of them (`terminals.shell`, [terminals.md](terminals.md)).
 
 `fy config path`, `check`, `schema` and `guide` need no daemon. `status`, `show`, `write` and `confirm` ask it:
 `fy config write <file> [--if-match <etag>]` reads the text from stdin and is refused whole unless it checks.
@@ -145,8 +146,10 @@ cannot be redacted is never sent (that flag is passed on instead). The Jev key i
 through the outbound holder ([docs/secrets.md](secrets.md)); `guard.endpoint` cannot move it to another host.
 Investigations run on your own login and read the transcript, pane, diffs and CI. The rules send nothing.
 
-**Only an investigation acts.** Its explicit `Verdict:` line is what acts — never prose — and only as far as
-`mayActAlone` allows: `nudge`, `resume`, `restart` and `failover` default on, **`stop` defaults off**.
+**Only an investigation acts on a ferret.** Its explicit `Verdict:` line is what acts — never prose — and only
+as far as `mayActAlone` allows: `nudge`, `resume`, `restart` and `failover` default on, **`stop` defaults off**.
+(The one rule that acts without an investigation, `closeLeftovers`, closes a leftover browser and never
+touches the ferret — see below.)
 `restart` relaunches a dead or frozen process with its conversation intact — the resume path, replacing a
 pane that still looks alive — when the report recommends `RESTART`; a file that names `resume` but not
 `restart` gives `restart` the same answer. An act it may not
@@ -175,11 +178,22 @@ priced from its own transcript once analytics has read it; until then it counts 
 investigation, for the cap only. The status's savings line — skips × that average, minus Jev's own cost —
 appears only once an investigation has been priced.
 
-**A cleared flag stays quiet, longer each time.** When Jev or an investigation clears a flag, that kind of
-anomaly on that ferret is left alone for `blessMinutes` (default 15). Each consecutive re-clear of the same
-kind on the same ferret doubles it — 15, 30, 60, 120 — up to **4 hours**. The run starts again when the
-ferret changes status (which also ends the quiet at once), or when the flag stops being raised. A different
-kind of trouble on the same ferret is never covered.
+**A cleared flag stays quiet until its situation changes.** Every flag on a ferret carries a **subject** —
+which episode of trouble it is: its turn and the moment the episode began (the transcript last grew, the
+ferret froze, it went idle), and for a stuck command that process itself, across turns. When Jev or an
+investigation clears a flag, that kind of flag on that ferret is left alone **until its subject changes** —
+the ferret moves and stalls again, a different command is the stuck one — for 24 hours at most, however its
+status flickers meanwhile; a different kind of trouble on the same ferret
+is never covered. The `blessMinutes` blessing (default 15, doubling per re-clear up to 4 hours) still
+records the clear for the Warden page and _Leave it longer_, and still ends at once when the ferret changes
+status — but it is no longer what keeps a cleared ferret from being looked at again.
+
+**Each look at the same situation waits longer.** An investigation that did not clear its flag (a nudge, a
+recommendation it held for you, a report it could not finish) is not repeated on a timer either: the next
+automatic look at the same subject waits `assignedCooldownMinutes` (default 30), then four times that, then
+sixteen, then a day — **30 min → 2 h → 8 h → 24 h**. A new subject starts again at once, so a new situation
+is never hidden behind an old answer; the owner's own _Investigate_ and a forced run are never held. The
+looks are remembered in `warden/state.json` (`backoff`), so a restart does not re-investigate the fleet.
 
 **Leave it longer.** On a flagged or cleared ferret, Insights › Warden offers _Leave it longer_: an hour,
 four, or until its status changes (at most a week). It covers the kinds flagged or cleared there now, never
@@ -188,16 +202,45 @@ no streak. It is `POST /v1/warden/leave {sessionId, duration}` — `warden.confi
 Warden's supervision of that ferret off for a while ([grants.md](grants.md)).
 
 **The liveness check.** Every 30 s the Warden looks at each working ferret — a digest of its screen and
-of its transcript tail, the work counters its harness paints, and whether its pane has a live subprocess —
-and keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and
-long-command rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been
-able to see for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
+of its transcript tail, the work counters its harness paints, and which processes run under its pane — and
+keeps a per-ferret ledger of when each last moved. That ledger is what the long-think and stuck-command
+rules (`susThinkingSeconds`, `susSubprocessSeconds`) read, and a working ferret it has not been able to see
+for three ticks is flagged `dead_monitor`. A ferret with no sign of life of any kind for its
 `nudgeAfterSeconds` (default 300) is nudged once — only while `mayActAlone.nudge` is on — and one with no
 transcript, counter or subprocess sign for its `killAfterSeconds` (default 900; read as "frozen", since the
 Warden never kills) after that is flagged **frozen**: a restart candidate that goes through the layers like
 any other flag. A ferret parked with `signal waiting`, an interactive ferret, or a tick that ran late on a
 starved host is never nudged or flagged. The ledger is kept in memory: a restarted daemon starts every
 clock again rather than judging silence it did not see.
+
+**What counts as a running command.** Only a **tool command**: what the harness runs for the agent through
+a shell (`zsh -c …`, `bash -c …`), and everything under it. The harness's own **helpers** — `fy mcp serve`,
+an MCP or language server, Codex's app server, and anything they start (a Chrome an MCP server drives) — are
+not, however long they live; nor is a server the agent left **listening** on a port (a dev or board server),
+nor a **browser**. Only processes under the ferret's own pane are ever looked at, so another session's
+process or the daemon's own tmux reader can never be blamed on it. A different command running is a new
+episode, so one short command after another never reads as one long one.
+
+**Waiting on you is never investigated.** While a ferret's turn is over (`your-turn`) with no command of
+its own still running, or it is parked on a question or permission prompt (`needs-input`), no long-think or
+stuck-command flag is raised — and it is never nudged — because the next move is yours; a question nobody
+answers is `unattended_question`, which Needs you owns. Detection resumes by itself once it works again. A
+turn that ended while a command it started still runs is **not** waiting on you: it is waiting on that
+command, and a command that can never finish is exactly what the stuck rule is for.
+
+**Stuck mid-turn.** `sus_subprocess` is raised when a tool command has run for `susSubprocessSeconds`
+(default **600**, 10 min) **and nothing moved for that long**: no transcript growth, no token advance, and no
+screen change once the harness's own spinner, elapsed clocks and status line are masked out. The old rule
+fired on any child process alive for 15 min, so it needed the slack; requiring every progress signal to be
+flat is what makes the shorter time safe — a build that prints, a watch loop that refreshes, a ferret
+writing about what it is doing all count as moving. Climbing tokens still exempt a long think.
+
+**Leftover browsers are closed by rule.** A ferret whose turn is over (or whose done marker is written),
+with no command of its own running, whose pane has had a browser it launched for 10 minutes since the turn
+ended, gets that browser closed — the browser only, never the ferret, and the pane's processes are read again at the moment
+of closing. No Jev, no investigation, nothing spent. It is `mayActAlone.closeLeftovers` (default **on**);
+with it off the Warden lists the recommendation once under Recent actions instead. Every close is listed
+there too, and journalled as `fleet.warden_leftover_closed`.
 
 **When it sweeps.** Every `intervalMinutes` (1, 2, 5, 10 or 15; default 2), and also soon after a turn ends,
 a question is waiting or a pane dies (`events.turnEnd`, `events.question`, `events.paneDied`), at most one

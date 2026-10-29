@@ -25,14 +25,19 @@ export interface WardenRemedyPort {
   restart(sessionId: string): Promise<void>;
   stop(sessionId: string, reason: string): Promise<void>;
   failover(sessionId: string, agent: string): Promise<void>;
+  /**
+   * Close the browsers a ferret launched that still run under its pane — the ferret itself untouched.
+   * The process tree is read again at the moment of closing; answers how many were closed.
+   */
+  closeLeftoverBrowsers(sessionId: string): Promise<number>;
 }
 
 /** The act a verdict asks for, before the owner's permissions are applied. */
 export type WardenVerdictAct =
-  | { readonly action: Exclude<WardenActionKind, 'bless' | 'failover'>; readonly reason: string }
+  | { readonly action: Exclude<WardenActionKind, 'bless' | 'failover' | 'close_leftover'>; readonly reason: string }
   | { readonly action: 'failover'; readonly reason: string; readonly agent: string };
 
-const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless'>, string>> = {
+const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless' | 'close_leftover'>, string>> = {
   nudge: 'it looks wedged but recoverable',
   resume: 'its turn died but the work should continue',
   restart: 'its process is dead or frozen',

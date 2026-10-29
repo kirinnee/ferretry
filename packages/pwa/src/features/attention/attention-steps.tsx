@@ -1,0 +1,125 @@
+/**
+ * THE BODY AND THE STEPS OF ONE ATTENTION ITEM: full Markdown through the caller's prose renderer (the
+ * chat's own, so hypermedia blocks and the proof-before-link reference gate behave exactly as in a
+ * message), the steps as a checklist.
+ *
+ * A tick is OPTIMISTIC: it shows at once and goes to the machine as the `progress` action, so every
+ * device sees it; a refusal rolls it back and says so on the step. A long body is folded behind
+ * "Show all" past a height, never clipped without a way to the rest.
+ */
+
+import { type ReactNode, useId, useState } from 'react';
+
+type Prose = (text: string) => ReactNode;
+
+/** A body longer than this many characters (or lines) starts folded. */
+const BODY_FOLD_CHARS = 700;
+const BODY_FOLD_LINES = 14;
+
+const bodyFoldsByDefault = (text: string): boolean =>
+  text.length > BODY_FOLD_CHARS || text.split('\n').length > BODY_FOLD_LINES;
+
+export function AttentionBody({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {
+  const [all, setAll] = useState(false);
+  const folds = bodyFoldsByDefault(text);
+  const regionId = useId();
+  return (
+    <div className="fy-attn-body" data-attention-body="" data-folded={(folds && !all) || undefined} id={regionId}>
+      <div className="fy-attn-body__text">{renderProse(text)}</div>
+      {folds ? (
+        <button
+          aria-controls={regionId}
+          aria-expanded={all}
+          className="fy-attn-card__more"
+          data-attention-body-toggle=""
+          onClick={() => setAll(open => !open)}
+          type="button"
+        >
+          {all ? 'Show less' : 'Show all'}
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+export interface AttentionStepsProps {
+  readonly steps: readonly string[];
+  /** The indices already ticked on the machine. */
+  readonly done: readonly number[];
+  readonly renderProse: Prose;
+  /** Sends one tick; a rejection rolls it back. Absent: the list is read-only. */
+  readonly onProgress?: (step: number, done: boolean) => Promise<void>;
+  readonly disabled?: boolean;
+}
+
+export function AttentionSteps({ steps, done, renderProse, onProgress, disabled = false }: AttentionStepsProps) {
+  const [pending, setPending] = useState<ReadonlyMap<number, boolean>>(new Map());
+  const [failure, setFailure] = useState<{ readonly step: number; readonly message: string } | null>(null);
+  const confirmed = new Set(done);
+  const ticked = (step: number): boolean => pending.get(step) ?? confirmed.has(step);
+  const count = steps.reduce((total, _, step) => total + (ticked(step) ? 1 : 0), 0);
+
+  const settle = (step: number): void =>
+    setPending(current => {
+      const next = new Map(current);
+      next.delete(step);
+      return next;
+    });
+
+  const toggle = (step: number): void => {
+    if (onProgress === undefined || pending.has(step)) return;
+    const next = !ticked(step);
+    setFailure(null);
+    setPending(current => new Map(current).set(step, next));
+    onProgress(step, next).then(
+      () => settle(step),
+      (reason: unknown) => {
+        settle(step);
+        setFailure({
+          step,
+          message: reason instanceof Error ? reason.message : 'the machine did not accept it',
+        });
+      },
+    );
+  };
+
+  return (
+    <section aria-label="Steps" className="fy-attn-steps" data-attention-steps="">
+      <p className="fy-attn-steps__count" data-attention-steps-count="">
+        {count} of {steps.length} done
+      </p>
+      <ol className="fy-attn-steps__list">
+        {steps.map((text, step) => {
+          const on = ticked(step);
+          const saving = pending.has(step);
+          return (
+            <li
+              className="fy-attn-step"
+              data-attention-step={step}
+              data-done={on || undefined}
+              // biome-ignore lint/suspicious/noArrayIndexKey: a step's position is its identity on the wire
+              key={step}
+            >
+              <input
+                aria-label={`Step ${step + 1}`}
+                aria-busy={saving || undefined}
+                checked={on}
+                className="fy-attn-step__box"
+                data-attention-tick={step}
+                disabled={disabled || onProgress === undefined}
+                onChange={() => toggle(step)}
+                type="checkbox"
+              />
+              <div className="fy-attn-step__text">{renderProse(text)}</div>
+              {failure?.step === step ? (
+                <p className="fy-attn-step__error m-0 text-meta text-err" role="alert">
+                  Step {step + 1} was not saved: {failure.message}
+                </p>
+              ) : null}
+            </li>
+          );
+        })}
+      </ol>
+    </section>
+  );
+}

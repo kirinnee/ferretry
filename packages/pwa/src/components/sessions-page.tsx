@@ -22,6 +22,7 @@ import { useAccountPickerSlice, useMachineRosters } from '../hooks/use-account-p
 import { useAttentionInbox } from '../hooks/use-attention-inbox.ts';
 import { useConnectionHealth } from '../hooks/use-connection-health.ts';
 import { useDensity } from '../hooks/use-density.ts';
+import { useGroupNeedsYou } from '../hooks/use-group-needs-you.ts';
 import { useFleetView } from '../hooks/use-fleet-view.ts';
 import { type LiveClockOptions, useLiveClock } from '../hooks/use-live-clock.ts';
 import {
@@ -169,14 +170,18 @@ function DashboardContent({
   const healthState = useConnectionHealth(health, connection.daemonId);
   const view = useFleetView({ fleet, controls, daemonId: connection.daemonId, projects: projectList });
   const { density } = useDensity(controls);
+  const groupNeedsYou = useGroupNeedsYou(controls);
   const status = useWardenStatus(connection, wardenStatus);
   // The page's own search and mode filters narrow every machine's list alike.
   const allMachines = useMemo(
     () =>
       machineSources === undefined || view.scope !== null
         ? undefined
-        : allMachinesView(machineSources, { select: sessions => filterSessions(sessions, view.controls) }),
-    [machineSources, view.scope, view.controls],
+        : allMachinesView(machineSources, {
+            select: sessions => filterSessions(sessions, view.controls),
+            groupNeedsYou,
+          }),
+    [machineSources, view.scope, view.controls, groupNeedsYou],
   );
 
   useProjectScope({
@@ -204,6 +209,7 @@ function DashboardContent({
     connection,
     dashboardView: view.controls.dashboardView,
     density,
+    groupNeedsYou,
     error: view.slice.error,
     outage,
     machineName: name,

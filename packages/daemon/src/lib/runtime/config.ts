@@ -302,6 +302,14 @@ export const DaemonConfigDocumentSchema = z
     analyticsPricingSources: ConfiguredAnalyticsPricingSourcesSchema.default([]),
     projectRoots: z.array(z.string().trim().min(1)).readonly().default(['~/Workspace', '~/.config']),
     /**
+     * HOW WEB TERMINALS START (docs/terminals.md). `shell` is the program a new terminal runs as a login shell.
+     * ABSENT MEANS THE OWNER'S OWN: the account's login shell, then `$SHELL`, then `/bin/sh`. A value here is
+     * still held to the machine's `/etc/shells` and to being an executable file, so naming a path is a
+     * preference between shells the machine already vouches for, never a way to run an arbitrary program.
+     * Read when the first terminal opens after the daemon starts; a change needs a restart.
+     */
+    terminals: z.strictObject({ shell: z.string().trim().min(1).max(512).optional() }).prefault({}),
+    /**
      * WHERE `claude` AND `codex` ARE, when this daemon cannot see them for itself.
      *
      * IT BELONGS IN THIS DOCUMENT for the same reason `grants` does: it is a thing an operator

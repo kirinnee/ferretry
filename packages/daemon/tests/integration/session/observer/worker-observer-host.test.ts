@@ -237,7 +237,8 @@ async function rig(
     observer: new SessionObserver(text => `digest(${text})`),
     liveness: {
       redact: async text => text.replaceAll('secret', '[redacted]'),
-      processes: async () => ({ kind: 'observed', processes: [{ pid: 1 }] }) as never,
+      processes: async () =>
+        ({ kind: 'observed', processes: [{ pid: 1, argv: 'bash -c sleep 600', verdict: 'unknown' }] }) as never,
     },
     clock: { now: () => NOW },
     barrierMs: options.barrierMs ?? 1_000,
@@ -453,6 +454,7 @@ describe('WorkerObserverHost — reads that need an answer now', () => {
       paneHash: 'digest(a [redacted] screen)',
       transcriptHash: 'digest(fingerprint)',
       subprocessAlive: true,
+      subprocessKey: 'pid:1',
     });
     should(evidence).deepEqual({ readable: true, inputs: [] });
     should(failures.size).equal(0);

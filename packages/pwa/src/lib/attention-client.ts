@@ -92,6 +92,27 @@ export const applyAttentionAction = async (
   return parseSnapshot(scope, value);
 };
 
+/** "Send now": the daemon delivers the answers it is holding at once and returns the board without `replies`. */
+export const sendAttentionReplies = async (
+  daemon: DaemonConnection,
+  scope: DaemonSessionScope,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<AttentionSnapshot> =>
+  parseSnapshot(
+    scope,
+    await fetchAttention(
+      daemon,
+      scope,
+      `${attentionPath(scope)}/replies`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
+        body: '{}',
+      },
+      fetcher,
+    ),
+  );
+
 interface ConnectionBinding {
   readonly baseUrl: string;
   readonly deviceId: string;
@@ -216,6 +237,22 @@ export class DaemonAttentionClient {
     return this.#mutate(daemon, scope, { action: 'dismiss', id, ...(note === undefined ? {} : { note }) });
   }
 
+  /** Ticks (or unticks) one 0-based step of an item's checklist; every device sees it. */
+  progress(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    id: string,
+    step: number,
+    done: boolean,
+  ): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'progress', id, step, done });
+  }
+
+  /** Tells the ferret a to-do needs more information; the item stays open, waiting on it. */
+  needsInfo(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, note?: string): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'needs-info', id, ...(note === undefined ? {} : { note }) });
+  }
+
   /** Unpair one daemon without perturbing any other daemon's cache or work. */
   clearDaemon(daemonId: DaemonId): void {
     this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);
@@ -227,12 +264,23 @@ export class DaemonAttentionClient {
     this.#clearBoardRevisions(daemonId);
   }
 
-  #mutate(daemon: DaemonConnection, scope: DaemonSessionScope, action: AttentionActionRequest): Promise<void> {
+  /** Delivers the answers the daemon is holding for this ferret now. */
+  sendReplies(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
+    return this.#mutate(daemon, scope, () => sendAttentionReplies(daemon, scope, this.fetcher));
+  }
+
+  #mutate(
+    daemon: DaemonConnection,
+    scope: DaemonSessionScope,
+    action: AttentionActionRequest | (() => Promise<AttentionSnapshot>),
+  ): Promise<void> {
     assertScopeDaemon(daemon, scope);
     const generation = this.#bind(daemon);
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
-    const promise = applyAttentionAction(daemon, scope, action, this.fetcher)
+    const promise = (
+      typeof action === 'function' ? action() : applyAttentionAction(daemon, scope, action, this.fetcher)
+    )
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);

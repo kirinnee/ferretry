@@ -76,7 +76,8 @@ const pct = (fraction: number): string => `${Math.round(fraction * 100)}%`;
 const sentenceList = (items: readonly string[]): string =>
   items.length <= 1 ? items.join('') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`;
 
-const ACT_ALONE_WORDS: Readonly<Record<keyof WardenMayActAlone, string>> = {
+/** What an investigation's verdict may do alone. Closing a leftover is a rule, never a verdict. */
+const ACT_ALONE_WORDS: Readonly<Record<Exclude<keyof WardenMayActAlone, 'closeLeftovers'>, string>> = {
   nudge: 'nudge',
   resume: 'resume or revive',
   restart: 'restart a dead or frozen process',
@@ -101,7 +102,7 @@ export const wardenSummary = (config: WardenConfig, hasJevKey: boolean, machineD
   const { jev, llm } = config.layers;
   if (!jev && !llm) return `${every} and show them to you. No AI runs and nothing is spent.`;
   const errors = wardenFormErrors(config);
-  const own = (Object.keys(ACT_ALONE_WORDS) as (keyof WardenMayActAlone)[])
+  const own = (Object.keys(ACT_ALONE_WORDS) as (keyof typeof ACT_ALONE_WORDS)[])
     .filter(action => config.mayActAlone[action])
     .map(action => ACT_ALONE_WORDS[action]);
   const acts =

@@ -22,7 +22,7 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-      - uses: cachix/install-nix-action@v31
+      - uses: ./.github/actions/install-nix
       # RELEASE_TOKEN must be a PAT (or GitHub-App token): tags pushed with the default
       # GITHUB_TOKEN do not trigger the CD workflow.
       - name: Release

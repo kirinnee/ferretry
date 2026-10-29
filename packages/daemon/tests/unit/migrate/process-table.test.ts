@@ -88,13 +88,14 @@ describe('migration process inventory decisions', () => {
 
     // Assert
     should(actual).deepEqual([
-      { pid: 200, argv: 'zsh', startedSecondsAgo: 420, cwd: undefined, verdict: 'safe_to_kill' },
+      { pid: 200, ppid: 100, argv: 'zsh', startedSecondsAgo: 420, cwd: undefined, verdict: 'safe_to_kill' },
       {
         pid: 300,
         argv: 'git commit -m work',
         startedSecondsAgo: 400,
         cwd: '/work/repository',
         verdict: 'destructive_to_interrupt',
+        ppid: 200,
       },
     ]);
   });

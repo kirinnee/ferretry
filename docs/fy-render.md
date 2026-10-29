@@ -5,7 +5,9 @@ renders where the explanation is, instead of as a wall of markup the reader has 
 
 **Read this first: one kind of block runs an author's code, and it runs it somewhere that cannot reach
 the app.** `svg` and inline `image` become an `<img>` directly. `map` is drawn **in the page** by a bundled map library from a small JSON/YAML description, with
-OpenStreetMap tiles as its one remote load ([Maps](#maps)). `mermaid` and `lottie` are handed as
+OpenStreetMap tiles as its one remote load ([Maps](#maps)). `chart` is drawn **in the page** too, by bundled Chart.js from a
+small description in this package's own chart language, in the theme's colours, loading nothing
+([Charts](#charts)). `mermaid` and `lottie` are handed as
 **data** to a trusted library running inside an opaque-origin sandbox frame. `html` WITHOUT script is a
 **static fragment**: sanitized against a strict allowlist and rendered into a closed shadow root in the
 message ([The `html` fragment](#the-html-fragment)). `html` WITH script **runs**, in its own
@@ -58,12 +60,12 @@ alt: A ten by ten square, filled solid
 
 **Header block** — `key: value` lines, one per line, from a closed set:
 
-| Key    | Required                                             | Value                                                                              |
-| ------ | ---------------------------------------------------- | ---------------------------------------------------------------------------------- |
-| `type` | yes, **and on the FIRST line**                       | one of `html`, `svg`, `lottie`, `mermaid`, `map`, `image`, `video`, `audio`, `pdf` |
-| `alt`  | yes                                                  | ≤ 200 characters, one line, no control characters                                  |
-| `mime` | for an inline `image` only                           | one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`                        |
-| `src`  | for `video`, `audio`, `pdf`; or instead of an `mime` | `@path` in the session's workspace, or an `https://` URL; ≤ 2048 characters        |
+| Key    | Required                                             | Value                                                                                       |
+| ------ | ---------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `type` | yes, **and on the FIRST line**                       | one of `html`, `svg`, `lottie`, `mermaid`, `map`, `chart`, `image`, `video`, `audio`, `pdf` |
+| `alt`  | yes                                                  | ≤ 200 characters, one line, no control characters                                           |
+| `mime` | for an inline `image` only                           | one of `image/png`, `image/jpeg`, `image/gif`, `image/webp`                                 |
+| `src`  | for `video`, `audio`, `pdf`; or instead of an `mime` | `@path` in the session's workspace, or an `https://` URL; ≤ 2048 characters                 |
 
 `type` is positional, not merely present, so a block is identifiable from its opening line alone — by
 a reader scrolling and by a grep. `alt` is required rather than optional so an author cannot ship an
@@ -102,15 +104,16 @@ also what it is.
 Single-owned constants in `packages/pwa/src/lib/fy-render.ts`; this table and the tests read the same
 numbers.
 
-| Type      | Payload cap                      | Also refused                                                                                                                                                                                                                                                                               |
-| --------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `html`    | 200 KiB                          | —                                                                                                                                                                                                                                                                                          |
-| `svg`     | 100 KiB                          | `<!DOCTYPE>`/`<!ENTITY>`; `<script>`; `<foreignObject>`; `<use>`; more than 500 element opening tags; more than 32 filter primitives; a declared canvas over 8192 per axis or 16,777,216 pixels; an unterminated comment, CDATA section or tag; a payload that does not begin with `<svg>` |
-| `mermaid` | 20,000 characters                | —                                                                                                                                                                                                                                                                                          |
-| `map`     | 32 KiB                           | a blank payload; invalid JSON/YAML (aliases refused); more than 100 markers, 50 lines+polygons or 2,000 vertices; a coordinate off the globe; a zoom outside 0–18; a label over 80 or a popup over 500 characters — each falls back to a coordinates list, never a blank block             |
-| `lottie`  | 1 MiB                            | invalid JSON; a non-object root; a **string-valued** `"x"` expression key at any depth, or an array containing one at any index; more than 500 layers; deeper than 64 levels                                                                                                               |
-| `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a container that fails the selected admission checks below                                                                          |
-| `src:`    | no payload at all                | a workspace file over **1 MiB** (the daemon's own per-file view limit, mirrored, not chosen); an https `image` over 2 MiB; an `image` whose fetched bytes fail the same admission checks below                                                                                             |
+| Type      | Payload cap                      | Also refused                                                                                                                                                                                                                                                                                                          |
+| --------- | -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `html`    | 200 KiB                          | —                                                                                                                                                                                                                                                                                                                     |
+| `svg`     | 100 KiB                          | `<!DOCTYPE>`/`<!ENTITY>`; `<script>`; `<foreignObject>`; `<use>`; more than 500 element opening tags; more than 32 filter primitives; a declared canvas over 8192 per axis or 16,777,216 pixels; an unterminated comment, CDATA section or tag; a payload that does not begin with `<svg>`                            |
+| `mermaid` | 20,000 characters                | —                                                                                                                                                                                                                                                                                                                     |
+| `map`     | 32 KiB                           | a blank payload; invalid JSON/YAML (aliases refused); more than 100 markers, 50 lines+polygons or 2,000 vertices; a coordinate off the globe; a zoom outside 0–18; a label over 80 or a popup over 500 characters — each falls back to a coordinates list, never a blank block                                        |
+| `chart`   | 64 KiB                           | a blank payload; invalid JSON/YAML (aliases refused); any key the chart language does not name (a colour included); more than 12 series, 500 points a series, 500 labels, 30 frames or 10,000 points across every frame; a title over 120 or a name or label over 80 characters — each falls back to the source fence |
+| `lottie`  | 1 MiB                            | invalid JSON; a non-object root; a **string-valued** `"x"` expression key at any depth, or an array containing one at any index; more than 500 layers; deeper than 64 levels                                                                                                                                          |
+| `image`   | 2 MiB decoded (≈ 2.7 MiB base64) | anything that is not canonical base64; bytes that disagree with the declared MIME; a declared size over 8192 per axis or 16,777,216 pixels; animation; a container that fails the selected admission checks below                                                                                                     |
+| `src:`    | no payload at all                | a workspace file over **1 MiB** (the daemon's own per-file view limit, mirrored, not chosen); an https `image` over 2 MiB; an `image` whose fetched bytes fail the same admission checks below                                                                                                                        |
 
 **A `src:` image passes the inline image's admission, once it is read.** Its bytes do not exist at
 parse time, so `FyRenderMedia` runs `fyRenderRasterRefusal` — the same function an inline payload
@@ -180,8 +183,9 @@ Two properties this feature must never change, and does not:
 | `image` (inline)   | `<img src="data:{mime};base64,…">`                                    | No script surface exists in a raster decode                                                                  |
 | `html` (no script) | a static fragment in a closed shadow root, sanitized by DOMPurify     | Nothing runs; [The `html` fragment](#the-html-fragment) says what is stripped and what contains the rest     |
 | `html` (script)    | a live page in its own opaque frame, `/fy-render-html.html`           | The owner asked for interaction; [The interactive `html` frame](#the-interactive-html-frame) is the boundary |
-| `mermaid`          | `<img src="data:image/svg+xml,…">`                                    | Compiled to SVG in the sandbox frame, then re-admitted through the same gate an authored SVG passes          |
+| `mermaid`          | `<img src="data:image/svg+xml,…">`                                    | Compiled to SVG in the sandbox frame in the theme's tokens, then re-admitted through the authored-SVG gate   |
 | `map`              | a Leaflet map in the message, tiles from `tile.openstreetmap.org`     | The payload is data placed with `textContent`; [Maps](#maps) says what loads and what is refused             |
+| `chart`            | a Chart.js `<canvas>` in the message, with page-text legend and steps | The payload is data in a closed language, painted by `fillText`; [Charts](#charts) says why not a frame      |
 | `lottie`           | live player inside the sandbox frame                                  | An animation has to keep running to animate, so this one stays live                                          |
 | `image` (`src:`)   | `<img src="blob:…">` of admitted bytes                                | Workspace or https bytes, checked like inline ones — [Media from `src:`](#media-from-src)                    |
 | `video`            | the browser's native `<video controls>`                               | A workspace file as a `blob:`; an https URL directly, which `media-src https:` admits                        |
@@ -241,6 +245,116 @@ they reach a style.
 caps shows the reason and a **coordinates list** (`Point: 51.5, -0.12`, up to 200 lines) taken from
 whatever could be read; the same list appears if the map library cannot load (offline, a blocked chunk).
 Tiles that fail to load leave the pins and lines on a plain background.
+
+### Charts
+
+**A `chart` block is an interactive chart drawn in the message by Chart.js, from a description in this
+package's own small chart language — never a Chart.js configuration.** An author says what the chart
+says; the renderer decides how it looks, in the reader's theme. The payload is JSON or YAML, at most
+64 KiB:
+
+```text
+kind: bar                    # line | bar | area | pie | doughnut | scatter | radar
+title: Warden spend          # optional; a frame may override it
+x: [26 Oct, 27 Oct, 28 Oct]  # category labels, or {label, values}; scatter takes {label, format}
+y: {label: USD, format: money, currency: USD, min: 0, max: 10}
+stacked: true                # line, area and bar only
+horizontal: false            # bar only
+series:
+  - {name: Investigations, data: [2.1, 2.2, 2.0]}          # null is a gap
+  - {name: First-pass filter, data: [0.3, 0.3, 0.29], tone: muted}
+  - {name: Trend, data: [2.4, 2.5, 2.3], kind: line}       # a line over bars
+frames:                      # optional step-through: Previous / Next, a slider, the step's label
+  - {label: Before}
+  - {label: After, title: Spend after, series: [...], x: [...]}
+```
+
+- **A series never names a colour.** It asks for a `tone` — `accent`, `good`, `warn`, `bad`, `muted` —
+  or a palette slot `1`–`8`; without one, series _n_ takes slot _n_. Any key the language does not name,
+  `color:` included, refuses the block, so an author sees it fall back rather than a chart silently in
+  other colours.
+- **Formats are a closed set**: `number`, `percent` (the value is already a percentage, `42` → `42%`),
+  `money` (ISO 4217 `currency`, default USD), `duration` (seconds → `450 ms`, `3m 20s`, `2h 5m`) and
+  `bytes` (binary units). Ticks use a compact form (`12.3K`); tooltips and the data table the full one.
+  There is no author formatter and no author callback anywhere.
+- Scatter data is `[[x, y], …]` or `[{x, y}, …]` on a numeric x axis; every other kind is one value per
+  label. Caps are in the table above; a refusal is the ordinary source fence with the reason as its
+  `title` (`data-fy-render-failure="render"`), and a chunk that will not load is `library`, with
+  **Try rendering again**.
+
+**The theme, and only the theme, paints it.** The block reads the app's tokens from its own element and
+resolves each to a hex literal through a one-pixel canvas (`components/fy-render-theme.ts`) — the
+browser's own colour parser, so a `color-mix()` or `oklch()` token works. Series colours come from
+`--viz-1` … `--viz-8` in `styles/themes.css`; each slot NAMES a hue every family already restates per
+mode (the per-tool hues, the keyword violet, the Claude orange, the error red), so a new family gets a
+palette without writing one. Their order is measured, not chosen: across all 22 themes the first five stay
+at least 70 apart in RGB (of 441) and all eight at least 40, and the browser suite re-checks that against
+the sheet. The accent is deliberately not a slot — in several families it _is_ one of those hues — so a
+chart that wants the brand colour says `tone: accent`. Grid, ticks, tooltip, font and corner radius
+(`--radius-xs`, so a Neo bar is square) come from tokens too. `lib/fy-render-chart-config.ts` is the one
+place a spec meets Chart.js, and a unit test walks every kind's configuration and finds no colour the theme
+did not supply.
+
+**Interaction.** Tooltips on hover or tap. The legend and the step controls are **page text**, not
+canvas: one toggle button per series (per slice on a pie), `aria-pressed`, and Previous / a range slider /
+Next with the step's label in a polite live region — all reachable and operable from the keyboard. Line
+and area charts zoom along the x axis (`chartjs-plugin-zoom`, bundled) without trapping the page: inline,
+a mouse drags a box or pinches a trackpad (Ctrl + wheel), and a finger is left to the transcript's scroll —
+nothing binds a touch gesture to the canvas. In **Fullscreen** the chart takes the wheel, a pinch and a
+drag to pan. **Reset zoom** appears once zoomed. Under `prefers-reduced-motion: reduce` nothing animates.
+
+**Accessible.** The canvas is `role="img"` named `Chart: <alt>` and described by a visually hidden table
+of the numbers behind the current frame (one row per label, one column per series, values in the axis
+format) — clipped inside a wrapper, because a table never shrinks below its content and a transcript's
+`.md table` rule would otherwise paint it over the canvas (measured, and pinned in the browser suite).
+
+**Why in the page, and not in the sandbox frame.** The library sandbox exists because Mermaid and Lottie
+are large libraries interpreting rich author input, and Mermaid writes raw `innerHTML`, which this page's
+Trusted Types policy refuses. A chart is neither:
+
+- **The input is not a language a library interprets.** It is parsed by a strict zod schema
+  (`lib/fy-render-chart.ts`) into numbers and short strings; Chart.js receives a configuration this
+  package builds, every function in it this package's own. Nothing an author writes becomes code,
+  markup, a style or a URL: labels and names reach Chart.js's `fillText` and React text.
+- **The libraries hold no sink the page would refuse.** Chart.js 4.6.1, `chartjs-plugin-zoom` 2.2.0 and
+  its Hammer.js 2.0.8 write no markup, compile no string and open no request —
+  `tests/unit/build-contract.test.ts` scans the exact files bundled for `innerHTML`, `outerHTML`,
+  `insertAdjacentHTML`, `document.write`, `new Function`, `eval`, `fetch`, `XMLHttpRequest` and
+  `importScripts`, and fails an upgrade that adds one. So no Trusted Types policy, CSP source or
+  `_headers` line changes for it (and none is in this build).
+- **The theme lives here.** A frame would need every token, the font, a resize protocol and every gesture
+  carried across a port; in the page the chart reads the theme like any component and redraws when it
+  changes.
+
+The residual is the map's: a bundled library, given bounded data, could still have a bug its own input
+reaches. That is [gap 17](#declared-gaps).
+
+**Bundled and lazy.** Chart.js, the zoom plugin and Hammer.js are one lazy chunk (≈ 220 KB, ≈ 75 KB
+gzipped) and the reader with its YAML and schema one more (≈ 4 KB); both are fetched only once a chart is
+near the viewport. The main bundle grows by the component and the palette, ≈ 17 KB (≈ 6 KB gzipped).
+
+### Mermaid in the theme
+
+**A diagram is painted from the same tokens.** The parent resolves the theme (as above), turns it into
+Mermaid's `base`-theme `themeVariables` (`lib/fy-render-palette.ts`: nodes in the accent's soft wash
+with the accent itself as the border and body ink as the text, cluster and label edges in `--border-strong`
+(the theme's strong edge), lines muted, notes the warn wash, a pie and a git graph on the
+`chart` palette, the page's font) and sends them as data with the render command. The shell admits only
+those keys, only hex literals, and a font stack with no brace or semicolon, because Mermaid writes them
+into the compiled SVG's own `<style>`; anything else is dropped and `base` derives that slot itself.
+
+**The author cannot repaint it.** `theme`, `themeVariables`, `themeCSS` and `darkMode` join the shell's
+`secure` list, which no `%%{init}%%` directive or front matter reaches — measured in real Chromium: a
+directive, and front matter, asking for `forest` and `#ff0000` each compile in the app's palette with no
+trace of the red. A diagram's own `style` and `classDef` colours are NOT blocked — they are styling an
+author chose, inert in the `<img>` sink — and the authoring skill tells agents to leave them out.
+Every existing gate is untouched: `securityLevel: 'strict'`, `htmlLabels: false`, the `<foreignObject>`
+refusal and the re-admission of the compiled SVG through the authored-SVG checks.
+
+**The cache key is the palette, not the mode.** The shell echoes the key it painted with
+(`<mode>:<8 hex>`, a hash of every resolved token, the font and the radius) and the wire refuses any other
+shape. A diagram is redrawn when that key differs from the page's AND it is on screen — so a switch
+between two dark themes repaints too, which a light/dark key would have missed.
 
 ### The `html` fragment
 
@@ -570,9 +684,10 @@ all of them is gone. What replaced it bounds where and when work happens, and **
   assistant therefore does not re-decode a partial SVG, recompile a diagram or re-sanitize a fragment
   on every token. A change of type takes effect immediately.
 - **On screen only, for the two things that should be.** A Lottie animation plays only while it is on
-  screen (or fullscreen), and a diagram drawn for the other theme is redrawn only while it is on
-  screen — so a theme switch with ten diagrams in a transcript redraws the ones in view, and the rest
-  as they come back into view, never all at once.
+  screen (or fullscreen), and a diagram or chart painted in another palette is redrawn only while it is
+  on screen — so a theme switch with ten diagrams in a transcript redraws the ones in view, and the rest
+  as they come back into view, never all at once. The palette, not just light or dark, is what is
+  compared ([Mermaid in the theme](#mermaid-in-the-theme)).
 
 **The residual this adds, stated rather than softened.** The gesture was the reader's chance to decline
 work an agent asked their device to do. Without it:
@@ -603,15 +718,16 @@ count). They are never `display: none`: a keyboard reader who tabs into the bloc
 landed on. On a coarse pointer each icon resolves to the 44px touch floor through `--target-floor`;
 on a fine one it stays small.
 
-| Form                              | Source | Fullscreen | Play / Pause  |
-| --------------------------------- | :----: | :--------: | :-----------: |
-| `svg`, `image`, compiled Mermaid  |  yes   |    yes     |       —       |
-| `lottie`                          |  yes   |    yes     |      yes      |
-| `html`                            |  yes   |    yes     |       —       |
-| `map`                             |  yes   |    yes     | Zoom in / out |
-| `src:` `image` / `video`          |  yes   |    yes     | the player's  |
-| `src:` `audio`                    |   —    |     —      | the player's  |
-| `pdf` and every media refusal row |   —    |     —      |       —       |
+| Form                              | Source | Fullscreen |             Play / Pause             |
+| --------------------------------- | :----: | :--------: | :----------------------------------: |
+| `svg`, `image`, compiled Mermaid  |  yes   |    yes     |                  —                   |
+| `lottie`                          |  yes   |    yes     |                 yes                  |
+| `html`                            |  yes   |    yes     |                  —                   |
+| `map`                             |  yes   |    yes     |            Zoom in / out             |
+| `chart`                           |  yes   |    yes     | its own legend, steps and Reset zoom |
+| `src:` `image` / `video`          |  yes   |    yes     |             the player's             |
+| `src:` `audio`                    |   —    |     —      |             the player's             |
+| `pdf` and every media refusal row |   —    |     —      |                  —                   |
 
 An audio player gets no icons because its own controls fill that corner and there is nothing to see
 in fullscreen; a file row has its own Open and Download actions.
@@ -640,8 +756,8 @@ the Escape that leaves fullscreen.
 ### Error fallback
 
 **A failure falls back to the code block, quietly.** A payload the browser will not decode, a diagram
-Mermaid will not parse, a compiled diagram the re-admission gate refuses, a sandbox that never
-started, a renderer that did not load, a compile that ran out of time, and an interactive page that
+Mermaid will not parse, a compiled diagram the re-admission gate refuses, a chart description the
+chart language refuses, a sandbox that never started, a renderer that did not load, a compile that ran out of time, and an interactive page that
 navigated away all show the authored source as the ordinary fence it would have been without this
 feature — `.md pre`, nothing else. No sentence in the app's voice says it failed. The class travels as
 `data-fy-render-failure` and the raw library or gate wording as the element's `title`, for whoever is
@@ -868,23 +984,36 @@ What this build knowingly does not do. Each of these is why row 65 is **not** ti
     Anyone who considers this unacceptable can route every `html` block to the fragment by making
     `fyRenderHtmlRunsScript` answer `false`; nothing else depends on it.
 
+17. **`type: chart` runs a bundled library in the page on author-shaped data.** Nothing an author writes
+    is code, markup, a style or a URL — a strict schema reduces it to numbers and short labels, and every
+    function Chart.js is given is this package's — but Chart.js, its zoom plugin and Hammer.js still run
+    in this document, so a bug their own input reaches would run here, as Leaflet's would for a map.
+    **Mitigated by**: the closed language and its caps, pinned versions, a build test that fails an upgrade
+    adding a markup, eval or network sink, and the page policy underneath (Trusted Types, `connect-src`).
+    **Not eliminated.** Measured in Chromium only (gap 4); touch zoom in fullscreen is driven in touch
+    emulation, not on a physical phone. Anyone who considers this unacceptable can map `chart` to
+    source-only; nothing else depends on it.
+
 ## Evidence
 
 Every claim above is either a test in this repository or one of these probe records. They are session
 artifacts outside the repository; cite them, do not assume they will outlive the session.
 
-| Claim                                                                                                                                                | Record                                                                                                                    |
-| ---------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `<img>`-loaded SVG: zero egress, no script/handler execution, Chrome 150                                                                             | `svg-img-security-probe-report.md` with `svg-img-network-*`, `svg-img-same-origin-*` and `svg-img-script-*` ledgers       |
-| Opaque-frame self-navigation, prerender and WebRTC egress; Navigation API inert                                                                      | `self-navigation-result.md` with `nav-*.json` and `egress-output.json`                                                    |
-| Independent review concluding executable HTML is a release blocker                                                                                   | `sandbox-security-verdict.md`                                                                                             |
-| Slice plan, mechanism survey and cost sheet                                                                                                          | `execution-boundary-plan.md`                                                                                              |
-| Static-slice security review that found the unbounded-decode blocker                                                                                 | `fy-render-static-security-review.md`                                                                                     |
-| UI/accessibility review of the fullscreen presentation                                                                                               | `fy-render-static-ui-review.md`                                                                                           |
-| Raster header reader agreeing with Chrome's decoder, 18 of 18                                                                                        | `prototype/verify.ts` beside its `raster-header.ts`                                                                       |
-| Interactive `html`: storage, parent, token, top navigation, popups, ordinary requests refused; cover contained; self-navigation egresses and is seen | `packages/pwa/tests/integration/fy-render-html.security.test.ts` (in this repository, real Chromium + request ledger)     |
-| `html` fragment: an XSS corpus runs nothing, loads nothing and escapes nothing under the app policy                                                  | `packages/pwa/tests/integration/fy-render-fragment.security.test.ts` (in this repository, real Chromium + request ledger) |
-| The production build renders every form inline, from an agent's reply, with media from `FY_MEDIA_DIR`                                                | `tests/e2e/product-journeys.e2e.test.ts` step `hypermedia-renders-inline` (in this repository)                            |
-| A map renders inline under the real Pages headers: tile requests go only to the tile origin, no Trusted Types or CSP violation, pins present         | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`, tiles fulfilled by a fake)          |
-| Markers + route, light and dark, phone and desktop                                                                                                   | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium, tiles fulfilled by a fake)           |
-| The library shell is frameable under Pages pretty URLs; the `fy-fragment` policy and no other is allowed                                             | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`)                                     |
+| Claim                                                                                                                                                                                                                                                                                       | Record                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `<img>`-loaded SVG: zero egress, no script/handler execution, Chrome 150                                                                                                                                                                                                                    | `svg-img-security-probe-report.md` with `svg-img-network-*`, `svg-img-same-origin-*` and `svg-img-script-*` ledgers       |
+| Opaque-frame self-navigation, prerender and WebRTC egress; Navigation API inert                                                                                                                                                                                                             | `self-navigation-result.md` with `nav-*.json` and `egress-output.json`                                                    |
+| Independent review concluding executable HTML is a release blocker                                                                                                                                                                                                                          | `sandbox-security-verdict.md`                                                                                             |
+| Slice plan, mechanism survey and cost sheet                                                                                                                                                                                                                                                 | `execution-boundary-plan.md`                                                                                              |
+| Static-slice security review that found the unbounded-decode blocker                                                                                                                                                                                                                        | `fy-render-static-security-review.md`                                                                                     |
+| UI/accessibility review of the fullscreen presentation                                                                                                                                                                                                                                      | `fy-render-static-ui-review.md`                                                                                           |
+| Raster header reader agreeing with Chrome's decoder, 18 of 18                                                                                                                                                                                                                               | `prototype/verify.ts` beside its `raster-header.ts`                                                                       |
+| Interactive `html`: storage, parent, token, top navigation, popups, ordinary requests refused; cover contained; self-navigation egresses and is seen                                                                                                                                        | `packages/pwa/tests/integration/fy-render-html.security.test.ts` (in this repository, real Chromium + request ledger)     |
+| `html` fragment: an XSS corpus runs nothing, loads nothing and escapes nothing under the app policy                                                                                                                                                                                         | `packages/pwa/tests/integration/fy-render-fragment.security.test.ts` (in this repository, real Chromium + request ledger) |
+| The production build renders every form inline, from an agent's reply, with media from `FY_MEDIA_DIR`                                                                                                                                                                                       | `tests/e2e/product-journeys.e2e.test.ts` step `hypermedia-renders-inline` (in this repository)                            |
+| A map renders inline under the real Pages headers: tile requests go only to the tile origin, no Trusted Types or CSP violation, pins present                                                                                                                                                | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`, tiles fulfilled by a fake)          |
+| Markers + route, light and dark, phone and desktop                                                                                                                                                                                                                                          | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium, tiles fulfilled by a fake)           |
+| Charts: theme colours as exact canvas pixels, legend, tooltip, frames by button and keyboard, box zoom and Reset, no touch gesture bound inline, doughnut slices, repaint on a same-mode theme switch, the source fence for a painted chart, all eight palette slots apart in all 22 themes | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium)                                      |
+| Mermaid: painted from the theme tokens, light and dark, phone and desktop; redrawn on a same-mode palette switch; a `%%{init}%%` or front matter asking for `forest` and red reaches nothing                                                                                                | `packages/pwa/tests/integration/fy-render-component.visual.test.tsx` (real Chromium, the real shell and bundle)           |
+| The chart libraries hold no markup, eval or network sink                                                                                                                                                                                                                                    | `packages/pwa/tests/unit/build-contract.test.ts`                                                                          |
+| The library shell is frameable under Pages pretty URLs; the `fy-fragment` policy and no other is allowed                                                                                                                                                                                    | `tests/e2e/fy-render-pages.e2e.test.ts` (production build under `wrangler pages dev`)                                     |

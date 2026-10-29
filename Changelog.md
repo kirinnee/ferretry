@@ -1,3 +1,35 @@
+## [4.96.0](https://github.com/kirinnee/ferretry/compare/v4.95.1...v4.96.0) (2026-10-28)
+
+### Features
+
+* **pwa:** attention cards render Markdown, steps as a checklist, to-do actions ([#835](https://github.com/kirinnee/ferretry/issues/835)) ([a802980](https://github.com/kirinnee/ferretry/commit/a80298060ab7e39288efeb052d87537021a84983))
+
+## [4.95.1](https://github.com/kirinnee/ferretry/compare/v4.95.0...v4.95.1) (2026-10-28)
+
+### Fixes
+
+* **cli:** refuse unknown attention verbs and add a read-only show ([#829](https://github.com/kirinnee/ferretry/issues/829)) ([e637cad](https://github.com/kirinnee/ferretry/commit/e637cad0e35e6fb9bf2809d314bbec9da83b5b7d))
+* **pwa:** draw Mermaid node and cluster borders with contrast in light themes ([#836](https://github.com/kirinnee/ferretry/issues/836)) ([3a1b977](https://github.com/kirinnee/ferretry/commit/3a1b9778e2a82d7cedb61725e055683a7ed7c21f))
+* **test:** drive the idle budget suite with a manual clock, not Bun's fake timers ([#824](https://github.com/kirinnee/ferretry/issues/824)) ([b5b90cb](https://github.com/kirinnee/ferretry/commit/b5b90cb0db78cb7bd54b44a3853d32678d6ced63)), closes [#695](https://github.com/kirinnee/ferretry/issues/695)
+
+## [4.95.0](https://github.com/kirinnee/ferretry/compare/v4.94.1...v4.95.0) (2026-10-28)
+
+### Features
+
+* **pwa:** per-machine notifications, single-source Needs you ([#816](https://github.com/kirinnee/ferretry/issues/816)) ([0cd2aff](https://github.com/kirinnee/ferretry/commit/0cd2aff5e93ec71c28cee4d29d0f82e718a7485b))
+* **pwa:** themed chart hypermedia type, and Mermaid that follows the theme ([#827](https://github.com/kirinnee/ferretry/issues/827)) ([e1bafed](https://github.com/kirinnee/ferretry/commit/e1bafed242dfe2a82e4b4df9e34cc7eba943ad06))
+
+### Fixes
+
+* **pwa:** join hard-wrapped terminal links and say when 'Open links in' cannot be honoured ([#834](https://github.com/kirinnee/ferretry/issues/834)) ([159c736](https://github.com/kirinnee/ferretry/commit/159c736cb7b6131256e54b761ffe2fb6c349f39f))
+* **warden:** stop investigating idle ferrets and back off repeat looks ([#825](https://github.com/kirinnee/ferretry/issues/825)) ([af69428](https://github.com/kirinnee/ferretry/commit/af6942898152fa154a180e15ee93d89182a62dd2))
+
+## [4.94.1](https://github.com/kirinnee/ferretry/compare/v4.94.0...v4.94.1) (2026-10-28)
+
+### Fixes
+
+* **daemon:** open terminals in the owner's login shell instead of /bin/sh ([#830](https://github.com/kirinnee/ferretry/issues/830)) ([a9d16ca](https://github.com/kirinnee/ferretry/commit/a9d16ca18ea62402865428b71b8cc6f85a07d218))
+
 ## [4.94.0](https://github.com/kirinnee/ferretry/compare/v4.93.0...v4.94.0) (2026-10-28)
 
 ### Features

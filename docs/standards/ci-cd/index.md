@@ -71,7 +71,7 @@ every second, and the GitHub times from the last runs before Namespace (p50):
 | `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                                  | free; macOS and arm64 have no Namespace equivalent here     |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
-  with `cache: nix` mounts a persistent `/nix` BEFORE `cachix/install-nix-action`, so the dev shell
+  with `cache: nix` mounts a persistent `/nix` BEFORE the [Nix install](#installing-nix), so the dev shell
   is already built when the job starts. The order is load-bearing: installing Nix first would
   populate a fresh store. The tag is the key, so every shape shares the one volume. It holds ~2.5GB
   (dev shell plus install bundle), so `nscloud-cache-size-10gb` replaces the 20GB default and halves
@@ -344,8 +344,32 @@ installer, and the in-repo Homebrew cask. See
   `contents: write` only for `Release` and `CD`.
 - Every checkout sets `persist-credentials: false`, so a compromised build step cannot reuse the
   checkout's credentials to push.
-- Nix comes from `cachix/install-nix-action`; there is no bespoke setup action, and checkout is
-  always its own step.
+- Nix comes from the one local action `.github/actions/install-nix` ([Installing Nix](#installing-nix)),
+  and checkout is always its own step before it.
+
+## Installing Nix
+
+Every job that needs Nix calls `uses: ./.github/actions/install-nix` (with `shell: .#releaser` in
+`CD`), never `cachix/install-nix-action` directly. It is the one bespoke setup action, and it exists
+because the network failed whole jobs, including on `main`, where a red CI skips a release:
+
+- **The installer's download.** `cachix/install-nix-action` fetches its installer five times one
+  second apart, which a DNS blip outlasts (`Could not resolve host: releases.nixos.org`). That fails
+  before anything is installed, so the action installs once more after 60 seconds, with a
+  `::warning::`, and never a third time.
+- **A substitute's download.** `download-attempts = 10` and `connect-timeout = 15` go into
+  `/etc/nix/nix.conf` for the daemon that does the downloading. They do not cover the failure that
+  actually recurred: cache.nixos.org breaks a `.nar.zst` mid-file, Nix resumes it from that byte, the
+  CDN answers the range with HTTP 416, and Nix stops with `path … is required, but there is no
+substituter that can build it`. Only a fresh download recovers, so the action's last step runs
+  `scripts/ci/nix-realise.sh <shell>`: `nix print-dev-env` realises the dev shell without running
+  anything, at most three times, 20 then 40 seconds apart, each failure a `::warning::`. The job's
+  real step then enters a shell that is already in the store, so a retry never reruns a test.
+
+A real evaluation or build failure fails every attempt identically and reaches the PR about a minute
+later than it would have; that is the whole cost. The cache volume step stays in each workflow,
+BEFORE this action. `scripts/validate/action-pins.sh` reads `.github/actions/` as well as
+`.github/workflows/`, so the pin inside the action is held to the same rules as any other.
 
 ## Action pins
 

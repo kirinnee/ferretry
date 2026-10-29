@@ -31,6 +31,10 @@ This document is the contract for that loop. The board's own rules are in
   and the state machine clears the mark in the same commit, so a retried edit is no change and pushes
   nothing. `history` keeps the last 20 `{at, kind: 'needs-info'|'updated', note?}` entries, oldest dropped,
   so the app can say "You asked for more info 10:42 · updated 10:44". Closing the item drops the mark.
+- **Raising takes the explicit `add` verb.** `fy attention` has no default command: a first word that is
+  not a verb (`fy attention show A6`, a typo, a bare sentence) is refused with "unknown command" and the
+  verbs on offer, and exits non-zero. A raise pushes to the owner's phone, so a mistyped read must never
+  become one. `fy attention show <id>` prints one item, open or resolved, read-only.
 - **Who raised it is decided by the pane, not the words.** `fy attention` sends the client header and,
   inside a ferret, that ferret's `FY_SESSION_ID` as `x-ferretry-session-id`. The daemon attributes the
   call to `peer:<session>`, so the item is `raisedBy: agent` with `raisedBySession` set, and the push
@@ -162,6 +166,18 @@ characters, ticket-like ids (`ABC-123`, `#1234`), URLs, file paths, and ALL-CAPS
 questions' words (same count and options, in order), recommendation, impact, urgency, links, steps and body. It
 never changes the ask, who raised it or the question options, and it does not push again — except an
 edit that answers an open Need more info request, which pushes once (see "The loop").
+
+### How the app shows steps and to-dos
+
+- `context`, `body` and every step render as full Markdown through the chat's own renderer (`ChatProse`),
+  so fy-render blocks and the proof-before-link reference gate behave exactly as in chat. There is no
+  second renderer. Code spans and fences in an item get a Copy button.
+- `steps` are a checklist. A tick sends `{action:'progress', id, step, done}`; it shows at once and rolls
+  back with a message if the board refuses. When every step is ticked, Done is the primary action.
+- A `task` item has no reply box: Done and Need more info (optional note). On a phone, swipe right is Done
+  and swipe left is Need more info, on the deck and on rows. An item with `waitingOn:'ferret'` shows
+  "Waiting on <ferret>" with no Done until the ferret edits it. Both actions ride the batched-delivery
+  countdown. The history line ("You asked for more info 10:42 · updated 10:44") is local time.
 
 ## The unread signal
 

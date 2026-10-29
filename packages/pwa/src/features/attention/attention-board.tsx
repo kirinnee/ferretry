@@ -18,6 +18,7 @@ import {
   CircleHelp,
   Clock3,
   ListChecks,
+  ListTodo,
   LoaderCircle,
   MessageCircleQuestion,
   ShieldQuestion,
@@ -54,6 +55,13 @@ export const attentionKindMeta = (
       return { tone: 'answer-review', label: 'Review answer', icon: BadgeCheck, action: 'Accept it, or ask for more' };
     case 'open-question':
       return { tone: 'open-question', label: 'Open question', icon: MessageCircleQuestion, action: 'Write an answer' };
+    case 'task':
+      return {
+        tone: 'task',
+        label: 'To do',
+        icon: ListTodo,
+        action: 'Do it, then mark it done — or ask for more info',
+      };
     default:
       return {
         tone: 'unknown',

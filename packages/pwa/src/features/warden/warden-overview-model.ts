@@ -27,8 +27,8 @@ import type {
   WardenFailoverAccountView,
   WardenInvestigation,
   WardenJudgement,
-  WardenStatusView,
   WardenLayers,
+  WardenStatusView,
   WardenVerdictKind,
 } from '@ferretry/protocol';
 import { wardenAccountLabel, wardenInvestigationHead, wardenLoginProblem } from './warden-status-model.ts';
@@ -55,6 +55,7 @@ const ACTION_DONE: Readonly<Record<WardenActionKind, WardenChip>> = {
   restart: chip('restarted', 'ok'),
   stop: chip('stopped', 'err'),
   failover: chip('failed over', 'accent'),
+  close_leftover: chip('cleaned up', 'ok'),
 };
 
 const ACTION_VERB: Readonly<Record<WardenActionKind, string>> = {
@@ -64,6 +65,7 @@ const ACTION_VERB: Readonly<Record<WardenActionKind, string>> = {
   restart: 'restart',
   stop: 'stop',
   failover: 'fail over',
+  close_leftover: 'close a leftover browser',
 };
 
 /** `96%`, from Jev's 0–1 confidence. */

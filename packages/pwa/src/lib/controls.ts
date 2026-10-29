@@ -125,6 +125,8 @@ export interface DeviceControls {
   readonly dashboardView: DashboardView | null;
   /** null = use the first-load device default without persisting it. */
   readonly density: Density | null;
+  /** Gather the sessions with open Attention into a "Needs you" group at the top. Default on. */
+  readonly groupNeedsYou: boolean;
   /** Chat pane horizontal measure; inert on a phone, which is already narrower. */
   readonly chatWidth: ChatWidthPreference;
   /** Bare Enter on a keyboard (desktop). null = the default, Enter sends. */
@@ -183,6 +185,7 @@ export const DEFAULT_DEVICE_CONTROLS: DeviceControls = Object.freeze({
   includeFinished: false,
   dashboardView: null,
   density: null,
+  groupNeedsYou: true,
   chatWidth: 'readable',
   composerEnterKey: null,
   composerPhoneEnterKey: null,
@@ -280,6 +283,7 @@ const readDeviceControls = (value: unknown): DeviceControls => {
     dashboardView: fields.dashboardView === 'cards' || fields.dashboardView === 'table' ? fields.dashboardView : null,
     density:
       fields.density === 'full' || fields.density === 'compact' || fields.density === 'minimal' ? fields.density : null,
+    groupNeedsYou: readFlag(fields.groupNeedsYou, DEFAULT_DEVICE_CONTROLS.groupNeedsYou),
     chatWidth:
       fields.chatWidth === 'full' || fields.chatWidth === 'balanced' || fields.chatWidth === 'readable'
         ? fields.chatWidth

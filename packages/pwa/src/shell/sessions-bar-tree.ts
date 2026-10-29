@@ -17,7 +17,7 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { buildLineage, lineageLabel } from '../lib/lineage.ts';
-import { hasAttention, isStopped, needsYou } from './sessions-bar-model.ts';
+import { hasAttention, isStopped } from './sessions-bar-model.ts';
 
 /** Indentation stops growing here: deeper rows stay in the same column rather than walking off a phone. */
 export const TREE_INDENT_DEPTHS = 2;
@@ -60,7 +60,7 @@ const add = (left: TreeRollup, right: TreeRollup): TreeRollup => ({
 
 /** What one row contributes to its ancestors' rollups. */
 const own = (view: SessionView): TreeRollup => {
-  const wants = hasAttention(view) || needsYou(view);
+  const wants = hasAttention(view);
   return {
     total: 1,
     stopped: isStopped(view) ? 1 : 0,

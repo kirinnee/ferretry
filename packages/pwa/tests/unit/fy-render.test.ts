@@ -225,8 +225,19 @@ describe('fy-render fence language', () => {
     should(FY_RENDER_FENCE_LANGUAGE).equal('fy-render');
   });
 
-  test('should declare the nine types the block grammar accepts', () => {
-    should([...FY_RENDER_TYPES]).eql(['html', 'svg', 'lottie', 'mermaid', 'map', 'image', 'video', 'audio', 'pdf']);
+  test('should declare the ten types the block grammar accepts', () => {
+    should([...FY_RENDER_TYPES]).eql([
+      'html',
+      'svg',
+      'lottie',
+      'mermaid',
+      'map',
+      'chart',
+      'image',
+      'video',
+      'audio',
+      'pdf',
+    ]);
   });
 
   test('should allow a src header on exactly the four media types', () => {
@@ -311,6 +322,7 @@ describe('fy-render presentation', () => {
       accepted(body('type: mermaid', 'alt: A graph', '---', 'graph TD;')),
       accepted(body('type: image', 'alt: A pixel', 'mime: image/png', '---', PIXEL)),
       accepted(body('type: map', 'alt: A city', '---', 'center: [51.5, -0.12]')),
+      accepted(body('type: chart', 'alt: A trend', '---', 'kind: line')),
     ];
 
     // Act
@@ -326,6 +338,7 @@ describe('fy-render presentation', () => {
       ['mermaid', 'sandbox'],
       ['image', 'visual'],
       ['map', 'map'],
+      ['chart', 'chart'],
     ]);
   });
 
@@ -470,6 +483,27 @@ describe('fy-render map payloads', () => {
   test('should refuse a map block with nothing to draw', () => {
     should(reasonOf(parseFyRender(body('type: map', 'alt: A city', '---', '   ')))).equal(
       'A map block needs a payload describing it',
+    );
+  });
+});
+
+describe('fy-render chart payloads', () => {
+  test('should accept a chart payload inside the byte cap and keep it as written, unread', () => {
+    // The grammar bounds the bytes; the chart language is read lazily, with the renderer, by `readChart`.
+    const result = parseFyRender(body('type: chart', 'alt: A trend', '---', 'kind: line'));
+    should(result.ok && result.block.type === 'chart' ? result.block.payload : null).equal('kind: line');
+  });
+
+  test('should refuse a chart payload past the byte cap', () => {
+    const payload = 'a'.repeat(FY_RENDER_LIMITS.chartBytes + 1);
+    should(reasonOf(parseFyRender(body('type: chart', 'alt: A trend', '---', payload)))).equal(
+      'Chart payload exceeds 64 KiB',
+    );
+  });
+
+  test('should refuse a chart block with nothing to draw', () => {
+    should(reasonOf(parseFyRender(body('type: chart', 'alt: A trend', '---', ' ')))).equal(
+      'A chart block needs a payload describing it',
     );
   });
 });

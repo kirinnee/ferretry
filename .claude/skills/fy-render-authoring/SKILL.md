@@ -27,17 +27,58 @@ button, no card, no caption:
 | --------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `svg`     | renders as a picture                                                                                                       |
 | `image`   | renders as a picture (raster only) — inline base64, or from `src:`                                                         |
-| `mermaid` | renders as a diagram — drawn in a sandbox, shown as a picture                                                              |
+| `mermaid` | renders as a diagram — drawn in a sandbox in the reader's theme, shown as a picture                                        |
 | `map`     | an interactive map (pan, zoom, tap pins) from small JSON/YAML: `center`, `zoom`, `markers`, `lines`, `polygons`, `geojson` |
+| `chart`   | an interactive chart (tooltips, legend toggles, zoom, step-through frames) from small JSON/YAML, in the reader's theme     |
 | `lottie`  | plays as an animation, with Pause and Play                                                                                 |
 | `html`    | a **static** fragment in the message; with a `<script>`, a live page in an isolated frame                                  |
 | `video`   | plays in the browser's own player, from `src:`                                                                             |
 | `audio`   | plays in the browser's own player, from `src:`                                                                             |
 | `pdf`     | a workspace PDF opens in a new tab or downloads; an https PDF is a link                                                    |
 
-So write `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have
-to hand-draw it as `svg`. Reach for `svg` when you want exact control over the drawing, `lottie` when
+So write `chart` when the point is in numbers — a trend, a comparison, a share, a before-and-after —
+and `mermaid` when a flowchart, sequence or state diagram is what you mean; you no longer have
+to hand-draw either as `svg`. Reach for `svg` when you want exact control over the drawing, `lottie` when
 motion genuinely helps, and `html` for a table, a comparison or a small styled layout.
+
+### Writing a `chart`
+
+A chart is a small description, not a Chart.js config. Say what it shows; the reader's theme decides how
+it looks:
+
+```fy-render
+type: chart
+alt: Warden spend per day, by kind of work
+---
+kind: bar
+title: Warden spend
+x: [26 Oct, 27 Oct, 28 Oct]
+y: { label: USD, format: money }
+stacked: true
+series:
+  - name: Investigations
+    data: [2.1, 2.2, 2.0]
+  - name: First-pass filter
+    data: [0.3, 0.3, 0.29]
+    tone: muted
+```
+
+- `kind`: `line`, `bar`, `area`, `pie`, `doughnut`, `scatter` (data `[[x, y], …]`) or `radar`.
+- `y.format` (and `x.format` on a scatter): `number`, `percent` (write `42` for 42%), `money` (with
+  `currency`, default USD), `duration` (seconds) or `bytes`. `min`/`max` bound the axis.
+- `stacked: true` for line, area and bar; `horizontal: true` for bar; a series `kind: line` on a bar
+  chart draws a line over the bars. `null` in `data` is a gap.
+- **Never a colour.** A series takes `tone: accent | good | warn | bad | muted` or a palette slot `1`–`8`,
+  or nothing and gets the next slot. A `color:` key — or any key not listed here — makes the block fall
+  back to its source.
+- **Tell it as steps with `frames`**: each `{label, title?, series?, x?}` overrides the chart, and the
+  reader gets Previous / Next and a slider. One idea per step.
+- The reader can hover or tap for values, tap a legend entry to hide a series, and zoom a line or area
+  chart. The numbers also reach a screen reader as a table.
+
+**Mermaid takes the theme too.** A `%%{init}%%` or front matter setting `theme`, `themeVariables` or
+`themeCSS` is ignored — the diagram is already painted in the reader's theme. Leave out `style` and
+`classDef` colours as well: those still apply, and a fixed colour fights the theme in every other mode.
 
 ### Writing `html` that works
 
@@ -179,6 +220,7 @@ bytes), a small **Try rendering again** link sits under the code.
 | `svg`     | 100 KiB, and at most 500 elements                            |
 | `mermaid` | 20,000 characters                                            |
 | `map`     | 32 KiB, 100 markers, 50 shapes, 2,000 vertices               |
+| `chart`   | 64 KiB, 12 series, 500 points a series, 30 frames            |
 | `lottie`  | 1 MiB                                                        |
 | `image`   | 2 MiB decoded                                                |
 | `src:`    | no payload; a workspace file ≤ 1 MiB, an https image ≤ 2 MiB |

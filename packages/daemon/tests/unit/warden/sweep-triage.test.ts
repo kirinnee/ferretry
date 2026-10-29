@@ -457,7 +457,9 @@ describe('what a verdict does', () => {
   it('should stop when the owner allowed it', async () => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true } }),
+      config: enabled({
+        mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true, closeLeftovers: true },
+      }),
       fleet: [session({ id: 's1', status: 'running' })],
       reports: { '/r.md': report('KILL', 'STOP — looping') },
       state: finished(),
@@ -480,7 +482,9 @@ describe('what a verdict does', () => {
       state: finished(),
     });
     const held = harness({
-      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: false, failover: true, stop: false } }),
+      config: enabled({
+        mayActAlone: { nudge: true, resume: true, restart: false, failover: true, stop: false, closeLeftovers: true },
+      }),
       fleet: [session({ id: 's1', status: 'running' })],
       reports: { '/r.md': report('RESUME', 'RESTART — the process is frozen') },
       state: finished(),
@@ -551,7 +555,9 @@ describe('what a verdict does', () => {
   it('should hold a nudge the owner did not let it send alone', async () => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: false, resume: true, restart: true, failover: true, stop: false } }),
+      config: enabled({
+        mayActAlone: { nudge: false, resume: true, restart: true, failover: true, stop: false, closeLeftovers: true },
+      }),
       fleet: [session({ id: 's1', status: 'running' })],
       reports: { '/r.md': report('NUDGE', 'NUDGE — quiet') },
       state: finished(),
@@ -571,7 +577,9 @@ describe('what a verdict does', () => {
   ] as const)('should do nothing on %s', async (_label, text, status) => {
     // Arrange
     const subject = harness({
-      config: enabled({ mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true } }),
+      config: enabled({
+        mayActAlone: { nudge: true, resume: true, restart: true, failover: true, stop: true, closeLeftovers: true },
+      }),
       fleet: [session({ id: 's1', status })],
       reports: { '/r.md': text },
       state: finished(),

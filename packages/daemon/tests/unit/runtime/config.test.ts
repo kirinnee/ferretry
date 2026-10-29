@@ -44,6 +44,12 @@ describe('daemon configuration', () => {
       advertisement: { kind: 'local-only', url: 'http://localhost:9000' },
     });
     should(parseDaemonConfig({ projectRoots: ['~/Work'] }).projectRoots).deepEqual(['~/Work']);
+    should(parseDaemonConfig({}).terminals).deepEqual({});
+    should(parseDaemonConfig({ terminals: { shell: ' /usr/bin/zsh ' } }).terminals).deepEqual({
+      shell: '/usr/bin/zsh',
+    });
+    should(() => parseDaemonConfig({ terminals: { shell: '' } })).throw();
+    should(() => parseDaemonConfig({ terminals: { shell: '/bin/sh', command: 'x' } })).throw();
     should(
       parseDaemonConfig({
         analyticsPricing: [

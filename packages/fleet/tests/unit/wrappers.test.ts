@@ -863,9 +863,10 @@ describe('the appended system prompt of a real agent runtime, for every combinat
     };
 
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
-    // stays under 6.75 KB (docs/pack-mode.md records the sizes)
+    // stays under 7.1 KB (docs/pack-mode.md records the sizes: raised from 6.7 KB for Attention's steps and
+    // hypermedia's `chart`)
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(6_750);
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_100);
     should(sizes.pack).be.below(1_050);
     should(sizes.tools).be.below(1_100);
     should(sizes.settings).be.below(600);
