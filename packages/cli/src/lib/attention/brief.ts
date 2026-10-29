@@ -225,7 +225,7 @@ function askLineFrom(summary: string | undefined): string {
 }
 
 /** The card's title: required, one line, and short enough to head a notification. */
-export function titleFrom(raw: string | undefined): string {
+function titleFrom(raw: string | undefined): string {
   if (raw === undefined) {
     throw new Error(
       'give the card a title: --title "<what this is about, ≤40 chars, plain words, no IDs>" — it is the notification heading',
