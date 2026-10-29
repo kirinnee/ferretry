@@ -11,8 +11,7 @@ const CLOCK = /^(?:at\s+)?([01]?\d|2[0-3]):([0-5]\d)$/iu;
 const ISO = /^\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?)?(?:Z|[+-]\d{2}:?\d{2})?$/iu;
 
 /** What `--by` accepts, for the error that refuses anything else. */
-export const BY_FORMS =
-  'an ISO time (2026-10-29T17:00:00Z), a wait ("in 3h", "in 90m", "in 1d"), or a clock time ("17:00")';
+const BY_FORMS = 'an ISO time (2026-10-29T17:00:00Z), a wait ("in 3h", "in 90m", "in 1d"), or a clock time ("17:00")';
 
 /**
  * Read the time a person typed for `--by` as an instant, relative to `nowMs` and the zone this process

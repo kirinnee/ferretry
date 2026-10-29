@@ -11,7 +11,7 @@ export interface NotifyOptions {
   readonly ping?: boolean | undefined;
 }
 
-export interface AgendaModeOptions {
+interface AgendaModeOptions {
   readonly session?: string | undefined;
 }
 
@@ -37,11 +37,7 @@ export async function runNotify(ports: NotifyPorts, words: readonly string[], op
 }
 
 /** `fy notify agenda [on|off]`: read, or switch, whether this ferret is told to keep an agenda. */
-export async function runAgendaMode(
-  ports: NotifyPorts,
-  state: string | undefined,
-  options: AgendaModeOptions,
-): Promise<void> {
+async function runAgendaMode(ports: NotifyPorts, state: string | undefined, options: AgendaModeOptions): Promise<void> {
   const choice = state?.trim().toLowerCase() ?? '';
   if (choice !== '' && choice !== 'on' && choice !== 'off') {
     throw new Error(`agenda mode is "on" or "off", not "${state?.trim() ?? ''}" — leave it out to read it`);
