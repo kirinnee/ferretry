@@ -18,6 +18,7 @@ export type {
   ObservedHumanInputProof,
   TranscriptAttachment,
   TranscriptAttachmentEvent,
+  TranscriptBytesRef,
   TranscriptBatch,
   TranscriptErrorEvent,
   TranscriptEvent,
