@@ -23,11 +23,12 @@
  */
 
 import type { AttentionId, AttentionItem, AttentionSnapshot } from '@ferretry/protocol';
-import { ChevronLeft, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import type { DaemonAttentionClient } from '../../lib/attention-client.ts';
 import { actionSentence, type InboxAction } from '../../lib/attention-inbox.ts';
+import { nextSelection, QUEUE_END } from '../../lib/attention-inbox-list.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -127,11 +128,17 @@ interface CardState {
 const failure = (reason: unknown): string =>
   reason instanceof Error ? reason.message : 'The machine did not accept this answer.';
 
-/** The open item the block shows: the chosen one while it is open, else the first. */
+/**
+ * The open item the block shows — and so the item the next message answers: the chosen one, else the first
+ * while none is chosen. A chosen item that has left shows nothing until the block moves on to the item
+ * after it (or to "You skipped N"), so a message is never offered as the answer to an item the reader did
+ * not choose.
+ */
 export const shownAttentionItem = (
   snapshot: AttentionSnapshot | null,
   selectedId: AttentionId | null,
-): AttentionItem | undefined => snapshot?.items.find(entry => entry.id === selectedId) ?? snapshot?.items[0];
+): AttentionItem | undefined =>
+  selectedId === null ? snapshot?.items[0] : snapshot?.items.find(entry => entry.id === selectedId);
 
 export function AttentionPanel({
   id,
@@ -154,9 +161,25 @@ export function AttentionPanel({
   const [announcement, setAnnouncement] = useState('');
   const target = focus?.target ?? null;
   const location = target === null ? null : locateAttention(snapshot, target);
-  const selected = shownAttentionItem(snapshot, selectedId);
-  const selectedIndex = selected === undefined ? -1 : items.indexOf(selected);
   const openIds = items.map(entry => entry.id);
+  // THE QUEUE ONLY MOVES FORWARD: once the shown item is answered the block shows the one after it, and past
+  // the last one it offers the skipped ones — never item 1 again (`nextSelection`).
+  const lastIds = useRef<readonly string[]>(openIds);
+  const forward = nextSelection(lastIds.current, selectedId, openIds);
+  const atEnd = forward === QUEUE_END;
+  const selected = atEnd ? undefined : (items.find(entry => entry.id === forward) ?? items[0]);
+  const selectedIndex = selected === undefined ? -1 : items.indexOf(selected);
+  const openKey = openIds.join('\u0001');
+  // The order is remembered only while the selection is SETTLED (none chosen, or the chosen one open): until
+  // the page catches up with the move, the departed item must still have a place to move on from.
+  const settled = selectedId === null || openIds.includes(selectedId);
+  useEffect(() => {
+    if (settled) lastIds.current = openKey === '' ? [] : openKey.split('\u0001');
+  }, [openKey, settled]);
+  const shownId = selected?.id ?? null;
+  useEffect(() => {
+    if (selectedId !== null && shownId !== null && shownId !== selectedId) onSelect(shownId);
+  }, [selectedId, shownId, onSelect]);
   const fold = useAttentionCollapse(scope, openIds, snapshot !== null);
   const folded = fold.collapsed;
   const expandFold = fold.expand;
@@ -228,7 +251,7 @@ export function AttentionPanel({
   const unavailable = snapshot === null && status === 'error';
   const state = selected === undefined ? undefined : cards.get(selected.id);
   const missing = target !== null && location === 'unknown';
-  const quiet = selected === undefined && !loading && !unavailable && !missing;
+  const quiet = selected === undefined && !atEnd && !loading && !unavailable && !missing;
   // The live region outlives the block: answering the last open item removes the block, and the sentence
   // that says what was sent must still be spoken.
   const live = (
@@ -270,6 +293,25 @@ export function AttentionPanel({
             <CircleAlert aria-hidden="true" size={14} />
             Attention cannot be read right now. Reconnect before assuming nothing needs you.
           </p>
+        ) : atEnd ? (
+          <div className="fy-attn-panel__end" data-attention-queue-end="">
+            <span>
+              You skipped {items.length} {items.length === 1 ? 'item' : 'items'} — review them?
+            </span>
+            <button
+              className="kt-btn kt-btn--sm"
+              data-attention-review=""
+              data-variant="primary"
+              onClick={() => {
+                const first = items[0];
+                if (first !== undefined) onSelect(first.id);
+              }}
+              type="button"
+            >
+              Review them
+              <ArrowRight aria-hidden="true" size={13} />
+            </button>
+          </div>
         ) : selected === undefined ? null : folded ? (
           <>
             <AttentionCollapsedLine controls={id} item={selected} more={items.length - 1} onExpand={fold.expand} />

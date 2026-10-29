@@ -215,6 +215,32 @@ describe('AttentionPanel', () => {
     expect(c.querySelector('[data-attention-pager]')?.textContent).toContain('2 of 2');
   });
 
+  test('once the shown item is answered it moves FORWARD to the next one, not back to the first', async () => {
+    const picked: string[] = [];
+    view = await mount(panel({ snapshot: board([item('A1'), item('A2'), item('A3')]), selectedId: 'A2' }));
+    const c = must(view.container, 'view');
+    expect(cardOf(c, 'A2')).not.toBeNull();
+    await view.render(
+      panel({ snapshot: board([item('A1'), item('A3')]), selectedId: 'A2', onSelect: id => picked.push(id) }),
+    );
+    expect(cardOf(c, 'A3')).not.toBeNull();
+    expect(picked).toEqual(['A3']);
+  });
+
+  test('answering the last after skipping the rest offers "You skipped N", and never deals the first again', async () => {
+    const picked: string[] = [];
+    const onSelect = (id: string) => picked.push(id);
+    view = await mount(panel({ snapshot: board([item('A1'), item('A2'), item('A3')]), selectedId: 'A3', onSelect }));
+    const c = must(view.container, 'view');
+    await view.render(panel({ snapshot: board([item('A1'), item('A2')]), selectedId: 'A3', onSelect }));
+    expect(c.querySelector('[data-attention-card]')).toBeNull();
+    const end = must(c.querySelector('[data-attention-queue-end]'), 'the end of the queue');
+    expect(end.textContent).toContain('You skipped 2 items — review them?');
+    expect(picked).toEqual([]);
+    await interact(() => must(end.querySelector<HTMLButtonElement>('[data-attention-review]'), 'Review').click());
+    expect(picked).toEqual(['A1']);
+  });
+
   test('a single item has no pager', async () => {
     view = await mount(panel());
     expect(must(view.container, 'view').querySelector('[data-attention-pager]')).toBeNull();
