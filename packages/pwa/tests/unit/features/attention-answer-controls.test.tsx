@@ -255,6 +255,22 @@ describe('AttentionAnswerControls', () => {
     await unmount();
   });
 
+  it('shows a spinner on the disabled send of an answer already in flight', async () => {
+    const sent: AttentionResponse[] = [];
+    const { container, unmount } = await mount(
+      <AttentionAnswerControls ask={OPEN} busy swipeEnabled onRespond={r => sent.push(r)} />,
+    );
+    await typeInto(container, 'Ship it');
+    const sending = must(
+      Array.from(container.querySelectorAll('button')).find(button => button.querySelector('svg.animate-spin')),
+      'the busy send button',
+    );
+    expect(sending.disabled).toBe(true);
+    await interact(() => sending.click());
+    expect(sent).toEqual([]);
+    await unmount();
+  });
+
   it('answers an open question with typed text and nothing else', async () => {
     const { container, sent, unmount } = await controls(OPEN);
 
