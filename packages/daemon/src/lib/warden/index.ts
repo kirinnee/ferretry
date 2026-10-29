@@ -12,6 +12,7 @@ export * from './liveness.ts';
 export * from './liveness-monitor.ts';
 export * from './logins.ts';
 export * from './marker.ts';
+export * from './owner-routes.ts';
 export * from './pane-processes.ts';
 export * from './paths.ts';
 export * from './ports.ts';

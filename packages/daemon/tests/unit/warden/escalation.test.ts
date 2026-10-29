@@ -4,6 +4,7 @@ import {
   planWardenEscalations,
   planWardenRemedy,
   remedyPermitsEscalation,
+  LEGACY_ESCALATION_NOTE,
   wardenEscalationSourceRef,
   type WardenAnomaly,
   type WardenEscalationBoard,
@@ -62,7 +63,6 @@ const board = (
 ): WardenEscalationBoard => ({
   sessionId,
   items: overrides.items ?? [],
-  resolved: overrides.resolved ?? [],
 });
 
 const FORBIDDEN: WardenRemedyOutcome = { disposition: 'forbidden', why: 'no remedy is permitted here' };
@@ -115,7 +115,7 @@ describe('what a warden may do before waking a person', () => {
 describe('the stable identity of a node escalation', () => {
   it('should key on the anomaly class alone, so a later sweep refreshes one row', () => {
     // Arrange / Act / Assert
-    should(wardenEscalationSourceRef('sus_thinking')).eql('warden:sus_thinking');
+    should(wardenEscalationSourceRef('sus_thinking')).eql('warden:ask:sus_thinking');
   });
 });
 
@@ -130,7 +130,7 @@ describe('raising an escalation', () => {
       sessionId: 's1',
       anomalyKind: 'sus_thinking',
       source: 'agent-raised',
-      sourceRef: 'warden:sus_thinking',
+      sourceRef: 'warden:ask:sus_thinking',
       reportPath: '/state/warden/reports/r1.md',
     });
   });
@@ -318,7 +318,7 @@ describe('raising an escalation', () => {
     });
 
     // Assert
-    should(result.raise.map(entry => entry.sourceRef)).eql(['warden:sus_subprocess', 'warden:sus_thinking']);
+    should(result.raise.map(entry => entry.sourceRef)).eql(['warden:ask:sus_subprocess', 'warden:ask:sus_thinking']);
   });
 
   it('should keep two nodes’ escalations on their own boards', () => {
@@ -335,7 +335,7 @@ describe('raising an escalation', () => {
     should(result.raise[1]?.subject).containEql(':boreas');
   });
 
-  it('should give a fleet-wide anomaly an item on every node it names', () => {
+  it('should give a fleet-wide anomaly ONE item, on the first node it names', () => {
     // Arrange
     const outage = anomaly({ kind: 'provider_unavailable', sessionId: 's1', affectedSessionIds: ['s1', 's2'] });
 
@@ -351,7 +351,9 @@ describe('raising an escalation', () => {
     });
 
     // Assert
-    should(result.raise.map(entry => entry.sessionId)).eql(['s1', 's2']);
+    should(result.raise.map(entry => [entry.sessionId, entry.sourceRef, entry.notice, entry.ping])).eql([
+      ['s1', 'warden:ask:fleet:provider_unavailable:s1', true, true],
+    ]);
   });
 
   it('should read the newest of two verdicts for the same class', () => {
@@ -390,7 +392,7 @@ describe('the evidence an escalation carries', () => {
 
     // Assert
     should(result.raise[0]?.subject).containEql(':atlas');
-    should(result.raise[0]?.context).containEql(':atlas');
+    should(result.raise[0]?.premise).containEql(':atlas');
   });
 
   it('should fall back to the bare session id when the node has no callsign', () => {
@@ -402,12 +404,12 @@ describe('the evidence an escalation carries', () => {
     should(result.raise[0]?.subject).not.containEql(':');
   });
 
-  it('should title the item with the one name this anomaly class has', () => {
+  it('should title the item in plain words for its class', () => {
     // Arrange / Act
     const result = plan();
 
     // Assert
-    should(result.raise[0]?.subject).containEql('Session may be stuck thinking');
+    should(result.raise[0]?.title).equal('atlas may be stuck thinking');
   });
 
   it('should carry the detector’s own evidence, not a paraphrase', () => {
@@ -415,8 +417,8 @@ describe('the evidence an escalation carries', () => {
     const result = plan();
 
     // Assert
-    should(result.raise[0]?.context).containEql('the transcript has not grown for 40m while counters advanced');
-    should(result.raise[0]?.context).containEql(at(-40));
+    should(result.raise[0]?.premise).containEql('the transcript has not grown for 40m while counters advanced');
+    should(result.raise[0]?.premise).containEql(at(-40));
   });
 
   it('should carry how long the node has been idle when the detector measured it', () => {
@@ -424,7 +426,7 @@ describe('the evidence an escalation carries', () => {
     const result = plan({ anomalies: [anomaly({ idleMinutes: 40 })] });
 
     // Assert
-    should(result.raise[0]?.context).containEql('Idle 40m');
+    should(result.raise[0]?.premise).containEql('Idle 40m');
   });
 
   it('should say which report the verdict came from', () => {
@@ -474,7 +476,7 @@ describe('the evidence an escalation carries', () => {
     const result = plan();
 
     // Assert
-    should(result.raise[0]?.context).containEql('CLI claude-auto-a, model sample-model-2');
+    should(result.raise[0]?.premise).containEql('CLI claude-auto-a, model sample-model-2');
   });
 
   it('should fall back to the model the start resolved when the account pinned none', () => {
@@ -484,7 +486,7 @@ describe('the evidence an escalation carries', () => {
     });
 
     // Assert
-    should(result.raise[0]?.context).containEql('model resolved-model-7');
+    should(result.raise[0]?.premise).containEql('model resolved-model-7');
   });
 
   it('should say plainly when neither the CLI nor the model was recorded', () => {
@@ -492,7 +494,7 @@ describe('the evidence an escalation carries', () => {
     const result = plan({ nodes: [node({ teammate: 'atlas' })] });
 
     // Assert
-    should(result.raise[0]?.context).containEql('CLI not recorded, model not recorded');
+    should(result.raise[0]?.premise).containEql('CLI not recorded, model not recorded');
   });
 
   it('should state the prohibition rather than pretend a repair ran', () => {
@@ -567,86 +569,100 @@ describe('the evidence an escalation carries', () => {
   });
 });
 
-describe('suppressing an escalation a person already answered', () => {
-  const addressed = (resolvedAt: string): WardenEscalationBoard =>
-    board('s1', { resolved: [{ source: 'agent-raised', sourceRef: 'warden:sus_thinking', resolvedAt }] });
-
-  it('should not resurrect an item addressed after the verdict was written', () => {
+describe('telling a person once per episode', () => {
+  it('should not notify again about a subject already told, while it stands', () => {
     // Arrange / Act
-    const result = plan({ boards: [addressed(at(-1))] });
+    const result = plan({ notified: new Set(['s1|warden:ask:sus_thinking']) });
 
     // Assert
     should(result.raise).be.empty();
+    should(result.standing).eql(['s1|warden:ask:sus_thinking']);
   });
 
-  it('should not resurrect an item addressed in the same instant as the verdict', () => {
+  it('should keep refreshing a notification still open, even once told', () => {
     // Arrange / Act
-    const result = plan({ boards: [addressed(at(-5))] });
-
-    // Assert
-    should(result.raise).be.empty();
-  });
-
-  it('should let a genuinely newer verdict raise again', () => {
-    // Arrange / Act
-    const result = plan({ boards: [addressed(at(-10))], verdicts: [verdict({ at: at(-1) })] });
-
-    // Assert
-    should(result.raise).have.length(1);
-  });
-
-  it('should ignore a resolution of some other class on the same board', () => {
-    // Arrange
-    const other = board('s1', {
-      resolved: [{ source: 'agent-raised', sourceRef: 'warden:sus_subprocess', resolvedAt: at(-1) }],
-    });
-
-    // Act
-    const result = plan({ boards: [other] });
-
-    // Assert
-    should(result.raise).have.length(1);
-  });
-
-  it('should ignore an addressed row that carries no source reference at all', () => {
-    // Arrange
-    const freeform = board('s1', { resolved: [{ source: 'agent-raised', sourceRef: null, resolvedAt: at(-1) }] });
-
-    // Act
-    const result = plan({ boards: [freeform] });
-
-    // Assert
-    should(result.raise).have.length(1);
-  });
-
-  it('should treat an unreadable resolution instant as the beginning of time', () => {
-    // Arrange / Act
-    const result = plan({ boards: [addressed('not an instant')] });
-
-    // Assert
-    should(result.raise).have.length(1);
-  });
-
-  it('should keep the newest of several resolutions of the same item', () => {
-    // Arrange
-    const twice = board('s1', {
-      resolved: [
-        { source: 'agent-raised', sourceRef: 'warden:sus_thinking', resolvedAt: at(-30) },
-        { source: 'agent-raised', sourceRef: 'warden:sus_thinking', resolvedAt: at(-1) },
+    const result = plan({
+      notified: new Set(['s1|warden:ask:sus_thinking']),
+      boards: [
+        board('s1', { items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' }] }),
       ],
     });
 
-    // Act
-    const result = plan({ boards: [twice] });
+    // Assert
+    should(result.raise).have.length(1);
+    should(result.resolve).be.empty();
+  });
+
+  it('should notify about another class on the same ferret that was not told', () => {
+    // Arrange / Act
+    const result = plan({ notified: new Set(['s1|warden:ask:sus_subprocess']) });
 
     // Assert
-    should(result.raise).be.empty();
+    should(result.raise).have.length(1);
+  });
+
+  it('should report no standing subject when nothing has a reason', () => {
+    // Arrange / Act
+    const result = plan({ verdicts: [] });
+
+    // Assert
+    should(result.standing).eql([]);
+  });
+});
+
+describe('retiring the items escalations wrote before notifications', () => {
+  it('should resolve an old warden item with a note, even while its node is still flagged', () => {
+    // Arrange
+    const old = board('s1', {
+      items: [{ source: 'agent-raised', sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' }],
+    });
+
+    // Act
+    const result = plan({ boards: [old] });
+
+    // Assert
+    should(result.resolve).eql([
+      {
+        sessionId: 's1',
+        anomalyKind: 'sus_thinking',
+        source: 'agent-raised',
+        sourceRef: 'warden:sus_thinking',
+        note: LEGACY_ESCALATION_NOTE,
+      },
+    ]);
+    should(result.raise).have.length(1);
+  });
+
+  it.each([
+    {
+      label: 'one somebody else raised',
+      item: { source: 'agent-raised' as const, sourceRef: 'warden:sus_thinking', raisedBy: 'agent' as const },
+    },
+    {
+      label: 'one on another source',
+      item: { source: 'task' as const, sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' as const },
+    },
+    {
+      label: 'one naming a report block',
+      item: { source: 'agent-raised' as const, sourceRef: 'warden:/r.md#sus_thinking', raisedBy: 'daemon' as const },
+    },
+    {
+      label: 'one naming no class',
+      item: { source: 'agent-raised' as const, sourceRef: 'warden:not_a_kind', raisedBy: 'daemon' as const },
+    },
+    {
+      label: 'one with no reference',
+      item: { source: 'agent-raised' as const, sourceRef: null, raisedBy: 'daemon' as const },
+    },
+  ])('should leave $label alone', ({ item }) => {
+    // Act / Assert
+    should(plan({ anomalies: [], boards: [board('s1', { items: [item] })] }).resolve).be.empty();
   });
 });
 
 describe('clearing an escalation whose reason has gone', () => {
   const live = board('s1', {
-    items: [{ source: 'agent-raised', sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' }],
+    items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' }],
   });
 
   it('should clear it when the node stops being flagged for that class', () => {
@@ -655,7 +671,11 @@ describe('clearing an escalation whose reason has gone', () => {
 
     // Assert
     should(result.resolve).have.length(1);
-    should(result.resolve[0]).match({ sessionId: 's1', sourceRef: 'warden:sus_thinking', anomalyKind: 'sus_thinking' });
+    should(result.resolve[0]).match({
+      sessionId: 's1',
+      sourceRef: 'warden:ask:sus_thinking',
+      anomalyKind: 'sus_thinking',
+    });
     should(result.resolve[0]?.note).match(/recovered/u);
   });
 
@@ -695,11 +715,11 @@ describe('clearing an escalation whose reason has gone', () => {
     { label: 'a reference that is not a warden one', patch: { sourceRef: 'task:T3' } },
     { label: 'a reference naming one exact report block', patch: { sourceRef: 'warden:/r/a.md#sus_thinking' } },
     { label: 'a reference naming a report and no class', patch: { sourceRef: 'warden:/r/a.md' } },
-    { label: 'a reference naming no known class', patch: { sourceRef: 'warden:not_a_kind' } },
+    { label: 'a reference naming no known class', patch: { sourceRef: 'warden:ask:not_a_kind' } },
   ])('should leave $label alone', ({ patch }) => {
     // Arrange
     const foreign = board('s1', {
-      items: [{ source: 'agent-raised', sourceRef: 'warden:sus_thinking', raisedBy: 'daemon', ...patch }],
+      items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon', ...patch }],
     });
 
     // Act
@@ -713,8 +733,8 @@ describe('clearing an escalation whose reason has gone', () => {
     // Arrange
     const both = board('s1', {
       items: [
-        { source: 'agent-raised', sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' },
-        { source: 'agent-raised', sourceRef: 'warden:sus_subprocess', raisedBy: 'daemon' },
+        { source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' },
+        { source: 'agent-raised', sourceRef: 'warden:ask:sus_subprocess', raisedBy: 'daemon' },
       ],
     });
 
@@ -729,11 +749,11 @@ describe('clearing an escalation whose reason has gone', () => {
   it('should clear in a deterministic order across nodes and classes', () => {
     // Arrange
     const boards = [
-      board('s2', { items: [{ source: 'agent-raised', sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' }] }),
+      board('s2', { items: [{ source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' }] }),
       board('s1', {
         items: [
-          { source: 'agent-raised', sourceRef: 'warden:sus_thinking', raisedBy: 'daemon' },
-          { source: 'agent-raised', sourceRef: 'warden:dead_monitor', raisedBy: 'daemon' },
+          { source: 'agent-raised', sourceRef: 'warden:ask:sus_thinking', raisedBy: 'daemon' },
+          { source: 'agent-raised', sourceRef: 'warden:ask:dead_monitor', raisedBy: 'daemon' },
         ],
       }),
     ];

@@ -111,7 +111,9 @@ describe('Jev acting as first responder', () => {
     should(subject.remedies).be.empty();
     should(subject.state().actions?.[0]).match({ action: 'stop', outcome: 'held', by: 'jev', confidence: 0.99 });
     should(subject.state().actions?.[0]?.detail).startWith('Jev recommends stopping it (99% sure)');
-    should(feed.items.map(item => item.source)).containEql('warden-action');
+    // The held act is a real Warden card, recommending the act it holds.
+    should(feed.items.map(item => item.raisedByName)).deepEqual(['Warden']);
+    should(subject.raises.at(-1)?.request).match({ reason: 'held', subject: /The Warden recommends stopping it/u });
   });
 
   it('should leave an unsure flag to the owner when investigations are off', async () => {

@@ -21,8 +21,8 @@ import { jsonResponse, textResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
- * Warden supervision: `/v1/warden/status`, `/v1/warden/run`, `/v1/warden/config`, the "who needs you"
- * feed at `/v1/warden/attention`, the owner's own request at `/v1/warden/investigate`, and the owner
+ * Warden supervision: `/v1/warden/status`, `/v1/warden/run`, `/v1/warden/config`, a read of the
+ * Warden's own Attention cards at `/v1/warden/attention`, the owner's own request at `/v1/warden/investigate`, and the owner
  * leaving a ferret alone for longer at `/v1/warden/leave`.
  *
  * THIS MOUNT IS WHY SIX MODULES ARE PRODUCTION CODE. `packages/daemon/src/lib/warden/` held the

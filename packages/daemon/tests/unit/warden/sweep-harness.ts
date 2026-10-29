@@ -6,7 +6,6 @@ import {
   type WardenAttentionWrite,
   type WardenConfig,
   type WardenEscalationBoardItem,
-  type WardenEscalationBoardResolution,
   type WardenEscalationRaise,
   type WardenEscalationVerdict,
   type WardenFleetSession,
@@ -100,7 +99,6 @@ export interface Harness {
   /** The live rows of one node's board, as the fake store now holds them. */
   board(sessionId: string): readonly WardenEscalationBoardItem[];
   seedBoard(sessionId: string, items: readonly WardenEscalationBoardItem[]): void;
-  seedResolved(sessionId: string, entries: readonly WardenEscalationBoardResolution[]): void;
   state(): WardenRuntimeState;
   setState(value: unknown): void;
   setFleet(fleet: readonly WardenFleetSession[]): void;
@@ -159,8 +157,9 @@ export function harness(
   const spawns: WardenSpawnRequest[] = [];
   const provenance = new Map<string, WardenSpawnProvenance>();
   const boards = new Map<string, readonly WardenEscalationBoardItem[]>();
-  const resolutions = new Map<string, readonly WardenEscalationBoardResolution[]>();
   const raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[] = [];
+  /** The newest card text raised per `[sessionId, sourceRef]`. */
+  const cards = new Map<string, WardenEscalationRaise>();
   const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
   let spawnCall = 0;
   let capability = 0;
@@ -204,9 +203,30 @@ export function harness(
       },
     },
     costs: { costUsd: async wardenId => await (options.cost?.(wardenId) ?? Promise.resolve(undefined)) },
+    // By default the feed reads the SAME fake board the escalation writes: the Warden page is a thin read
+    // of the Warden's own cards.
     feed: {
       board: async sessionId =>
-        options.feedBoards === undefined ? { sessionId, parseErrors: 0, items: [] } : options.feedBoards[sessionId],
+        options.feedBoards === undefined
+          ? {
+              sessionId,
+              parseErrors: 0,
+              items: (boards.get(sessionId) ?? []).map((item, index) => {
+                const card =
+                  item.sourceRef === null ? undefined : cards.get(JSON.stringify([sessionId, item.sourceRef]));
+                return {
+                  id: `A${index + 1}`,
+                  source: item.source,
+                  raisedBy: item.raisedBy,
+                  ...(item.sourceRef === null ? {} : { sourceRef: item.sourceRef }),
+                  subject: card?.subject ?? 'A seeded card',
+                  why: card?.why ?? 'seeded',
+                  waitingSince: card?.waitingSince ?? at(0),
+                  howToResolve: card?.howToResolve ?? 'seeded',
+                };
+              }),
+            }
+          : options.feedBoards[sessionId],
     },
     fleet: {
       fleet: async () => fleet,
@@ -260,11 +280,12 @@ export function harness(
     attention: {
       board: async sessionId => {
         if (options.unreadableBoards?.includes(sessionId) === true) return undefined;
-        return { sessionId, items: boards.get(sessionId) ?? [], resolved: resolutions.get(sessionId) ?? [] };
+        return { sessionId, items: boards.get(sessionId) ?? [] };
       },
       raise: async (sessionId, request) => {
         raises.push({ sessionId, request });
         if (options.raiseWrite !== undefined) return options.raiseWrite;
+        cards.set(JSON.stringify([sessionId, request.sourceRef]), request);
         const existing = boards.get(sessionId) ?? [];
         if (existing.some(item => item.sourceRef === request.sourceRef)) return 'unchanged';
         boards.set(sessionId, [
@@ -301,7 +322,6 @@ export function harness(
     remedies,
     board: sessionId => boards.get(sessionId) ?? [],
     seedBoard: (sessionId, items) => void boards.set(sessionId, items),
-    seedResolved: (sessionId, entries) => void resolutions.set(sessionId, entries),
     state: () => stateDocument as WardenRuntimeState,
     setState: value => {
       stateDocument = value;

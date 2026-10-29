@@ -72,17 +72,26 @@ const RECOMMENDED_ACTIONS: ReadonlySet<string> = new Set<WardenRecommendedAction
   'leave',
 ]);
 
-const WARDEN_ANOMALY_KINDS: ReadonlySet<string> = new Set<WardenAnomalyKind>([
-  'dead_monitor',
-  'unattended_question',
-  'abandoned_wreckage',
-  'quota_reset_passed',
-  'declared_wait_overdue',
-  'peer_wait_unanswerable',
-  'sus_thinking',
-  'sus_subprocess',
-  'provider_unavailable',
-]);
+/**
+ * Every anomaly kind, as a TOTAL record over the kind union: adding a kind without listing it here is a
+ * compile error. A hand-kept list drifted once — `agent_frozen` and `owner_request` were missing, so a
+ * Warden card for a frozen ferret was raised and could never be parsed back to be cleared.
+ */
+const ANOMALY_KINDS: Readonly<Record<WardenAnomalyKind, true>> = {
+  dead_monitor: true,
+  unattended_question: true,
+  abandoned_wreckage: true,
+  quota_reset_passed: true,
+  declared_wait_overdue: true,
+  peer_wait_unanswerable: true,
+  sus_thinking: true,
+  sus_subprocess: true,
+  agent_frozen: true,
+  provider_unavailable: true,
+  owner_request: true,
+};
+
+const WARDEN_ANOMALY_KINDS: ReadonlySet<string> = new Set(Object.keys(ANOMALY_KINDS));
 
 export function parseWardenAnomalyKind(value: string | undefined): WardenAnomalyKind | undefined {
   const normalized = value?.trim();

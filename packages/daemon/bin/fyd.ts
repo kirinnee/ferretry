@@ -3917,6 +3917,8 @@ interface WardenParts {
   readonly livenessSample: (target: LivenessTarget) => Promise<LivenessSample>;
   /** Close the browsers a ferret launched that still run under its pane, read afresh; how many closed. */
   readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
+  /** This machine's name, as pairing gave it: every Warden notification says which machine it is about. */
+  readonly machineName: () => string | undefined;
 }
 
 /**
@@ -4036,7 +4038,6 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
               waitingSince: item.waitingSince,
               howToResolve: item.howToResolve,
               raisedBy: item.raisedBy,
-              ...(item.raisedByName === null ? {} : { raisedByName: item.raisedByName }),
               ...(item.sourceRef === null ? {} : { sourceRef: item.sourceRef }),
             })),
           };
@@ -4115,9 +4116,14 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
                 context: request.context,
                 waitingSince: request.waitingSince,
                 howToResolve: request.howToResolve,
-                // NO STRUCTURED ASK. This is an instruction, not a question: the daemon has nothing
-                // to do with an answer, and a bare `resolve` is what a person needs to be able to
-                // reach for once they have acted.
+                // A plain notification from the Warden: no ask and no answers — reading it is acting on
+                // it, and it opens the ferret's chat. Old apps read it as an `info` card.
+                // TODO(notice): pass `notice: request.notice, ping: request.ping` once
+                // `RaiseAttentionRequest` accepts them (the Attention model's daemon unit).
+                title: request.title,
+                kind: 'info',
+                premise: request.premise,
+                ...(request.terms === undefined ? {} : { terms: [...request.terms] }),
               },
               WARDEN_ESCALATION_ACTOR,
             )
@@ -4152,6 +4158,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       wardenCwd: parts.wardenRoot,
       supervisesMonitors: true,
       mayAct: false,
+      machineName: parts.machineName,
     },
   );
   // The loop drives a WRAPPED service so the holder is refreshed by the timer's sweeps as well as by
@@ -10221,6 +10228,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }),
         secrets,
         warden: createWardenSubsystem({
+          machineName: () => analyticsMachineName ?? hostname(),
           activities,
           sessions,
           documents: createSessionDirectorySubsystem(paths, storage),
