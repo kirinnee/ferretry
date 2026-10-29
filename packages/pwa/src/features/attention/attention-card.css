@@ -739,10 +739,11 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-card[data-capped] {
   max-height: min(78dvh, 44rem);
 }
-/* In the inbox the deck sits under the page heading and the filter and above the hint and the tab bar,
-   so the top card leaves them that room (about 19rem) rather than sliding under the tab bar. */
+/* The deck measures the room it has — from its top edge to the bottom of what the reader can see, less
+   the inbox hint under it — as `--deck-room`, and the top card grows to it: its detail scrolls inside,
+   its answer bar stays pinned. Before the first measurement, a guess that clears the tab bar. */
 .fy-attn-deck__top .fy-attn-card {
-  max-height: min(max(20rem, calc(100dvh - 19rem)), 44rem);
+  max-height: var(--deck-room, max(20rem, calc(100dvh - 19rem)));
 }
 .fy-attn-deck__top .fy-attn-card > .fy-attn-card__scroll,
 .fy-attn-card[data-capped] > .fy-attn-card__scroll {
