@@ -63,6 +63,8 @@ describe('structured-item rules', () => {
   test('knows a rich item from an old one', () => {
     expect(hasAttentionBrief({})).toBe(false);
     expect(hasAttentionBrief({ impact: 'it stalls' })).toBe(true);
+    expect(hasAttentionBrief({ premise: '- a fact' })).toBe(true);
+    expect(hasAttentionBrief({ decided: '- a decision' })).toBe(true);
   });
 
   test('answers per question only for several questions with an open-question ask', () => {

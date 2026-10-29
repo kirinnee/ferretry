@@ -71,9 +71,7 @@ describe('AttentionCard sections', () => {
     const old = attentionItem('A2', { subject: 'Approve?', context: 'Halfway there.', ask: choices('Yes', 'No') });
     view = await mount(<AttentionCard item={old} onAct={() => {}} />);
     expect(sections(view.container)).toEqual(['context']);
-    expect(view.container.querySelector('[data-attention-section="context"] .fy-attn-prose')?.textContent).toBe(
-      'Halfway there.',
-    );
+    expect(view.container.querySelector('[data-attention-section="context"]')?.textContent).toContain('Halfway there.');
     expect(view.container.querySelectorAll('[data-attention-option]')).toHaveLength(2);
     expect(view.container.querySelector('[data-attention-recommended]')).toBeNull();
   });

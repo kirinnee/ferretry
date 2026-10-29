@@ -18,8 +18,8 @@
 
 import type { AttentionItem, AttentionLink, AttentionQuestion, AttentionRecommendation } from '@ferretry/protocol';
 import { recommendedAttentionOption } from '@ferretry/protocol';
-import { Check, ChevronRight, ExternalLink } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
+import { ArrowLeft, ArrowRight, ArrowUp, Check, ChevronRight, ExternalLink } from 'lucide-react';
+import { Fragment, type ReactNode, useId } from 'react';
 
 type AttentionProse = (text: string) => ReactNode;
 
@@ -55,6 +55,12 @@ interface QuestionAnswers {
 
 /** The word the badge on a recommended option says; a badge, so the pick never rests on colour alone. */
 const RECOMMENDED_WORD = 'Recommended';
+
+const OPTION_ARROWS: Readonly<Record<'left' | 'up' | 'right', ReactNode>> = {
+  left: <ArrowLeft aria-hidden="true" size={13} />,
+  up: <ArrowUp aria-hidden="true" size={13} />,
+  right: <ArrowRight aria-hidden="true" size={13} />,
+};
 
 function RecommendedBadge() {
   return (
@@ -237,6 +243,8 @@ export interface AttentionBriefProps {
   readonly why?: string | null;
   /** What to draw as the recommendation; defaults to the item's own. A lone question's pick goes here. */
   readonly recommendation?: AttentionRecommendation | undefined;
+  /** Which way each option swipes, by label: the card draws it as an arrow in front of the option. */
+  readonly optionDirections?: Readonly<Record<string, 'left' | 'up' | 'right'>>;
   /** The steps checklist, drawn under "Steps". */
   readonly steps?: ReactNode;
   /** The body, drawn under "More detail" — the one section that may start folded. */
@@ -264,6 +272,7 @@ export function AttentionBriefSections({
   ask,
   why = null,
   recommendation = item.recommendation,
+  optionDirections,
   steps,
   detail,
 }: AttentionBriefProps) {
@@ -277,15 +286,16 @@ export function AttentionBriefSections({
   const questions = askShown && !several && picker === undefined ? [] : all;
   const options = describedOptions(item, several);
   const pick = recommendedAttentionOption(item);
+  const termsLine = item.terms ?? null;
   return (
     <div className="fy-attn-secs" data-layout={fold ? 'fold' : 'open'}>
       {premise === null ? null : (
-        <Section fold={fold} name="premise" open={open} title="What's going on">
+        <Section fold={fold} name="premise" open={open} title={fold ? "What's going on" : 'Premise'}>
           <PointForm className="fy-attn-prose" text={premise} />
         </Section>
       )}
       {context === null && why === null ? null : (
-        <Section fold={fold} name="context" open={open} title={fold ? 'Context' : 'Why it matters now'}>
+        <Section fold={fold} name="context" open={open} title="Context">
           {why === null ? null : (
             <div className="fy-attn-prose" data-attention-why="">
               {renderProse(why)}
@@ -349,22 +359,32 @@ export function AttentionBriefSections({
       {options.length === 0 ? null : (
         <Section fold={fold} name="options" open={open} title="Options">
           <ul className="fy-attn-options">
-            {options.map(option => (
-              <li className="fy-attn-options__row" data-attention-option-detail={option.label} key={option.label}>
-                <span className="fy-attn-options__label">
-                  <strong>{option.label}</strong>
-                  {pick === option.label.trim() ? <RecommendedBadge /> : null}
-                </span>
-                {option.description === undefined ? null : (
-                  <span className="fy-attn-options__what">{option.description}</span>
-                )}
-              </li>
-            ))}
+            {options.map(option => {
+              const direction = optionDirections?.[option.label.trim()];
+              return (
+                <li className="fy-attn-options__row" data-attention-option-detail={option.label} key={option.label}>
+                  {direction === undefined || fold ? null : (
+                    <span className="fy-attn-options__arrow" data-direction={direction}>
+                      {OPTION_ARROWS[direction]}
+                    </span>
+                  )}
+                  <span className="fy-attn-options__text">
+                    <strong>{option.label}</strong>
+                    {option.description === undefined ? null : (
+                      <span className="fy-attn-options__what"> — {option.description}</span>
+                    )}
+                    {pick === option.label.trim() && (fold || recommendation === undefined) ? (
+                      <RecommendedBadge />
+                    ) : null}
+                  </span>
+                </li>
+              );
+            })}
           </ul>
         </Section>
       )}
       {recommendation === undefined ? null : (
-        <Section fold={fold} name="recommendation" open={open} title="Recommendation">
+        <Section fold={fold} name="recommendation" open={open} title={fold ? 'Recommendation' : 'Recommended'}>
           <p className="fy-attn-card__rec" data-attention-recommendation="">
             <RecommendedBadge />
             <span>
@@ -384,21 +404,34 @@ export function AttentionBriefSections({
           )}
         </Section>
       )}
-      {item.terms === undefined ? null : (
-        <Section fold={fold} name="terms" open={open} title={fold ? `Terms (${item.terms.length})` : 'Terms'}>
-          <dl className="fy-attn-terms">
-            {item.terms.map(entry => (
-              <div className="fy-attn-terms__row" key={entry.term}>
-                <dt>{entry.term}</dt>
-                <dd>{entry.meaning}</dd>
-              </div>
-            ))}
-          </dl>
-        </Section>
-      )}
       {steps === undefined ? null : (
         <Section fold={fold} name="steps" open={open} title="Steps">
           {steps}
+        </Section>
+      )}
+      {termsLine === null ? null : (
+        <Section fold={fold} name="terms" open={open} title={fold ? `Terms (${termsLine.length})` : 'Terms'}>
+          {fold ? (
+            <dl className="fy-attn-terms">
+              {termsLine.map(entry => (
+                <div className="fy-attn-terms__row" key={entry.term}>
+                  <dt>{entry.term}</dt>
+                  <dd>{entry.meaning}</dd>
+                </div>
+              ))}
+            </dl>
+          ) : (
+            <p className="fy-attn-terms-line" data-attention-terms-line="">
+              {termsLine.map((entry, index) => (
+                <Fragment key={entry.term}>
+                  {index === 0 ? null : <span aria-hidden="true"> · </span>}
+                  <span className="fy-attn-terms-line__item">
+                    <strong>{entry.term}</strong> = {entry.meaning}
+                  </span>
+                </Fragment>
+              ))}
+            </p>
+          )}
         </Section>
       )}
       {detail === undefined ? null : (

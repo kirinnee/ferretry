@@ -66,7 +66,10 @@ describe('the card says what it is, at a glance', () => {
     expect(root.querySelector('[data-attention-recommendation]')?.textContent).toContain('No server to run.');
     const scroll = must(root.querySelector('[data-attention-scroll]'), 'the detail region');
     expect(scroll.textContent).toContain('The board needs somewhere to keep its tasks.');
-    expect(scroll.querySelector('[data-attention-title], [data-attention-ask]')).toBeNull();
+    expect(scroll.querySelector('[data-attention-title]')).toBeNull();
+    expect(scroll.querySelector('[data-attention-section="questions"] [data-attention-ask]')?.textContent).toBe(
+      'Which database should the board use?',
+    );
   });
 
   test('an old item with no title is headed by its whole ask, said once', async () => {
@@ -93,7 +96,7 @@ describe('the card says what it is, at a glance', () => {
       }),
     );
     expect(root.querySelector('[data-attention-recommendation]')?.textContent).toContain('SQLite — No server to run.');
-    expect(root.querySelector('[data-attention-section="questions"]')).toBeNull();
+    expect(root.querySelector('[data-attention-question]')).toBeNull();
     expect(root.textContent).not.toContain('Which database should hold the board?');
   });
 
@@ -109,7 +112,7 @@ describe('the card says what it is, at a glance', () => {
   });
 
   test('draws no empty sections for an item with no detail', async () => {
-    const { root } = await card(attentionItem('A1', { subject: 'Heads up' }));
+    const { root } = await card(attentionItem('A1', { subject: 'Heads up', why: 'Heads up' }));
     expect(root.querySelectorAll('[data-attention-section]')).toHaveLength(0);
     expect(root.querySelector('[data-attention-recommendation]')).toBeNull();
   });

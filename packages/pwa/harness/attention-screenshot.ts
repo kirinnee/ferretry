@@ -183,14 +183,15 @@ try {
         ['left', -1],
       ] as const) {
         page = await open(phone, theme, 'task-inbox-phone');
-        const box = await page.locator('.fy-attn-deck__top').boundingBox();
-        if (box === null) fail('no deck card to swipe');
+        const title = await page.locator('.fy-attn-deck__top [data-attention-title]').boundingBox();
+        if (title === null) fail('no deck card title to swipe from');
         else {
-          const y = box.y + box.height - 14;
-          await page.mouse.move(box.x + box.width / 2, y);
+          const y = title.y + title.height / 2;
+          const x = title.x + Math.min(title.width / 2, 40);
+          await page.mouse.move(x, y);
           await page.mouse.down();
-          await page.mouse.move(box.x + box.width / 2 + sign * 60, y, { steps: 4 });
-          await page.mouse.move(box.x + box.width / 2 + sign * 110, y, { steps: 4 });
+          await page.mouse.move(x + sign * 60, y, { steps: 4 });
+          await page.mouse.move(x + sign * 110, y, { steps: 4 });
           await page.waitForTimeout(250);
           await shot(page, scheme, `task-swipe-${direction}-phone`);
           await page.mouse.up();

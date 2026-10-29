@@ -75,8 +75,8 @@
   margin: 0;
   overflow-wrap: anywhere;
   font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-strong);
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
   line-height: 1.25;
 }
 .fy-attn-card__ask {
@@ -284,7 +284,7 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 /*
  * The card's own layout (attention-brief.tsx, collapsible={false}): every section open under a small, quiet
  * heading, one idea per block, generous space between. PREMISE and CONTEXT must never read as one block:
- * the premise is a tinted panel (the situation, in bullets); the context is plain prose behind a left rule
+ * the premise is an amber block (the situation, in bullets); the context a blue one (accent tokens)
  * (why it matters now).
  */
 .fy-attn-secs[data-layout='open'] {
@@ -313,18 +313,27 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-sec--open .md {
   color: inherit;
 }
+.fy-attn-sec--premise,
+.fy-attn-sec--context {
+  border-radius: 0 var(--radius-control) var(--radius-control) 0;
+  border-left: var(--stroke-heavy) solid;
+  padding: var(--gap-sm) var(--gap-md);
+}
 .fy-attn-sec--premise {
-  border-radius: var(--radius-control);
-  background: var(--surface-2);
-  padding: var(--gap-sm) var(--gap-md) var(--gap-md);
+  border-color: var(--warn-border);
+  border-left-color: var(--warn);
+  background: var(--warn-bg);
 }
 .fy-attn-sec--premise > .fy-attn-sec__heading {
-  color: var(--accent);
+  color: var(--warn);
 }
-.fy-attn-sec--context > .fy-attn-sec__body {
-  border-left: var(--divider-width, 2px) solid var(--border);
-  padding-left: var(--gap-sm);
-  color: var(--muted);
+.fy-attn-sec--context {
+  border-color: var(--accent-border);
+  border-left-color: var(--accent);
+  background: var(--accent-soft);
+}
+.fy-attn-sec--context > .fy-attn-sec__heading {
+  color: var(--accent);
 }
 .fy-attn-sec--decided > .fy-attn-sec__body {
   color: var(--muted);
@@ -340,17 +349,29 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-options__row {
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  gap: 1px;
-}
-.fy-attn-options__label {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--gap-xs);
+}
+.fy-attn-options__arrow {
+  display: inline-flex;
+  height: 1.55em;
+  flex-shrink: 0;
+  align-items: center;
+  color: var(--muted);
+}
+.fy-attn-options__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 .fy-attn-options__what {
   color: var(--muted);
+}
+.fy-attn-terms-line {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
 }
 .fy-attn-prose {
   margin: 0;
@@ -800,7 +821,8 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   transform: rotate(180deg);
 }
 /* Discuss: a quiet button beside Reply — the fixed fourth answer, the downward swipe. */
-.fy-attn-discuss {
+.fy-attn-discuss,
+.fy-attn-skip {
   min-height: 36px;
   flex-shrink: 0;
   gap: 6px;

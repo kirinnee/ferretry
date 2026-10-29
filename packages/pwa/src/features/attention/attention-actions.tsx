@@ -19,10 +19,11 @@ import {
   ArrowRight,
   ArrowUp,
   ChevronDown,
+  ChevronRight,
   CornerDownLeft,
   Ellipsis,
   LoaderCircle,
-  MessageSquarePlus,
+  Pencil,
   MessagesSquare,
   Send,
   X,
@@ -136,6 +137,23 @@ function DiscussButton({
   );
 }
 
+/** Skip: move on without answering. Quiet like Discuss, after it; absent where the host cannot skip. */
+function SkipButton({ busy, onSkip }: { readonly busy: boolean; readonly onSkip: () => void }) {
+  return (
+    <button
+      className="kt-btn fy-attn-skip"
+      data-attention-skip=""
+      disabled={busy}
+      onClick={onSkip}
+      title="Leave it for now and move on to the next card"
+      type="button"
+    >
+      Skip
+      <ChevronRight aria-hidden="true" size={14} />
+    </button>
+  );
+}
+
 function AnswerButton({
   answer,
   busy,
@@ -190,6 +208,8 @@ export interface AttentionActionsProps {
   readonly waiting?: string;
   /** Asks to discuss; present only where the card can be discussed (a ferret raised it and it is not already). */
   readonly onDiscuss?: () => void;
+  /** Skips the card unanswered; present only where the host can skip. A quiet "Skip ›" after Discuss. */
+  readonly onSkip?: () => void;
   readonly reply: string;
   readonly onReplyChange: (text: string) => void;
   readonly replyOpen: boolean;
@@ -216,6 +236,7 @@ export function AttentionActions({
   busy,
   waiting,
   onDiscuss,
+  onSkip,
   reply,
   onReplyChange,
   replyOpen,
@@ -233,6 +254,7 @@ export function AttentionActions({
   const replyId = useId();
   const boxId = useId();
   const menu = dismissInMenu ? <ActionMenu busy={busy} onDismiss={onDismiss} /> : null;
+  const skip = onSkip === undefined ? null : <SkipButton busy={busy} onSkip={onSkip} />;
   const discuss =
     onDiscuss === undefined ? null : <DiscussButton busy={busy} onDiscuss={onDiscuss} swipeHints={swipeHints} />;
   if (sendAnswers !== undefined) {
@@ -255,6 +277,7 @@ export function AttentionActions({
             Send answers
           </button>
           {discuss}
+          {skip}
           {menu}
         </div>
       </div>
@@ -317,7 +340,7 @@ export function AttentionActions({
             onClick={() => onReplyOpenChange(!replyOpen)}
             type="button"
           >
-            <MessageSquarePlus aria-hidden="true" size={14} />
+            <Pencil aria-hidden="true" size={14} />
             {reply.trim() === '' ? 'Reply…' : 'Reply added'}
             <ChevronDown
               aria-hidden="true"
@@ -327,6 +350,7 @@ export function AttentionActions({
             />
           </button>
           {discuss}
+          {skip}
           {menu}
         </div>
       ) : null}
@@ -378,8 +402,11 @@ export function AttentionActions({
           {replyIsAnswer ? menu : null}
         </form>
       ) : null}
-      {replyIsAnswer && discuss !== null ? (
-        <div className="fy-attn-actions__row fy-attn-actions__row--end">{discuss}</div>
+      {replyIsAnswer && (discuss !== null || skip !== null) ? (
+        <div className="fy-attn-actions__row fy-attn-actions__row--end">
+          {discuss}
+          {skip}
+        </div>
       ) : null}
     </div>
   );

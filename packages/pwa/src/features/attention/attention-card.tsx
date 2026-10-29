@@ -90,6 +90,8 @@ export interface AttentionCardProps {
   readonly id?: string;
   /** Drawn last inside the scrolling detail — the Attention page's "Last messages" toggle. */
   readonly detailEnd?: ReactNode;
+  /** Skips the card without answering it; draws a quiet "Skip" in the answer bar's second row. Absent: no Skip. */
+  readonly onSkip?: () => void;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
@@ -109,6 +111,7 @@ export function AttentionCard({
   pinned = false,
   headerSlot,
   detailEnd,
+  onSkip,
 }: AttentionCardProps) {
   const titleId = useId();
   const draft = useReplyDraft();
@@ -144,6 +147,9 @@ export function AttentionCard({
     (lone?.recommended === undefined
       ? undefined
       : { decision: lone.recommended, ...(lone.why === undefined ? {} : { why: lone.why }) });
+  const optionDirections = Object.fromEntries(
+    answers.filter(answer => answer.does === 'choose').map(answer => [answer.label.trim(), answer.direction]),
+  );
   const hasDismissAnswer = answers.some(answer => answer.does === 'dismiss');
   const focusRequests = (draft?.focusTick ?? 0) + localTick;
 
@@ -252,6 +258,7 @@ export function AttentionCard({
           collapsible={false}
           detail={body === null ? undefined : <AttentionBody renderProse={renderProse} text={body} />}
           item={item}
+          optionDirections={optionDirections}
           recommendation={recommendation}
           renderProse={renderProse}
           steps={
@@ -288,6 +295,7 @@ export function AttentionCard({
         dismissInMenu={!hasDismissAnswer}
         extraOptions={extras}
         onAnswer={answer => give(answerAction(answer, reply))}
+        {...(onSkip === undefined ? {} : { onSkip })}
         onDismiss={() => {
           const action = answerAction(
             { direction: 'left', does: 'dismiss', label: DEFAULT_ANSWER_LABELS.dismiss },
