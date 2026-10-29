@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import type { ResolvedAttentionItem } from '@ferretry/protocol';
 import { AttentionCard } from '../../../src/features/attention/attention-card.tsx';
 import { AttentionDetail } from '../../../src/features/attention/attention-detail.tsx';
@@ -413,9 +413,9 @@ describe('AttentionInboxPage list and card', () => {
       must(failing.container.querySelector<HTMLButtonElement>('[data-attention-recent-toggle]'), 'fold').click(),
     );
     await flush();
-    expect(failing.container.querySelector('[data-attention-recent] [role="alert"]')?.textContent).toContain(
-      'machine offline',
-    );
+    const alert = failing.container.querySelector('[data-attention-recent] [role="alert"]');
+    expect(alert?.textContent).toBe("Recent messages unavailable — couldn't reach the machine");
+    expect(alert?.getAttribute('title')).toBe('machine offline');
     await failing.unmount();
     const none = await mount(page(fakeInbox(), [twoWay]));
     expect(none.container.querySelector('[data-attention-recent]')).toBeNull();
@@ -915,5 +915,93 @@ describe('AttentionInboxPage Resolved filter', () => {
     await interact(() => option(none.container, 'resolved').click());
     expect(none.container.querySelector('[data-attention-resolved-empty]')?.textContent).toContain('Nothing resolved');
     await none.unmount();
+  });
+});
+
+describe('AttentionInboxPage flat on a wide, fine-pointer screen', () => {
+  const RAIL_KEY = 'fy-attention-list-rail-v1';
+  const flatMain = (mounted: Mounted) => mounted.container.querySelector('[data-attention-flat]');
+  const rows = (mounted: Mounted) => [...mounted.container.querySelectorAll('[data-attention-row]')];
+  const rail = (mounted: Mounted) => mounted.container.querySelector<HTMLElement>('[data-attention-rail]');
+  const railToggle = (mounted: Mounted) =>
+    must(mounted.container.querySelector<HTMLButtonElement>('[data-attention-rail-toggle]'), 'the rail toggle');
+  const paneItem = (mounted: Mounted) =>
+    mounted.container.querySelector('[data-attention-pane] [data-attention-card]')?.getAttribute('data-attention-card');
+  const key = (target: string) => window.dispatchEvent(new KeyboardEvent('keydown', { key: target, bubbles: true }));
+  const cards = [threeWay, twoWay, bare];
+
+  beforeEach(() => localStorage.clear());
+  afterEach(() => localStorage.clear());
+
+  it('is flat only with a fine pointer and no phone, and draws the swipe card otherwise', async () => {
+    const flat = await mount(page(fakeInbox(), cards, { finePointer: true }));
+    expect(flatMain(flat)).not.toBeNull();
+    await flat.unmount();
+    const coarse = await mount(page(fakeInbox(), cards, { finePointer: false }));
+    expect(flatMain(coarse)).toBeNull();
+    expect(coarse.container.querySelector('[data-attention-rail-toggle]')).toBeNull();
+    await coarse.unmount();
+    const phone = await mount(page(fakeInbox(), cards, { finePointer: true, phone: true }));
+    expect(flatMain(phone)).toBeNull();
+    await phone.unmount();
+  });
+
+  it('folds the list to a rail of conversations with counts, and the choice survives a remount', async () => {
+    const first = await mount(page(fakeInbox(), cards, { finePointer: true }));
+    expect(rail(first)).toBeNull();
+    expect(rows(first)).toHaveLength(3);
+    await interact(() => railToggle(first).click());
+    expect(rail(first)).not.toBeNull();
+    expect(rows(first)).toHaveLength(0);
+    const groups = [...first.container.querySelectorAll<HTMLElement>('[data-attention-rail-group]')];
+    expect(groups).toHaveLength(3);
+    expect(groups[0]?.getAttribute('title')).toBe('Fix the build · Zoe');
+    expect(groups[0]?.getAttribute('aria-label')).toContain('1 waiting');
+    expect(groups[0]?.textContent).toContain('1');
+    expect(localStorage.getItem(RAIL_KEY)).toBe('1');
+    await first.unmount();
+
+    const second = await mount(page(fakeInbox(), cards, { finePointer: true }));
+    expect(rail(second)).not.toBeNull();
+    await interact(() => railToggle(second).click());
+    expect(rail(second)).toBeNull();
+    expect(rows(second)).toHaveLength(3);
+    expect(localStorage.getItem(RAIL_KEY)).toBe('0');
+    await second.unmount();
+  });
+
+  it('still walks the items with j / k while the list is a rail, and a rail icon selects its conversation', async () => {
+    localStorage.setItem(RAIL_KEY, '1');
+    const mounted = await mount(page(fakeInbox(), cards, { finePointer: true }));
+    expect(paneItem(mounted)).toBe('A3');
+    await interact(() => key('j'));
+    expect(paneItem(mounted)).toBe('A2');
+    await interact(() => key('j'));
+    expect(paneItem(mounted)).toBe('A1');
+    await interact(() => key('k'));
+    expect(paneItem(mounted)).toBe('A2');
+    const groups = [...mounted.container.querySelectorAll<HTMLButtonElement>('[data-attention-rail-group]')];
+    await interact(() => (groups[2] as HTMLButtonElement).click());
+    expect(paneItem(mounted)).toBe('A1');
+    expect(groups[2]?.getAttribute('data-selected')).not.toBeNull();
+    await mounted.unmount();
+  });
+
+  it('keeps working when storage refuses reads and writes', async () => {
+    const real = Object.getOwnPropertyDescriptor(window, 'localStorage');
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      get: () => {
+        throw new Error('SecurityError');
+      },
+    });
+    try {
+      const mounted = await mount(page(fakeInbox(), cards, { finePointer: true }));
+      await interact(() => railToggle(mounted).click());
+      expect(rail(mounted)).not.toBeNull();
+      await mounted.unmount();
+    } finally {
+      if (real !== undefined) Object.defineProperty(window, 'localStorage', real);
+    }
   });
 });

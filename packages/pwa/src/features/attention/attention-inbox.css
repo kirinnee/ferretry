@@ -1007,3 +1007,90 @@
 .fy-attn-inbox__deck--end > .fy-attn-end {
   margin-bottom: 22px;
 }
+
+/* ---- Flat page (wide AND a pointer): a slim list that folds to a rail, the item drawn flat ----------- */
+.fy-attn-rail__toggle {
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  align-self: flex-end;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-attn-rail__toggle:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-attn-rail__toggle:focus-visible,
+.fy-attn-rail__group:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 1px;
+}
+.fy-attn-rail {
+  display: flex;
+  margin: 0;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0;
+  list-style: none;
+}
+.fy-attn-rail__group {
+  position: relative;
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-attn-rail__group:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-attn-rail__group[data-selected] {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-attn-rail__count {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  padding: 0 4px;
+  color: var(--accent-fg);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  line-height: 16px;
+  text-align: center;
+}
+.fy-attn-inbox[data-attention-flat] .fy-attn-row {
+  border-left-width: var(--stroke-control, 1px);
+}
+@media (min-width: 900px) {
+  .fy-attn-inbox[data-attention-flat] .fy-attn-inbox__lists {
+    width: 300px;
+  }
+  .fy-attn-inbox[data-attention-flat] .fy-attn-inbox__lists[data-attention-lists='rail'] {
+    width: 56px;
+    padding-inline: 4px;
+  }
+  /* The flat item keeps a readable text column. */
+  .fy-attn-inbox[data-attention-flat] .fy-attn-inbox__pane > .fy-attn-card {
+    width: 100%;
+    max-width: 720px;
+    margin-inline: auto;
+  }
+}
