@@ -642,6 +642,14 @@ command says so at the moment somebody might be tempted to do that instead.
   Its `live` frames (`?live=1`, a working turn's verb, clock start and token counts) are read off
   the same pane and transcript `GET /v1/sessions/:id/snapshot` and `/logs` already return at the same
   `operator` minimum, so they widen nothing.
+- **The transcript image route (`GET /v1/sessions/:id/transcript-images/:handle`) reads the same
+  transcript as `/logs`, at the same `operator` minimum, and widens nothing.** It carries no
+  capability of its own and is not `noStore`, exactly like `/logs` — an image is bytes of that
+  transcript the log already summarises as a marker, so whoever may read the log may fetch the image.
+  A handle only names a record the daemon re-parses with the session's own harness parser; it can
+  never address arbitrary bytes of the file, and a handle outside that transcript is a 4xx with a
+  code. The image is served as `private, max-age=31536000, immutable` with a strong etag, so a
+  browser keeps it per device.
 - ~~Web Push enrolment is governed by `pairing`.~~ **Closed by B5.** A device enrolling **itself** — reading
   the key, enrolling, listing and un-enrolling its own enrolments — needs no capability and no step-up,
   because it grants nothing: it lets this daemon reach the device that asked, and only it. A default

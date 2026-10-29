@@ -25,6 +25,7 @@ import type { SessionFilesystem } from '../../session/filesystem/index.ts';
 import type { MonitorLoop } from '../../session/monitor/types.ts';
 import type { SessionObserverHost } from '../../session/observer/host.ts';
 import type { OperatorReadService } from '../../session/reads/index.ts';
+import type { TranscriptImageReader } from '../../session/transcript/image-reader.ts';
 import type { SessionRuntimeSubsystem } from '../../session/runtime-control/types.ts';
 import type { SendTrackingLoop } from '../../session/send/tracker.ts';
 import type { StepUpService } from '../../step-up/index.ts';
@@ -390,6 +391,8 @@ export interface MountedSubsystems {
    *  agent itself wrote. Every one of these refuses rather than answering blank — see the domain's own
    *  header for why a dead pane and an unresolved transcript are errors and an empty event page is not. */
   readonly sessionReads: OperatorReadService;
+  /** One image of that transcript, named by the handle its log carried: proved before it is served. */
+  readonly transcriptImages: TranscriptImageReader;
   /** A short-lived, freshly validated tmux identity for a local human attach. */
   readonly sessionAttach: SessionAttachSubsystem;
   /** Typing into a session's own pane — the Console — governed as a session terminal is. */
@@ -634,7 +637,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The operator reads register last, beside the working-tree read they sit alongside. All three are
         // one-segment patterns under `/v1/sessions/:sessionId` whose final literals (`events`, `snapshot`,
         // `logs`) no other route uses, so they can neither shadow nor be shadowed by anything above.
-        ...sessionReadRoutes(subsystems.sessionReads, subsystems.sessions),
+        ...sessionReadRoutes(subsystems.sessionReads, subsystems.sessions, subsystems.transcriptImages),
         // The attach proof sits with the operator reads but is its own capability: unlike a screen or a
         // transcript it authorizes a local process action, and its mount revalidates the pane identity.
         ...sessionAttachRoutes(subsystems.sessionAttach, subsystems.sessions),

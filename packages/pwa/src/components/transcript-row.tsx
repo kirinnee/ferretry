@@ -29,6 +29,7 @@ import { MessageFooter } from './send-receipt.tsx';
 import { SentMessageRow } from './sent-message.tsx';
 import { type SendDismiss, type SendExpand, SettledSendNote } from './settled-send-note.tsx';
 import { ToolGroup } from './tool-group.tsx';
+import { messageImageAlt, TranscriptImages } from './transcript-images.tsx';
 
 export interface TranscriptRowProps {
   readonly entry: TranscriptEntry;
@@ -325,7 +326,7 @@ function OwnMessageRow({
       {...rhythm}
     >
       <span className="sr-only">You said:</span>
-      {children ?? <p>{entry.text}</p>}
+      {children ?? <EntryBody entry={entry} prose={<p>{entry.text}</p>} speaker="user" />}
       <MessageFooter
         answered={answered}
         clock={clockOfInstant(record?.acceptedAt) ?? clockOfInstant(entry.at)}
@@ -365,9 +366,37 @@ function TranscriptTextRow({
       <header className={continued ? 'sr-only' : undefined}>
         <span>{label}</span>
       </header>
-      {entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
+      <EntryBody
+        entry={entry}
+        prose={entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
+        speaker={entry.kind === 'assistant' ? 'assistant' : undefined}
+      />
       {run === undefined || run.end ? footer : <div className="fy-run-time">{footer}</div>}
     </article>
+  );
+}
+
+/**
+ * What a message says: its words, and the pictures its log named under them. A row that is only a picture
+ * has no empty paragraph above it — the picture is the message.
+ */
+function EntryBody({
+  entry,
+  prose,
+  speaker,
+}: {
+  readonly entry: TranscriptEntry;
+  readonly prose: ReactNode;
+  readonly speaker: 'user' | 'assistant' | undefined;
+}) {
+  const images = entry.images;
+  if (images === undefined || images.length === 0 || speaker === undefined) return prose;
+  const alt = messageImageAlt(speaker, entry.label);
+  return (
+    <>
+      {entry.text === '' ? null : prose}
+      <TranscriptImages images={images.map(marker => ({ marker, alt }))} />
+    </>
   );
 }
 

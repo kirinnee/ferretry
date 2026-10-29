@@ -451,7 +451,7 @@ import {
   TmuxPaneQueue,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
-import { LOOP_PARSE_PACING, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
+import { LOOP_PARSE_PACING, NodeTranscriptImageFiles, NodeTranscriptSource } from '../src/adapters/transcript/index.ts';
 import { CliRolloutFormatProbe } from '../src/adapters/transcript/rollout-format-probe.ts';
 import {
   FileSessionAttachmentCopier,
@@ -974,6 +974,7 @@ import {
   type TranscriptSearchOptions,
   TranscriptSendEvidence,
   type TranscriptSource,
+  TranscriptImageReader,
   TranscriptTailCache,
   type TriageGuardPort,
   TunnelCarrier,
@@ -7364,6 +7365,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
     };
   };
   /**
+   * One image of a session's transcript, found from the handle its log carried.
+   *
+   * It resolves the file and the harness exactly as the tail does, and parses ONLY the one record the
+   * handle names with that harness's own paced parser — see `TranscriptImageReader` for the proof.
+   */
+  const createTranscriptImageReader = (storage: DaemonStorage): TranscriptImageReader => {
+    const resolver = createTranscriptFileResolver(storage);
+    return new TranscriptImageReader(
+      {
+        locate: async sessionId => {
+          const file = await resolver.file(sessionId).catch(() => undefined);
+          if (file === undefined) return undefined;
+          const id = tryParseSessionId(sessionId);
+          if (id === undefined) return undefined;
+          const config = SessionConfigSchema.safeParse(await storage.readConfig(id).catch(() => undefined));
+          if (!config.success) return undefined;
+          return { file, harness: config.data.harness === 'codex' ? 'codex' : 'claude' };
+        },
+      },
+      new NodeTranscriptImageFiles(),
+      pacedTranscriptParsers,
+    );
+  };
+  /**
    * A finished session's whole transcript, read once, for the analytics token total.
    *
    * It is a SEPARATE read from `createSessionTranscriptTail` because the two want opposite things:
@@ -10214,6 +10239,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         sessionReads: operatorReads,
+        transcriptImages: createTranscriptImageReader(storage),
         sessionAttach,
         // The Console types into the pane the attach proof names, on the same private tmux server.
         sessionConsole: new SessionConsoleService(sessionAttach, launchTmuxCommands),

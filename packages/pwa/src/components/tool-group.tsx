@@ -52,6 +52,7 @@ import {
 import { CodeBlock } from './code-block.tsx';
 import { QuestionCard } from './question-card.tsx';
 import { Spinner } from './spinner.tsx';
+import { type NamedTranscriptImage, toolImageAlt, TranscriptImages } from './transcript-images.tsx';
 
 const iconFor = (kind: ToolKind) => {
   switch (kind) {
@@ -93,6 +94,22 @@ export const elapsedLabel = (since: string | undefined, now: number): string | u
   const start = instantMs(since);
   return start === null ? undefined : formatElapsedSeconds(wholeSecondsSince(start, now));
 };
+
+/** Every picture the finished calls of a run returned, in order, each named for the tool that made it. */
+const resultImagesOf = (calls: readonly ToolCall[]): readonly NamedTranscriptImage[] =>
+  calls.flatMap(call =>
+    (call.result?.images ?? []).map((marker): NamedTranscriptImage => ({ marker, alt: toolImageAlt(call.use.name) })),
+  );
+
+/**
+ * The pictures a run returned, drawn UNDER the run and never folded into it: a screenshot is what the
+ * tool was run to show, so collapsing "4 tools" must not hide it. At most three show at rest.
+ */
+function RunImages({ calls }: { readonly calls: readonly ToolCall[] }) {
+  const images = resultImagesOf(calls);
+  if (images.length === 0) return null;
+  return <TranscriptImages className="fy-tool-images mb-1 ml-1.5 mt-0.5" images={images} initialLimit={3} />;
+}
 
 /** The reading of a bare result whose tool use never arrived. */
 const ORPHAN_RESULT: ExtractedTool = {
@@ -179,6 +196,7 @@ const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGr
     return (
       <>
         <ToolLine call={first} />
+        <RunImages calls={history} />
         {runningLine}
       </>
     );
@@ -212,6 +230,7 @@ const ToolRun = memo(function ToolRun({ calls, live, isLast, scheduler }: ToolGr
           </div>
         ) : null}
       </div>
+      <RunImages calls={history} />
       {runningLine}
     </>
   );
@@ -236,11 +255,13 @@ function ToolLine({ call }: { readonly call: ToolCall }) {
   const [open, setOpen] = useState(false);
   const summary = call.orphanResult ? ORPHAN_RESULT : extractToolSummary(call.use.name, call.use.input);
   const Icon = iconFor(summary.kind);
-  const hasBody = summary.bodyLines.length > 0 || call.result !== undefined;
-
   const failed = call.result?.isError === true;
   const raw = call.result ? resultText(call.result) : null;
-  const cleaned = raw !== null && summary.isExec ? parseExecOutput(raw).cleanText : raw;
+  const text = raw !== null && summary.isExec ? parseExecOutput(raw).cleanText : raw;
+  // A result that is only a picture has no text to open: the picture is drawn under the run (`RunImages`).
+  const pictureOnly = text === '' && (call.result?.images?.length ?? 0) > 0;
+  const cleaned = pictureOnly ? null : text;
+  const hasBody = summary.bodyLines.length > 0 || (call.result !== undefined && !pictureOnly);
 
   const bodyLang = bodyLanguage(summary);
   const resultLang = langFromPath(summary.filePath);

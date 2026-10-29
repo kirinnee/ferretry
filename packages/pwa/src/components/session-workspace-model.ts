@@ -1,4 +1,4 @@
-import type { IFyApiClient, SessionView } from '@ferretry/protocol';
+import { type IFyApiClient, type SessionView, splitTranscriptImageMarkers } from '@ferretry/protocol';
 import { projectPackCalls } from '../lib/pack-calls.ts';
 import { projectDeliveries } from '../lib/peer-delivery.ts';
 import { isTerminalSessionStatus, type TranscriptEntry } from '../lib/session-screens.ts';
@@ -55,7 +55,27 @@ const isToolRecord = (record: LogRecord): boolean => record.kind === 'tool-call'
  * split there read as `2 tools · Bash, Edit` followed by `2 tools · result ×2`.
  */
 const isHiddenRecord = (record: LogRecord): boolean =>
-  !isToolRecord(record) && record.kind !== 'error' && recordKind(record) === 'notice';
+  !isToolRecord(record) && record.kind !== 'error' && !showsImages(record) && recordKind(record) === 'notice';
+
+/**
+ * Does this attachment line carry a picture the chat can draw? Only a line whose log names an image by
+ * marker does: a daemon that writes none (an older one) leaves the line hidden, exactly as before.
+ */
+const attachmentImages = (record: LogRecord): ReturnType<typeof splitTranscriptImageMarkers>['images'] =>
+  record.kind === 'attachment' && (record.role === 'user' || record.role === 'assistant')
+    ? splitTranscriptImageMarkers(record.lines.join('\n')).images
+    : [];
+
+const showsImages = (record: LogRecord): boolean => attachmentImages(record).length > 0;
+
+/** A picture a person or a ferret shared, as a row of its own: the log wrote it as its own record. */
+const imageEntryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => ({
+  id: `log:${index}:${fieldHash(`${record.clock ?? ''}|${record.role}|${record.kind}|${record.lines.join('\n')}`)}`,
+  kind: record.role === 'user' ? 'user' : 'assistant',
+  text: '',
+  images: attachmentImages(record),
+  ...(at === undefined ? {} : { at }),
+});
 
 const entryFor = (record: LogRecord, index: number, at: number | undefined): TranscriptEntry => {
   const text = record.lines.join('\n');
@@ -109,9 +129,15 @@ const toolUse = (text: string): ToolUseData => {
   }
 };
 
-/** The daemon prefixes a failed result with `error `; there is no other marker on this wire. */
-const toolResult = (text: string): ToolResultData =>
-  text.startsWith('error ') ? { text: text.slice('error '.length), isError: true } : { text };
+/**
+ * The daemon prefixes a failed result with `error `; there is no other marker on this wire. An image a
+ * result carried arrives as a marker line under its text: those lines leave the text and become `images`.
+ */
+const toolResult = (raw: string): ToolResultData => {
+  const { text, images } = splitTranscriptImageMarkers(raw);
+  const seen = images.length === 0 ? {} : { images };
+  return text.startsWith('error ') ? { text: text.slice('error '.length), isError: true, ...seen } : { text, ...seen };
+};
 
 const DAY_MS = 86_400_000;
 
@@ -202,6 +228,11 @@ const projectRecords = (records: readonly LogRecord[], now: number): readonly Tr
       if (waiting === undefined)
         run.calls.push({ key, use: { name: 'result' }, result: toolResult(text), orphanResult: true });
       else waiting.result = toolResult(text);
+      return;
+    }
+    if (showsImages(record)) {
+      flush();
+      entries.push(imageEntryFor(record, index, instants[index]));
       return;
     }
     const command = recordKind(record) === 'user' ? parseSlashCommandText(text) : null;

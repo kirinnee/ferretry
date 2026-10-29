@@ -2,6 +2,7 @@ export * from './claude-path.ts';
 export * from './codex-rollout.ts';
 export * from './digest.ts';
 export * from './discovery-pacing.ts';
+export * from './image-reader.ts';
 export * from './message-token.ts';
 export * from './provenance.ts';
 export * from './reader.ts';

@@ -20,6 +20,7 @@ import { SessionFilesystem } from '../../../../src/lib/session/filesystem/index.
 import { OperatorReadService } from '../../../../src/lib/session/reads/index.ts';
 import { ChallengeLedger, StepUpRegistry, StepUpService } from '../../../../src/lib/step-up/index.ts';
 import { agentToolWorld } from '../../agent-tools/support.ts';
+import { MemoryTranscript } from '../../../support/transcript-images.ts';
 import { fixedClock, request } from '../../api/support.ts';
 import { NOT_AUDITED, NOT_AUDITED_SOCKETS } from '../../audit/not-audited.ts';
 import { FakeRootPinner, FakeSessionGit } from '../../session/filesystem/support.ts';
@@ -672,6 +673,7 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
   systemOpen: { open: async () => ({ opened: true, host: 'example.com' }) },
   secrets: secretSubsystem(),
   warden: new FakeWarden(),
+  transcriptImages: new MemoryTranscript([]).reader(),
   sessionReads: new OperatorReadService(
     {
       replay: async () => [
@@ -790,6 +792,7 @@ describe('the mounted daemon surface', () => {
       3 + // the model catalogs: the list, a check for a newer published one, and a read of the models Ollama has installed (docs/model-catalog.md)
       9 + // lessons: the default's write, Apply's preview and write, the per-ferret switch and its list, and the scan's estimate, start, read and cancel (a ferret's own door is `none`)
       2 + // the performance profile: start one, and read it back by id (`fy daemon profile`)
+      1 + // one transcript image by its handle: the log's `[fy-image …]` marker, governed exactly like `logs` (docs/grants.md)
       1 + // handing a web address to this computer's own browser (loopback caller only)
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
       3; // a ferret's processes: the list, one process's output, and Stop
@@ -1122,6 +1125,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/snapshot',
       'GET /v1/sessions/:sessionId/logs',
       'GET /v1/sessions/:sessionId/messages',
+      'GET /v1/sessions/:sessionId/transcript-images/:handle',
       // The attach proof. It sits with the operator reads but authorizes a local process action
       // rather than answering a question, which is why it is its own mount and its own literal.
       'GET /v1/sessions/:sessionId/attach',
