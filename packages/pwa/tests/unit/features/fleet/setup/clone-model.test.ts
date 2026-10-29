@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import {
   CLONE_FLOW_KIND,
+  CLONE_NO_DEFAULT,
+  cloneDefaultView,
   cloneOriginName,
   clonePreview,
   cloneSharesSentence,
@@ -294,5 +296,39 @@ describe('a bundle the review could misread (review H1)', () => {
       'The setup from work-linux carries components/hooks/mine.json, which none of its components uses, so none of it can be copied.',
     );
     expect(clonePreview(bundle(), machineView()).problem).toBeNull();
+  });
+});
+
+describe('cloneDefaultView', () => {
+  it('selects none and sends nothing when the machine had no default to lose', () => {
+    // Act
+    const view = cloneDefaultView({
+      bundle: bundle(),
+      mode: 'replace',
+      machineName: 'Liftoff MBP',
+      targetDefault: undefined,
+      sourceDefault: undefined,
+      picked: undefined,
+    });
+
+    // Assert
+    expect(view.selected).toBe(CLONE_NO_DEFAULT);
+    expect(view.send).toBeUndefined();
+  });
+
+  it('sends null when the person picks none for a machine that had a default', () => {
+    // Act
+    const view = cloneDefaultView({
+      bundle: bundle(),
+      mode: 'replace',
+      machineName: 'Liftoff MBP',
+      targetDefault: 'claude-kirin',
+      sourceDefault: undefined,
+      picked: null,
+    });
+
+    // Assert
+    expect(view.selected).toBe(CLONE_NO_DEFAULT);
+    expect(view.send).toBeNull();
   });
 });
