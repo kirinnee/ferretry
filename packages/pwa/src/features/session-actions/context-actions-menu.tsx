@@ -20,6 +20,7 @@ import {
 import { useDialogFocus } from '../../hooks/use-dialog-focus.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
 import { clampMenuPosition, type MenuAnchor, type MenuPosition } from '../../shell/context-menu.tsx';
+import { ActionDrawer } from './action-drawer.tsx';
 import { ActionForm, ActionSections } from './actions-menu.tsx';
 import { findSessionAction, type SessionActionFormHost, type SessionActionSection } from './registry.ts';
 import { useActionMenu } from './use-action-menu.ts';
@@ -119,6 +120,14 @@ export function ContextActionsMenu({
       sections={sections}
     />
   );
+
+  if (shownForm?.presentation === 'drawer') {
+    return (
+      <ActionDrawer compact={touch} heading={shownForm.heading} onClose={host.close} title={shownForm.title}>
+        {shownForm.render(host)}
+      </ActionDrawer>
+    );
+  }
 
   if (shownForm !== undefined) {
     const body = (
