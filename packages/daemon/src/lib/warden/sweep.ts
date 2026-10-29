@@ -785,8 +785,8 @@ export class WardenSweepService {
       throw new WardenRequestError(
         'cap',
         capPaced(budget.spend, 'investigation')
-          ? `This hour’s share of the investigation cap (${(stored.config.caps.investigationUsdPerDay * HOURLY_CAP_SHARE).toFixed(2)} of ${stored.config.caps.investigationUsdPerDay.toFixed(2)} a day) is spent. Try again at ${pacedUntilLabel(budget.spend.pacedUntil)}.`
-          : `Today’s investigation cap (${stored.config.caps.investigationUsdPerDay.toFixed(2)}) is reached. Raise it in Settings › Warden, or wait until midnight UTC.`,
+          ? `This hour’s share of the investigation cap ($${(stored.config.caps.investigationUsdPerDay * HOURLY_CAP_SHARE).toFixed(2)} of $${stored.config.caps.investigationUsdPerDay.toFixed(2)} a day) is spent. Try again at ${pacedUntilLabel(budget.spend.pacedUntil)}.`
+          : `Today’s investigation cap ($${stored.config.caps.investigationUsdPerDay.toFixed(2)}) is reached. Raise it in Settings › Warden, or wait until midnight UTC.`,
       );
     const at = new Date(nowMs).toISOString();
     const queue = (state.assignedQueue ?? []).filter(anomaly => anomaly.sessionId !== sessionId);

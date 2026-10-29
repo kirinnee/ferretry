@@ -297,6 +297,30 @@ describe('wardenStatusLine', () => {
     ]);
   });
 
+  it('should say a cap reached only for this hour is back at the top of the hour, not at midnight', () => {
+    // Arrange
+    const base = jevStatus();
+    const paced = (cap: 'jev' | 'investigation') => ({
+      ...base.spend,
+      capsHit: [cap],
+      capsPaced: [cap],
+      pacedUntil: '2026-10-29T07:00:00.000Z',
+    });
+    const statuses = [
+      jevStatus({ triage: { jev: on, llm: stopped('investigation_cap') }, spend: paced('investigation') }),
+      jevStatus({ triage: { jev: stopped('jev_cap'), llm: on }, spend: paced('jev') }),
+    ];
+
+    // Act
+    const warnings = statuses.map(status => wardenStatusLine(status, NOW).warning);
+
+    // Assert
+    expect(warnings).toEqual([
+      'This hour’s share of the LLM cap is spent — flags wait until 07:00 UTC',
+      'This hour’s share of the Jev cap is spent — every flag goes to an investigation until 07:00 UTC',
+    ]);
+  });
+
   it('should name the investigator by login when no model is pinned', () => {
     // Arrange
     const status = wardenStatus({ config: wardenConfig({ accounts: [{ agent: 'codex-default' }] }) });

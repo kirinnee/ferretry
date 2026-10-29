@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { WardenRuntimeState } from '../../../src/lib/warden/index.ts';
-import { WardenRequestError } from '../../../src/lib/warden/index.ts';
+import { investigationsOffMessage, WardenRequestError } from '../../../src/lib/warden/index.ts';
 import {
   at,
   enabled,
@@ -816,6 +816,48 @@ describe('the owner asking for an investigation', () => {
 
     // Assert
     should(error).be.instanceOf(WardenRequestError).and.have.property('failure', 'cap');
+    should((error as Error).message).startWith('Today’s investigation cap ($2.00) is reached.');
+  });
+
+  it('should refuse until the next hour once this hour’s share of the cap is spent, and say when', async () => {
+    // Arrange — $0.60 this hour against a $2 day: past the $0.50 hourly share, far from the day's cap.
+    const subject = harness({
+      config: enabled(),
+      fleet: [session({ id: 's1' })],
+      state: {
+        investigations: [
+          { id: 'r', scope: 'fleet', origin: 'sweep', startedAt: at(0), reportPath: '/r.md', costUsd: 0.6 },
+        ],
+      },
+    });
+
+    // Act
+    const error: unknown = await subject.service.requestInvestigation('s1').catch((cause: unknown) => cause);
+
+    // Assert
+    should(error).be.instanceOf(WardenRequestError).and.have.property('failure', 'cap');
+    should((error as Error).message).equal(
+      'This hour’s share of the investigation cap ($0.50 of $2.00 a day) is spent. Try again at 13:00 UTC.',
+    );
+  });
+
+  it('should tell a paced investigation layer apart from a spent day in the run’s own words', () => {
+    // Arrange
+    const on = { configured: true, active: true, reason: 'configured' } as const;
+    const layers = { jev: on, llm: { configured: true, active: false, reason: 'investigation_cap' } } as const;
+
+    // Act
+    const paced = investigationsOffMessage(layers, 2, {
+      capsPaced: ['investigation'],
+      pacedUntil: '2026-07-31T13:00:00.000Z',
+    });
+    const unknownHour = investigationsOffMessage(layers, 1, { capsPaced: ['investigation'] });
+
+    // Assert
+    should(paced).equal(
+      'this hour’s share of the investigation cap is spent: 2 flags Jev did not clear wait until 13:00 UTC',
+    );
+    should(unknownHour).endWith('waits until the next hour');
   });
 
   it('should answer "already running" for a ferret under investigation', async () => {
