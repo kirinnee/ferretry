@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { WardenInvestigateRequest, WardenLeaveRequest, WardenStatusView } from '@ferretry/protocol';
+import type { WardenLeaveRequest, WardenStatusView } from '@ferretry/protocol';
 
 import {
   type WardenOverviewClient,
@@ -31,7 +31,6 @@ const settle = async (): Promise<void> => {
 interface FakeOptions {
   readonly status?: WardenStatusView;
   readonly run?: WardenOverviewClient['wardenRun'];
-  readonly investigate?: WardenOverviewClient['wardenInvestigate'];
   readonly leave?: WardenOverviewClient['wardenLeave'];
 }
 
@@ -39,7 +38,6 @@ const fake = (options: FakeOptions = {}) => {
   const calls = {
     status: 0,
     runs: [] as (boolean | undefined)[],
-    investigations: [] as WardenInvestigateRequest[],
     leaves: [] as WardenLeaveRequest[],
   };
   const client: WardenOverviewClient = {
@@ -49,6 +47,7 @@ const fake = (options: FakeOptions = {}) => {
         options.status ??
         wardenStatus({
           lastSweepAt: '2026-07-31T11:59:00.000Z',
+          anomalies: [wardenAnomaly({ sessionId: 'sess-flag' })],
           investigations: [
             wardenInvestigation({
               id: 'done-1',
@@ -69,13 +68,6 @@ const fake = (options: FakeOptions = {}) => {
     wardenRun: async spawn => {
       calls.runs.push(spawn);
       return await (options.run ?? (async () => ({ sweptAt: '2026-07-31T12:00:00.000Z', anomalies: [] })))(spawn);
-    },
-    wardenInvestigate: async request => {
-      calls.investigations.push(request);
-      return await (
-        options.investigate ??
-        (async () => ({ sessionId: request.sessionId, state: 'queued' as const, message: 'Queued: next in line.' }))
-      )(request);
     },
     wardenLeave: async request => {
       calls.leaves.push(request);
@@ -188,53 +180,6 @@ describe('WardenOverviewSurface', () => {
     }
   });
 
-  it('should send an investigate request and show the daemon’s answer or its refusal', async () => {
-    // Arrange
-    const accepted = fake();
-    const refused = fake({
-      investigate: async () => {
-        throw new Error('409: the daily investigation cap is hit');
-      },
-    });
-    const ok = await mount(
-      <WardenOverviewSurface
-        connection={connection('a')}
-        createClient={async () => accepted.client}
-        now={() => NOW}
-        pollOptions={POLL}
-      />,
-    );
-    const no = await mount(
-      <WardenOverviewSurface
-        connection={connection('a')}
-        createClient={async () => refused.client}
-        now={() => NOW}
-        pollOptions={POLL}
-      />,
-    );
-    try {
-      await settle();
-      const click = (container: HTMLElement) =>
-        must(
-          [...container.querySelectorAll('button')].find(node => node.textContent?.includes('Investigate')),
-          'investigate',
-        ).click();
-
-      // Act
-      await interact(() => click(ok.container));
-      await interact(() => click(no.container));
-      await settle();
-
-      // Assert
-      expect(accepted.calls.investigations).toEqual([{ sessionId: 'sess-flag' }]);
-      expect(ok.container.textContent).toContain('Queued: next in line.');
-      expect(no.container.textContent).toContain('No investigation: 409: the daily investigation cap is hit');
-    } finally {
-      await ok.unmount();
-      await no.unmount();
-    }
-  });
-
   it('should leave a flagged ferret alone longer and show the daemon’s answer or its refusal', async () => {
     // Arrange
     const accepted = fake();
@@ -302,10 +247,7 @@ describe('WardenOverviewSurface', () => {
 
       // Act
       await interact(() =>
-        must(
-          [...view.container.querySelectorAll('button')].find(node => node.textContent === 'Report'),
-          'report',
-        ).click(),
+        must(view.container.querySelector<HTMLButtonElement>('button[aria-label="Open report"]'), 'report').click(),
       );
       await settle();
       const opened = view.container.textContent ?? '';
