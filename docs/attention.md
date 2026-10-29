@@ -135,6 +135,11 @@ before the structure existed still reads.
   **conversation's name** (the session's task title). The ferret and the machine are the subtitle. Then
   comes the summary in bold, and collapsible Context · Terms · Questions · Recommendation · Impact · Links.
   The recommended option is marked "Recommended".
+- **Nothing open, nothing drawn.** A chat with no open item shows nothing above its composer: no "all
+  clear" line and no resolved history. Open items are the pinned card and an accent count in the chat
+  header. The history is one step away: the header's Actions menu has an "N resolved" entry (only when
+  there is any), and the inbox has a Resolved filter that reads the boards of the 30 most recently active
+  conversations.
 - **Raising one.** It can be raised from flags (`--context`, `--term "X=meaning"`, `--question`,
   `--option`, `--recommend`, `--recommend-why`, `--impact`, `--urgency`, `--link`) or from a JSON body
   (`--json-file <path>`, `-` for stdin), where a flag wins over the same field. `fy attention add --help`

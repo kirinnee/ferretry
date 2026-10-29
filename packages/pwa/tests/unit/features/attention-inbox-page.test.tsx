@@ -8,7 +8,8 @@ import {
   inboxCardOrigin,
   waitingWords,
 } from '../../../src/features/attention/attention-inbox-page.tsx';
-import { type InboxCard } from '../../../src/lib/attention-inbox.ts';
+import type { ResolvedAttentionItem } from '@ferretry/protocol';
+import { type InboxCard, type InboxResolved, inboxCardKey } from '../../../src/lib/attention-inbox.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import {
   attentionItem,
@@ -311,7 +312,7 @@ describe('AttentionInboxPage banner slot', () => {
     );
     const root = withBanner.container;
     const banner = must(root.querySelector('[data-test-banner]'), 'the banner');
-    const first = must(root.querySelector('[data-attention-inbox] > :nth-child(3)'), 'the child after the head');
+    const first = must(root.querySelector('[data-attention-inbox] > :nth-child(3)'), 'the filter after the banner');
     expect(root.querySelector('[data-attention-inbox]')?.children[1]).toBe(banner);
     expect(first).not.toBe(banner);
     await withBanner.unmount();
@@ -335,5 +336,100 @@ describe('AttentionInboxPage refusals whose card has gone', () => {
     await interact(() => clear.click());
     expect(mounted.container.querySelector('[data-attention-failures]')).toBeNull();
     await mounted.unmount();
+  });
+});
+
+describe('AttentionInboxPage Resolved filter', () => {
+  const record = (id: string, resolvedAt: string): ResolvedAttentionItem =>
+    ({
+      ...attentionItem(id),
+      resolvedAt,
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+      resolutionNote: null,
+      disposition: 'done',
+    }) as unknown as ResolvedAttentionItem;
+  const row = (id: string, resolvedAt: string): InboxResolved => {
+    const view = sessionView('sess-1', { config: { teammate: 'zoe', name: 'Fix the build' } });
+    return {
+      key: inboxCardKey(daemonId('studio'), view.config.id, id),
+      daemonId: daemonId('studio'),
+      machineName: 'Workshop',
+      view,
+      record: record(id, resolvedAt),
+    };
+  };
+  const mountFilter = (extra: { resolved?: readonly InboxResolved[]; resolvedReading?: boolean } = {}) => {
+    const fake = fakeInbox();
+    const navigated: string[] = [];
+    let loads = 0;
+    const mounted = mount(
+      <InboxHarness
+        cards={[threeWay]}
+        fake={fake}
+        loadResolved={() => {
+          loads += 1;
+        }}
+        render={inbox => (
+          <AttentionInboxPage
+            clock={fake.clock.now}
+            inbox={inbox}
+            now={NOW}
+            onNavigate={to => navigated.push(to)}
+            phone={false}
+          />
+        )}
+        {...extra}
+      />,
+    );
+    return { mounted, navigated, loads: () => loads };
+  };
+  const option = (root: ParentNode, which: 'open' | 'resolved') =>
+    must(root.querySelector<HTMLButtonElement>(`[data-attention-filter-option="${which}"]`), which);
+
+  it('starts on Open, and choosing Resolved reads the history and swaps the list', async () => {
+    const { mounted, loads } = mountFilter({
+      resolved: [row('A1', '2026-08-01T09:00:00.000Z'), row('A2', '2026-08-01T10:00:00.000Z')],
+    });
+    const view = await mounted;
+    const root = view.container;
+    expect(option(root, 'open').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-attention-resolved-pane]')).toBeNull();
+    await interact(() => option(root, 'resolved').click());
+    expect(loads()).toBe(1);
+    expect(option(root, 'resolved').getAttribute('aria-pressed')).toBe('true');
+    expect(root.querySelector('[data-attention-resolved-pane]')).not.toBeNull();
+    expect(
+      [...root.querySelectorAll('[data-attention-record]')].map(r => r.getAttribute('data-attention-record')),
+    ).toEqual(['A1', 'A2']);
+    expect(root.querySelector('[data-attention-record-origin]')?.textContent).toContain('Workshop');
+    await interact(() => option(root, 'open').click());
+    expect(root.querySelector('[data-attention-resolved-pane]')).toBeNull();
+    await view.unmount();
+  });
+
+  it('a record links to its conversation', async () => {
+    const { mounted, navigated } = mountFilter({ resolved: [row('A1', '2026-08-01T09:00:00.000Z')] });
+    const view = await mounted;
+    await interact(() => option(view.container, 'resolved').click());
+    await interact(() =>
+      must(view.container.querySelector<HTMLElement>('.fy-attn-panel__record-link'), 'link').click(),
+    );
+    expect(navigated).toHaveLength(1);
+    expect(navigated[0]).toContain('A1');
+    await view.unmount();
+  });
+
+  it('says it is reading, then says nothing is resolved', async () => {
+    const reading = await mountFilter({ resolvedReading: true }).mounted;
+    await interact(() => option(reading.container, 'resolved').click());
+    expect(reading.container.textContent).toContain('Reading resolved items');
+    await reading.unmount();
+
+    const none = await mountFilter().mounted;
+    await interact(() => option(none.container, 'resolved').click());
+    expect(none.container.querySelector('[data-attention-resolved-empty]')?.textContent).toContain('Nothing resolved');
+    await none.unmount();
   });
 });

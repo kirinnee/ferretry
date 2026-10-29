@@ -28,13 +28,14 @@ import type { SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { hypermediaOn, packOn } from '../features/session-info/info-model.ts';
-import { type SwitchMarksProps, SwitchMarks } from '../features/session-info/switch-marks.tsx';
+import { SwitchMarks, type SwitchMarksProps } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { harnessWord } from '../lib/harness-dialogs.ts';
 import { permissionPhrase } from '../lib/permission-requests.ts';
 import type { SessionTurn } from '../lib/session-activity.ts';
 import { sessionStatusLabel } from '../lib/session-screens.ts';
 import { StatusMark } from '../shell/status-mark.tsx';
+import { UnreadBadge } from '../shell/unread-badge.tsx';
 
 /**
  * The name a person calls this session by: its callsign, else whatever the session was labelled,
@@ -60,6 +61,11 @@ export interface SessionTopBarProps {
   readonly compact: boolean;
   /** The primary lifecycle actions, rendered by the page that owns them. */
   readonly actions: ReactNode;
+  /**
+   * How many Attention items are open on this ferret. A small accent count beside the name when there are
+   * any, nothing when there are none — the pinned block above the composer is the item itself.
+   */
+  readonly attentionOpen?: number;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
   /**
@@ -92,6 +98,7 @@ export function SessionTopBar({
   project,
   compact,
   actions,
+  attentionOpen = 0,
   status,
   turn = null,
   infoOpen = false,
@@ -131,6 +138,7 @@ export function SessionTopBar({
       )}
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
+        {attentionOpen > 0 ? <UnreadBadge className="fy-session-bar__attention" count={attentionOpen} /> : null}
         {compact ? null : (
           <SwitchMarks
             {...(switches ?? { learning: false, hypermedia: hypermediaOn(session), pack: packOn(session) })}

@@ -7,6 +7,9 @@
  *   (the same block the chat page draws). Answering happens there, through the chat.
  * - A PHONE gets the list alone; a row opens that ferret's chat at the item.
  *
+ * A small OPEN / RESOLVED filter sits under the heading. Resolved history lives only here and behind a
+ * chat's header menu — never as a line under every conversation.
+ *
  * The page renders off the shell's `AttentionInbox` alone, so it render-tests with a fake one; the chat
  * pane is supplied by the host as `renderChat`.
  */
@@ -21,8 +24,10 @@ import {
   type FailedAttentionAction,
   type InboxAction,
   type InboxCard,
+  type InboxResolved,
   isTask,
   isWaitingOnFerret,
+  RESOLVED_READ_LIMIT,
   swipeMap,
 } from '../../lib/attention-inbox.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
@@ -32,6 +37,7 @@ import { RouteLink } from '../../shell/route-link.tsx';
 import { sessionsBarNames } from '../../shell/sessions-bar-model.ts';
 import { attentionAge, attentionReference } from './attention-board.tsx';
 import { AttentionCard, type AttentionCardOrigin } from './attention-card.tsx';
+import { ResolvedRow } from './attention-resolved.tsx';
 import { AttentionSwipeDeck } from './attention-swipe-deck.tsx';
 import { AttentionUndoToast } from './attention-undo-toast.tsx';
 
@@ -122,14 +128,90 @@ function InboxEmpty() {
   );
 }
 
-function InboxReading() {
+function InboxReading({ words = 'Reading what your ferrets asked…' }: { readonly words?: string }) {
   return (
     <p className="fy-attn-inbox__reading" data-attention-reading="" role="status">
       <Spinner size={16} />
-      Reading what your ferrets asked…
+      {words}
     </p>
   );
 }
+
+export type InboxFilter = 'open' | 'resolved';
+
+/** Open / Resolved: two toggle buttons, the chosen one pressed. */
+function InboxFilterBar({
+  filter,
+  onChange,
+}: {
+  readonly filter: InboxFilter;
+  readonly onChange: (next: InboxFilter) => void;
+}) {
+  return (
+    // biome-ignore lint/a11y/useSemanticElements: a pair of toggle buttons, not a form fieldset
+    <div aria-label="Show" className="fy-attn-inbox__filter" data-attention-filter="" role="group">
+      {(['open', 'resolved'] as const).map(entry => (
+        <button
+          aria-pressed={filter === entry}
+          className="fy-attn-inbox__filter-button"
+          data-attention-filter-option={entry}
+          key={entry}
+          onClick={() => onChange(entry)}
+          type="button"
+        >
+          {entry === 'open' ? 'Open' : 'Resolved'}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** The Resolved filter: every resolved item the inbox has read, newest first, each linked to its chat. */
+function InboxResolvedList({
+  inbox,
+  onNavigate,
+}: {
+  readonly inbox: AttentionInbox;
+  readonly onNavigate: (to: string) => void;
+}) {
+  const rows = inbox.resolved;
+  if (rows.length === 0)
+    return inbox.resolvedReading ? (
+      <InboxReading words="Reading resolved items…" />
+    ) : (
+      <p className="fy-attn-inbox__none" data-attention-resolved-empty="">
+        Nothing resolved in your {RESOLVED_READ_LIMIT} most recent conversations.
+      </p>
+    );
+  return (
+    <div className="fy-attn-inbox__resolved" data-attention-resolved-pane="">
+      <ul aria-label="Resolved" className="fy-attn-panel__records fy-attn-inbox__records">
+        {rows.map((row, index) => (
+          <ResolvedRow
+            id={`inbox-resolved-${index}`}
+            key={`${row.key}:${row.record.resolvedAt}`}
+            origin={resolvedOrigin(row, onNavigate)}
+            record={row.record}
+          />
+        ))}
+      </ul>
+      <p className="fy-attn-inbox__hint">
+        From your {RESOLVED_READ_LIMIT} most recent conversations
+        {inbox.resolvedReading ? ' · reading more…' : ''}
+      </p>
+    </div>
+  );
+}
+
+const resolvedOrigin = (row: InboxResolved, onNavigate: (to: string) => void) => {
+  const names = sessionsBarNames(row.view);
+  return {
+    ferret: names.ferret ?? names.title,
+    machine: row.machineName,
+    href: attentionConversationPath(row.daemonId, row.view.config.id, row.record.id),
+    onNavigate,
+  };
+};
 
 export interface AttentionInboxPageProps {
   readonly inbox: AttentionInbox;
@@ -252,6 +334,11 @@ export function AttentionInboxPage({
 }: AttentionInboxPageProps) {
   const headingId = useId();
   const [chosen, setChosen] = useState<string | null>(null);
+  const [filter, setFilter] = useState<InboxFilter>('open');
+  const choose = (next: InboxFilter): void => {
+    setFilter(next);
+    if (next === 'resolved') inbox.loadResolved();
+  };
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
   const empty = inbox.cards.length === 0;
   const selected = inbox.cards.find(card => card.key === chosen) ?? inbox.cards[0];
@@ -268,8 +355,11 @@ export function AttentionInboxPage({
         </p>
       </header>
       {banner}
+      <InboxFilterBar filter={filter} onChange={choose} />
       <OrphanedFailures inbox={inbox} />
-      {empty ? (
+      {filter === 'resolved' ? (
+        <InboxResolvedList inbox={inbox} onNavigate={onNavigate} />
+      ) : empty ? (
         inbox.reading ? (
           <InboxReading />
         ) : (
@@ -315,7 +405,7 @@ export function AttentionInboxPage({
           )}
         </div>
       )}
-      {inbox.reading && !empty ? <InboxReading /> : null}
+      {inbox.reading && !empty && filter === 'open' ? <InboxReading /> : null}
       <AttentionUndoToast inbox={inbox} {...(clock === undefined ? {} : { clock })} />
     </main>
   );

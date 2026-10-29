@@ -24,6 +24,7 @@ import {
   type AttentionResponse,
   type AttentionSnapshot,
   MAX_ATTENTION_DETAIL_LENGTH,
+  type ResolvedAttentionItem,
   type SessionAttentionSummary,
   type SessionView,
 } from '@ferretry/protocol';
@@ -154,6 +155,65 @@ export const inboxCards = (
     (left, right) =>
       instant(right.item.waitingSince) - instant(left.item.waitingSince) || left.key.localeCompare(right.key),
   );
+};
+
+/** One resolved item in the inbox's Resolved filter: the record, its conversation and its machine. */
+export interface InboxResolved {
+  readonly key: string;
+  readonly daemonId: DaemonId;
+  readonly machineName: string;
+  readonly view: SessionView;
+  readonly record: ResolvedAttentionItem;
+}
+
+/**
+ * The resolved records of every listed conversation whose board has been read, newest resolution first.
+ * A conversation whose board has not been read contributes nothing, never "nothing resolved".
+ */
+export const inboxResolved = (
+  sources: readonly AttentionInboxSource[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AttentionSnapshot | undefined,
+): readonly InboxResolved[] => {
+  const rows: InboxResolved[] = [];
+  for (const source of sources) {
+    for (const view of source.sessions ?? []) {
+      for (const record of boardFor(source.daemonId, view.config.id)?.resolved ?? []) {
+        rows.push({
+          key: inboxCardKey(source.daemonId, view.config.id, record.id),
+          daemonId: source.daemonId,
+          machineName: source.name,
+          view,
+          record,
+        });
+      }
+    }
+  }
+  return rows.sort(
+    (left, right) =>
+      instant(right.record.resolvedAt) - instant(left.record.resolvedAt) || left.key.localeCompare(right.key),
+  );
+};
+
+/** How many conversations the Resolved filter reads boards for: history is not worth a request per session. */
+export const RESOLVED_READ_LIMIT = 30;
+
+/**
+ * The conversations the Resolved filter should read: the most recently active ones whose board is not
+ * held yet, at most {@link RESOLVED_READ_LIMIT} counting those already held, across every machine.
+ */
+export const sessionsToReadForResolved = (
+  sources: readonly AttentionInboxSource[],
+  hasBoard: (daemonId: DaemonId, sessionId: string) => boolean,
+): readonly { readonly daemonId: DaemonId; readonly sessionId: string }[] => {
+  const recent = sources
+    .flatMap(source => (source.sessions ?? []).map(view => ({ daemonId: source.daemonId, view })))
+    .sort(
+      (left, right) => instant(right.view.state.lastActivityAt ?? '') - instant(left.view.state.lastActivityAt ?? ''),
+    )
+    .slice(0, RESOLVED_READ_LIMIT);
+  return recent
+    .filter(entry => !hasBoard(entry.daemonId, entry.view.config.id))
+    .map(entry => ({ daemonId: entry.daemonId, sessionId: entry.view.config.id }));
 };
 
 /** What answering a card does, as the daemon is asked to do it. */

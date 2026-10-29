@@ -112,6 +112,17 @@ describe('SessionTopBar', () => {
     expect(opened).toBe(1);
   });
 
+  test('shows an accent count while items are open, and nothing at all when clear', async () => {
+    const props = { actions: null, compact: false, project: null, session: sessionView('s1') };
+    view = await mount(<SessionTopBar {...props} attentionOpen={3} />);
+    const badge = must(view.container.querySelector('.fy-session-bar__attention'), 'the count badge');
+    expect(badge.textContent).toContain('3');
+    await view.render(<SessionTopBar {...props} attentionOpen={0} />);
+    expect(view.container.querySelector('.fy-session-bar__attention')).toBeNull();
+    await view.render(<SessionTopBar {...props} />);
+    expect(view.container.querySelector('.fy-session-bar__attention')).toBeNull();
+  });
+
   test('on a phone it draws no switch marks — they live in Info — and on a desktop it still does', async () => {
     const props = {
       actions: null,
