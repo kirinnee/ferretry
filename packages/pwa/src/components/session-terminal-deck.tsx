@@ -750,10 +750,12 @@ export function SessionTerminalDeck({
     setBusy(true);
     try {
       const updated = await dependencies.rename(connection, scope, active.id, renameValue.trim());
-      setList(current =>
-        current === null
-          ? current
-          : { ...current, terminals: current.terminals.map(item => (item.id === updated.id ? updated : item)) },
+      setList(
+        current =>
+          current && {
+            ...current,
+            terminals: current.terminals.map(item => (item.id === updated.id ? updated : item)),
+          },
       );
       setRenaming(false);
       setError(null);
@@ -772,14 +774,13 @@ export function SessionTerminalDeck({
     setBusy(true);
     try {
       await dependencies.close(connection, scope, active.id);
-      setList(current =>
-        current === null
-          ? current
-          : {
-              ...current,
-              terminals: current.terminals.filter(item => item.id !== active.id),
-              limits: { ...current.limits, runningGlobal: Math.max(0, current.limits.runningGlobal - 1) },
-            },
+      setList(
+        current =>
+          current && {
+            ...current,
+            terminals: current.terminals.filter(item => item.id !== active.id),
+            limits: { ...current.limits, runningGlobal: Math.max(0, current.limits.runningGlobal - 1) },
+          },
       );
       setActiveId(current => (current === active.id ? fallbackId : current));
       setRenaming(false);
