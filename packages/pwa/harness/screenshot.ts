@@ -491,16 +491,12 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
     await card.locator('[data-pairing-failure="stated"]').waitFor();
     await assertCardFitsWithMargins(card, `${label} at ${viewportName}`);
     for (const theme of ['studio-dark', 'studio-light'] as const) {
-      await page.evaluate(name => {
-        document.documentElement.dataset.theme = name;
-      }, theme);
+      await applyTheme(page, theme);
       const target = join(outDir, `${slug}${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
       await captureElement(page, card, target);
       process.stdout.write(`📸 ${label} ${theme} ${viewportName} -> ${target}\n`);
     }
-    await page.evaluate(() => {
-      document.documentElement.dataset.theme = 'studio-dark';
-    });
+    await applyTheme(page, 'studio-dark');
   }
   // The notice a refused device sees in place of the page: no button to press, the same fit rule.
   const refused = page.getByLabel('Machine no longer accepts this browser', { exact: true });
@@ -510,16 +506,12 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
   );
   if (sideways) throw new Error(`the refused-device notice scrolls sideways at ${viewportName}`);
   for (const theme of ['studio-dark', 'studio-light'] as const) {
-    await page.evaluate(name => {
-      document.documentElement.dataset.theme = name;
-    }, theme);
+    await applyTheme(page, theme);
     const target = join(outDir, `device-refused${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
     await captureElement(page, refused, target);
     process.stdout.write(`📸 device refused ${theme} ${viewportName} -> ${target}\n`);
   }
-  await page.evaluate(() => {
-    document.documentElement.dataset.theme = 'studio-dark';
-  });
+  await applyTheme(page, 'studio-dark');
 };
 
 /**
@@ -1209,6 +1201,28 @@ const settleTransitions = async (page: Page): Promise<void> => {
     for (const animation of document.getAnimations())
       if (animation.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY) animation.finish();
   });
+};
+
+/**
+ * Put `<html data-theme>` to `theme` (`''` removes it) and let the page LAND there before the next step.
+ *
+ * Every theme flip in this file goes through here, because a flip on its own leaves the page moving.
+ * The contexts emulate reduced motion, and `index.css` answers that by giving every element a 1ms
+ * transition — on every property, since `transition-property` defaults to `all` — so a new theme's
+ * font sizes, line heights and padding are not applied until the transitions run, two frames later.
+ * Two frames of the OLD layout is exactly what Playwright's "stable" check accepts. Measured at
+ * 1440px, the Edit as YAML button at the foot of a profile sat still for two frames after the theme
+ * was put back, then dropped 23px — more than half its height — so a click pressed it at its old
+ * place and released over the row above, the button never saw a click, and the editor it opens was
+ * waited for until the run timed out. Finishing the transitions puts every box where it ends up before
+ * anything is clicked or measured.
+ */
+const applyTheme = async (page: Page, theme: string): Promise<void> => {
+  await page.evaluate(next => {
+    if (next === '') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = next;
+  }, theme);
+  await settleTransitions(page);
 };
 
 /**
@@ -3026,17 +3040,13 @@ try {
           const themedShot = async (name: string): Promise<void> => {
             const initial = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
             for (const theme of PROFILE_SCOPE_THEMES) {
-              await page.evaluate(next => {
-                document.documentElement.dataset.theme = next;
-              }, theme);
+              await applyTheme(page, theme);
               const target = join(outDir, `settings-machines-${name}-${theme}-${viewport.name}.png`);
               await settledShot(target);
               process.stdout.write(`📸 Settings Machines ${name} ${theme} ${viewport.name} -> ${target}\n`);
             }
-            await page.evaluate(next => {
-              if (next === '') delete document.documentElement.dataset.theme;
-              else document.documentElement.dataset.theme = next;
-            }, initial);
+            // Settled, not just set: the step after this one clicks, and on the old layout it can miss.
+            await applyTheme(page, initial);
           };
           await openMachine('harness-daemon');
           await machinesSurface.locator('[data-machine-tab="runtimes"]').click();
@@ -3514,9 +3524,7 @@ try {
           // AND IN LIGHT. Pairing is the first screen a new reader ever sees,
           // and half of them are not in dark mode. The rest of this harness page
           // is captured dark only; this one surface is worth both.
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-light';
-          });
+          await applyTheme(page, 'studio-light');
           for (const [label, slug] of [
             ['Daemon pairing', 'pairing'],
             ['Pairing confirmation', 'pairing-confirm'],
@@ -3526,9 +3534,7 @@ try {
             await captureElement(page, page.getByLabel(label, { exact: true }), lightTarget);
             process.stdout.write(`📸 ${label} light ${viewport.name} -> ${lightTarget}\n`);
           }
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-dark';
-          });
+          await applyTheme(page, 'studio-dark');
 
           await capturePairingFailures(page, viewport.name);
           const wardenOverviewTarget = join(outDir, `warden-overview-${viewport.name}.png`);
@@ -3586,9 +3592,7 @@ try {
           // AND THE PASSKEY FRAMES IN LIGHT. The warn tone of a row waiting on a confirmation is the last
           // place to lose contrast, so it has to be legible in both themes rather than designed in dark and
           // inverted — a hairline that vanishes on `surface-2` takes a boundary with it.
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-light';
-          });
+          await applyTheme(page, 'studio-light');
           for (const name of ['grants-step-up-needed', 'grants-step-up-held'] as const) {
             const frame = page.locator(`[data-harness="${name}"]`);
             await frame.scrollIntoViewIfNeeded();
@@ -3596,9 +3600,7 @@ try {
             await captureElement(page, frame, target);
             process.stdout.write(`📸 Capability limits ${name} light ${viewport.name} -> ${target}\n`);
           }
-          await page.evaluate(() => {
-            document.documentElement.dataset.theme = 'studio-dark';
-          });
+          await applyTheme(page, 'studio-dark');
           // Adding a device, in the states somebody actually meets. THE CODE IN THESE FRAMES IS FAKE —
           // see `HARNESS_INVITE`. A committed PNG of a real minted code would be a live credential in
           // the repository, and a QR is a machine-readable label rather than obfuscation.
@@ -4205,6 +4207,15 @@ try {
                 `${after.fieldTop}-${after.fieldBottom}px; portrait gate mounted=${after.gate}\n`,
             );
           }
+        } catch (cause) {
+          // The screen a wait gave up on, which the log alone cannot show: a timed-out wait names the
+          // element it wanted, never what was there instead. Best effort — a crashed page has no frame.
+          const target = join(outDir, `failure-${viewport.name}.png`);
+          await page
+            .screenshot({ path: target, timeout: 5_000 })
+            .then(() => process.stderr.write(`📸 the screen at the failure -> ${target}\n`))
+            .catch(() => undefined);
+          throw cause;
         } finally {
           await page.close();
         }
