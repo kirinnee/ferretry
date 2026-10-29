@@ -1,6 +1,11 @@
 import { chmod, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { shedAmbientSession } from '../../support/ambient-session.ts';
+
+// A suite started without its tier's preload (`bun test tests/integration` from inside a package) must
+// still never see the agent session it was started from. Idempotent: the preload, when present, shed it.
+shedAmbientSession();
 
 /**
  * Every integration test in this tier operates on throwaway repositories under the OS temp

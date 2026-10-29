@@ -161,9 +161,31 @@ export async function treeContains(root: string, needle: string): Promise<boolea
  * Kill every process whose command line names `root`. From 0.16x Codex starts a background
  * app-server daemon from inside `CODEX_HOME` that outlives the TUI it served; a sandbox path is
  * unique (mkdtemp), so this reaches only what this suite started.
+ *
+ * BY LITERAL PATH, NEVER BY PATTERN, and only under the temporary directory. `pkill -f` takes a
+ * regular expression and matches it against every command line on the machine; a suite is often run
+ * from inside a live agent whose own processes carry long command lines.
  */
 export async function reap(root: string): Promise<void> {
-  await run(['pkill', '-9', '-f', root], { env: { PATH: '/usr/bin:/bin' }, timeoutMs: 10_000 });
+  const sandbox = path.resolve(root);
+  if (!sandbox.startsWith(`${path.resolve(tmpdir())}${path.sep}`))
+    throw new Error(`refusing to reap ${sandbox}: it is not inside the temporary directory`);
+  const listed = await run(['ps', '-A', '-ww', '-o', 'pid=', '-o', 'args='], {
+    env: { PATH: '/usr/bin:/bin' },
+    timeoutMs: 10_000,
+  });
+  for (const line of listed.stdout.split('\n')) {
+    const match = /^\s*(\d+)\s+(.*)$/u.exec(line);
+    const pid = Number(match?.[1]);
+    const args = match?.[2] ?? '';
+    if (pid === process.pid || !(args.includes(`${sandbox}${path.sep}`) || args.split(/\s+/u).includes(sandbox)))
+      continue;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {
+      // Already gone.
+    }
+  }
 }
 
 /** A harness's `major.minor.patch`, read off its own `--version`, for a claim that changed at a release. */

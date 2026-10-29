@@ -239,6 +239,19 @@ pre-commit-lib.run {
     # conflict-markers gate does — the opener reaches `main` through the file nobody was looking at.
     # The two files that must SHOW the syntax to teach it are exempt by exact path; see
     # scripts/validate/no-fy-render-in-docs.sh and docs/fy-render.md.
+    # Test code never kills by pattern. Suites run from inside live agents' panes, and `pkill -f`
+    # matches a regular expression against every command line on the machine — the live tmux server's
+    # included. Teardowns kill by pid or by an exact `-S <own temp socket>` argv; see
+    # scripts/validate/no-pattern-kill.sh and packages/daemon/tests/support/ambient-session.ts.
+    a-no-pattern-kill = {
+      enable = true;
+      name = "No pattern kills in test code";
+      entry = validator "scripts/validate/no-pattern-kill.sh";
+      files = "(^|/)(tests|scripts/test)/";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-no-fy-render-in-docs = {
       enable = true;
       name = "No fy-render fences in durable files";

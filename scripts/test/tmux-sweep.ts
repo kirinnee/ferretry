@@ -12,14 +12,21 @@
  * ONLY UNDER THE ROOTS GIVEN. Several runs share one machine, so a sweep that killed every tmux
  * server under `/tmp` would end a sibling run's live journey. Every caller names the roots it owns.
  *
+ * AND ONLY ROOTS THAT ARE DISPOSABLE. A root must lie strictly inside a system temporary directory (or
+ * this process's own `TMPDIR`), and may not be, hold or lie inside a protected path: the inherited
+ * `FY_HOME`, the socket `TMUX` names, the ones `scripts/test/swept.sh` recorded in
+ * `FY_TEST_PROTECTED_PATHS`, and this account's default state home. Those name the live server every
+ * agent on the machine runs under, and a suite is often started from inside one of those agents. A
+ * refused root kills nothing and exits 2; a server on a protected socket is never swept under any root.
+ *
  * Usage: `tmux-sweep.ts [--fail-on-leak] [--exit-status <status>] <root>...` — prints one line per server
  * it kills, exits 1 with `--fail-on-leak` when it killed any, and 0 otherwise. `--exit-status` is the
  * test command's own status: one that died on a signal is already red, and its leftovers are reported as
  * the crash's, not a fixture's.
  */
-import { realpathSync } from 'node:fs';
-import { constants } from 'node:os';
-import { basename, resolve, sep } from 'node:path';
+import { readFileSync, realpathSync } from 'node:fs';
+import { constants, homedir, tmpdir } from 'node:os';
+import { basename, delimiter, isAbsolute, join, resolve, sep } from 'node:path';
 
 export interface LeakedTmuxServer {
   readonly pid: number;
@@ -35,6 +42,35 @@ interface ProcessRow {
 
 const SOCKET_FLAG = /(?:^|\s)-S\s+(\S+)/u;
 
+/** The system temporary roots a swept root must lie strictly inside. */
+const TEMPORARY_BASES = ['/tmp', '/private/tmp', '/var/tmp', '/var/folders'] as const;
+
+/** The product name, read from the root manifest rather than spelled: it names the default state home. */
+function productName(): string | undefined {
+  try {
+    const manifest = JSON.parse(readFileSync(resolve(import.meta.dir, '../../package.json'), 'utf8')) as {
+      readonly name?: unknown;
+    };
+    return typeof manifest.name === 'string' && manifest.name !== '' ? manifest.name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+type Environment = Readonly<Record<string, string | undefined>>;
+
+/** Every home and socket no sweep may reach: what this run inherited, and the account's default home. */
+export function protectedPaths(
+  environment: Environment = process.env,
+  userHome: string = homedir(),
+): readonly string[] {
+  const recorded = (environment.FY_TEST_PROTECTED_PATHS ?? '').split(delimiter);
+  const socket = environment.TMUX?.split(',', 1)[0];
+  const product = productName();
+  const fallback = product === undefined ? [] : [join(userHome, `.${product}`)];
+  return [...new Set([...recorded, environment.FY_HOME ?? '', socket ?? '', ...fallback])].filter(isAbsolute);
+}
+
 function canonical(path: string): string {
   try {
     return realpathSync(path);
@@ -46,6 +82,25 @@ function canonical(path: string): string {
 function inside(root: string, path: string): boolean {
   return path === root || path.startsWith(root.endsWith(sep) ? root : `${root}${sep}`);
 }
+
+/** Why `root` may not be swept, or `undefined` when it may. */
+export function rootRefusal(
+  root: string,
+  guarded: readonly string[] = protectedPaths(),
+  temporary: string = tmpdir(),
+): string | undefined {
+  if (!isAbsolute(root)) return `${JSON.stringify(root)} is not an absolute path`;
+  const target = canonical(root);
+  const scratch = canonical(temporary);
+  const bases = [...TEMPORARY_BASES.map(canonical), ...(scratch === sep ? [] : [scratch])];
+  if (!bases.some(base => base !== target && inside(base, target)))
+    return `${target} is not inside a temporary directory`;
+  const reached = guarded.map(canonical).find(path => inside(path, target) || inside(target, path));
+  return reached === undefined ? undefined : `${target} is, holds or lies inside ${reached}`;
+}
+
+/** Thrown before a single process is signalled when any root is not disposable. */
+export class UnsafeSweepRootError extends Error {}
 
 function processTable(): readonly ProcessRow[] {
   const listed = Bun.spawnSync(['ps', '-A', '-ww', '-o', 'pid=', '-o', 'ppid=', '-o', 'args='], {
@@ -66,7 +121,16 @@ function processTable(): readonly ProcessRow[] {
  * written and canonicalised, because `/tmp` is `/private/tmp` on macOS and a deleted root can no
  * longer be resolved at all.
  */
-export function tmuxServersUnder(roots: readonly string[]): readonly LeakedTmuxServer[] {
+export function tmuxServersUnder(
+  roots: readonly string[],
+  guarded: readonly string[] = protectedPaths(),
+): readonly LeakedTmuxServer[] {
+  const refusals = roots.flatMap(root => {
+    const refusal = rootRefusal(root, guarded);
+    return refusal === undefined ? [] : [refusal];
+  });
+  if (refusals.length > 0) throw new UnsafeSweepRootError(`refusing to sweep: ${refusals.join('; ')}`);
+  const shielded = guarded.flatMap(path => [resolve(path), canonical(path)]);
   const owned = roots
     .filter(root => root !== '' && resolve(root) !== sep)
     .flatMap(root => [resolve(root), canonical(root)]);
@@ -77,6 +141,8 @@ export function tmuxServersUnder(roots: readonly string[]): readonly LeakedTmuxS
       const socket = SOCKET_FLAG.exec(row.args)?.[1];
       if (socket === undefined) return [];
       const candidates = [resolve(socket), canonical(socket)];
+      // Never a protected socket, whatever root it was reached under.
+      if (shielded.some(path => candidates.some(candidate => inside(path, candidate)))) return [];
       return owned.some(root => candidates.some(candidate => inside(root, candidate)))
         ? [{ pid: row.pid, socket, args: row.args }]
         : [];
@@ -112,8 +178,11 @@ function alive(pid: number): boolean {
  * safe from an `exit` handler. A pane's program is killed by pid as well as by the server's hangup,
  * because a harness that ignores SIGHUP is exactly the kind of process this exists to stop.
  */
-export function sweepTmuxServers(roots: readonly string[]): readonly LeakedTmuxServer[] {
-  const servers = tmuxServersUnder(roots);
+export function sweepTmuxServers(
+  roots: readonly string[],
+  guarded: readonly string[] = protectedPaths(),
+): readonly LeakedTmuxServer[] {
+  const servers = tmuxServersUnder(roots, guarded);
   if (servers.length === 0) return servers;
   const table = processTable();
   const targets = [...new Set(servers.flatMap(server => [server.pid, ...descendants(table, server.pid)]))];
@@ -176,7 +245,15 @@ if (import.meta.main) {
     console.error('usage: tmux-sweep.ts [--fail-on-leak] [--exit-status <status>] <root>...');
     process.exit(2);
   }
-  const verdict = sweepVerdict(sweepTmuxServers(roots), { failOnLeak, exitStatus });
+  let swept: readonly LeakedTmuxServer[];
+  try {
+    swept = sweepTmuxServers(roots);
+  } catch (error) {
+    if (!(error instanceof UnsafeSweepRootError)) throw error;
+    console.error(`❌ ${error.message} — nothing was killed`);
+    process.exit(2);
+  }
+  const verdict = sweepVerdict(swept, { failOnLeak, exitStatus });
   for (const line of verdict.lines) console.error(line);
   if (verdict.fail) process.exit(1);
 }
