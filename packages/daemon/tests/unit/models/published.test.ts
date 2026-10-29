@@ -119,6 +119,26 @@ describe('verifyPublishedCatalog', () => {
   });
 });
 
+describe('verifyPublishedCatalog with a key the platform cannot use', () => {
+  it('should say the list signature does not verify, rather than fail, when the compiled-in key is not an Ed25519 key', async () => {
+    // Arrange — a well-formed PEM of bytes that are not an SPKI key, with a signature naming that very key.
+    const notAKey = encode('these bytes are not a public key');
+    const pem = `-----BEGIN PUBLIC KEY-----\n${b64(notAKey)}\n-----END PUBLIC KEY-----`;
+    const list = encode('{"files":{}}');
+
+    // Act
+    const answer = await verifyPublishedCatalog({
+      publicKeyPem: pem,
+      list,
+      catalog: encode('{}'),
+      signature: `${await sha(notAKey)}.${b64url(new Uint8Array(64))}`,
+    });
+
+    // Assert
+    should(answer).match({ ok: false, reason: /does not verify/ });
+  });
+});
+
 describe('PublishedModelCatalogService', () => {
   const NOW = Date.parse('2026-10-19T00:00:00.000Z');
 

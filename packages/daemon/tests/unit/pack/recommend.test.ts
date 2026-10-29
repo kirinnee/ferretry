@@ -443,6 +443,32 @@ describe('availableModels', () => {
     should(named.map(row => row.model)).deepEqual(['sonnet', 'opus', 'haiku']);
     should(unnamed.map(row => row.model)).deepEqual(['opus', 'sonnet', 'haiku']);
   });
+
+  it('should order models nothing else tells apart by their label', () => {
+    // Arrange — two models of one profile set, declared out of alphabetical order, with no tier and nothing named.
+    const known = facts({
+      runtimes: [
+        runtime('claude-set', {
+          modelSet: {
+            source: 'model-set',
+            name: 'set',
+            models: [
+              { id: 'zeta-7b', available: true },
+              { id: 'alpha-7b', available: true },
+            ],
+            declaredDefault: 'zeta-7b',
+            default: 'zeta-7b',
+          },
+        }),
+      ],
+    });
+
+    // Act
+    const rows = list(known, 'Nothing named here.');
+
+    // Assert
+    should(rows.map(row => row.modelLabel)).deepEqual(['alpha-7b', 'zeta-7b']);
+  });
 });
 
 describe('automaticOrder', () => {

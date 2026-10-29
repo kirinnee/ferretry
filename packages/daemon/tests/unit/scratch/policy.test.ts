@@ -40,6 +40,17 @@ describe('scratch reclamation policy', () => {
     });
   });
 
+  it('should refuse a terminal session that settled inside the TTL, saying for how long', () => {
+    should(scratchEligibility({ ...eligible, finishedAt: new Date(NOW - 5 * HOUR).toISOString() })).deepEqual({
+      eligible: false,
+      reason: 'terminal for 5h, under the TTL',
+    });
+    should(scratchEligibility({ ...eligible, finishedAt: undefined, newestMtimeMs: NOW - 2 * HOUR })).deepEqual({
+      eligible: false,
+      reason: 'terminal for 2h, under the TTL',
+    });
+  });
+
   it('should refuse a terminal session whose files were touched inside the TTL', () => {
     should(scratchEligibility({ ...eligible, newestMtimeMs: NOW - HOUR })).deepEqual({
       eligible: false,

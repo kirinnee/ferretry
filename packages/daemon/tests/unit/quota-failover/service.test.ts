@@ -436,6 +436,28 @@ describe('the quota-failover loop', () => {
     should(test.writes.at(-1)?.lastTick).not.be.undefined();
   });
 
+  it('should reject the caller of a tick that genuinely failed, and still run the next one', async () => {
+    // Arrange — the clock is read before anything is guarded, so a broken clock fails the tick itself.
+    const defect = new Error('the clock is broken');
+    let broken = true;
+    const test = harness({
+      nowMs: () => {
+        if (broken) throw defect;
+        return AT;
+      },
+    });
+
+    // Act
+    const failure = await test.service.run().catch((error: unknown) => error);
+    broken = false;
+    const next = await test.service.run();
+
+    // Assert
+    should(failure).equal(defect);
+    should(next.halted).be.undefined();
+    should(test.migrations).have.length(1);
+  });
+
   it('should complete the tick even when the ledger cannot be written', async () => {
     // Arrange — the move already happened, and the report is still worth returning
     const test = harness({ writeError: new Error('the disk is full') });

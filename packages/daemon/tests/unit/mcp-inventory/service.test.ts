@@ -247,6 +247,44 @@ describe('McpInventoryService', () => {
       should(servers.some(server => server.shadowedBy !== undefined)).be.false();
     });
 
+    it('should list a declaration once when two runtimes of the same harness both see it', async () => {
+      // Arrange — a second Claude runtime with its own home, holding the same component.
+      const spareHome = '/fy/fleet/homes/claude-spare-id';
+      const world = inventoryWorld(
+        new Map<string, unknown>([
+          ...documents(),
+          [
+            `${spareHome}/.claude.json`,
+            { mcpServers: { linear: { type: 'http', url: 'https://mcp.linear.app/mcp' } } },
+          ],
+          [`${spareHome}/settings.json`, {}],
+        ]),
+      );
+      const service = new McpInventoryService({
+        ...world.deps,
+        accounts: async () => [
+          ...(await world.deps.accounts()),
+          { runtime: 'claude-spare', harness: 'claude', home: spareHome, wrapper: '/fy/fleet/bin/claude-spare' },
+        ],
+        components: async () => [
+          { name: 'linear', runtimes: ['claude-work', 'claude-spare', 'codex-work'], auth: 'oauth' },
+        ],
+      });
+
+      // Act
+      const { servers } = await service.machine();
+
+      // Assert — one row per declaration, carrying every runtime that sees it, and no duplicate runtime.
+      const linear = servers.filter(
+        server => server.name === 'linear' && server.scope === 'component' && server.harness === 'claude',
+      );
+      should(linear).have.length(1);
+      should(linear[0]?.runtimes.map(use => use.runtime)).deepEqual(['claude-work', 'claude-spare']);
+      const docs = servers.filter(server => server.name === 'docs' && server.scope === 'project');
+      should(docs).have.length(1);
+      should(docs[0]?.runtimes.map(use => use.runtime)).deepEqual(['claude-work', 'claude-spare']);
+    });
+
     it('should resolve an id from either view, and refuse one that is gone', async () => {
       // Arrange
       const service = new McpInventoryService(inventoryWorld().deps);

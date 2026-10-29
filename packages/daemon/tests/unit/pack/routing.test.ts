@@ -256,6 +256,20 @@ describe('legacyPrompt', () => {
     should(actual?.text.endsWith('…')).be.true();
   });
 
+  it('should skip a candidate that names no model, keeping the ones that do', () => {
+    should(
+      legacyPrompt(
+        {
+          useCases: [
+            { id: 'chores', title: 'Chores', candidates: [{ effort: 'low' }, { model: 'haiku', effort: 'low' }] },
+          ],
+        },
+        undefined,
+        BASE,
+      )?.text,
+    ).containEql('- Chores: haiku at low.');
+  });
+
   it('should read leniently: a use case without a title or candidates that are not objects', () => {
     should(
       legacyPrompt({ useCases: [{ id: 'only-id', candidates: ['nope', { model: 'opus' }] }, 'junk'] }, undefined, BASE)

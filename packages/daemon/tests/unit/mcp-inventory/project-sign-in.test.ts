@@ -176,6 +176,34 @@ describe('ProjectMcpLaunch', () => {
     should(localScope.calls).have.length(1);
   });
 
+  it.each([
+    ['the project’s .mcp.json', `${PROJECT}/.mcp.json`],
+    ['the runtime’s .claude.json', `${CLAUDE_HOME}/.claude.json`],
+    ['the runtime’s settings', `${CLAUDE_HOME}/settings.json`],
+  ] as const)('should not swallow a failure to read %s that is not an unreadable document', async (_what, path) => {
+    // Arrange — a disk that fails, as opposed to a file that does not parse.
+    const defect = new Error('EIO: the disk is gone');
+    const files = new MemoryDocuments(documents());
+    const launch = new ProjectMcpLaunch({
+      accounts: async () => ACCOUNTS,
+      folders: knownFolders(FOLDERS),
+      documents: {
+        read: async target => {
+          if (target === path) throw defect;
+          return files.read(target);
+        },
+      },
+      secrets: { values: async () => new Map([[DOCS.access, 'docs-token']]) },
+      localScope: new RecordingLocalScope(),
+    });
+
+    // Act
+    const failure = await launch.forLaunch('/fy/fleet/bin/claude-work', PROJECT).catch((error: unknown) => error);
+
+    // Assert
+    should(failure).equal(defect);
+  });
+
   it('should do nothing for a Codex runtime, an unknown executable, or a folder in no project', async () => {
     // Arrange
     const { launch, localScope, renewed } = launcher();
