@@ -110,15 +110,17 @@ function AnswerButton({
   answer,
   busy,
   swipeHints,
+  arrows,
   onAnswer,
 }: {
   readonly answer: AttentionCardAnswer;
   readonly busy: boolean;
   readonly swipeHints: boolean;
+  readonly arrows: boolean;
   readonly onAnswer: (answer: AttentionCardAnswer) => void;
 }) {
   const hintId = useId();
-  const arrow = swipeHints ? ARROWS[answer.direction] : null;
+  const arrow = arrows ? ARROWS[answer.direction] : null;
   return (
     <button
       aria-describedby={answer.description === undefined ? undefined : hintId}
@@ -149,7 +151,10 @@ export interface AttentionActionsProps {
   readonly answers: readonly AttentionCardAnswer[];
   /** An old choice's options past the third: buttons with no direction. */
   readonly extraOptions: readonly AttentionAskOption[];
+  /** The card can be swiped: each answer also says which way, aloud. */
   readonly swipeHints: boolean;
+  /** Draws each answer's direction arrow. Defaults to `swipeHints`; a card that cannot be swiped may still show them. */
+  readonly arrows?: boolean;
   readonly busy: boolean;
   /** A to-do that is waiting on its ferret says so, above the bar. */
   readonly waitingOn?: string;
@@ -162,8 +167,6 @@ export interface AttentionActionsProps {
   readonly replyIsAnswer: boolean;
   readonly canSendReply: boolean;
   readonly onSendReply: () => void;
-  /** Draws the reply control. Off where the conversation's own composer is the reply. */
-  readonly showReply?: boolean;
   readonly onAnswer: (answer: AttentionCardAnswer) => void;
   readonly onOption: (option: AttentionAskOption) => void;
   /** Whether Dismiss is in the ⋯ menu — it is not when an answer already is one (a Skip). */
@@ -177,6 +180,7 @@ export function AttentionActions({
   answers,
   extraOptions,
   swipeHints,
+  arrows = swipeHints,
   busy,
   waitingOn,
   reply,
@@ -187,7 +191,6 @@ export function AttentionActions({
   replyIsAnswer,
   canSendReply,
   onSendReply,
-  showReply = true,
   onAnswer,
   onOption,
   dismissInMenu,
@@ -239,6 +242,7 @@ export function AttentionActions({
               key={answer.direction}
               onAnswer={onAnswer}
               swipeHints={swipeHints}
+              arrows={arrows}
             />
           ))}
         </fieldset>
@@ -266,7 +270,7 @@ export function AttentionActions({
           ))}
         </fieldset>
       )}
-      {showReply && !replyIsAnswer ? (
+      {!replyIsAnswer ? (
         <div className="fy-attn-actions__row">
           <button
             aria-controls={replyOpen ? boxId : undefined}
@@ -289,7 +293,7 @@ export function AttentionActions({
           {menu}
         </div>
       ) : null}
-      {showReply && (replyOpen || replyIsAnswer) ? (
+      {replyOpen || replyIsAnswer ? (
         <form
           className="fy-attn-actions__row"
           onSubmit={event => {
@@ -336,9 +340,6 @@ export function AttentionActions({
           </div>
           {replyIsAnswer ? menu : null}
         </form>
-      ) : null}
-      {!showReply && menu !== null ? (
-        <div className="fy-attn-actions__row fy-attn-actions__row--end">{menu}</div>
       ) : null}
     </div>
   );

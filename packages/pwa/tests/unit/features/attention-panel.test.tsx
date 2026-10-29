@@ -213,9 +213,27 @@ describe('AttentionPanel', () => {
     expect(must(view.container, 'view').querySelector('[data-attention-pager]')).toBeNull();
   });
 
-  test('keeps the reply to the composer: no reply form on the pinned card', async () => {
+  test("the pinned card carries the deck's answer bar: arrows, Reply… and the ⋯ in the same row", async () => {
     view = await mount(panel());
-    expect(cardOf(must(view.container, 'view'), 'A3').querySelector('textarea')).toBeNull();
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    const answers = [...card.querySelectorAll<HTMLElement>('[data-attention-answer]')];
+    expect(answers.map(answer => answer.getAttribute('data-attention-answer'))).toEqual(['left', 'right']);
+    for (const answer of answers) expect(answer.querySelector('svg')).not.toBeNull();
+    expect(card.textContent).not.toContain('or swipe');
+    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
+    expect(toggle.textContent).toContain('Reply…');
+    expect(toggle.closest('.fy-attn-actions__row')?.querySelector('[data-attention-more]')).not.toBeNull();
+    expect(card.querySelectorAll('.fy-attn-actions__row')).toHaveLength(1);
+  });
+
+  test('Reply… on the pinned card opens its box', async () => {
+    view = await mount(panel());
+    const card = cardOf(must(view.container, 'view'), 'A3');
+    expect(card.querySelector('textarea')).toBeNull();
+    const toggle = must(card.querySelector<HTMLButtonElement>('[data-attention-reply-toggle]'), 'reply toggle');
+    await interact(() => toggle.click());
+    expect(card.querySelector('textarea')).not.toBeNull();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
   });
 
   test('Details unfolds the context and brief, and folds it again', async () => {
