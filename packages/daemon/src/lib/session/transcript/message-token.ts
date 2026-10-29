@@ -33,7 +33,6 @@
  * u64 element count, so "no baseline" and "an empty baseline" cannot spell the same bytes either.
  */
 
-import { createHash } from 'node:crypto';
 import {
   type ConversationMessagePoint,
   type ExactConversationMessagePoint,
@@ -41,6 +40,19 @@ import {
   type TranscriptProvenance,
   TranscriptProvenanceSchema,
 } from '@ferretry/protocol';
+import {
+  frameSessionTranscriptValue,
+  SESSION_TRANSCRIPT_UNSIGNED_64_BYTES,
+  sessionTranscriptUnsigned64,
+} from './raw-prefix.ts';
+
+/** The chain and its framing live in `raw-prefix.ts`, so a fold can load them alone; they are still this vocabulary. */
+export {
+  extendSessionTranscriptRawPrefix,
+  frameSessionTranscriptValue,
+  sessionTranscriptRawPrefixStart,
+  sessionTranscriptUnsigned64,
+} from './raw-prefix.ts';
 
 /** The envelope every token tag is taken under, so no other Ferretry MAC can be read as one. */
 const SESSION_TRANSCRIPT_MESSAGE_TOKEN_ENVELOPE = 'ferretry.session-transcript.message-token.v1';
@@ -54,10 +66,6 @@ export const SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN = 'cursor';
 export type SessionTranscriptMessageTokenDomain =
   | typeof SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN
   | typeof SESSION_TRANSCRIPT_MESSAGE_TOKEN_CURSOR_DOMAIN;
-
-/** The rolling-commitment domains: a chain start and a chain step are different statements. */
-const SESSION_TRANSCRIPT_RAW_PREFIX_DOMAIN = 'ferretry.session-transcript.raw-prefix.v1';
-const SESSION_TRANSCRIPT_RAW_PREFIX_ROW_DOMAIN = 'ferretry.session-transcript.raw-prefix-row.v1';
 
 /** SHA-256 and HMAC-SHA-256 are both 32 bytes wide here. Tags are never truncated. */
 export const SESSION_TRANSCRIPT_MESSAGE_TOKEN_TAG_BYTES = 32;
@@ -80,30 +88,9 @@ const POINT_TEXT = /^[A-Za-z0-9_-]{32}$/u;
 const SELECTION_BINDING_PREFIX = 's1';
 const CURSOR_PREFIX = 'c1';
 
-const UNSIGNED_64_BYTES = 8;
+const UNSIGNED_64_BYTES = SESSION_TRANSCRIPT_UNSIGNED_64_BYTES;
 const ABSENT = Uint8Array.of(0);
 const PRESENT = Uint8Array.of(1);
-
-/**
- * One fixed-width unsigned 64-bit big-endian field.
- *
- * Fixed width is why numbers are not framed: their length is a property of the encoding rather than
- * of the value. A value outside the safe-integer range is refused rather than silently rounded — a
- * rounded offset would address a different message under a tag that still verified.
- */
-export function sessionTranscriptUnsigned64(value: number): Uint8Array {
-  if (!Number.isSafeInteger(value) || value < 0)
-    throw new RangeError(`${String(value)} is not an unsigned 64-bit transcript field this encoding can carry`);
-  const encoded = Buffer.alloc(UNSIGNED_64_BYTES);
-  encoded.writeBigUInt64BE(BigInt(value));
-  return encoded;
-}
-
-/** `frame(x)`: the u64 byte length of `x`, then exactly `x`. Text is UTF-8. */
-export function frameSessionTranscriptValue(value: Uint8Array | string): Uint8Array {
-  const bytes = typeof value === 'string' ? Buffer.from(value, 'utf8') : value;
-  return Buffer.concat([sessionTranscriptUnsigned64(bytes.length), bytes]);
-}
 
 /** An optional member: one absent/present byte, and the framed value only when it is present. */
 function frameOptional(value: string | undefined): Uint8Array {
@@ -119,34 +106,6 @@ function frameOptionalArray(values: readonly string[] | undefined): Uint8Array {
   ]);
   return Buffer.concat([PRESENT, frameSessionTranscriptValue(body)]);
 }
-
-/** `H_0`: the commitment to an empty raw prefix, which is the domain and nothing else. */
-export function sessionTranscriptRawPrefixStart(): Uint8Array {
-  return createHash('sha256').update(frameSessionTranscriptValue(SESSION_TRANSCRIPT_RAW_PREFIX_DOMAIN)).digest();
-}
-
-/**
- * `H_i = SHA-256(frame(row-domain) || frame(H_(i-1)) || frame(raw_i))`.
- *
- * One fixed-cost step per physical record. The previous VALUE is folded in rather than the previous
- * prefix being re-read, which is what makes a page of k rows one transcript pass plus k hashes
- * instead of k passes over the prefix.
- *
- * The record's frame is hashed as its length and then the record itself, never joined into one buffer
- * first: the bytes hashed are the same, and a multi-megabyte screenshot record is not copied just to be
- * read once by the hash.
- */
-export function extendSessionTranscriptRawPrefix(previous: Uint8Array, rawRecord: Uint8Array): Uint8Array {
-  return createHash('sha256')
-    .update(RAW_PREFIX_ROW_DOMAIN_FRAME)
-    .update(frameSessionTranscriptValue(previous))
-    .update(sessionTranscriptUnsigned64(rawRecord.length))
-    .update(rawRecord)
-    .digest();
-}
-
-/** `frame(row-domain)`, which every step of the chain begins with. */
-const RAW_PREFIX_ROW_DOMAIN_FRAME = frameSessionTranscriptValue(SESSION_TRANSCRIPT_RAW_PREFIX_ROW_DOMAIN);
 
 /**
  * Everything a tag is taken over besides the row itself: which session, which run of it, and the

@@ -1,6 +1,5 @@
 import { basename, join } from 'node:path';
 import {
-  CONVERSATION_PREVIEW_MAX,
   type ConversationAdoptRefusalCode,
   type ConversationAdoptRequest,
   ConversationAdoptRequestSchema,
@@ -11,23 +10,10 @@ import {
   type ConversationSource,
   type Harness,
   type ImportableConversation,
-  ImportConversationIdSchema,
   type SessionStatus,
 } from '@ferretry/protocol';
-import type { PacedTranscriptParser, TranscriptEvent } from '../transcript/index.ts';
-import { codexIndexNames, transcriptNames } from './conversation-name.ts';
-import {
-  HANDOFF_READ_MAX_BYTES,
-  type HandoffDocuments,
-  type HandoffScope,
-  handoffPointers,
-  isReadableHandoff,
-  isWrapperTitle,
-  NO_HANDOFF_SCOPE,
-  recentExchanges,
-  spokenMessages,
-  wrapperOnlyWords,
-} from './conversation-text.ts';
+import type { ConversationCandidate, ConversationDescriber, ConversationFiles } from './conversation-describer.ts';
+import { codexIndexNames } from './conversation-name.ts';
 
 /**
  * Keeping an existing Claude Code / Codex conversation "on" as a ferret.
@@ -42,26 +28,7 @@ import {
  * Chat shows and the one the CLI appends to are one file.
  */
 
-/** A directory entry as discovery needs it. A link is `other`: discovery never follows one. */
-export interface ConversationFileEntry {
-  readonly name: string;
-  readonly kind: 'file' | 'directory' | 'other';
-}
-
-export interface ConversationFileInfo {
-  readonly modifiedAtMs: number;
-  readonly size: number;
-}
-
-/** Read-only by construction: there is no way to write through this port. */
-export interface ConversationFiles {
-  entries(directory: string): Promise<readonly ConversationFileEntry[]>;
-  info(file: string): Promise<ConversationFileInfo | undefined>;
-  /** At most the last `maxBytes` of a file: where an append-only index keeps its newest lines. */
-  tail(file: string, maxBytes: number): Promise<string | undefined>;
-  /** At most the first `maxBytes` of a file, for documents that are not trusted to be small. */
-  head(file: string, maxBytes: number): Promise<string | undefined>;
-}
+export type { ConversationFileEntry, ConversationFileInfo, ConversationFiles } from './conversation-describer.ts';
 
 /** One CLI home to look in: Ferretry's shared pool, or the owner's own (`~/.claude`, `~/.codex`). */
 export interface ConversationRoot {
@@ -124,143 +91,9 @@ export function conversationResumeArguments(harness: Harness, id: string): reado
 const CODEX_INDEX = 'session_index.jsonl';
 const CODEX_INDEX_READ_MAX_BYTES = 1024 * 1024;
 
-/**
- * How much of a transcript a listing reads from each END.
- *
- * Everything a row says is at one end or the other — the folder and the first message at the start,
- * the latest message, the model and the last activity at the end — and a transcript grows without
- * limit: an adopted conversation reached 200 MB, and reading it whole for every listing held all of
- * it in memory, twice, because the same file is listed from two homes. A file larger than both ends
- * together is described from them alone, and says its turn count is only a floor.
- */
-export const CONVERSATION_HEAD_READ_MAX_BYTES = 4 * 1024 * 1024;
-export const CONVERSATION_TAIL_READ_MAX_BYTES = 4 * 1024 * 1024;
-
-/** A transcript as a listing may read it: whole when small, else its first and last complete records. */
-interface BoundedTranscript {
-  readonly text: string;
-  /** The middle was not read. */
-  readonly partial: boolean;
-}
-
-async function boundedTranscript(
-  files: ConversationFiles,
-  file: string,
-  size: number,
-): Promise<BoundedTranscript | undefined> {
-  if (size <= CONVERSATION_HEAD_READ_MAX_BYTES + CONVERSATION_TAIL_READ_MAX_BYTES) {
-    const text = await files.head(file, size);
-    return text === undefined ? undefined : { text, partial: false };
-  }
-  const [head, tail] = await Promise.all([
-    files.head(file, CONVERSATION_HEAD_READ_MAX_BYTES),
-    files.tail(file, CONVERSATION_TAIL_READ_MAX_BYTES),
-  ]);
-  if (head === undefined || tail === undefined) return undefined;
-  // Each end is cut to whole records: the head's last line and the tail's first are pieces of ones
-  // the read cut through, and a piece parsed as a record is a record nobody wrote.
-  const start = tail.indexOf('\n');
-  return {
-    text: `${head.slice(0, head.lastIndexOf('\n') + 1)}${start < 0 ? '' : tail.slice(start + 1)}`,
-    partial: true,
-  };
-}
-
 const ROLLOUT_ID = /([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 /** How deep Codex nests rollouts (`sessions/YYYY/MM/DD/`), plus one level of slack. */
 const CODEX_MAX_DEPTH = 4;
-
-interface Candidate {
-  readonly harness: Harness;
-  readonly source: string;
-  readonly relativePath: string;
-  /** The id the file name carries, when it carries one. */
-  readonly nameId: string | undefined;
-}
-
-/**
- * The working folder a transcript records — Claude on every record, Codex in its `session_meta` — and,
- * for Codex, the conversation id that record carries (Claude names a conversation by its file).
- */
-export function conversationHead(
-  harness: Harness,
-  text: string,
-): { readonly project: string; readonly id: string | undefined } | undefined {
-  for (const line of text.split('\n')) {
-    if (line.trim() === '') continue;
-    let value: unknown;
-    try {
-      value = JSON.parse(line);
-    } catch {
-      continue;
-    }
-    if (typeof value !== 'object' || value === null) continue;
-    const record = value as Record<string, unknown>;
-    const holder =
-      harness === 'claude'
-        ? record
-        : record.type === 'session_meta' && typeof record.payload === 'object' && record.payload !== null
-          ? (record.payload as Record<string, unknown>)
-          : undefined;
-    const cwd = holder?.cwd;
-    if (typeof cwd === 'string' && cwd.startsWith('/'))
-      return { project: cwd, id: typeof holder?.id === 'string' && harness === 'codex' ? holder.id : undefined };
-  }
-  return undefined;
-}
-
-/**
- * The listing row a transcript describes, or why it describes none. Its preview and latest message are
- * what the owner said (`conversation-text.ts`), with each hand-off pointer read from `documents`. Its
- * name is the owner's, else the CLI's generated one unless that title describes the wrapper it was
- * generated from (a turn-file pointer, an AGENTS.md block) — then the first real message heads it.
- */
-export function describeConversation(
-  candidate: { readonly harness: Harness; readonly nameId: string | undefined },
-  text: string,
-  events: readonly TranscriptEvent[],
-  modifiedAtMs: number,
-  documents?: HandoffDocuments,
-  /** The transcript's middle was not read, so the spoken messages counted are only some of them. */
-  partial = false,
-): Omit<DiscoveredConversation, 'source' | 'relativePath'> | undefined {
-  const head = conversationHead(candidate.harness, text);
-  if (head === undefined) return undefined;
-  const { project } = head;
-  const id = head.id ?? candidate.nameId;
-  if (id === undefined || !ImportConversationIdSchema.safeParse(id).success) return undefined;
-  const spoken = spokenMessages(events, documents);
-  const first = spoken[0];
-  if (first === undefined) return undefined;
-  const names = transcriptNames(candidate.harness, text);
-  const generated =
-    names.generated === undefined || isWrapperTitle(names.generated, wrapperOnlyWords(events, documents))
-      ? undefined
-      : names.generated;
-  const name = names.chosen ?? generated;
-  const latest = spoken.at(-1);
-  let model: string | undefined;
-  let last: string | undefined;
-  for (const event of events) {
-    if (event.kind === 'usage' && event.usage.model !== undefined) model = event.usage.model;
-    if (event.kind === 'settings' && event.settings.model !== undefined) model = event.settings.model;
-    if (event.timestamp !== undefined && (last === undefined || Date.parse(event.timestamp) > Date.parse(last)))
-      last = event.timestamp;
-  }
-  const parsedLast = last === undefined ? Number.NaN : Date.parse(last);
-  return {
-    id,
-    harness: candidate.harness,
-    project,
-    ...(name === undefined ? {} : { name }),
-    preview: first.slice(0, CONVERSATION_PREVIEW_MAX),
-    ...(latest === undefined || latest === first ? {} : { latest: latest.slice(0, CONVERSATION_PREVIEW_MAX) }),
-    lastActivityAt: new Date(Number.isNaN(parsedLast) ? modifiedAtMs : parsedLast).toISOString(),
-    turns: spoken.length,
-    ...(partial ? { turnsAtLeast: true as const } : {}),
-    ...(model === undefined ? {} : { model }),
-  };
-}
 
 /** The search a listing applies: every word must appear somewhere, and the date is a floor. */
 export function conversationMatcher(query: ConversationImportQuery): (row: DiscoveredConversation) => boolean {
@@ -276,12 +109,6 @@ export function conversationMatcher(query: ConversationImportQuery): (row: Disco
   };
 }
 
-interface CachedDescription {
-  readonly modifiedAtMs: number;
-  readonly size: number;
-  readonly described: Omit<DiscoveredConversation, 'source' | 'relativePath'> | undefined;
-}
-
 /**
  * Lists, previews and adopts a machine's existing conversations.
  *
@@ -289,19 +116,16 @@ interface CachedDescription {
  * current; a file whose size and modification time are unchanged is not re-parsed.
  */
 export class ConversationImportService {
-  private readonly cache = new Map<string, CachedDescription>();
   private serial: Promise<unknown> = Promise.resolve();
 
   constructor(
     private readonly files: ConversationFiles,
     /** In preference order: when two homes hold one conversation, the first one's file is used. */
     private readonly roots: readonly ConversationRoot[],
-    /** Paced, because a conversation is read up to 8 MiB whole and would otherwise hold the loop through it. */
-    private readonly parsers: Readonly<Record<Harness, PacedTranscriptParser>>,
+    /** Reads, parses and describes each file: on this thread, or wherever the adapter parses. */
+    private readonly describer: ConversationDescriber,
     private readonly owners: ConversationOwners,
     private readonly adopter: ConversationAdopter,
-    /** Where a hand-off pointer's document may be read from; a pointer anywhere else says nothing. */
-    private readonly handoffScope: HandoffScope = NO_HANDOFF_SCOPE,
     private readonly policy: ConversationListPolicy = LIST_COMPUTER_CONVERSATIONS,
   ) {}
 
@@ -334,15 +158,13 @@ export class ConversationImportService {
     const { conversations } = await this.discover(harness);
     const conversation = conversations.find(row => row.id === id);
     if (conversation === undefined) return undefined;
-    const info = await this.files.info(conversation.source);
-    const read = info === undefined ? undefined : await boundedTranscript(this.files, conversation.source, info.size);
-    if (read === undefined) return undefined;
-    const { events } = await this.parsers[harness].parse({
-      text: read.text,
+    return await this.describer.preview({
+      harness,
       source: conversation.source,
-      endOfInput: true,
+      relativePath: conversation.relativePath,
+      // The row's id is the one the file's name or its own record gave it, so it names the file again.
+      nameId: conversation.id,
     });
-    return { id, harness, messages: [...recentExchanges(events, await this.handoffDocuments(events))] };
   }
 
   /** One adoption at a time, so two pickers can never both keep one conversation. */
@@ -408,7 +230,7 @@ export class ConversationImportService {
       if (source !== undefined && root.source !== source) continue;
       const index = await this.indexNames(root);
       for (const candidate of await this.candidates(root)) {
-        const described = await this.describe(candidate);
+        const described = await this.describer.describe(candidate);
         if (described === undefined) {
           skipped += 1;
           continue;
@@ -438,58 +260,13 @@ export class ConversationImportService {
     return text === undefined ? new Map() : codexIndexNames(text);
   }
 
-  private async describe(
-    candidate: Candidate,
-  ): Promise<Omit<DiscoveredConversation, 'source' | 'relativePath'> | undefined> {
-    const info = await this.files.info(candidate.source);
-    if (info === undefined) return undefined;
-    const cached = this.cache.get(candidate.source);
-    if (cached !== undefined && cached.modifiedAtMs === info.modifiedAtMs && cached.size === info.size)
-      return cached.described;
-    const read = await boundedTranscript(this.files, candidate.source, info.size);
-    // A live conversation may end mid-record; the complete records before it still describe it.
-    const events =
-      read === undefined
-        ? undefined
-        : (await this.parsers[candidate.harness].parse({ text: read.text, source: candidate.source, endOfInput: true }))
-            .events;
-    const described =
-      read === undefined || events === undefined
-        ? undefined
-        : describeConversation(
-            candidate,
-            read.text,
-            events,
-            info.modifiedAtMs,
-            await this.handoffDocuments(events),
-            read.partial,
-          );
-    this.cache.set(candidate.source, { modifiedAtMs: info.modifiedAtMs, size: info.size, described });
-    return described;
-  }
-
-  /**
-   * The hand-off documents `events` point at, each read only where the hand-off scope allows it and
-   * only up to {@link HANDOFF_READ_MAX_BYTES}. One that cannot be read is left out, which makes its
-   * pointer say nothing.
-   */
-  private async handoffDocuments(events: readonly TranscriptEvent[]): Promise<HandoffDocuments> {
-    const documents = new Map<string, string>();
-    for (const path of handoffPointers(events)) {
-      if (!isReadableHandoff(path, this.handoffScope)) continue;
-      const document = await this.files.head(path, HANDOFF_READ_MAX_BYTES);
-      if (document !== undefined) documents.set(path, document);
-    }
-    return documents;
-  }
-
   /**
    * Claude keeps `projects/<folder>/<id>.jsonl` (a subfolder there holds a conversation's sub-agents,
    * which are not conversations an owner had). Codex keeps `sessions/YYYY/MM/DD/rollout-…-<id>.jsonl`.
    */
-  private async candidates(root: ConversationRoot): Promise<readonly Candidate[]> {
+  private async candidates(root: ConversationRoot): Promise<readonly ConversationCandidate[]> {
     if (root.harness === 'claude') {
-      const found: Candidate[] = [];
+      const found: ConversationCandidate[] = [];
       for (const project of await this.files.entries(join(root.home, 'projects'))) {
         if (project.kind !== 'directory') continue;
         for (const entry of await this.files.entries(join(root.home, 'projects', project.name))) {
@@ -504,7 +281,7 @@ export class ConversationImportService {
       }
       return found;
     }
-    const found: Candidate[] = [];
+    const found: ConversationCandidate[] = [];
     const pending: { readonly relative: string; readonly depth: number }[] = [{ relative: 'sessions', depth: 0 }];
     for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
       for (const entry of await this.files.entries(join(root.home, next.relative))) {

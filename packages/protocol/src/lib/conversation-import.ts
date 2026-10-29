@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import { InstantSchema } from './common.ts';
-import { SessionStatusSchema } from './session.ts';
-import { HarnessSchema } from './session-base.ts';
+import { HarnessSchema, SessionStatusSchema } from './session-base.ts';
 
 /**
  * Keeping an existing Claude Code / Codex conversation "on" as a ferret.

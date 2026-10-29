@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'bun:test';
+import { createHash } from 'node:crypto';
 import {
+  FileForeignTranscriptReader,
   type ForeignHistoryEntry,
   type ForeignHistoryFiles,
   ForeignHistoryImporter,
@@ -53,10 +55,10 @@ function importer(files: ForeignHistoryFiles) {
   return new ForeignHistoryImporter(
     files,
     { claudeProjects: CLAUDE_ROOT, codexSessions: CODEX_ROOT },
-    {
+    new FileForeignTranscriptReader(files, {
       claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), UNPACED),
       codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED),
-    },
+    }),
   );
 }
 
@@ -175,16 +177,20 @@ describe('ForeignHistoryImporter', () => {
       },
       UNPACED,
     );
+    const files = new FixtureFiles(
+      {
+        [CLAUDE_ROOT]: [{ name: 'project', kind: 'directory' }],
+        [`${CLAUDE_ROOT}/project`]: [{ name: 'partial.jsonl', kind: 'file' }],
+      },
+      { [source]: `${validClaude}\n` },
+    );
     const history = new ForeignHistoryImporter(
-      new FixtureFiles(
-        {
-          [CLAUDE_ROOT]: [{ name: 'project', kind: 'directory' }],
-          [`${CLAUDE_ROOT}/project`]: [{ name: 'partial.jsonl', kind: 'file' }],
-        },
-        { [source]: `${validClaude}\n` },
-      ),
+      files,
       { claudeProjects: CLAUDE_ROOT, codexSessions: CODEX_ROOT },
-      { claude: partial, codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED) },
+      new FileForeignTranscriptReader(files, {
+        claude: partial,
+        codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED),
+      }),
     );
 
     await expect(history.list()).resolves.toEqual({
@@ -237,3 +243,58 @@ describe('ForeignHistoryImporter', () => {
     expect(read).toEqual([]);
   });
 });
+
+describe('FileForeignTranscriptReader', () => {
+  const source = `${CLAUDE_ROOT}/project/foreign-claude.jsonl`;
+  const reader = () =>
+    new FileForeignTranscriptReader(new FixtureFiles({}, { [source]: `${validClaude}\n` }), {
+      claude: new PacedTranscriptParser(new ClaudeTranscriptParser(), UNPACED),
+      codex: new PacedTranscriptParser(new CodexTranscriptParser(), UNPACED),
+    });
+
+  test('answers a row alone for a listing and the row with its events for a detail', async () => {
+    const candidate = { harness: 'claude' as const, source };
+
+    const listed = await reader().read(candidate, false);
+    const detailed = await reader().read(candidate, true);
+
+    if (!('conversation' in listed) || !('conversation' in detailed)) throw new Error('expected a conversation');
+    expect(listed.events).toEqual([]);
+    expect(listed.conversation.eventCount).toBe(1);
+    expect(detailed.events).toHaveLength(1);
+    expect(detailed.conversation).toEqual(listed.conversation);
+  });
+});
+
+describe('ForeignHistoryImporter over a reader', () => {
+  test('asks the reader for a row alone when it lists and for events when it opens one', async () => {
+    const asked: boolean[] = [];
+    const files = new FixtureFiles({ [CLAUDE_ROOT]: [{ name: 'a.jsonl', kind: 'file' }] }, {});
+    const conversation = {
+      id: idOf('claude', `${CLAUDE_ROOT}/a.jsonl`),
+      harness: 'claude' as const,
+      title: 'a',
+      source: `${CLAUDE_ROOT}/a.jsonl`,
+      eventCount: 0,
+      readOnly: true as const,
+    };
+    const history = new ForeignHistoryImporter(
+      files,
+      { claudeProjects: CLAUDE_ROOT, codexSessions: CODEX_ROOT },
+      {
+        read: async (_candidate, withEvents) => {
+          asked.push(withEvents);
+          return { conversation, events: [] };
+        },
+      },
+    );
+
+    await history.list();
+    await history.get(conversation.id);
+
+    expect(asked).toEqual([false, true]);
+  });
+});
+
+const idOf = (harness: string, source: string): string =>
+  createHash('sha256').update(`${harness}\u0000${source}`, 'utf8').digest('base64url');

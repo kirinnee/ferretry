@@ -29,7 +29,7 @@ import {
   type TranscriptImageDownload,
   type TranscriptImageHandle,
   type TranscriptImageMediaType,
-} from '@ferretry/protocol';
+} from '@ferretry/protocol/transcript-images';
 import { inspectImageBase64 } from '../../transcript/image-bytes.ts';
 import { recordImages } from '../../transcript/images.ts';
 import type { SlicedTranscriptInput } from '../../transcript/sliced.ts';
@@ -75,6 +75,11 @@ export interface TranscriptImageParser {
   parse(input: SlicedTranscriptInput): Promise<TranscriptParseResult>;
 }
 
+/** What a route needs of the reader: the image a handle names, proved. Where the proof runs is the adapter's choice. */
+export interface TranscriptImages {
+  lookup(sessionId: string, handleText: string): Promise<TranscriptImageLookup>;
+}
+
 export interface TranscriptImageLookup {
   /** A strong validator: this session, this handle, this size. Never the bytes. */
   readonly etag: string;
@@ -112,7 +117,7 @@ const NOT_FOUND = 'the session has no image at that handle';
 const imageTag = (sessionId: string, handle: string, byteLength: number): string =>
   `"${createHash('sha256').update(`${sessionId}\u0000${handle}\u0000${byteLength}`).digest('base64url')}"`;
 
-export class TranscriptImageReader {
+export class TranscriptImageReader implements TranscriptImages {
   readonly #proofs = new Map<string, Proof>();
   readonly #waiting: Array<() => void> = [];
   #running = 0;
@@ -127,12 +132,24 @@ export class TranscriptImageReader {
 
   /** The image `handleText` names in `sessionId`'s transcript, proved; every refusal is a {@link TranscriptImageError}. */
   async lookup(sessionId: string, handleText: string): Promise<TranscriptImageLookup> {
+    // The handle is judged before the session is looked up: a caller that sends nonsense learns nothing of it.
+    if (parseTranscriptImageHandle(handleText) === undefined)
+      return refuse('invalid_image_handle', 'the image handle is not usable');
+    const target = await this.locator.locate(sessionId);
+    if (target === undefined) return refuse('no_transcript', `session ${sessionId} has no transcript to read`);
+    return await this.lookupAt(sessionId, handleText, target);
+  }
+
+  /**
+   * {@link lookup} for a transcript already located: the proof, with no locator in it. The event loop
+   * locates (it owns the session registry) and the transcript parse worker proves, so this is the half
+   * that crosses between them.
+   */
+  async lookupAt(sessionId: string, handleText: string, target: TranscriptImageTarget): Promise<TranscriptImageLookup> {
     const handle = parseTranscriptImageHandle(handleText);
     if (handle === undefined) return refuse('invalid_image_handle', 'the image handle is not usable');
     const name = formatTranscriptImageHandle(handle);
 
-    const target = await this.locator.locate(sessionId);
-    if (target === undefined) return refuse('no_transcript', `session ${sessionId} has no transcript to read`);
     const fingerprint = await this.files.fingerprint(target.file).catch(() => undefined);
     if (fingerprint === undefined)
       return refuse('transcript_unreadable', `session ${sessionId} has a transcript this daemon could not read`);
