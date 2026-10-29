@@ -51,6 +51,7 @@
    wraps the tools onto a second line rather than squeezing them. */
 .fy-attn-inbox__head {
   display: flex;
+  min-height: 32px;
   min-width: 0;
   flex-wrap: wrap;
   align-items: center;
@@ -131,6 +132,7 @@
 }
 .fy-attn-inbox__machine {
   max-width: 12rem;
+  flex-shrink: 0;
   padding: 0 var(--gap-sm);
 }
 .fy-attn-inbox__find {
@@ -148,6 +150,9 @@
   outline: none;
   box-shadow: 0 0 0 var(--focus-width, 2px) var(--ring, var(--accent-soft));
 }
+.fy-attn-inbox__find > svg {
+  flex-shrink: 0;
+}
 .fy-attn-inbox__find-input {
   min-width: 0;
   flex: 1;
@@ -164,12 +169,16 @@
 @media (max-width: 767.98px) {
   .fy-attn-inbox__tools {
     flex-basis: 100%;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
     justify-content: flex-start;
   }
   .fy-attn-inbox__find {
     width: auto;
-    flex: 1 1 8rem;
+    flex: 1 1 7rem;
+    min-width: 7rem;
+    min-height: 44px;
+  }
+  .fy-attn-inbox__chip {
     min-height: 44px;
   }
   .fy-attn-inbox__find-input,
@@ -181,7 +190,8 @@
   }
   .fy-attn-inbox__machine {
     min-height: 44px;
-    max-width: 9rem;
+    max-width: none;
+    flex-shrink: 0;
   }
 }
 .fy-attn-inbox__clear {
@@ -479,6 +489,10 @@
   padding: 0 var(--gap-sm) 0 0;
   color: inherit;
   font: inherit;
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
   cursor: pointer;
 }
 .fy-inbox-section__toggle:hover {
@@ -549,6 +563,9 @@
 .fy-inbox-group__machine {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.fy-inbox-group__dot {
+  margin: 0 var(--gap-xs);
 }
 /* A line: the item's title and age, its ask, its kind and reference. A light border and a roomy pad make
    the target; selection and press fill it. */
@@ -698,8 +715,10 @@
 /* The Warden chip: a quiet pill that says what the page is narrowed to, and clears it. */
 .fy-attn-inbox__chip {
   display: inline-flex;
-  min-height: 44px;
+  min-height: 32px;
+  flex-shrink: 0;
   align-items: center;
+  white-space: nowrap;
   gap: var(--gap-sm);
   border: var(--stroke-control, 1px) solid var(--border);
   border-radius: var(--radius-pill);

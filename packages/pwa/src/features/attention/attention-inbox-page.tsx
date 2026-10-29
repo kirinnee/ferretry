@@ -410,7 +410,7 @@ function ItemRow({
         </span>
         {ask === null ? null : <span className="fy-inbox-row__ask">{ask}</span>}
         <span className="fy-inbox-row__meta">
-          {status === null ? null : <AgendaStatusPill status={status} />}
+          {status === null || status.tone === 'needs-you' ? null : <AgendaStatusPill status={status} />}
           <span>{kindWord(card.item)}</span>
           <span aria-hidden="true">·</span>
           <span>{attentionReference(card.item.id)}</span>
@@ -474,8 +474,18 @@ function GroupView({ group, env }: { readonly group: FerretGroup; readonly env: 
         to={daemonSessionPath(group.daemonId, group.view.config.id)}
       >
         <span className="fy-inbox-group__ferret">{group.ferret}</span>
-        {group.task === null ? null : <span className="fy-inbox-group__task"> · {group.task}</span>}
-        <span className="fy-inbox-group__machine"> · {group.machineName}</span>
+        {group.task === null ? null : (
+          <>
+            <span aria-hidden="true" className="fy-inbox-group__dot">
+              ·
+            </span>
+            <span className="fy-inbox-group__task">{group.task}</span>
+          </>
+        )}
+        <span aria-hidden="true" className="fy-inbox-group__dot">
+          ·
+        </span>
+        <span className="fy-inbox-group__machine">{group.machineName}</span>
       </RouteLink>
       <ul aria-label={`${group.ferret}'s items`} className="fy-inbox-group__rows">
         {group.items.map(card => (
@@ -525,14 +535,14 @@ function Section({
           onClick={onToggle}
           type="button"
         >
+          {title}
+          <span className="fy-inbox-section__count">{count}</span>
           <ChevronRight
             aria-hidden="true"
             className="fy-attn-group__chevron"
             data-open={shown || undefined}
             size={14}
           />
-          {title}
-          <span className="fy-inbox-section__count">{count}</span>
         </button>
       </h2>
     );

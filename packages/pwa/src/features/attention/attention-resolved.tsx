@@ -18,7 +18,7 @@ import { attentionReference, describeResponse, resolutionBadge } from './attenti
 export const ATTENTION_RESOLVED_ACTION_ID = 'attention-resolved';
 
 /** The DOM id one item is drawn under, so a link can scroll to it. */
-export const attentionPanelItemId = (panelId: string, id: AttentionId): string => `${panelId}-item-${id}`;
+const attentionPanelItemId = (panelId: string, id: AttentionId): string => `${panelId}-item-${id}`;
 
 /** Newest resolution first: the one just made is the one the reader is looking for. */
 export const byNewestResolution = (left: ResolvedAttentionItem, right: ResolvedAttentionItem): number =>

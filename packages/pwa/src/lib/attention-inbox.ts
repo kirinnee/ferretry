@@ -77,7 +77,7 @@ export const unreadCount = (view: SessionView): number => {
 
 /** How many of an open board's items need the owner: the pinned panel's header count. */
 export const needsYouItems = (items: readonly Pick<AttentionItem, 'waitingOn' | 'waitingFor'>[]): number =>
-  items.filter(item => !isInDiscussion(item)).length;
+  items.filter(item => !attentionInDiscussion(item)).length;
 
 /** The badge's text: a count, capped so it never widens a row. */
 export const badgeText = (count: number): string => (count > 99 ? '99+' : String(count));
@@ -279,13 +279,6 @@ export const NEEDS_INFO_ACTION: Extract<InboxAction, { kind: 'needs-info' }> = {
   kind: 'needs-info',
   label: 'Need more info',
 };
-
-/** The ferret was asked for more information, or to discuss, and has not yet edited the item. */
-export const isWaitingOnFerret = (item: Pick<AttentionItem, 'waitingOn'>): boolean => item.waitingOn === 'ferret';
-
-/** The owner asked to talk this item through and the ferret has not updated it: the summary counts it apart. */
-export const isInDiscussion = (item: Pick<AttentionItem, 'waitingOn' | 'waitingFor'>): boolean =>
-  attentionInDiscussion(item);
 
 /** The ticked steps of an item once the not-yet-confirmed ticks are laid over them. */
 export const tickedSteps = (

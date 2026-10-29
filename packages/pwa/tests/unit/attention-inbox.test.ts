@@ -23,7 +23,6 @@ import {
   inboxCards,
   inboxOptions,
   inboxResolved,
-  isInDiscussion,
   NEEDS_INFO_ACTION,
   needsYouCount,
   needsYouItems,
@@ -292,11 +291,6 @@ describe('Discuss', () => {
 
   test('still says what an old discuss held, for an answer that was in flight', () => {
     expect(actionSentence({ kind: 'discuss', label: 'Discuss' }, 'A3')).toBe('Asked to discuss !A3');
-  });
-
-  test("reads a discussion as the ferret's turn on a discussion, and nothing else", () => {
-    expect(isInDiscussion({ waitingOn: 'ferret', waitingFor: 'discussion' })).toBe(true);
-    expect(isInDiscussion({ waitingOn: 'ferret', waitingFor: 'info' })).toBe(false);
   });
 
   test('puts "You asked to discuss" in the history line', () => {
