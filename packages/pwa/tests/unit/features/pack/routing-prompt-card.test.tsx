@@ -9,8 +9,8 @@ import {
 } from '@ferretry/protocol';
 import { RoutingPromptCard, type RoutingPromptCardProps } from '../../../../src/features/pack/routing-prompt-card.tsx';
 import { ideaLimitFor } from '../../../../src/lib/pack/routing-prompt.ts';
-import { healthOf } from '../../../support/health.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../../support/dom.ts';
+import { healthOf } from '../../../support/health.ts';
 import { byText, click, textOf, typeInto, waitFor, waitForText } from '../../../support/learning-dom.ts';
 import {
   IDLE_ROUTING_API,

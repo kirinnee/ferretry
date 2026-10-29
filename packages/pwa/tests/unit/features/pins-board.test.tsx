@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
-import { renderToStaticMarkup } from 'react-dom/server';
 import type { PinSnapshot } from '@ferretry/protocol';
+import { renderToStaticMarkup } from 'react-dom/server';
 import {
   DaemonPinsBoard,
   PinsBoard,

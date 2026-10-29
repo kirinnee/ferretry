@@ -8,12 +8,12 @@ import { useSettingsFlow } from '../../../../src/features/fleet/setup/settings-r
 import type { MachineTabProps, MachineTabSurfaces } from '../../../../src/features/fleet/shell/machines-surface.tsx';
 import { DaemonHostChecks, type DaemonReachabilityProbe } from '../../../../src/features/settings/daemon-settings.tsx';
 import type { DaemonSettingsTabDefinition } from '../../../../src/features/settings/daemon-settings-frame.tsx';
+import { settingDefinition } from '../../../../src/features/settings/settings-catalog.ts';
 import { SettingsPage, SettingsScope, SettingsSection } from '../../../../src/features/settings/settings-page.tsx';
 import type { WardenClientFactory } from '../../../../src/features/warden/warden-config-card.tsx';
 import type { DaemonConnectionRecord } from '../../../../src/lib/connections.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../../../src/lib/controls.ts';
 import { type DaemonId, daemonConnection } from '../../../../src/lib/daemon-connection.ts';
-import { settingDefinition } from '../../../../src/features/settings/settings-catalog.ts';
 import { DEFAULT_STT_SETTINGS } from '../../../../src/lib/stt/stt-settings.ts';
 import { UNSUPPORTED_RECOGNITION } from '../../../support/browser-recognition.ts';
 import { interact, mount, must } from '../../../support/dom.ts';

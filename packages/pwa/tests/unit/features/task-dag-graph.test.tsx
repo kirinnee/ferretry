@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'bun:test';
+import { filterTaskDag, taskDag } from '../../../src/features/tasks/task-dag.ts';
 import {
-  TaskDagGraph,
   fitTaskDagTransform,
   shouldNavigateTaskAgentLink,
+  TaskDagGraph,
 } from '../../../src/features/tasks/task-dag-graph.tsx';
-import { filterTaskDag, taskDag } from '../../../src/features/tasks/task-dag.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import { interact, mount, pressKey } from '../../support/dom.ts';
+import { render, run } from '../../support/react.ts';
 import { taskSummary } from '../../support/tasks.ts';
 
 const alpha = daemonId('daemon-alpha');
@@ -140,5 +141,48 @@ describe('TaskDagGraph', () => {
       Object.defineProperty(globalThis, 'ResizeObserver', { configurable: true, value: previous });
     }
     expect(disconnected).toBe(1);
+  });
+
+  it('falls back to the default canvas size when the host has no measurable canvas', () => {
+    // react-test-renderer attaches no DOM nodes, so the canvas ref stays empty.
+    const renderer = render(<TaskDagGraph daemonId={alpha} dag={graph} onOpen={() => {}} />);
+    const viewBox = () =>
+      renderer.root.find(node => node.type === 'svg' && node.props.viewBox !== undefined && node.props.width === '100%')
+        .props.viewBox;
+
+    expect(viewBox()).toBe('0 0 390 520');
+    run(() => renderer.root.findByProps({ 'aria-label': 'Fit graph' }).props.onClick());
+    expect(viewBox()).toBe('0 0 390 520');
+    run(() => renderer.unmount());
+  });
+
+  it('still pans when the browser rejects pointer capture', async () => {
+    const view = await mount(<TaskDagGraph daemonId={alpha} dag={graph} onOpen={() => {}} />);
+    try {
+      const canvas = view.container.querySelector('.kt-task-dag-canvas') as HTMLElement;
+      canvas.setPointerCapture = () => {
+        throw new Error('rejects pointer capture');
+      };
+      const pointer = (type: string, clientX: number): PointerEvent => {
+        const event = new Event(type, { bubbles: true, cancelable: true }) as PointerEvent;
+        Object.defineProperties(event, {
+          pointerId: { value: 1 },
+          clientX: { value: clientX },
+          clientY: { value: 10 },
+        });
+        return event;
+      };
+      const shifted = () => view.container.querySelector('svg > g')?.getAttribute('transform');
+      const before = shifted();
+
+      await interact(() => canvas.dispatchEvent(pointer('pointerdown', 10)));
+      expect(canvas.dataset.panning).toBe('true');
+      await interact(() => canvas.dispatchEvent(pointer('pointermove', 60)));
+      expect(shifted()).not.toBe(before);
+      await interact(() => canvas.dispatchEvent(pointer('pointerup', 60)));
+      expect(canvas.dataset.panning).toBeUndefined();
+    } finally {
+      await view.unmount();
+    }
   });
 });

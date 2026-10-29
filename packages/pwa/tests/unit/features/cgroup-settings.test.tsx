@@ -192,10 +192,9 @@ describe('CgroupConfigCard while a save is in flight', () => {
 
     expect(spinning(JSON.stringify(idle.toJSON()))).toBe(false);
     expect(spinning(JSON.stringify(busy.toJSON()))).toBe(true);
-    const apply = busy.root
-      .findAllByType('button')
-      .find(button => JSON.stringify(button.props.children).includes('Apply'));
-    expect(apply?.props.disabled).toBe(true);
+    const buttons = busy.root.findAllByType('button');
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]?.props.disabled).toBe(true);
   });
 
   it('shows the same spinner on Disable where enforcement is unavailable but still saved as on', () => {

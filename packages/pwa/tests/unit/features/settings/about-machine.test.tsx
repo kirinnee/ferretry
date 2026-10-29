@@ -5,10 +5,10 @@ import {
   AboutMachineSurface,
   aboutSettingsTab,
 } from '../../../../src/features/settings/about-machine.tsx';
+import { type WhatsNewEntry, WhatsNewProvider } from '../../../../src/features/whats-new/whats-new-host.tsx';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { updateView } from './about-machine-support.ts';
-import { type WhatsNewEntry, WhatsNewProvider } from '../../../../src/features/whats-new/whats-new-host.tsx';
 
 const connection = daemonConnection({ daemonId: 'alpha', baseUrl: 'https://alpha.example.test', deviceId: 'device-a' });
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');

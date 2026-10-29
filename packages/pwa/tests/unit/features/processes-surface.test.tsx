@@ -6,6 +6,9 @@ import {
   type ProcessStopper,
 } from '../../../src/features/workspace/processes-surface.tsx';
 import {
+  applyOutput,
+  EMPTY_OUTPUT,
+  PROCESS_OUTPUT_HELD_MAX,
   type ProcessListState,
   type ProcessOutputReader,
   useSessionProcesses,
@@ -68,6 +71,7 @@ interface Options {
   readonly onShowConsole?: () => void;
   readonly outputPollMs?: number;
   readonly clipboard?: string[];
+  readonly clipboardRefuses?: boolean;
 }
 
 const setup = async (options: Options = {}) => {
@@ -92,6 +96,7 @@ const setup = async (options: Options = {}) => {
       ...(options.stopProcess === undefined ? {} : { stopProcess: options.stopProcess }),
       ...(options.outputPollMs === undefined ? {} : { outputPollMs: options.outputPollMs }),
       writeClipboard: async text => {
+        if (options.clipboardRefuses === true) throw new Error('clipboard denied');
         options.clipboard?.push(text);
       },
     };
@@ -305,6 +310,53 @@ describe('an opened process', () => {
     await turns();
     expect(copied).toEqual(['bun test v1.3.13\n✓ adds numbers\n✗ fails loudly\n 2 pass, 1 fail']);
     expect(view.container.querySelector('[data-action-toast]')?.textContent).toContain('Copied');
+  });
+
+  it('counts and steps through several matches that share one line', async () => {
+    const { reader } = readerOf({
+      '100.1': [outputAnswer('100.1', 'beta and beta\nno\n', { complete: true })],
+    });
+    const { q, view, rowFor, click } = await setup({ readOutput: reader });
+    await click(rowFor('100.1'));
+    await turns();
+    await click(q('[aria-label="Find in output"].kt-btn', 'the Find button'));
+    await typeInto(q<HTMLInputElement>('input[aria-label="Find in output"]', 'the find box'), 'beta');
+
+    expect(q('[data-find-count]', 'the count').textContent).toBe('1 of 2');
+    expect(view.container.querySelectorAll('[data-match]')).toHaveLength(2);
+    expect(view.container.querySelectorAll('[data-current-match]')).toHaveLength(1);
+    await click(q('[aria-label="Next match"]', 'next'));
+    expect(q('[data-find-count]', 'the count').textContent).toBe('2 of 2');
+  });
+
+  it('says so when the browser blocks copying the output', async () => {
+    const { reader } = readerOf({ '100.1': [outputAnswer('100.1', 'some output\n', { complete: true })] });
+    const { q, view, rowFor, click } = await setup({ readOutput: reader, clipboardRefuses: true });
+    await click(rowFor('100.1'));
+    await turns();
+    await click(q('[aria-label="Copy output"]', 'Copy'));
+    await turns();
+
+    expect(view.container.querySelector('[data-action-toast]')?.textContent).toContain(
+      'Copy was blocked — select the text instead',
+    );
+    expect(view.container.querySelector('[data-action-toast]')?.textContent).not.toContain('Copied');
+  });
+
+  it('tells a finished process that printed nothing from one that has not printed yet', async () => {
+    const { reader } = readerOf({
+      '100.1': [outputAnswer('100.1', '', { complete: true })],
+      '200.2': [outputAnswer('200.2', '')],
+    });
+    const { q, rowFor, click } = await setup({ readOutput: reader });
+
+    await click(rowFor('100.1'));
+    await turns();
+    expect(q('.fy-proc-body', 'the body').textContent).toBe('It printed nothing.');
+
+    await click(rowFor('200.2'));
+    await turns();
+    expect(q('.fy-proc-body', 'the body').textContent).toBe('No output yet.');
   });
 
   it('explains output that cannot be read and offers the Console', async () => {
@@ -636,5 +688,19 @@ describe('inverse colours in the output', () => {
     has('B', 'var(--code-bg)', 'var(--fy-ansi-1)');
     has('C', 'var(--fy-ansi-2)', 'var(--code-fg)');
     has('D', 'var(--fy-ansi-2)', 'var(--fy-ansi-1)');
+  });
+});
+
+describe('holding the output of a long-running process', () => {
+  it('keeps only the newest of what it is allowed to hold, and says earlier output is gone', () => {
+    const first = applyOutput(EMPTY_OUTPUT, outputAnswer('100.1', 'a'.repeat(PROCESS_OUTPUT_HELD_MAX - 10)));
+    expect(first.skipped).toBe(false);
+
+    const held = applyOutput(first, outputAnswer('100.1', 'b'.repeat(20)));
+
+    expect(held.text).toHaveLength(PROCESS_OUTPUT_HELD_MAX);
+    expect(held.text.endsWith('a'.repeat(10) + 'b'.repeat(20))).toBe(true);
+    expect(held.text.startsWith('a')).toBe(true);
+    expect(held.skipped).toBe(true);
   });
 });
