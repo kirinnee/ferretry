@@ -43,23 +43,21 @@ const sections = (root: ParentNode): string[] =>
 describe('AttentionCard sections', () => {
   test('a rich item draws every section, in order, all open — the card shows everything to decide', async () => {
     view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual(['context', 'terms', 'questions', 'impact', 'links']);
-    const open = [...view.container.querySelectorAll('[data-attention-section]')]
-      .filter(node => node.hasAttribute('open'))
-      .map(node => node.getAttribute('data-attention-section'));
-    expect(open).toEqual(['context', 'terms', 'questions', 'impact', 'links']);
+    expect(sections(view.container)).toEqual(['context', 'questions', 'recommendation', 'impact', 'terms', 'links']);
+    // Open means drawn, not folded: no section is a `<details>` the reader has to open.
+    expect(view.container.querySelectorAll('details[data-attention-section]')).toHaveLength(0);
     expect(view.container.textContent).toContain('Urgency:');
   });
 
   test('the summary is drawn once, and a why that repeats it is not drawn', async () => {
     view = await mount(<AttentionCard item={rich} onAct={() => {}} />);
     expect(view.container.textContent?.split('Pick the storage').length).toBe(2);
-    expect(view.container.querySelector('.fy-attn-card__why')).toBeNull();
+    expect(view.container.querySelector('[data-attention-why]')).toBeNull();
   });
 
   test('a different why is kept', async () => {
     view = await mount(<AttentionCard item={{ ...rich, why: 'It blocks the release.' }} onAct={() => {}} />);
-    expect(view.container.querySelector('.fy-attn-card__why')?.textContent).toContain('It blocks the release.');
+    expect(view.container.querySelector('[data-attention-why]')?.textContent).toContain('It blocks the release.');
   });
 
   test('an external link opens safely in a new tab', async () => {
@@ -72,13 +70,15 @@ describe('AttentionCard sections', () => {
   test('an old item stays minimal: the summary, its context and its options', async () => {
     const old = attentionItem('A2', { subject: 'Approve?', context: 'Halfway there.', ask: choices('Yes', 'No') });
     view = await mount(<AttentionCard item={old} onAct={() => {}} />);
-    expect(sections(view.container)).toEqual([]);
-    expect(view.container.querySelector('.fy-attn-card__context')?.textContent).toBe('Halfway there.');
+    expect(sections(view.container)).toEqual(['context']);
+    expect(view.container.querySelector('[data-attention-section="context"] .fy-attn-prose')?.textContent).toBe(
+      'Halfway there.',
+    );
     expect(view.container.querySelectorAll('[data-attention-option]')).toHaveLength(2);
     expect(view.container.querySelector('[data-attention-recommended]')).toBeNull();
   });
 
-  test('the header names the ferret and machine, then the title, ask and recommendation stand above the detail', async () => {
+  test('the header names the ferret and machine, the title stands above the detail, the recommendation is one of its sections', async () => {
     view = await mount(
       <AttentionCard
         item={rich}
@@ -90,7 +90,12 @@ describe('AttentionCard sections', () => {
     expect(view.container.querySelector('.fy-attn-card__origin-sub')?.textContent).toBe('Laptop');
     expect(view.container.querySelector('[data-attention-title]')?.textContent).toBeTruthy();
     expect(view.container.querySelector('[data-attention-recommendation]')?.textContent).toContain('Use SQLite');
-    expect(view.container.querySelector('[data-attention-scroll] [data-attention-recommendation]')).toBeNull();
+    expect(view.container.querySelector('[data-attention-scroll] [data-attention-title]')).toBeNull();
+    expect(
+      view.container.querySelector(
+        '[data-attention-scroll] [data-attention-section="recommendation"] [data-attention-recommendation]',
+      ),
+    ).not.toBeNull();
   });
 });
 

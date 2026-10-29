@@ -3,7 +3,8 @@
  *
  *   inbox-phone / inbox-desktop   the list; on desktop beside the selected item’s card
  *   panel-phone / panel-desktop   the pinned item above the composer
- *   details-phone / -desktop      the same, Details open
+ *   rich-phone / -desktop         the pinned item with the whole brief: every section open, in order
+ *   details-phone / -desktop      a long card scrolled to its end (nothing is folded behind a button)
  *   task-*                       a step-by-step to-do: ticked partly / fully, waiting on the ferret, the
  *                                 phone deck mid-swipe right (Done) and left (Need more info), the desktop inbox
  *   quiet-empty-*                a chat with nothing open: nothing above the composer, no badge
@@ -128,8 +129,17 @@ try {
         page = await open(context, theme, 'panel');
         await shot(page, scheme, `panel-${label}`);
         await page.close();
+        page = await open(context, theme, 'rich');
+        await shot(page, scheme, `rich-${label}`);
+        await page.close();
         page = await open(context, theme, 'long');
-        await page.locator('[data-attention-details]').first().click();
+        // Nothing is folded behind a button: the detail is all there, so scroll the card's own middle to its end.
+        await page
+          .locator('[data-attention-scroll]')
+          .first()
+          .evaluate(el => {
+            el.scrollTop = el.scrollHeight;
+          });
         await page.waitForTimeout(200);
         await shot(page, scheme, `details-${label}`);
         await page.close();

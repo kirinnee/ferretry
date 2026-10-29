@@ -1,7 +1,9 @@
 /**
  * ONE ATTENTION ITEM, AS A CARD THAT STANDS ALONE: a header (what kind of card, which ferret and machine,
- * how long it has waited), the TITLE, the ask, the recommendation when there is one — then, scrolling
- * inside the card, everything the owner needs to decide — and the answer bar pinned under it.
+ * how long it has waited), the TITLE — then, scrolling inside the card, everything the owner needs to
+ * decide, every section OPEN and in one fixed order (premise, context, the question, what is already
+ * decided, options, recommendation, terms, steps, more detail; `AttentionBriefSections`) — and the answer
+ * bar pinned under it. Nothing hides behind a click except a long "More detail".
  *
  * It is the one card every place draws — the Attention inbox's deck, where it also swipes, and the
  * sheet over the ferret's own conversation — so an answer reads, and is sent, the same in both. It
@@ -35,7 +37,6 @@ import {
 } from '../../lib/attention-answers.ts';
 import {
   answersPerQuestion,
-  hasAttentionBrief,
   historyLine,
   type InboxAction,
   isWaitingOnFerret,
@@ -47,8 +48,8 @@ import {
 } from '../../lib/attention-inbox.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { AttentionActions } from './attention-actions.tsx';
-import { attentionAge, attentionKindMeta, collapsesByDefault } from './attention-board.tsx';
-import { AttentionBriefSections, RecommendedBadge } from './attention-brief.tsx';
+import { attentionAge, attentionKindMeta } from './attention-board.tsx';
+import { AttentionBriefSections } from './attention-brief.tsx';
 import { useReplyDraft } from './attention-reply-draft.tsx';
 import { AttentionBody, AttentionSteps } from './attention-steps.tsx';
 
@@ -81,7 +82,7 @@ export interface AttentionCardProps {
   readonly onAct: (action: InboxAction) => void;
   /** Ticks or unticks one step on the machine; a rejection rolls the tick back. Absent: the steps are read-only. */
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
-  /** Pinned above the composer: no origin, the detail folded behind "Details". */
+  /** Pinned above the composer: no origin, the detail scrolling inside a height cap. */
   readonly pinned?: boolean;
   /** A control at the end of the header, after the age — the pinned card's fold button. */
   readonly headerSlot?: ReactNode;
@@ -111,12 +112,10 @@ export function AttentionCard({
 }: AttentionCardProps) {
   const titleId = useId();
   const draft = useReplyDraft();
-  const [detailsOpen, setDetailsOpen] = useState(false);
   const [localReply, setLocalReply] = useState('');
   const [replyOpen, setReplyOpen] = useState(false);
   const [localTick, setLocalTick] = useState(0);
   const [picks, setPicks] = useState<readonly string[]>([]);
-  const [contextOpen, setContextOpen] = useState(false);
   const replyRef = useRef<HTMLTextAreaElement>(null);
   const pendingFocus = useRef(false);
   const reply = draft?.text ?? localReply;
@@ -125,11 +124,8 @@ export function AttentionCard({
   const KindIcon = kind.icon;
   const answers = cardAnswers(item);
   const extras = unswipedChoices(item);
-  const rich = hasAttentionBrief(item);
   const perQuestion = answersPerQuestion(item);
   const textOnly = isTextOnlyAsk(item);
-  const context = item.context?.trim() ? item.context : null;
-  const longContext = context !== null && collapsesByDefault(context);
   const why = visibleWhy(item);
   const history = historyLine(item.history);
   const updated = updatedSinceAsked(item);
@@ -140,8 +136,8 @@ export function AttentionCard({
   // repeat its first words above it. (A push still cuts one, to fit a lock screen: `attentionTitle`.)
   const title = hasOwnTitle(item) ? attentionTitle(item) : item.subject.trim();
   const showAsk = item.subject.trim() !== title;
-  // `fy attention add --recommend` puts a lone question's pick ON the question: the card says it under the
-  // ask all the same, so the banner never depends on where the ferret wrote it.
+  // `fy attention add --recommend` puts a lone question's pick ON the question: the card says it in its
+  // Recommendation all the same, so it never depends on where the ferret wrote it.
   const lone = singleAttentionQuestion(item);
   const recommendation =
     item.recommendation ??
@@ -191,28 +187,6 @@ export function AttentionCard({
     setPicks([]);
   };
 
-  const bodyAndSteps = (
-    <>
-      {updated === null ? null : (
-        <p className="fy-attn-card__updated m-0" data-attention-updated="">
-          <span className="kt-attn-chip kt-label px-badge-x py-0.5">New</span>
-          Needs you again — the ferret updated this
-          {updated.note === undefined ? '.' : `: ${updated.note}`}
-        </p>
-      )}
-      {body === null ? null : <AttentionBody renderProse={renderProse} text={body} />}
-      {item.steps === undefined ? null : (
-        <AttentionSteps
-          disabled={busy}
-          done={item.stepsDone ?? []}
-          renderProse={renderProse}
-          steps={item.steps}
-          {...(onProgress === undefined ? {} : { onProgress })}
-        />
-      )}
-    </>
-  );
-  const folded = pinned && !detailsOpen && !perQuestion;
   const picker = perQuestion
     ? {
         answers: picks,
@@ -265,70 +239,36 @@ export function AttentionCard({
       <h3 className="fy-attn-card__title" data-attention-title="" id={titleId}>
         {title}
       </h3>
-      {showAsk ? (
-        <p className="fy-attn-card__ask" data-attention-ask="">
-          {item.subject}
-        </p>
-      ) : null}
-      {recommendation === undefined ? null : (
-        <p className="fy-attn-card__rec" data-attention-recommendation="">
-          <RecommendedBadge />
-          <span>
-            <strong>{recommendation.decision}</strong>
-            {recommendation.why === undefined ? null : <> — {recommendation.why}</>}
-          </span>
-        </p>
-      )}
       <div className="fy-attn-card__scroll" data-attention-scroll="">
-        {why === null ? null : (
-          <div className="fy-attn-card__why" data-attention-why="">
-            {renderProse(why)}
-          </div>
+        {updated === null ? null : (
+          <p className="fy-attn-card__updated m-0" data-attention-updated="">
+            <span className="kt-attn-chip kt-label px-badge-x py-0.5">New</span>
+            Needs you again — the ferret updated this
+            {updated.note === undefined ? '.' : `: ${updated.note}`}
+          </p>
         )}
-        {pinned && !perQuestion && (rich || context !== null) ? (
-          <button
-            aria-expanded={detailsOpen}
-            className="fy-attn-card__details"
-            data-attention-details=""
-            onClick={() => setDetailsOpen(open => !open)}
-            type="button"
-          >
-            {detailsOpen ? 'Hide details' : 'Details'}
-          </button>
-        ) : null}
-        {folded ? (
-          bodyAndSteps
-        ) : rich ? (
-          <AttentionBriefSections
-            expanded={!pinned}
-            item={item}
-            renderProse={renderProse}
-            askShown
-            showRecommendation={false}
-            {...(picker === undefined ? {} : { picker })}
-          >
-            {bodyAndSteps}
-          </AttentionBriefSections>
-        ) : (
-          <>
-            {context === null ? null : (
-              <div className="fy-attn-card__context" data-open={!longContext || contextOpen || undefined}>
-                {renderProse(context)}
-                {longContext ? (
-                  <button
-                    aria-expanded={contextOpen}
-                    className="fy-attn-card__more"
-                    onClick={() => setContextOpen(open => !open)}
-                    type="button"
-                  >
-                    {contextOpen ? 'Show less' : 'Show more'}
-                  </button>
-                ) : null}
-              </div>
-            )}
-            {bodyAndSteps}
-          </>
-        )}
+        <AttentionBriefSections
+          askShown
+          collapsible={false}
+          detail={body === null ? undefined : <AttentionBody renderProse={renderProse} text={body} />}
+          item={item}
+          recommendation={recommendation}
+          renderProse={renderProse}
+          steps={
+            item.steps === undefined ? undefined : (
+              <AttentionSteps
+                disabled={busy}
+                done={item.stepsDone ?? []}
+                renderProse={renderProse}
+                steps={item.steps}
+                {...(onProgress === undefined ? {} : { onProgress })}
+              />
+            )
+          }
+          why={why}
+          {...(showAsk ? { ask: item.subject } : {})}
+          {...(picker === undefined ? {} : { picker })}
+        />
         {history === null ? null : (
           <p className="fy-attn-card__history m-0 text-meta text-faint" data-attention-history="">
             {history}
