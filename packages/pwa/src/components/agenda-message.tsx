@@ -113,11 +113,28 @@ function AgendaReferenceChip({ id }: { readonly id: string }) {
   );
 }
 
+/**
+ * What a card's body says. A reply's heading already names its items, so the references the owner typed at the
+ * front of it ("!A5 Leaning SQLite") are not said again: leading `!A<n>` tokens that are exactly the card's own
+ * items are dropped. Display only — the ferret received the text as written; any other text is drawn whole.
+ */
+export const agendaPartBody = (part: Pick<AgendaMessagePart, 'kind' | 'items' | 'text'>): string => {
+  if (part.kind !== 're') return part.text;
+  const own = new Set(part.items.map(item => item.id));
+  const lead = /^\s*!(A[1-9][0-9]*)(?=[\s,;:]|$)[\s,;:]*/u;
+  let body = part.text;
+  for (let match = lead.exec(body); match !== null && own.has(match[1] as string); match = lead.exec(body)) {
+    body = body.slice(match[0].length);
+  }
+  return body;
+};
+
 function AgendaPart({ part }: { readonly part: AgendaMessagePart }) {
   const lookup = useContext(AgendaItemsContext);
   const items = part.items.map(named => ({ named, item: lookup(named.id) }));
   const first = items[0]?.item;
   const chosen = isChosenAnswer(part, first);
+  const body = agendaPartBody(part);
   return (
     <section className="fy-agenda-msg-part" data-agenda-kind={part.kind}>
       <header className="fy-agenda-msg-head">
@@ -131,15 +148,15 @@ function AgendaPart({ part }: { readonly part: AgendaMessagePart }) {
           {item === undefined ? named.quote : agendaTitle(item)}
         </p>
       ))}
-      {part.text === '' ? null : chosen ? (
+      {body === '' ? null : chosen ? (
         <p className="fy-agenda-msg-choice">
           <span className="fy-agenda-msg-option">
             <Check aria-hidden="true" size={14} strokeWidth={2.5} />
-            <span>{part.text}</span>
+            <span>{body}</span>
           </span>
         </p>
       ) : (
-        <p className="fy-agenda-msg-text">{part.text}</p>
+        <p className="fy-agenda-msg-text">{body}</p>
       )}
       {part.note === undefined ? null : (
         <p className="fy-agenda-msg-note">
