@@ -506,9 +506,9 @@ describe('BoardPage — moving cards', () => {
     expect(root.querySelector('.fy-board__notice')).toBeNull();
   });
 
-  it('closes a card from To test in one tap with "Works → Close"', async () => {
+  it('closes a card from To test in one tap with Done', async () => {
     const { root, acts } = await open();
-    await click(root, '[data-task="F4"] [data-verdict="works"]');
+    await click(root, '[data-task="F4"] .fy-board-done');
     expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
   });
 

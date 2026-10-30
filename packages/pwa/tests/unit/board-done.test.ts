@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import { boardDone, doneLabel, doneTitle } from '../../src/lib/board-done.ts';
+import { boardDone, doneLabel, doneTitle, isReleaseLane } from '../../src/lib/board-done.ts';
 import { laneSetFor } from './board-support.ts';
+import { must } from '../support/dom.ts';
 
 const lanes = laneSetFor();
 
@@ -52,5 +53,16 @@ describe('the words', () => {
     expect(doneTitle({ kind: 'reopen', laneId: 'implement' }, 'Fix it')).toBe(
       'Reopen Fix it: send it back, with a reason',
     );
+  });
+});
+
+describe('isReleaseLane', () => {
+  it('is the last shipped lane of the set, not an earlier one', () => {
+    const shipped = lanes.lanes.filter(lane => lane.category === 'shipped');
+    expect(shipped.length).toBeGreaterThan(1);
+    expect(isReleaseLane(lanes, must(shipped.at(-1), 'the release lane').id)).toBe(true);
+    expect(isReleaseLane(lanes, must(shipped[0], 'the merged lane').id)).toBe(false);
+    expect(isReleaseLane(lanes, 'todo')).toBe(false);
+    expect(isReleaseLane(null, 'released')).toBe(false);
   });
 });

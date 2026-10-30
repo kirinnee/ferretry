@@ -29,6 +29,8 @@ import { archiveRowsOf, TableRows } from './board-table.tsx';
 export interface BoardDoneControl {
   readonly done: BoardDone;
   readonly press: () => void;
+  /** The card sits in the release lane, where the Done row is drawn on the card itself. */
+  readonly atRelease: boolean;
 }
 
 /** What every view needs to draw and wire a card. */
@@ -62,6 +64,7 @@ interface PlacedProps {
 export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
   const moves = place === undefined ? undefined : env.movesFor(card, place);
+  const done = place === undefined ? undefined : env.doneFor?.(card, place);
   return (
     <BoardCard
       card={card}
@@ -75,6 +78,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
       showMachine={env.showMachine}
       touch={env.touch === true}
       {...(moves === undefined ? {} : { moves })}
+      {...(done === undefined ? {} : { done })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
     />

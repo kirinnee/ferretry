@@ -46,3 +46,7 @@ export const doneLabel = (done: BoardDone, spelledOut = false): string =>
 /** The sentence behind the control, for a tooltip and a screen reader. */
 export const doneTitle = (done: BoardDone, cardTitle: string): string =>
   done.kind === 'reopen' ? `Reopen ${cardTitle}: send it back, with a reason` : `Mark ${cardTitle} done and close it`;
+
+/** Whether this lane is where released work waits to be tried: the last of the set's shipped lanes (Merged is earlier). */
+export const isReleaseLane = (laneSet: DoneLanes | null, laneId: string): boolean =>
+  laneSet?.lanes.filter(lane => lane.category === 'shipped').at(-1)?.id === laneId;
