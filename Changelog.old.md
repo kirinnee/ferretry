@@ -1,3 +1,9 @@
+## [4.118.0](https://github.com/kirinnee/ferretry/compare/v4.117.0...v4.118.0) (2026-10-30)
+
+### Features
+
+* **warden:** revive sessions that died abnormally ([#960](https://github.com/kirinnee/ferretry/issues/960)) ([bf113ef](https://github.com/kirinnee/ferretry/commit/bf113ef0885355666cbe6fbe379a114774cf8f0f))
+
 ## [4.117.0](https://github.com/kirinnee/ferretry/compare/v4.116.0...v4.117.0) (2026-10-30)
 
 ### Features
