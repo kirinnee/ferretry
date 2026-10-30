@@ -45,6 +45,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync } from 'node:fs';
+import { availableParallelism } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Locator, Page } from 'playwright-core';
@@ -52,8 +53,9 @@ import { type Browser, chromium, webkit } from 'playwright-core';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
 import { captureElement } from './gallery-capture.ts';
 import { assertFixedElementsClear } from './landing-geometry.ts';
+import { type PoolTask, runOrderedPool } from './ordered-pool.ts';
 import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geometry.ts';
-import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
+import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
 import { reportWalkTiming, timePage } from './walk-timing.ts';
@@ -95,6 +97,11 @@ const SELECTED_VIEWPORTS: readonly (typeof VIEWPORTS)[number][] = (() => {
 })();
 
 /** Whether this run walks `name`'s viewport. */
+type WalkPart = 'gallery' | 'settings' | 'sessions' | 'overlays';
+
+/** How many independent walks share one Chrome. A 2-CPU runner gets two, anything bigger three; the cap is a decision, not a guess at load. */
+const WALK_CONCURRENCY = availableParallelism() <= 2 ? 2 : 3;
+
 const walks = (name: ViewportName): boolean => SELECTED_VIEWPORTS.some(viewport => viewport.name === name);
 
 /** What a per-viewport tally owes over the viewports this run walks: both shares unsplit, one share split. */
@@ -2292,9 +2299,7 @@ try {
 
   const browser = await chromium.launch({ executablePath: chrome, headless: true });
   try {
-    for (const viewport of SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY
-      ? []
-      : SELECTED_VIEWPORTS) {
+    const walkViewport = async (viewport: (typeof VIEWPORTS)[number], parts: ReadonlySet<WalkPart>): Promise<void> => {
       const context = await browser.newContext({
         ...(viewport.name === 'mobile'
           ? PHONE_CONTEXT
@@ -2318,10 +2323,10 @@ try {
         watchTrustedTypes(page);
         timePage(page);
         try {
-          await page.goto(server.url.toString());
+          if (!WALKS_SETTINGS || parts.has('gallery') || parts.has('overlays')) await page.goto(server.url.toString());
           if (SEARCH_ONLY) {
             await captureSessionSearchEvidence(page, viewport, server.url.toString());
-            continue;
+            return;
           }
           if (AGENDA_ONLY) {
             // Pressing the real line is the point — this proves the journey (the line → the open drawer),
@@ -2334,7 +2339,7 @@ try {
             const target = join(outDir, `agenda-${viewport.name}.png`);
             await captureElement(page, harness, target);
             process.stdout.write(`📸 agenda ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
-            continue;
+            return;
           }
           if (WARDEN_ONLY) {
             // The settings card that carries Jev's per-act bars, then the page whose Recent actions show Jev's own.
@@ -2351,43 +2356,43 @@ try {
             process.stdout.write(`📸 Warden page ${viewport.name} -> ${pageTarget}\n`);
             const overflow = await overview.evaluate(el => el.scrollWidth - el.clientWidth);
             if (overflow > 0) throw new Error(`Warden page scrolls sideways by ${overflow}px on ${viewport.name}`);
-            continue;
+            return;
           }
           if (FILES_ONLY) {
             await captureFiles(page, viewport.name);
-            continue;
+            return;
           }
           if (PAIRING_FAILURES_ONLY) {
             await capturePairingFailures(page, viewport.name);
-            continue;
+            return;
           }
           if (MCP_SIGN_IN_ONLY) {
             await captureMcpSignIn(page, viewport.name);
-            continue;
+            return;
           }
           if (CONTEXT_TOOLS_ONLY) {
             await captureContextTools(page, viewport.name);
-            continue;
+            return;
           }
           if (PAIR_FROM_MENU_ONLY) {
             await capturePairFromMenu(page, viewport.name);
-            continue;
+            return;
           }
           if (WHATS_NEW_ONLY) {
             await captureWhatsNew(page, viewport.name);
-            continue;
+            return;
           }
           if (SESSION_CONTEXT_MENU_ONLY) {
             await captureSessionContextMenu(page, viewport.name);
-            continue;
+            return;
           }
           if (ABOUT_ONLY) {
             await captureAbout(page, viewport.name);
-            continue;
+            return;
           }
           if (AGENT_CLIS_ONLY) {
             await captureAgentClis(page, viewport.name);
-            continue;
+            return;
           }
           if (TASK_BOARD_ONLY) {
             const target = join(outDir, `task-board-${viewport.name}.png`);
@@ -2395,7 +2400,7 @@ try {
             await taskBoard.scrollIntoViewIfNeeded();
             await captureElement(page, taskBoard, target);
             process.stdout.write(`📸 task board ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
-            continue;
+            return;
           }
           if (PROJECTS_ONLY) {
             for (const frame of PROJECTS_FRAMES) {
@@ -2524,9 +2529,9 @@ try {
                 `   projects form ${mode} @ ${viewport.name}: page scroll x=false focus=${geometry.focused ?? '(none)'}\n`,
               );
             }
-            continue;
+            return;
           }
-          if (!SETTINGS_ONLY) {
+          if (!SETTINGS_ONLY && parts.has('gallery')) {
             const target = join(outDir, `${viewport.name}.png`);
             await page.screenshot({ path: target });
             process.stdout.write(`📸 ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
@@ -2691,6 +2696,7 @@ try {
           // above uses the same SettingsPageHarness component, but the standalone
           // query removes the gallery gutters so these are true 390×844 and
           // 1440×900 responsive captures rather than close approximations.
+          if (parts.has('settings')) {
           const settingsUrl = new URL(server.url);
           settingsUrl.searchParams.set('settings-harness', '1');
           await page.goto(settingsUrl.toString());
@@ -3557,8 +3563,8 @@ try {
           await page.evaluate(() => localStorage.removeItem('fy-theme-v1'));
           await page.goto(settingsUrl.toString());
 
-          // The rest of this pass belongs to the full gallery.
-          if (SETTINGS_ONLY) continue;
+          }
+          if (parts.has('sessions')) {
           await page.goto(server.url.toString());
           // A four-kind ledger is taller than a phone viewport. Chrome may cull
           // unpainted rows during an element screenshot, so temporarily borrow
@@ -3807,6 +3813,8 @@ try {
           await captureElement(page, toolGroup, toolGroupTarget);
           process.stdout.write(`📸 tool group -> ${toolGroupTarget}\n`);
 
+          }
+          if (parts.has('overlays')) {
           // The context menu is anchored and `fixed`, which is exactly what a
           // full-page stitch cannot capture — so it gets its own viewport-sized
           // pass behind a fragment.
@@ -4275,6 +4283,7 @@ try {
                 `${after.fieldTop}-${after.fieldBottom}px; portrait gate mounted=${after.gate}\n`,
             );
           }
+          }
         } catch (cause) {
           // The screen a wait gave up on, which the log alone cannot show: a timed-out wait names the
           // element it wanted, never what was there instead. Best effort — a crashed page has no frame.
@@ -4290,14 +4299,38 @@ try {
       } finally {
         await context.close();
       }
+    };
+
+    // INDEPENDENT WALKS, run together and PRINTED in the order listed here. Each task opens its own
+    // context (own storage, viewport, theme) and shares nothing with another, so what one finishes first
+    // cannot change what another measures; the pool prints their output in list order whichever ends first.
+    const walkTasks: PoolTask[] = [];
+    const walked: readonly (typeof VIEWPORTS)[number][] =
+      SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY ? [] : SELECTED_VIEWPORTS;
+    for (const viewport of walked) {
+      const segments: readonly { readonly part: WalkPart; readonly weight: number }[] = !WALKS_SETTINGS
+        ? [{ part: 'gallery', weight: 100 }]
+        : SETTINGS_ONLY
+          ? [{ part: 'settings', weight: 100 }]
+          : [
+              { part: 'gallery', weight: 20 },
+              { part: 'settings', weight: 50 },
+              { part: 'sessions', weight: 100 },
+              { part: 'overlays', weight: 60 },
+            ];
+      for (const segment of segments) {
+        const parts: ReadonlySet<WalkPart> = WALKS_SETTINGS
+          ? new Set([segment.part])
+          : new Set<WalkPart>(['gallery', 'settings', 'sessions', 'overlays']);
+        walkTasks.push({ weight: segment.weight, run: () => walkViewport(viewport, parts) });
+      }
     }
-    reportWalkTiming('viewport walk');
 
     // THE SESSION PAGE'S LAYOUT — conversation width, the tab strip, nothing under a split pane — in
-    // every theme family. Its own contexts and viewports, so it runs after the viewport passes.
+    // every theme family. Its own contexts and viewports.
     const owesSessionLayout = (WALKS_SETTINGS && walks(PASS_OWNER.sessionLayout)) || SESSION_LAYOUT_ONLY;
-    const sessionLayoutChecks = owesSessionLayout
-      ? await runSessionLayoutGeometry({
+    const sessionLayoutPlan = owesSessionLayout
+      ? planSessionLayoutGeometry({
           browser,
           rootUrl: server.url.toString(),
           scheme: SCHEME,
@@ -4305,7 +4338,48 @@ try {
           fail,
           ...(SESSION_LAYOUT_ONLY ? { captureDir: outDir, captureFamilies: ['studio', 'neo', 'wayfinding'] } : {}),
         })
-      : 0;
+      : undefined;
+    for (const step of sessionLayoutPlan?.steps ?? []) walkTasks.push({ weight: 1, run: step });
+
+    // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
+    // down, and rotated. Its own contexts.
+    const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea)) || SAFE_AREA_ONLY;
+    let safeAreaChecks = 0;
+    if (owesSafeArea)
+      walkTasks.push({
+        weight: 10,
+        run: async () => {
+          safeAreaChecks = await runSafeAreaGeometry({
+            browser,
+            rootUrl: server.url.toString(),
+            scheme: SCHEME,
+            fail,
+            keyboardShim: VISUAL_VIEWPORT_SHIM,
+            ...(SAFE_AREA_ONLY ? { captureDir: outDir } : {}),
+          });
+        },
+      });
+
+    // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
+    const owesSessionsPage = (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage)) || SESSIONS_PAGE_ONLY;
+    let sessionsPageChecks = 0;
+    if (owesSessionsPage)
+      walkTasks.push({
+        weight: 10,
+        run: async () => {
+          sessionsPageChecks = await runSessionsPageGeometry({
+            browser,
+            rootUrl: server.url.toString(),
+            scheme: SCHEME,
+            fail,
+          });
+        },
+      });
+
+    await runOrderedPool(walkTasks, WALK_CONCURRENCY);
+    reportWalkTiming('concurrent walk');
+
+    const sessionLayoutChecks = sessionLayoutPlan?.checks() ?? 0;
     if (owesSessionLayout && sessionLayoutChecks !== SESSION_LAYOUT_GEOMETRY_CHECKS)
       fail(
         `the run made ${sessionLayoutChecks} session layout geometry checks instead of the ` +
@@ -4316,21 +4390,7 @@ try {
         `✅ session layout geometry checks: ${sessionLayoutChecks}/${SESSION_LAYOUT_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
     else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('session layout geometry', PASS_OWNER.sessionLayout));
-    reportWalkTiming('session layout');
 
-    // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
-    // down, and rotated. Its own contexts, so it runs after the viewport passes.
-    const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea)) || SAFE_AREA_ONLY;
-    const safeAreaChecks = owesSafeArea
-      ? await runSafeAreaGeometry({
-          browser,
-          rootUrl: server.url.toString(),
-          scheme: SCHEME,
-          fail,
-          keyboardShim: VISUAL_VIEWPORT_SHIM,
-          ...(SAFE_AREA_ONLY ? { captureDir: outDir } : {}),
-        })
-      : 0;
     if (owesSafeArea && safeAreaChecks !== SAFE_AREA_GEOMETRY_CHECKS)
       fail(
         `the run made ${safeAreaChecks} safe-area geometry checks instead of the ` +
@@ -4341,7 +4401,6 @@ try {
         `✅ safe-area geometry checks: ${safeAreaChecks}/${SAFE_AREA_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
     else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('safe-area geometry', PASS_OWNER.safeArea));
-    reportWalkTiming('safe area');
 
     // THE BOTTOM OF THE APP ACROSS THE DEVICE MATRIX, each in its own engine. A WebKit row with no WebKit on
     // this machine is reported as skipped, never counted as passed.
@@ -4368,11 +4427,6 @@ try {
       }
     }
 
-    // THE SESSIONS PAGE'S SIDEWAYS SCROLL, on a phone at four widths and every density, with the worst text.
-    const owesSessionsPage = (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage)) || SESSIONS_PAGE_ONLY;
-    const sessionsPageChecks = owesSessionsPage
-      ? await runSessionsPageGeometry({ browser, rootUrl: server.url.toString(), scheme: SCHEME, fail })
-      : 0;
     if (owesSessionsPage && sessionsPageChecks !== SESSIONS_PAGE_GEOMETRY_CHECKS)
       fail(
         `the run made ${sessionsPageChecks} sessions page geometry checks instead of the ` +
@@ -4383,7 +4437,6 @@ try {
         `✅ sessions page geometry checks: ${sessionsPageChecks}/${SESSIONS_PAGE_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
     else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('sessions page geometry', PASS_OWNER.sessionsPage));
-    reportWalkTiming('sessions page');
 
     // THE CLOSING LINE, and the only one the CI script insists on. It is reached after every viewport
     // this run walks has completed, so a run that died halfway prints nothing here and the job goes red on a
