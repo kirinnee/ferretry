@@ -1,11 +1,10 @@
 import { dirname, isAbsolute, join } from 'node:path';
-import { TaskError } from '../../lib/tasks/task-error.ts';
-import type { TaskFileOperations, TempNameSource } from './file-operations.ts';
-import { NodeTaskFileOperations, RandomTempNameSource } from './file-operations.ts';
+import type { FileOperations, TempNameSource } from './file-operations.ts';
+import { NodeFileOperations, RandomTempNameSource } from './file-operations.ts';
 
-/** Private by default: the board holds the human's asks, so nothing is group- or world-readable. */
-export const PRIVATE_DIRECTORY_MODE = 0o700;
-export const PRIVATE_FILE_MODE = 0o600;
+/** Private by default: what lands here is the operator's, so nothing is group- or world-readable. */
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const PRIVATE_FILE_MODE = 0o600;
 
 /** Scratch names are constructed here, never taken from a caller, and always live beside the target. */
 const SAFE_TEMP_TOKEN = /^[A-Za-z0-9_-]{1,64}$/u;
@@ -17,11 +16,11 @@ const SAFE_TEMP_TOKEN = /^[A-Za-z0-9_-]{1,64}$/u;
  * file. Placement is not this class's business — it is handed an absolute path and nothing else.
  */
 export class AtomicFileWriter {
-  private readonly files: TaskFileOperations;
+  private readonly files: FileOperations;
   private readonly tempNames: TempNameSource;
 
   constructor(
-    files: TaskFileOperations = new NodeTaskFileOperations(),
+    files: FileOperations = new NodeFileOperations(),
     tempNames: TempNameSource = new RandomTempNameSource(),
   ) {
     this.files = files;
@@ -35,7 +34,7 @@ export class AtomicFileWriter {
 
   /**
    * Replaces `path` atomically. Any failure leaves the previous contents intact and removes the
-   * scratch file, so a crashed write never degrades into a truncated or empty board.
+   * scratch file, so a crashed write never degrades into a truncated or empty document.
    */
   async write(path: string, contents: string): Promise<void> {
     const target = this.requireAbsolute(path);
@@ -60,7 +59,7 @@ export class AtomicFileWriter {
   scratchFor(target: string): string {
     const token = this.tempNames.next();
     if (!SAFE_TEMP_TOKEN.test(token)) {
-      throw new TaskError('invalid', `unsafe scratch token: ${JSON.stringify(token)}`);
+      throw new Error(`unsafe scratch token: ${JSON.stringify(token)}`);
     }
     const directory = dirname(target);
     return join(directory, `.${target.slice(directory.length + 1)}.${token}.tmp`);
@@ -69,7 +68,7 @@ export class AtomicFileWriter {
   /** An adapter that resolves relative paths against a process cwd would be a hidden dependency. */
   private requireAbsolute(path: string): string {
     if (path.length === 0 || !isAbsolute(path)) {
-      throw new TaskError('invalid', `snapshot path must be absolute: ${JSON.stringify(path)}`);
+      throw new Error(`path must be absolute: ${JSON.stringify(path)}`);
     }
     return path;
   }

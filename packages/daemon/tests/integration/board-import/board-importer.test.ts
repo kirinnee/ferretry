@@ -20,9 +20,8 @@ import {
   type UnlinkedAsk,
 } from '../../../src/lib/board-import/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
-import { serializeTaskSnapshot } from '../../../src/lib/tasks/task-snapshot.ts';
 import { lanes, MACHINE, NOW, OTHER_PROJECT, PROJECT } from '../../unit/board/support.ts';
-import { snapshotOf, task } from '../../unit/tasks/fixtures.ts';
+import { serializeLegacySnapshot, snapshotOf, task } from '../../unit/board-import/legacy-fixtures.ts';
 
 /**
  * The importer over a fixture state home: several sessions' real `tasks.json` files, the real file adapters and
@@ -81,7 +80,7 @@ async function fixture() {
   };
   await plant(
     'busy',
-    serializeTaskSnapshot(
+    serializeLegacySnapshot(
       snapshotOf(
         task({ id: 'F1' as never, title: 'Now', status: 'in_progress', phase: 'build', assignee: 'plain' }),
         task({ id: 'F2' as never, title: 'Later', status: 'todo', phase: 'todo' }),
@@ -95,8 +94,8 @@ async function fixture() {
       ),
     ),
   );
-  await plant('plain', serializeTaskSnapshot(snapshotOf(task({ id: 'F1' as never, title: 'Solo' }))));
-  await plant('unlaned', serializeTaskSnapshot(snapshotOf(task({ id: 'F1' as never, title: 'No lanes yet' }))));
+  await plant('plain', serializeLegacySnapshot(snapshotOf(task({ id: 'F1' as never, title: 'Solo' }))));
+  await plant('unlaned', serializeLegacySnapshot(snapshotOf(task({ id: 'F1' as never, title: 'No lanes yet' }))));
   await plant('broken', '{not json');
   await mkdir(join(home, 'sessions', 'silent'), { recursive: true });
 

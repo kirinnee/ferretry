@@ -1,6 +1,9 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { exactWorkerAssignee, type TaskAssigneeCandidate } from '../../../src/lib/tasks/exact-worker-assignee.ts';
+import {
+  exactWorkerAssignee,
+  type TaskAssigneeCandidate,
+} from '../../../src/lib/board-import/exact-worker-assignee.ts';
 
 function candidate(
   overrides: Partial<TaskAssigneeCandidate> & Pick<TaskAssigneeCandidate, 'id'>,

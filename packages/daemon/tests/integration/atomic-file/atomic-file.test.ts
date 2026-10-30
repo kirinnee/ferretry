@@ -2,15 +2,15 @@ import { describe, it } from 'bun:test';
 import { readdir, stat, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
-import { AtomicFileWriter } from '../../../src/adapters/tasks/atomic-file.ts';
-import type { TaskFileOperations } from '../../../src/adapters/tasks/file-operations.ts';
-import { NodeTaskFileOperations } from '../../../src/adapters/tasks/file-operations.ts';
-import { FixedTempNameSource, shouldReject, withTempRoot } from './fixtures.ts';
+import { AtomicFileWriter } from '../../../src/adapters/atomic-file/atomic-file.ts';
+import type { FileOperations } from '../../../src/adapters/atomic-file/file-operations.ts';
+import { NodeFileOperations } from '../../../src/adapters/atomic-file/file-operations.ts';
+import { FixedTempNameSource, withTempRoot } from './fixtures.ts';
 
 /** Wraps the real filesystem and fails exactly one named step, leaving every other step honest. */
-class FaultyFileOperations implements TaskFileOperations {
+class FaultyFileOperations implements FileOperations {
   readonly calls: string[] = [];
-  private readonly inner = new NodeTaskFileOperations();
+  private readonly inner = new NodeFileOperations();
   private readonly failOn: 'write' | 'replace' | 'sync' | null;
 
   constructor(failOn: 'write' | 'replace' | 'sync' | null) {
@@ -162,7 +162,7 @@ describe('AtomicFileWriter', () => {
       const scratch = join(root, '.tasks.json.claimed.tmp');
       await writeFile(target, 'original');
       await writeFile(scratch, 'other writer');
-      const subject = new AtomicFileWriter(new NodeTaskFileOperations(), new FixedTempNameSource(['claimed']));
+      const subject = new AtomicFileWriter(new NodeFileOperations(), new FixedTempNameSource(['claimed']));
 
       // Act
       const refusal = subject.write(target, 'replacement');
@@ -201,7 +201,7 @@ describe('AtomicFileWriter', () => {
 
   it('should place the scratch file beside its target so the rename stays on one filesystem', () => {
     // Arrange
-    const subject = new AtomicFileWriter(new NodeTaskFileOperations(), new FixedTempNameSource(['abc123']));
+    const subject = new AtomicFileWriter(new NodeFileOperations(), new FixedTempNameSource(['abc123']));
 
     // Act
     const actual = subject.scratchFor('/var/lib/fy/board/tasks.json');
@@ -212,7 +212,7 @@ describe('AtomicFileWriter', () => {
 
   it('should refuse a temp-name collaborator that returns an unsafe token', () => {
     // Arrange
-    const subject = new AtomicFileWriter(new NodeTaskFileOperations(), new FixedTempNameSource(['../escape']));
+    const subject = new AtomicFileWriter(new NodeFileOperations(), new FixedTempNameSource(['../escape']));
 
     // Act + Assert
     should(() => subject.scratchFor('/var/lib/fy/tasks.json')).throw(/unsafe scratch token/u);
@@ -225,8 +225,8 @@ describe('AtomicFileWriter', () => {
       const subject = new AtomicFileWriter();
 
       // Act + Assert
-      await shouldReject('invalid', async () => await subject.write(path, 'nope'));
-      await shouldReject('invalid', async () => await subject.read(path));
+      await should(subject.write(path, 'nope')).be.rejectedWith(/must be absolute/u);
+      await should(subject.read(path)).be.rejectedWith(/must be absolute/u);
     },
   );
 
@@ -234,7 +234,7 @@ describe('AtomicFileWriter', () => {
     await withTempRoot(async root => {
       // Arrange — a directory where a file is expected is an IO fault, not "no board yet".
       const target = join(root, 'tasks.json');
-      await new NodeTaskFileOperations().ensureDirectory(target, 0o700);
+      await new NodeFileOperations().ensureDirectory(target, 0o700);
       await writeFile(join(target, 'decoy'), 'x');
       const subject = new AtomicFileWriter();
 

@@ -1,5 +1,5 @@
 /**
- * Serializes work per key. The task store runs its whole read-decide-rewrite transaction inside one
+ * Serializes work per key. The caller runs its whole read-decide-rewrite transaction inside one
  * of these, so a graph read, a global id allocation, the reducer call, and the atomic file rewrite
  * are a single critical section rather than four racy steps.
  */

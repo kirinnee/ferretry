@@ -2,10 +2,10 @@ import { randomBytes } from 'node:crypto';
 import { mkdir, open, readFile, rename, rm } from 'node:fs/promises';
 
 /**
- * The whole filesystem surface the task store is allowed to use. Narrow on purpose: it is injected
+ * The whole filesystem surface the atomic writer is allowed to use. Narrow on purpose: it is injected
  * so fault tests can make any single step fail, and so nothing else about the host is reachable.
  */
-export interface TaskFileOperations {
+export interface FileOperations {
   /** Returns null when the file is absent; any other failure propagates. */
   read(path: string): Promise<string | null>;
   /** Creates the containing directory (and parents) with a private mode where supported. */
@@ -25,7 +25,7 @@ const isMissing = (error: unknown): boolean =>
   typeof error === 'object' && error !== null && (error as { code?: string }).code === 'ENOENT';
 
 /** The production collaborator: plain `node:fs/promises`, no caching, no hidden state. */
-export class NodeTaskFileOperations implements TaskFileOperations {
+export class NodeFileOperations implements FileOperations {
   async read(path: string): Promise<string | null> {
     try {
       return await readFile(path, 'utf8');
@@ -84,16 +84,5 @@ export interface TempNameSource {
 export class RandomTempNameSource implements TempNameSource {
   next(): string {
     return randomBytes(8).toString('hex');
-  }
-}
-
-/** Supplies the timestamps the store stamps onto a snapshot. Injected to keep tests deterministic. */
-export interface InstantSource {
-  now(): string;
-}
-
-export class SystemInstantSource implements InstantSource {
-  now(): string {
-    return new Date().toISOString();
   }
 }

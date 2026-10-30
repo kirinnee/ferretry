@@ -478,11 +478,7 @@ import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.t
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
-import {
-  FileTaskStore,
-  KeyedSerialExecutor as TaskBoardSerialExecutor,
-  TaskRecordService,
-} from '../src/adapters/tasks/index.ts';
+import { KeyedSerialExecutor as LearningSerialExecutor } from '../src/adapters/atomic-file/index.ts';
 import {
   ManagedTerminalService,
   systemLoginShell,
@@ -558,7 +554,7 @@ import {
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
 import { GitHubWatcher } from '../src/lib/board-github/index.ts';
-import { BoardImporter, LaneSetImportProjects } from '../src/lib/board-import/index.ts';
+import { BoardImporter, LaneSetImportProjects, type TaskAssigneeCandidate } from '../src/lib/board-import/index.ts';
 import {
   ConfigChangeLedger,
   ConfigChangeStreamService,
@@ -647,7 +643,6 @@ import {
   type ApiServerHandle,
   type ApiServerPort,
   type ArgumentAnswer,
-  type AssigneeObservation,
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
@@ -756,7 +751,6 @@ import {
   EventLoopLagMeter,
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
-  exactWorkerAssignee,
   FileConversationDescriber,
   FileForeignTranscriptReader,
   type FileSystemPort,
@@ -1072,9 +1066,6 @@ import {
   sessionScopedAttachments,
   suggestedOllamaModel,
   supersededCarrierKeys,
-  type TaskAssigneeCandidate,
-  TaskError,
-  type TaskSubsystem,
   TERMINAL_ANALYTICS_STATUSES,
   TEST_MODE_VARIABLE,
   TEST_TIMINGS_VARIABLE,
@@ -1964,90 +1955,6 @@ function createBoardWorld(
     bin,
   });
   return { store, board, cards, focus };
-}
-
-/**
- * The task record boards, over the state home and the opened session index.
- *
- * The board is ONE JSON snapshot inside the session's own private directory, which is why the path
- * is derived here and never by the store: layout is the composition root's business, and a store that
- * derived its own path could not be pointed at a test's temp home.
- *
- * The id is PARSED rather than asserted. A path-unsafe session id must never become a directory, so
- * the refusal is raised in the task protocol's own taxonomy — the mount answers `invalid` with 400
- * instead of leaking a schema error as a 500.
- */
-function createTaskSubsystem(
-  paths: FoundationPaths,
-  storage: DaemonStorage,
-  clock: SystemClock,
-  boards: TaskBoardSerialExecutor,
-): TaskSubsystem {
-  /** The document a session's own state directory holds, parsed, or `undefined` when unusable. */
-  const observed = async (id: SessionId): Promise<AssigneeObservation | undefined> => {
-    const [rawConfig, rawState] = await Promise.all([storage.readConfig(id), storage.readState(id)]);
-    const state = SessionStateSchema.safeParse(rawState);
-    if (!state.success) return undefined;
-    const config = SessionConfigSchema.safeParse(rawConfig);
-    return {
-      sessionId: id,
-      // A missing or unreadable configuration costs the display name, not the whole observation: the
-      // state document is what carries the facts the board reports.
-      name: config.success ? config.data.name : null,
-      status: state.data.status,
-      lastActivityAt: state.data.lastActivityAt ?? null,
-    };
-  };
-  return {
-    board: sessionId => {
-      const id = tryParseSessionId(sessionId);
-      if (id === undefined) throw new TaskError('invalid', `${JSON.stringify(sessionId)} is not a usable session id`);
-      return new TaskRecordService(
-        id,
-        new FileTaskStore(join(createSessionPaths(paths, id).directory, 'tasks.json'), { executor: boards }),
-      );
-    },
-    sessionIds: async () => storage.listSessions().map(session => session.id),
-    /**
-     * An assignee is a TEAMMATE, and this is where the name a human typed becomes a session.
-     *
-     * `fy task create --assignee <who>` documents its argument as "the teammate who owns it", so a
-     * session id is the exception rather than the rule. This used to match ids only — every task a
-     * person assigned by callsign reported a null live column — and the recorded reason was the cost:
-     * resolving a name means reading the documents that carry names. The mount asks for the DISTINCT
-     * assignees of one response instead of one row at a time, so that cost is one fan-out per request
-     * rather than one per task, which is the same fan-out `/v1/names` already performs.
-     *
-     * A KNOWN SESSION ID SHORT-CIRCUITS, so the common single-task read stays two document reads: an
-     * assignee the index already holds needs no directory at all.
-     *
-     * `exactWorkerAssignee` is the DOMAIN's resolution rule, not a second one written here — an exact
-     * id, then a callsign, then a display name only for a session with no callsign of its own, and
-     * `null` whenever two sessions answer to one name. Ambiguity reported as unknown is the point: the
-     * alternative attributes a task to whichever session the index happened to list first.
-     */
-    observe: async assignees => {
-      const resolved = new Map<string, AssigneeObservation>();
-      const unresolved: string[] = [];
-      for (const assignee of assignees) {
-        const id = tryParseSessionId(assignee);
-        if (id !== undefined && storage.findSession(id) !== undefined) {
-          const observation = await observed(id);
-          if (observation !== undefined) resolved.set(assignee, observation);
-        } else unresolved.push(assignee);
-      }
-      if (unresolved.length === 0) return resolved;
-      const candidates = await assigneeCandidates(storage);
-      for (const assignee of unresolved) {
-        const named = exactWorkerAssignee({ assignee }, candidates);
-        const id = named === null ? undefined : tryParseSessionId(named);
-        const observation = id === undefined ? undefined : await observed(id);
-        if (observation !== undefined) resolved.set(assignee, observation);
-      }
-      return resolved;
-    },
-    now: () => clock.now(),
-  };
 }
 
 /**
@@ -6270,7 +6177,7 @@ interface LearningSubsystemParts {
   readonly paths: FoundationPaths;
   readonly files: StateFileSystem;
   readonly clock: SystemClock;
-  readonly serial: TaskBoardSerialExecutor;
+  readonly serial: LearningSerialExecutor;
   readonly sessions: SessionDirectorySubsystem;
   readonly transcripts: SessionTranscriptReader;
   readonly sessionControl: SessionControlSubsystem;
@@ -7020,13 +6927,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // that does and does not promise — in particular that a value an agent deliberately transformed is
   // not recognisable, and this is not a defence against one that is trying.
   const secretRedactor = new SecretRedactor(secretVault);
-  // ONE executor for every task board in the process. The file store keys its transactions on the
-  // snapshot path, so a single shared executor serializes writes PER BOARD; giving each store its own
-  // would let two concurrent requests to the same board interleave read-modify-write and lose one.
-  const taskBoards = new TaskBoardSerialExecutor();
-  // Its own executor: a learning verdict must not queue behind a task board's transaction, and the
-  // two snapshots share no file.
-  const learningBoard = new TaskBoardSerialExecutor();
+  // Its own executor: a learning verdict must not queue behind another document's transaction, and the
+  // snapshots share no file.
+  const learningBoard = new LearningSerialExecutor();
   // ONE executor for the callsign ledger. It is what makes a claim atomic across concurrent starts:
   // the read-modify-write of that one file must never interleave with another start's.
   const callsignClaims = new KeyedSerialExecutor();
@@ -10889,7 +10792,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return () => clearInterval(handle);
           },
         }),
-        tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
         board: {
           board: async query => await boardWorld.board.board(query),
           task: async id => await boardWorld.board.task(id),

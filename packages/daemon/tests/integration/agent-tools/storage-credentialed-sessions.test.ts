@@ -160,7 +160,7 @@ describe('StorageCredentialedSessions', () => {
 
   it('should walk a large fleet 64 sessions at a time, which is 128 open documents here', async () => {
     // The walk used to start every session in the daemon at once, so its cost grew with the fleet.
-    // It now goes through `readTaskBoardFleet` — but that limits SESSIONS, and this adapter reads
+    // It now goes through `readSessionFleet` — but that limits SESSIONS, and this adapter reads
     // TWO documents per session, started together. So the honest statement about this caller is
     // "64 sessions, 128 documents", NOT the aggregate route's 64 documents for the same limit, and
     // the point of measuring both numbers here is that a doc comment claiming otherwise would have

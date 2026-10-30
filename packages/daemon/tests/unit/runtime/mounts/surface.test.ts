@@ -57,7 +57,6 @@ import {
   secretSubsystem,
   sessionDirectory,
   sessionView,
-  taskSubsystem,
 } from './support.ts';
 
 /**
@@ -584,7 +583,6 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
       throw new Error('not exercised by the surface inventory');
     },
   },
-  tasks: taskSubsystem(),
   board: boardSubsystem(),
   boardGitHub: { arm: () => () => undefined },
   analytics: analyticsSubsystem(),
@@ -778,7 +776,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      109 + // the session table and everything that is not the account model (three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the session's durable message queue; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      104 + // the session table and everything that is not the account model (three of them the agenda spellings of the agenda routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the session's durable message queue; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       5 + // the project boards: the board query, one card, a new card, an action on a card (board-design.md §2), and a ferret's skip (§3.4)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
@@ -1058,11 +1056,6 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/notify',
       'GET /v1/sessions/:sessionId/pins',
       'POST /v1/sessions/:sessionId/pins',
-      'GET /v1/tasks',
-      'GET /v1/sessions/:sessionId/tasks',
-      'POST /v1/sessions/:sessionId/tasks',
-      'GET /v1/sessions/:sessionId/tasks/:taskId',
-      'POST /v1/sessions/:sessionId/tasks/:taskId',
       'GET /v1/board',
       'POST /v1/board/tasks',
       'POST /v1/board/skip',
@@ -1208,8 +1201,6 @@ describe('the mounted daemon surface', () => {
     const skills = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/skills', headers: human }));
     const pins = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/pins', headers: human }));
     const agenda = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/attention', headers: human }));
-    const tasks = await dispatcher.dispatch(request({ path: '/v1/sessions/s1/tasks', headers: human }));
-    const fleet = await dispatcher.dispatch(request({ path: '/v1/tasks', headers: human }));
     const analytics = await dispatcher.dispatch(request({ path: '/v1/analytics', headers: human }));
     const importedHistory = await dispatcher.dispatch(request({ path: '/v1/imports/history', headers: human }));
     const importedConversation = await dispatcher.dispatch(
@@ -1284,8 +1275,6 @@ describe('the mounted daemon surface', () => {
     // The session is unknown to this fixture, which still proves the route is mounted and reached.
     should(pins.status).equal(404);
     should(agenda.status).equal(200);
-    should(tasks.status).equal(200);
-    should(fleet.status).equal(200);
     should(analytics.status).equal(200);
     should(importedHistory.status).equal(200);
     should(importedConversation.status).equal(200);

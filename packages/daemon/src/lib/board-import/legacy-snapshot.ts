@@ -1,5 +1,4 @@
 import { TaskActivitySchema, TaskSchema, type Task, type TaskActivity } from '@ferretry/protocol';
-import { TaskError } from './task-error.ts';
 
 /** The old outer container reused the task-record version, so v1 remains a read-only migration input. */
 const LEGACY_TASK_SNAPSHOT_SCHEMA_VERSION = 1 as const;
@@ -52,7 +51,7 @@ const hintedTaskId = (value: unknown): string | null => {
   return typeof id === 'string' && id.length > 0 && id.length <= 32 ? id : null;
 };
 
-export const emptyTaskSnapshot = (): TaskSnapshot => ({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [] });
+const emptyTaskSnapshot = (): TaskSnapshot => ({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [] });
 
 const fatalSnapshot = (detail: string): DecodedTaskSnapshot => ({
   snapshot: emptyTaskSnapshot(),
@@ -131,46 +130,3 @@ export const parseTaskSnapshot = (rawText: string): DecodedTaskSnapshot => {
     return fatalSnapshot('task snapshot is not valid JSON');
   }
 };
-
-/** Schema-validates and clones an entry before it can reach authoritative persistence. */
-export const validateTaskEntry = (entry: TaskEntry): TaskEntry => {
-  const parsedTask = TaskSchema.safeParse(entry.task);
-  if (!parsedTask.success) throw new TaskError('invalid', 'refusing to persist an invalid task');
-
-  const activity: TaskActivity[] = [];
-  for (const [index, candidate] of entry.activity.entries()) {
-    const parsedActivity = TaskActivitySchema.safeParse(candidate);
-    if (!parsedActivity.success) {
-      throw new TaskError('invalid', `refusing to persist invalid activity for ${parsedTask.data.id}`);
-    }
-    const expectedSequence = index + 1;
-    if (parsedActivity.data.seq !== expectedSequence) {
-      throw new TaskError(
-        'invalid',
-        `activity seq ${parsedActivity.data.seq} is not the expected gap-free seq ${expectedSequence} for ${parsedTask.data.id}`,
-      );
-    }
-    activity.push(parsedActivity.data);
-  }
-  return { task: parsedTask.data, activity };
-};
-
-/** Validates duplicate IDs and every nested protocol object, returning fresh readonly-compatible values. */
-export const validateTaskSnapshot = (snapshot: TaskSnapshot): TaskSnapshot => {
-  if (snapshot.v !== TASK_SNAPSHOT_SCHEMA_VERSION) {
-    throw new TaskError('invalid', 'task snapshot schema version is unknown');
-  }
-  const seen = new Set<string>();
-  const tasks = snapshot.tasks.map(entry => {
-    const validated = validateTaskEntry(entry);
-    if (seen.has(validated.task.id)) {
-      throw new TaskError('ambiguous', `task ${validated.task.id} exists more than once`);
-    }
-    seen.add(validated.task.id);
-    return validated;
-  });
-  return { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks };
-};
-
-export const serializeTaskSnapshot = (snapshot: TaskSnapshot): string =>
-  `${JSON.stringify(validateTaskSnapshot(snapshot), null, 2)}\n`;

@@ -7,20 +7,11 @@ import type {
   TaskLinkFlags,
   TaskListShimFlags,
 } from '../../lib/board/board-controllers';
-import type { ITaskGateway, ITaskOutput } from '../../lib/tasks/ports';
-import { TaskListController } from '../../lib/tasks/task-controllers';
-import { TASK_LIST_VIEWS, type TaskListOptions } from '../../lib/tasks/task-request';
-import { resolveTaskScope } from '../../lib/tasks/task-scope';
 import { TASK_TITLE_GUIDANCE } from '../../lib/tasks/task-title';
 
 /** Everything the task command group is wired from; the composition root owns the concrete instances. */
 export interface TaskCommandDependencies {
   readonly board: BoardController;
-  /** The v1 per-session routes, kept for `fy task list --legacy` until they are removed. */
-  readonly legacyGateway: ITaskGateway;
-  readonly io: ITaskOutput;
-  /** `FY_SESSION_ID`, as the daemon exported it into the agent's environment. */
-  readonly environmentSessionId: string | undefined;
 }
 
 interface SessionOptions {
@@ -41,8 +32,7 @@ const acting = (command: Command): Command =>
 const ID_HELP = 'the task id: &F21 (or F21)';
 
 export function registerTaskCommands(program: Command, dependencies: TaskCommandDependencies): Command {
-  const { board, legacyGateway, io, environmentSessionId } = dependencies;
-  const legacyList = new TaskListController(legacyGateway, io);
+  const { board } = dependencies;
 
   const group = program.command('task').description("create and move the cards of a project's board");
 
@@ -81,26 +71,13 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
     });
 
   acting(group.command('list'))
-    .description(
-      'retired: this is `fy board --mine` (`--all` for everybody); `--legacy` reads the old per-session list',
-    )
-    .option('--legacy', 'read the old per-session task routes')
+    .description('retired: this is `fy board --mine` (`--all` for everybody)')
     .option('--all', 'read every session on this host')
-    .option('--view <view>', `legacy only: one of ${choices(TASK_LIST_VIEWS)}`)
-    .option('--repo <path>', 'legacy only: only tasks in this repository')
-    .option('--assignee <who>', 'legacy only: only tasks owned by this teammate')
     .option('--kind <kind>', `only ${choices(TaskKindSchema.options)}`)
-    .option('--status <status>', 'legacy only: only this status (repeatable)', collect, [])
     .option('--query <text>', 'only tasks whose text contains this')
     .option('--md', 'render as markdown')
-    .action(async (options: TaskListOptions & TaskListShimFlags & { readonly legacy?: boolean }) => {
-      if (options.legacy !== true) return await board.listShim(options);
-      await legacyList.run({
-        scope: resolveTaskScope({ session: options.session, all: options.all, environmentSessionId }),
-        options,
-        markdown: options.md === true,
-        json: options.json === true,
-      });
+    .action(async (options: TaskListShimFlags) => {
+      await board.listShim(options);
     });
 
   acting(group.command('move'))

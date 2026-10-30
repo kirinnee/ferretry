@@ -1,18 +1,12 @@
 import { describe, it } from 'bun:test';
 import type { Task, TaskActivity } from '@ferretry/protocol';
 import should from 'should';
-import { TaskError } from '../../../src/lib/tasks/task-error.ts';
 import {
   decodeTaskSnapshot,
-  emptyTaskSnapshot,
   parseTaskSnapshot,
-  serializeTaskSnapshot,
   TASK_SNAPSHOT_SCHEMA_VERSION,
-  validateTaskEntry,
-  validateTaskSnapshot,
   type TaskEntry,
-  type TaskSnapshot,
-} from '../../../src/lib/tasks/task-snapshot.ts';
+} from '../../../src/lib/board-import/legacy-snapshot.ts';
 
 const task = (overrides: Partial<Task> = {}): Task => ({
   v: 1,
@@ -53,7 +47,7 @@ const entry = (overrides: Partial<Task> = {}, history: readonly TaskActivity[] =
   activity: history,
 });
 
-describe('task snapshot decoding', () => {
+describe('legacy task snapshot decoding', () => {
   it('should decode a valid snapshot into fresh protocol-validated values', () => {
     // Arrange
     const input = { v: 1, tasks: [entry()] };
@@ -80,7 +74,7 @@ describe('task snapshot decoding', () => {
 
     // Assert
     should(actual.fatal).be.true();
-    should(actual.snapshot).deepEqual(emptyTaskSnapshot());
+    should(actual.snapshot).deepEqual({ v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [] });
     should(actual.parseErrors[0]?.detail).containEql(detail);
   });
 
@@ -217,62 +211,5 @@ describe('task snapshot decoding', () => {
     // Assert
     should(actual.fatal).be.true();
     should(actual.parseErrors[0]?.detail).equal('task snapshot is not valid JSON');
-  });
-});
-
-describe('task snapshot validation and serialization', () => {
-  it('should round-trip the pure snapshot without session or board placement fields', () => {
-    // Arrange
-    const input: TaskSnapshot = { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry()] };
-
-    // Act
-    const serialized = serializeTaskSnapshot(input);
-    const actual = parseTaskSnapshot(serialized);
-
-    // Assert
-    should(serialized).not.containEql('sessionId');
-    should(serialized).not.containEql('mutationGeneration');
-    should(actual).deepEqual({ snapshot: input, parseErrors: [], fatal: false });
-  });
-
-  it('should reject invalid task values before persistence', () => {
-    // Arrange
-    const input = entry({ title: 'This task title has too many words' });
-
-    // Act + Assert
-    should(() => validateTaskEntry(input)).throw(TaskError);
-  });
-
-  it('should refuse to persist an entry whose history does not satisfy the protocol', () => {
-    // Arrange
-    const input = entry({}, [{ ...activity(1), type: 'nonsense' } as unknown as TaskActivity]);
-
-    // Act + Assert
-    should(() => validateTaskEntry(input)).throw(/refusing to persist invalid activity/u);
-  });
-
-  it('should reject activity that is not gap-free', () => {
-    // Arrange
-    const input = entry({}, [activity(2)]);
-
-    // Act + Assert
-    should(() => validateTaskEntry(input)).throw(/expected gap-free seq 1/u);
-  });
-
-  it('should reject duplicate task IDs in an outgoing snapshot', () => {
-    // Arrange
-    const input: TaskSnapshot = { v: TASK_SNAPSHOT_SCHEMA_VERSION, tasks: [entry(), entry()] };
-
-    // Act + Assert
-    should(() => validateTaskSnapshot(input)).throw(TaskError);
-    should(() => validateTaskSnapshot(input)).throw(/exists more than once/u);
-  });
-
-  it('should refuse to serialize the legacy outer version after migration', () => {
-    // The v1 reader is a migration input only. Letting a current writer preserve it would reopen
-    // the rollback path that strips a receipt an older Zod schema does not know.
-    const legacy = { v: 1, tasks: [] } as unknown as TaskSnapshot;
-
-    should(() => validateTaskSnapshot(legacy)).throw(/schema version is unknown/u);
   });
 });

@@ -14,7 +14,7 @@ import {
   type UnlinkedAsk,
   UNTRIAGED_TITLE,
 } from '../../../src/lib/board-import/index.ts';
-import type { TaskEntry } from '../../../src/lib/tasks/task-snapshot.ts';
+import type { TaskEntry } from '../../../src/lib/board-import/legacy-snapshot.ts';
 import { card, lanes, MACHINE, MemoryBoardStore, NOW, OTHER_PROJECT, PROJECT } from '../board/support.ts';
 import { entryOf, oldTask, taskAt } from './support.ts';
 

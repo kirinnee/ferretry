@@ -19,7 +19,7 @@ export class BoardError extends Error {
 }
 
 /**
- * The whole message a persistence refusal answers with. Fixed, for the reason `TASK_UNAVAILABLE_MESSAGE`
+ * The whole message a persistence refusal answers with. Fixed, for the reason `LANE_SET_UNAVAILABLE_MESSAGE`
  * gives: the API is reachable by every agent on the host, and a message interpolated from the failure
  * would hand each of them the operator's state-home path. The evidence stays in `detail`.
  */

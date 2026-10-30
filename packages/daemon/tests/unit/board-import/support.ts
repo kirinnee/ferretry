@@ -1,5 +1,5 @@
 import type { BoardActor, Task, TaskActivity, TaskStatus, TaskPhase } from '@ferretry/protocol';
-import type { TaskEntry } from '../../../src/lib/tasks/task-snapshot.ts';
+import type { TaskEntry } from '../../../src/lib/board-import/legacy-snapshot.ts';
 
 const SESSION = 'lead';
 export const WHEN = '2026-10-01T10:00:00.000Z';

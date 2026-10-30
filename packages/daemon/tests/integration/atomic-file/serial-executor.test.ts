@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { KeyedSerialExecutor } from '../../../src/adapters/tasks/serial-executor.ts';
+import { KeyedSerialExecutor } from '../../../src/adapters/atomic-file/serial-executor.ts';
 
 /** Yields to the event loop enough times for every queued microtask to drain. */
 const settle = async (): Promise<void> => {

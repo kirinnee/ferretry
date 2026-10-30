@@ -3,16 +3,16 @@ import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from '
 import { SessionStatusSchema } from './session.ts';
 
 export const TASK_SCHEMA_VERSION = 1 as const;
-export const MAX_TASK_TITLE_LENGTH = 200;
-export const MAX_TASK_DESCRIPTION_LENGTH = 64 * 1024;
-export const MAX_TASK_NOTE_LENGTH = 2 * 1024;
-export const MAX_TASK_LINK_LENGTH = 512;
-export const MAX_TASK_LINKS_PER_FIELD = 64;
-export const MAX_TASK_SOURCE_LENGTH = 2 * 1024;
-export const MAX_TASK_CLARIFICATIONS = 128;
-export const MAX_TASK_DEPENDENCIES = 128;
-export const MAX_TASK_FILES = 256;
-export const MAX_TASK_FILE_LENGTH = 1024;
+const MAX_TASK_TITLE_LENGTH = 200;
+const MAX_TASK_DESCRIPTION_LENGTH = 64 * 1024;
+const MAX_TASK_NOTE_LENGTH = 2 * 1024;
+const MAX_TASK_LINK_LENGTH = 512;
+const MAX_TASK_LINKS_PER_FIELD = 64;
+const MAX_TASK_SOURCE_LENGTH = 2 * 1024;
+const MAX_TASK_CLARIFICATIONS = 128;
+const MAX_TASK_DEPENDENCIES = 128;
+const MAX_TASK_FILES = 256;
+const MAX_TASK_FILE_LENGTH = 1024;
 
 export const TaskKindSchema = z.enum(['bug', 'feature', 'infra', 'chore']);
 export type TaskKind = z.infer<typeof TaskKindSchema>;
@@ -166,7 +166,6 @@ export const TaskDoneRequestFingerprintSchema = z.discriminatedUnion('action', [
     note: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
   }),
 ]);
-export type TaskDoneRequestFingerprint = z.infer<typeof TaskDoneRequestFingerprintSchema>;
 
 export const TaskAuthorizationProvenanceSchema = z.strictObject({
   boardId: z.string().optional(),
@@ -184,7 +183,6 @@ export const TaskAuthorizationProvenanceSchema = z.strictObject({
   /** Present on the durable receipt for a top-agent completion; generic task authorization may omit it. */
   requestFingerprint: TaskDoneRequestFingerprintSchema.optional(),
 });
-export type TaskAuthorizationProvenance = z.infer<typeof TaskAuthorizationProvenanceSchema>;
 
 export const TaskActivityTypeSchema = z.enum([
   'created',
@@ -575,20 +573,6 @@ export const ScopedTaskSummarySchema = TaskSummarySchema.safeExtend({
 });
 export type ScopedTaskSummary = z.infer<typeof ScopedTaskSummarySchema>;
 
-export const TaskListResponseSchema = z.object({
-  tasks: z.array(TaskSummarySchema),
-  parseErrors: NonNegativeIntegerSchema,
-  parseErrorIds: z.array(z.string()).optional(),
-});
-export type TaskListResponse = z.infer<typeof TaskListResponseSchema>;
-
-export const TaskDetailResponseSchema = z.object({
-  task: TaskViewSchema,
-  activity: z.array(TaskActivitySchema),
-  activityParseErrors: NonNegativeIntegerSchema.optional(),
-});
-export type TaskDetailResponse = z.infer<typeof TaskDetailResponseSchema>;
-
 export const SessionTaskListResponseSchema = z.object({
   v: z.literal(TASK_SCHEMA_VERSION),
   sessionId: z.string().min(1),
@@ -600,11 +584,6 @@ export const SessionTaskListResponseSchema = z.object({
 });
 export type SessionTaskListResponse = z.infer<typeof SessionTaskListResponseSchema>;
 
-export const FleetTaskListResponseSchema = SessionTaskListResponseSchema.extend({
-  sessionId: z.null(),
-});
-export type FleetTaskListResponse = z.infer<typeof FleetTaskListResponseSchema>;
-
 export const ScopedTaskDetailResponseSchema = z.object({
   sessionId: z.string().nullable(),
   task: TaskViewSchema.safeExtend({ sessionId: z.string().nullable() }),
@@ -613,96 +592,3 @@ export const ScopedTaskDetailResponseSchema = z.object({
   authorization: TaskAuthorizationProvenanceSchema.optional(),
 });
 export type ScopedTaskDetailResponse = z.infer<typeof ScopedTaskDetailResponseSchema>;
-
-const PartialTaskLinksSchema = z.strictObject({
-  prs: z.array(z.string().min(1).max(MAX_TASK_LINK_LENGTH)).max(MAX_TASK_LINKS_PER_FIELD).optional(),
-  branch: z.string().min(1).max(MAX_TASK_LINK_LENGTH).nullable().optional(),
-  commits: z.array(z.string().min(1).max(MAX_TASK_LINK_LENGTH)).max(MAX_TASK_LINKS_PER_FIELD).optional(),
-  docs: z.array(z.string().min(1).max(MAX_TASK_LINK_LENGTH)).max(MAX_TASK_LINKS_PER_FIELD).optional(),
-});
-
-/** Transport create shape. Actor metadata and compatibility-only phase overrides are excluded. */
-export const TaskCreateRequestSchema = z
-  .strictObject({
-    kind: TaskKindSchema,
-    title: TaskTitleSchema,
-    description: z.string().max(MAX_TASK_DESCRIPTION_LENGTH).default(''),
-    ask: TaskMessageSchema,
-    workflow: TaskWorkflowSchema.default('quick'),
-    dependsOn: z.array(TaskIdSchema).max(MAX_TASK_DEPENDENCIES).default([]),
-    files: z.array(z.string().min(1).max(MAX_TASK_FILE_LENGTH)).max(MAX_TASK_FILES).default([]),
-    status: TaskStatusSchema.default('todo'),
-    statusReason: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
-    assignee: z.string().min(1).nullable().default(null),
-    repo: z.string().min(1).nullable().default(null),
-    links: PartialTaskLinksSchema.default({}),
-    order: z.number().int().nonnegative().nullable().default(null),
-  })
-  .superRefine((value, context) => {
-    if ((value.status === 'blocked' || value.status === 'dropped') && value.statusReason === undefined) {
-      context.addIssue({ code: 'custom', message: 'statusReason is required for this status', path: ['statusReason'] });
-    }
-    const phase = value.status === 'blocked' ? 'todo' : TASK_STATUS_PHASE[value.status];
-    if (phase !== 'dropped' && !TASK_WORKFLOW_PHASES[value.workflow].includes(phase)) {
-      context.addIssue({ code: 'custom', message: 'status is not part of the selected workflow', path: ['status'] });
-    }
-  });
-export type TaskCreateRequest = z.infer<typeof TaskCreateRequestSchema>;
-export type TaskCreateRequestInput = z.input<typeof TaskCreateRequestSchema>;
-
-export const TaskActionRequestSchema = z.discriminatedUnion('action', [
-  z.strictObject({
-    action: z.literal('status'),
-    status: TaskStatusSchema,
-    reason: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH),
-    note: z.string().trim().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
-  }),
-  z.strictObject({
-    action: z.literal('phase'),
-    phase: TaskPhaseSchema,
-    reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
-  }),
-  z.strictObject({
-    action: z.literal('reopen'),
-    reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH),
-    ask: z.string().min(1).max(MAX_TASK_DESCRIPTION_LENGTH),
-    source: z.string().min(1).max(MAX_TASK_SOURCE_LENGTH),
-  }),
-  z.strictObject({ action: z.literal('note'), text: z.string().min(1).max(MAX_TASK_NOTE_LENGTH) }),
-  z.strictObject({ action: z.literal('feedback'), text: z.string().min(1).max(MAX_TASK_NOTE_LENGTH) }),
-  z.strictObject({
-    action: z.literal('clarify'),
-    text: z.string().min(1).max(MAX_TASK_DESCRIPTION_LENGTH),
-    source: z.string().min(1).max(MAX_TASK_SOURCE_LENGTH),
-  }),
-  z.strictObject({ action: z.literal('dependency'), taskId: TaskIdSchema, remove: z.boolean().optional() }),
-  z.strictObject({
-    action: z.literal('file'),
-    path: z.string().min(1).max(MAX_TASK_FILE_LENGTH),
-    remove: z.boolean().optional(),
-    reason: z.string().min(1).max(MAX_TASK_NOTE_LENGTH).optional(),
-  }),
-  z.strictObject({
-    action: z.literal('link'),
-    field: TaskLinkFieldSchema,
-    value: z.string().min(1).max(MAX_TASK_LINK_LENGTH),
-  }),
-  z.strictObject({ action: z.literal('assign'), assignee: z.string().min(1).nullable() }),
-  z.strictObject({ action: z.literal('order'), order: z.number().int().nonnegative().nullable() }),
-]);
-export type TaskActionRequest = z.infer<typeof TaskActionRequestSchema>;
-
-export const TaskErrorCodeSchema = z.enum([
-  'invalid',
-  'too-long',
-  'reason-required',
-  'not-found',
-  'forbidden',
-  'ambiguous',
-  'transition',
-  'approval-required',
-  'cycle',
-  'dependency-conflict',
-  'read-only',
-]);
-export type TaskErrorCode = z.infer<typeof TaskErrorCodeSchema>;

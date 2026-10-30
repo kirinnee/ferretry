@@ -1,23 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { readTaskBoardFleet } from '../../../src/lib/tasks/fleet-read.ts';
+import { readSessionFleet } from '../../../src/lib/agent-tools/fleet-read.ts';
 
 /**
- * The one way the task-board domain walks every session.
+ * The one way the daemon walks every session.
  *
- * Both callers — the aggregate `/v1/tasks` route and `StorageTaskBoardSessionDirectory` — depend on
- * three properties this decision owns, and each of them is a defect somewhere else if it is wrong:
- * the ORDER a fleet board renders in, the SESSION ceiling that keeps a fleet walk from growing with
- * the fleet, and the fail-closed rule that a session nobody can read makes the whole answer
- * unavailable rather than quietly shortening it.
- *
- * The ceiling is counted in SESSION CALLBACKS, never in documents or descriptors — one caller reads
- * one document per callback and the other reads two, so a document number stated here would be
- * false for one of them. What the directory's own physical cost is belongs to the directory's
- * integration test, and is asserted there.
- *
- * The bound itself is deliberately not exported, so these tests measure it — peak simultaneous
- * callbacks — rather than reading a number back out of the module and comparing it with itself.
+ * The caller depends on three properties this decision owns: the ORDER the answer comes back in, the
+ * SESSION ceiling that keeps a fleet walk from growing with the fleet, and the fail-closed rule that a
+ * session nobody can read makes the whole answer unavailable rather than quietly shortening it.
  */
 
 /** Every read that is currently running, so a case can assert the ceiling instead of assuming it. */
@@ -49,7 +39,7 @@ function concurrencyMeter(): {
 
 const sessions = (count: number): string[] => Array.from({ length: count }, (_unused, index) => `s${index}`);
 
-describe('the task board fleet read', () => {
+describe('the fleet read', () => {
   describe('order', () => {
     it('should answer in the order it was asked, not the order the reads finished', async () => {
       // Arrange — inverted latency: the LAST session answers first and the first answers last, so a
@@ -58,7 +48,7 @@ describe('the task board fleet read', () => {
       const delays: Record<string, number> = { s0: 40, s1: 30, s2: 20, s3: 10 };
 
       // Act
-      const read = await readTaskBoardFleet(ids, async id => {
+      const read = await readSessionFleet(ids, async id => {
         await Bun.sleep(delays[id] as number);
         return id;
       });
@@ -72,7 +62,7 @@ describe('the task board fleet read', () => {
       const ids = sessions(200);
 
       // Act
-      const read = await readTaskBoardFleet(ids, async id => {
+      const read = await readSessionFleet(ids, async id => {
         await Bun.sleep(Number(id.slice(1)) % 7);
         return id;
       });
@@ -89,7 +79,7 @@ describe('the task board fleet read', () => {
       const ids = sessions(300);
 
       // Act
-      const read = await readTaskBoardFleet(
+      const read = await readSessionFleet(
         ids,
         meter.wrap(async id => {
           await Bun.sleep(2);
@@ -117,7 +107,7 @@ describe('the task board fleet read', () => {
       let lastStarted = false;
 
       // Act
-      const pending = readTaskBoardFleet(
+      const pending = readSessionFleet(
         ids,
         meter.wrap(async id => {
           if (id === 's0') await slow;
@@ -143,7 +133,7 @@ describe('the task board fleet read', () => {
       const meter = concurrencyMeter();
 
       // Act
-      await readTaskBoardFleet(
+      await readSessionFleet(
         sessions(5),
         meter.wrap(async id => {
           await Bun.sleep(5);
@@ -160,7 +150,7 @@ describe('the task board fleet read', () => {
       let reads = 0;
 
       // Act
-      const read = await readTaskBoardFleet([], async id => {
+      const read = await readSessionFleet([], async id => {
         reads += 1;
         return id;
       });
@@ -177,7 +167,7 @@ describe('the task board fleet read', () => {
       const failure = new Error('board s2 is damaged');
 
       // Act
-      const outcome = await readTaskBoardFleet(sessions(10), async id => {
+      const outcome = await readSessionFleet(sessions(10), async id => {
         if (id === 's2') throw failure;
         return id;
       }).then(
@@ -203,7 +193,7 @@ describe('the task board fleet read', () => {
       const ids = sessions(200);
 
       // Act
-      const raised = await readTaskBoardFleet(
+      const raised = await readSessionFleet(
         ids,
         meter.wrap(async id => {
           if (id === 's0') throw new Error('s0 is damaged');
@@ -229,7 +219,7 @@ describe('the task board fleet read', () => {
       const meter = concurrencyMeter();
 
       // Act
-      const raised = await readTaskBoardFleet(
+      const raised = await readSessionFleet(
         sessions(200),
         meter.wrap(async id => {
           if (id === 's0') throw new Error('s0 is damaged');
@@ -248,7 +238,7 @@ describe('the task board fleet read', () => {
       // Arrange — s1 fails LATE, well after s0's rejection has settled the returned promise. Every
       // read is subscribed to before any of them runs, so the late one is a handled rejection; were
       // it not, Bun would fail this test on the unhandled rejection rather than on an assertion.
-      const readFleet = readTaskBoardFleet(sessions(4), async id => {
+      const readFleet = readSessionFleet(sessions(4), async id => {
         if (id === 's0') throw new Error('s0 is damaged');
         if (id === 's1') {
           await Bun.sleep(30);
@@ -273,7 +263,7 @@ describe('the task board fleet read', () => {
       const failure = new BoardDamaged('unreadable');
 
       // Act
-      const raised = await readTaskBoardFleet(['s0'], async () => {
+      const raised = await readSessionFleet(['s0'], async () => {
         throw failure;
       }).catch((error: unknown) => error);
 

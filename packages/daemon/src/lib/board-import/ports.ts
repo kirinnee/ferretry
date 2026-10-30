@@ -1,5 +1,5 @@
 import type { BoardImportSummary, BoardProjectId, LaneSet, TaskRef } from '@ferretry/protocol';
-import type { TaskEntry, TaskParseIssue } from '../tasks/task-snapshot.ts';
+import type { TaskEntry, TaskParseIssue } from './legacy-snapshot.ts';
 
 /** One session's old task file, as far as it could be read. */
 export interface LegacySessionTasks {

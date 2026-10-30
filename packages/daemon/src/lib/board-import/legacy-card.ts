@@ -8,7 +8,7 @@ import {
   type PrLink,
   prUrlParts,
 } from '@ferretry/protocol';
-import type { TaskEntry } from '../tasks/task-snapshot.ts';
+import type { TaskEntry } from './legacy-snapshot.ts';
 import { type BlockReading, readBlockReason } from './block-reason.ts';
 import { laneForStatus, statusOfPhase } from './lane-for-status.ts';
 import { type EventDraft, mapHistory } from './legacy-history.ts';

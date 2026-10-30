@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import should from 'should';
 import { GitWorkingCopies } from '../../../src/adapters/board-github/git-working-copies.ts';
-import { withTempRoot } from '../tasks/fixtures.ts';
+import { withTempRoot } from '../atomic-file/fixtures.ts';
 
 const git = async (cwd: string, ...args: string[]): Promise<void> => {
   const process = Bun.spawn(['git', '-C', cwd, ...args], { stdout: 'ignore', stderr: 'ignore' });

@@ -61,7 +61,6 @@ import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from
 import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { createStatuslineController } from '../src/adapters/statusline/index.ts';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
-import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
@@ -915,12 +914,7 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       binary: BINARY_NAME,
       environmentSessionId: ownSessionId,
     });
-    registerTaskCommands(program, {
-      board,
-      legacyGateway: new FyTaskGateway(client),
-      io: world.io,
-      environmentSessionId: ownSessionId,
-    });
+    registerTaskCommands(program, { board });
     registerBoardCommands(program, board);
   },
   ({ program, world, client }) =>

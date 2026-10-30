@@ -115,7 +115,7 @@ describe('addressing a session by its agent name', () => {
   it('should leave routes that take no session untouched', () => {
     // Arrange
     const { book } = addressBook();
-    const plain = echo('/v1/tasks');
+    const plain = echo('/v1/fleet-sessions');
 
     // Act / Assert
     should(sessionAddressedRoutes(book, [plain])[0]).equal(plain);

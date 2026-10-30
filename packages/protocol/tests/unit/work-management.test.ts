@@ -124,16 +124,6 @@ const taskCases: SchemaCase[] = [
     value: { ...taskSummary, sessionId: 'session-1' },
   },
   {
-    name: 'task list response',
-    schema: tasks.TaskListResponseSchema,
-    value: { tasks: [taskSummary], parseErrors: 0 },
-  },
-  {
-    name: 'task detail response',
-    schema: tasks.TaskDetailResponseSchema,
-    value: { task: taskView, activity: [createdActivity] },
-  },
-  {
     name: 'session task list',
     schema: tasks.SessionTaskListResponseSchema,
     value: {
@@ -145,35 +135,10 @@ const taskCases: SchemaCase[] = [
     },
   },
   {
-    name: 'fleet task list',
-    schema: tasks.FleetTaskListResponseSchema,
-    value: { v: 1, sessionId: null, tasks: [], parseErrors: 0, updatedAt: INSTANT },
-  },
-  {
     name: 'scoped detail',
     schema: tasks.ScopedTaskDetailResponseSchema,
     value: { sessionId: 'session-1', task: { ...taskView, sessionId: 'session-1' }, activity: [] },
   },
-  {
-    name: 'create request',
-    schema: tasks.TaskCreateRequestSchema,
-    value: {
-      kind: 'feature',
-      title: task.title,
-      ask: task.ask,
-      description: '',
-      workflow: 'quick',
-      dependsOn: [],
-      files: [],
-      status: 'todo',
-      assignee: null,
-      repo: null,
-      links: {},
-      order: null,
-    },
-  },
-  { name: 'action request', schema: tasks.TaskActionRequestSchema, value: { action: 'note', text: 'progress' } },
-  { name: 'task error', schema: tasks.TaskErrorCodeSchema, value: 'invalid' },
 ];
 
 const permissionAsk = { kind: 'permission' };
@@ -581,32 +546,8 @@ describe('task schemas', () => {
     assertRejects(contradictoryCases);
   });
 
-  it('should resolve every task action member', () => {
-    // Arrange
-    const values = [
-      { action: 'status', status: 'blocked', reason: 'needs input' },
-      { action: 'phase', phase: 'build', reason: 'approved' },
-      { action: 'reopen', reason: 'regression', ask: 'Fix it', source: 'message-2' },
-      { action: 'note', text: 'note' },
-      { action: 'feedback', text: 'feedback' },
-      { action: 'clarify', text: 'clarification', source: 'message-2' },
-      { action: 'dependency', taskId: 'F2', remove: true },
-      { action: 'file', path: 'src/file.ts', remove: true, reason: 'scope changed' },
-      { action: 'link', field: 'commit', value: 'abc123' },
-      { action: 'assign', assignee: null },
-      { action: 'order', order: 1 },
-    ];
-
-    // Act + Assert
-    for (const value of values) should(tasks.TaskActionRequestSchema.parse(value)).deepEqual(value);
-  });
-
-  it('should apply create defaults and accept historical nonterminal reasons', () => {
-    // Arrange
-    const input = { kind: 'feature', title: 'Build protocol', ask: { text: 'Build it', source: 'message-1' } };
-
+  it('should accept historical nonterminal reasons', () => {
     // Act
-    const created = tasks.TaskCreateRequestSchema.parse(input);
     const historical = tasks.TaskSchema.parse({
       ...task,
       phase: 'build',
@@ -615,8 +556,6 @@ describe('task schemas', () => {
     });
 
     // Assert
-    should(created.workflow).equal('quick');
-    should(created.dependsOn).deepEqual([]);
     should(historical.statusReason).equal('rewound');
   });
 
@@ -633,21 +572,6 @@ describe('task schemas', () => {
         value: { ...task, workflow: 'quick', phase: 'research', status: 'researched' },
       },
       { name: 'status phase mismatch', schema: tasks.TaskSchema, value: { ...task, phase: 'build', status: 'todo' } },
-      {
-        name: 'create blocked without reason',
-        schema: tasks.TaskCreateRequestSchema,
-        value: { kind: 'bug', title: 'Blocked bug', ask: task.ask, status: 'blocked' },
-      },
-      {
-        name: 'create status outside workflow',
-        schema: tasks.TaskCreateRequestSchema,
-        value: { kind: 'feature', title: 'Research it', ask: task.ask, workflow: 'quick', status: 'researched' },
-      },
-      {
-        name: 'status action without reason',
-        schema: tasks.TaskActionRequestSchema,
-        value: { action: 'status', status: 'in_progress' },
-      },
       {
         name: 'opaque activity data',
         schema: tasks.TaskActivitySchema,
