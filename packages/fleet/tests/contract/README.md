@@ -26,7 +26,11 @@ scheduled `harness-contract-latest.yaml` runs `latest` daily and gates nothing.
 One suite lives in the daemon, because it measures daemon code against the CLIs, and `run.sh` runs it
 with these: `packages/daemon/tests/contract/conversion-acceptance.test.ts` — a cross-harness
 conversion (`docs/migration-cross-harness.md`) of every recorded transcript of the other harness is
-resumed by the real CLI against a loopback model and read back in order; a damaged one is refused. A
+resumed by the real CLI against a loopback model and read back in order; a damaged one is refused. And
+`packages/daemon/tests/contract/question-hook.test.ts`: with the fixed overlay, a real Claude asking one
+`AskUserQuestion` (scripted by a loopback model) fires the overlay's `PreToolUse` hook before the form is
+drawn, the daemon projects that question as pending from the hook's file, and once the form is answered
+the transcript takes over ([launch-settings.md](../../../../docs/launch-settings.md)). A
 version outside the converter's gate fails it on purpose.
 
 Every positive claim sits beside the control that shows what it suppresses. A claim that changed at a

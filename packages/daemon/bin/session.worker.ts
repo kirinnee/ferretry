@@ -12,6 +12,7 @@ import { SessionWorkerRuntime } from '../src/adapters/session/observer/session-w
 import { countWorkerChildren } from '../src/adapters/session/observer/worker-children.ts';
 import { BunTmuxProcess } from '../src/adapters/tmux/bun-tmux-process.ts';
 import { ControlModeTmuxProcess } from '../src/adapters/tmux/control-tmux-process.ts';
+import { readAskedQuestion } from '../src/adapters/session/question/asked-question-file.ts';
 import { NodeTranscriptSource } from '../src/adapters/transcript/file-source.ts';
 import { SessionObserver } from '../src/lib/session/observer/observer.ts';
 import type { FromSessionWorker, ToSessionWorker } from '../src/lib/session/observer/protocol.ts';
@@ -61,6 +62,7 @@ const runtime = new SessionWorkerRuntime({
     const info = await stat(file);
     return { size: info.size, mtimeMs: info.mtimeMs };
   },
+  asked: readAskedQuestion,
   clock: { now: () => new Date().toISOString() },
   nowMs,
   schedule: (delayMs, run) => {
