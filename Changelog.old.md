@@ -1,3 +1,16 @@
+## [4.117.0](https://github.com/kirinnee/ferretry/compare/v4.116.0...v4.117.0) (2026-10-30)
+
+### Features
+
+* **daemon:** warn in fy doctor when tmux is older than 3.7 ([#959](https://github.com/kirinnee/ferretry/issues/959)) ([bb7a51e](https://github.com/kirinnee/ferretry/commit/bb7a51ef42ee59dd0ff9c70d597830430992302f))
+
+### Fixes
+
+* **daemon:** release control clients before killing a session so tmux 3.6a cannot crash ([#958](https://github.com/kirinnee/ferretry/issues/958)) ([540fd82](https://github.com/kirinnee/ferretry/commit/540fd829934672cc186d863d906ce681f2481719))
+* **daemon:** stop the restart queue, downloads and session lists stalling the loop ([#950](https://github.com/kirinnee/ferretry/issues/950)) ([a0e4036](https://github.com/kirinnee/ferretry/commit/a0e40360481a56d6fced45359304da7416c3fb06))
+* **question:** see an open Claude question while its form is on screen ([#952](https://github.com/kirinnee/ferretry/issues/952)) ([4cf70c2](https://github.com/kirinnee/ferretry/commit/4cf70c2c44223c801cade8f0bc22f5eb12686b3a))
+* **scripts:** rename a stale old-name reference beside its new name instead of refusing it as a collision ([#954](https://github.com/kirinnee/ferretry/issues/954)) ([59b527f](https://github.com/kirinnee/ferretry/commit/59b527fe28b414215b418bb03738d94ddc2e136c))
+
 ## [4.116.0](https://github.com/kirinnee/ferretry/compare/v4.115.0...v4.116.0) (2026-10-30)
 
 ### Features
