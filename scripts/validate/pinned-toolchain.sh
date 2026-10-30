@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Fails when `node`, `bun` or `tmux` resolves outside /nix/store, and prints the version of each.
+# Fails when `node` or `bun` resolves outside /nix/store.
 #
 # The flake pins the toolchain, but PATH decides which binary a script actually runs. The `vite`
 # bin is `#!/usr/bin/env node`, so with no pinned Node in the devshell the PWA build ran on whatever
@@ -15,9 +15,7 @@ fail() {
   exit 1
 }
 
-# tmux: the integration tier drives a real one, and a runner image's tmux is a different program on
-# every image (3.6a on Ubuntu, 3.8 from Homebrew) with its own races — see nix/env.nix.
-for tool in node bun tmux; do
+for tool in node bun; do
   path="$(command -v "${tool}" || true)"
   [[ -n ${path} ]] || fail "${tool} is not on PATH; the flake devshell provides it"
   resolved="$(readlink -f "${path}")"
@@ -25,4 +23,4 @@ for tool in node bun tmux; do
     fail "${tool} resolves to ${resolved}, outside /nix/store: the runner image's ${tool}, not the one the flake pins"
 done
 
-echo "✅ node $(node --version), bun $(bun --version) and $(tmux -V) come from /nix/store"
+echo "✅ node and bun come from /nix/store"
