@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
 import { type BoardMachineData, mergeBoard, NO_BOARD_FILTERS, NO_DATE_RANGE } from '../../src/lib/board-model.ts';
 import {
-  activeFilterCount,
   ARCHIVE_PAGE,
+  activeFilterCount,
   archivePage,
   archiveRows,
   buildTree,
@@ -15,7 +15,7 @@ import {
   parseListSort,
   sortRows,
 } from '../../src/lib/board-view.ts';
-import { card, COUNTS, laneSetFor, laptop, OTHER_PROJECT, PROJECT } from './board-support.ts';
+import { COUNTS, card, laneSetFor, laptop, OTHER_PROJECT, PROJECT } from './board-support.ts';
 
 const data = (cards: ReturnType<typeof card>[]): BoardMachineData => ({
   daemonId: laptop.daemonId,
@@ -97,6 +97,12 @@ describe('the Tree', () => {
       ['F12', 2, 0],
       ['F13', 0, 0],
     ]);
+  });
+
+  it('keeps several children of one lead in the order given', () => {
+    const second = card('F14', { parent: { id: 'F10' } });
+    const ids = flattenTree(buildTree(model([lead, child, second]).cards)).map(row => row.card.task.id);
+    expect(ids).toEqual(['F10', 'F11', 'F14']);
   });
 
   it('draws a card whose lead is out of view as a root, marked detached', () => {
