@@ -763,10 +763,11 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(
       '`--premise` = situation, `--context` = why now, `--decided` = settled, `--still-open` = left',
     );
-    should(text).containEql('`--body`: SMALL diagram (fy-render svg|html|mermaid)');
+    should(text).containEql('`--body`: show it with hypermedia (fy-render image|chart|mermaid|svg) when it helps');
     should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
-    // Fields are Markdown, and each option is a short letter-able label plus a one-line reason.
-    should(text).containEql('Fields are Markdown: `code` for names/commands, **bold** key point.');
+    // Each item stands alone, in full Markdown, and each option is a short letter-able label plus a one-line reason.
+    should(text).containEql('Each item stands ALONE — the owner never looks elsewhere');
+    should(text).containEql('full Markdown (`code` for names/commands, **bold** key point)');
     should(text).containEql('Choice: 2–3 `--option "Label: why"`; `--recommend <label> --recommend-why <line>`');
     should(text).containEql('To-do: `--step "<md>"`');
     // When it is needed: it blocks now, will block later, or by a time.
