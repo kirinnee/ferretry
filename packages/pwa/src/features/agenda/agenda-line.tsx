@@ -6,7 +6,7 @@
  *   narrow. The row never wraps, and has no left half when nothing is running;
  * - the DRAWER the pill opens: a raised sheet above the chat, over a scrim, with its own header and scroll, one
  *   row (one button) per item;
- * - the same rows as a section of Info (`AgendaPanelBody`): there is no side bar of its own.
+ * - the same rows, as Info's one agenda list (`agenda-info-list.tsx`): there is no side bar of its own.
  */
 
 import type { AgendaItem } from '@ferretry/protocol';
@@ -124,7 +124,7 @@ function AgendaLineStatus({
   );
 }
 
-export interface AgendaRowsProps {
+interface AgendaRowsProps {
   readonly items: readonly AgendaItem[];
   readonly ferret: string;
   readonly now?: number;
@@ -216,10 +216,4 @@ export function AgendaDrawer({ id, counts, onClose, ...rows }: AgendaDrawerProps
       </section>
     </div>
   );
-}
-
-/** The rows as a section of Info, or a plain line when there are none. */
-export function AgendaPanelBody(rows: AgendaRowsProps) {
-  if (rows.items.length === 0) return <p className="fy-agenda-panel__empty">Nothing on the agenda.</p>;
-  return <AgendaRows {...rows} />;
 }

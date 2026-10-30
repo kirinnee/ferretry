@@ -16,6 +16,7 @@ import {
 } from '../../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { ageLabel, type FerretNames } from '../../../lib/board-present.ts';
+import { agendaHeading } from '../../agenda/agenda-delivery.tsx';
 import { BoardIcon } from '../board-icons.tsx';
 
 export interface DetailSectionProps {
@@ -337,25 +338,52 @@ export const prIconName = (pr: BoardTaskView['links']['prs'][number]) =>
             ? 'pr-pending'
             : 'pr-pass';
 
-/** Where the card stands on one line each: id, kind and project are in the header; this is the asks log. */
-export function AsksList({ asks, names }: { readonly asks: CardAsks; readonly names: FerretNames }) {
+/**
+ * The card's asks, one row each — blocking first, then open, then answered. A list is only a list: a row opens the
+ * item's view in its ferret's chat (the same view a `!A5` click opens), where it is answered; nothing is answered here.
+ */
+export function AsksList({
+  asks,
+  names,
+  onOpen,
+}: {
+  readonly asks: CardAsks;
+  readonly names: FerretNames;
+  /** Open one ask's view, by the ferret whose agenda holds it. */
+  readonly onOpen: (sessionId: string, id: string) => void;
+}) {
   if (asks.open.length === 0 && asks.resolved.length === 0) {
     return <p className="fy-board-detail__quiet">{asks.reading ? 'Reading the asks…' : 'No asks have been raised.'}</p>;
   }
+  const open = [...asks.open].sort((a, b) => Number(b.blocking) - Number(a.blocking));
   return (
     <ul className="fy-board-detail__list" data-kind="asks">
-      {asks.open.map(row => (
-        <li data-state="open" key={`${row.ref.sessionId}/${row.ref.id}`}>
-          <strong>{row.blocking ? 'Blocking' : 'Open'}</strong> ·{' '}
-          {row.item === null ? `${row.ref.id} from ${names(row.ref.sessionId)}` : row.item.title}
+      {open.map(row => (
+        <li data-state={row.blocking ? 'blocking' : 'open'} key={`${row.ref.sessionId}/${row.ref.id}`}>
+          <button
+            className="fy-board-detail__askrow"
+            data-ask-open={row.ref.id}
+            onClick={() => onOpen(row.ref.sessionId, row.ref.id)}
+            type="button"
+          >
+            <strong>{row.blocking ? 'Blocking' : 'Open'}</strong> ·{' '}
+            {row.item === null ? `${row.ref.id} from ${names(row.ref.sessionId)}` : agendaHeading(row.item)}
+          </button>
         </li>
       ))}
-      {asks.resolved.map(item => (
-        <li data-state="resolved" key={`${item.id}:${item.resolvedAt}`}>
-          <strong>{item.disposition === 'dismissed' ? 'Dismissed' : 'Answered'}</strong> · {item.title}
-          {item.resolutionNote === null ? null : (
-            <span className="fy-board-detail__quiet"> · {item.resolutionNote}</span>
-          )}
+      {asks.resolved.map(({ sessionId, item }) => (
+        <li data-state="resolved" key={`${sessionId}/${item.id}:${item.resolvedAt}`}>
+          <button
+            className="fy-board-detail__askrow"
+            data-ask-open={item.id}
+            onClick={() => onOpen(sessionId, item.id)}
+            type="button"
+          >
+            <strong>{item.disposition === 'dismissed' ? 'Dismissed' : 'Answered'}</strong> · {agendaHeading(item)}
+            {item.resolutionNote === null ? null : (
+              <span className="fy-board-detail__quiet"> · {item.resolutionNote}</span>
+            )}
+          </button>
         </li>
       ))}
     </ul>

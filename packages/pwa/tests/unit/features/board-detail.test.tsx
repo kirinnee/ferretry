@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from 'bun:test';
+import type { AgendaId } from '@ferretry/protocol';
 import { BoardDetail } from '../../../src/features/board/detail/board-detail.tsx';
+import { agendaConversationPath } from '../../../src/lib/agenda-inbox.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../src/lib/pages/routes.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
@@ -732,45 +734,21 @@ describe('BoardDetail — answering', () => {
     ask: choices('Yes', 'No'),
   });
 
-  const tap = async (button: HTMLButtonElement): Promise<void> => {
-    const fire = (type: string) => {
-      const event = new Event(type, { bubbles: true, cancelable: true });
-      Object.assign(event, { pointerId: 1, clientX: 0, clientY: 0, button: 0 });
-      button.dispatchEvent(event);
-    };
-    await interact(() => fire('pointerdown'));
-    await interact(() => fire('pointerup'));
-    await interact(() => button.click());
-  };
-
-  it('draws a Waiting-on-you section with the ask the ferret raised, and the asks list', async () => {
-    const { root } = await open({ task: blocked(), agendaItems: [item] });
+  it('lists the ask, and a row opens it AT the item in its ferret’s chat — never an answer here (#B76)', async () => {
+    const { root, navigated, actions } = await open({ task: blocked(), agendaItems: [item] });
     const section = must(root.querySelector('[data-section="asks"]'), 'the Agenda asks section');
     expect(section.querySelector('.fy-board-detail__count')?.textContent).toBe('1');
-    expect(text(section, '.fy-board-detail__asktitle')).toBe('Approve the plan?');
-    expect(text(root, '[data-kind="asks"] [data-state="open"]')).toBe('Blocking · Approve the plan?');
+    expect(text(root, '[data-kind="asks"] [data-state="blocking"]')).toBe('Blocking · Approve the plan?');
+    expect(section.querySelector('[data-agenda-quick-replies]')).toBeNull();
+    await interact(() => must(section.querySelector<HTMLButtonElement>('[data-ask-open="A1"]'), 'the A1 row').click());
+    expect(navigated).toEqual([agendaConversationPath(laptop.daemonId, LEAD, 'A1' as AgendaId)]);
+    expect(actions.calls.filter(call => call.startsWith('answer:'))).toEqual([]);
   });
 
-  it('answers through the board actions and shows nothing when it goes through', async () => {
-    const { root, actions } = await open({ task: blocked(), agendaItems: [item] });
-    await tap(buttonNamed(root, 'Yes'));
-    await interact(() => flush());
-    expect(actions.calls).toEqual([
-      `answer:${JSON.stringify([waiting, { kind: 'multiple-choice', choice: 'Yes' }, undefined])}`,
-    ]);
-    expect(root.querySelector('[data-section="asks"] [role="alert"]')).toBeNull();
-  });
-
-  it('shows the words of a refused answer in place', async () => {
-    const actions = fakeActions({ answer: async () => refusal('the ferret is gone') });
-    const { root } = await open({ task: blocked(), agendaItems: [item], actions });
-    await tap(buttonNamed(root, 'No'));
-    await interact(() => flush());
-    expect(text(root, '[data-section="asks"] [role="alert"]')).toBe('the ferret is gone');
-  });
-
-  it('says the ask is not listed when the ferret agenda does not hold it', async () => {
-    const { root } = await open({ task: blocked(), agendaItems: [] });
-    expect(text(root, '[data-section="asks"]')).toContain('is waiting, but its ask is not listed any more.');
+  it('still opens an ask the ferret agenda does not list, by its ref', async () => {
+    const { root, navigated } = await open({ task: blocked(), agendaItems: [] });
+    expect(text(root, '[data-section="asks"]')).toContain('A1 from');
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-ask-open="A1"]'), 'the A1 row').click());
+    expect(navigated).toEqual([agendaConversationPath(laptop.daemonId, LEAD, 'A1' as AgendaId)]);
   });
 });

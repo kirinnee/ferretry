@@ -64,6 +64,11 @@ export interface AgendaItemViewProps {
   readonly quoteScope?: DaemonSessionScope | null;
   /** What ✕ is called: "Back to the chat", unless the host is somewhere else (the Inbox). */
   readonly closeLabel?: string;
+  /**
+   * The item cannot be answered here — it is parked or resolved (`agenda-settled.tsx`): this is drawn in the quick
+   * replies' place, and the arrow keys answer nothing.
+   */
+  readonly settled?: ReactNode;
 }
 
 /** The option a question's recommendation names, or '' when it names none. */
@@ -100,6 +105,7 @@ export function AgendaItemView({
   renderProse,
   closeLabel = 'Back to the chat',
   quoteScope = null,
+  settled,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
   const quote = useQuoteMenu(root, quoteScope);
@@ -149,7 +155,7 @@ export function AgendaItemView({
       | 'up'
       | 'right'
       | undefined;
-    const action = direction === undefined || busy ? undefined : map[direction];
+    const action = direction === undefined || busy || settled !== undefined ? undefined : map[direction];
     if (action === undefined) return;
     event.preventDefault();
     onAct(action);
@@ -262,31 +268,35 @@ export function AgendaItemView({
           <AgendaItemHistory events={history} ferret={ferret} now={now} />
         </div>
       </div>
-      <AgendaQuickReplies
-        busy={busy}
-        error={error}
-        map={map}
-        model={model}
-        onAct={onAct}
-        onSkip={skip}
-        options={itemOptions(item)}
-        swipeable={swipeable}
-        {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
-        {...(model.perQuestion && asked.length > 0
-          ? {
-              sending: {
-                ready: sendable !== null,
-                canUseRecommended,
-                onSend: () => {
-                  if (sendable === null || busy) return;
-                  onAct(sendable);
-                  setPicks([]);
+      {settled !== undefined ? (
+        settled
+      ) : (
+        <AgendaQuickReplies
+          busy={busy}
+          error={error}
+          map={map}
+          model={model}
+          onAct={onAct}
+          onSkip={skip}
+          options={itemOptions(item)}
+          swipeable={swipeable}
+          {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
+          {...(model.perQuestion && asked.length > 0
+            ? {
+                sending: {
+                  ready: sendable !== null,
+                  canUseRecommended,
+                  onSend: () => {
+                    if (sendable === null || busy) return;
+                    onAct(sendable);
+                    setPicks([]);
+                  },
+                  onUseRecommended: () => setPicks(agreed),
                 },
-                onUseRecommended: () => setPicks(agreed),
-              },
-            }
-          : {})}
-      />
+              }
+            : {})}
+        />
+      )}
       {quote.menu}
     </section>
   );

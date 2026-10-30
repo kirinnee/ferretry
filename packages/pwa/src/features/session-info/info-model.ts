@@ -20,9 +20,9 @@ import {
 } from '@ferretry/protocol';
 import { launchedModel } from '../../components/composer-runtime.tsx';
 
-export type InfoTab = 'overview' | 'tasks' | 'runtime' | 'usage' | 'folder' | 'signals' | 'surfaces';
+export type InfoTab = 'overview' | 'tasks' | 'runtime' | 'usage' | 'folder' | 'surfaces';
 
-export const INFO_TABS: readonly InfoTab[] = ['overview', 'tasks', 'runtime', 'usage', 'folder', 'signals', 'surfaces'];
+export const INFO_TABS: readonly InfoTab[] = ['overview', 'tasks', 'runtime', 'usage', 'folder', 'surfaces'];
 
 /** The tabs a host without a board shows: Tasks is the board filtered to this ferret, so it needs one. */
 export const INFO_TABS_WITHOUT_BOARD: readonly InfoTab[] = INFO_TABS.filter(tab => tab !== 'tasks');
@@ -34,7 +34,6 @@ export const INFO_TAB_LABEL: Readonly<Record<InfoTab, string>> = {
   usage: 'Usage',
   // The id stays `folder` (links and remembered sub-tabs name it); what a person reads is Context.
   folder: 'Context',
-  signals: 'Signals',
   surfaces: 'Surfaces',
 };
 

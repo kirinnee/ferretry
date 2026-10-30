@@ -1,32 +1,20 @@
 /**
  * THE RESOLVED RECORDS: what was asked, who cleared it and how — kept out of the chat feed.
  *
- * A conversation shows only what is open. The history is one step away instead of one line under every
- * chat: the header menu's "N resolved" entry opens {@link AgendaResolvedList} in a drawer (a full
- * screen on a phone), and the Attention inbox's "Resolved" filter draws the same {@link ResolvedRow}
- * across every conversation.
+ * A conversation shows only what is open. A resolved item is one tap away instead of one line under every chat:
+ * Info's agenda list has a Resolved filter whose rows open the item's view read-only (`agenda-settled.tsx`), and the
+ * Inbox's "Resolved" filter draws {@link ResolvedRow} across every conversation.
  */
 
-import type { AgendaId, ResolvedAgendaItem } from '@ferretry/protocol';
-import { CheckCheck } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import type { ResolvedAgendaItem } from '@ferretry/protocol';
+import { useId, useLayoutEffect, useRef, useState } from 'react';
 import { cn } from '../../lib/class-names.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
-import type { SessionActionContribution } from '../session-actions/registry.ts';
 import { agendaReference, describeResponse, resolutionBadge } from './agenda-board.tsx';
-
-/** The action id the header menu opens this list by; the page also opens it for a `!A3` that is resolved. */
-export const AGENDA_RESOLVED_ACTION_ID = 'agenda-resolved';
-
-/** The DOM id one item is drawn under, so a link can scroll to it. */
-const agendaPanelItemId = (panelId: string, id: AgendaId): string => `${panelId}-item-${id}`;
 
 /** Newest resolution first: the one just made is the one the reader is looking for. */
 export const byNewestResolution = (left: ResolvedAgendaItem, right: ResolvedAgendaItem): number =>
   Date.parse(right.resolvedAt) - Date.parse(left.resolvedAt);
-
-/** "7 resolved" — the words the menu entry and the inbox filter use. */
-export const resolvedWords = (count: number): string => `${count} resolved`;
 
 /** When it was cleared, short and in the reader's own time: "Oct 23, 8:54 AM" — no year, no seconds. */
 export const resolvedWhen = (instant: string, timeZone?: string): string =>
@@ -146,64 +134,3 @@ export function ResolvedRow({
     </li>
   );
 }
-
-/** This conversation's resolved items, newest first; `highlighted` is rung and focused once, on open. */
-export function AgendaResolvedList({
-  records,
-  panelId,
-  highlighted = null,
-}: {
-  readonly records: readonly ResolvedAgendaItem[];
-  readonly panelId: string;
-  readonly highlighted?: AgendaId | null;
-}) {
-  const sorted = useMemo(() => [...records].sort(byNewestResolution), [records]);
-  useEffect(() => {
-    if (highlighted === null) return;
-    const row = document.getElementById(agendaPanelItemId(panelId, highlighted));
-    row?.scrollIntoView?.({ block: 'nearest' });
-    row?.focus({ preventScroll: true });
-  }, [highlighted, panelId]);
-  return sorted.length === 0 ? (
-    <p className="fy-attn-panel__note" data-agenda-resolved-empty="">
-      Nothing has been resolved in this conversation.
-    </p>
-  ) : (
-    <ul aria-label="Resolved" className="fy-attn-panel__records" data-agenda-resolved-list="">
-      {sorted.map(record => (
-        <ResolvedRow
-          highlighted={highlighted === record.id}
-          id={agendaPanelItemId(panelId, record.id)}
-          key={`${record.id}:${record.resolvedAt}`}
-          record={record}
-        />
-      ))}
-    </ul>
-  );
-}
-
-/**
- * The header menu's "N resolved" entry, as the registry's contribution. Hidden when nothing is resolved,
- * so a conversation with no history shows no row; `highlighted` rings the item a `!A3` link named.
- */
-export const resolvedActionContribution = (
-  records: readonly ResolvedAgendaItem[],
-  panelId: string,
-  highlighted: AgendaId | null,
-): SessionActionContribution<unknown> => ({
-  group: 'session',
-  order: 25,
-  build: () =>
-    records.length === 0
-      ? null
-      : {
-          kind: 'form',
-          id: AGENDA_RESOLVED_ACTION_ID,
-          label: resolvedWords(records.length),
-          title: 'Resolved in Inbox',
-          heading: `Resolved · ${records.length}`,
-          presentation: 'drawer',
-          icon: CheckCheck,
-          render: (): ReactNode => <AgendaResolvedList highlighted={highlighted} panelId={panelId} records={records} />,
-        },
-});

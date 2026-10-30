@@ -5,15 +5,15 @@ import { MAX_BOARD_NOTE_LENGTH } from '@ferretry/protocol';
 import {
   activityText,
   askOrigin,
+  askSessions,
   askWords,
   assignedMessage,
-  askSessions,
   collectAsks,
   commentNote,
   commentTag,
   ferretComment,
-  hasLinks,
   type HistoryContext,
+  hasLinks,
   historyRows,
   isWebLink,
   kindLabel,
@@ -385,7 +385,7 @@ describe('collectAsks', () => {
       ),
       snapshot('s2', [], [resolvedItem('R7', '2026-07-02T12:00:00.000Z', { id: 'F1' })]),
     ]);
-    expect(asks.resolved.map(entry => entry.id)).toEqual(['R2', 'R7', 'R1']);
+    expect(asks.resolved.map(entry => entry.item.id)).toEqual(['R2', 'R7', 'R1']);
   });
 
   it('has no asks for a card with none', () => {
