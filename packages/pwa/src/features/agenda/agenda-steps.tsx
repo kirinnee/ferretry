@@ -4,43 +4,18 @@
  * message), the steps as a checklist.
  *
  * A tick is OPTIMISTIC: it shows at once and goes to the machine as the `progress` action, so every
- * device sees it; a refusal rolls it back and says so on the step. A long body shows a short preview with
- * "Show more", never clipped without a way to the rest.
+ * device sees it; a refusal rolls it back and says so on the step. The body is always drawn whole.
  */
 
-import { type ReactNode, useId, useState } from 'react';
-import { collapsesByDefault } from './agenda-board.tsx';
+import { type ReactNode, useState } from 'react';
 
 type Prose = (text: string) => ReactNode;
 
-export function AgendaBody({
-  text,
-  renderProse,
-  folded = true,
-}: {
-  readonly text: string;
-  readonly renderProse: Prose;
-  /** A long body shows a short preview with "Show more". `false` draws it whole (the item view never folds). */
-  readonly folded?: boolean;
-}) {
-  const [all, setAll] = useState(false);
-  const folds = folded && collapsesByDefault(text);
-  const regionId = useId();
+/** An item's body, drawn whole: nothing on an agenda item hides behind a "Show more". */
+export function AgendaBody({ text, renderProse }: { readonly text: string; readonly renderProse: Prose }) {
   return (
-    <div className="fy-attn-body" data-agenda-body="" data-folded={(folds && !all) || undefined} id={regionId}>
+    <div className="fy-attn-body" data-agenda-body="">
       <div className="fy-attn-body__text">{renderProse(text)}</div>
-      {folds ? (
-        <button
-          aria-controls={regionId}
-          aria-expanded={all}
-          className="fy-attn-card__more"
-          data-agenda-body-toggle=""
-          onClick={() => setAll(open => !open)}
-          type="button"
-        >
-          {all ? 'Show less' : 'Show more'}
-        </button>
-      ) : null}
     </div>
   );
 }

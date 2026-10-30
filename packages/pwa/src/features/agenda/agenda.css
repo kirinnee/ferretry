@@ -167,10 +167,25 @@
   background: var(--surface);
 }
 .fy-item-view__nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-sm);
+  display: flow-root;
+}
+.fy-item-view__nav > .fy-item-view__pager {
+  float: right;
+  margin-left: var(--gap-sm);
+  /* The 44px tap targets would hold a second title line beside them; let it pass under their padding. */
+  margin-bottom: -0.75rem;
+}
+.fy-item-view__nav > .fy-item-view__title {
+  padding-top: 0.45em;
+}
+/* In the head only the status DOT shows; its words stay for screen readers and the hover title. */
+.fy-item-view__status {
+  display: inline-flex;
+  padding-inline: var(--gap-xs);
+}
+.fy-item-view__status .fy-agenda-pill {
+  gap: 0;
+  font-size: 0;
 }
 .fy-item-view__pager {
   display: flex;
@@ -287,7 +302,7 @@
   display: grid;
   /* Each slot is at least as wide as its longest word, so a label wraps only between words — never "Postgre / s".
      Labels with a word over 8 characters are drawn as letters, so three slots and "…" still fit a phone card. */
-  grid-template-columns: repeat(3, minmax(min-content, 1fr)) auto;
+  grid-template-columns: repeat(3, minmax(min-content, 1fr));
 }
 .fy-qr__row[data-slots] > [data-agenda-answer='left'] {
   grid-column: 1;
@@ -298,8 +313,31 @@
 .fy-qr__row[data-slots] > [data-agenda-answer='right'] {
   grid-column: 3;
 }
-.fy-qr__row[data-slots] > .fy-attn-menu {
-  grid-column: 4;
+/* The options past the swiped three: as many rows as they need, each filling the width; tap only. */
+.fy-qr__more {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+  margin-top: var(--gap-xs);
+}
+/* "Not needed" is a plain, quiet button under the rows — never a popup. */
+.fy-qr__dismiss {
+  display: block;
+  min-height: 32px;
+  margin: var(--gap-xs) 0 0 auto;
+  border: 0;
+  padding: 0 var(--gap-xs);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.fy-qr__dismiss:hover:not(:disabled) {
+  color: var(--fg);
+  text-decoration: underline;
+}
+.fy-qr__dismiss:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
 }
 .fy-qr__chip {
   display: inline-flex;
@@ -331,24 +369,6 @@
 }
 .fy-qr__chip[data-variant='primary'][data-recommended] {
   color: inherit;
-}
-.fy-qr__stamp {
-  position: absolute;
-  inset: auto 0 100%;
-  z-index: 1;
-  margin: 0 auto var(--gap-xs);
-  width: fit-content;
-  padding: var(--gap-xs) var(--gap-md);
-  border: var(--stroke) solid var(--divider-color);
-  border-radius: var(--radius-control);
-  background: var(--surface-2);
-  color: var(--fg);
-  font-weight: var(--weight-strong);
-  pointer-events: none;
-}
-.fy-qr__stamp[data-committed] {
-  background: var(--accent);
-  color: var(--accent-fg, var(--bg));
 }
 .fy-qr__error,
 .fy-qr__note {

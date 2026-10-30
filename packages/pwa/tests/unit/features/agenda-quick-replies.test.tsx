@@ -8,7 +8,7 @@ import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import { type InboxAction, swipeMap } from '../../../src/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
+import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -40,7 +40,6 @@ const draw = async (item: AgendaItem, extra: Partial<AgendaQuickRepliesProps> = 
       onSkip={() => {
         spy.skipped += 1;
       }}
-      skipLabel="Skip"
       swipeable
       {...extra}
     />,
@@ -140,39 +139,29 @@ describe('the quick replies', () => {
     expect(answer('Later').dataset.agendaAnswer).toBe('right');
   });
 
-  test('draws three buttons at most; the options past them are in the "…" menu as "D — label", and answer too', async () => {
+  test('draws three swipe buttons at most; the options past them are a second, tap-only row that answers too', async () => {
     const many = agendaItem('A8', {
       ask: choices('Now', 'Later', 'Never', 'Maybe', 'Soon'),
       recommendation: { decision: 'Maybe' },
     } as Partial<AgendaItem>);
     const spy = await draw(many);
-    expect(root().querySelectorAll('[data-agenda-option]')).toHaveLength(3);
+    expect(root().querySelectorAll('[data-agenda-answer]')).toHaveLength(3);
     expect(answer('Maybe').dataset.agendaAnswer).toBe('up');
-    expect(root().querySelector('[data-agenda-extra]')).toBeNull();
-    await interact(() => one<HTMLButtonElement>('[aria-label="More"], [aria-haspopup="menu"]').click());
-    const extras = [...root().querySelectorAll<HTMLElement>('[data-agenda-extra]')];
-    expect(extras.map(item => item.textContent)).toEqual(['C — Never', 'E — Soon']);
-    await interact(() => must(extras[0], 'an extra item').click());
+    const more = one('[data-agenda-more-row]');
+    expect([...more.querySelectorAll('button')].map(button => button.textContent)).toEqual(['Never', 'Soon']);
+    expect(more.querySelector('[data-agenda-answer]')).toBeNull();
+    expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
+    await interact(() => answer('Never').click());
     expect(spy.acted[0]).toMatchObject({ kind: 'respond', response: { choice: 'Never' } });
   });
 
-  test('the "…" menu moves between its items with ↓ and ↑, and wraps', async () => {
-    await draw(
-      agendaItem('A8', {
-        ask: choices('Now', 'Later', 'Never', 'Maybe', 'Soon'),
-        recommendation: { decision: 'Now' },
-      } as Partial<AgendaItem>),
-    );
-    await interact(() => one<HTMLButtonElement>('[data-agenda-more]').click());
-    const items = [...root().querySelectorAll<HTMLElement>('[role="menuitem"]')];
-    expect(items.length).toBeGreaterThanOrEqual(2);
-    expect(document.activeElement).toBe(must(items[0], 'first'));
-    await interact(() => pressKey(must(items[0], 'first'), 'ArrowDown'));
-    expect(document.activeElement).toBe(must(items[1], 'second'));
-    await interact(() => pressKey(must(items[1], 'second'), 'ArrowUp'));
-    expect(document.activeElement).toBe(must(items[0], 'first'));
-    await interact(() => pressKey(must(items[0], 'first'), 'ArrowUp'));
-    expect(document.activeElement).toBe(must(items.at(-1), 'last'));
+  test('offers Not needed as a plain button, never a menu, and has no second row when three options are all', async () => {
+    const spy = await draw(agendaItem('A9', { ask: choices('Now', 'Later', 'Never') } as Partial<AgendaItem>));
+    expect(root().querySelector('[data-agenda-more-row]')).toBeNull();
+    const dismiss = one<HTMLButtonElement>('[data-agenda-dismiss]');
+    expect(dismiss.textContent).toBe('Not needed');
+    await interact(() => dismiss.click());
+    expect(spy.acted.at(-1)?.kind).toBe('dismiss');
   });
 
   test('has no arrows on a mouse', async () => {
@@ -284,16 +273,13 @@ describe('the swipe over the chips', () => {
     expect(spy.acted).toHaveLength(1);
   });
 
-  test('shows what the drag would send while it goes, and drops it when cancelled', async () => {
-    await draw(chosen);
+  test('names nothing while a drag goes, and a cancelled drag sends nothing', async () => {
+    const spy = await draw(chosen);
     await interact(() => lane().dispatchEvent(pointer('pointerdown', 200, 200)));
-    await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 140)));
-    expect(one('.fy-qr__stamp').textContent).toContain('SQLite');
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(false);
     await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 0)));
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(true);
-    await interact(() => lane().dispatchEvent(pointer('pointercancel', 400, 200)));
     expect(root().querySelector('.fy-qr__stamp')).toBeNull();
+    await interact(() => lane().dispatchEvent(pointer('pointercancel', 400, 200)));
+    expect(spy.acted).toEqual([]);
   });
 
   test('says nothing of a drag toward a direction without an answer', async () => {
@@ -336,15 +322,14 @@ describe('the pull down over the chips', () => {
     expect(spy.skipped).toBe(0);
   });
 
-  test('says where a pull down goes while it is dragged, and commits it past the threshold', async () => {
-    await draw(chosen, { skipLabel: 'Back to the chat' });
+  test('a pull down shows no floating label, and commits past the threshold', async () => {
+    const spy = await draw(chosen);
     await interact(() => lane().dispatchEvent(pointer('pointerdown', 200, 200)));
     await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 260)));
-    expect(one<HTMLElement>('.fy-qr__stamp').dataset.swipe).toBe('down');
-    expect(one('.fy-qr__stamp').textContent).toBe('↓ Back to the chat');
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(false);
+    expect(root().querySelector('.fy-qr__stamp')).toBeNull();
     await interact(() => lane().dispatchEvent(pointer('pointermove', 200, 420)));
-    expect(one('.fy-qr__stamp').hasAttribute('data-committed')).toBe(true);
+    await interact(() => lane().dispatchEvent(pointer('pointerup', 200, 420)));
+    expect(spy.skipped).toBe(1);
   });
 
   test('a row that does not swipe, or a mouse, does not skip on a pull down', async () => {

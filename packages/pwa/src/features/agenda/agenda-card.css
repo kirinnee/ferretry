@@ -990,16 +990,17 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 }
 
 /*
- * ILLUSTRATIONS FIT THE CARD. An fy-render mock-up (svg, mermaid, chart, html) is at most the card's width,
- * and scrolls inside its OWN box when it is bigger — in both directions — so the page never scrolls sideways
- * and one tall picture cannot push the answers off the screen. A wide table or code block pans in its box too.
+ * ILLUSTRATIONS FIT THE CARD, AND NEVER TRAP A SCROLL. An fy-render mock-up (svg, mermaid, chart, html) is at
+ * most the card's width and as tall as it is: the card has ONE scroll, so a finger-drag over a picture moves the
+ * card, never the picture. Only something wider than the card pans — sideways, in its own box. A wide table or
+ * code block pans sideways too.
  */
 .fy-attn-card .fy-render,
 .fy-attn-detail .fy-render {
   max-width: 100%;
-  max-height: min(60dvh, 32rem);
-  overflow: auto;
-  overscroll-behavior: contain;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 .fy-attn-card .fy-render :is(svg, img, canvas, video, iframe),
 .fy-attn-detail .fy-render :is(svg, img, canvas, video, iframe) {

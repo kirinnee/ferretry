@@ -45,7 +45,7 @@ function RecommendedTag() {
 }
 
 /** An option the answer row has no button for: it lives in the menu as "D — label". */
-export interface MenuChoice {
+interface MenuChoice {
   readonly label: string;
   readonly letter: string | undefined;
   readonly onPick: () => void;
@@ -55,7 +55,7 @@ export interface MenuChoice {
  * A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. It holds the
  * options past the row's three (`extras`) and, unless `onDismiss` is absent, "Not needed…".
  */
-export function ActionMenu({
+function ActionMenu({
   busy,
   onDismiss,
   extras = [],

@@ -8,7 +8,7 @@
  * and phone 390, in the Studio theme, light and dark.
  *
  *   bun harness/agenda-v4-screenshot.ts [outDir]   # writes <outDir>/agenda-v4-<name>-<phone|desktop>-<theme>.png
- *                                                  # and <outDir>/agenda-v4b-<name>-<phone|desktop>-<theme>.png
+ *                                                  # and <outDir>/agenda-v4c-<name>-<phone|desktop>-<theme>.png
  *
  * It bundles `agenda-page.tsx` (the real `useAgenda`, invented data), serves it on an ephemeral loopback
  * port, drives it with real clicks, and FAILS (after writing every picture) when: a page scrolls sideways; the
@@ -247,9 +247,9 @@ const checkOverlay = async (page: Page, form: Form, label: string, composerRest:
   const composerNow = await composerBox(page);
   const gap = composerNow.y - (card.y + card.height);
   check(gap >= -1 && gap <= 24, `${label}: the composer is ${Math.round(gap)}px from the card`);
-  const row = page.locator('[data-agenda-quick-replies] .fy-qr__row');
+  const row = page.locator('[data-agenda-quick-replies] .fy-qr__row:not(.fy-qr__more)');
   if ((await row.count()) > 0) {
-    const buttons = await row.locator('button:not([data-agenda-more])').all();
+    const buttons = await row.locator('button').all();
     const boxes = (await Promise.all(buttons.map(button => button.boundingBox()))).filter(
       (found): found is Box => found !== null,
     );
@@ -458,13 +458,9 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const V4B = [
     { id: 'A62', name: 'options-2', answers: ['left', 'up'] },
     { id: 'A63', name: 'options-3', answers: ['left', 'up', 'right'] },
-    { id: 'A64', name: 'options-5', answers: ['left', 'up', 'right'], extras: ['D — Sydney', 'E — São Paulo'] },
-    {
-      id: 'A60',
-      name: 'jaeda-options',
-      answers: ['left', 'up', 'right'],
-      extras: ['D — Warn when one is dropped', 'E — Do nothing for now'],
-    },
+    { id: 'A64', name: 'options-5', answers: ['left', 'up', 'right'], extras: 2 },
+    { id: 'A65', name: 'options-7', answers: ['left', 'up', 'right'], extras: 4 },
+    { id: 'A60', name: 'jaeda-options', answers: ['left', 'up', 'right'], extras: 2 },
   ] as const;
   for (const entry of V4B) {
     const page = await open(browserContext, theme, `view=board&v4=1&agenda=${entry.id}`);
@@ -479,23 +475,38 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       JSON.stringify(directions) === JSON.stringify(entry.answers),
       `${label}: the row answers are ${directions.join(',')}, wanted ${entry.answers.join(',')}`,
     );
-    const plainChips = await page.locator('.fy-qr__row button[data-agenda-option]:not([data-agenda-answer])').count();
+    const plainChips = await page
+      .locator('.fy-qr__row[data-slots] button[data-agenda-option]:not([data-agenda-answer])')
+      .count();
     check(plainChips === 0, `${label}: ${plainChips} option buttons sit outside the three slots`);
+    check((await page.locator('[aria-haspopup="menu"]').count()) === 0, `${label}: a "…" menu is still drawn`);
+    // Options past the three: the rows under the swipe row, tap only, each row filling the width.
+    const more = page.locator('[data-agenda-more-row]');
+    const wanted = 'extras' in entry ? entry.extras : 0;
+    const extraButtons = (await more.count()) === 0 ? 0 : await more.locator('button').count();
+    check(extraButtons === wanted, `${label}: ${extraButtons} buttons under the swipe row, wanted ${wanted}`);
+    if (wanted > 0) {
+      const fill = await more.evaluate(row => {
+        const box = row.getBoundingClientRect();
+        const buttons = [...row.querySelectorAll('button')].map(button => button.getBoundingClientRect());
+        const rows = new Map<number, { left: number; right: number }>();
+        for (const b of buttons) {
+          const at = Math.round(b.top);
+          const seen = rows.get(at);
+          rows.set(at, {
+            left: Math.min(seen?.left ?? b.left, b.left),
+            right: Math.max(seen?.right ?? b.right, b.right),
+          });
+        }
+        return [...rows.values()].every(r => r.left - box.left < 2 && box.right - r.right < 2);
+      });
+      check(fill, `${label}: a row of extra options does not fill the width`);
+    }
     check(
       (await page.locator('.fy-qr__row [data-agenda-answer="up"][data-recommended]').count()) === 1,
       `${label}: the recommended answer is not in the middle slot`,
     );
-    await shot(page, entry.name, form, theme, 'agenda-v4b');
-    if ('extras' in entry) {
-      await page.locator('[data-agenda-more]').click();
-      await page.locator('[role="menu"]').waitFor({ state: 'visible' });
-      const extras = await page.locator('[data-agenda-extra]').allTextContents();
-      check(
-        JSON.stringify(extras) === JSON.stringify(entry.extras),
-        `${label}: the "…" menu holds ${JSON.stringify(extras)}, wanted ${JSON.stringify(entry.extras)}`,
-      );
-      await shot(page, `${entry.name}-menu`, form, theme, 'agenda-v4b');
-    }
+    await shot(page, entry.name, form, theme, 'agenda-v4c');
     // a touch swipe, caught mid-drag: ↑ answers the middle one, ↓ skips to the next item (phone only: a mouse does not swipe)
     if (phone && entry.id === 'A63') {
       const drag = async (dy: number): Promise<void> => {
@@ -513,18 +524,16 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
         await page.waitForTimeout(150);
       };
       await drag(-70);
-      const up = (await page.locator('.fy-qr__stamp').textContent()) ?? '';
-      check(/^↑ Lock the session row$/u.test(up), `${label}: the swipe-up stamp says "${up}"`);
-      await shot(page, 'swipe-up', form, theme, 'agenda-v4b');
+      check((await page.locator('.fy-qr__stamp').count()) === 0, `${label}: a floating label shows while swiping up`);
+      await shot(page, 'swipe-up', form, theme, 'agenda-v4c');
       await page.evaluate(() => {
         document
           .querySelector('.fy-qr')
           ?.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 11, pointerType: 'touch' }));
       });
       await drag(80);
-      const down = (await page.locator('.fy-qr__stamp').textContent()) ?? '';
-      check(/^↓ Skip$/u.test(down), `${label}: the swipe-down stamp says "${down}"`);
-      await shot(page, 'swipe-down', form, theme, 'agenda-v4b');
+      check((await page.locator('.fy-qr__stamp').count()) === 0, `${label}: a floating label shows while swiping down`);
+      await shot(page, 'swipe-down', form, theme, 'agenda-v4c');
       await page.evaluate(() => {
         const lane = document.querySelector('.fy-qr');
         if (lane === null) return;

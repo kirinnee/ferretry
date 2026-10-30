@@ -105,6 +105,25 @@ describe('the item view', () => {
     expect(top.querySelector('[data-agenda-body]')).toBeNull();
   });
 
+  test('keeps the head to ONE row: the title beside the status dot, n of N, ‹ › and ✕', async () => {
+    await draw(richItem);
+    const row = one('[data-agenda-top] .fy-item-view__nav');
+    expect(row.querySelector('[data-agenda-title]')).not.toBeNull();
+    expect(row.querySelector('[data-agenda-where]')).not.toBeNull();
+    expect(row.querySelector('[data-agenda-close]')).not.toBeNull();
+    const status = row.querySelector<HTMLElement>('.fy-item-view__status');
+    expect(status === null || (status.title !== '' && status.querySelector('[data-agenda-status]') !== null)).toBe(
+      true,
+    );
+  });
+
+  test('draws no arrow on a quick reply: the position alone is the swipe', async () => {
+    await draw(richItem, { swipeable: true });
+    const chips = root().querySelectorAll('[data-agenda-answer]');
+    expect(chips.length).toBeGreaterThan(0);
+    for (const chip of chips) expect(chip.querySelector('svg')).toBeNull();
+  });
+
   test('reads like a conversation: what is going on, why, decided, still open, a terms table, then history', async () => {
     const entries: TranscriptEntry[] = [
       {
@@ -212,19 +231,14 @@ describe('moving through the items', () => {
     expect([last.next, last.closed]).toEqual([0, 1]);
   });
 
-  test('says on the pull what ↓ does: Skip, or Back to the chat on the last item', async () => {
-    const stamp = async (extra: Partial<AgendaItemViewProps>): Promise<string> => {
-      await draw(richItem, extra);
-      const lane = one<HTMLElement>('.fy-qr');
-      const touch = (type: string, y: number): PointerEvent =>
-        new PointerEvent(type, { bubbles: true, clientX: 200, clientY: y, pointerId: 5, pointerType: 'touch' });
-      await interact(() => lane.dispatchEvent(touch('pointerdown', 200)));
-      await interact(() => lane.dispatchEvent(touch('pointermove', 260)));
-      return one('.fy-qr__stamp').textContent ?? '';
-    };
-    expect(await stamp({})).toBe('↓ Skip');
-    await view?.unmount();
-    expect(await stamp({ onNext: undefined })).toBe('↓ Back to the chat');
+  test('draws no floating label while a pull is dragged: the card teaches nothing, it just moves on', async () => {
+    await draw(richItem);
+    const lane = one<HTMLElement>('.fy-qr');
+    const touch = (type: string, y: number): PointerEvent =>
+      new PointerEvent(type, { bubbles: true, clientX: 200, clientY: y, pointerId: 5, pointerType: 'touch' });
+    await interact(() => lane.dispatchEvent(touch('pointerdown', 200)));
+    await interact(() => lane.dispatchEvent(touch('pointermove', 260)));
+    expect(root().querySelector('.fy-qr__stamp')).toBeNull();
   });
 });
 

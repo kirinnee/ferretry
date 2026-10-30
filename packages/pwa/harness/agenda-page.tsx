@@ -75,7 +75,7 @@ const A5 = item('A5', 12, {
     ],
   },
   answers: [
-    { direction: 'right', does: 'choose', label: 'SQLite' },
+    { direction: 'up', does: 'choose', label: 'SQLite' },
     { direction: 'left', does: 'choose', label: 'Postgres' },
   ],
   recommendation: { decision: 'SQLite', why: 'Needs nothing installed on the machine' },
@@ -385,6 +385,25 @@ const A64 = item('A64', 6, {
   recommendation: { decision: 'Virginia', why: 'Most of the owners are on the east coast' },
 } as Partial<AgendaItem>);
 
+// Seven options: three on the swipe row, four on the rows under it (tap only).
+const A65 = item('A65', 6, {
+  title: 'Which day for the migration?',
+  subject: 'Which weekday should the ledger migration run on?',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Monday' },
+      { label: 'Tuesday' },
+      { label: 'Wednesday' },
+      { label: 'Thursday' },
+      { label: 'Friday' },
+      { label: 'Saturday' },
+      { label: 'Sunday' },
+    ],
+  },
+  recommendation: { decision: 'Saturday', why: 'Nobody is on the board then' },
+} as Partial<AgendaItem>);
+
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
 const HISTORY_ENTRIES = [
@@ -404,7 +423,7 @@ const configChange = params.get('config') === '1';
 const jaeda = params.get('jaeda') === '1';
 const v4 = params.get('v4') === '1';
 
-const items = [...AGENDA, ...(jaeda ? [A47, A48] : []), ...(v4 ? [A60, A61, A62, A63, A64] : [])].map(entry =>
+const items = [...AGENDA, ...(jaeda ? [A47, A48] : []), ...(v4 ? [A60, A61, A62, A63, A64, A65] : [])].map(entry =>
   entry.id === 'A5'
     ? long
       ? A5_LONG

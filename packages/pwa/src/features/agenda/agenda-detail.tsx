@@ -62,7 +62,7 @@ export function AgendaDetail({
       <AgendaBriefSections
         collapsible={false}
         highlight={highlight}
-        detail={body === null ? undefined : <AgendaBody folded={false} renderProse={renderProse} text={body} />}
+        detail={body === null ? undefined : <AgendaBody renderProse={renderProse} text={body} />}
         item={item}
         part={layout === 'full' ? 'all' : 'detail'}
         {...brief}

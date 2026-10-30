@@ -7,7 +7,7 @@ import { cardModel } from '../../../src/lib/agenda-card-model.ts';
 import { itemOptions } from '../../../src/lib/agenda-options.ts';
 import { swipeMap } from '../../../src/lib/agenda-inbox.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+import { type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
 afterEach(async () => {
@@ -121,7 +121,6 @@ describe('the quick replies, lettered', () => {
         model={cardModel(item)}
         onAct={() => {}}
         onSkip={() => {}}
-        skipLabel="Skip"
         options={itemOptions(item)}
         swipeable
       />,
@@ -157,14 +156,16 @@ describe('the quick replies, lettered', () => {
     expect(buttons().map(button => button.textContent)).toEqual(['Skip', 'Looks good']);
   });
 
-  test('an old choice past the third option has no button: its letter is in the "…" menu', async () => {
+  test('an old choice past the third option gets a second row, lettered like the first, and no menu', async () => {
     const many = agendaItem('A61', {
       ask: choices('Now and here', 'Later on today', 'Never ever again', 'Maybe some day'),
     });
     await draw(many);
-    expect(buttons().map(button => button.textContent)).toEqual(['B', 'A', 'C']);
-    await interact(() => must(root().querySelector<HTMLButtonElement>('[aria-haspopup="menu"]'), 'the menu').click());
-    expect(must(root().querySelector('[data-agenda-extra]'), 'the extra').textContent).toBe('D — Maybe some day');
+    expect(buttons().map(button => button.textContent)).toEqual(['B', 'A', 'C', 'D']);
+    const more = must(root().querySelector('[data-agenda-more-row]'), 'the second row');
+    expect(more.textContent).toBe('D');
+    expect(must(more.querySelector('button'), 'D').title).toBe('Maybe some day');
+    expect(root().querySelector('[aria-haspopup="menu"]')).toBeNull();
   });
 
   test('answers that are not options of the ask stay in swipe order, whole labels', async () => {

@@ -113,16 +113,13 @@ describe('agenda card Markdown and hypermedia', () => {
     expect(body.textContent).toContain('line 39');
   });
 
-  test('a long body still previews behind Show more where a host asks for it to fold', async () => {
+  test('a long body is drawn whole, with no Show more', async () => {
     const text = Array.from({ length: 40 }, (_, line) => `line ${line}`).join('\n\n');
     view = await mount(<AgendaBody renderProse={chatProse()} text={text} />);
     const body = must(view.container.querySelector('[data-agenda-body]'), 'body');
-    const toggle = must(body.querySelector<HTMLButtonElement>('[data-agenda-body-toggle]'), 'toggle');
-    expect(body.hasAttribute('data-folded')).toBe(true);
-    expect(toggle.textContent).toBe('Show more');
-    await interact(() => toggle.click());
+    expect(body.querySelector('[data-agenda-body-toggle]')).toBeNull();
     expect(body.hasAttribute('data-folded')).toBe(false);
-    expect(toggle.textContent).toBe('Show less');
+    expect(body.textContent).toContain('line 39');
   });
 
   test('does not fold a short body', async () => {

@@ -147,9 +147,15 @@ export function AgendaItemView({
       tabIndex={-1}
     >
       <header className="fy-item-view__top" data-agenda-top="" {...pull}>
+        {/* ONE compact head: the controls float right — status dot, n of N, ‹ › and ✕ — and the title flows beside and
+            under them, so a long title wraps across the full width instead of into a narrow column. */}
         <div className="fy-item-view__nav">
-          {status === null ? <span /> : <AgendaStatusPill status={status} />}
           <div className="fy-item-view__pager">
+            {status === null ? null : (
+              <span className="fy-item-view__status" title={status.label}>
+                <AgendaStatusPill status={status} />
+              </span>
+            )}
             <button
               aria-label="Previous item"
               className="fy-item-view__step"
@@ -181,10 +187,10 @@ export function AgendaItemView({
               <X aria-hidden="true" size={18} />
             </button>
           </div>
+          <h2 className="fy-item-view__title" data-agenda-title="">
+            {agendaHeading(item)}
+          </h2>
         </div>
-        <h2 className="fy-item-view__title" data-agenda-title="">
-          {agendaHeading(item)}
-        </h2>
         {ask === null ? null : (
           <div className="fy-item-view__ask" data-agenda-ask="">
             {renderProse(ask)}
@@ -219,7 +225,6 @@ export function AgendaItemView({
         onAct={onAct}
         onSkip={skip}
         options={itemOptions(item)}
-        skipLabel={onNext === undefined ? 'Back to the chat' : 'Skip'}
         swipeable={swipeable}
         {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
         {...(model.perQuestion && asked.length > 0
