@@ -91,10 +91,27 @@ describe('cardSegments', () => {
   it('draws the ref, the people and the machine only when there are several', () => {
     const task = card('F412', { assignee: 'mvudnuly-ec442385' });
     const keys = cardSegments(task, { names, now: NOW, category: 'active', machine: 'laptop' }).map(entry => entry.key);
-    expect(keys).toEqual(['ref', 'people', 'activity', 'machine']);
+    expect(keys).toEqual(['ref', 'activity', 'people', 'machine']);
     expect(segment(task, 'ref')?.text).toBe('&F412');
     expect(segment(task, 'people')?.text).toBe('Denisha→mvudnuly');
     expect(segment(task, 'machine')).toBeUndefined();
+  });
+
+  it('orders the meta line by priority so a narrow card drops items from the right', () => {
+    const task = card('F1', {
+      assignee: 'mvudnuly-ec442385',
+      blockedBy: [{ id: 'F2' }],
+      links: { prs: [pr()], branch: null, commits: [], docs: [] },
+      rollup: {
+        children: 1,
+        byCategory: { backlog: 0, active: 1, review: 0, shipped: 0, verify: 0, closed: 0 },
+        active: 1,
+        lastTouchedAt: null,
+      },
+      shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
+    });
+    const keys = cardSegments(task, { names, now: NOW, category: 'active', machine: 'laptop' }).map(entry => entry.key);
+    expect(keys).toEqual(['ref', 'activity', 'pr', 'blocked', 'subs', 'people', 'shipped', 'machine']);
   });
 
   it('words the headline PR by its checks', () => {

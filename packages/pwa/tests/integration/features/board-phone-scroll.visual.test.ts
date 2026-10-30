@@ -23,7 +23,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
-import { pullDown, readBoardDensity, readBoardScroll, scrollBoardTo } from '../support/board-scroll.ts';
+import {
+  pullDown,
+  readBoardDensity,
+  readBoardReadable,
+  readBoardScroll,
+  scrollBoardTo,
+} from '../support/board-scroll.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_BOARD_SCROLL_SHOTS_DIR ?? '';
@@ -63,6 +69,7 @@ const build = async (): Promise<{ readonly css: string; readonly js: string }> =
 const open = async (
   scene: 'phone' | 'desktop',
   mode: 'light' | 'dark' = 'light',
+  columns?: number,
 ): Promise<{ readonly context: BrowserContext; readonly tab: Page }> => {
   const phone = scene === 'phone';
   const context = await browser.newContext({
@@ -77,7 +84,7 @@ const open = async (
     new URL(route.request().url()).origin === origin ? await route.continue() : await route.abort(),
   );
   const tab = await context.newPage();
-  await tab.goto(`${origin}/?scene=${scene}&theme=studio-${mode}`);
+  await tab.goto(`${origin}/?scene=${scene}&theme=studio-${mode}${columns === undefined ? '' : `&cols=${columns}`}`);
   await tab.waitForSelector('.fy-board-card');
   if (phone) await tab.waitForSelector('.fy-board__notice');
   return { context, tab };
@@ -197,6 +204,37 @@ describe('the Board scrolls in one place on a phone', () => {
       }
     }
   }, 60_000);
+
+  it('wraps a title to two lines and drops whole meta items, never cutting one mid-line', async () => {
+    const cases = [
+      { scene: 'phone', columns: undefined },
+      { scene: 'desktop', columns: 200 },
+      { scene: 'desktop', columns: 168 },
+      { scene: 'desktop', columns: 270 },
+    ] as const;
+    for (const { scene, columns } of cases) {
+      for (const mode of ['light', 'dark'] as const) {
+        const { context, tab } = await open(scene, mode, columns);
+        try {
+          const facts = await readBoardReadable(tab);
+          expect(facts.cards).toBeGreaterThan(30);
+          expect(facts.titleMaxLines).toBeLessThanOrEqual(2);
+          expect(facts.titlesCut).toBe(0);
+          expect(facts.partialItems).toBe(0);
+          expect(facts.cardsMissingId).toBe(0);
+          expect(facts.tallestCard).toBeLessThanOrEqual(64);
+          if (scene === 'desktop' && (columns ?? 999) <= 200) {
+            expect(facts.titleMaxLines).toBe(2);
+            expect(facts.titleWidth).toBeLessThan(200);
+          }
+          if (columns === 200 || columns === 270 || scene === 'phone') expect(facts.cardsMissingActivity).toBe(0);
+          await shoot(tab, `board-readable-${mode}-${scene}.png`);
+        } finally {
+          await context.close();
+        }
+      }
+    }
+  }, 120_000);
 
   it('draws the notice on one line until tapped, and dismisses it', async () => {
     const { context, tab } = await open('phone');
