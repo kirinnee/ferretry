@@ -1,3 +1,9 @@
+## [4.119.0](https://github.com/kirinnee/ferretry/compare/v4.118.0...v4.119.0) (2026-10-30)
+
+### Features
+
+* **pwa:** agenda item view v3 — the real composer below, quick replies above it ([#962](https://github.com/kirinnee/ferretry/issues/962)) ([d4ad45f](https://github.com/kirinnee/ferretry/commit/d4ad45feefc48fab323dd15eaf7cb1fcdfff06c2))
+
 ## [4.118.0](https://github.com/kirinnee/ferretry/compare/v4.117.0...v4.118.0) (2026-10-30)
 
 ### Features
