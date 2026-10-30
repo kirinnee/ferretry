@@ -824,7 +824,8 @@ describe('the mounted daemon surface', () => {
       1 + // handing a web address to this computer's own browser (loopback caller only)
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
       3 + // a ferret's processes: the list, one process's output, and Stop
-      3; // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
+      3 + // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
+      2; // the board's legacy import: the old-reference lookup, and the one-time import (owner only)
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -1064,6 +1065,8 @@ describe('the mounted daemon surface', () => {
       'POST /v1/sessions/:sessionId/tasks/:taskId',
       'GET /v1/board',
       'POST /v1/board/tasks',
+      'GET /v1/board/tasks',
+      'POST /v1/board/import',
       'GET /v1/board/tasks/:taskId',
       'POST /v1/board/tasks/:taskId',
       // The board MEMBERSHIP surface. Two of the CLI's eleven board routes are absent on purpose:

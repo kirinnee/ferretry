@@ -140,6 +140,13 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import {
+  AgendaImportAgenda,
+  FileBoardImportMarker,
+  FileLegacyTaskSource,
+  StorageImportSessions,
+} from '../src/adapters/board-import/index.ts';
+import { BoardImporter, LaneSetImportProjects } from '../src/lib/board-import/index.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
@@ -232,6 +239,7 @@ import {
   FileUpdateDocuments,
   foreignHistoryRoots,
   GitHubLatestRelease,
+  GitProjectFacts,
   GitRepositoryProbe,
   HostedModelCatalog,
   HostedRelayDirectory,
@@ -1866,6 +1874,7 @@ export interface BrowserTransportWorld {
 
 /** The board, and the cards a start makes on it. */
 interface BoardWorld {
+  readonly store: FileBoardStore;
   readonly board: BoardService;
   readonly cards: SessionCards;
 }
@@ -1897,8 +1906,10 @@ function createBoardWorld(
   const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
   const parents = new StorageSessionParents(storage);
   const focus = new StorageSessionFocus(storage);
+  // ONE store per daemon: the service and the legacy import share its id counter.
+  const store = new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics);
   const board = new BoardService({
-    store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics),
+    store,
     lanes,
     parents,
     focus,
@@ -1925,7 +1936,7 @@ function createBoardWorld(
     diagnostics,
     bin,
   });
-  return { board, cards };
+  return { store, board, cards };
 }
 
 /**
@@ -9226,6 +9237,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // The one-time import of the old per-session task files onto the project boards. It shares the board's
+      // store with the board service (one id counter), proposes lanes through the lane service above, and
+      // points the open agenda items at their cards. Total: a bad file is reported, never a failed start.
+      const boardImporter = new BoardImporter({
+        tasks: new FileLegacyTaskSource(
+          () => storage.listSessions().map(session => session.id),
+          id => join(createSessionPaths(paths, parseSessionId(id)).directory, 'tasks.json'),
+        ),
+        store: boardWorld.store,
+        projects: new LaneSetImportProjects(laneSets, new GitProjectFacts()),
+        sessions: new StorageImportSessions(
+          () => storage.listSessions().map(session => session.id),
+          async () => await assigneeCandidates(storage),
+        ),
+        agenda: new AgendaImportAgenda(agendaBoards, () => new Date(clock.now()).toISOString()),
+        marker: new FileBoardImportMarker(join(paths.home, 'board-import.json')),
+        clock: { now: () => new Date(clock.now()).toISOString() },
+        machineId: () => attachmentDaemonId,
+      });
+      unrefTimer(2000, () => {
+        void boardImporter
+          .run()
+          .then(summary => {
+            if (summary.skipped) return;
+            const said = `board import: ${summary.imported} imported, ${summary.alreadyImported} already there, ${summary.linkedAsks} asks linked, ${summary.problems.length} problems`;
+            process.stderr.write(`${said}\n`);
+            for (const problem of summary.problems) {
+              process.stderr.write(
+                `board import: ${problem.sessionId ?? '-'} ${problem.taskId ?? ''} ${problem.detail}\n`,
+              );
+            }
+          })
+          .catch(() => undefined);
+      });
       // Each ferret's held answers (docs/agenda.md § Delivery). The send is awaited by the batcher, outside
       // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
       // must not wait on that. The send ledger keeps one message per batch send id, and is the one witness of
@@ -10675,7 +10720,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
-        board: boardWorld.board,
+        board: {
+          board: async query => await boardWorld.board.board(query),
+          task: async id => await boardWorld.board.task(id),
+          taskByLegacyRef: async legacyRef => await boardWorld.board.taskByLegacyRef(legacyRef),
+          create: async (request, caller) => await boardWorld.board.create(request, caller),
+          act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
+          importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
+        },
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
