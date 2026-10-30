@@ -513,6 +513,13 @@ export const agendaWakeAt = (item: {
   return item.neededBy !== undefined && Date.parse(item.neededBy) < Date.parse(until) ? item.neededBy : until;
 };
 
+/**
+ * The number a badge shows for a board: its open items less the PARKED ones (snoozed, or replied to), which wait
+ * on nobody. A snapshot's `count` stays every open item — the wire checks `count === items.length`.
+ */
+export const agendaBadgeCount = (snapshot: { readonly items: readonly { readonly parked?: unknown }[] }): number =>
+  snapshot.items.filter(item => item.parked === undefined).length;
+
 /** How often a ferret may wake an item the owner snoozed (`now`): once an hour per item. */
 export const AGENDA_URGENT_WAKE_MS = 60 * 60_000;
 

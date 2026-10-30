@@ -328,8 +328,9 @@ export function agendaSnapshot(ledger: AgendaLedger): AgendaSnapshot {
     sessionId: ledger.sessionId,
     items,
     resolved,
-    // A parked item (snoozed, or replied to) is no part of the count a badge shows.
-    count: items.filter(item => item.parked === undefined).length,
+    // EVERY open item, parked ones included: the wire's contract (and every older client's check) is
+    // count === items.length. A badge leaves parked items out itself (`agendaBadgeCount`).
+    count: items.length,
     parseErrors: 0,
     updatedAt: ledger.updatedAt,
   };

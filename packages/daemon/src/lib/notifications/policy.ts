@@ -3,6 +3,7 @@ import {
   AGENDA_PUSH_TITLE_LENGTH,
   type AgendaItem,
   type AgendaSnapshot,
+  agendaBadgeCount,
   agendaNotificationPath,
   agendaTitle,
   clipAtWord,
@@ -79,7 +80,7 @@ export function pingNotificationPayload(
     body: clipAtWord(oneLine(item.subject), AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: agendaNotificationPath(sessionId, item.id),
-    count: snapshot.count,
+    count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
 }
 
@@ -102,7 +103,7 @@ export function deadlineNotificationPayload(
     body: clipAtWord(`${timeLeftPhrase(item.neededBy, now)}: ${oneLine(item.subject)}`, AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: agendaNotificationPath(sessionId, item.id),
-    count: snapshot.count,
+    count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
 }
 
@@ -121,7 +122,7 @@ export function wokeNotificationPayload(
     body: clipAtWord(`Back from snooze: ${oneLine(item.subject)}`, AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: agendaNotificationPath(sessionId, item.id),
-    count: snapshot.count,
+    count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
 }
 
@@ -151,7 +152,7 @@ export function stoppedNotificationPayload(
     body: clipAtWord(oneLine(agendaTitle(first)), AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: agendaNotificationPath(sessionId, first.id),
-    count: snapshot.count,
+    count: agendaBadgeCount(snapshot),
   }) as SessionNotificationPayload;
 }
 

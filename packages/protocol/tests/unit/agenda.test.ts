@@ -6,6 +6,7 @@ import {
   AGENDA_URGENT_WAKE_MS,
   AgendaItemSchema,
   AgendaParkedSchema,
+  agendaBadgeCount,
   agendaWakeAt,
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
@@ -297,6 +298,18 @@ describe('AgendaParkedSchema', () => {
 
     // Assert
     should(item).containDeep({ parked: { reason: 'snoozed', until: LATER }, urgentAt: AT });
+  });
+});
+
+describe('agendaBadgeCount', () => {
+  it('should count the open items that wait on someone, leaving parked ones out', () => {
+    const at = '2026-10-30T10:00:00.000Z';
+    should(agendaBadgeCount({ items: [] })).equal(0);
+    should(
+      agendaBadgeCount({
+        items: [{}, { parked: { reason: 'replied', at } }, { parked: { reason: 'snoozed', at, until: at } }, {}],
+      }),
+    ).equal(2);
   });
 });
 
