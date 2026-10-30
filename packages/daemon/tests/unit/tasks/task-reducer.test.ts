@@ -277,13 +277,32 @@ describe('applyTaskAction — status and phase', () => {
     );
   });
 
-  it('should refuse live to done without a human verifying it', () => {
+  it('should let an agent close its own session task as a claim, never as a verification', () => {
+    // Arrange
+    const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
+
+    // Act
+    const outcome = act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'it works' });
+
+    // Assert
+    should(outcome.entry.task.phase).equal('done');
+    should(lastActivity(outcome.entry).data).have.property('completionClaim', true);
+    should(lastActivity(outcome.entry).data).not.have.property('verifiedByHuman');
+    should(lastActivity(outcome.entry).data).not.have.property('verifiedByTopAgent');
+  });
+
+  it('should refuse live to done to an agent of another session', () => {
     // Arrange
     const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
 
     // Act & Assert
-    shouldRefuse('approval-required', () =>
-      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'it works' }),
+    shouldRefuse('forbidden', () =>
+      act(
+        snapshot,
+        'F1',
+        { action: 'status', status: 'done', reason: 'not mine' },
+        agent({ sessionId: 'session-beta' }),
+      ),
     );
   });
 
@@ -373,7 +392,7 @@ describe('applyTaskAction — status and phase', () => {
     });
   });
 
-  it('should refuse malformed or mismatched top-agent evidence without writing a completion', () => {
+  it('should record malformed or mismatched top-agent evidence as a plain claim, never a verification', () => {
     // Arrange — this is the reducer boundary, so a caller can hand it an object that never travelled
     // through the task-board mount. It must validate the receipt rather than trusting its presence.
     const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
@@ -382,24 +401,29 @@ describe('applyTaskAction — status and phase', () => {
       markDoneAuthorization: { ...MARK_DONE_GRANT, role: 'read', action: 'note' },
     });
 
-    // Act + Assert
-    shouldRefuse('approval-required', () =>
-      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, malformed),
+    // Act
+    const forged = act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'shipped it' }, malformed);
+    const mismatched = act(
+      snapshot,
+      'F1',
+      { action: 'status', status: 'done', reason: 'a different click' },
+      topAgent(),
     );
-    shouldRefuse('approval-required', () =>
-      act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'a different click' }, topAgent()),
-    );
-    should(snapshot.tasks[0]?.task.phase).equal('live');
-    should(snapshot.tasks[0]?.activity).have.length(1);
+
+    // Assert
+    for (const outcome of [forged, mismatched]) {
+      should(lastActivity(outcome.entry).data).have.property('completionClaim', true);
+      should(lastActivity(outcome.entry).data).not.have.property('verifiedByTopAgent');
+    }
   });
 
-  it('should refuse live to done to an agent whose grant did not name this session', () => {
+  it('should refuse live to done to an agent of another session even with a grant for it', () => {
     // Arrange — authorized for a DIFFERENT session, so the grant proves nothing here.
     const snapshot = snapshotOf(task({ phase: 'live', status: 'live' }));
-    const elsewhere = agent({ boardAuthorizedForSession: 'session-beta' });
+    const elsewhere = agent({ sessionId: 'session-beta', boardAuthorizedForSession: 'session-beta' });
 
     // Act + Assert
-    shouldRefuse('approval-required', () =>
+    shouldRefuse('forbidden', () =>
       act(snapshot, 'F1', { action: 'status', status: 'done', reason: 'not mine to close' }, elsewhere),
     );
   });

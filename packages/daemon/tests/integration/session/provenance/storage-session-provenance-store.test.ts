@@ -60,7 +60,6 @@ function sessionConfig(id: string): Record<string, unknown> {
     incarnation: `${id}-1`,
     runtimeGeneration: 1,
     name: 'zelda',
-    boardAccess: 'none',
     agent: 'claude-auto-atomi',
     harness: 'claude',
     modelHint: '',

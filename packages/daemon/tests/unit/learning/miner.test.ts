@@ -40,7 +40,6 @@ function session(transcript = true, id = 'session-1'): SessionView {
       incarnation: `${id}-1`,
       runtimeGeneration: 1,
       name: 'Complete task',
-      boardAccess: 'none',
       agent: 'claude',
       harness: 'claude',
       modelHint: '',
@@ -633,7 +632,6 @@ describe('LearningMiner scan', () => {
       label: LEARNING_MINER_LABEL,
       name: 'Lesson Scan',
       cwd: '/daemon',
-      boardAccess: 'none',
       model: 'opus',
     });
     should(started[0]?.prompt).containEql(`${SCAN_RUN}/observations.json`);

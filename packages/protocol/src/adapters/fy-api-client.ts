@@ -2,7 +2,6 @@ import { z } from 'zod';
 import { type AnalyticsResponse, AnalyticsResponseSchema } from '../lib/analytics.ts';
 import { type ProjectList, ProjectListSchema, type SessionSkills, SessionSkillsSchema } from '../lib/catalog.ts';
 import {
-  FY_BOARD_CAPABILITY_HEADER,
   FY_REQUEST_ID_HEADER,
   FY_VERSION_HEADER,
   type FyClientOptions,
@@ -147,7 +146,6 @@ import {
   type SkillFile,
   SkillFileSchema,
 } from '../lib/skills-inventory.ts';
-import { TaskBoardChildGrantRequestSchema, TaskBoardGrantRequestViewSchema } from '../lib/task-boards.ts';
 import { type TranscriptImageDownload, TranscriptImageDownloadSchema } from '../lib/transcript-images.ts';
 import { type SessionHandoff, SessionHandoffNameSchema, SessionHandoffSchema } from '../lib/turn-handoff.ts';
 import {
@@ -817,13 +815,9 @@ export class FyApiClient implements IFyApiClient {
     );
   }
 
-  async start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView> {
+  async start(input: StartSessionRequestInput, requestId?: string): Promise<SessionView> {
     const parsed = StartSessionRequestSchema.parse(input);
     const logicalRequestId = NonEmptyValueSchema.parse(requestId ?? this.#requestId());
-    const capability = boardCapability?.trim() ?? '';
-    if (parsed.boardAccess !== 'none' && capability === '') {
-      throw new Error('a non-none board-access start requires a board capability');
-    }
 
     const body = JSON.stringify(parsed);
     const digest = await payloadDigest(body);
@@ -831,7 +825,6 @@ export class FyApiClient implements IFyApiClient {
       'content-type': 'application/json',
       [FY_REQUEST_ID_HEADER]: logicalRequestId,
     });
-    if (capability !== '') headers.set(FY_BOARD_CAPABILITY_HEADER, capability);
     const startInit: RequestInit = { method: 'POST', body, headers };
 
     let originalError: FyTransportError;
@@ -853,9 +846,6 @@ export class FyApiClient implements IFyApiClient {
       () => undefined,
     );
     if (recovered === undefined) throw originalError;
-    if (parsed.boardAccess !== 'none') {
-      await this.#ensureBoardAccess(recovered, parsed.boardAccess, logicalRequestId, digest, capability);
-    }
     return recovered;
   }
 
@@ -1269,45 +1259,6 @@ export class FyApiClient implements IFyApiClient {
     if (skew === undefined) return;
     this.#reportedVersionSkew = true;
     this.#onVersionSkew?.(skew);
-  }
-
-  /**
-   * Re-requests the child grant a recovered start could not confirm the daemon had made.
-   *
-   * Only the RECOVERY path reaches here: a start whose POST was answered had its grant requested by
-   * the daemon, which is why the board capability travels on `/v1/sessions` at all. When both POSTs
-   * died in transport the client cannot know how far the daemon got, so it asks again — and the ask
-   * is safe to repeat because the board derives its own request id from the operation's identity and
-   * replays rather than opening a second intent.
-   *
-   * The path is plural. `/v1/task-boards` is the prefix the daemon mounts and the one
-   * `TASK_BOARD_ROUTE_PREFIX` names for the CLI's own eleven routes; the singular spelling this used
-   * to carry reached no route at all, so the one call that exists to make a recovered start whole
-   * answered `unknown_route`.
-   */
-  async #ensureBoardAccess(
-    view: SessionView,
-    role: Exclude<StartSessionRequestInput['boardAccess'], undefined | 'none'>,
-    requestId: string,
-    digest: string,
-    capability: string,
-  ): Promise<void> {
-    await this.request(
-      '/v1/task-boards/child-grants/request',
-      TaskBoardGrantRequestViewSchema,
-      {
-        ...jsonRequest('POST', TaskBoardChildGrantRequestSchema, {
-          targetSessionId: view.config.id,
-          role,
-        }),
-        headers: {
-          'content-type': 'application/json',
-          [FY_REQUEST_ID_HEADER]: `${requestId}:board-access:${digest}`,
-          [FY_BOARD_CAPABILITY_HEADER]: capability,
-        },
-      },
-      FY_RECOVERY_TIMEOUT_MS,
-    );
   }
 
   /**

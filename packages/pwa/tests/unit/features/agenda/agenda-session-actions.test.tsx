@@ -20,7 +20,6 @@ const LEGACY = sessionView('session-hadi', { config: { teammate: 'hadi', mode: '
 const WIRE_CONFIG: Partial<SessionConfig> = {
   incarnation: 'session-hadi-1',
   runtimeGeneration: 1,
-  boardAccess: 'none',
   remoteControl: false,
   harnessFlags: [],
   turn: 4,

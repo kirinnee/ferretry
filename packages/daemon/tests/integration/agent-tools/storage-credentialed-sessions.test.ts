@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { StorageTaskBoardSessionDirectory } from '../../../src/adapters/task-boards/storage-task-board-session-directory.ts';
+import { StorageCredentialedSessions } from '../../../src/adapters/agent-tools/storage-credentialed-sessions.ts';
 
 const AT = '2026-07-31T09:00:00.000Z';
 const HASH = 'a'.repeat(64);
@@ -13,7 +13,6 @@ function configDocument(id: string, overrides: Readonly<Record<string, unknown>>
     incarnation: `${id}-1`,
     runtimeGeneration: 1,
     name: 'Wire Subsystems',
-    boardAccess: 'none',
     agent: 'claude-auto',
     harness: 'claude',
     modelHint: 'opus',
@@ -42,16 +41,16 @@ function configDocument(id: string, overrides: Readonly<Record<string, unknown>>
 
 function directory(
   documents: Readonly<Record<string, { readonly config: unknown; readonly state: unknown }>>,
-): StorageTaskBoardSessionDirectory {
-  return new StorageTaskBoardSessionDirectory({
+): StorageCredentialedSessions {
+  return new StorageCredentialedSessions({
     sessionIds: () => Object.keys(documents),
     readConfig: async id => documents[id]?.config,
     readState: async id => documents[id]?.state,
   });
 }
 
-describe('StorageTaskBoardSessionDirectory', () => {
-  it('should project the fields every board authorization decision is keyed on', async () => {
+describe('StorageCredentialedSessions', () => {
+  it('should project the fields the identity resolver is keyed on', async () => {
     // Arrange
     const source = directory({
       root: {
@@ -67,10 +66,6 @@ describe('StorageTaskBoardSessionDirectory', () => {
     should(sessions).eql([
       {
         id: 'root',
-        incarnation: 'root-1',
-        runtimeGeneration: 1,
-        parentSessionId: null,
-        mode: 'interactive',
         active: true,
         name: 'Wire Subsystems',
         teammate: 'loge',
@@ -79,24 +74,7 @@ describe('StorageTaskBoardSessionDirectory', () => {
     ]);
   });
 
-  it('should report a parent so lineage and descendant checks can be made', async () => {
-    // Arrange
-    const source = directory({
-      child: {
-        config: configDocument('child', { parent: 'root', mode: 'auto' }),
-        state: { id: 'child', status: 'thinking', turn: 2 },
-      },
-    });
-
-    // Act
-    const sessions = await source.snapshot();
-
-    // Assert
-    should(sessions[0]).have.property('parentSessionId', 'root');
-    should(sessions[0]).have.property('mode', 'auto');
-  });
-
-  it('should omit a session that holds no credential, because no grant could ever bind to it', async () => {
+  it('should omit a session that holds no credential, because no presented credential could ever name it', async () => {
     // Arrange — a session started before the per-session credential existed.
     const source = directory({
       legacy: {
@@ -113,8 +91,7 @@ describe('StorageTaskBoardSessionDirectory', () => {
   });
 
   it('should omit a session whose configuration document does not satisfy the protocol', async () => {
-    // Arrange — an incarnation is a term in `isCapabilityBoundToSession`; guessing one would
-    // manufacture a match against a capability minted for a different incarnation.
+    // Arrange — a document the protocol refuses is left out rather than guessed at.
     const source = directory({
       damaged: {
         config: configDocument('damaged', { incarnation: '' }),
@@ -142,7 +119,7 @@ describe('StorageTaskBoardSessionDirectory', () => {
     should(await source.snapshot()).be.empty();
   });
 
-  it('should report a session in a status it never leaves as inactive, so its grants stop authorizing', async () => {
+  it('should report a session in a status it never leaves as inactive, so its credential proves nothing', async () => {
     // Arrange
     const source = directory({
       finished: {
@@ -223,7 +200,7 @@ describe('StorageTaskBoardSessionDirectory', () => {
         if (bracket === 'last') sessionsInFlight -= 1;
       }
     };
-    const source = new StorageTaskBoardSessionDirectory({
+    const source = new StorageCredentialedSessions({
       sessionIds: () => ids,
       readConfig: async id => await readSessionDocument(configDocument(id), 'first'),
       readState: async id => await readSessionDocument({ id, status: 'running', turn: 1, lastActivityAt: AT }, 'last'),
@@ -244,7 +221,7 @@ describe('StorageTaskBoardSessionDirectory', () => {
     // session the schema refuses, but a filesystem that cannot answer at all is damaged state, and
     // the bounded walk hands that failure straight back to the caller.
     const failure = new Error('EIO: the session directory is unreadable');
-    const source = new StorageTaskBoardSessionDirectory({
+    const source = new StorageCredentialedSessions({
       sessionIds: () => ['ok', 'broken'],
       readConfig: async id => {
         if (id === 'broken') throw failure;

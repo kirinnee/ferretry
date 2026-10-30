@@ -88,11 +88,6 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
     .option('--teammate-fallback', 'with --teammate: auto-assign a free callsign instead of failing on a collision')
     .option('--label <label>', 'ownership label; filter later with `ps --label`')
     .option('--parent <id>', 'parent session; an auto session started inside a pane inherits that pane by default')
-    .addOption(
-      new Option('--board-access <access>', "child task-board access; needs the caller's own board capability").choices(
-        ['none', 'read', 'worker', 'coordinator'],
-      ),
-    )
     .option('--prompt-file <file>', 'read the prompt from a file instead of the command line')
     .option('--model <model>', 'override the model (alias or full id)')
     .option(
@@ -130,9 +125,6 @@ export function registerSessionCommands(program: Command, deps: SessionCommandDe
           ...(flag(options, 'teammateFallback') === undefined ? {} : { teammateFallback: true }),
           ...(text(options, 'label') === undefined ? {} : { label: text(options, 'label') }),
           ...(text(options, 'parent') === undefined ? {} : { parent: text(options, 'parent') }),
-          ...(options.boardAccess === undefined
-            ? {}
-            : { boardAccess: options.boardAccess as 'none' | 'read' | 'worker' | 'coordinator' }),
           ...(text(options, 'model') === undefined ? {} : { model: text(options, 'model') }),
           // Only state a remote-control decision when one was actually typed; otherwise the daemon
           // applies its mode-dependent default.

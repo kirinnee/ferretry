@@ -84,7 +84,6 @@ function configuration(id: string, overrides: Record<string, unknown> = {}): Rec
     teammate: 'alistair',
     label: 'f117',
     parent: '20260806-parent',
-    boardAccess: 'worker',
     agent: 'claude-auto-loge',
     harness: 'claude',
     modelHint: 'opus',

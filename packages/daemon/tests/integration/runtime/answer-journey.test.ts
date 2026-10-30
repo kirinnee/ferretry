@@ -297,7 +297,6 @@ async function seed(
       incarnation: `${SESSION_ID}-1`,
       runtimeGeneration: 1,
       name: 'Answer Journey',
-      boardAccess: 'none',
       agent: 'claude-auto',
       harness: 'claude',
       modelHint: 'opus',

@@ -369,7 +369,6 @@ export async function scaledFleet(root: string, shape: ScaledFleetShape = OWNER_
           incarnation: `${sessionId}-1`,
           runtimeGeneration: 1,
           name: `Scaled ${String(index)}`,
-          boardAccess: 'none',
           agent: runtime,
           harness: codex ? 'codex' : 'claude',
           modelHint: 'opus',

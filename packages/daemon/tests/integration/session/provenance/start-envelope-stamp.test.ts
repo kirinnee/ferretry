@@ -83,7 +83,6 @@ function envelope(overrides: Record<string, unknown>): SessionProtocolEnvelope {
   return {
     incarnation: 'x-1',
     runtimeGeneration: 1,
-    boardAccess: 'none',
     agent: 'claude-auto-loge',
     harness: 'claude',
     modelHint: '',

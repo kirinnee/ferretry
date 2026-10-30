@@ -222,9 +222,8 @@ export interface SessionEnvironmentStore {
 }
 
 /**
- * The environment variable the fleet wrappers read their own session credential from. It is the
- * name `packages/cli/src/lib/task-boards/board-credentials.ts` demands before it will send an
- * `invite-accept`, so it is a wire contract with the CLI rather than a local choice.
+ * The environment variable the fleet wrappers read their own session credential from. The agent
+ * tools present it, so its name is a wire contract with the wrappers rather than a local choice.
  */
 export const SESSION_BOARD_CAPABILITY_VARIABLE = 'FY_SESSION_BOARD_CAPABILITY';
 

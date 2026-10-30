@@ -70,7 +70,6 @@ describe('buildStartRequest', () => {
       mode: 'auto',
       prompt: 'do the thing',
       agent: 'claude-alpha',
-      boardAccess: 'none',
       cwd: '/work/repo',
       parent: 'ses-lead',
       teammateFallback: true,
@@ -84,7 +83,6 @@ describe('buildStartRequest', () => {
       detach: true,
     });
     should(plan.warnings).be.empty();
-    should(plan.boardCapability).be.undefined();
   });
 
   it('should put a typed fast decision on the wire, either way, and nothing otherwise', () => {
@@ -105,14 +103,7 @@ describe('buildStartRequest', () => {
     const plan = buildStartRequest(auto, HERE);
 
     // Assert
-    should(Object.keys(plan.request).sort()).deepEqual([
-      'agent',
-      'boardAccess',
-      'cwd',
-      'harnessFlags',
-      'mode',
-      'prompt',
-    ]);
+    should(Object.keys(plan.request).sort()).deepEqual(['agent', 'cwd', 'harnessFlags', 'mode', 'prompt']);
   });
 
   it('should leave agent off the wire entirely when none was named (T: the daemon resolves its own default)', () => {
@@ -194,25 +185,6 @@ describe('buildStartRequest', () => {
 
     // Assert
     should(plan.request).containDeep({ nudgeAfterSeconds: 0, directSendMaxChars: 0 });
-  });
-
-  it('should refuse a board-access start with no capability to grant it with', () => {
-    // Arrange / Act / Assert
-    should(() => buildStartRequest({ ...auto, boardAccess: 'worker', parent: 'ses-lead' }, HERE)).throw(
-      /needs the caller's own board capability/,
-    );
-  });
-
-  it('should carry the capability when a board grant is requested', () => {
-    // Arrange / Act
-    const plan = buildStartRequest(
-      { ...auto, boardAccess: 'worker', parent: 'ses-lead' },
-      { cwd: '/work/repo', boardCapability: ' cap-token ' },
-    );
-
-    // Assert
-    should(plan.boardCapability).equal('cap-token');
-    should(plan.request.boardAccess).equal('worker');
   });
 
   it('should report a usage error with exit code 2', () => {

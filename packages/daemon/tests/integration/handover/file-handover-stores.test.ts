@@ -83,7 +83,6 @@ function plan(planId = PLAN_ID): SessionTransferPlan {
       cwd: '/work/repo',
       mode: 'interactive',
       parentSessionId: null,
-      boardAccess: 'none',
       label: null,
       harnessFlags: [],
       remoteControl: false,

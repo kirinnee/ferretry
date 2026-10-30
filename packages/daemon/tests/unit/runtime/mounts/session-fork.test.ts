@@ -279,7 +279,7 @@ describe('the session fork mount', () => {
         through: POINT,
         selectionBinding: 'selection-binding-1',
         agent: 'codex-auto',
-        boardAccess: 'reader',
+        undeclared: 'a field the wire does not carry',
       }),
     );
 

@@ -90,7 +90,6 @@ export * from './stt-cleanup-context.ts';
 export * from './stt-cleanup-debug.ts';
 export * from './stt-cleanup-guard.ts';
 export * from './surface.ts';
-export * from './task-boards.ts';
 export * from './task-title.ts';
 export * from './system-callsigns.ts';
 export * from './tasks.ts';

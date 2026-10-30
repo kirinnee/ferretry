@@ -135,7 +135,6 @@ export function transferPlan(planId: string): SessionTransferPlan {
       cwd: '/work/repo',
       mode: 'interactive',
       parentSessionId: null,
-      boardAccess: 'none',
       label: null,
       harnessFlags: [],
       remoteControl: false,

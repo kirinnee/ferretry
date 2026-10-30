@@ -38,7 +38,7 @@ export class StartSessionController {
     );
     for (const warning of plan.warnings) this.presenter.note(warning);
 
-    const view = await this.api.start(plan.request, flags.requestId, plan.boardCapability);
+    const view = await this.api.start(plan.request, flags.requestId);
     this.presenter.view(view, flags.json === true);
     // A launch that outran the request window is not a failure: the session is persisted and the
     // agent keeps coming up, so say where to watch it rather than implying something broke.
