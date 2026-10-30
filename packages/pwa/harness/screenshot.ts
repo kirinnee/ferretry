@@ -58,7 +58,7 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
-import { reportWalkTiming, timePage } from './walk-timing.ts';
+import { lapPage, reportWalkTiming, timePage, timed } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -1019,73 +1019,75 @@ const assertRuntimeDialogGeometry = async (page: Page, where: string): Promise<v
 };
 
 const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> => {
-  const overflow = await page.evaluate(() => {
-    /**
-     * The elements actually sticking out, named — because a width alone is not a repair.
-     *
-     * "402px of content in a 390px box" says a regression exists and leaves finding it to whoever
-     * reads the log, and the reader of a CI log is usually not at a machine that reproduces it. Text
-     * metrics differ between a developer's font set and a runner's, so a 12px overflow can be real on
-     * CI and absent locally — which makes "which element" the only part of the message that travels.
-     *
-     * Only LEAF offenders are reported. Every ancestor of a too-wide element is also too wide, so
-     * sorting by width would name the page, the section and the card before the one node to fix;
-     * dropping any offender that contains another leaves the culprits.
-     */
-    const describe = (element: Element): string => {
-      const classes =
-        typeof element.className === 'string' && element.className.trim() !== ''
-          ? `.${element.className.trim().split(/\s+/).slice(0, 5).join('.')}`
-          : '';
-      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 50);
-      return (
-        `${element.tagName.toLowerCase()}${element.id === '' ? '' : `#${element.id}`}${classes}` +
-        `${text === '' ? '' : ` "${text}"`}`
-      );
-    };
-    const culprits = (box: Element): readonly string[] => {
-      const limit = box.getBoundingClientRect().left + box.clientWidth + 1;
+  const overflow = await timed('assert.sideways', () =>
+    page.evaluate(() => {
       /**
-       * TWO WAYS TO STICK OUT, and only checking the obvious one reports nothing on the common case.
+       * The elements actually sticking out, named — because a width alone is not a repair.
        *
-       * A too-wide ELEMENT has a rect past the limit — a fixed width, a min-width, an unshrinkable flex
-       * child. But unbreakable TEXT does not move its own block's box: a `<li>` stays exactly as wide as
-       * its container while a 44-character `PATH` paints straight past it, so a rect comparison finds
-       * nothing and the honest-looking conclusion is "the box is sized wrong". It is not — it is holding
-       * content it never agreed to clip. That case is a box whose own `scrollWidth` exceeds its
-       * `clientWidth` while its `overflow-x` is `visible`, which is precisely "leaking into my
-       * ancestors" as opposed to "scrolling in my own box", the latter being what `PanelPath` does on
-       * purpose and must not be reported.
+       * "402px of content in a 390px box" says a regression exists and leaves finding it to whoever
+       * reads the log, and the reader of a CI log is usually not at a machine that reproduces it. Text
+       * metrics differ between a developer's font set and a runner's, so a 12px overflow can be real on
+       * CI and absent locally — which makes "which element" the only part of the message that travels.
+       *
+       * Only LEAF offenders are reported. Every ancestor of a too-wide element is also too wide, so
+       * sorting by width would name the page, the section and the card before the one node to fix;
+       * dropping any offender that contains another leaves the culprits.
        */
-      const offenders = [...box.querySelectorAll('*')].filter(element => {
-        if (element.getBoundingClientRect().right > limit) return true;
-        return element.scrollWidth > element.clientWidth + 1 && getComputedStyle(element).overflowX === 'visible';
-      });
-      return offenders
-        .filter(element => !offenders.some(other => other !== element && element.contains(other)))
-        .slice(0, 4)
-        .map(
-          element =>
-            `${describe(element)} — ${element.scrollWidth}px of content in a ${element.clientWidth}px box, ` +
-            `right edge ${element.getBoundingClientRect().right.toFixed(1)}px`,
+      const describe = (element: Element): string => {
+        const classes =
+          typeof element.className === 'string' && element.className.trim() !== ''
+            ? `.${element.className.trim().split(/\s+/).slice(0, 5).join('.')}`
+            : '';
+        const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim().slice(0, 50);
+        return (
+          `${element.tagName.toLowerCase()}${element.id === '' ? '' : `#${element.id}`}${classes}` +
+          `${text === '' ? '' : ` "${text}"`}`
         );
-    };
-    const boxes = [
-      { name: 'document', element: document.documentElement as Element },
-      ...[...document.querySelectorAll('[data-settings-scroller]')].map(element => ({
-        name: 'settings scroller',
-        element,
-      })),
-    ];
-    return boxes
-      .filter(box => box.element.scrollWidth > box.element.clientWidth + 1)
-      .map(box => ({
-        name: box.name,
-        scroll: box.element.scrollWidth,
-        client: box.element.clientWidth,
-        culprits: culprits(box.element),
-      }));
-  });
+      };
+      const culprits = (box: Element): readonly string[] => {
+        const limit = box.getBoundingClientRect().left + box.clientWidth + 1;
+        /**
+         * TWO WAYS TO STICK OUT, and only checking the obvious one reports nothing on the common case.
+         *
+         * A too-wide ELEMENT has a rect past the limit — a fixed width, a min-width, an unshrinkable flex
+         * child. But unbreakable TEXT does not move its own block's box: a `<li>` stays exactly as wide as
+         * its container while a 44-character `PATH` paints straight past it, so a rect comparison finds
+         * nothing and the honest-looking conclusion is "the box is sized wrong". It is not — it is holding
+         * content it never agreed to clip. That case is a box whose own `scrollWidth` exceeds its
+         * `clientWidth` while its `overflow-x` is `visible`, which is precisely "leaking into my
+         * ancestors" as opposed to "scrolling in my own box", the latter being what `PanelPath` does on
+         * purpose and must not be reported.
+         */
+        const offenders = [...box.querySelectorAll('*')].filter(element => {
+          if (element.getBoundingClientRect().right > limit) return true;
+          return element.scrollWidth > element.clientWidth + 1 && getComputedStyle(element).overflowX === 'visible';
+        });
+        return offenders
+          .filter(element => !offenders.some(other => other !== element && element.contains(other)))
+          .slice(0, 4)
+          .map(
+            element =>
+              `${describe(element)} — ${element.scrollWidth}px of content in a ${element.clientWidth}px box, ` +
+              `right edge ${element.getBoundingClientRect().right.toFixed(1)}px`,
+          );
+      };
+      const boxes = [
+        { name: 'document', element: document.documentElement as Element },
+        ...[...document.querySelectorAll('[data-settings-scroller]')].map(element => ({
+          name: 'settings scroller',
+          element,
+        })),
+      ];
+      return boxes
+        .filter(box => box.element.scrollWidth > box.element.clientWidth + 1)
+        .map(box => ({
+          name: box.name,
+          scroll: box.element.scrollWidth,
+          client: box.element.clientWidth,
+          culprits: culprits(box.element),
+        }));
+    }),
+  );
   for (const box of overflow)
     fail(
       `${where}: the ${box.name} scrolls sideways — ${box.scroll}px of content in a ${box.client}px box\n` +
@@ -1093,6 +1095,7 @@ const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> 
           ? '   no descendant sticks out, so the box itself is sized wrong rather than holding something too wide'
           : box.culprits.map(culprit => `   sticking out: ${culprit}`).join('\n')),
     );
+  lapPage(page, where);
   sidewaysChecks += 1;
   process.stdout.write(`🧭 no sideways scroll: ${where}\n`);
 };
@@ -1154,15 +1157,30 @@ let machinesGeometryChecks = 0;
  */
 let terminalGeometryChecks = 0;
 
-const assertTerminalGeometry = async (page: Page, rootUrl: string, family: string, where: string): Promise<void> => {
-  await page.evaluate(
-    ([id, scheme]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode: scheme })),
-    [family, SCHEME] as const,
-  );
-  // A query per family, so every family is a full load: `pre-paint.js` resolves the theme only then,
-  // and a hash-only change to the same URL would keep the previous family on screen.
-  await page.goto(`${rootUrl}?split&family=${family}#session-workspace`);
-  await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+const assertTerminalGeometry = async (
+  page: Page,
+  rootUrl: string,
+  family: string,
+  where: string,
+  loaded: boolean,
+): Promise<void> => {
+  if (loaded) {
+    // The terminal deck watches `<html data-theme>` and puts the family's own monospace stack on xterm in
+    // place — the path a person takes when they change theme — so the next family is a flip, not a load.
+    await page.evaluate(next => {
+      document.documentElement.dataset.theme = next;
+    }, `${family}-${SCHEME}`);
+    await settleTransitions(page);
+  } else {
+    await page.evaluate(
+      ([id, scheme]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode: scheme })),
+      [family, SCHEME] as const,
+    );
+    // The first family is a full load: `pre-paint.js` resolves the theme only then, and a hash-only
+    // change to the same URL would keep the previous family on screen.
+    await page.goto(`${rootUrl}?split&family=${family}#session-workspace`);
+    await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+  }
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   if (theme !== `${family}-${SCHEME}`)
     fail(`the terminal geometry pass asked for ${family}-${SCHEME} and got ${theme}`);
@@ -3646,8 +3664,8 @@ try {
             await page.goto(settingsUrl.toString());
 
             // EVERY THEME FAMILY'S TERMINAL, measured: one cell per character, in a monospace face.
-            for (const family of THEME_FAMILIES)
-              await assertTerminalGeometry(page, server.url.toString(), family.id, viewport.name);
+            for (const [index, family] of THEME_FAMILIES.entries())
+              await assertTerminalGeometry(page, server.url.toString(), family.id, viewport.name, index > 0);
             await page.evaluate(() => localStorage.removeItem('fy-theme-v1'));
             await page.goto(settingsUrl.toString());
           }
@@ -4385,6 +4403,9 @@ try {
     // context (own storage, viewport, theme) and shares nothing with another, so what one finishes first
     // cannot change what another measures; the pool prints their output in list order whichever ends first.
     const walkTasks: PoolTask[] = [];
+    const addTask = (label: string, task: PoolTask): void => {
+      walkTasks.push({ weight: task.weight, run: () => timed(`task ${label}`, task.run) });
+    };
     const walked: readonly (typeof VIEWPORTS)[number][] =
       SESSION_LAYOUT_ONLY || SAFE_AREA_ONLY || SESSIONS_PAGE_ONLY || VIEWPORT_MATRIX_ONLY ? [] : SELECTED_VIEWPORTS;
     for (const viewport of walked) {
@@ -4402,7 +4423,10 @@ try {
         const parts: ReadonlySet<WalkPart> = WALKS_SETTINGS
           ? new Set([segment.part])
           : new Set<WalkPart>(['gallery', 'settings', 'sessions', 'overlays']);
-        walkTasks.push({ weight: segment.weight, run: () => walkViewport(viewport, parts) });
+        addTask(`${segment.part} ${viewport.name}`, {
+          weight: segment.weight,
+          run: () => walkViewport(viewport, parts),
+        });
       }
     }
 
@@ -4419,14 +4443,14 @@ try {
           ...(SESSION_LAYOUT_ONLY ? { captureDir: outDir, captureFamilies: ['studio', 'neo', 'wayfinding'] } : {}),
         })
       : undefined;
-    for (const step of sessionLayoutPlan?.steps ?? []) walkTasks.push(step);
+    for (const [index, step] of (sessionLayoutPlan?.steps ?? []).entries()) addTask(`session layout ${index}`, step);
 
     // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
     // down, and rotated. Its own contexts.
     const owesSafeArea = (WALKS_SETTINGS && walks(PASS_OWNER.safeArea)) || SAFE_AREA_ONLY;
     let safeAreaChecks = 0;
     if (owesSafeArea)
-      walkTasks.push({
+      addTask('safe area', {
         weight: 10,
         run: async () => {
           safeAreaChecks = await runSafeAreaGeometry({
@@ -4444,7 +4468,7 @@ try {
     const owesSessionsPage = (WALKS_SETTINGS && walks(PASS_OWNER.sessionsPage)) || SESSIONS_PAGE_ONLY;
     let sessionsPageChecks = 0;
     if (owesSessionsPage)
-      walkTasks.push({
+      addTask('sessions page', {
         weight: 10,
         run: async () => {
           sessionsPageChecks = await runSessionsPageGeometry({
