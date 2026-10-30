@@ -201,7 +201,8 @@ async function waitForRenderedQuestion(socket: string): Promise<void> {
   let lastSeen = 'no capture was taken';
   try {
     await waitFor(async () => {
-      const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
+      // `=name:` is the exact session's active pane; a bare `=name` is no pane target, so tmux says "can't find pane".
+      const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}:`], {
         stdin: 'ignore',
         stdout: 'pipe',
         stderr: 'pipe',
