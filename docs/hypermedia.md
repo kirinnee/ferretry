@@ -38,7 +38,7 @@ and the tools server now says one line.)
 A runtime's wrapper is materialised once and serves every ferret launched on it, so a static launch
 argument could not differ per ferret. The wrapper therefore **composes the one value at exec time**
 (`packages/fleet/src/lib/wrappers.ts`): the person's own appended instruction, then Ferretry's tools,
-settings rules and Attention rule (always on), then each per-ferret section whose switch the daemon set to `1` in that ferret's launch
+settings rules and notify rule (always on), then each per-ferret section whose switch the daemon set to `1` in that ferret's launch
 environment, in this order: hypermedia (`FY_HYPERMEDIA`), Pack mode (`FY_PACK`,
 [pack-mode.md](pack-mode.md)), lessons (`FY_LEARNING_PASSIVE`, [learning.md](learning.md)). A restart,
 migration, resume or revive runs the same wrapper with the same stored environment and the session's

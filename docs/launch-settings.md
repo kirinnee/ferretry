@@ -90,9 +90,9 @@ part of the system prompt. Once the note is durably queued, the launch record ma
 so the next message queues nothing. The Instructions row then shows the new sizes.
 
 - **The owner's message triggers it and goes out exactly as typed.** The note is its own message in the
-  ferret's attention outbox, under the key `instructions~<digest>` (a key made from the note's words, so
+  ferret's agenda outbox, under the key `instructions~<digest>` (a key made from the note's words, so
   the same note is never queued twice). It rides the same quiet window and the same hold while the ferret
-  is mid-turn as the owner's answers ([attention.md](attention.md#delivery)), and joins a batch of them as one
+  is mid-turn as the owner's answers ([agenda.md](agenda.md#delivery)), and joins a batch of them as one
   message. Only an owner's message triggers it: a release must not start a turn for every ferret on the
   machine, and a teammate's message never does. If the note cannot be queued it is not marked as told, so
   the next owner message offers it again.
