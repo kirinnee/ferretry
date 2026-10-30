@@ -14,6 +14,7 @@ import type { RestartRequest, RestartResult, SessionView } from '@ferretry/proto
 import { RotateCw } from 'lucide-react';
 import { useState } from 'react';
 import { OUTDATED_REQUEST, outdatedViews, restartButtonLabel, restartSummary } from './outdated-model.ts';
+import { useRestartOverlay } from './restart-overlay.tsx';
 
 type Outcome =
   | { readonly kind: 'idle' }
@@ -33,13 +34,22 @@ const failureMessage = (error: unknown): string =>
 
 export function RestartOutdatedStrip({ sessions, onRestart }: RestartOutdatedStripProps) {
   const [outcome, setOutcome] = useState<Outcome>({ kind: 'idle' });
-  const count = outdatedViews(sessions).length;
+  const { overlay, record, clear } = useRestartOverlay();
+  const count = outdatedViews(sessions, overlay).length;
   if (onRestart === undefined || (count === 0 && outcome.kind === 'idle')) return null;
+
+  const dismiss = (): void => {
+    clear();
+    setOutcome({ kind: 'idle' });
+  };
 
   const press = (): void => {
     setOutcome({ kind: 'running' });
     onRestart(OUTDATED_REQUEST).then(
-      result => setOutcome({ kind: 'done', result }),
+      result => {
+        record(result);
+        setOutcome({ kind: 'done', result });
+      },
       (error: unknown) => setOutcome({ kind: 'failed', message: failureMessage(error) }),
     );
   };
@@ -62,7 +72,7 @@ export function RestartOutdatedStrip({ sessions, onRestart }: RestartOutdatedStr
       {outcome.kind === 'done' ? (
         <p className="fy-restart-outdated__result" data-restart-outdated-result="" role="status">
           <span>{restartSummary(outcome.result)}</span>
-          <button className="fy-restart-outdated__dismiss" onClick={() => setOutcome({ kind: 'idle' })} type="button">
+          <button className="fy-restart-outdated__dismiss" onClick={dismiss} type="button">
             Dismiss
           </button>
         </p>

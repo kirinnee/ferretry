@@ -49,3 +49,9 @@
   text-decoration: underline;
   cursor: pointer;
 }
+/* A restart waiting for the ferret's idle moment: the same chip, in muted ink, so it reads as "in hand". */
+.fy-outdated-mark--queued {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+}

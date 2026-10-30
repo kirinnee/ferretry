@@ -257,6 +257,14 @@
   box-shadow: var(--nav-sel-shadow, none);
   color: var(--nav-sel-fg, var(--accent));
 }
+/* The name and its Outdated/Queued mark share the row's one name cell, so the mark never takes a grid cell
+   of its own and pushes the switch marks onto the next line. */
+.fy-sbar__title {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
 .fy-sbar__name {
   min-width: 0;
   overflow: hidden;

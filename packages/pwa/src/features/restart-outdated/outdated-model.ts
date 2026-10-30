@@ -43,9 +43,20 @@ export const outdatedLabel = (view: SessionView): string => {
   return `Outdated: running on older instructions${what === '' ? '' : ` (${what})`}. Restart to apply the new ones.`;
 };
 
-/** The ferrets "Restart outdated" would act on. */
-export const outdatedViews = (sessions: readonly SessionView[] | null): readonly SessionView[] =>
-  (sessions ?? []).filter(isOutdated);
+/**
+ * The ferrets "Restart outdated" would act on: outdated, and not already restarted or queued by the press
+ * the page still remembers (`restart-overlay.tsx`).
+ */
+export const outdatedViews = (
+  sessions: readonly SessionView[] | null,
+  overlay?: { readonly restarted: ReadonlySet<string>; readonly queued: ReadonlySet<string> },
+): readonly SessionView[] =>
+  (sessions ?? []).filter(
+    view =>
+      isOutdated(view) &&
+      !(overlay?.restarted.has(view.config.id) ?? false) &&
+      !(overlay?.queued.has(view.config.id) ?? false),
+  );
 
 /** The button's label: the count it will act on. */
 export const restartButtonLabel = (count: number): string => `Restart outdated (${count})`;

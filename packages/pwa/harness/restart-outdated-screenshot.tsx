@@ -34,6 +34,7 @@ const run = (command: string, args: readonly string[]): void => {
 const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../../src/components/session-top-bar.tsx';
+import { RestartOverlayProvider } from '../../src/features/restart-outdated/restart-overlay.tsx';
 import { SessionsBar } from '../../src/shell/sessions-bar.tsx';
 import { sessionView } from '../../tests/support/sessions.ts';
 
@@ -54,7 +55,7 @@ const sessions = [
 ];
 const compact = window.innerWidth < 640;
 const restart = async () => ({
-  restarted: [{ id: 'ora', name: 'Ora' }],
+  restarted: [{ id: 'maryah', name: 'Maryah' }],
   queued: [
     { id: 'hadi', name: 'Hadi', reason: 'own-session' },
     { id: 'wren', name: 'Wren', reason: 'mid-turn' },
@@ -66,6 +67,7 @@ const restart = async () => ({
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
+  <RestartOverlayProvider>
   <div className="flex flex-col bg-bg text-fg" style={{ minHeight: 560 }} data-shot="">
     <SessionTopBar
       actions={null}
@@ -92,7 +94,8 @@ createRoot(root).render(
         sessions={sessions}
       />
     </div>
-  </div>,
+  </div>
+  </RestartOverlayProvider>,
 );
 `;
 

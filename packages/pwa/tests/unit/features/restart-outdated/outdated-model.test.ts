@@ -46,6 +46,9 @@ describe('outdated ferrets', () => {
       'd',
     ]);
     expect(outdatedViews(null)).toEqual([]);
+    const overlay = { restarted: new Set(['a']), queued: new Set(['d']) };
+    expect(outdatedViews(sessions, overlay)).toEqual([]);
+    expect(outdatedViews(sessions, { restarted: new Set(['a']), queued: new Set<string>() })).toHaveLength(1);
     expect(restartButtonLabel(2)).toBe('Restart outdated (2)');
     expect(OUTDATED_REQUEST).toEqual({ scope: 'outdated' });
   });

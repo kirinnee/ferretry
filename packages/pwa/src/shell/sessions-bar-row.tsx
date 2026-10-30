@@ -87,8 +87,10 @@ export function SessionsBarRow({
         to={sessionRowPath(daemonId, view)}
       >
         <StatusMark view={view} />
-        <span className="fy-sbar__name">{name}</span>
-        <OutdatedMark view={view} />
+        <span className="fy-sbar__title">
+          <span className="fy-sbar__name">{name}</span>
+          <OutdatedMark view={view} />
+        </span>
         {unread > 0 ? (
           <span className="fy-sbar__marks">
             {machine === undefined ? null : <MachineChip name={machine} />}

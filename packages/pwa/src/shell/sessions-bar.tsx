@@ -52,10 +52,10 @@ import { NewSessionMenu, withReach } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
-import { SessionsBarOptions } from './sessions-bar-density.tsx';
 import { SessionsBarAttention } from './sessions-bar-attention.tsx';
-import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
+import { SessionsBarOptions } from './sessions-bar-density.tsx';
 import { SessionsRailDot } from './sessions-bar-dot.tsx';
+import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import { DEFAULT_LIST_FILTER, type SessionsListFilter, sessionsBarView, sidebarCompact } from './sessions-bar-model.ts';
 import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
@@ -163,14 +163,14 @@ export interface SessionsBarProps {
   /** The clock a machine's "last seen" is measured against. */
   readonly now?: number;
   /**
-   * The menu a row opens (right-click, long-press, the Menu key): the host draws it for the pressed ferret.
-   * Absent, rows have no menu and the browser's own is left alone.
-   */
-  /**
    * Restarts this machine's outdated ferrets (the button at the head of the list). Absent: the bar draws no
    * such button, whatever the ferrets' marks say.
    */
   readonly onRestartOutdated?: (request: RestartRequest) => Promise<RestartResult>;
+  /**
+   * The menu a row opens (right-click, long-press, the Menu key): the host draws it for the pressed ferret.
+   * Absent, rows have no menu and the browser's own is left alone.
+   */
   readonly renderSessionMenu?: (menu: SessionMenuState, close: (restoreFocus: boolean) => void) => ReactNode;
 }
 

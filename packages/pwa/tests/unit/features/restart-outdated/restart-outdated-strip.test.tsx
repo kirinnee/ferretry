@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'bun:test';
 import type { RestartResult } from '@ferretry/protocol';
 import { OutdatedMark } from '../../../../src/features/restart-outdated/outdated-mark.tsx';
 import { RestartOutdatedStrip } from '../../../../src/features/restart-outdated/restart-outdated-strip.tsx';
+import { RestartOverlayProvider } from '../../../../src/features/restart-outdated/restart-overlay.tsx';
 import { interact, type Mounted, mount, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
 
@@ -119,6 +120,50 @@ describe('RestartOutdatedStrip', () => {
     );
     await interact(() => must(mounted?.container.querySelector<HTMLButtonElement>('button'), 'b').click());
     expect(mounted.container.querySelector('[role="alert"]')?.textContent).toContain('the daemon could not be reached');
+  });
+});
+
+describe('after a press', () => {
+  it('should drop the mark on a restarted ferret, call a waiting one Queued and lower the count', async () => {
+    const result: RestartResult = {
+      restarted: [{ id: 'a' }],
+      queued: [{ id: 'b', reason: 'mid-turn' }],
+      skipped: [],
+      failed: [],
+    };
+    const marks = (): string[] =>
+      [...(mounted?.container.querySelectorAll('[data-row]') ?? [])].map(
+        row => row.querySelector('[data-outdated-mark]')?.textContent ?? '',
+      );
+    const tree = (
+      <RestartOverlayProvider>
+        <RestartOutdatedStrip onRestart={async () => result} sessions={SESSIONS} />
+        {SESSIONS.map(view => (
+          <div data-row="" key={view.config.id}>
+            <OutdatedMark view={view} />
+          </div>
+        ))}
+      </RestartOverlayProvider>
+    );
+    mounted = await mount(tree);
+    const root = mounted.container;
+    expect(marks()).toEqual(['Outdated', 'Outdated', '']);
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-restart-outdated-button]'), 'b').click());
+
+    expect(marks()).toEqual(['', 'Queued', '']);
+    expect(root.querySelector('[data-outdated-mark="queued"]')?.getAttribute('aria-label')).toContain(
+      'next idle moment',
+    );
+    expect(root.querySelector('[data-restart-outdated-button]')).toBeNull();
+    expect(root.querySelector('[data-restart-outdated-result]')).not.toBeNull();
+
+    await interact(() =>
+      must(root.querySelector<HTMLButtonElement>('.fy-restart-outdated__dismiss'), 'dismiss').click(),
+    );
+    expect(marks()).toEqual(['Outdated', 'Outdated', '']);
+    expect(must(root.querySelector('[data-restart-outdated-button]'), 'button').textContent).toBe(
+      'Restart outdated (2)',
+    );
   });
 });
 
