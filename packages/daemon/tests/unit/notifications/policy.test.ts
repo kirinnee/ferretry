@@ -20,6 +20,7 @@ import {
   pingNotificationPayload,
   stoppedNotificationPayload,
   timeLeftPhrase,
+  wokeNotificationPayload,
 } from '../../../src/lib/notifications/policy.ts';
 
 const AT = '2026-08-06T09:00:00.000Z';
@@ -73,6 +74,17 @@ describe('notification keys', () => {
     should(keys[2]).equal(`agenda:session-1:stopped:${AT}`);
     should(keys[3]).equal(keys[2]);
     should(new Set([keys[0], keys[1], keys[2], keys[4]]).size).equal(4);
+  });
+
+  it('should name each wake of an item apart, and keep it apart from the item’s other pushes', () => {
+    // Arrange / Act
+    const first = notificationKey({ sessionId: 'session-1', agendaId: 'A1', woke: AT });
+    const next = notificationKey({ sessionId: 'session-1', agendaId: 'A1', woke: '2026-08-07T09:00:00.000Z' });
+
+    // Assert
+    should(first).equal(`agenda:session-1:A1:woke:${AT}`);
+    should(next).not.equal(first);
+    should(first).not.equal(notificationKey({ sessionId: 'session-1', agendaId: 'A1', deadline: true }));
   });
 
   it('should keep reading the keys an earlier daemon wrote', () => {
@@ -143,6 +155,34 @@ describe('deadline push', () => {
     should(timeLeftPhrase('2026-08-06T12:00:00.000Z', AT)).equal('Needed in about 3 h');
     should(timeLeftPhrase('2026-08-06T08:00:00.000Z', AT)).equal('Overdue');
     should(timeLeftPhrase(undefined, AT)).equal('Needed soon');
+  });
+});
+
+describe('woke push', () => {
+  it('should say the item is back from snooze, lead with the ask, and open the item', () => {
+    // Act
+    const payload = wokeNotificationPayload('session-1', titled, snapshot);
+
+    // Assert
+    should(payload.title).equal('Release window');
+    should(payload.body).equal('Back from snooze: Which window should the release use?');
+    should(payload.eventKey).equal('attention-woke:A7');
+    should(payload.url).equal('/session/session-1?attention=A7');
+    should(payload.count).equal(2);
+    should(payload.body.length).be.belowOrEqual(AGENDA_PUSH_BODY_LENGTH);
+  });
+
+  it('should keep a long subject within the push body, on one line', () => {
+    // Arrange
+    const long = AgendaItemSchema.parse({ ...titled, subject: `Which window ${'should '.repeat(25)}the release use?` });
+
+    // Act
+    const payload = wokeNotificationPayload('session-1', long, snapshot);
+
+    // Assert
+    should(payload.body.startsWith('Back from snooze: ')).be.true();
+    should(payload.body.length).be.belowOrEqual(AGENDA_PUSH_BODY_LENGTH);
+    should(payload.body).not.match(/\n/);
   });
 });
 

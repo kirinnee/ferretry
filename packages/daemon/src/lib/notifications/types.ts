@@ -64,6 +64,8 @@ export const AgendaNotificationRequestedRecordSchema = z
     deadline: z.literal(true).optional(),
     /** The push for a notice the ferret asked to buzz for (`fy notify --ping`). At most one per notice. */
     ping: z.literal(true).optional(),
+    /** The push for a snoozed item that woke: the instant it woke. At most one per wake. */
+    woke: z.string().min(1).optional(),
     sent: SentNotificationSchema,
     enrolled: NonNegativeIntegerSchema,
   })

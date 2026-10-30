@@ -318,7 +318,8 @@ export function agendaSnapshot(ledger: AgendaLedger): AgendaSnapshot {
     sessionId: ledger.sessionId,
     items,
     resolved,
-    count: items.length,
+    // A parked item (snoozed, or replied to) is no part of the count a badge shows.
+    count: items.filter(item => item.parked === undefined).length,
     parseErrors: 0,
     updatedAt: ledger.updatedAt,
   };

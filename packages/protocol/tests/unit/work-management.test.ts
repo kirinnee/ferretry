@@ -259,6 +259,12 @@ const agendaCases: SchemaCase[] = [
     value: { kind: 'permission', decision: 'approve' },
   },
   { name: 'disposition', schema: agenda.AgendaDispositionSchema, value: 'done' },
+  {
+    name: 'snoozed park',
+    schema: agenda.AgendaParkedSchema,
+    value: { reason: 'snoozed', at: INSTANT, until: LATER_INSTANT },
+  },
+  { name: 'replied park', schema: agenda.AgendaParkedSchema, value: { reason: 'replied', at: INSTANT } },
   { name: 'attention id', schema: agenda.AgendaIdSchema, value: 'A1' },
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },

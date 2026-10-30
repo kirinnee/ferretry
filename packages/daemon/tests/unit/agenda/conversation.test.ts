@@ -372,6 +372,33 @@ describe('Attention in a conversation', () => {
     should(onlyNotice).be.undefined();
   });
 
+  it('should leave parked items out of the counts, the first item and the newest raise', () => {
+    // Arrange
+    const snoozed = item('A1', {
+      waitingSince: '2026-10-23T13:00:00.000Z',
+      parked: { reason: 'snoozed', at: AT, until: '2026-10-24T10:00:00.000Z' },
+    });
+    const replied = item('A2', { parked: { reason: 'replied', at: AT } });
+    const board = (items: AgendaItem[]) =>
+      AgendaSnapshotSchema.parse({
+        v: 1,
+        sessionId: 'session-1',
+        items,
+        resolved: [],
+        count: items.length,
+        parseErrors: 0,
+        updatedAt: AT,
+      });
+
+    // Act
+    const mixed = sessionAgendaSummary(board([snoozed, replied, OPEN]));
+    const onlyParked = sessionAgendaSummary(board([snoozed, replied]));
+
+    // Assert
+    should(mixed).deepEqual({ open: 1, first: 'A3', ask: 'Which region?', latestAt: AT });
+    should(onlyParked).be.undefined();
+  });
+
   it('should count the items in discussion apart, and open the row to the oldest one still needing the owner', () => {
     // Arrange
     const discussing = item('A2', { waitingOn: 'ferret', askedAt: AT, waitingFor: 'discussion', infoRequests: 1 });

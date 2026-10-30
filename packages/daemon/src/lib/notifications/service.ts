@@ -127,6 +127,7 @@ export class NotificationService implements AgendaRaisedObserver {
             agendaId: item.id,
             ...(identity.ping === true ? { ping: true } : {}),
             ...(identity.deadline === true ? { deadline: true } : {}),
+            ...(identity.woke === undefined ? {} : { woke: identity.woke }),
             ...(identity.stoppedAt === undefined ? {} : { stoppedAt: identity.stoppedAt }),
             sent: {
               kind: payload.kind,
