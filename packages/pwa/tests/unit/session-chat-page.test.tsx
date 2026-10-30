@@ -23,13 +23,13 @@ import type { RuntimeModelControls } from '../../src/components/runtime-controls
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
-import { AttentionAgendaRow } from '../../src/features/attention/attention-agenda-row.tsx';
 import {
   AttentionAgendaDrawer,
   AttentionAgendaLine,
   AttentionReferenceChips,
 } from '../../src/features/attention/attention-agenda-line.tsx';
-import { AttentionFullCard } from '../../src/features/attention/attention-full-card.tsx';
+import { AttentionAgendaRow } from '../../src/features/attention/attention-agenda-row.tsx';
+import { AttentionItemView } from '../../src/features/attention/attention-item-view.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
@@ -2363,11 +2363,15 @@ describe('SessionChatPage', () => {
     const drawers = (root: ReactTestInstance) =>
       root.findAll(node => node.type === 'section' && node.props['data-agenda-drawer'] !== undefined);
     const cards = (root: ReactTestInstance) =>
-      root.findAll(node => node.type === 'div' && node.props['data-agenda-card'] !== undefined);
+      root.findAll(node => node.type === 'section' && node.props['data-agenda-view'] !== undefined);
     const column = (root: ReactTestInstance) =>
       root.find(node => node.type === 'div' && node.props.className === 'fy-chat-input__column');
     const log = (root: ReactTestInstance) =>
       root.find(node => node.type === 'div' && node.props.className === 'fy-chat-log');
+    const surface = (root: ReactTestInstance) =>
+      root.find(node => node.type === 'div' && node.props['data-chat-width'] !== undefined);
+    const chatInput = (root: ReactTestInstance) =>
+      root.find(node => node.type === 'div' && node.props.className === 'fy-chat-input');
     const names = (parent: ReactTestInstance): readonly string[] =>
       parent.children.flatMap(child => (typeof child === 'string' ? [] : [String(child.type)]));
     const press = (root: ReactTestInstance) =>
@@ -2469,9 +2473,9 @@ describe('SessionChatPage', () => {
 
         run(() => surface.onAttentionOpen('A3', null));
         expect(cards(page.root)).toHaveLength(1);
-        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
+        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
 
-        run(() => page.root.findByType(AttentionFullCard).props.onClose());
+        run(() => page.root.findByType(AttentionItemView).props.onClose());
         expect(cards(page.root)).toHaveLength(0);
 
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A2', null));
@@ -2499,11 +2503,14 @@ describe('SessionChatPage', () => {
       const board = attentionModel([attentionItem, { ...attentionItem, id: 'A5' }], [resolvedItem]);
       const page = renderSessionChatPage(agendaPage({ attention: board, attentionTarget: 'A3' }));
       try {
-        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
-        expect(page.root.findAll(node => node.props?.role === 'dialog')).toHaveLength(0);
+        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
+        // The only dialog is the item view itself, laid over the chat column rather than over the page.
+        expect(
+          page.root.findAll(node => node.props?.role === 'dialog').map(node => node.props['data-agenda-view']),
+        ).toEqual(['A3']);
 
         update(page, agendaPage({ attention: board, attentionTarget: 'A5' }));
-        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A5');
+        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A5');
       } finally {
         run(() => page.unmount());
       }
@@ -2516,11 +2523,11 @@ describe('SessionChatPage', () => {
       };
       const page = renderSessionChatPage(agendaPage({ ...props, attentionTargetKey: 'entry-1' }));
       try {
-        run(() => page.root.findByType(AttentionFullCard).props.onClose());
+        run(() => page.root.findByType(AttentionItemView).props.onClose());
         expect(cards(page.root)).toHaveLength(0);
 
         update(page, agendaPage({ ...props, attentionTargetKey: 'entry-2' }));
-        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
+        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
       } finally {
         run(() => page.unmount());
       }
@@ -2544,13 +2551,13 @@ describe('SessionChatPage', () => {
       try {
         update(page, agendaPage({ attentionTarget: 'A3', session: agendaSession('other') }));
         // The reset for the new session runs first; the link's target wins.
-        expect(page.root.findByType(AttentionFullCard).props.item.id).toBe('A3');
+        expect(page.root.findByType(AttentionItemView).props.item.id).toBe('A3');
       } finally {
         run(() => page.unmount());
       }
     });
 
-    test('opens the drawer upward from the line, and a row title swaps it for the card over the transcript only', () => {
+    test('opens the drawer upward from the line, and a row title opens the item over the whole chat column', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
         const composerBefore = names(column(page.root)).at(-1);
@@ -2563,11 +2570,13 @@ describe('SessionChatPage', () => {
         run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
         expect(drawers(page.root)).toHaveLength(0);
         expect(cards(page.root)).toHaveLength(1);
-        // The card is a layer inside the transcript's own box; the input column holds none of it.
-        expect(log(page.root).findAllByType(AttentionFullCard)).toHaveLength(1);
-        expect(column(page.root).findAllByType(AttentionFullCard)).toHaveLength(0);
-        // The line and the composer stay.
-        expect(lines(page.root)).toHaveLength(1);
+        // Focus mode: the item is a direct child of the chat surface, over the log AND the composer.
+        const last = surface(page.root).children.at(-1);
+        expect(typeof last === 'string' ? 0 : last?.findAllByType(AttentionItemView).length).toBe(1);
+        expect(surface(page.root).findAllByType(AttentionItemView)).toHaveLength(1);
+        expect(log(page.root).findAllByType(AttentionItemView)).toHaveLength(0);
+        expect(column(page.root).findAllByType(AttentionItemView)).toHaveLength(0);
+        // The chat stays mounted underneath, so its scroll position is kept.
         expect(column(page.root).findAllByType(Composer)).toHaveLength(1);
         expect(names(column(page.root)).at(-1)).toBe(composerBefore);
       } finally {
@@ -2575,7 +2584,68 @@ describe('SessionChatPage', () => {
       }
     });
 
-    test('never moves the composer: it stays the input column’s last child whether the line, drawer or card is open', () => {
+    test('covers the messages and the composer while an item shows, and gives them back when it closes', () => {
+      const page = renderSessionChatPage(agendaPage());
+      try {
+        expect(surface(page.root).props['data-agenda-focus']).toBeUndefined();
+        expect(log(page.root).props.inert).toBeUndefined();
+        expect(chatInput(page.root).props.inert).toBeUndefined();
+        run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAttentionOpen('A3', null));
+        expect(surface(page.root).props['data-agenda-focus']).toBe(true);
+        expect(log(page.root).props.inert).toBe(true);
+        expect(chatInput(page.root).props.inert).toBe(true);
+        run(() => page.root.findByType(AttentionItemView).props.onClose());
+        expect(surface(page.root).props['data-agenda-focus']).toBeUndefined();
+        expect(log(page.root).props.inert).toBeUndefined();
+        expect(chatInput(page.root).props.inert).toBeUndefined();
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('puts a scrim over the chat only while the drawer is open', () => {
+      const page = renderSessionChatPage(agendaPage());
+      try {
+        const scrims = () => log(page.root).findAll(node => node.props['data-agenda-scrim'] !== undefined);
+        expect(scrims()).toHaveLength(0);
+        press(page.root);
+        expect(scrims()).toHaveLength(1);
+        run(() => scrims()[0]?.props.onClick());
+        expect(drawers(page.root)).toHaveLength(0);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('draws what is running on the agenda line instead of at the foot of the transcript', () => {
+      const working = sessionView('shared', {
+        state: { attention: { agendaMode: true } as never, turnState: 'working' as never },
+      });
+      const page = renderSessionChatPage(agendaPage({ session: working }));
+      try {
+        expect(page.root.findByType(Transcript).props.liveInRow).toBe(true);
+        const row = lines(page.root)[0];
+        expect(row?.findAll(node => node.props['data-agenda-live'] !== undefined)).toHaveLength(1);
+        expect(row?.props['data-shared']).toBe('');
+        expect(
+          log(page.root).findAll(node => node.type === 'div' && node.props.className === 'fy-live-activity'),
+        ).toHaveLength(0);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('leaves what is running at the foot of the transcript when there is no agenda line', () => {
+      const working = sessionView('shared', { state: { turnState: 'working' as never } });
+      const page = renderSessionChatPage(chatPage({ session: working }));
+      try {
+        expect(page.root.findByType(Transcript).props.liveInRow).toBe(false);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('never moves the composer in the chat: it stays the input column’s last child whether the line or the drawer is open', () => {
       const closedBoard = attentionModel([], []);
       const page = renderSessionChatPage(agendaPage({ attention: closedBoard }));
       try {
@@ -2592,10 +2662,6 @@ describe('SessionChatPage', () => {
 
         press(page.root);
         expect(drawers(page.root)).toHaveLength(1);
-        expect(lastChildIsComposer()).toBe(true);
-
-        run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
-        expect(cards(page.root)).toHaveLength(1);
         expect(lastChildIsComposer()).toBe(true);
       } finally {
         run(() => page.unmount());
@@ -2617,7 +2683,8 @@ describe('SessionChatPage', () => {
         // No chip: the message goes out exactly as typed.
         await send('plain');
         press(page.root);
-        run(() => page.root.findByType(AttentionAgendaRow).props.onAddReply());
+        run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
+        run(() => page.root.findByType(AttentionItemView).props.onReply());
         expect(
           page.root.findByType(AttentionReferenceChips).props.items.map((item: { id: string }) => item.id),
         ).toEqual(['A3']);

@@ -3,23 +3,24 @@ import type { AttentionId, AttentionItem, AttentionSnapshot } from '@ferretry/pr
 import type { ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
-  AttentionAgendaDrawer,
-  AttentionAgendaLine,
-  AttentionAgendaPanel,
-  AttentionReferenceChips,
-} from '../../../src/features/attention/attention-agenda-line.tsx';
-import { AttentionAgendaRow } from '../../../src/features/attention/attention-agenda-row.tsx';
-import {
   type AttentionActionClient,
   type AttentionAgenda,
   type AttentionFocus,
   attentionLedgerIds,
   useAttentionAgenda,
 } from '../../../src/features/attention/attention-agenda.tsx';
-import { AttentionFullCard } from '../../../src/features/attention/attention-full-card.tsx';
+import {
+  AttentionAgendaDrawer,
+  AttentionAgendaLine,
+  AttentionAgendaPanel,
+  AttentionReferenceChips,
+} from '../../../src/features/attention/attention-agenda-line.tsx';
+import { AttentionAgendaRow } from '../../../src/features/attention/attention-agenda-row.tsx';
 import { useAgendaDock } from '../../../src/features/attention/attention-collapse.ts';
+import { AttentionItemView } from '../../../src/features/attention/attention-item-view.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import '../../support/dom.ts';
 import { attentionItem } from '../../support/attention-inbox.tsx';
 import { render, run, runAsync } from '../../support/react.ts';
@@ -80,6 +81,9 @@ interface HostProps {
   readonly clientOverride?: AttentionActionClient;
   readonly repliesSlot?: ReactElement;
   readonly status?: 'loading' | 'ready' | 'error';
+  readonly live?: ReactElement;
+  readonly entries?: readonly TranscriptEntry[];
+  readonly send?: (message: string) => Promise<unknown>;
 }
 
 let current: AttentionAgenda | undefined;
@@ -102,11 +106,17 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     swipeable: !desktop,
     ...(rest.onOpenResolved === undefined ? {} : { onOpenResolved: rest.onOpenResolved }),
     ...(rest.repliesSlot === undefined ? {} : { repliesSlot: rest.repliesSlot }),
+    ...(rest.live === undefined ? {} : { live: rest.live }),
+    ...(rest.entries === undefined ? {} : { entries: rest.entries }),
+    ...(rest.send === undefined ? {} : { send: rest.send }),
   });
   current = agenda;
   return (
     <div data-host="">
-      <div className="fy-chat-log">{agenda.card}</div>
+      <div className="fy-chat-log" data-covered={agenda.covered || undefined}>
+        {agenda.scrim}
+      </div>
+      {agenda.view}
       <div className="fy-chat-input__column">
         {agenda.above}
         <div data-composer="" />
@@ -142,6 +152,9 @@ const lastIsComposer = (root: ReactTestInstance): boolean => {
   const last = column.children.at(-1);
   return typeof last !== 'string' && last?.props['data-composer'] !== undefined;
 };
+
+const textOf = (node: ReactTestInstance | undefined): string =>
+  (node?.children ?? []).map(child => (typeof child === 'string' ? child : textOf(child))).join('');
 
 const MIXED = [
   item('A1', { waitingOn: 'ferret' }),
@@ -206,6 +219,41 @@ describe('the agenda line', () => {
   });
 });
 
+describe('the one row above the composer', () => {
+  const liveNodes = (root: ReactTestInstance) =>
+    root.findAll(node => node.type === 'div' && node.props['data-agenda-live'] !== undefined);
+
+  test('shares the row with what is running: it on the left, the pill after it, and the agenda hosts it', () => {
+    const view = mount({ snapshot: board(MIXED), live: <i>Pondering…</i> });
+    const [row] = lines(view.root);
+    expect(row?.props['data-shared']).toBe('');
+    expect(row?.findAll(node => node.props['data-agenda-live'] !== undefined)).toHaveLength(1);
+    expect(liveNodes(view.root)).toHaveLength(1);
+    expect(live().hostsLive).toBe(true);
+  });
+
+  test('has the pill alone, and no empty box, when nothing runs', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    expect(liveNodes(view.root)).toHaveLength(0);
+    expect(lines(view.root)[0]?.props['data-shared']).toBeUndefined();
+  });
+
+  test('hosts what is running while something is sending, but not when the line is not there', () => {
+    mount({ snapshot: board(MIXED, { delivery: { sending: ['A2'] } }), agendaMode: false });
+    expect(live().hostsLive).toBe(true);
+    mount({ snapshot: board([item('A4', { notice: true })]), live: <i>Pondering…</i> });
+    expect(live().hostsLive).toBe(false);
+    mount({ snapshot: null, live: <i>Pondering…</i> });
+    expect(live().hostsLive).toBe(false);
+  });
+
+  test('says "Agenda · N" in the short form the row falls back to when it is narrow', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    const short = view.root.find(node => node.props['data-agenda-line-short'] !== undefined);
+    expect(textOf(short)).toBe('Agenda · 3');
+  });
+});
+
 describe('the drawer', () => {
   test('opens from the line with every agenda row sorted blocking, then needs you, then the ferret’s turn', () => {
     const view = mount({ snapshot: board(MIXED) });
@@ -218,15 +266,47 @@ describe('the drawer', () => {
     expect(view.root.findAllByType(AttentionAgendaDrawer)).toHaveLength(0);
   });
 
-  test('closes when a row opens its card, and the card leaves the composer where it was', () => {
+  test('closes when a row opens its item, which covers the chat in focus mode', () => {
     const view = mount({ snapshot: board(MIXED) });
     run(() => toggle(view.root)[0]?.props.onClick());
-    expect(lastIsComposer(view.root)).toBe(true);
+    expect(live().covered).toBe(false);
     run(() => view.root.findAllByType(AttentionAgendaRow)[1]?.props.onOpen());
     expect(view.root.findAllByType(AttentionAgendaDrawer)).toHaveLength(0);
-    const card = view.root.find(node => node.type === 'div' && node.props['data-agenda-card'] !== undefined);
-    expect(card.props['data-agenda-card']).toBe('A2');
-    expect(lastIsComposer(view.root)).toBe(true);
+    const opened = view.root.find(node => node.type === 'section' && node.props['data-agenda-view'] !== undefined);
+    expect(opened.props['data-agenda-view']).toBe('A2');
+    expect(live().covered).toBe(true);
+    expect(view.root.find(node => node.props['data-covered'] !== undefined).props['data-covered']).toBe(true);
+  });
+
+  test('is a raised sheet with its own header: the count of what needs the owner, and a close button', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    run(() => toggle(view.root)[0]?.props.onClick());
+    const drawer = view.root.findByType(AttentionAgendaDrawer);
+    expect(textOf(drawer.find(node => node.type === 'h2'))).toBe('Agenda2 need you');
+    run(() => drawer.find(node => node.props['data-agenda-drawer-close'] !== undefined).props.onClick());
+    expect(view.root.findAllByType(AttentionAgendaDrawer)).toHaveLength(0);
+  });
+
+  test('says "Nothing needs you" in its header when it is all with the ferret', () => {
+    const view = mount({ snapshot: board([item('A1', { waitingOn: 'ferret' })]) });
+    run(() => toggle(view.root)[0]?.props.onClick());
+    expect(textOf(view.root.find(node => node.type === 'h2'))).toBe('AgendaNothing needs you');
+  });
+
+  test('has a scrim over the chat that closes it, and Esc closes it too', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    expect(view.root.findAll(node => node.props['data-agenda-scrim'] !== undefined)).toHaveLength(0);
+    run(() => toggle(view.root)[0]?.props.onClick());
+    run(() => view.root.find(node => node.props['data-agenda-scrim'] !== undefined).props.onClick());
+    expect(view.root.findAllByType(AttentionAgendaDrawer)).toHaveLength(0);
+    run(() => toggle(view.root)[0]?.props.onClick());
+    const stopped: boolean[] = [];
+    const drawer = view.root.find(node => node.type === 'section' && node.props['data-agenda-drawer'] !== undefined);
+    run(() => drawer.props.onKeyDown({ key: 'Enter', stopPropagation: () => stopped.push(true) }));
+    expect(view.root.findAllByType(AttentionAgendaDrawer)).toHaveLength(1);
+    run(() => drawer.props.onKeyDown({ key: 'Escape', stopPropagation: () => stopped.push(true) }));
+    expect(stopped).toEqual([true]);
+    expect(view.root.findAllByType(AttentionAgendaDrawer)).toHaveLength(0);
   });
 
   test('is not offered while the agenda is docked', () => {
@@ -245,29 +325,29 @@ describe('the full card', () => {
       row?.props.onOpen();
     });
   const cardId = (view: ReturnType<typeof render>): string | undefined =>
-    view.root.findAllByType(AttentionFullCard)[0]?.props.item.id;
+    view.root.findAllByType(AttentionItemView)[0]?.props.item.id;
   const withDrawer = (view: ReturnType<typeof render>) => run(() => toggle(view.root)[0]?.props.onClick());
 
   test('pages through the agenda with ‹ ›, and stops at its ends', () => {
     const view = mount({ snapshot: board(MIXED) });
     withDrawer(view);
     open(view, 'A3');
-    expect(view.root.findByType(AttentionFullCard).props.onPrevious).toBeUndefined();
-    expect(view.root.findByType(AttentionFullCard).props.position).toEqual({ index: 0, total: 3 });
-    run(() => view.root.findByType(AttentionFullCard).props.onNext());
+    expect(view.root.findByType(AttentionItemView).props.onPrevious).toBeUndefined();
+    expect(view.root.findByType(AttentionItemView).props.position).toEqual({ index: 0, total: 3 });
+    run(() => view.root.findByType(AttentionItemView).props.onNext());
     expect(cardId(view)).toBe('A2');
-    run(() => view.root.findByType(AttentionFullCard).props.onNext());
+    run(() => view.root.findByType(AttentionItemView).props.onNext());
     expect(cardId(view)).toBe('A1');
-    expect(view.root.findByType(AttentionFullCard).props.onNext).toBeUndefined();
-    run(() => view.root.findByType(AttentionFullCard).props.onPrevious());
+    expect(view.root.findByType(AttentionItemView).props.onNext).toBeUndefined();
+    run(() => view.root.findByType(AttentionItemView).props.onPrevious());
     expect(cardId(view)).toBe('A2');
   });
 
   test('draws swipe arrows on a touch screen and none on a wide screen with a mouse', () => {
     const touch = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AttentionId, seq: 1 } });
-    expect(touch.root.findByType(AttentionFullCard).props.swipeable).toBe(true);
+    expect(touch.root.findByType(AttentionItemView).props.swipeable).toBe(true);
     const wide = mount({ snapshot: board(MIXED), desktop: true, focus: { target: 'A2' as AttentionId, seq: 1 } });
-    expect(wide.root.findByType(AttentionFullCard).props.swipeable).toBe(false);
+    expect(wide.root.findByType(AttentionItemView).props.swipeable).toBe(false);
   });
 
   test('after an answer, goes to the next item that needs the owner, else closes', async () => {
@@ -275,13 +355,13 @@ describe('the full card', () => {
     withDrawer(view);
     open(view, 'A1');
     await runAsync(async () => {
-      view.root.findByType(AttentionFullCard).props.onAct({ kind: 'resolve' });
+      view.root.findByType(AttentionItemView).props.onAct({ kind: 'resolve' }, '');
     });
     expect(calls).toEqual(['resolve:A1']);
     expect(cardId(view)).toBe('A2');
     run(() => view.update(<Host snapshot={board([item('A2'), item('A3', { waitingOn: 'ferret' })])} />));
     await runAsync(async () => {
-      view.root.findByType(AttentionFullCard).props.onAct({ kind: 'resolve' });
+      view.root.findByType(AttentionItemView).props.onAct({ kind: 'resolve' }, '');
     });
     expect(calls).toEqual(['resolve:A1', 'resolve:A2']);
     expect(cardId(view)).toBeUndefined();
@@ -292,13 +372,12 @@ describe('the full card', () => {
     withDrawer(view);
     open(view, 'A1');
     await runAsync(async () => {
-      view.root.findByType(AttentionFullCard).props.onAct({
-        kind: 'respond',
-        response: { kind: 'permission', decision: 'approve' },
-      });
+      view.root
+        .findByType(AttentionItemView)
+        .props.onAct({ kind: 'respond', response: { kind: 'permission', decision: 'approve' } }, '');
     });
     expect(cardId(view)).toBe('A1');
-    expect(view.root.findByType(AttentionFullCard).props.error).toBe('The machine said no.');
+    expect(view.root.findByType(AttentionItemView).props.error).toBe('The machine said no.');
   });
 
   test('does not carry an open card into another session', () => {
@@ -314,9 +393,9 @@ describe('a request to show an item (`?attention=A5`)', () => {
 
   test('opens an open item’s full card once the board is read', () => {
     const view = mount({ snapshot: null, focus: target('A2') });
-    expect(view.root.findAllByType(AttentionFullCard)).toHaveLength(0);
+    expect(view.root.findAllByType(AttentionItemView)).toHaveLength(0);
     run(() => view.update(<Host focus={target('A2')} snapshot={board(MIXED)} />));
-    expect(view.root.findByType(AttentionFullCard).props.item.id).toBe('A2');
+    expect(view.root.findByType(AttentionItemView).props.item.id).toBe('A2');
   });
 
   test('hands a resolved item to the resolved list and opens no card', () => {
@@ -327,7 +406,7 @@ describe('a request to show an item (`?attention=A5`)', () => {
       onOpenResolved: id => opened.push(id),
     });
     expect(opened).toEqual(['A9']);
-    expect(view.root.findAllByType(AttentionFullCard)).toHaveLength(0);
+    expect(view.root.findAllByType(AttentionItemView)).toHaveLength(0);
   });
 
   test('says out loud that an unknown id is no longer open', () => {
@@ -338,16 +417,16 @@ describe('a request to show an item (`?attention=A5`)', () => {
 
   test('is honoured once per request, so closing the card is not undone, but a new request re-opens it', () => {
     const view = mount({ snapshot: board(MIXED), focus: target('A2') });
-    run(() => view.root.findByType(AttentionFullCard).props.onClose());
+    run(() => view.root.findByType(AttentionItemView).props.onClose());
     run(() => view.update(<Host focus={target('A2')} snapshot={board([...MIXED, item('A5')])} />));
-    expect(view.root.findAllByType(AttentionFullCard)).toHaveLength(0);
+    expect(view.root.findAllByType(AttentionItemView)).toHaveLength(0);
     run(() => view.update(<Host focus={target('A2', 2)} snapshot={board(MIXED)} />));
-    expect(view.root.findByType(AttentionFullCard).props.item.id).toBe('A2');
+    expect(view.root.findByType(AttentionItemView).props.item.id).toBe('A2');
   });
 
   test('with agenda mode off nothing opens and nothing is said', () => {
     const view = mount({ snapshot: board(MIXED), agendaMode: false, focus: target('A2') });
-    expect(view.root.findAllByType(AttentionFullCard)).toHaveLength(0);
+    expect(view.root.findAllByType(AttentionItemView)).toHaveLength(0);
     expect(view.root.findAll(node => node.props?.['data-agenda-missing'] !== undefined)).toHaveLength(0);
   });
 });
@@ -359,30 +438,33 @@ describe('the "re:" chips', () => {
       .flatMap(entry => entry.props.items.map((it: { id: string }) => it.id));
 
   test('collect several items, add each once, and can be removed one by one', () => {
-    const view = mount({ snapshot: board(MIXED) });
-    run(() => toggle(view.root)[0]?.props.onClick());
-    const add = (id: string) =>
+    const view = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AttentionId, seq: 1 } });
+    const reply = () => run(() => view.root.findByType(AttentionItemView).props.onReply());
+    const openFromDrawer = (id: string) => {
+      run(() => toggle(view.root)[0]?.props.onClick());
       run(() =>
         view.root
           .findAllByType(AttentionAgendaRow)
           .find(row => row.props.item.id === id)
-          ?.props.onAddReply(),
+          ?.props.onOpen(),
       );
-    add('A2');
-    add('A3');
-    add('A2');
-    expect(live().references()).toEqual(['A2', 'A3']);
-    expect(chips(view)).toEqual(['A2', 'A3']);
-    run(() => view.root.findByType(AttentionReferenceChips).props.onRemove('A2'));
-    expect(chips(view)).toEqual(['A3']);
-    expect(view.root.findAllByType(AttentionAgendaRow).find(row => row.props.item.id === 'A3')?.props.referenced).toBe(
-      true,
-    );
+    };
+    reply();
+    openFromDrawer('A2');
+    reply();
+    openFromDrawer('A3');
+    reply();
+    expect(live().references()).toEqual(['A3', 'A2']);
+    expect(chips(view)).toEqual(['A3', 'A2']);
+    run(() => view.root.findByType(AttentionReferenceChips).props.onRemove('A3'));
+    expect(chips(view)).toEqual(['A2']);
   });
 
-  test('can also be added from the full card, and are spent when a message goes', () => {
+  test('"Add to reply" closes the view and the chips are spent when a message goes', () => {
     const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AttentionId, seq: 1 } });
-    run(() => view.root.findByType(AttentionFullCard).props.onAddReply());
+    run(() => view.root.findByType(AttentionItemView).props.onReply());
+    expect(view.root.findAllByType(AttentionItemView)).toHaveLength(0);
+    expect(live().covered).toBe(false);
     expect(live().references()).toEqual(['A2']);
     run(() => live().composer.onSent());
     expect(live().references()).toEqual([]);
@@ -391,34 +473,69 @@ describe('the "re:" chips', () => {
 
   test('are dropped when their item leaves the agenda', () => {
     const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AttentionId, seq: 1 } });
-    run(() => view.root.findByType(AttentionFullCard).props.onAddReply());
+    run(() => view.root.findByType(AttentionItemView).props.onReply());
     run(() => view.update(<Host snapshot={board([item('A3')])} />));
     expect(live().references()).toEqual([]);
   });
 });
 
-describe('an option picked while the composer holds text', () => {
-  test('carries the text as the note and empties the composer when it was used', async () => {
-    const view = mount({ snapshot: board([item('A1')]) });
-    const before = live().composer.clearSignal;
-    run(() => live().composer.onDraftChange('on the staging box only'));
-    run(() => toggle(view.root)[0]?.props.onClick());
+describe('what the item view sends', () => {
+  const sent: string[] = [];
+  const send = async (message: string) => {
+    sent.push(message);
+  };
+  afterEach(() => {
+    sent.length = 0;
+  });
+  const open = (extra: Partial<HostProps> = {}) =>
+    mount({ snapshot: board([item('A1')]), focus: { target: 'A1' as AttentionId, seq: 1 }, send, ...extra });
+
+  test('typed text goes as a reply naming the item, through the normal send', async () => {
+    const view = open();
     await runAsync(async () => {
-      view.root.findByType(AttentionAgendaRow).props.onAct({ kind: 'dismiss' });
+      await view.root.findByType(AttentionItemView).props.onSend('on the staging box only');
     });
-    expect(calls).toEqual(['dismiss:A1:on the staging box only']);
-    expect(live().composer.clearSignal).toBe(before + 1);
+    expect(sent).toEqual(['!A1 on the staging box only']);
   });
 
-  test('leaves an empty composer alone', async () => {
-    const view = mount({ snapshot: board([item('A1')]) });
-    const before = live().composer.clearSignal;
-    run(() => toggle(view.root)[0]?.props.onClick());
+  test('says so, and sends nothing, when the conversation cannot take a message from here', async () => {
+    const view = open({ send: undefined as unknown as HostProps['send'] });
+    let reason = '';
     await runAsync(async () => {
-      view.root.findByType(AttentionAgendaRow).props.onAct({ kind: 'dismiss' });
+      await view.root
+        .findByType(AttentionItemView)
+        .props.onSend('hello')
+        .catch((error: Error) => {
+          reason = error.message;
+        });
+    });
+    expect(reason).toBe('This conversation cannot take a message from here.');
+    expect(sent).toEqual([]);
+  });
+
+  test('an option carries the typed text as the answer’s note', async () => {
+    const view = open();
+    await runAsync(async () => {
+      view.root.findByType(AttentionItemView).props.onAct({ kind: 'dismiss' }, 'on the staging box only');
+    });
+    expect(calls).toEqual(['dismiss:A1:on the staging box only']);
+    expect(sent).toEqual([]);
+  });
+
+  test('an option without text carries no note', async () => {
+    const view = open();
+    await runAsync(async () => {
+      view.root.findByType(AttentionItemView).props.onAct({ kind: 'dismiss' }, '');
     });
     expect(calls).toEqual(['dismiss:A1:']);
-    expect(live().composer.clearSignal).toBe(before);
+  });
+
+  test('reads the item’s history from the conversation', () => {
+    const view = open({
+      entries: [{ id: 'm1', kind: 'assistant', text: 'Looking at !A1 now.', at: 1 } as unknown as TranscriptEntry],
+    });
+    const events = view.root.findByType(AttentionItemView).props.history;
+    expect(events.map((event: { kind: string }) => event.kind)).toEqual(['ferret']);
   });
 });
 
@@ -489,9 +606,6 @@ describe('the layout choices', () => {
   });
 });
 
-const textOf = (node: ReactTestInstance | undefined): string =>
-  (node?.children ?? []).map(child => (typeof child === 'string' ? child : textOf(child))).join('');
-
 describe('what the agenda says about a board it cannot trust', () => {
   const notes = (root: ReactTestInstance) =>
     root.findAll(node => node.type === 'p' && node.props.className === 'fy-agenda-note');
@@ -528,7 +642,7 @@ describe('the full card’s steps', () => {
         ?.props.onOpen(),
     );
     await runAsync(async () => {
-      await view.root.findByType(AttentionFullCard).props.onProgress(2, true);
+      await view.root.findByType(AttentionItemView).props.onProgress(2, true);
     });
     expect(calls).toEqual(['progress:A3:2:true']);
   });
@@ -567,7 +681,7 @@ describe('the drawer’s scroll cue', () => {
     return view;
   };
   const drawer = (view: ReturnType<typeof render>) =>
-    view.root.find(node => node.type === 'section' && node.props['data-agenda-drawer'] !== undefined);
+    view.root.find(node => node.type === 'div' && node.props.className === 'fy-agenda-drawer__list');
 
   test('shows when rows are hidden below, and goes when the drawer is scrolled to its end or resized to fit', () => {
     const view = open();

@@ -3,6 +3,7 @@ import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
+import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
 import { CacheUpdating } from '../../components/cache-updating.tsx';
 import { CompactionChip } from '../../components/compaction-card.tsx';
 import { Composer } from '../../components/composer.tsx';
@@ -10,10 +11,9 @@ import type { ComposerSuggestionSwitches } from '../../components/composer-autoc
 import { FastToggle } from '../../components/composer-fast.tsx';
 import { ComposerRuntime } from '../../components/composer-runtime.tsx';
 import { FilesTab } from '../../components/files-tab.tsx';
-import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
 import { HandoffSourceProvider } from '../../components/handoff-message.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from '../../components/ledger-message.tsx';
-import { type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
+import { LiveActivityLine, type PaneFrameReader, usePaneActivity } from '../../components/live-activity.tsx';
 import { LiveStreamIndicator, type LiveStreamIndicatorProps } from '../../components/live-stream-indicator.tsx';
 import { MigrateSheet } from '../../components/migrate-sheet.tsx';
 import { PackSessionsProvider } from '../../components/pack-call.tsx';
@@ -28,7 +28,6 @@ import {
 } from '../../components/runtime-controls.tsx';
 import type { TerminalDeckDependencies } from '../../components/session-terminal-deck.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../components/session-top-bar.tsx';
-import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { SendDismiss, SendExpand } from '../../components/settled-send-note.tsx';
 import { SubFerretIndicator } from '../../components/sub-ferrets.tsx';
 import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx';
@@ -44,7 +43,6 @@ import {
   attentionLedgerIds,
   useAttentionAgenda,
 } from '../../features/attention/attention-agenda.tsx';
-import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { AttentionRepliesNotice } from '../../features/attention/attention-replies-notice.tsx';
 import {
   ATTENTION_RESOLVED_ACTION_ID,
@@ -101,6 +99,7 @@ import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/work
 import type { AttentionReplies } from '../../hooks/use-attention-replies.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
+import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
 import { useLiveActivity } from '../../hooks/use-live-counter.ts';
 import { useOptionalSessionQuota } from '../../hooks/use-usage.ts';
 import { BottomSheet } from '../../shell/bottom-sheet.tsx';
@@ -108,6 +107,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
+import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
@@ -544,7 +544,7 @@ export function SessionChatPage({
           attention: {
             items: attention.snapshot?.items,
             ...(attention.status === 'error' && attention.snapshot === null
-              ? { failure: 'this session’s Attention could not be read' }
+              ? { failure: 'this session’s agenda could not be read' }
               : {}),
           },
         }),
@@ -1111,6 +1111,17 @@ export function SessionChatPage({
           sending={attentionReplies.sending}
         />
       ),
+    live:
+      busy && liveSample?.compaction?.phase !== 'running' ? (
+        <LiveActivityLine
+          activity={pane.activity}
+          fallback={session.state.activity ?? null}
+          live={liveSample}
+          turnStartedAt={working ? (session.state.turnStateAt ?? null) : null}
+        />
+      ) : undefined,
+    entries,
+    send: message => client.send(session.config.id, { message, now: false }),
     scope,
     snapshot: attention?.snapshot ?? null,
     status: attention?.status ?? 'idle',
@@ -1370,7 +1381,12 @@ export function SessionChatPage({
   }, [agendaSent, onSent]);
   const composerClient = useMemo(() => withReferencePrefix(client, agendaReferences), [client, agendaReferences]);
   const chat = (
-    <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
+    <div
+      className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col"
+      data-agenda-focus={agenda.covered || undefined}
+      data-chat-width={chatWidth}
+      ref={chatSurface}
+    >
       {/* A zero-height row, so the pill overlays the top of the transcript without moving a line of it. */}
       {updating ? (
         <div className="relative h-0">
@@ -1386,7 +1402,7 @@ export function SessionChatPage({
           />
         </div>
       ) : null}
-      <div className="fy-chat-log">
+      <div className="fy-chat-log" inert={agenda.covered || undefined}>
         {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
         <AgendaItemsProvider snapshot={attention?.snapshot}>
           <Transcript
@@ -1398,6 +1414,7 @@ export function SessionChatPage({
             busy={busy}
             daemonId={connection.daemonId}
             entries={entries}
+            liveInRow={agenda.hostsLive}
             {...(onRetry === undefined ? {} : { onRetry })}
             {...(onCancel === undefined ? {} : { onCancel })}
             {...(onSubmit === undefined ? {} : { onSubmit })}
@@ -1408,9 +1425,9 @@ export function SessionChatPage({
             sessionId={session.config.id}
           />
         </AgendaItemsProvider>
-        {agenda.card}
+        {agenda.scrim}
       </div>
-      <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
+      <div className="fy-chat-input" data-safe-bottom="" data-session-input="" inert={agenda.covered || undefined}>
         <div className="fy-chat-input__column">
           {/* THE AGENDA: the drawer, the line and the "re:" chips, all siblings above the composer, so the
               composer's own box never moves. */}
@@ -1485,8 +1502,6 @@ export function SessionChatPage({
               phoneEnterKeyPreference={composerPhoneEnterKey}
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
-              onDraftChange={agenda.composer.onDraftChange}
-              clearSignal={agenda.composer.clearSignal}
               onSent={onSentWithAgenda}
               connectionLive={connectionState?.kind === 'connected'}
               quota={quota}
@@ -1499,6 +1514,8 @@ export function SessionChatPage({
           )}
         </div>
       </div>
+      {/* FOCUS MODE: the item view covers the whole column, composer included; the chat above stays mounted. */}
+      {agenda.view}
     </div>
   );
 

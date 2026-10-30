@@ -13,7 +13,9 @@
  */
 
 import type { AttentionId, AttentionItem, AttentionSnapshot, ResolvedAttentionItem } from '@ferretry/protocol';
+import { agendaReMessage } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
+import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
 
 const NOW = Date.parse('2026-10-29T09:00:00.000Z');
@@ -183,9 +185,61 @@ const SENT = {
   resolvedByName: null,
 } as unknown as ResolvedAttentionItem;
 
+// THE PERMISSION ITEM, with its own terms and a revision, for the item view.
+const A2_FULL = {
+  ...A2,
+  premise: '- The staging relay serves a stale advertisement\n- A restart drops live sessions for about ten seconds',
+  terms: [
+    { term: 'Relay', meaning: 'The carrier a phone reaches the daemon through.' },
+    { term: 'Advertisement', meaning: 'The address list the relay publishes.' },
+  ],
+  revisions: [
+    {
+      at: ago(30),
+      by: 'agent',
+      changed: ['subject'],
+      previous: { subject: 'Can I restart the staging relay?' },
+    },
+  ],
+} as AttentionItem;
+
+// A LONG ITEM: many bullets, a table of terms, a diagram and a long body — the one body scrolls.
+const LONG_LINES = (stem: string, count: number): string =>
+  Array.from(
+    { length: count },
+    (_, at) => `- ${stem} ${at + 1}: the board and the ledger must agree after a restart`,
+  ).join('\n');
+const A5_LONG = {
+  ...A5_UPDATED,
+  premise: LONG_LINES('Premise', 8),
+  context: LONG_LINES('Context', 10),
+  decided: LONG_LINES('Decided', 5),
+  stillOpen: LONG_LINES('Still open', 5),
+  terms: Array.from({ length: 9 }, (_, at) => ({
+    term: `Term ${at + 1}`,
+    meaning: 'A meaning that runs to a full sentence so that the second column wraps on a phone.',
+  })),
+} as AttentionItem;
+
+const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
+const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
+const HISTORY_ENTRIES = [
+  ferretSays('h1', 50, 'I raised !A5 — SQLite or Postgres for the ledger?'),
+  owner('h2', 40, agendaReMessage([{ id: 'A5', quote: A5.subject }], 'Does Postgres need a separate machine?')),
+  ferretSays('h3', 38, 'Re !A5: yes, Postgres is its own server; SQLite is just a file beside the daemon.'),
+  owner('h4', 5, '!A5 leaning SQLite, but I want the nightly export'),
+] as unknown as TranscriptEntry[];
+
 const params = new URLSearchParams(location.search);
 const view = params.get('view') ?? 'board';
-const target = (params.get('attention') ?? null) as AttentionId | null;
+const target = (params.get('attention') ?? params.get('agenda') ?? null) as AttentionId | null;
+const withHistory = params.get('history') === '1';
+const long = params.get('long') === '1';
+const fakeKeyboard = params.get('kb') === '1';
+
+const items = AGENDA.map(entry =>
+  entry.id === 'A5' ? (long ? A5_LONG : withHistory ? A5_UPDATED : entry) : entry.id === 'A2' ? A2_FULL : entry,
+);
 
 const board: AttentionSnapshot =
   view === 'updated'
@@ -194,12 +248,28 @@ const board: AttentionSnapshot =
       ? snapshot(AGENDA, { delivery: { sending: ['A1' as AttentionId] } }, [SENT])
       : view === 'status-sending'
         ? snapshot([], { delivery: { sending: ['A1' as AttentionId] } }, [SENT])
-        : snapshot(AGENDA);
+        : view === 'one'
+          ? snapshot([A3])
+          : snapshot(items);
+
+const live =
+  params.get('live') === '1' ? (
+    <p className="m-0 flex items-center gap-xs text-meta text-muted" data-fixture-live="">
+      Ottilie is thinking…
+    </p>
+  ) : undefined;
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  <div className="h-dvh" data-fixture="">
-    <AgendaChatHarness agendaMode={view !== 'none'} board={board} now={NOW} target={target} />
+  <div className="h-dvh" data-fixture="" style={fakeKeyboard ? { height: 'calc(100dvh - 300px)' } : undefined}>
+    <AgendaChatHarness
+      agendaMode={view !== 'none'}
+      board={board}
+      entries={withHistory || long ? HISTORY_ENTRIES : undefined}
+      live={live}
+      now={NOW}
+      target={target}
+    />
   </div>,
 );

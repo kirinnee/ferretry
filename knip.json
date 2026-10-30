@@ -43,7 +43,7 @@
         "harness/screenshot.ts",
         "harness/attention-cards-screenshot.ts",
         "harness/attention-cards-page.tsx",
-        "harness/agenda-screenshot.ts",
+        "harness/agenda-v2-screenshot.ts",
         "harness/agenda-page.tsx",
         "harness/inbox-page.tsx",
         "harness/processes-tab-screenshot.tsx",

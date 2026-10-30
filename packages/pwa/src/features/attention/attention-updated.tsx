@@ -28,7 +28,7 @@ export function AttentionDecidedSummary({ item }: { readonly item: AttentionItem
 }
 
 /** The earlier versions of an item, newest first: when, who, which fields changed and what each said before. */
-export function AttentionRevisions({
+function AttentionRevisions({
   item,
   now,
   id,

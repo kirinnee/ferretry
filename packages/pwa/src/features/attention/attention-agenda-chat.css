@@ -1,10 +1,11 @@
-/* A ferret's agenda inside its chat (attention-agenda.tsx): one line above the composer, a bounded drawer that
-   opens upward from it, "re:" chips, the full card over the transcript and a docked side panel. Everything
-   above the composer is a sibling of it, so the composer's own box never moves. Role tokens only, so light and
-   dark read the same; calm rules: no stripes, no tinted boxes, sentence case. */
-/* ONE ROW, ALWAYS. The line is its own container so a narrow chat drops the word "Agenda" (the dot stays) and
-   the last segment gives way with an ellipsis, whatever the viewport. Its side inset is the composer's own: the
-   box's stroke and padding, so the dot, the chips and the box's text start on one edge. */
+/* A ferret's agenda inside its chat (attention-agenda.tsx): ONE ROW above the composer (what is running on its
+   left, the agenda pill on its right), a raised drawer over a scrim that opens upward from the pill, "re:" chips,
+   the item's card in place of the transcript and a docked side panel. Everything above the composer is a sibling
+   of it, so the composer's own box never moves. Theme role tokens only, so Studio, Mission Control, Neo-Brutalism
+   and Geist, light and dark, each draw it from their own palette. */
+/* ONE ROW, NEVER WRAPPED. The row is its own container: a narrow chat shortens the pill to "Agenda · 7", and what
+   is running truncates with an ellipsis. Its side inset is the composer's own: the box's stroke and padding, so the
+   spinner, the pill, the chips and the box's text start on one edge. */
 .fy-agenda-line,
 .fy-agenda-chips {
   --agenda-inset: calc(var(--stroke-control, 1px) + var(--pad-panel));
@@ -15,44 +16,62 @@
   min-height: 44px;
   min-width: 0;
   padding-inline: var(--agenda-inset);
+  flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-end;
   gap: var(--gap-md);
   color: var(--muted);
   font-size: var(--text-sm);
 }
-.fy-agenda-line__fill {
-  flex: 1 1 auto;
+/* What is running: the row's left half, giving way before the pill does. */
+.fy-agenda-line__live {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 0;
+  align-items: center;
+  overflow: hidden;
 }
+.fy-agenda-line__live > * {
+  min-width: 0;
+  max-width: 100%;
+}
+/* THE PILL: a defined, tappable bar in the theme's accent, not loose text. */
 .fy-agenda-line__main {
   display: inline-flex;
   min-width: 0;
-  min-height: 44px;
+  min-height: 36px;
   flex: 0 1 auto;
   align-items: center;
   gap: var(--gap-sm);
   margin: 0;
-  padding: 0;
+  padding: 0 var(--gap-md);
   overflow: hidden;
-  border: 0;
+  border: var(--stroke) solid var(--divider-color);
   border-radius: var(--radius-control);
-  background: transparent;
-  color: inherit;
+  background: var(--surface);
+  color: var(--fg);
   font: inherit;
+}
+.fy-agenda-line:has(.fy-agenda-line__dot[data-urgent]) .fy-agenda-line__main {
+  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 button.fy-agenda-line__main {
   cursor: pointer;
 }
 button.fy-agenda-line__main:hover {
-  background: var(--surface-2);
-  color: var(--fg);
-}
-button.fy-agenda-line__main:active {
+  border-color: var(--accent);
   background: var(--accent-soft);
+}
+button.fy-agenda-line__main:active,
+button.fy-agenda-line__main[aria-expanded='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: inset 0 0 0 var(--stroke) var(--accent);
 }
 button.fy-agenda-line__main:focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: -2px;
+  outline-offset: 2px;
 }
 .fy-agenda-line__dot {
   width: 8px;
@@ -72,6 +91,12 @@ button.fy-agenda-line__main:focus-visible {
   column-gap: var(--gap-sm);
   white-space: nowrap;
 }
+.fy-agenda-line__short {
+  display: none;
+  color: var(--fg);
+  font-weight: var(--weight-strong);
+  white-space: nowrap;
+}
 .fy-agenda-line__name,
 .fy-agenda-line__segment {
   flex-shrink: 0;
@@ -86,12 +111,29 @@ button.fy-agenda-line__main:focus-visible {
   color: var(--fg);
   font-weight: var(--weight-strong);
 }
+/* Narrow: the long sentence gives way to "Agenda · 7". With nothing else on the row it keeps its words a while longer. */
 @container (max-width: 30rem) {
   .fy-agenda-line__name {
     display: none;
   }
   .fy-agenda-line__name + .fy-agenda-line__segment::before {
     content: none;
+  }
+}
+@container (max-width: 40rem) {
+  .fy-agenda-line[data-shared] .fy-agenda-line__words {
+    display: none;
+  }
+  .fy-agenda-line[data-shared] .fy-agenda-line__short {
+    display: inline;
+  }
+}
+@container (max-width: 24rem) {
+  .fy-agenda-line .fy-agenda-line__words {
+    display: none;
+  }
+  .fy-agenda-line .fy-agenda-line__short {
+    display: inline;
   }
 }
 .fy-agenda-line__name {
@@ -105,7 +147,7 @@ button.fy-agenda-line__main:focus-visible {
 }
 .fy-agenda-line__chevron {
   flex-shrink: 0;
-  color: var(--faint);
+  color: var(--muted);
 }
 @media (prefers-reduced-motion: no-preference) {
   .fy-agenda-line__chevron {
@@ -121,7 +163,6 @@ button.fy-agenda-line__main:focus-visible {
   flex: 0 1 auto;
   align-items: center;
   gap: var(--gap-xs);
-  margin-left: auto;
 }
 .fy-agenda-line__status.fy-agenda-sending {
   flex: none;
@@ -140,29 +181,26 @@ button.fy-agenda-line__main:focus-visible {
   color: var(--err);
 }
 
-/* THE DRAWER: between the chat and the line, never over the composer. */
-.fy-agenda-drawer {
-  max-height: 48vh;
-  max-height: 48dvh;
-  min-width: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  /* The scroll area ends ABOVE the line: no padding of its own (a sticky fade stops short of padding, and rows
-     would show through under it), a gap to the line, and the room at the foot inside the list. */
-  margin-bottom: var(--gap-sm);
-  padding-bottom: 0;
-  border-bottom: var(--stroke) solid var(--divider-color);
+/* THE DRAWER: a raised sheet that floats above the pill over a scrim, never over the composer. The layer is a
+   zero-height anchor at the top of what sits above the composer; the sheet grows upward from it. */
+.fy-agenda-layer {
+  position: relative;
+  z-index: 30;
+  height: 0;
 }
-/* More rows below: a soft fade into the chat's ground at the foot, there only while there is more to scroll to. */
-.fy-agenda-drawer[data-more]::after {
-  position: sticky;
-  bottom: 0;
-  display: block;
-  height: 32px;
-  margin-top: -32px;
-  background: linear-gradient(to top, var(--chat-ground, var(--bg)), transparent);
-  content: '';
-  pointer-events: none;
+.fy-agenda-drawer {
+  position: absolute;
+  inset: auto 0 var(--gap-xs);
+  display: flex;
+  max-height: min(26rem, calc(100dvh - 14rem));
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: var(--stroke) solid var(--divider-color);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+  box-shadow: var(--shadow-popover, var(--shadow-lg));
+  color: var(--fg);
 }
 @media (prefers-reduced-motion: no-preference) {
   .fy-agenda-drawer {
@@ -175,17 +213,124 @@ button.fy-agenda-line__main:focus-visible {
     transform: translateY(8px);
   }
 }
+.fy-agenda-drawer__head {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gap-md);
+  padding: var(--gap-sm) var(--gap-sm) var(--gap-sm) var(--gap-md);
+  border-bottom: var(--stroke) solid var(--divider-color);
+}
+.fy-agenda-drawer__title {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: var(--gap-sm);
+  margin: 0;
+  color: var(--fg);
+  font-size: var(--text-md);
+  font-weight: var(--weight-strong);
+}
+.fy-agenda-drawer__count {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-agenda-drawer__count::before {
+  content: '·';
+  margin-right: var(--gap-sm);
+  color: var(--faint);
+}
+.fy-agenda-drawer__count[data-urgent] {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 var(--gap-sm);
+  border-radius: var(--radius-badge);
+  background: var(--accent);
+  color: var(--accent-fg);
+}
+.fy-agenda-drawer__count[data-urgent]::before {
+  content: none;
+}
+.fy-agenda-drawer__close {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-agenda-drawer__close:hover {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-agenda-drawer__close:active {
+  border-color: var(--accent);
+}
+.fy-agenda-drawer__close:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+/* The rows' own scroller. More rows below: a soft fade into the sheet at the foot, only while there is more. */
+.fy-agenda-drawer__list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--gap-sm);
+}
+.fy-agenda-drawer__list[data-more]::after {
+  position: sticky;
+  bottom: calc(-1 * var(--gap-sm));
+  display: block;
+  height: 32px;
+  margin: -32px calc(-1 * var(--gap-sm)) calc(-1 * var(--gap-sm));
+  background: linear-gradient(to top, var(--surface), transparent);
+  content: '';
+  pointer-events: none;
+}
 .fy-agenda-rows {
   display: flex;
   margin: 0;
-  padding: 0 0 var(--gap-sm);
+  padding: 0;
   min-width: 0;
   flex-direction: column;
-  gap: var(--gap-md);
+  gap: var(--gap-sm);
   list-style: none;
 }
 .fy-agenda-rows__item {
   min-width: 0;
+}
+/* The scrim: the transcript's own grid cell only, so the header, the pill and the composer stay clear. */
+.fy-chat-log > .fy-agenda-scrim {
+  z-index: 25;
+  min-width: 0;
+  min-height: 0;
+  grid-area: 1 / 1;
+  border: 0;
+  padding: 0;
+  background: var(--scrim);
+  cursor: default;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .fy-chat-log > .fy-agenda-scrim {
+    animation: fy-agenda-scrim 160ms ease-out;
+  }
+}
+@keyframes fy-agenda-scrim {
+  from {
+    opacity: 0;
+  }
 }
 
 /* THE CHIPS: "re: <title> ✕", directly above the composer. */
@@ -246,27 +391,6 @@ button.fy-agenda-line__main:focus-visible {
 .fy-agenda-ref__clear:focus-visible {
   outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
   outline-offset: -2px;
-}
-
-/* THE FULL CARD: over the transcript's own grid cell only; the header, the line and the composer stay. */
-.fy-chat-log > .fy-agenda-card {
-  z-index: 2;
-  display: flex;
-  min-width: 0;
-  min-height: 0;
-  grid-area: 1 / 1;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg);
-}
-.fy-agenda-card > * {
-  min-height: 0;
-  flex: 1 1 auto;
-}
-@media (prefers-reduced-motion: no-preference) {
-  .fy-agenda-card {
-    animation: fy-agenda-open 160ms ease-out;
-  }
 }
 
 /* THE DOCKED PANEL: a wide screen with a mouse keeps the agenda beside the chat. */
