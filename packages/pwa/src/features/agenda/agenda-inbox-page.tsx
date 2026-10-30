@@ -52,6 +52,7 @@ import {
   stepSelection,
 } from '../../lib/agenda-inbox-list.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
+import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import type { RecentMessage } from '../../lib/recent-messages.ts';
@@ -100,6 +101,20 @@ interface CardHostProps {
   readonly readRecent?: ((card: InboxCard) => Promise<readonly RecentMessage[]>) | undefined;
   readonly recentOpen?: boolean | undefined;
 }
+
+/**
+ * Answers a card into the undo window. Edit on a lane-proposal card also opens the lane editor: leaving the page
+ * flushes the held answer, so the card is still resolved.
+ */
+const answerCard = (
+  { inbox, onNavigate }: Pick<CardHostProps, 'inbox' | 'onNavigate'>,
+  card: InboxCard,
+  action: InboxAction,
+): void => {
+  inbox.deferred.schedule(card, action);
+  const editor = laneEditDestination(card.daemonId, card.item, action);
+  if (editor !== undefined) onNavigate(editor);
+};
 
 /** One card, answering into the undo window. */
 const renderInboxCard = (
@@ -839,7 +854,7 @@ export function AgendaInboxPage({
           <div className="fy-attn-inbox__deck" data-agenda-deck-host="">
             <AgendaSwipeDeck
               cards={deck}
-              onAct={(card, action) => inbox.deferred.schedule(card, action)}
+              onAct={(card, action) => answerCard(host, card, action)}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
               renderCard={(card, act) =>
                 renderInboxCard(host, card, act, true, card.key === deckPlace ? skip : undefined)
@@ -918,7 +933,7 @@ export function AgendaNeedsYou({ inbox, daemonId, onNavigate, now, clock }: Agen
       </header>
       <ul className="fy-attn-needs__cards" data-count={shown.length}>
         {shown.map(card => (
-          <li key={card.key}>{renderInboxCard(host, card, action => inbox.deferred.schedule(card, action), false)}</li>
+          <li key={card.key}>{renderInboxCard(host, card, action => answerCard(host, card, action), false)}</li>
         ))}
       </ul>
       {toast}

@@ -174,7 +174,7 @@ describe('answer', () => {
 describe('lane verbs', () => {
   it('proposes a template and confirms it at once, because the owner chose it', async () => {
     const { actions, lanesSent } = harness();
-    const answer = await actions.useTemplate(laptop.daemonId, lanes.projectId, 'pr');
+    const answer = await actions.adoptTemplate(laptop.daemonId, lanes.projectId, 'pr');
     expect(answer.ok && answer.value.version).toBe(2);
     expect(lanesSent.map(sent => sent.request)).toEqual([
       { action: 'propose', template: 'pr', renames: {} },
@@ -185,7 +185,7 @@ describe('lane verbs', () => {
   it('stops after a refused proposal', async () => {
     const { actions, lanesSent, refuse } = harness();
     refuse(true);
-    const answer = await actions.useTemplate(laptop.daemonId, lanes.projectId, 'quick');
+    const answer = await actions.adoptTemplate(laptop.daemonId, lanes.projectId, 'quick');
     expect(!answer.ok && answer.error.code).toBe('version-conflict');
     expect(lanesSent).toHaveLength(1);
   });

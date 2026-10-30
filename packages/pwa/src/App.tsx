@@ -81,6 +81,7 @@ import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
+import { LaneEditorPage } from './features/projects/lane-editor.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
@@ -194,6 +195,7 @@ import {
   connectionPickerPath,
   daemonAgendaPath,
   daemonLearningPath,
+  daemonProjectPath,
   daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
@@ -459,6 +461,13 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
         { href: sessions, label: 'Sessions' },
         { href: `${sessions}/projects`, label: 'Projects' },
         { label: 'Project' },
+      ];
+    case 'project-lanes':
+      return [
+        { href: sessions, label: 'Sessions' },
+        { href: `${sessions}/projects`, label: 'Projects' },
+        { href: daemonProjectPath(route.daemonId, route.projectId), label: 'Project' },
+        { label: 'Lanes' },
       ];
     case 'session':
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
@@ -847,6 +856,7 @@ export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
   switch (route.kind) {
     case 'projects':
     case 'project-detail':
+    case 'project-lanes':
       return 'projects';
     case 'analytics':
     case 'warden':
@@ -2028,6 +2038,10 @@ function ProjectDetailRoute({ connection, projectId }: ProjectDetailPageProps) {
   return <ProjectDetailPage connection={connection} projectId={projectId} />;
 }
 
+function ProjectLanesRoute({ connection, projectId }: ProjectDetailPageProps) {
+  return <LaneEditorPage connection={connection} projectId={projectId} />;
+}
+
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
   Setup: SetupGuide,
@@ -2035,6 +2049,7 @@ const PAGE_SLOTS: PageHostSlots = {
   NewSession: NewSessionRoute,
   Projects: ProjectsRoute,
   ProjectDetail: ProjectDetailRoute,
+  ProjectLanes: ProjectLanesRoute,
   SessionChat: SessionRoute,
   Settings: SettingsRoute,
   Warden: WardenRoute,

@@ -1,4 +1,4 @@
-import { ProjectInfoSchema } from '@ferretry/protocol';
+import { BoardProjectIdSchema, ProjectInfoSchema } from '@ferretry/protocol';
 
 import { type DaemonId, daemonId } from '../daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../daemon-scope.ts';
@@ -14,6 +14,9 @@ import { daemonSessionKey, daemonSessionScope } from '../daemon-scope.ts';
 const ProjectIdSchema = ProjectInfoSchema.shape.id;
 
 const isProjectId = (value: string): boolean => ProjectIdSchema.safeParse(value).success;
+
+/** A board's project is a registered UUID or the Unfiled board; the lane editor serves both. */
+const isBoardProjectId = (value: string): boolean => BoardProjectIdSchema.safeParse(value).success;
 
 /** The route shown before a browser has selected one of its paired daemons. */
 export interface ConnectionPickerRoute {
@@ -50,6 +53,13 @@ export interface DaemonProjectsRoute {
 /** One durable registered Project, addressed by its protocol UUID rather than its path. */
 export interface DaemonProjectDetailRoute {
   readonly kind: 'project-detail';
+  readonly daemonId: DaemonId;
+  readonly projectId: string;
+}
+
+/** One project's lane editor: the Board's lanes, edited, proposed or picked from a template. */
+export interface DaemonProjectLanesRoute {
+  readonly kind: 'project-lanes';
   readonly daemonId: DaemonId;
   readonly projectId: string;
 }
@@ -113,6 +123,7 @@ export type DaemonPageRoute =
   | DaemonNewSessionRoute
   | DaemonProjectsRoute
   | DaemonProjectDetailRoute
+  | DaemonProjectLanesRoute
   | DaemonSessionRoute
   | DaemonAgendaRoute
   | DaemonSettingsRoute
@@ -192,6 +203,13 @@ export const daemonProjectPath = (id: DaemonId, projectId: string): string => {
   return `${daemonProjectsPath(id)}/${encodeURIComponent(value)}`;
 };
 
+/** Builds the lane editor pathname for one board project: `/d/<id>/projects/<uuid | unfiled>/lanes`. */
+export const daemonProjectLanesPath = (id: DaemonId, projectId: string): string => {
+  const value = projectId.trim();
+  if (!isBoardProjectId(value)) throw new Error('projectId must be a board project id');
+  return `${daemonProjectsPath(id)}/${encodeURIComponent(value)}/lanes`;
+};
+
 /** Builds the canonical session pathname for one daemon and session. */
 export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   const scope = daemonSessionScope({ daemonId: id }, sessionId);
@@ -253,6 +271,17 @@ export const parseRoute = (pathname: string): Route => {
   if (destination === 'analytics' && sessionSegment === 'query' && remainder.length === 0)
     return { kind: 'analytics', daemonId: id, view: 'query' };
 
+  if (
+    destination === 'projects' &&
+    sessionSegment !== undefined &&
+    remainder.length === 1 &&
+    remainder[0] === 'lanes'
+  ) {
+    const candidate = decodeRouteSegment(sessionSegment);
+    if (isBoardProjectId(candidate)) return { kind: 'project-lanes', daemonId: id, projectId: candidate };
+    return { kind: 'projects', daemonId: id };
+  }
+
   if (destination === 'projects' && sessionSegment !== undefined && remainder.length === 0) {
     const candidate = decodeRouteSegment(sessionSegment);
     if (isProjectId(candidate)) return { kind: 'project-detail', daemonId: id, projectId: candidate };
@@ -287,6 +316,8 @@ export const routePath = (route: Route): string => {
       return daemonProjectsPath(route.daemonId);
     case 'project-detail':
       return daemonProjectPath(route.daemonId, route.projectId);
+    case 'project-lanes':
+      return daemonProjectLanesPath(route.daemonId, route.projectId);
     case 'session':
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'attention':
@@ -321,5 +352,6 @@ export const routePageKey = (route: Route): string => {
   // The two Analytics pages are kept apart, so each keeps its own state while the other is on screen.
   if (route.kind === 'analytics' && route.view === 'query') return `analytics-query:${JSON.stringify(route.daemonId)}`;
   if (route.kind === 'project-detail') return `project-detail:${JSON.stringify([route.daemonId, route.projectId])}`;
+  if (route.kind === 'project-lanes') return `project-lanes:${JSON.stringify([route.daemonId, route.projectId])}`;
   return `${route.kind}:${JSON.stringify(route.daemonId)}`;
 };

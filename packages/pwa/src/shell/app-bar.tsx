@@ -177,6 +177,7 @@ export const appBarDestinationForRoute = (route: Route): AppBarDestinationId | n
       return 'attention';
     case 'projects':
     case 'project-detail':
+    case 'project-lanes':
       return 'projects';
     case 'analytics':
     case 'warden':

@@ -82,7 +82,7 @@ export interface BoardActions {
   drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
   editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
   /** The owner picks a template for a project with no lanes: proposed, then confirmed in the same breath. */
-  useTemplate(daemonId: DaemonId, projectId: BoardProjectId, template: LaneTemplateName): Promise<LaneMutation>;
+  adoptTemplate(daemonId: DaemonId, projectId: BoardProjectId, template: LaneTemplateName): Promise<LaneMutation>;
   /** Saves an edited layout against the version the editor saw; the owner's edit confirms the set. */
   saveLanes(
     daemonId: DaemonId,
@@ -142,7 +142,7 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
   };
 
   return {
-    useTemplate: async (daemonId, projectId, template) => {
+    adoptTemplate: async (daemonId, projectId, template) => {
       const proposed = await changeLanes(daemonId, projectId, { action: 'propose', template, renames: {} });
       return proposed.ok
         ? await changeLanes(daemonId, projectId, { action: 'confirm', version: proposed.value.version })

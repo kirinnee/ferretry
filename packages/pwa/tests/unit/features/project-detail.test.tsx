@@ -546,3 +546,17 @@ describe('ProjectDetailPage on the server', () => {
     expect(asked).toEqual([]);
   });
 });
+
+describe('ProjectDetailPage lane editor entry', () => {
+  it('opens the lane editor for this project from the header', async () => {
+    // Arrange
+    const view = await show(shell(storeFor()));
+
+    // Act
+    await press(must(view.container.querySelector(`[data-project-lanes-link="${PROJECT_ID}"]`), 'the Lanes entry'));
+
+    // Assert
+    expect(window.location.pathname).toBe(`/d/workstation/projects/${PROJECT_ID}/lanes`);
+    expect(view.container.querySelector(`[data-project-lanes-link="${PROJECT_ID}"]`)?.textContent).toBe('Lanes ✎');
+  });
+});

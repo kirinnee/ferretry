@@ -410,3 +410,6 @@ packages/pwa/src/hooks/use-fine-pointer.ts # used by SessionChatPage via App.tsx
 # The project board's data layer (board U10) lands before the pages that read it (board U11–U15).
 packages/pwa/src/hooks/use-board.ts # the board hooks; the board pages import them next (U11–U15)
 packages/pwa/src/lib/board-actions.ts # the board write verbs, reached through use-board.ts
+
+# The lane editor (board U15), imported only from the .tsx app tree that the gate does not root.
+packages/pwa/src/lib/lane-editor-model.ts # the lane editor draft model, used by features/projects/lane-editor.tsx ← App.tsx ← main.tsx

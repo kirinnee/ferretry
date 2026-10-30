@@ -25,6 +25,7 @@ export interface PageHostSlots {
   readonly NewSession: ComponentType<DaemonPageProps>;
   readonly Projects?: ComponentType<DaemonPageProps>;
   readonly ProjectDetail?: ComponentType<ProjectDetailPageProps>;
+  readonly ProjectLanes?: ComponentType<ProjectDetailPageProps>;
   readonly SessionChat: ComponentType<SessionChatPageProps>;
   readonly Settings: ComponentType<DaemonPageProps>;
   readonly Warden: ComponentType<DaemonPageProps>;
@@ -73,6 +74,9 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
     case 'project-detail':
       if (slots.ProjectDetail === undefined) throw new Error('the project detail route is not mounted');
       return <slots.ProjectDetail connection={matchedConnection} projectId={route.projectId} />;
+    case 'project-lanes':
+      if (slots.ProjectLanes === undefined) throw new Error('the project lanes route is not mounted');
+      return <slots.ProjectLanes connection={matchedConnection} projectId={route.projectId} />;
     case 'session':
       return (
         <slots.SessionChat
