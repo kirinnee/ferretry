@@ -198,15 +198,25 @@ async function paneSocket(home: string): Promise<string> {
 
 /** Waits until the pane has drawn the question and its first option, the one thing the driver can bind to. */
 async function waitForRenderedQuestion(socket: string): Promise<void> {
-  await waitFor(async () => {
-    const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return text.includes(QUESTION) && text.includes('1. Yes');
-  }, `the pane to draw "${QUESTION}" with its first option`);
+  let lastSeen = 'no capture was taken';
+  try {
+    await waitFor(async () => {
+      const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
+        stdin: 'ignore',
+        stdout: 'pipe',
+        stderr: 'pipe',
+      });
+      const [text, errors, code] = await Promise.all([
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+        child.exited,
+      ]);
+      lastSeen = `capture-pane exited ${String(code)} with stdout ${JSON.stringify(text)} and stderr ${JSON.stringify(errors)}`;
+      return text.includes(QUESTION) && text.includes('1. Yes');
+    }, `the pane to draw "${QUESTION}" with its first option`);
+  } catch (error) {
+    throw new Error(`${(error as Error).message}; the last look: ${lastSeen}`);
+  }
 }
 
 /** A live pane on the daemon's own private socket, rendering the exact question it will be asked. */
