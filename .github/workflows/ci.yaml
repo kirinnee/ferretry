@@ -28,13 +28,20 @@ on:
   workflow_dispatch:
 
 # A new push to a PR supersedes the run for its old SHA, so that run is cancelled instead of holding
-# a runner. Everything else — `main`, manual dispatch — gets a group of its own run id: a shared group
-# would still cancel a *pending* main run when a newer one queued, and Release needs every main CI
-# run to complete.
+# a runner.
+#
+# `main` shares ONE group and never cancels in progress: at most one main run runs and one waits, and a
+# newer push replaces the one waiting. Each main run used to have a group of its own, so every merge
+# queued a full run on GitHub's runners; on 2026-10-30 a burst of merges left twelve of them queued for
+# over an hour behind pull-request jobs, and no release went out. Superseding a waiting run loses
+# nothing: Release releases `main`'s head, and the newer run proves every commit the older one held.
+# A run already in progress is never cancelled, so a steady stream of merges cannot starve Release.
+# Manual dispatch keeps a group of its own run id.
 concurrency:
   group: >-
     ${{ github.workflow }}-${{
       github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      || (github.event_name == 'push' && github.ref == 'refs/heads/main') && 'main'
       || github.run_id
     }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
