@@ -490,10 +490,12 @@ import {
   TmuxTerminalRuntime,
 } from '../src/adapters/terminal/index.ts';
 import {
+  BunTmuxProcess,
   ControlModeTmuxProcess,
   RealHarnessLaunchGuard,
   TmuxPaneDelivery,
   TmuxPaneQueue,
+  TmuxReleaseReader,
 } from '../src/adapters/tmux/index.ts';
 import { CliConversionCheck, CliHarnessVersion } from '../src/adapters/transcript/conversion-check.ts';
 import {
@@ -10295,6 +10297,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               executables,
               harnesses: await readHarnesses(accounts, executables, harnessDiscovery),
               directorySyscalls,
+              tmuxRelease: await new TmuxReleaseReader(tmuxExecutable, tmux).read(),
             });
           },
         },
@@ -12106,6 +12109,16 @@ export async function checkConfiguration(
     executables: world.harnesses.executables,
     harnesses,
     directorySyscalls,
+    // The same socket the boot serves (`paths.home/tmux.sock`); a check never starts a server on it.
+    tmuxRelease: await (async () => {
+      try {
+        const executable = Bun.which('tmux') ?? FALLBACK_TMUX;
+        const server = new BunTmuxProcess(executable, join(world.stateHome.path, 'tmux.sock'));
+        return await new TmuxReleaseReader(executable, server).read();
+      } catch {
+        return undefined;
+      }
+    })(),
   });
   for (const line of renderDoctorReport(doctor)) say(line);
   /**
