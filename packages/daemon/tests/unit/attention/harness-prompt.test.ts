@@ -428,6 +428,20 @@ describe('HarnessPromptAttention', () => {
     should(cleared.ok && cleared.value.count).equal(0);
   });
 
+  it('should read an open board from either name, preferring the agenda one', async () => {
+    // Arrange
+    const { service, raised } = board();
+    await observer(service).stateWritten(SESSION, running({ pendingQuestion: choice }));
+
+    // Act — a stopped ferret whose state names the board only as `agenda` still has its item cleared
+    await observer(service, { [SESSION]: running({ status: 'stopped', agenda: { open: 1 } }) }).reconcile([SESSION]);
+    const cleared = await service.list(SESSION);
+
+    // Assert
+    should(raised).deepEqual(['A1']);
+    should(cleared.ok && cleared.value.count).equal(0);
+  });
+
   it('should retry at the next write when the board cannot be read or changed', async () => {
     // Arrange
     const { service } = board();

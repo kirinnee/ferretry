@@ -136,6 +136,7 @@ export interface NotificationSpec {
 
 const bodyFor = (view: SessionView, kind: SessionNotifyKind): string => {
   switch (kind) {
+    case 'agenda':
     case 'attention':
       return view.state.turnState === 'your-turn'
         ? 'Your turn — finished and waiting for you.'
@@ -166,7 +167,7 @@ const notificationEventParts = (
     view.state.status,
     view.state.turn,
     // The boundary itself, so each turn end is its own event and never collapsed into the last one.
-    kind === 'attention' ? (view.state.turnStateAt ?? '') : '',
+    kind === 'attention' || kind === 'agenda' ? (view.state.turnStateAt ?? '') : '',
   ];
 };
 

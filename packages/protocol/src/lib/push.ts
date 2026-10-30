@@ -2,11 +2,21 @@ import { z } from 'zod';
 import { InstantSchema, NonNegativeFiniteSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 /**
+ * `agenda` is the later spelling of `attention`: accepted now, sent only from the agenda removal release, because an
+ * older app's worker parses this enum and drops a kind it does not know.
+ *
  * `device-paired` is the one kind a payload about NO session may carry (see
  * `PushNotificationPayloadSchema`): every other kind narrates a session's own transition and is
  * meaningless without one.
  */
-export const PushNotificationKindSchema = z.enum(['attention', 'question', 'failed', 'completed', 'device-paired']);
+export const PushNotificationKindSchema = z.enum([
+  'attention',
+  'agenda',
+  'question',
+  'failed',
+  'completed',
+  'device-paired',
+]);
 export type PushNotificationKind = z.infer<typeof PushNotificationKindSchema>;
 
 /**

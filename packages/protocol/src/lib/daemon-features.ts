@@ -27,6 +27,12 @@
 export const DAEMON_FEATURES = {
   /** `idea` on a Pack clean-up request takes up to 4,000 characters (an older daemon refuses past 500). */
   packIdea4000: 'pack.idea.4000',
+  /**
+   * The agenda's wire names (docs/agenda.md § Compatibility): `/v1/sessions/:id/agenda`,
+   * `/v1/sessions/:id/agenda/replies`, `/v1/warden/agenda` and `SessionState.agenda`, beside the older
+   * `attention` spellings this daemon still answers.
+   */
+  agendaWire: 'agenda.wire.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

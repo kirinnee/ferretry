@@ -771,7 +771,7 @@ describe('the mounted daemon surface', () => {
     // total, which git merges without a conflict — exactly how a route goes missing with this test
     // green. Two additions here both have to rewrite the line that carries the terminating `;`.
     const operatorRoutes =
-      115 + // the session table and everything that is not the account model (six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
+      118 + // the session table and everything that is not the account model (three of them the agenda spellings of the attention routes, kept beside them for the legacy window; six of them the send ledger: its read, one send, a retry under the same id, a cancel, an Enter for one typed and not sent, and the hand-off document behind a pointer; one the Enter or erase for a person's own draft in the composer) (three socket-ticket counters gone: a device opens streams inside its session; the operator password's set and unlock routes gone: the passkey step-up replaced them)
       4 + // the credential sign-in family: start, then read, answer or cancel one flow
       5 + // the MCP sign-in family: its status read, start, finish, cancel and sign out (docs/mcp-oauth.md)
       3 + // every MCP server a ferret sees, for the machine and for one ferret, and checking one (docs/mcp-scopes.md)
@@ -819,7 +819,7 @@ describe('the mounted daemon surface', () => {
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
     // It gained the tunnel read too: whether a machine has a tunnel is not a secret (§15).
-    should(minima).deepEqual({ none: 7, authenticated: 10, operator: operatorRoutes, 'admin-token': 1 });
+    should(minima).deepEqual({ none: 7, authenticated: 11, operator: operatorRoutes, 'admin-token': 1 });
     should(
       routes.filter(route => route.privilegedOnly === true).map(route => `${route.method} ${route.path}`),
     ).deepEqual([
@@ -1035,6 +1035,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/attachments/:attachmentId',
       'POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
       'DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock',
+      'GET /v1/sessions/:sessionId/agenda',
+      'POST /v1/sessions/:sessionId/agenda',
+      'POST /v1/sessions/:sessionId/agenda/replies',
       'GET /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention',
       'POST /v1/sessions/:sessionId/attention/replies',
@@ -1137,6 +1140,7 @@ describe('the mounted daemon surface', () => {
       'GET /v1/warden/verdicts',
       'GET /v1/warden/report',
       'POST /v1/warden/run',
+      'GET /v1/warden/agenda',
       'GET /v1/warden/attention',
       'POST /v1/warden/investigate',
       'POST /v1/warden/leave',

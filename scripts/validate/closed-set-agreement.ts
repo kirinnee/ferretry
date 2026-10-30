@@ -606,10 +606,10 @@ const agreements: readonly Agreement[] = [
       'PushNotificationKindSchema = z.enum(',
       '@ferretry/protocol PushNotificationKindSchema',
     ),
-    // `notification-filter.ts` collapses these five kinds onto four Settings-screen switches
+    // `notification-filter.ts` collapses these kinds onto four Settings-screen switches
     // (`notificationCategoryFor`, a compiler-exhaustive switch — adding a kind with no case is a
     // build error), so the four-category UI no longer mirrors the kind set 1:1 and has no agreement
-    // entry of its own any more. This witness object is what still mirrors the full five.
+    // entry of its own any more. This witness object is what still mirrors the full set.
     replica: trueObject(
       'packages/pwa/src/lib/notification-filter.ts',
       'NOTIFICATION_KIND_FIELDS =',

@@ -166,6 +166,7 @@ import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
 import { ThemeCornerStrip, ThemeToggle } from './shell/theme-toggle.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
+import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { attentionTargetFromSearch } from './lib/attention-inbox.ts';
 import { inboxSourceFromSearch } from './lib/attention-inbox-list.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
@@ -2674,6 +2675,7 @@ export function AppShell() {
     <AttentionInboxContext.Provider value={attentionInbox}>
       <AllMachinesContext.Provider value={allMachines}>
         <NotificationControlsContext.Provider value={notificationControlsHost}>
+          <AgendaWireProbes machines={connectionSnapshot.connections} />
           <ThemeFollower />
           <MotionFollower />
           <ViewportOverlay />

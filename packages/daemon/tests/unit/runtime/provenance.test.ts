@@ -303,3 +303,25 @@ describe('the grant posture a `--check` reports', () => {
     should(reachableOffHost(config, none).reachable).be.false();
   });
 });
+
+describe('the agenda reply-window row', () => {
+  it('should show the resolved value under agenda and say it came from the file when the agenda block is written', () => {
+    // Arrange
+    const document = { agenda: { deadlineWarnHours: 6 } };
+
+    // Act
+    const rows = describeConfiguration({
+      document,
+      config: parseDaemonConfig(document),
+      overrides: {},
+      configFile: CONFIG_FILE,
+      stateHome: STATE_HOME,
+      stateHomeFromEnvironment: false,
+    });
+
+    // Assert
+    should(row(rows, 'agenda').origin).equal('config file');
+    should(row(rows, 'agenda').value).match(/"deadlineWarnHours":6/u);
+    should(row(rows, 'attention').value).equal(row(rows, 'agenda').value);
+  });
+});

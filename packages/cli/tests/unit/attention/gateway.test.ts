@@ -1,7 +1,13 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import type { z } from 'zod';
-import { attentionBoardPath, ProtocolAttentionGateway, repliesPath } from '../../../src/lib/attention/gateway';
+import {
+  agendaBoardPath,
+  agendaRepliesPath,
+  attentionBoardPath,
+  ProtocolAttentionGateway,
+  repliesPath,
+} from '../../../src/lib/attention/gateway';
 import type { AttentionApiClient } from '../../../src/lib/attention/ports';
 import { humanItem, SESSION, snapshot } from './fixtures';
 
@@ -23,6 +29,7 @@ function fakeClient(payload: unknown, calls: Call[] = []): AttentionApiClient {
 describe('attention routes', () => {
   it('should escape a session id that would otherwise break the route', () => {
     // Act + Assert
+    should(agendaBoardPath('a/b')).equal('/v1/sessions/a%2Fb/agenda');
     should(attentionBoardPath('a/b')).equal('/v1/sessions/a%2Fb/attention');
   });
 });
@@ -37,7 +44,7 @@ describe('protocol attention gateway', () => {
     const actual = await gateway.snapshot(SESSION);
 
     // Assert
-    should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/attention`);
+    should(calls[0]?.path).equal(`/v1/sessions/${SESSION}/agenda`);
     should(calls[0]?.init).deepEqual({ headers: { 'x-ferretry-client': 'cli' } });
     should(actual.items).have.length(1);
   });
@@ -113,8 +120,9 @@ describe('protocol attention gateway send-now', () => {
     await gateway.sendReplies('a/b');
 
     // Assert
+    should(agendaRepliesPath('a/b')).equal('/v1/sessions/a%2Fb/agenda/replies');
     should(repliesPath('a/b')).equal('/v1/sessions/a%2Fb/attention/replies');
-    should(calls[0]?.path).equal('/v1/sessions/a%2Fb/attention/replies');
+    should(calls[0]?.path).equal('/v1/sessions/a%2Fb/agenda/replies');
     should(calls[0]?.init?.method).equal('POST');
     should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({});
     should(calls[0]?.init?.headers).containDeep({ 'x-ferretry-session-id': 'ferret-1' });

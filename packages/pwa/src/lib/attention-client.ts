@@ -7,6 +7,7 @@ import {
   AttentionSnapshotSchema,
   FY_REQUEST_ID_HEADER,
 } from '@ferretry/protocol';
+import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { DaemonAttentionStore } from './attention-store.ts';
 import { ConcurrencyLimit } from './concurrency-limit.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
@@ -17,9 +18,6 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-m
 const assertScopeDaemon = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('attention scope must belong to the requested daemon');
 };
-
-export const attentionPath = (scope: DaemonSessionScope): string =>
-  `/v1/sessions/${encodeURIComponent(scope.sessionId)}/attention`;
 
 const responseError = async (response: Response): Promise<DaemonResponseError> => {
   const body = (await response.json().catch(() => ({}))) as { error?: unknown; code?: unknown };
@@ -55,8 +53,9 @@ export const fetchAttentionSnapshot = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionSnapshot> =>
-  parseSnapshot(scope, await fetchAttention(daemon, scope, attentionPath(scope), {}, fetcher));
+  parseSnapshot(scope, await fetchAttention(daemon, scope, sessionAgendaPath(scope.sessionId, wire), {}, fetcher));
 
 /**
  * Reads the mounted full snapshot route and derives its count for a badge
@@ -66,8 +65,9 @@ export const fetchAttentionCount = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionCountResponse> => {
-  const snapshot = await fetchAttentionSnapshot(daemon, scope, fetcher);
+  const snapshot = await fetchAttentionSnapshot(daemon, scope, fetcher, wire);
   return { sessionId: snapshot.sessionId, count: snapshot.count };
 };
 
@@ -77,12 +77,13 @@ export const applyAttentionAction = async (
   scope: DaemonSessionScope,
   action: AttentionActionRequest,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionSnapshot> => {
   const body = AttentionActionRequestSchema.parse(action);
   const value = await fetchAttention(
     daemon,
     scope,
-    attentionPath(scope),
+    sessionAgendaPath(scope.sessionId, wire),
     {
       method: 'POST',
       headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
@@ -98,13 +99,14 @@ export const sendAttentionReplies = async (
   daemon: DaemonConnection,
   scope: DaemonSessionScope,
   fetcher: DaemonFetch = browserFetch,
+  wire: AgendaWire = 'attention',
 ): Promise<AttentionSnapshot> =>
   parseSnapshot(
     scope,
     await fetchAttention(
       daemon,
       scope,
-      `${attentionPath(scope)}/replies`,
+      sessionAgendaRepliesPath(scope.sessionId, wire),
       {
         method: 'POST',
         headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
@@ -157,6 +159,8 @@ export class DaemonAttentionClient {
   constructor(
     readonly store: DaemonAttentionStore = new DaemonAttentionStore(),
     private readonly fetcher: DaemonFetch = browserFetch,
+    /** Which spelling each machine speaks; a machine nobody has read health for is spoken to the older way. */
+    readonly wires: AgendaWireDirectory = new AgendaWireDirectory(),
   ) {}
 
   hydrate(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
@@ -208,9 +212,12 @@ export class DaemonAttentionClient {
     if (this.store.status(scope) !== 'ready') this.store.beginLoad(scope);
     // Asked again once a slot is free, for the reason it is asked above: a read that waited behind others
     // may reach its turn after the machine was unpaired or re-paired, and then it sends nothing at all.
+    // The wire is read when the slot comes, so a health answer that arrived meanwhile picks the route.
     const promise = this.#readLimit(daemon.daemonId)
       .run(async () =>
-        this.#currentConnection(daemon, generation) ? await fetchAttentionSnapshot(daemon, scope, this.fetcher) : null,
+        this.#currentConnection(daemon, generation)
+          ? await fetchAttentionSnapshot(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
+          : null,
       )
       .then(snapshot => {
         if (snapshot !== null && this.#current(daemon, generation, key, revision)) {
@@ -242,7 +249,7 @@ export class DaemonAttentionClient {
     if (existing?.generation === generation) return existing.promise;
 
     const revision = this.#boardRevisions.get(key) ?? 0;
-    const promise = fetchAttentionCount(daemon, scope, this.fetcher)
+    const promise = fetchAttentionCount(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
       .then(count => {
         if (this.#current(daemon, generation, key, revision)) this.store.applyCount(scope, count);
       })
@@ -305,7 +312,9 @@ export class DaemonAttentionClient {
 
   /** Delivers the answers the daemon is holding for this ferret now. */
   sendReplies(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
-    return this.#mutate(daemon, scope, () => sendAttentionReplies(daemon, scope, this.fetcher));
+    return this.#mutate(daemon, scope, () =>
+      sendAttentionReplies(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId)),
+    );
   }
 
   #mutate(
@@ -318,7 +327,9 @@ export class DaemonAttentionClient {
     const key = daemonSessionKey(scope);
     const revision = this.#advanceBoardRevision(key);
     const promise = (
-      typeof action === 'function' ? action() : applyAttentionAction(daemon, scope, action, this.fetcher)
+      typeof action === 'function'
+        ? action()
+        : applyAttentionAction(daemon, scope, action, this.fetcher, this.wires.wireOf(daemon.daemonId))
     )
       .then(snapshot => {
         if (this.#current(daemon, generation, key, revision)) {

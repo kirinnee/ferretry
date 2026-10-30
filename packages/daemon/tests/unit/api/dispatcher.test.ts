@@ -1602,3 +1602,92 @@ describe('spending a single-use step-up', () => {
     should(served.status).equal(200);
   });
 });
+
+describe('ApiDispatcher legacy-use counting', () => {
+  const legacyRoute: ApiRoute = { ...echo('/v1/old/:id', 'operator'), legacy: true };
+  const admin = { authorization: 'Bearer admin-secret', 'x-ferretry-client': 'cli' } as const;
+
+  const counted = (recorder: { record(hit: { route: string; clientVersion?: string }): void }, ...routes: ApiRoute[]) =>
+    new ApiDispatcher(new ApiRouter(routes), credentials, NO_GOVERNED_ROUTES_GUARD, undefined, undefined, recorder);
+
+  it('should record a legacy hit by its declared pattern with the client version', async () => {
+    // Arrange
+    const hits: Array<{ route: string; clientVersion?: string }> = [];
+    const dispatcher = counted({ record: hit => hits.push(hit) }, legacyRoute);
+
+    // Act
+    const response = await dispatcher.dispatch(
+      request({ path: '/v1/old/abc', headers: { ...admin, 'x-fy-version': '4.108.0' }, loopback: true }),
+    );
+
+    // Assert
+    should(response.status).equal(200);
+    should(hits).deepEqual([{ route: 'GET /v1/old/:id', clientVersion: '4.108.0' }]);
+  });
+
+  it('should record a legacy hit without a version when the caller sent none', async () => {
+    // Arrange
+    const hits: Array<{ route: string; clientVersion?: string }> = [];
+    const dispatcher = counted({ record: hit => hits.push(hit) }, legacyRoute);
+
+    // Act
+    await dispatcher.dispatch(request({ path: '/v1/old/abc', headers: admin, loopback: true }));
+
+    // Assert
+    should(hits).deepEqual([{ route: 'GET /v1/old/:id' }]);
+  });
+
+  it('should not record a route that is not marked legacy', async () => {
+    // Arrange
+    const hits: unknown[] = [];
+    const dispatcher = counted({ record: hit => hits.push(hit) }, echo('/v1/new/:id', 'operator'));
+
+    // Act
+    await dispatcher.dispatch(request({ path: '/v1/new/abc', headers: admin, loopback: true }));
+
+    // Assert
+    should(hits).deepEqual([]);
+  });
+
+  it('should not record a hit that was refused, so a probe is not mistaken for a client', async () => {
+    // Arrange
+    const hits: unknown[] = [];
+    const dispatcher = counted({ record: hit => hits.push(hit) }, legacyRoute);
+
+    // Act
+    const response = await dispatcher.dispatch(request({ path: '/v1/old/abc', loopback: false }));
+
+    // Assert
+    should(response.status).equal(401);
+    should(hits).deepEqual([]);
+  });
+
+  it('should still serve the request when the counter throws', async () => {
+    // Arrange
+    const dispatcher = counted(
+      {
+        record: () => {
+          throw new Error('the counter broke');
+        },
+      },
+      legacyRoute,
+    );
+
+    // Act
+    const response = await dispatcher.dispatch(request({ path: '/v1/old/abc', headers: admin, loopback: true }));
+
+    // Assert
+    should(response.status).equal(200);
+  });
+
+  it('should serve a legacy route where no counter is wired', async () => {
+    // Arrange
+    const dispatcher = dispatcherFor(legacyRoute);
+
+    // Act
+    const response = await dispatcher.dispatch(request({ path: '/v1/old/abc', headers: admin, loopback: true }));
+
+    // Assert
+    should(response.status).equal(200);
+  });
+});

@@ -25,6 +25,7 @@ import {
 } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
+import { AgendaWireDirectory } from './agenda-wire.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
 import { browserCarrierDropEnvironment, CarrierDropLog } from './carrier-drops.ts';
@@ -385,6 +386,8 @@ export interface AppStore {
   readonly configChanges: DaemonConfigChangeStore;
   /** The one daemon/session-scoped Attention cache and mutation client. */
   readonly attention: DaemonAttentionClient;
+  /** Which spelling of the agenda wire each paired machine speaks, from the health the app reads. */
+  readonly agendaWire: AgendaWireDirectory;
   readonly usage: DaemonUsageStore;
   readonly pins: DaemonPinClient;
   readonly browserLogin: DaemonBrowserLoginStore;
@@ -778,7 +781,8 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   // Attention is not part of the generated FyApiClient yet, but it still takes
   // the SAME carrier as every generated call. A direct-only second client would
   // make the action modal fail on precisely the remote phone it is for.
-  const attention = new DaemonAttentionClient(undefined, sharedReads);
+  const agendaWire = new AgendaWireDirectory();
+  const attention = new DaemonAttentionClient(undefined, sharedReads, agendaWire);
   const usage = new DaemonUsageStore(daemonUsagePort(sharedReads));
   const pins = new DaemonPinClient(undefined, carried);
   const browserLogin = new DaemonBrowserLoginStore(daemon => ({
@@ -824,6 +828,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       projects,
       accountPicker,
       attention,
+      agendaWire,
       usage,
       pins,
       browserLogin,
@@ -938,6 +943,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     accountPicker,
     configChanges,
     attention,
+    agendaWire,
     usage,
     pins,
     browserLogin,

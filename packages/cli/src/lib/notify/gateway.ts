@@ -6,7 +6,8 @@ import {
   SessionAgendaModeSchema,
   sessionAgendaEnabled,
 } from '@ferretry/protocol';
-import { attentionBoardPath } from '../attention/gateway.ts';
+import { requestWithRouteFallback } from '../agenda-wire/route-fallback.ts';
+import { boardRoutes } from '../attention/gateway.ts';
 import { FY_CLIENT_HEADER, FY_CLIENT_NAME, FY_SESSION_ID_HEADER } from '../session/connection.ts';
 import type { INotifyGateway, NotifyApiClient } from './ports.ts';
 import { type NoticeRequest, NoticeRequestSchema } from './request.ts';
@@ -38,7 +39,7 @@ export class ProtocolNotifyGateway implements INotifyGateway {
 
   async raise(sessionId: string, request: NoticeRequest): Promise<void> {
     const body = NoticeRequestSchema.parse(request);
-    await this.client.request(attentionBoardPath(sessionId), AttentionSnapshotSchema, {
+    await requestWithRouteFallback(this.client, boardRoutes(sessionId), AttentionSnapshotSchema, {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...this.#headers },
       body: JSON.stringify(body),

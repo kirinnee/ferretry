@@ -93,6 +93,7 @@ import { type InstalledDaemonBinary, resolveDaemonBinaryPath } from '../src/lib/
 import { registerDaemonCommands } from '../src/lib/daemon/commands';
 import { DaemonController } from '../src/lib/daemon/controller';
 import { type DaemonLayout, resolveDaemonLayout, resolveDaemonStateHome } from '../src/lib/daemon/layout';
+import { legacyWireReport } from '../src/lib/daemon/legacy-wire';
 import type { IServiceDefinitionSupervisor } from '../src/lib/daemon/ports';
 import { registerProfileCommands } from '../src/lib/daemon/profile/commands';
 import { ProfileController, ProtocolProfileGateway } from '../src/lib/daemon/profile/controller';
@@ -241,7 +242,8 @@ export function createProgram(): Command {
  * launchability rule a session start uses. Delegating keeps `fy doctor` from growing a second,
  * inevitably divergent definition of a working host.
  */
-function registerDoctorCommand(program: Command, environment: Record<string, string | undefined>): void {
+function registerDoctorCommand(program: Command, world: CliWorld): void {
+  const environment = world.environment;
   program
     .command('doctor')
     .description('check host dependencies and what each missing program prevents')
@@ -254,6 +256,8 @@ function registerDoctorCommand(program: Command, environment: Record<string, str
         );
       const child = Bun.spawn([executable, '--check'], { stdin: 'ignore', stdout: 'inherit', stderr: 'inherit' });
       process.exitCode = await child.exited;
+      const stateHome = resolveDaemonStateHome(world.homeDirectory, environment.FY_HOME, PRODUCT_NAME);
+      for (const line of await legacyWireReport(localDaemonHealth(world, stateHome), Date.now())) world.io.report(line);
     });
 }
 
@@ -1321,7 +1325,7 @@ export function registerDomain(program: Command, world: CliWorld): void {
     ownSessionId,
     restartPatience: patience,
   };
-  registerDoctorCommand(program, environment);
+  registerDoctorCommand(program, world);
   for (const register of DOMAIN_REGISTRARS) register(wiring);
 }
 // ─── END DOMAIN WIRING ────────────────────────────────────────────────────────────────────────

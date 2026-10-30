@@ -2385,6 +2385,10 @@ const HARNESS_WARDEN_CLIENT: WardenClientFactory = async connection => {
 const HARNESS_WARDEN_OVERVIEW_CLIENT = async () => ({
   wardenStatus: async () => WARDEN_FIXTURE_STATUS,
   wardenAttention: async () => WARDEN_FIXTURE_ATTENTION,
+  // The harness has no app store, so no machine reads as speaking the agenda wire.
+  request: async () => {
+    throw new Error('the harness answers the older route only');
+  },
   wardenRun: async () => ({ sweptAt: new Date(WARDEN_FIXTURE_NOW).toISOString(), anomalies: [] }),
   wardenInvestigate: async ({ sessionId }: { readonly sessionId: string }) => ({
     sessionId,

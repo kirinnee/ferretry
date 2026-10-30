@@ -1,4 +1,10 @@
-import { daemonFeatureList, type HealthView, type IoPressureView, type SessionWorkerPool } from '@ferretry/protocol';
+import {
+  daemonFeatureList,
+  type HealthView,
+  type IoPressureView,
+  type LegacyWireUse,
+  type SessionWorkerPool,
+} from '@ferretry/protocol';
 import type { ApiResponse } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute } from '../../api/route.ts';
@@ -66,6 +72,8 @@ export interface DaemonHealthSubsystem {
   readonly sessionWorkers?: () => SessionWorkerPool;
   /** The disk's pressure now; absent where the host reports none. */
   readonly io?: () => IoPressureView | undefined;
+  /** The older wire names clients still used, by route; absent where this daemon counts none. */
+  readonly legacyWire?: () => readonly LegacyWireUse[];
 }
 
 /**
@@ -84,6 +92,7 @@ function view(
   scratch: ScratchReclamation,
   sessionWorkers: SessionWorkerPool | undefined,
   io: IoPressureView | undefined,
+  legacyWire: readonly LegacyWireUse[] | undefined,
 ): HealthView {
   return {
     ok: report.ok,
@@ -112,6 +121,7 @@ function view(
       : { bootstrapErrorMessages: [...report.bootstrapErrorMessages] }),
     ...(sessionWorkers === undefined ? {} : { sessionWorkers }),
     ...(io === undefined ? {} : { io }),
+    ...(legacyWire === undefined ? {} : { legacyWire: [...legacyWire] }),
     // Stated by the protocol, which owns the names, so the app and this daemon cannot disagree about one.
     features: [...daemonFeatureList()],
     time: report.time,
@@ -120,7 +130,14 @@ function view(
 
 async function health(subsystem: DaemonHealthSubsystem): Promise<ApiResponse> {
   return jsonResponse(
-    view(await subsystem.report(), subsystem.pid, subsystem.scratch, subsystem.sessionWorkers?.(), subsystem.io?.()),
+    view(
+      await subsystem.report(),
+      subsystem.pid,
+      subsystem.scratch,
+      subsystem.sessionWorkers?.(),
+      subsystem.io?.(),
+      subsystem.legacyWire?.(),
+    ),
   );
 }
 

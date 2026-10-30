@@ -1061,6 +1061,10 @@ export type WardenLeaveView = z.infer<typeof WardenLeaveViewSchema>;
 
 // ── Who needs you ───────────────────────────────────────────────────────────────────────────────
 
+/** Where the fleet's "who needs you" view is read (`agenda.wire.1`). */
+export const WARDEN_AGENDA_PATH = '/v1/warden/agenda';
+
+/** The older spelling, still served until the agenda removal release (docs/agenda.md § Compatibility). */
 export const WARDEN_ATTENTION_PATH = '/v1/warden/attention';
 
 export const WardenJudgementStateSchema = z.enum(['judged', 'pending', 'queued', 'failed', 'none']);

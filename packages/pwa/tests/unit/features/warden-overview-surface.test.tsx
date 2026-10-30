@@ -1,13 +1,22 @@
 import { describe, expect, it } from 'bun:test';
-import type { WardenLeaveRequest, WardenStatusView } from '@ferretry/protocol';
+import {
+  DAEMON_FEATURES,
+  type WardenLeaveRequest,
+  type WardenStatusView,
+  WARDEN_AGENDA_PATH,
+} from '@ferretry/protocol';
 
 import {
   type WardenOverviewClient,
   WardenOverviewSurface,
   wardenSettingsHref,
 } from '../../../src/features/warden/warden-overview-surface.tsx';
-import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
+import { AgendaWireDirectory } from '../../../src/lib/agenda-wire.ts';
+import { daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
+import type { DaemonHealthRead } from '../../../src/lib/daemon-health.ts';
+import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
+import { healthOf } from '../../support/health.ts';
 import {
   attentionItem,
   wardenAnomaly,
@@ -39,6 +48,7 @@ const fake = (options: FakeOptions = {}) => {
     status: 0,
     runs: [] as (boolean | undefined)[],
     leaves: [] as WardenLeaveRequest[],
+    requests: [] as string[],
   };
   const client: WardenOverviewClient = {
     wardenStatus: async () => {
@@ -60,6 +70,15 @@ const fake = (options: FakeOptions = {}) => {
         })
       );
     },
+    request: (async (path: string, schema: { parse: (value: unknown) => unknown }) => {
+      calls.requests.push(path);
+      return schema.parse(
+        wardenAttention({
+          outcome: 'items',
+          items: [attentionItem({ sessionId: 'sess-new', source: 'warden-anomaly', anomalyKind: 'dead_monitor' })],
+        }),
+      );
+    }) as WardenOverviewClient['request'],
     wardenAttention: async () =>
       wardenAttention({
         outcome: 'items',
@@ -320,6 +339,64 @@ describe('WardenOverviewSurface', () => {
       expect(onA).toContain('only-a');
       expect(view.container.textContent).not.toContain('only-a');
       expect(view.container.textContent).toContain('no daemon client exists outside the app store');
+    } finally {
+      await view.unmount();
+    }
+  });
+});
+
+describe('WardenOverviewSurface agenda wire', () => {
+  const wires = (read: DaemonHealthRead) => {
+    const agendaWire = new AgendaWireDirectory();
+    agendaWire.note(daemonId('a'), read);
+    return { agendaWire } as unknown as AppStore;
+  };
+  const NEW: DaemonHealthRead = { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) };
+  const OLD: DaemonHealthRead = { kind: 'read', health: healthOf('4.84.0') };
+
+  it('should ask a daemon that speaks the agenda wire for the agenda route', async () => {
+    // Arrange
+    const { client, calls } = fake();
+    const view = await mount(
+      <StoreProvider store={wires(NEW)}>
+        <WardenOverviewSurface
+          connection={connection('a')}
+          createClient={async () => client}
+          now={() => NOW}
+          pollOptions={POLL}
+        />
+      </StoreProvider>,
+    );
+    try {
+      // Act
+      await settle();
+
+      // Assert
+      expect(calls.requests).toEqual([WARDEN_AGENDA_PATH]);
+    } finally {
+      await view.unmount();
+    }
+  });
+
+  it('should keep asking an older daemon, and a machine nobody read, the attention route', async () => {
+    // Arrange
+    const { client, calls } = fake();
+    const view = await mount(
+      <StoreProvider store={wires(OLD)}>
+        <WardenOverviewSurface
+          connection={connection('a')}
+          createClient={async () => client}
+          now={() => NOW}
+          pollOptions={POLL}
+        />
+      </StoreProvider>,
+    );
+    try {
+      // Act
+      await settle();
+
+      // Assert
+      expect(calls.requests).toEqual([]);
     } finally {
       await view.unmount();
     }

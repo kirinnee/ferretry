@@ -23,6 +23,7 @@ describe('configJsonSchema', () => {
     should(Object.keys(actual.properties).toSorted()).deepEqual([
       'advanced',
       'agendaMode',
+      'agendaNudge',
       'agentControl',
       'agentPermissions',
       'attentionNudge',
