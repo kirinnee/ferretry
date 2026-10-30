@@ -10,6 +10,8 @@ import {
   BROWSER_WAIT_SLICE_MS,
   type BrowserActionResult,
   type BrowserDialogInfo,
+  type BrowserDownloadNotice,
+  type BrowserElementTarget,
   type BrowserEmulation,
   type BrowserPageLifecycleRequest,
   type BrowserTargetFields,
@@ -22,9 +24,11 @@ import {
   type SurfaceKind,
   type SurfaceOpener,
 } from '@ferretry/protocol';
+import { AGENT_FILE_LIMITS, AgentFileError, type AgentFiles, extensionOf, sizeWords } from '../agent-files/index.ts';
 import type { AuditSink } from '../audit/types.ts';
 import {
   BrowserSessionError,
+  type BrowserFileAction,
   type BrowserLifecycleOutcome,
   type BrowserPageAction,
   type BrowserSubsystem,
@@ -81,8 +85,10 @@ export interface AgentToolPorts {
   readonly terminals: Pick<TerminalSubsystem, 'list' | 'create' | 'write' | 'text' | 'foreground' | 'close'>;
   readonly browser: Pick<
     BrowserSubsystem,
-    'status' | 'openPage' | 'actOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+    'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
   >;
+  /** What the file tools may reach: the session's own folder and its attachments, nothing else. */
+  readonly files: Pick<AgentFiles, 'prepareUpload' | 'save'>;
   readonly control: SurfaceControl;
   readonly policy: AgentControlPolicy;
   readonly audit: AuditSink;
@@ -105,13 +111,19 @@ const DRIVING_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set([
   'browser.navigate',
   'browser.click',
   'browser.type',
+  'browser.upload',
 ]);
 
-/** A page's text as it came back, before redaction: what was read, where the page is now, and what its dialog says. */
+/** The tools that move a file between a page and the session's folder: they need the `files` switch as well as `browser`. */
+const FILE_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set(['browser.upload', 'browser.download', 'browser.pdf']);
+
+/** A page's text as it came back, before redaction: what was read, where the page is now, what its dialog says, and the names its downloads suggested. */
 interface PageReading {
   readonly url?: string;
   readonly text?: string;
   readonly dialog?: string;
+  /** File names a page suggested for its downloads. */
+  readonly names?: readonly string[];
 }
 
 /** What a call learned that the audit should keep, beside what the call itself said. */
@@ -166,6 +178,8 @@ export class AgentToolService {
     try {
       if (caller.kind === 'agent' && !(await this.ports.policy.allows(kindOf(call))))
         throw new AgentToolError('forbidden', controlRefusal(kindOf(call)));
+      if (caller.kind === 'agent' && FILE_TOOLS.has(call.tool) && !(await this.ports.policy.allows('files')))
+        throw new AgentToolError('forbidden', controlRefusal('files'));
       const result = await this.dispatch(caller, call, facts);
       await this.record(caller, call, facts, 'succeeded');
       return result;
@@ -334,6 +348,10 @@ export class AgentToolService {
       case 'browser.network':
       case 'browser.emulate':
         return await this.lifecycle(caller, call, surface, reference, facts);
+      case 'browser.upload':
+      case 'browser.download':
+      case 'browser.pdf':
+        return await this.files(caller, call, surface, reference, facts);
       default:
         return await this.browse(caller, call, surface, reference);
     }
@@ -496,13 +514,16 @@ export class AgentToolService {
       readonly screenshotFormat?: unknown;
     } = 'result' in answer ? answer.result : {};
     const dialog = pendingDialogOf(page);
+    const started = 'result' in answer ? (answer.result.downloads ?? []) : [];
     const read = await this.scrubbed({
       ...(page.url === undefined ? {} : { url: page.url }),
       ...(typeof page.text === 'string' ? { text: page.text } : {}),
       ...dialogOf(dialog),
+      ...(started.length === 0 ? {} : { names: started.map(notice => notice.name) }),
     });
     const at = read.url === undefined ? '' : ` (now at ${read.url})`;
-    const check = humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog);
+    const check =
+      humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog) + downloadsNote(started, read.names);
     if (read.text !== undefined && call.tool === 'browser.read') {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
@@ -521,14 +542,80 @@ export class AgentToolService {
     return { summary: `Done on ${reference}${at}.${check}` };
   }
 
+  /**
+   * The file tools. An upload hands the page files the file service has confined to the session's folder (or
+   * the session's own attachments); a download or a PDF is staged by the browser and SAVED by the file service,
+   * which alone decides where — under the session's folder, never over an existing file unless asked.
+   */
+  private async files(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'browser.upload' | 'browser.download' | 'browser.pdf' }>,
+    surface: ResolvedSurface,
+    reference: string,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    const { sessionId } = caller;
+    const guard = this.browserGuard(caller, surface);
+    if (call.tool === 'browser.upload') {
+      const prepared = await this.ports.files.prepareUpload(sessionId, call.files);
+      facts.detail = uploadFacts(prepared.files);
+      let answer: Awaited<ReturnType<BrowserSubsystem['filesOnPage']>>;
+      try {
+        answer = await this.ports.browser.filesOnPage(
+          sessionId,
+          surface.id,
+          {
+            action: 'upload',
+            target: elementTargetOf(call),
+            paths: prepared.files.map(file => file.path),
+            mode: call.mode ?? 'input',
+          },
+          guard,
+        );
+      } finally {
+        await prepared.release();
+      }
+      const started = answer.result.downloads ?? [];
+      const read = await this.scrubbed({
+        url: answer.result.url,
+        ...(started.length === 0 ? {} : { names: started.map(notice => notice.name) }),
+      });
+      const how = call.mode === 'drop' ? 'Dropped' : 'Gave';
+      return {
+        summary: `${how} ${plural(prepared.files.length, 'file')} (${sizeWords(prepared.files.reduce((sum, file) => sum + file.size, 0))}) ${call.mode === 'drop' ? 'onto' : 'to'} ${reference} (now at ${read.url ?? answer.result.url}).${humanCheckNote(answer, surface.id)}${downloadsNote(started, read.names)}`,
+      };
+    }
+    const action: BrowserFileAction =
+      call.tool === 'browser.download'
+        ? { action: 'download', ...(call.id === undefined ? {} : { downloadId: call.id }) }
+        : { action: 'pdf' };
+    const answer = await this.ports.browser.filesOnPage(sessionId, surface.id, action, guard);
+    if (answer.staged === undefined) throw new AgentToolError('upstream_failed', 'The browser staged no file to save.');
+    const read = await this.scrubbed({ names: [answer.staged.name] });
+    const name = read.names?.[0] ?? answer.staged.name;
+    const saved = await this.ports.files.save(
+      sessionId,
+      { ...answer.staged, name },
+      { saveAs: call.saveAs, overwrite: call.overwrite === true, maxBytes: AGENT_FILE_LIMITS.downloadBytes },
+    );
+    const extension = extensionOf(saved.name);
+    facts.detail = { size: saved.size, ...(extension === undefined ? {} : { extension }) };
+    const what = call.tool === 'browser.pdf' ? 'Printed' : 'Saved';
+    return {
+      summary: `${what} ${reference} as ${saved.saved} (${sizeWords(saved.size)}) in this session's folder.${humanCheckNote(answer, surface.id)}`,
+    };
+  }
+
   /** A page's reading with every vault secret masked, under one vault open — or refused, never served raw. */
   private async scrubbed(reading: PageReading): Promise<PageReading> {
-    if (reading.url === undefined && reading.text === undefined && reading.dialog === undefined) return reading;
+    // A reading carries only the parts a page returned, so an empty one has nothing to mask.
+    if (Object.keys(reading).length === 0) return reading;
     try {
       return await this.ports.redactor.batch(scrub => ({
         ...(reading.url === undefined ? {} : { url: scrub.text(reading.url) }),
         ...(reading.text === undefined ? {} : { text: scrub.text(reading.text) }),
         ...(reading.dialog === undefined ? {} : { dialog: scrub.text(reading.dialog) }),
+        ...(reading.names === undefined ? {} : { names: reading.names.map(name => scrub.text(name)) }),
       }));
     } catch {
       throw new AgentToolError(
@@ -899,6 +986,12 @@ function callFacts(call: AgentToolCall): AuditDetail {
           .map(([key]) => key)
           .join(','),
       };
+    case 'browser.upload':
+      return { ...targetFacts(call), files: call.files.length, mode: call.mode ?? 'input' };
+    case 'browser.download':
+      return call.id === undefined ? {} : { download: call.id };
+    case 'browser.pdf':
+      return {};
     default:
       return {};
   }
@@ -983,6 +1076,38 @@ function pageActionOf(
   }
 }
 
+/** The element an upload aims at, as the browser takes it. */
+function elementTargetOf(fields: BrowserTargetFields): BrowserElementTarget {
+  return fields.ref !== undefined
+    ? { kind: 'ref', ref: fields.ref }
+    : { kind: 'selector', selector: fields.selector as string };
+}
+
+/** The most uploaded files an audit record names; it holds twelve facts in all. */
+const AUDIT_NAMED_FILES = 4;
+
+/** The audit facts of an upload's files: their total size, and the first few by leaf name and size — never a path or content. */
+function uploadFacts(files: readonly { readonly name: string; readonly size: number }[]): AuditDetail {
+  const named: AuditDetail = {};
+  files.slice(0, AUDIT_NAMED_FILES).forEach((file, index) => {
+    named[`file${String(index + 1)}`] = `${file.name.slice(0, AGENT_FILE_LIMITS.nameChars)} (${String(file.size)} B)`;
+  });
+  return { bytes: files.reduce((sum, file) => sum + file.size, 0), ...named };
+}
+
+/** What an agent is told when a page has started downloads: each one's name and size, and how to keep it. */
+function downloadsNote(downloads: readonly BrowserDownloadNotice[], names: readonly string[] | undefined): string {
+  return downloads
+    .map((notice, index) => {
+      const name = names?.[index] ?? notice.name;
+      if (notice.state === 'failed') return ` A download (${name}) failed.`;
+      if (notice.state === 'downloading')
+        return ` A download started: ${name} is still arriving — save it with browser_download (id ${notice.id}) in a moment.`;
+      return ` A download started: ${name}, ${sizeWords(notice.size ?? 0)} — save it with browser_download (id ${notice.id}).`;
+    })
+    .join('');
+}
+
 /** Told after a snapshot: the refs in it are what every act accepts. */
 const REFS_NOTE = ' Pass a ref from it (ref: "e12") to any browser tool instead of a selector.';
 /** Told when a snapshot was longer than one answer holds. */
@@ -1009,6 +1134,7 @@ function shown(surface: SurfaceKind, rows: readonly (AgentSurface | undefined)[]
 function translate(error: unknown): AgentToolError | undefined {
   if (error instanceof AgentToolError) return error;
   if (error instanceof TerminalMountError) return new AgentToolError(error.code, error.message);
+  if (error instanceof AgentFileError) return new AgentToolError(error.code, error.message);
   if (error instanceof BrowserTransportError) return fromWorker(error);
   if (!(error instanceof BrowserSessionError)) return undefined;
   if (error.code === 'launch_failed') return new AgentToolError('unavailable', browserUnavailable(error.message));

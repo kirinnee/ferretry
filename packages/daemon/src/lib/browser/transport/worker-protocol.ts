@@ -7,6 +7,9 @@ import {
   BrowserDialogTypeSchema,
   type BrowserPageLifecycleReply,
   BrowserChallengeProviderSchema,
+  BROWSER_MAX_DOWNLOAD_NOTICES,
+  type BrowserDownloadNotice,
+  BrowserDownloadNoticeSchema,
   type BrowserErrorCode,
   type BrowserPageActionSnapshot,
   BrowserPageActionSnapshotSchema,
@@ -169,7 +172,47 @@ export function normalizeWorkerActionSnapshot(value: unknown): WorkerSnapshotRes
   if (actedPageId === undefined) return { ok: false, message: 'browser worker returned no acted page' };
   const snapshot = normalizeWorkerSnapshot(value);
   if (!snapshot.ok) return snapshot;
-  return parsed(BrowserPageActionSnapshotSchema, { ...snapshot.value, actedPageId });
+  const downloads = normalizeWorkerDownloads(asRecord(value)['downloads']);
+  return parsed(BrowserPageActionSnapshotSchema, {
+    ...snapshot.value,
+    actedPageId,
+    ...(downloads.length === 0 ? {} : { downloads }),
+  });
+}
+
+/** Downloads the worker says this act started or finished: each one parsed, the unusable ones dropped. */
+export function normalizeWorkerDownloads(value: unknown): readonly BrowserDownloadNotice[] {
+  if (!Array.isArray(value)) return [];
+  const notices: BrowserDownloadNotice[] = [];
+  for (const item of value.slice(0, BROWSER_MAX_DOWNLOAD_NOTICES)) {
+    const record = asRecord(item);
+    const notice = BrowserDownloadNoticeSchema.safeParse({
+      id: record['id'],
+      name: bounded(record['name'], 255) || 'download',
+      state: record['state'],
+      ...(typeof record['size'] === 'number' && Number.isSafeInteger(record['size']) && record['size'] >= 0
+        ? { size: record['size'] }
+        : {}),
+    });
+    if (notice.success) notices.push(notice.data);
+  }
+  return notices;
+}
+
+/** A file the worker staged for the daemon to save: an absolute path in the worker's own directory, a name and a size. */
+export interface WorkerStagedFile {
+  readonly path: string;
+  readonly name: string;
+  readonly size: number;
+}
+
+export function normalizeWorkerStaged(value: unknown): WorkerStagedFile | undefined {
+  const staged = asRecord(asRecord(value)['staged']);
+  const path = staged['path'];
+  const size = staged['size'];
+  if (typeof path !== 'string' || path === '' || path.length > 4_096 || typeof size !== 'number') return undefined;
+  if (!Number.isSafeInteger(size) || size < 0) return undefined;
+  return { path, name: bounded(staged['name'], 255) || 'download', size };
 }
 
 /** Text results are bounded here so no page content can grow without limit inside the daemon. */

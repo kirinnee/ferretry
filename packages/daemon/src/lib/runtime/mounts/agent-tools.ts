@@ -7,6 +7,7 @@ import {
 } from '@ferretry/protocol';
 import { isHumanAdminActor } from '../../api/actor.ts';
 import { parseBody } from '../../api/body.ts';
+import { grantRefusalCode } from '../../api/capability.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, headerValue } from '../../api/http.ts';
 import { jsonResponse } from '../../api/responses.ts';
@@ -146,11 +147,36 @@ async function agentCall(
   return jsonResponse(await service.call(caller, call).catch(answered));
 }
 
+/** The tools that move a file between a page and the session's folder. */
+const FILE_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set(['browser.upload', 'browser.download', 'browser.pdf']);
+
+/**
+ * A file tool reaches the host's disk, so the route's `browser` grant is not enough: the caller needs the
+ * `filesystem` grant on `use` as well. A paired phone granted the browser must not read or write the host's
+ * folders through it. A caller the grants cannot be read for is refused rather than waved through.
+ */
+function refusedFileTool(context: RouteContext): ApiError | undefined {
+  const governance = context.governance;
+  if (governance === undefined)
+    return new ApiError(403, 'this daemon cannot say whether this caller may use files', 'forbidden');
+  const decision = governance.decide({ capability: 'filesystem', axis: 'use' });
+  if (decision.allowed) return undefined;
+  return new ApiError(
+    403,
+    'this device may not move files between the browser and this machine; that needs the filesystem permission',
+    grantRefusalCode(decision.refusal),
+  );
+}
+
 async function personCall(service: AgentToolService, kind: SurfaceKind, context: RouteContext): Promise<ApiResponse> {
   const caller = personOf(context);
   const call = await parseBody(context.request, AgentToolCallSchema);
   if (kindOf(call) !== kind)
     throw new ApiError(400, `this route takes ${kind} tools; ${call.tool} is not one`, 'bad_request');
+  if (FILE_TOOLS.has(call.tool)) {
+    const refusal = refusedFileTool(context);
+    if (refusal !== undefined) throw refusal;
+  }
   return jsonResponse(await service.call(caller, call).catch(answered));
 }
 

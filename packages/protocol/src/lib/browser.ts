@@ -307,8 +307,25 @@ export const BrowserPageSnapshotSchema = z
   });
 export type BrowserPageSnapshot = z.infer<typeof BrowserPageSnapshotSchema>;
 
+/** The most downloads one act reports. */
+export const BROWSER_MAX_DOWNLOAD_NOTICES = 20;
+
+/**
+ * A download the page started, as an act reports it: the id `browser.download` takes, the name the page
+ * suggested (a leaf name, never a path), and its size once it has finished arriving.
+ */
+export const BrowserDownloadNoticeSchema = z.strictObject({
+  id: z.string().regex(/^dl-[a-z0-9]{1,16}$/u),
+  name: z.string().min(1).max(255),
+  size: z.number().int().min(0).optional(),
+  state: z.enum(['ready', 'downloading', 'failed']),
+});
+export type BrowserDownloadNotice = z.infer<typeof BrowserDownloadNoticeSchema>;
+
 export const BrowserPageActionSnapshotSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH),
+  /** Downloads the page started since the last act reported any. Absent when there are none. */
+  downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),
 });
 export type BrowserPageActionSnapshot = z.infer<typeof BrowserPageActionSnapshotSchema>;
 
@@ -443,6 +460,7 @@ export type BrowserAction = z.infer<typeof BrowserActionSchema>;
 
 const BrowserResultPageSchema = BrowserPageSnapshotSchema.safeExtend({
   actedPageId: z.string().min(1).max(BROWSER_MAX_PAGE_ID_LENGTH).optional(),
+  downloads: z.array(BrowserDownloadNoticeSchema).max(BROWSER_MAX_DOWNLOAD_NOTICES).optional(),
 });
 
 /** Actual action responses carry status plus an optional shape-specific result. */

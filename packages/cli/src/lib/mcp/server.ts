@@ -177,6 +177,7 @@ const ON_ONLY_FLAGS: ReadonlySet<string> = new Set([
   'boxes',
   'fullPage',
   'reset',
+  'overwrite',
 ]);
 /** The same flags one level down, inside an emulation's `media` and `network`. */
 const ON_ONLY_NESTED: Readonly<Record<string, readonly string[]>> = { media: ['print'], network: ['offline'] };

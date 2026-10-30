@@ -1,6 +1,7 @@
 export * from './automation-contracts.ts';
 export * from './challenge.ts';
 export * from './contracts.ts';
+export * from './download-stage.ts';
 export * from './envelope.ts';
 export * from './frame-governor.ts';
 export * from './input.ts';

@@ -79,6 +79,15 @@ export const AGENT_TOOL_MAX_URL_CHARS = 2_048;
 export const AGENT_TOOL_MAX_SELECTOR_CHARS = 1_024;
 /** The longest folder a terminal may be opened in. */
 export const AGENT_TOOL_MAX_FOLDER_CHARS = 1_024;
+/** The longest path an agent may name a file by (one to upload, or where to save one). */
+export const AGENT_TOOL_MAX_PATH_CHARS = 1_024;
+/** The most files one `browser.upload` carries. */
+export const AGENT_TOOL_MAX_UPLOAD_FILES = 20;
+/** The largest one file an upload may carry, and the most one call may carry in all. */
+export const AGENT_TOOL_MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024;
+export const AGENT_TOOL_MAX_UPLOAD_CALL_BYTES = 200 * 1024 * 1024;
+/** The largest file a download or a PDF may be saved as. */
+export const AGENT_TOOL_MAX_DOWNLOAD_BYTES = 500 * 1024 * 1024;
 /** The longest sentence an agent may leave the owner when it hands a surface over. */
 export const AGENT_TOOL_MAX_ASK_CHARS = 280;
 
@@ -165,6 +174,24 @@ const SelectorSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_SELECTOR_CHAR
 
 /** The element a browser act names: a ref from a page snapshot (`e12`), or a selector. */
 const ElementTargetShape = { selector: SelectorSchema.optional(), ref: BrowserRefSchema.optional() };
+
+/**
+ * A file an upload names: a path inside the session's own folder (relative to it, or absolute under it), or
+ * an attachment the owner put in this session's chat (`att_` and its sha-256).
+ */
+export const ATTACHMENT_ID_PATTERN = /^att_[a-f0-9]{64}$/u;
+export const AgentUploadFileSchema = z.union([
+  z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS),
+  z.strictObject({ attachment: z.string().regex(ATTACHMENT_ID_PATTERN, 'an attachment id is att_ and 64 hex digits') }),
+]);
+export type AgentUploadFile = z.infer<typeof AgentUploadFileSchema>;
+
+/** How `browser.upload` hands files over: into a file input (or a file chooser), or dropped on a dropzone. */
+export const BrowserUploadModeSchema = z.enum(['input', 'drop']);
+export type BrowserUploadMode = z.infer<typeof BrowserUploadModeSchema>;
+
+/** Where a saved file goes: a path inside the session's own folder. */
+const SaveAsSchema = z.string().trim().min(1).max(AGENT_TOOL_MAX_PATH_CHARS);
 
 /** Where in history `browser.navigate` goes instead of to a URL. */
 export const BrowserHistoryStepSchema = z.enum(['back', 'forward', 'reload']);
@@ -377,6 +404,36 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
       call => Object.entries(call).some(([key, value]) => key !== 'tool' && key !== 'name' && value !== undefined),
       'name something to emulate, or reset: true',
     ),
+  z
+    .strictObject({
+      tool: z.literal('browser.upload'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      files: z.array(AgentUploadFileSchema).min(1).max(AGENT_TOOL_MAX_UPLOAD_FILES),
+      /** `input` (the default) fills a file input or answers the file chooser a click opens; `drop` drops them on a dropzone. */
+      mode: BrowserUploadModeSchema.optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: true })),
+  z.strictObject({
+    tool: z.literal('browser.download'),
+    name: SurfaceKeySchema,
+    /** Which download, by the id an act reported; the page's latest when absent. */
+    id: z
+      .string()
+      .regex(/^dl-[a-z0-9]{1,16}$/u, 'a download id looks like dl-3')
+      .optional(),
+    /** Where to save it, inside the session's own folder; `downloads/<its name>` when absent. */
+    saveAs: SaveAsSchema.optional(),
+    /** Replace a file already there; without it an existing file is never touched. */
+    overwrite: z.literal(true).optional(),
+  }),
+  z.strictObject({
+    tool: z.literal('browser.pdf'),
+    name: SurfaceKeySchema,
+    /** Where to save it, inside the session's own folder; `downloads/<page title>.pdf` when absent. */
+    saveAs: SaveAsSchema.optional(),
+    overwrite: z.literal(true).optional(),
+  }),
   z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
   z.strictObject({
     tool: z.literal('browser.ask_owner'),
@@ -434,6 +491,9 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.console',
   'browser.network',
   'browser.emulate',
+  'browser.upload',
+  'browser.download',
+  'browser.pdf',
   'browser.close',
   'browser.ask_owner',
 ];

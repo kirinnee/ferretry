@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
+  type ActableCdp,
   type ActableLocator,
   type ActablePage,
   BROWSER_MAX_FIND_LINES,
@@ -9,10 +10,13 @@ import {
   browserTargetParam,
   clickOn,
   findSnapshotLines,
+  PDF_NEEDS_HEADLESS,
+  printPdf,
   readPage,
   shootPage,
   staleRefMessage,
   typeInto,
+  uploadFiles,
 } from '../../../../src/lib/index.ts';
 
 const SNAPSHOT = [
@@ -34,6 +38,12 @@ class FakePage implements ActablePage {
   failMouse = false;
   text = 'Welcome back';
   snapshot = SNAPSHOT;
+  /** Whether the element is a file input. */
+  fileInput = false;
+  /** The element's box; `null` is an element with nothing to see. */
+  box: { x: number; y: number; width: number; height: number } | null = { x: 100, y: 200, width: 60, height: 40 };
+  /** Whether a click opens a file dialog. */
+  opensChooser = true;
 
   locator(selector: string): ActableLocator {
     const page = this;
@@ -68,6 +78,14 @@ class FakePage implements ActablePage {
         page.calls.push(`screenshot ${selector} ${options.type}`);
         return new Uint8Array([1, 2, 3]);
       },
+      setInputFiles: async files => {
+        page.calls.push(`setInputFiles ${selector} ${JSON.stringify(files)}`);
+      },
+      evaluate: async () => page.fileInput,
+      scrollIntoViewIfNeeded: async () => {
+        page.calls.push(`scrollIntoView ${selector}`);
+      },
+      boundingBox: async () => page.box,
     };
     return locator;
   }
@@ -80,6 +98,16 @@ class FakePage implements ActablePage {
   async screenshot(options: Parameters<ActablePage['screenshot']>[0]): Promise<Uint8Array> {
     this.calls.push(`page.screenshot ${options.type} fullPage=${String(options.fullPage)}`);
     return new Uint8Array([4, 5, 6]);
+  }
+
+  async waitForEvent(event: 'filechooser'): Promise<{ setFiles(files: string[]): Promise<void> }> {
+    this.calls.push(`waitForEvent ${event}`);
+    if (!this.opensChooser) throw new Error('Timeout 30000ms exceeded waiting for event "filechooser"');
+    return {
+      setFiles: async files => {
+        this.calls.push(`chooser.setFiles ${JSON.stringify(files)}`);
+      },
+    };
   }
 
   readonly mouse = {
@@ -338,5 +366,125 @@ describe('browser page acts — the worker’s own check of a target', () => {
     should(browserElementParam(undefined)).be.undefined();
     should(() => browserElementParam({ kind: 'point', x: 1, y: 1 })).throw(/not a point/u);
     should(browserElementParam({ kind: 'ref', ref: 'e1' })).deepEqual({ kind: 'ref', ref: 'e1' });
+  });
+});
+
+class FakeCdp implements ActableCdp {
+  readonly sent: { readonly method: string; readonly params: Readonly<Record<string, unknown>> }[] = [];
+  failWith: Error | undefined;
+  async send(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown> {
+    this.sent.push({ method, params });
+    if (this.failWith !== undefined) throw this.failWith;
+    return { data: 'JVBERi0=' };
+  }
+}
+
+describe('browser page acts — upload', () => {
+  it('should set the files straight onto a file input', async () => {
+    // Arrange
+    const page = new FakePage();
+    page.fileInput = true;
+
+    // Act
+    await uploadFiles(page, new FakeCdp(), { kind: 'selector', selector: '#file' }, ['/a/one.txt', '/a/two.txt']);
+
+    // Assert
+    should(page.calls).deepEqual(['setInputFiles #file ["/a/one.txt","/a/two.txt"]']);
+  });
+
+  it('should click anything else while awaiting the file dialog, and answer the dialog', async () => {
+    // Arrange
+    const page = new FakePage();
+
+    // Act
+    await uploadFiles(page, new FakeCdp(), { kind: 'ref', ref: 'e2' }, ['/a/one.txt']);
+
+    // Assert
+    should(page.calls).deepEqual([
+      'waitForEvent filechooser',
+      'click aria-ref=e2 {"timeout":30000}',
+      'chooser.setFiles ["/a/one.txt"]',
+    ]);
+  });
+
+  it('should refuse in the dialog’s own words when the click opened none', async () => {
+    const page = new FakePage();
+    page.opensChooser = false;
+
+    const error = await rejection(uploadFiles(page, new FakeCdp(), { kind: 'selector', selector: 'button' }, ['/a']));
+
+    should(error.message).containEql('filechooser');
+  });
+
+  it('should drop on the centre of the element: enter, over, then drop, each carrying the files', async () => {
+    // Arrange
+    const page = new FakePage();
+    const cdp = new FakeCdp();
+
+    // Act
+    await uploadFiles(page, cdp, { kind: 'selector', selector: '.zone' }, ['/a/one.txt'], 'drop');
+
+    // Assert
+    should(page.calls).deepEqual(['scrollIntoView .zone']);
+    should(cdp.sent.map(entry => [entry.method, entry.params.type, entry.params.x, entry.params.y])).deepEqual([
+      ['Input.dispatchDragEvent', 'dragEnter', 130, 220],
+      ['Input.dispatchDragEvent', 'dragOver', 130, 220],
+      ['Input.dispatchDragEvent', 'drop', 130, 220],
+    ]);
+    should(cdp.sent[2]?.params.data).deepEqual({ items: [], files: ['/a/one.txt'], dragOperationsMask: 1 });
+  });
+
+  it('should refuse to drop on an element with no visible area', async () => {
+    const page = new FakePage();
+    page.box = null;
+
+    const error = await rejection(
+      uploadFiles(page, new FakeCdp(), { kind: 'selector', selector: '.zone' }, ['/a'], 'drop'),
+    );
+
+    should(error.message).containEql('no visible area');
+  });
+
+  it('should refuse an upload of nothing, and a stale ref before touching the page', async () => {
+    const page = new FakePage();
+    page.refs.delete('e2');
+
+    const none = await rejection(uploadFiles(page, new FakeCdp(), { kind: 'selector', selector: '#f' }, []));
+    const stale = await rejection(uploadFiles(page, new FakeCdp(), { kind: 'ref', ref: 'e2' }, ['/a']));
+
+    should(none.message).containEql('nothing to upload');
+    should(stale.message).equal(staleRefMessage('e2'));
+    should(page.calls).deepEqual([]);
+  });
+});
+
+describe('browser page acts — pdf', () => {
+  it('should print with backgrounds and hand back the base64 body', async () => {
+    const cdp = new FakeCdp();
+
+    const body = await printPdf(cdp);
+
+    should(body).equal('JVBERi0=');
+    should(cdp.sent).deepEqual([
+      { method: 'Page.printToPDF', params: { printBackground: true, transferMode: 'ReturnAsBase64' } },
+    ]);
+  });
+
+  it('should turn a window-mode browser’s "not implemented" into the one-sentence refusal', async () => {
+    const cdp = new FakeCdp();
+    cdp.failWith = new Error('PrintToPDF is not implemented');
+
+    const error = await rejection(printPdf(cdp));
+
+    should(error.message).equal(PDF_NEEDS_HEADLESS);
+  });
+
+  it('should let any other failure through as it is, and refuse an empty print', async () => {
+    const cdp = new FakeCdp();
+    cdp.failWith = new Error('the target closed');
+    should((await rejection(printPdf(cdp))).message).equal('the target closed');
+    cdp.failWith = undefined;
+    cdp.send = async () => ({ data: '' });
+    should((await rejection(printPdf(cdp))).message).containEql('printed nothing');
   });
 });

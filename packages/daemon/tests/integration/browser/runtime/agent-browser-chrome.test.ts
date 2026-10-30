@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserScreencastFrame } from '@ferretry/protocol';
 import should from 'should';
 import { BrowserProfileStore } from '../../../../src/adapters/browser/control/index.ts';
+import { NodeAgentFilesystem } from '../../../../src/adapters/agent-files/index.ts';
 import { NodeSessionBrowserLauncher } from '../../../../src/adapters/browser/runtime/index.ts';
 import {
+  AgentFiles,
   type AgentToolCaller,
   AgentToolError,
   AgentToolService,
@@ -56,6 +58,7 @@ async function cookieSeenBy(sessionId: string, page: string): Promise<string> {
 beforeAll(async () => {
   if (chrome === null || node === null) throw new Error('this test needs a real Chrome and Node on PATH');
   root = await mkdtemp(join(tmpdir(), 'ferretry-agent-browser-'));
+  await mkdir(join(root, 'work'), { recursive: true });
   site = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
@@ -67,6 +70,33 @@ beforeAll(async () => {
             'content-type': 'text/html',
             ...(url.pathname === '/set' ? { 'set-cookie': `who=${url.searchParams.get('v') ?? ''}; Path=/` } : {}),
           },
+        });
+      if (url.pathname === '/upload')
+        return new Response(
+          '<html><body><input id="f" type="file" multiple>' +
+            '<button id="pick" onclick="document.getElementById(\'hidden\').click()">Choose</button>' +
+            '<input id="hidden" type="file" style="display:none">' +
+            '<div id="zone" style="width:200px;height:100px;background:#ccc">drop here</div><p id="r">none</p>' +
+            '<script>' +
+            "const show=(files)=>{document.getElementById('r').textContent=[...files].map(f=>f.name+':'+f.size).join(',')};" +
+            "document.getElementById('f').onchange=e=>show(e.target.files);" +
+            "document.getElementById('hidden').onchange=e=>show(e.target.files);" +
+            "const z=document.getElementById('zone');" +
+            "z.addEventListener('dragover',e=>e.preventDefault());" +
+            "z.addEventListener('drop',e=>{e.preventDefault();show(e.dataTransfer.files)});" +
+            '</script></body></html>',
+          { headers: { 'content-type': 'text/html' } },
+        );
+      if (url.pathname === '/downloads')
+        return new Response(
+          '<html><body><a id="dl" href="/data.csv" download>Export</a><h1>Report</h1></body></html>',
+          {
+            headers: { 'content-type': 'text/html' },
+          },
+        );
+      if (url.pathname === '/data.csv')
+        return new Response('a,b\n1,2\n', {
+          headers: { 'content-type': 'text/csv', 'content-disposition': 'attachment; filename="data.csv"' },
         });
       if (url.pathname === '/form')
         return new Response(
@@ -91,11 +121,18 @@ beforeAll(async () => {
   base = `http://127.0.0.1:${String(site.port)}`;
   browser = new BrowserSessionService(
     { get: async id => (sessions.has(id) ? {} : undefined) },
-    new NodeSessionBrowserLauncher(new BrowserProfileStore(root), { kind: 'source', entry: WORKER }, node, {
-      FY_CHROME_BIN: chrome,
-      PATH: process.env.PATH,
-      HOME: process.env.HOME,
-    }),
+    new NodeSessionBrowserLauncher(
+      new BrowserProfileStore(root),
+      { kind: 'source', entry: WORKER },
+      node,
+      {
+        FY_CHROME_BIN: chrome,
+        PATH: process.env.PATH,
+        HOME: process.env.HOME,
+      },
+      undefined,
+      { stageDirectory: join(root, 'stage') },
+    ),
     () => Date.now(),
   );
   tools = new AgentToolService({
@@ -103,6 +140,15 @@ beforeAll(async () => {
     browser,
     control: new SurfaceControl({ publish: async () => undefined, history: async () => [] }, { now: () => Date.now() }),
     policy: { allows: async () => true },
+    files: new AgentFiles({
+      fs: new NodeAgentFilesystem(),
+      folderOf: async () => join(root, 'work'),
+      readAttachment: async () => {
+        throw new Error('this test has no attachments');
+      },
+      uploadDirectory: join(root, 'upload'),
+      token: () => crypto.randomUUID().replaceAll('-', ''),
+    }),
     audit: { record: async () => undefined },
     redactor: NO_REDACTION,
     clock: { now: () => Date.now() },
@@ -312,5 +358,86 @@ describe('the machine agent browser, in a real Chrome', () => {
     should(emulated.summary).containEql('viewport 390x844');
     should(reset.summary).not.be.empty();
     await call({ tool: 'browser.close', name: 'life' });
+  }, 90_000);
+
+  it('should hand a page files through an input, a file dialog and a dropzone, and refuse a path outside the folder', async () => {
+    // Arrange
+    const work = join(root, 'work');
+    await writeFile(join(work, 'hello.txt'), 'hello');
+    await writeFile(join(root, 'outside.txt'), 'secret');
+    await symlink(join(root, 'outside.txt'), join(work, 'escape.txt'));
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'up', url: `${base}/upload` });
+    const shown = async () =>
+      (await tools.call(agent('s1'), { tool: 'browser.read', name: 'up', selector: '#r' })).output;
+    const refused = async (files: string[]) =>
+      await tools.call(agent('s1'), { tool: 'browser.upload', name: 'up', selector: '#f', files }).then(
+        () => undefined,
+        (error: unknown) => error as AgentToolError,
+      );
+
+    // Act
+    await tools.call(agent('s1'), { tool: 'browser.upload', name: 'up', selector: '#f', files: ['hello.txt'] });
+    const viaInput = await shown();
+    await tools.call(agent('s1'), { tool: 'browser.upload', name: 'up', selector: '#pick', files: ['hello.txt'] });
+    const viaDialog = await shown();
+    await tools.call(agent('s1'), { tool: 'browser.read', name: 'up', selector: '#zone' });
+    await tools.call(agent('s1'), {
+      tool: 'browser.upload',
+      name: 'up',
+      selector: '#zone',
+      files: ['hello.txt'],
+      mode: 'drop',
+    });
+    const viaDrop = await shown();
+    const parent = await refused(['../outside.txt']);
+    const link = await refused(['escape.txt']);
+
+    // Assert
+    should(viaInput).equal('hello.txt:5');
+    should(viaDialog).equal('hello.txt:5');
+    should(viaDrop).equal('hello.txt:5');
+    should(parent).be.instanceOf(AgentToolError);
+    should(parent?.code).equal('forbidden');
+    should(link?.code).equal('forbidden');
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'up' });
+  }, 90_000);
+
+  it('should report a download an act started, then save it under the folder once and never over a file', async () => {
+    // Arrange
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'dl', url: `${base}/downloads` });
+
+    // Act
+    const clicked = await tools.call(agent('s1'), { tool: 'browser.click', name: 'dl', selector: '#dl' });
+    const saved = await tools.call(agent('s1'), { tool: 'browser.download', name: 'dl' });
+    const again = await tools.call(agent('s1'), { tool: 'browser.download', name: 'dl' }).then(
+      () => undefined,
+      (error: unknown) => error as AgentToolError,
+    );
+    const replaced = await tools.call(agent('s1'), { tool: 'browser.download', name: 'dl', overwrite: true });
+    const target = join(root, 'work', 'downloads', 'data.csv');
+    const info = await stat(target);
+
+    // Assert
+    should(clicked.summary).containEql('A download started: data.csv');
+    should(saved.summary).containEql('downloads/data.csv');
+    should(await readFile(target, 'utf8')).equal('a,b\n1,2\n');
+    should(info.mode & 0o111).equal(0);
+    should(again?.code).equal('conflict');
+    should(replaced.summary).containEql('downloads/data.csv');
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'dl' });
+  }, 90_000);
+
+  it('should print a page to a PDF in the folder', async () => {
+    // Arrange
+    await tools.call(agent('s1'), { tool: 'browser.open', name: 'print', url: `${base}/downloads` });
+
+    // Act
+    const printed = await tools.call(agent('s1'), { tool: 'browser.pdf', name: 'print', saveAs: 'out/page.pdf' });
+    const bytes = await readFile(join(root, 'work', 'out', 'page.pdf'));
+
+    // Assert
+    should(printed.summary).containEql('out/page.pdf');
+    should(bytes.subarray(0, 4).toString('latin1')).equal('%PDF');
+    await tools.call(agent('s1'), { tool: 'browser.close', name: 'print' });
   }, 90_000);
 });

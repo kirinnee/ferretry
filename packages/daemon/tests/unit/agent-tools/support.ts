@@ -1,6 +1,8 @@
 import type {
+  AgentUploadFile,
   BrowserActionResult,
   BrowserDialogInfo,
+  BrowserDownloadNotice,
   BrowserPageLifecycleRequest,
   BrowserPageSnapshot,
   BrowserPageSummary,
@@ -9,6 +11,8 @@ import type {
 } from '@ferretry/protocol';
 import type { AgentControlKind, AgentControlPolicy } from '../../../src/lib/fleet/agent-control.ts';
 import {
+  type AgentFiles,
+  AgentFileError,
   type AgentIdentity,
   type AgentIdentityResolver,
   AgentToolService,
@@ -16,6 +20,8 @@ import {
   type AuditSink,
   type BrowserActGuard,
   type BrowserLifecycleOutcome,
+  type BrowserFileAction,
+  type BrowserFileResult,
   type BrowserOpenOptions,
   type BrowserPageAction,
   BrowserSessionError,
@@ -117,7 +123,7 @@ type FakePage = BrowserPageSummary & { readonly sessionId: string };
  */
 class FakeBrowserPages implements Pick<
   BrowserSubsystem,
-  'status' | 'openPage' | 'actOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+  'status' | 'openPage' | 'actOnPage' | 'filesOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
 > {
   /** Every lifecycle request, exactly as the agent-tools service built it. */
   readonly lifecycles: BrowserPageLifecycleRequest[] = [];
@@ -133,6 +139,16 @@ class FakeBrowserPages implements Pick<
   readonly acts: string[] = [];
   /** Every action, exactly as the agent-tools service built it. */
   readonly actions: BrowserPageAction[] = [];
+  /** Every file action, exactly as the agent-tools service built it. */
+  readonly fileActions: BrowserFileAction[] = [];
+  /** Downloads every act reports the page to have started. */
+  downloads: readonly BrowserDownloadNotice[] | undefined;
+  /** What a download or a PDF stages, when a case wants something other than the defaults. */
+  staged: { readonly path: string; readonly name: string; readonly size: number } = {
+    path: '/stage/dl-1',
+    name: 'report.csv',
+    size: 2048,
+  };
   /** What the next read answers, when a case wants something other than the defaults. */
   readText: string | undefined;
   /** Where every act reports the page to be, when a case wants an address other than the page's own. */
@@ -197,6 +213,7 @@ class FakeBrowserPages implements Pick<
     const snapshot = {
       ...this.snapshot(sessionId),
       ...(this.actedUrl === undefined ? {} : { url: this.actedUrl }),
+      ...(this.downloads === undefined ? {} : { downloads: [...this.downloads] }),
       actedPageId: page.id,
       ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
     };
@@ -261,6 +278,28 @@ class FakeBrowserPages implements Pick<
     return { ...page, name, ...(openedBy === undefined ? {} : { openedBy }) };
   }
 
+  async filesOnPage(
+    sessionId: string,
+    key: string,
+    action: BrowserFileAction,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserFileResult> {
+    this.fail();
+    await guard?.();
+    const page = this.page(sessionId, key);
+    this.active.set(sessionId, page.id);
+    this.acts.push(`${sessionId}:${page.id}:${action.action}`);
+    this.fileActions.push(action);
+    const status = (await this.status(sessionId)) as Extract<BrowserStatus, { readonly state: 'running' }>;
+    const result = {
+      ...this.snapshot(sessionId),
+      ...(this.actedUrl === undefined ? {} : { url: this.actedUrl }),
+      ...(this.downloads === undefined ? {} : { downloads: [...this.downloads] }),
+      actedPageId: page.id,
+    };
+    return action.action === 'upload' ? { status, result } : { status, result, staged: this.staged };
+  }
+
   async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {
     this.fail();
     await guard?.();
@@ -305,6 +344,58 @@ class FakeBrowserPages implements Pick<
   }
 }
 
+/** The file service, over canned answers: it records what it was asked and what it released. */
+class FakeAgentFiles implements Pick<AgentFiles, 'prepareUpload' | 'save'> {
+  readonly prepared: (readonly AgentUploadFile[])[] = [];
+  readonly saves: {
+    readonly name: string;
+    readonly saveAs: string | undefined;
+    readonly overwrite: boolean;
+    readonly maxBytes: number;
+  }[] = [];
+  released = 0;
+  /** Sizes the upload reports, by position; 1024 bytes each otherwise. */
+  sizes: readonly number[] = [];
+  /** An error the next call raises. */
+  failure: AgentFileError | undefined;
+
+  async prepareUpload(_sessionId: string, sources: readonly AgentUploadFile[]) {
+    this.fail();
+    this.prepared.push(sources);
+    return {
+      files: sources.map((source, index) => ({
+        path: `/upload/${String(index)}`,
+        name: typeof source === 'string' ? (source.split('/').at(-1) as string) : 'notes.pdf',
+        size: this.sizes[index] ?? 1024,
+      })),
+      release: async () => {
+        this.released += 1;
+      },
+    };
+  }
+
+  async save(
+    _sessionId: string,
+    staged: { readonly name: string; readonly size: number },
+    options: { readonly saveAs?: string | undefined; readonly overwrite?: boolean; readonly maxBytes: number },
+  ) {
+    this.fail();
+    this.saves.push({
+      name: staged.name,
+      saveAs: options.saveAs,
+      overwrite: options.overwrite === true,
+      maxBytes: options.maxBytes,
+    });
+    return { saved: options.saveAs ?? `downloads/${staged.name}`, name: staged.name, size: staged.size };
+  }
+
+  private fail(): void {
+    const failure = this.failure;
+    this.failure = undefined;
+    if (failure !== undefined) throw failure;
+  }
+}
+
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
 export function agentToolWorld() {
   const terminals = new FakeTerminals(['s1', 's2']);
@@ -317,11 +408,13 @@ export function agentToolWorld() {
   const control = new SurfaceControl(events, clock);
   const onSleep: (() => void | Promise<void>)[] = [];
   const redactor = new FakeRedactor();
+  const files = new FakeAgentFiles();
   const service = new AgentToolService({
     terminals,
     browser,
     control,
     policy,
+    files,
     audit,
     redactor,
     clock,
@@ -331,7 +424,21 @@ export function agentToolWorld() {
       await onSleep.shift()?.();
     },
   });
-  return { terminals, browser, audit, events, clock, policy, slept, onSleep, control, redactor, service, identities };
+  return {
+    terminals,
+    browser,
+    files,
+    audit,
+    events,
+    clock,
+    policy,
+    slept,
+    onSleep,
+    control,
+    redactor,
+    service,
+    identities,
+  };
 }
 
 export const agent = { kind: 'agent', sessionId: 's1', name: 'Hadi' } as const;
