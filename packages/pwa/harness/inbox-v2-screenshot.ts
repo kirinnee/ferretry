@@ -9,7 +9,10 @@
  * loopback port, drives it with a real pointer, and FAILS (after writing every picture) when: a page scrolls
  * sideways; a group head lacks its task or card; the open item is not the full item view; its who-and-what line or
  * its composer is missing or off screen; a hint line is drawn under the card (the owner removed it); or a held drag is not
- * stamped with what it would do. Nothing is sent: the drag is put back before it is let go.
+ * stamped with what it would do; a phone's quick-reply row does not say its arrows (the chat's row does); or a picture
+ * is not in the theme its name says — every page is opened with the browser's colour scheme set to match, because
+ * the desktop list's theme switch applies the reader's light/dark preference over the page's own. Nothing is sent:
+ * the drag is put back before it is let go.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -109,8 +112,24 @@ const open = async (context: { newPage: () => Promise<Page> }, theme: string, vi
   return page;
 };
 
+/** How light the page's background is, 0 (black) to 1 (white), as the browser paints it. */
+const backgroundLightness = (page: Page): Promise<number> =>
+  page.evaluate(() => {
+    const paint = (element: Element): string => getComputedStyle(element).backgroundColor;
+    const colour = [document.body, document.documentElement]
+      .map(paint)
+      .find(value => !/rgba\(0, 0, 0, 0\)|transparent/u.test(value));
+    const [r = 255, g = 255, b = 255] = (colour ?? 'rgb(255,255,255)').match(/\d+(\.\d+)?/gu)?.map(Number) ?? [];
+    return (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  });
+
 const shot = async (page: Page, name: string, form: Form, theme: string): Promise<void> => {
   await page.waitForTimeout(120);
+  const light = await backgroundLightness(page);
+  check(
+    theme.endsWith('-dark') ? light < 0.35 : light > 0.65,
+    `${name} ${form} ${theme}: the page is not ${theme.endsWith('-dark') ? 'dark' : 'light'} (lightness ${light.toFixed(2)})`,
+  );
   const path = join(outDir, `inbox-v2-${name}-${form}-${theme}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
@@ -118,13 +137,17 @@ const shot = async (page: Page, name: string, form: Form, theme: string): Promis
 
 /** Holds a drag from the item's head by `dy`, shoots it, then puts it back before letting go: nothing is sent. */
 const holdDrag = async (page: Page, dy: number, name: string, form: Form, theme: string, stamp: string) => {
-  const head = page.locator('.fy-attn-deck__top [data-agenda-title]').first();
+  // The deck's own handle: the who-and-what line (on a phone the view's head and row swipe on their own).
+  const head = page.locator('.fy-attn-deck__top [data-inbox-who-ferret]').first();
   const box = await head.boundingBox();
   if (box === null) return fail(`${form} ${theme}: the open item's head is not on screen`);
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
   await page.mouse.move(x, y);
   await page.mouse.down();
+  // A mouse has no implicit capture (a finger does): the first move stays on the card, past the slop, so the deck
+  // captures the pointer before the drag leaves the line it started on.
+  await page.mouse.move(x + 14, y);
   for (let step = 1; step <= 6; step += 1) await page.mouse.move(x, y + (dy * step) / 6);
   await page.waitForTimeout(80);
   const said = (await page.locator('[data-agenda-stamp]').textContent())?.trim() ?? '';
@@ -137,7 +160,11 @@ const holdDrag = async (page: Page, dy: number, name: string, form: Form, theme:
 
 for (const form of ['phone', 'desktop'] as const) {
   for (const theme of THEMES) {
-    const context = await browser.newContext({ ...(form === 'phone' ? PHONE : DESKTOP), ...LOCALE });
+    const context = await browser.newContext({
+      ...(form === 'phone' ? PHONE : DESKTOP),
+      ...LOCALE,
+      colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
+    });
 
     // The list: every group says who AND what — callsign, task, card, machine.
     const list = await open(context, theme, 'sections');
@@ -168,6 +195,16 @@ for (const form of ['phone', 'desktop'] as const) {
       composerBox !== null && composerBox.y + composerBox.height <= height + 1,
       `${form} ${theme}: the composer is off screen (${JSON.stringify(composerBox)})`,
     );
+    if (form === 'phone') {
+      const arrows = await item.locator('.fy-attn-deck__top [data-agenda-quick-replies] button svg').count();
+      check(
+        arrows >= 2,
+        `${form} ${theme}: the quick-reply row draws ${arrows} arrows, not one per answer as the chat does`,
+      );
+    }
+    const task = item.locator('.fy-attn-deck__top [data-inbox-who-main]');
+    const cut = await task.evaluate(element => element.scrollWidth > element.clientWidth + 1);
+    check(!cut, `${form} ${theme}: the task name is cut in the who-and-what line`);
     await shot(item, 'open', form, theme);
     await holdDrag(item, -150, 'swipe-up', form, theme, 'SQLite');
     await holdDrag(item, 150, 'swipe-down', form, theme, 'Skip');

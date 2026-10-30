@@ -1137,13 +1137,14 @@
 .fy-attn-deck__peek .fy-inbox-open {
   height: 100%;
 }
-/* Who and what: the ferret, its task, its card, its machine, then the way to its chat. A swipe can start here. */
+/* Who and what: the ferret and its task, then its card and machine, then the way to its chat. A swipe can start here.
+   The line WRAPS rather than cut the task: the card, the machine and "Open chat" move down a line first, and the
+   task is cut only when it alone is wider than the card. */
 .fy-inbox-who {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: baseline;
-  white-space: nowrap;
-  gap: 0 var(--gap-xs);
+  gap: 0 var(--gap-sm);
   border-bottom: var(--stroke) solid var(--divider-color, var(--border));
   background: var(--surface-2, var(--surface));
   padding: var(--gap-xs) var(--gap-md);
@@ -1151,29 +1152,34 @@
   font-size: var(--text-sm);
   touch-action: none;
 }
+.fy-inbox-who__main {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-inbox-who__meta {
+  white-space: nowrap;
+}
 .fy-inbox-who__ferret {
   color: var(--fg);
   font-weight: var(--weight-strong);
 }
-/* One line: the task gives way first, cut with an ellipsis; the ferret, card and machine stay whole. */
 .fy-inbox-who__task {
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
   color: var(--fg);
-  text-overflow: ellipsis;
 }
 .fy-inbox-who__card {
   font-family: var(--font-mono);
   font-size: var(--text-xs, var(--text-sm));
 }
 .fy-inbox-who__dot {
+  margin: 0 var(--gap-xs);
   color: var(--faint);
 }
 .fy-inbox-who__chat {
   display: inline-flex;
   flex-shrink: 0;
-  padding-left: var(--gap-sm);
   align-items: center;
   gap: 2px;
   margin-left: auto;
@@ -1219,6 +1225,22 @@
   max-height: 32vh;
   overflow-y: auto;
   overscroll-behavior: contain;
+}
+/* On a phone the open item is as wide as the screen, exactly as wide as it is in the chat, so its quick-reply row
+   gets the chat's room; the bar above and the composer below keep the page's gutter. */
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] {
+  padding-right: 0;
+  padding-left: 0;
+}
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__cardbar,
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-deck-foot {
+  padding-right: 16px;
+  padding-left: 16px;
+}
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-open {
+  border-right: 0;
+  border-left: 0;
+  border-radius: 0;
 }
 /* On a wide screen the open item and its composer share one comfortable measure. */
 @media (min-width: 768px) {

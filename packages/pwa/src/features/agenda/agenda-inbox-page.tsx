@@ -176,27 +176,32 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
   );
   return (
     <div className="fy-inbox-who" data-inbox-who="">
-      <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
-        {who.ferret}
+      {/* WHO and WHAT first, together: the task is what the owner reads, so it is never cut to make room. */}
+      <span className="fy-inbox-who__main" data-inbox-who-main="">
+        <span className="fy-inbox-who__ferret" data-inbox-who-ferret="">
+          {who.ferret}
+        </span>
+        {who.task === null ? null : (
+          <>
+            {dot}
+            <span className="fy-inbox-who__task" data-inbox-who-task="">
+              {who.task}
+            </span>
+          </>
+        )}
       </span>
-      {who.task === null ? null : (
-        <>
-          {dot}
-          <span className="fy-inbox-who__task" data-inbox-who-task="">
-            {who.task}
-          </span>
-        </>
-      )}
-      {who.card === null ? null : (
-        <>
-          {dot}
-          <span className="fy-inbox-who__card" data-inbox-who-card="">
-            {who.card}
-          </span>
-        </>
-      )}
-      {dot}
-      <span className="fy-inbox-who__machine">{who.machine}</span>
+      {/* WHERE: the card and the machine, which move to a second line before the task gives up a letter. */}
+      <span className="fy-inbox-who__meta">
+        {who.card === null ? null : (
+          <>
+            <span className="fy-inbox-who__card" data-inbox-who-card="">
+              {who.card}
+            </span>
+            {dot}
+          </>
+        )}
+        <span className="fy-inbox-who__machine">{who.machine}</span>
+      </span>
       <RouteLink
         className="fy-inbox-who__chat"
         data-inbox-open-chat=""
@@ -210,11 +215,16 @@ function InboxWhoLine({ card, onNavigate }: { readonly card: InboxCard; readonly
   );
 }
 
+/** Where a touch item view swipes on its own: its head (↓ skips) and its quick-reply row (← ↑ → ↓). */
+const VIEW_GESTURES = '[data-agenda-top], [data-agenda-quick-replies]';
+
 interface OpenItemPlace {
   readonly index: number;
   readonly total: number;
   readonly onPrevious?: (() => void) | undefined;
   readonly onClose: () => void;
+  /** Touch: the view's own row swipes and says its arrows, exactly as in the chat. */
+  readonly swipeable: boolean;
 }
 
 /** The open item: who and what, then the SAME full view the chat shows, answering into the undo window. */
@@ -239,8 +249,9 @@ const renderOpenItem = (
       onNext={skip}
       position={{ index: place.index, total: place.total }}
       renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
-      // The deck owns the gestures (the stamp, the fly-off, ↓ to skip); the view takes the keys, ↓ going to "next".
-      swipeable={false}
+      // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
+      // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
+      swipeable={place.swipeable}
       {...(now === undefined ? {} : { now })}
       {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
     />
@@ -968,6 +979,7 @@ export function AgendaInboxPage({
               cards={deck}
               onAct={(card, action) => answerWithDraft(host, card, action)}
               onSkip={card => setDeckAt(skipSelection(order, card.key))}
+              {...(phone ? { ownGesturesIn: VIEW_GESTURES } : {})}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
               renderCard={(card, act, skipCard) => {
                 const index = order.indexOf(card.key);
@@ -976,6 +988,7 @@ export function AgendaInboxPage({
                   index: Math.max(0, index),
                   total: order.length,
                   onClose: () => setDeckOpen(false),
+                  swipeable: phone,
                   ...(previous === undefined ? {} : { onPrevious: () => setDeckAt(previous) }),
                 });
               }}

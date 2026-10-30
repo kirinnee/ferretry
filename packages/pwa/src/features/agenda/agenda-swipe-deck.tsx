@@ -323,6 +323,11 @@ export interface AgendaSwipeDeckProps {
   readonly onAct: (card: InboxCard, action: InboxAction) => void;
   /** The reader moved on from the card on top without answering it (↓). Absent: the deck cannot skip. */
   readonly onSkip?: (card: InboxCard) => void;
+  /**
+   * Regions of the card that answer their own swipes (a touch item view's head and quick-reply row): a drag that
+   * starts there is theirs, never also the deck's, so one swipe can never answer or skip twice.
+   */
+  readonly ownGesturesIn?: string;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
 }
@@ -334,6 +339,7 @@ export function AgendaSwipeDeck({
   renderCard,
   onAct,
   onSkip,
+  ownGesturesIn,
   reducedMotion,
 }: AgendaSwipeDeckProps) {
   const reduced = useReducedMotion(reducedMotion);
@@ -406,7 +412,8 @@ export function AgendaSwipeDeck({
       top === undefined ||
       (event.pointerType === 'mouse' && event.button !== 0) ||
       startsInField(event.target) ||
-      !startsInHandle(event.target)
+      !startsInHandle(event.target) ||
+      (ownGesturesIn !== undefined && event.target instanceof Element && event.target.closest(ownGesturesIn) !== null)
     )
       return;
     gesture.current = {

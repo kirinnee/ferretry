@@ -80,6 +80,9 @@ const topView = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-view]'), 'the open item');
 const head = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-top]'), 'the item head');
+/** The deck's own handle on a phone: the who-and-what line (the view's head and row swipe on their own there). */
+const whoLine = (mounted: Mounted): HTMLElement =>
+  must(mounted.container.querySelector<HTMLElement>('.fy-attn-deck__top [data-inbox-who]'), 'the who line');
 const pending = (fake: FakeInbox): string[] => fake.deferred.getSnapshot().pending.map(entry => entry.action.label);
 const key = (target: Element, name: string) =>
   interact(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })));
@@ -116,16 +119,16 @@ describe('the open Inbox item', () => {
     await none.unmount();
   });
 
-  it('answers the PRIMARY reply on a swipe up from its head, into the undo window', async () => {
+  it('answers the recommended reply on a swipe up from its who-and-what line, into the undo window', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: rebase.key }));
-    await swipeFrom(head(mounted), 0, -200);
+    await swipeFrom(whoLine(mounted), 0, -200);
     expect(pending(fake)).toEqual(['Rebase now']);
     expect(fake.commits).toEqual([]);
     await mounted.unmount();
   });
 
-  it('skips on a swipe down — nothing is answered and the next item comes on top', async () => {
+  it('skips on a swipe down of the view’s own head — nothing is answered and the next item comes on top', async () => {
     const fake = fakeInbox();
     const mounted = await mount(page(fake, [shipIt, rebase], { initialOpen: shipIt.key }));
     const first = topView(mounted).getAttribute('data-agenda-view');
@@ -137,16 +140,24 @@ describe('the open Inbox item', () => {
 
   it('stamps what a drag would do while it is held: ↑ the primary, ↓ Skip', async () => {
     const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
-    await swipeFrom(head(mounted), 0, -200, false);
+    await swipeFrom(whoLine(mounted), 0, -200, false);
     const up = must(mounted.container.querySelector('[data-agenda-stamp]'), 'the stamp');
     expect(up.getAttribute('data-agenda-stamp')).toBe('up');
     expect(up.textContent).toBe('Ship');
-    await interact(() => head(mounted).dispatchEvent(pointer('pointercancel', 100, 100)));
-    await swipeFrom(head(mounted), 0, 200, false);
+    await interact(() => whoLine(mounted).dispatchEvent(pointer('pointercancel', 100, 100)));
+    await swipeFrom(whoLine(mounted), 0, 200, false);
     const down = must(mounted.container.querySelector('[data-agenda-stamp]'), 'the stamp');
     expect(down.getAttribute('data-agenda-stamp')).toBe('down');
     expect(down.textContent).toBe('Skip');
     expect(down.hasAttribute('data-committed')).toBe(true);
+    await mounted.unmount();
+  });
+
+  it('leaves a drag on a phone’s item head to the view: the deck neither stamps it nor moves the card', async () => {
+    const mounted = await mount(page(fakeInbox(), [shipIt], { initialOpen: shipIt.key }));
+    await swipeFrom(head(mounted), 0, -200, false);
+    expect(mounted.container.querySelector('[data-agenda-stamp]')).toBeNull();
+    expect(mounted.container.querySelector('.fy-attn-deck__top')?.hasAttribute('data-dragging')).toBe(false);
     await mounted.unmount();
   });
 
