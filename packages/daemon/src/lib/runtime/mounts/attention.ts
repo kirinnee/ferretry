@@ -90,7 +90,7 @@ export function attentionActor(actor: ApiActor | undefined): AttentionActor {
   if (isHumanAdminActor(actor) || (kind === 'device' && id !== undefined && id.trim() !== '')) {
     return { kind: 'human' };
   }
-  throw new ApiError(403, 'attention mutations require established human or session provenance', 'forbidden');
+  throw new ApiError(403, 'agenda mutations require established human or session provenance', 'forbidden');
 }
 
 /** Turns a domain refusal into its HTTP answer, keeping the domain's own code for the client. */

@@ -219,7 +219,7 @@ describe('Attention service', () => {
     const items = repository.ledgers.get(SESSION)?.entries.map(entry => entry.item);
     should(items?.map(item => item.title)).deepEqual([
       'A ferret needs a human',
-      'Needs your attention',
+      'Needs you',
       'Worded by the daemon',
       undefined,
     ]);

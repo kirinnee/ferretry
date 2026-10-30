@@ -2313,7 +2313,7 @@ export class WardenSweepService {
         // the board.
         this.ports.journal.record('fleet.warden_escalation_blind_node', {
           sessionId: session.config.id,
-          reason: 'this node’s attention board could not be read, so it was neither escalated nor cleared this sweep',
+          reason: 'this node’s agenda board could not be read, so it was neither escalated nor cleared this sweep',
         });
         continue;
       }

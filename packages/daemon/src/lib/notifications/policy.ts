@@ -136,7 +136,7 @@ function oneLine(text: string): string {
 /** Server-derived attribution for a board item the daemon chose to announce. */
 export function attentionNotificationAttribution(item: AttentionItem): string {
   if (item.raisedBy === 'agent') {
-    if (item.raisedBySession === null) throw new Error('agent-raised attention has no raising session');
+    if (item.raisedBySession === null) throw new Error('agent-raised agenda item has no raising session');
     return `attention:agent:${item.raisedBySession}`;
   }
   return `attention:${item.raisedBy}`;

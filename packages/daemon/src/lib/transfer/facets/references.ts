@@ -52,7 +52,7 @@ const SESSION_SCOPED: readonly {
   {
     kind: 'attention',
     token: '!attention',
-    why: "their proof is this session's Attention ledger, and a new session's is empty",
+    why: "their proof is this session's agenda ledger, and a new session's is empty",
   },
   {
     kind: 'terminal',

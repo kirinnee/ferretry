@@ -330,7 +330,7 @@ function applyToLedger(ledger: AttentionLedger, command: AttentionCommand): Atte
   // this check in the pure daemon-owned layer so a transport or future
   // in-process caller cannot bypass it by constructing a command directly.
   if (!agentConfinedTo(command.actor, ledger.sessionId)) {
-    return failure('forbidden', 'an agent may change attention only in its own session');
+    return failure('forbidden', 'an agent may change the agenda only in its own session');
   }
   switch (command.action) {
     case 'raise':
@@ -374,10 +374,10 @@ type UndeliveredCommand = Extract<AttentionCommand, { action: 'undelivered' }>;
 function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutation {
   const { actor, request } = command;
   if (request.source !== 'agent-raised' && actor.kind !== 'daemon') {
-    return failure('forbidden', `only the daemon may raise attention from source ${request.source}`);
+    return failure('forbidden', `only the daemon may raise an agenda item from source ${request.source}`);
   }
   if (request.sourceRef !== null && actor.kind !== 'daemon') {
-    return failure('forbidden', 'stable attention source references are reserved for trusted daemon producers');
+    return failure('forbidden', 'stable agenda source references are reserved for trusted daemon producers');
   }
   const noticeProblem = attentionNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
@@ -387,11 +387,11 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
   if (request.ask === undefined && request.kind !== 'info' && request.notice !== true && actor.kind !== 'daemon') {
     return failure(
       'invalid',
-      'human and agent attention must declare a structured ask, or be kind info (something to know, no ask)',
+      'human and agent agenda items must declare a structured ask, or be kind info (something to know, no ask)',
     );
   }
   if (request.sourceSeq !== undefined && request.source !== 'agent-raised') {
-    return failure('invalid', 'sourceSeq is valid only for agent-raised attention');
+    return failure('invalid', 'sourceSeq is valid only for agent-raised agenda items');
   }
 
   const active = ledger.entries.filter(isActiveAttention);
@@ -421,7 +421,7 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
     return failure('full', `this session already has ${MAX_AGENT_ATTENTION_PER_SESSION} unresolved agent requests`);
   }
   if (!Number.isSafeInteger(ledger.nextId) || ledger.nextId < 1 || ledger.nextId >= Number.MAX_SAFE_INTEGER) {
-    return failure('full', 'this session has exhausted its attention id sequence');
+    return failure('full', 'this session has exhausted its agenda id sequence');
   }
 
   const item = withRaisedBy(
@@ -522,14 +522,14 @@ function addressById(
   if (target === undefined) {
     return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
       ? unchanged(ledger)
-      : failure('not-found', `no unresolved attention item ${command.id} in this session`);
+      : failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   }
   if (command.action === 'dismiss') {
     if (!canDismissAttention(command.actor, target)) {
-      return failure('forbidden', 'an agent or daemon may dismiss only an attention item it raised');
+      return failure('forbidden', 'an agent or daemon may dismiss only an agenda item it raised');
     }
   } else if (!canAddressAttention(command.actor, target)) {
-    return failure('forbidden', 'an agent or daemon may resolve only an attention item it raised');
+    return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
   }
   if (command.action === 'answer') {
     if (!responseMatchesAsk(target.item.ask, command.response)) {
@@ -548,7 +548,7 @@ function addressById(
 
 function resolveSource(ledger: AttentionLedger, command: ResolveSourceCommand): AttentionMutation {
   if (command.actor.kind !== 'daemon') {
-    return failure('forbidden', 'only the daemon may reconcile a trusted attention source');
+    return failure('forbidden', 'only the daemon may reconcile a trusted agenda source');
   }
   const target = ledger.entries
     .filter(isActiveAttention)
@@ -806,9 +806,9 @@ function sameField(left: unknown, right: unknown): boolean {
  */
 function edit(ledger: AttentionLedger, command: EditCommand): AttentionMutation {
   const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (!canAddressAttention(command.actor, target)) {
-    return failure('forbidden', 'an agent or daemon may edit only an attention item it raised');
+    return failure('forbidden', 'an agent or daemon may edit only an agenda item it raised');
   }
   const patch = command.patch;
   const clears = (patch.clear ?? []).filter(field => target.item[field] !== undefined);
@@ -905,7 +905,7 @@ function withHistory(
 function needsInfo(ledger: AttentionLedger, command: NeedsInfoCommand): AttentionMutation {
   if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner may ask for more information');
   const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (target.item.raisedBy !== 'agent') {
     return failure('invalid', 'more information can be asked only of an item a ferret raised');
   }
@@ -933,7 +933,7 @@ function needsInfo(ledger: AttentionLedger, command: NeedsInfoCommand): Attentio
 function discuss(ledger: AttentionLedger, command: DiscussCommand): AttentionMutation {
   if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner may ask to discuss an item');
   const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (target.item.raisedBy !== 'agent') {
     return failure('invalid', 'only an item a ferret raised can be discussed: nobody else would hear it');
   }
@@ -962,7 +962,7 @@ function discuss(ledger: AttentionLedger, command: DiscussCommand): AttentionMut
 function reply(ledger: AttentionLedger, command: ReplyCommand): AttentionMutation {
   if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner replies to an item');
   const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (target.item.notice === true) return failure('invalid', 'a notice is read, not replied to');
   if (target.item.waitingOn !== undefined && target.item.waitingFor === 'discussion') return unchanged(ledger);
   const { undelivered: _undelivered, ...current } = target.item;
@@ -986,7 +986,7 @@ function surface(ledger: AttentionLedger, command: SurfaceCommand): AttentionMut
   if (target === undefined) {
     return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
       ? unchanged(ledger)
-      : failure('not-found', `no unresolved attention item ${command.id} in this session`);
+      : failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   }
   // The daemon's resurface timer (`system`) may surface any item; a warden or a source may surface only its own.
   const allowed =
@@ -1116,9 +1116,9 @@ function sameSteps(left: readonly string[] | undefined, right: readonly string[]
  */
 function progress(ledger: AttentionLedger, command: ProgressCommand): AttentionMutation {
   const target = ledger.entries.filter(isActiveAttention).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved attention item ${command.id} in this session`);
+  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
   if (!canAddressAttention(command.actor, target)) {
-    return failure('forbidden', 'an agent or daemon may tick steps only on an attention item it raised');
+    return failure('forbidden', 'an agent or daemon may tick steps only on an agenda item it raised');
   }
   const count = target.item.steps?.length ?? 0;
   if (command.step >= count) return failure('invalid', stepRange(command.id, count, command.step));

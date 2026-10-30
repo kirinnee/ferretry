@@ -124,7 +124,7 @@ describe('FileAttentionLedgerRepository', () => {
     const { home, repository } = await createRepository();
 
     // Act + Assert
-    should(() => repository.file('../session')).throw(/not a valid attention session id/u);
+    should(() => repository.file('../session')).throw(/not a valid agenda session id/u);
     await writeFile(join(home, 'sentinel'), 'safe');
     should(await Bun.file(join(home, 'sentinel')).text()).equal('safe');
   });

@@ -26,7 +26,7 @@ export class FileAttentionOutboxRepository implements AttentionOutboxRepository 
   ) {}
 
   file(sessionId: string): string {
-    if (!isAttentionSessionId(sessionId)) throw new Error(`not a valid attention session id: ${sessionId}`);
+    if (!isAttentionSessionId(sessionId)) throw new Error(`not a valid agenda session id: ${sessionId}`);
     return join(this.sessionDirectory(sessionId), 'attention-replies.json');
   }
 

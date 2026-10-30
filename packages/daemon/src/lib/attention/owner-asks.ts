@@ -101,7 +101,7 @@ const WHO_HEADER = /^(?:who|owner|by|actor|whose)$/u;
 const OWNER_CELL = /^(?:you|owner|human|for you)$/u;
 const NOTHING = /^(?:none|nothing|n\/a|nil|no action|no further action|no input)(?![\p{L}\p{N}])/iu;
 const ONLY_DASHES = /^[-–—\s]*$/u;
-const ATTENTION_ITEM_REFERENCE = /[!?]A\d+\b|attention item/iu;
+const ATTENTION_ITEM_REFERENCE = /[!?]A\d+\b|attention item|agenda item/iu;
 
 const NEXT_LINE_BREAK = /\r\n|\r|\n/u;
 

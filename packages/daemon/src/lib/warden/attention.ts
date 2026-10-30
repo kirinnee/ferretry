@@ -178,6 +178,6 @@ function degradedBanner(evidence: {
   if (evidence.reportsUnreadable)
     return { reason: 'The Warden’s reports could not be read — a notification for you may be missing.' };
   if (evidence.unreadableBoards)
-    return { reason: 'Some attention boards could not be read — a notification for you may be hidden.' };
+    return { reason: 'Some agenda boards could not be read — a notification for you may be hidden.' };
   return undefined;
 }
