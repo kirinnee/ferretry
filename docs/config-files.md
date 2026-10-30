@@ -397,7 +397,8 @@ each revive is a row under Recent actions and a `fleet.warden_revived` line.
 never says "out of memory"; an OOM kill shows as a signal (SIGKILL). Archived ferrets are not yet excluded by a
 flag of their own. A death refused by the breaker is not retried when it lapses.
 
-**Turn it off:** `revive: { enabled: false }` in `warden.yaml`. Other keys: `windowMinutes`, `cooldownMinutes`,
+**Turn it off:** `revive: { enabled: false }` in `warden.yaml`. It is also off whenever `mayActAlone.resume` is
+`false`: a revive is a resume of a dead agent, so a Warden that may not resume alone may not revive alone. Other keys: `windowMinutes`, `cooldownMinutes`,
 `waveSize`, `waveGapSeconds`, `breakerMinutes`.
 
 **When it sweeps.** Every `intervalMinutes` (1, 2, 5, 10 or 15; default 2), and also soon after a turn ends,
