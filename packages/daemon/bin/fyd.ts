@@ -428,7 +428,11 @@ import {
   readAskedQuestion,
   TmuxStructuredQuestionDriver,
 } from '../src/adapters/session/question/index.ts';
-import { FileSessionQueueStore } from '../src/adapters/session/queue/index.ts';
+import {
+  FileSessionQueueStore,
+  SendPathDeliveryView,
+  SendPathQueueTransport,
+} from '../src/adapters/session/queue/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -909,6 +913,7 @@ import {
   portCandidates,
   previousConversation,
   publishableDirectCarrier,
+  QueueDeliverer,
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
@@ -8911,6 +8916,28 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       const sendNotices = new AgentSendFailureNotifier(sends, sendRepository, CLIENT_NAME);
       /**
+       * The durable message queue (docs/message-delivery.md § The durable queue) and its one deliverer.
+       * The queue's lock is shared by everything that changes it — an edit must not land on a message the
+       * deliverer has just started typing — and is never the send path's, which the hand-over takes.
+       * The deliverer looks at a session when its state document changes, and once at boot for whatever a
+       * restart left open; a session with nothing open costs nothing.
+       */
+      const queueSerial = new KeyedSerialExecutor();
+      const queueStore = new FileSessionQueueStore(id => createSessionPaths(paths, id).directory);
+      const sessionQueue = new SessionQueueService({ store: queueStore, clock, serial: queueSerial });
+      const deliveryView = new SendPathDeliveryView(sendRepository, sendTerminal, launchGate);
+      const queueDeliverer = new QueueDeliverer({
+        store: queueStore,
+        serial: queueSerial,
+        clock,
+        scheduler: new TimerSendScheduler(),
+        view: async id => await deliveryView.view(id),
+        transport: new SendPathQueueTransport(sends, sendLedger),
+        sessions: () => storage.listSessions().map(session => session.id),
+      });
+      storage.subscribeStates(id => void queueDeliverer.changed(id).catch(() => undefined));
+      void queueDeliverer.arm().catch(() => undefined);
+      /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
        *
        * IT ENDS PARKS THROUGH THE SIGNAL SERVICE and wakes teammates through the SEND, rather than
@@ -10768,11 +10795,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           sessions,
           sends,
           sendLedger,
-          new SessionQueueService({
-            store: new FileSessionQueueStore(id => createSessionPaths(paths, id).directory),
-            clock,
-            serial: new KeyedSerialExecutor(),
-          }),
+          sessionQueue,
           sendTracker,
           async (sessionId, attachmentIds) => {
             // Each copy sits beside its stored original, under the file's own name, written once: the
