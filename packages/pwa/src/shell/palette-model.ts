@@ -32,9 +32,9 @@ import {
   destinationPaletteEntries,
 } from './palette-destinations.ts';
 import { MAX_SESSION_RESULTS, rankSessions, recentSessions, type SessionEntry } from './palette-ranking.ts';
+import { sessionTask } from './session-title.ts';
 import { isGuideBuilder } from './sessions-bar-model.ts';
 import { statusMark, TERMINAL_STATUSES } from './status-mark.tsx';
-import { parseTaskName } from './task-name.ts';
 
 /** A ranked session plus the two rendered facts the ranker does not own. */
 export interface PaletteSession extends SessionEntry {
@@ -189,7 +189,7 @@ export const paletteSessionEntries = (views: readonly SessionView[], origin?: Pa
       return {
         id: config.id,
         teammate,
-        task: parseTaskName(config.name).task,
+        task: sessionTask(config.name),
         label: (config.label ?? '').trim(),
         // The group name AND the path: readers hunt by either, and the ranker
         // finds the tightest window inside whichever one hit.
@@ -199,8 +199,8 @@ export const paletteSessionEntries = (views: readonly SessionView[], origin?: Pa
         finished: TERMINAL_STATUSES.has(state.status),
         view,
         folderName,
-        headline: parseTaskName(config.name).task || displayCallsign(teammate) || shortSessionId(config.id),
-        callsign: parseTaskName(config.name).task === '' ? '' : displayCallsign(teammate),
+        headline: sessionTask(config.name) || displayCallsign(teammate) || shortSessionId(config.id),
+        callsign: sessionTask(config.name) === '' ? '' : displayCallsign(teammate),
         shortId: shortSessionId(config.id),
         ...(origin === undefined ? {} : { daemonId: origin.daemonId, machine: origin.machine }),
       };

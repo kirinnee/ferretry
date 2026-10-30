@@ -127,11 +127,13 @@ describe('SessionsBar as a column', () => {
     expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
     // Only a session that is actually waiting on a question echoes it.
     expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-question]')).toBeNull();
-    // A session with no callsign and no name falls back to its id rather than an empty row.
-    expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe('nameless');
+    // A session with no callsign and no name is titled by its folder rather than an empty row.
+    expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe(
+      'home-manager',
+    );
   });
 
-  test('titles a row by its task and falls back to the ferret when there is no name', async () => {
+  test('titles a row by its task, else its folder, with the ferret second', async () => {
     const taskless = sessionView('taskless-1', {
       config: { teammate: 'pim', label: undefined as never, name: undefined as never, cwd: '/work/ferretry' },
     });
@@ -142,8 +144,8 @@ describe('SessionsBar as a column', () => {
     const row = (id: string) => must(view?.container.querySelector(`[data-sbar-session="${id}"]`) ?? null, id);
     expect(row('maryah-1').querySelector('.fy-sbar__name')?.textContent).toBe('Diene work');
     expect(row('maryah-1').querySelector('.fy-sbar__ferret-name')?.textContent).toBe('Maryah');
-    expect(row('taskless-1').querySelector('.fy-sbar__name')?.textContent).toBe('Pim');
-    expect(row('taskless-1').querySelector('[data-sbar-ferret]')).toBeNull();
+    expect(row('taskless-1').querySelector('.fy-sbar__name')?.textContent).toBe('ferretry');
+    expect(row('taskless-1').querySelector('.fy-sbar__ferret-name')?.textContent).toBe('Pim');
     expect(row('label-only').querySelector('.fy-sbar__name')?.textContent).toBe('Home Manager');
     expect(row('label-only').querySelector('[data-sbar-ferret]')).toBeNull();
     expect(row('maryah-1').getAttribute('title')).toContain('Diene work — Maryah');
@@ -579,7 +581,7 @@ describe('SessionsBar as a rail', () => {
     const dots = [...view.container.querySelectorAll<HTMLAnchorElement>('.fy-sbar__dot')];
     expect(dots.map(dot => dot.getAttribute('aria-label'))).toEqual([
       'Diene work — 1 open Inbox item',
-      'nameless',
+      'home-manager',
       'Fix the stuck sign-in',
     ]);
     expect(dots.find(dot => dot.getAttribute('aria-current') === 'page')?.getAttribute('aria-label')).toBe(
@@ -801,7 +803,7 @@ describe('SessionsBar across every machine', () => {
       'A question on kirin-box — 1 open Inbox item',
       'Diene work on work-mac — 1 open Inbox item',
       'Fix the stuck sign-in on work-mac',
-      'nameless on work-mac',
+      'home-manager on work-mac',
       'Same id, other machine on kirin-box',
     ]);
     expect(dots.map(dot => dot.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);

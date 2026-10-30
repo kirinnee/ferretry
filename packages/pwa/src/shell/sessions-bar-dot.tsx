@@ -9,9 +9,9 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { unreadCount } from '../lib/agenda-inbox.ts';
-import { displayCallsign } from '../lib/callsign.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { RouteLink } from './route-link.tsx';
+import { sessionLabel } from './session-title.ts';
 import { agendaWords, sessionRowPath, sessionsBarSubline } from './sessions-bar-model.ts';
 import { StatusMark } from './status-mark.tsx';
 import { UnreadBadge } from './unread-badge.tsx';
@@ -30,7 +30,7 @@ export function SessionsRailDot({
   readonly active: boolean;
   readonly onNavigate: (to: string) => void;
 }) {
-  const name = view.config.name || displayCallsign(view.config.teammate) || view.config.id;
+  const name = sessionLabel(view.config);
   const where = machine === undefined ? name : `${name} on ${machine}`;
   const unread = unreadCount(view);
   return (

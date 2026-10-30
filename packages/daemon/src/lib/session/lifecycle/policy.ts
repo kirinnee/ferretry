@@ -2,6 +2,7 @@ import { basename } from 'node:path';
 import { HARNESS_LABEL, HYPERMEDIA_ENV, QUESTION_ASKED_FILE_ENV } from '@ferretry/fleet';
 import {
   type BoardProjectId,
+  INTERACTIVE_PLACEHOLDER_NAME,
   assignedTaskDocument as protocolAssignedTaskDocument,
   type SessionLaunchInstructions,
   taskTitleFor,
@@ -207,14 +208,15 @@ export function createSessionRecord(
   const parent = request.parent === undefined ? undefined : parseSessionId(request.parent);
   // Titles are shown verbatim in listings, so control characters and length are normalized here
   // rather than left to whatever renders them.
-  const name =
-    formatSessionTitle(request.name ?? '') || formatSessionTitle(prompt ? taskTitleFor(prompt, 'Task') : 'interactive');
+  const named = formatSessionTitle(request.name ?? '');
+  const name = named || formatSessionTitle(prompt ? taskTitleFor(prompt, 'Task') : INTERACTIVE_PLACEHOLDER_NAME);
   // Parsed, not asserted: this is the same shape `read` parses back, so a config that violates its
   // own schema can never reach the store and strand the session there.
   const record = SessionLifecycleRecordSchema.parse({
     config: {
       id: context.id,
       name,
+      nameSource: named ? 'owner' : 'auto',
       agent,
       command,
       cwd: context.cwd,

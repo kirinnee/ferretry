@@ -145,9 +145,8 @@ describe('session dashboard model', () => {
   });
 
   it("drops only the daemon's placeholder title for an unnamed interactive session", () => {
-    expect(sessionTaskName({ mode: 'interactive', name: 'interactive' })).toBe('');
-    expect(sessionTaskName({ mode: 'interactive', name: ' Interactive ' })).toBe('');
-    expect(sessionTaskName({ mode: 'interactive', name: 'Review the plan' })).toBe('Review the plan');
-    expect(sessionTaskName({ mode: 'auto', name: 'interactive' })).toBe('interactive');
+    expect(sessionTaskName({ name: 'interactive' })).toBe('');
+    expect(sessionTaskName({ name: ' Interactive ' })).toBe('');
+    expect(sessionTaskName({ name: 'Review the plan' })).toBe('Review the plan');
   });
 });
