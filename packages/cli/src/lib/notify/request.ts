@@ -1,8 +1,4 @@
-import {
-  ATTENTION_PUSH_TITLE_LENGTH,
-  MAX_ATTENTION_BODY_LENGTH,
-  MAX_ATTENTION_SUBJECT_LENGTH,
-} from '@ferretry/protocol';
+import { AGENDA_PUSH_TITLE_LENGTH, MAX_AGENDA_BODY_LENGTH, MAX_AGENDA_SUBJECT_LENGTH } from '@ferretry/protocol';
 import { z } from 'zod';
 
 /** What `fy notify` posts to the board route. */
@@ -10,8 +6,8 @@ export const NoticeRequestSchema = z.strictObject({
   action: z.literal('add'),
   source: z.literal('agent-raised'),
   sourceRef: z.null(),
-  subject: z.string().min(1).max(MAX_ATTENTION_SUBJECT_LENGTH),
-  title: z.string().min(1).max(MAX_ATTENTION_SUBJECT_LENGTH),
+  subject: z.string().min(1).max(MAX_AGENDA_SUBJECT_LENGTH),
+  title: z.string().min(1).max(MAX_AGENDA_SUBJECT_LENGTH),
   kind: z.literal('info'),
   why: z.string().min(1),
   context: z.null(),
@@ -21,7 +17,7 @@ export const NoticeRequestSchema = z.strictObject({
   notice: z.literal(true),
   /** The ferret asked for the phone to buzz. */
   ping: z.literal(true).optional(),
-  body: z.string().min(1).max(MAX_ATTENTION_BODY_LENGTH).optional(),
+  body: z.string().min(1).max(MAX_AGENDA_BODY_LENGTH).optional(),
 });
 export type NoticeRequest = z.infer<typeof NoticeRequestSchema>;
 
@@ -59,15 +55,15 @@ export function composeNoticeRequest(words: readonly string[], flags: NoticeFlag
   if (/[\r\n]/u.test(summary)) {
     throw new Error('the summary is one line — put the rest in --body');
   }
-  if (summary.length > MAX_ATTENTION_SUBJECT_LENGTH) {
+  if (summary.length > MAX_AGENDA_SUBJECT_LENGTH) {
     throw new Error(
-      `the summary is ${String(summary.length)} characters; keep it to ${String(MAX_ATTENTION_SUBJECT_LENGTH)} and put the rest in --body`,
+      `the summary is ${String(summary.length)} characters; keep it to ${String(MAX_AGENDA_SUBJECT_LENGTH)} and put the rest in --body`,
     );
   }
   const body = text(flags.body);
-  if (body !== undefined && body.length > MAX_ATTENTION_BODY_LENGTH) {
+  if (body !== undefined && body.length > MAX_AGENDA_BODY_LENGTH) {
     throw new Error(
-      `--body is ${String(body.length)} characters; the most it takes is ${String(MAX_ATTENTION_BODY_LENGTH)}`,
+      `--body is ${String(body.length)} characters; the most it takes is ${String(MAX_AGENDA_BODY_LENGTH)}`,
     );
   }
   const line = summary.replaceAll(/\s+/gu, ' ');
@@ -76,7 +72,7 @@ export function composeNoticeRequest(words: readonly string[], flags: NoticeFlag
     source: 'agent-raised',
     sourceRef: null,
     subject: line,
-    title: clip(line, ATTENTION_PUSH_TITLE_LENGTH),
+    title: clip(line, AGENDA_PUSH_TITLE_LENGTH),
     kind: 'info',
     why: line,
     context: null,

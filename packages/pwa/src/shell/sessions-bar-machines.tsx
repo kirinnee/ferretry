@@ -15,7 +15,7 @@ import type { SessionView } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import type { MachineLearners } from '../features/learning/passive-learning.tsx';
 import { type AllMachinesView, machineReachLabel } from '../lib/all-machines.ts';
-import { attentionFirst } from '../lib/attention-inbox.ts';
+import { agendaFirst } from '../lib/agenda-inbox.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { readOnlyReason } from '../lib/machine-outage.ts';
 import { MachineReachDot, MachineReachWords } from './machine-chip.tsx';
@@ -164,7 +164,7 @@ export function SessionsRailMachineDots({
   onNavigate,
 }: Omit<SessionsBarMachinesProps, 'learningPassive' | 'machineLearners' | 'now'>) {
   // Unread dots lead whichever machine they are on (an offline machine's stay in its own group above).
-  const rows = attentionFirst(
+  const rows = agendaFirst(
     [
       ...view.needsYou.map(entry => ({ daemonId: entry.daemonId, machine: entry.machineName, view: entry.view })),
       ...view.machines.flatMap(machine =>

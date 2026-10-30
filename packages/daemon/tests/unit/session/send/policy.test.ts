@@ -57,7 +57,7 @@ describe('authorizeSend', () => {
     });
   });
 
-  it('refuses an unknown future attention kind fail-closed', () => {
+  it('refuses an unknown future agenda kind fail-closed', () => {
     should(() => authorizeSend(target({ needsHumanKind: 'future-input-modal' }), [])).throw(SendUnavailable, {
       message: /future-input-modal/u,
     });

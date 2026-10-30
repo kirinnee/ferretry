@@ -1,0 +1,82 @@
+import { type AgendaResponse, NO_LABEL, YES_LABEL } from '@ferretry/protocol';
+
+/** The flags that carry a human's answer to an ask. */
+export interface AnswerFlags {
+  readonly approve?: boolean;
+  readonly reject?: boolean;
+  readonly choice?: string;
+  /** Answer a yes-or-no card: the same as `--choice Yes` / `--choice No`. */
+  readonly yes?: boolean;
+  readonly no?: boolean;
+  readonly good?: boolean;
+  readonly clarify?: string;
+  readonly answer?: string;
+  /** The owner's own words instead of the options: "none of these". */
+  readonly other?: string;
+}
+
+const ONE_ANSWER =
+  'give exactly one answer: --approve/--reject, --yes/--no, --choice, --good/--clarify, --answer, or --other';
+
+/**
+ * Read the answer an `agenda done` carries, or nothing when the item had no ask.
+ *
+ * Every conflicting combination is refused here rather than sent: the daemon would reject a response
+ * whose kind does not match the ask anyway, and a local message can name the flag that clashed.
+ */
+export function parseAnswer(flags: AnswerFlags): AgendaResponse | undefined {
+  const permission = flags.approve === true || flags.reject === true;
+  const yesNo = flags.yes === true || flags.no === true;
+  const review = flags.good === true || flags.clarify !== undefined;
+  const chosen = [
+    permission,
+    yesNo,
+    flags.choice !== undefined,
+    review,
+    flags.answer !== undefined,
+    flags.other !== undefined,
+  ].filter(Boolean).length;
+
+  if (chosen === 0) return undefined;
+  if (chosen > 1) throw new Error(ONE_ANSWER);
+  if (flags.approve === true && flags.reject === true) throw new Error(ONE_ANSWER);
+  if (flags.yes === true && flags.no === true) throw new Error(ONE_ANSWER);
+  if (flags.good === true && flags.clarify !== undefined) throw new Error(ONE_ANSWER);
+
+  if (permission) return { kind: 'permission', decision: flags.approve === true ? 'approve' : 'reject' };
+  if (yesNo) return { kind: 'multiple-choice', choice: flags.yes === true ? YES_LABEL : NO_LABEL };
+  if (flags.choice !== undefined)
+    return { kind: 'multiple-choice', choice: required(flags.choice, '--choice', 'the label of one listed option') };
+  if (flags.good === true) return { kind: 'answer-review', verdict: 'good' };
+  if (flags.clarify !== undefined) {
+    return {
+      kind: 'answer-review',
+      verdict: 'clarify',
+      clarification: required(flags.clarify, '--clarify', 'the clarification text'),
+    };
+  }
+  if (flags.other !== undefined) return { kind: 'other', answer: required(flags.other, '--other', 'the answer text') };
+  return { kind: 'open-question', answer: required(flags.answer ?? '', '--answer', 'the answer text') };
+}
+
+/** Describe a recorded answer for the history listing. */
+export function describeAnswer(response: AgendaResponse): string {
+  switch (response.kind) {
+    case 'permission':
+      return response.decision === 'approve' ? 'approved' : 'rejected';
+    case 'multiple-choice':
+      return `chose "${response.choice}"`;
+    case 'answer-review':
+      return response.verdict === 'good' ? 'answer accepted' : `clarification requested: ${response.clarification}`;
+    case 'open-question':
+      return `answered: ${response.answer}`;
+    case 'other':
+      return `answered with none of the options: ${response.answer}`;
+  }
+}
+
+function required(value: string, flag: string, what: string): string {
+  const trimmed = value.trim();
+  if (trimmed === '') throw new Error(`${flag} needs ${what}`);
+  return trimmed;
+}

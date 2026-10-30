@@ -102,7 +102,7 @@ describe('appBarDestinationForRoute', () => {
     expect(appBarDestinationForRoute({ kind: 'imported-history', daemonId: DAEMON })).toBeNull();
   });
 
-  it('marks the Attention inbox as its own place', () => {
+  it('marks the Agenda inbox as its own place', () => {
     expect(appBarDestinationForRoute({ kind: 'attention', daemonId: DAEMON })).toBe('attention');
     expect(showsTabBar({ kind: 'attention', daemonId: DAEMON })).toBe(true);
   });
@@ -210,13 +210,13 @@ describe('AppBar destinations', () => {
 
   it('badges Attention in the wide row with the same count, and only Attention', async () => {
     setViewport(DESKTOP);
-    const mounted = await mount(bar({ attentionCount: 12 }));
-    const attention = linksOf(mounted.container, 'Destinations').find(
+    const mounted = await mount(bar({ agendaCount: 12 }));
+    const agenda = linksOf(mounted.container, 'Destinations').find(
       link => link.getAttribute('data-app-nav') === 'attention',
     ) as HTMLAnchorElement;
 
-    expect(attention.querySelector('.fy-unread-badge [aria-hidden="true"]')?.textContent).toBe('12');
-    expect(attention.textContent).toBe('Inbox1212 open Inbox items');
+    expect(agenda.querySelector('.fy-unread-badge [aria-hidden="true"]')?.textContent).toBe('12');
+    expect(agenda.textContent).toBe('Inbox1212 open Inbox items');
     expect(mounted.container.querySelectorAll('.fy-unread-badge')).toHaveLength(1);
 
     await mounted.render(bar());
@@ -610,9 +610,9 @@ describe('AppTabBar', () => {
     await mounted.unmount();
   });
 
-  it('badges the Attention tab with the open count, says it in words, and draws nothing at zero', async () => {
+  it('badges the Agenda tab with the open count, says it in words, and draws nothing at zero', async () => {
     setViewport(PHONE);
-    const mounted = await mount(tabBar({ attentionCount: 3 }));
+    const mounted = await mount(tabBar({ agendaCount: 3 }));
     const tab = (): HTMLAnchorElement =>
       mounted.container.querySelector('[data-app-tab="attention"]') as HTMLAnchorElement;
     const badge = (): HTMLElement | null => tab().querySelector('[data-unread-badge] [aria-hidden="true"]');
@@ -622,16 +622,16 @@ describe('AppTabBar', () => {
     expect(badge()?.getAttribute('aria-hidden')).toBe('true');
     expect(tab().textContent).toBe('33 open Inbox itemsInbox');
 
-    await mounted.render(tabBar({ attentionCount: 250 }));
+    await mounted.render(tabBar({ agendaCount: 250 }));
     expect(badge()?.textContent).toBe('99+');
     expect(tab().textContent).toContain('250 open Inbox items');
 
-    await mounted.render(tabBar({ attentionCount: 0 }));
+    await mounted.render(tabBar({ agendaCount: 0 }));
     expect(badge()).toBeNull();
     expect(tab().textContent).toBe('Inbox');
 
     // No other tab ever carries the badge.
-    await mounted.render(tabBar({ attentionCount: 5 }));
+    await mounted.render(tabBar({ agendaCount: 5 }));
     expect(mounted.container.querySelectorAll('[data-unread-badge]')).toHaveLength(1);
 
     await mounted.unmount();

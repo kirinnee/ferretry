@@ -151,23 +151,23 @@ Rules:
 4. Do not put dependency-owning business behavior in static methods; it bypasses injection.
 
 ```typescript
-export interface AttentionMessage {
+export interface AgendaMessage {
   readonly kind: 'attention';
   readonly body: string;
 }
 
-export interface AttentionPublisher {
-  publish(message: AttentionMessage): Promise<void>;
+export interface AgendaPublisher {
+  publish(message: AgendaMessage): Promise<void>;
 }
 
-export interface AttentionTemplate {
-  render(body: string): AttentionMessage;
+export interface AgendaTemplate {
+  render(body: string): AgendaMessage;
 }
 
-export class AttentionNotifier {
+export class AgendaNotifier {
   constructor(
-    private readonly publisher: AttentionPublisher,
-    private readonly template: AttentionTemplate,
+    private readonly publisher: AgendaPublisher,
+    private readonly template: AgendaTemplate,
   ) {}
 
   async notify(body: string): Promise<void> {

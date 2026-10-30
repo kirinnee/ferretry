@@ -5,13 +5,13 @@
  * no chips goes out exactly as typed.
  */
 
-import type { AttentionId } from '@ferretry/protocol';
-import { withReferences } from './attention-reply.ts';
+import type { AgendaId } from '@ferretry/protocol';
+import { withReferences } from './agenda-reply.ts';
 
 /** A client whose `send` carries the chips' references; every other method is the target's own. */
 export const withReferencePrefix = <T extends { readonly send: (...args: never[]) => unknown }>(
   client: T,
-  idsOf: () => readonly AttentionId[],
+  idsOf: () => readonly AgendaId[],
 ): T =>
   new Proxy(client, {
     get(target, key, receiver) {

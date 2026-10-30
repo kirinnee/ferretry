@@ -4,24 +4,24 @@
  */
 
 import {
-  type AttentionItem,
-  type AttentionSnapshot,
-  AttentionSnapshotSchema,
+  type AgendaItem,
+  type AgendaSnapshot,
+  AgendaSnapshotSchema,
   type McpInventory,
   McpInventorySchema,
   type McpInventoryServer,
-  type ResolvedAttentionItem,
+  type ResolvedAgendaItem,
   type SessionSkillsInventory,
   SessionSkillsInventorySchema,
   type SkillEntry,
 } from '@ferretry/protocol';
 import type { ContextDoc } from '../../../../src/features/context-rail/context-rail-model.ts';
 import type { ContextSignalsPort } from '../../../../src/features/context-rail/context-rail-ports.ts';
-import type { AttentionLoadStatus } from '../../../../src/lib/attention-store.ts';
+import type { AgendaLoadStatus } from '../../../../src/lib/agenda-store.ts';
 
 export const NOW = Date.parse('2026-10-16T10:00:00.000Z');
 
-export const openItem = (overrides: Partial<AttentionItem> = {}): AttentionItem =>
+export const openItem = (overrides: Partial<AgendaItem> = {}): AgendaItem =>
   ({
     id: 'A1',
     source: 'question',
@@ -35,9 +35,9 @@ export const openItem = (overrides: Partial<AttentionItem> = {}): AttentionItem 
     raisedBySession: 'session-a',
     raisedByName: 'Hadi',
     ...overrides,
-  }) as AttentionItem;
+  }) as AgendaItem;
 
-export const answeredItem = (overrides: Partial<ResolvedAttentionItem> = {}): ResolvedAttentionItem =>
+export const answeredItem = (overrides: Partial<ResolvedAgendaItem> = {}): ResolvedAgendaItem =>
   ({
     id: 'A2',
     source: 'question',
@@ -58,13 +58,13 @@ export const answeredItem = (overrides: Partial<ResolvedAttentionItem> = {}): Re
     resolvedBySession: null,
     resolvedByName: null,
     ...overrides,
-  }) as ResolvedAttentionItem;
+  }) as ResolvedAgendaItem;
 
 export const snapshot = (
-  items: readonly AttentionItem[] = [openItem()],
-  resolved: readonly ResolvedAttentionItem[] = [answeredItem()],
-): AttentionSnapshot =>
-  AttentionSnapshotSchema.parse({
+  items: readonly AgendaItem[] = [openItem()],
+  resolved: readonly ResolvedAgendaItem[] = [answeredItem()],
+): AgendaSnapshot =>
+  AgendaSnapshotSchema.parse({
     v: 1,
     sessionId: 'session-a',
     items,
@@ -79,16 +79,16 @@ export interface FakeSignals extends ContextSignalsPort {
   readonly responses: unknown[];
   readonly resolved: string[];
   loads: number;
-  set(status: AttentionLoadStatus, value?: AttentionSnapshot): void;
+  set(status: AgendaLoadStatus, value?: AgendaSnapshot): void;
   /** The next answer or resolve fails with this, once. */
   failNext?: Error;
   /** The next load fails, once. */
   failLoad?: boolean;
 }
 
-export const fakeSignals = (initial?: AttentionSnapshot, status: AttentionLoadStatus = 'ready'): FakeSignals => {
+export const fakeSignals = (initial?: AgendaSnapshot, status: AgendaLoadStatus = 'ready'): FakeSignals => {
   const listeners = new Set<() => void>();
-  let state: { status: AttentionLoadStatus; value: AttentionSnapshot | undefined } = {
+  let state: { status: AgendaLoadStatus; value: AgendaSnapshot | undefined } = {
     status: initial === undefined ? 'loading' : status,
     value: initial,
   };

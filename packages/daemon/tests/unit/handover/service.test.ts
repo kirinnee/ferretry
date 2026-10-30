@@ -1085,7 +1085,7 @@ describe('what a pass answers with when it stops without advancing', () => {
     await service(context).advance(SOURCE_ID);
     // Past acceptance, so the loss raises rather than cleans up — and the ledger is down.
     context.sessions.set(sessionView({ status: 'stopped' }));
-    context.attention.failure = 'the attention ledger is unreachable';
+    context.attention.failure = 'the agenda ledger is unreachable';
 
     const answered = await service(context).advance(SOURCE_ID);
     // The intent DID land, so the answer must carry it rather than the pre-write copy.

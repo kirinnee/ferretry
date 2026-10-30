@@ -8,7 +8,7 @@
  * an accent count badge sits on the right, and the row's link opens the conversation AT the first open
  * item (`?attention=A3`). The WHOLE row links there rather than the badge alone — an anchor cannot hold
  * a button, and one big target is the better thing to hit on a phone. The badge's number is spoken as
- * "3 open Attention items" in the row's name, and it goes only when the items resolve.
+ * "3 open Agenda items" in the row's name, and it goes only when the items resolve.
  *
  * The mark on the right is the row's one exception: the unread badge, else a quiet "waiting" for a
  * ferret parked on a person, else the switch marks — the graduation cap of a ferret
@@ -22,14 +22,14 @@ import { type ReactNode, useContext, useState } from 'react';
 import { OutdatedMark } from '../features/restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
-import { unreadCount } from '../lib/attention-inbox.ts';
+import { unreadCount } from '../lib/agenda-inbox.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { MachineChip } from './machine-chip.tsx';
 import { RouteLink } from './route-link.tsx';
 import { useRowContextGesture } from './row-context-gesture.ts';
 import { SessionMenuContext } from './session-menu-context.ts';
 import {
-  attentionWords,
+  agendaWords,
   rowPreview,
   sessionRowPath,
   sessionsBarDirectory,
@@ -83,7 +83,7 @@ export function SessionsBarRow({
         data-sbar-unread={unread > 0 ? '' : undefined}
         onNavigate={onNavigate}
         {...gesture}
-        title={`${name}${ferret === null ? '' : ` — ${ferret}`}${unread > 0 ? `\n${attentionWords(unread)}` : ''}${preview === undefined ? '' : `\n${preview.text}`}\n${view.config.cwd}`}
+        title={`${name}${ferret === null ? '' : ` — ${ferret}`}${unread > 0 ? `\n${agendaWords(unread)}` : ''}${preview === undefined ? '' : `\n${preview.text}`}\n${view.config.cwd}`}
         to={sessionRowPath(daemonId, view)}
       >
         <StatusMark view={view} />

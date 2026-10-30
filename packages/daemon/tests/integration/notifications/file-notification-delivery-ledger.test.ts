@@ -39,7 +39,7 @@ function outcome(key = 'direct:req-1'): NotificationRecord {
   });
 }
 
-function attentionRequested(): NotificationRecord {
+function agendaRequested(): NotificationRecord {
   return NotificationRecordSchema.parse({
     v: 1,
     phase: 'requested',
@@ -48,7 +48,7 @@ function attentionRequested(): NotificationRecord {
     origin: 'attention',
     attribution: 'attention:agent:session-1',
     sessionId: 'session-1',
-    attentionId: 'A1',
+    agendaId: 'A1',
     sent: {
       kind: 'attention',
       interactive: false,
@@ -81,7 +81,7 @@ afterAll(async () => {
   await cleanupTempDirectories();
 });
 
-function attentionBuzz(key: string, extra: Record<string, unknown>): NotificationRecord {
+function agendaBuzz(key: string, extra: Record<string, unknown>): NotificationRecord {
   return NotificationRecordSchema.parse({
     v: 1,
     phase: 'requested',
@@ -90,7 +90,7 @@ function attentionBuzz(key: string, extra: Record<string, unknown>): Notificatio
     origin: 'attention',
     attribution: 'attention:agent:session-1',
     sessionId: 'session-1',
-    attentionId: 'A1',
+    agendaId: 'A1',
     sent: { kind: 'attention', interactive: false, title: 'Ada is stopped · 2 need you', body: 'Choose a region' },
     enrolled: 1,
     ...extra,
@@ -104,9 +104,9 @@ describe('FileNotificationDeliveryLedger', () => {
     const stop = 'attention:session-1:stopped:2026-10-23T09:00:00.000Z';
 
     // Act
-    await world.ledger.append(attentionBuzz(stop, { stoppedAt: '2026-10-23T09:00:00.000Z' }));
-    await world.ledger.append(attentionBuzz('attention:session-1:A1:deadline', { deadline: true }));
-    await world.ledger.append(attentionBuzz('attention:session-1:A1:ping', { ping: true }));
+    await world.ledger.append(agendaBuzz(stop, { stoppedAt: '2026-10-23T09:00:00.000Z' }));
+    await world.ledger.append(agendaBuzz('attention:session-1:A1:deadline', { deadline: true }));
+    await world.ledger.append(agendaBuzz('attention:session-1:A1:ping', { ping: true }));
 
     // Assert
     should((await world.ledger.find(stop))?.requested).containDeep({ stoppedAt: '2026-10-23T09:00:00.000Z' });
@@ -117,8 +117,8 @@ describe('FileNotificationDeliveryLedger', () => {
 
   it('should refuse a record whose key does not name what it is for', () => {
     // Act + Assert
-    should(() => attentionBuzz('attention:session-1:A1:ping', { deadline: true })).throw();
-    should(() => attentionBuzz('attention:session-1:stopped:other', { stoppedAt: '2026-10-23T09:00:00.000Z' })).throw();
+    should(() => agendaBuzz('attention:session-1:A1:ping', { deadline: true })).throw();
+    should(() => agendaBuzz('attention:session-1:stopped:other', { stoppedAt: '2026-10-23T09:00:00.000Z' })).throw();
   });
 
   it('should append requested and outcome as individual lines and merge them on lookup', async () => {
@@ -230,18 +230,18 @@ describe('FileNotificationDeliveryLedger', () => {
     should(secondFound).containDeep({ requested: { sessionId: 'session-2' }, outcome: { delivered: 1 } });
   });
 
-  it('should round-trip an attention-origin sent body without inventing a request block', async () => {
+  it('should round-trip an agenda-origin sent body without inventing a request block', async () => {
     // Arrange
-    const world = await fixture('notification-ledger-attention');
+    const world = await fixture('notification-ledger-agenda');
 
     // Act
-    await world.ledger.append(attentionRequested());
+    await world.ledger.append(agendaRequested());
     const found = await world.ledger.find('attention:session-1:A1');
 
     // Assert
     should(found?.requested).containDeep({
       origin: 'attention',
-      attentionId: 'A1',
+      agendaId: 'A1',
       sent: { body: 'The rollout needs a human decision.' },
     });
     should(found?.requested).not.have.property('request');
@@ -250,7 +250,7 @@ describe('FileNotificationDeliveryLedger', () => {
   it('should keep a more-info push apart from the first announcement of the same item', async () => {
     // Arrange
     const world = await fixture('notification-ledger-info');
-    const first = attentionRequested();
+    const first = agendaRequested();
 
     // Act
     await world.ledger.append(first);
@@ -260,7 +260,7 @@ describe('FileNotificationDeliveryLedger', () => {
     const info = await world.ledger.find('attention:session-1:A1:info-1');
 
     // Assert
-    should(info?.requested).containDeep({ attentionId: 'A1', infoRequest: 1 });
+    should(info?.requested).containDeep({ agendaId: 'A1', infoRequest: 1 });
     should((await world.ledger.find('attention:session-1:A1'))?.requested).not.have.property('infoRequest');
   });
 

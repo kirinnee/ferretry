@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test';
-import type { AttentionSnapshot, PinSnapshot, SessionView } from '@ferretry/protocol';
+import type { AgendaSnapshot, PinSnapshot, SessionView } from '@ferretry/protocol';
 import { renderToString } from 'react-dom/server';
-import { useAttentionCount, useAttentionSession, useAttentionSnapshot } from '../../src/hooks/use-attention.ts';
+import { useAgendaCount, useAgendaSession, useAgendaSnapshot } from '../../src/hooks/use-agenda.ts';
 import { useDensity } from '../../src/hooks/use-density.ts';
 import { useFleetView } from '../../src/hooks/use-fleet-view.ts';
 import { useGroupNeedsYou } from '../../src/hooks/use-group-needs-you.ts';
@@ -15,7 +15,7 @@ import {
   useUsage,
   useUsageSlice,
 } from '../../src/hooks/use-usage.ts';
-import { DaemonAttentionClient } from '../../src/lib/attention-client.ts';
+import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
 import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -36,7 +36,7 @@ const memoryStorage = (): ControlsStorage => {
   return { getItem: key => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) };
 };
 
-const attentionBoard: AttentionSnapshot = {
+const agendaBoard: AgendaSnapshot = {
   v: 1,
   sessionId: 'session-a',
   items: [
@@ -62,13 +62,13 @@ const attentionBoard: AttentionSnapshot = {
 const pinBoard: PinSnapshot = { v: 1, sessionId: 'session-a', updatedAt: '2026-08-01T00:00:00.000Z', pins: [] };
 
 describe('hooks rendered on the server', () => {
-  it('reads the attention store as idle status, its board and its badge count', () => {
-    const client = new DaemonAttentionClient();
-    client.store.applySnapshot(scope, attentionBoard);
+  it('reads the agenda store as idle status, its board and its badge count', () => {
+    const client = new DaemonAgendaClient();
+    client.store.applySnapshot(scope, agendaBoard);
     const Probe = () => {
-      const status = useAttentionSession(client, daemon, scope);
-      const board = useAttentionSnapshot(client, scope);
-      const count = useAttentionCount(client, daemon, scope);
+      const status = useAgendaSession(client, daemon, scope);
+      const board = useAgendaSnapshot(client, scope);
+      const count = useAgendaCount(client, daemon, scope);
       return <output>{`${status}:${board?.count ?? 'none'}:${count}`}</output>;
     };
     expect(renderToString(<Probe />)).toContain('idle:1:1');

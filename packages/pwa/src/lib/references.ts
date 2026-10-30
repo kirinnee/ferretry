@@ -52,7 +52,7 @@
  * Ported from kteam's `src/lib/references.ts`.
  */
 
-import type { AttentionId } from '@ferretry/protocol';
+import type { AgendaId } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 
 export interface AgentReference {
@@ -78,9 +78,9 @@ export interface TaskReference {
   readonly id: string;
 }
 
-export interface AttentionReference {
+export interface AgendaReference {
   readonly kind: 'attention';
-  readonly id: AttentionId;
+  readonly id: AgendaId;
 }
 
 /**
@@ -121,7 +121,7 @@ export type Reference =
   | AgentReference
   | FileReference
   | TaskReference
-  | AttentionReference
+  | AgendaReference
   | SurfaceReference
   | SkillReference;
 
@@ -149,7 +149,7 @@ export type ResolvedReference =
   | ResolvedAgentReference
   | FileReference
   | TaskReference
-  | AttentionReference
+  | AgendaReference
   | ResolvedSurfaceReference
   | SkillReference;
 
@@ -174,15 +174,15 @@ const FILE_TOKEN = /^@(?!@)([/.\p{L}\p{N}_+@#-]*[\p{L}\p{N}_+@#-])(?::([1-9][0-9
  */
 const AGENT_NAME_BODY = '[a-z][a-z0-9-]{0,31}';
 const TASK_ID_BODY = '[BFIC][0-9]{1,9}';
-const ATTENTION_ID_BODY = 'A[1-9][0-9]*';
+const AGENDA_ID_BODY = 'A[1-9][0-9]*';
 const SKILL_NAME_BODY = '[a-z][a-z0-9-]{0,63}';
 const AGENT_NAME = new RegExp(`^${AGENT_NAME_BODY}$`, 'iu');
 const AGENT_TOKEN = new RegExp(`^:(${AGENT_NAME_BODY})$`, 'iu');
 const SESSION_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u;
 const TASK_ID = new RegExp(`^${TASK_ID_BODY}$`, 'iu');
 const TASK_TOKEN = new RegExp(`^&(${TASK_ID_BODY})$`, 'iu');
-const ATTENTION_ID = new RegExp(`^${ATTENTION_ID_BODY}$`, 'u');
-const ATTENTION_TOKEN = new RegExp(`^!(${ATTENTION_ID_BODY})$`, 'u');
+const AGENDA_ID = new RegExp(`^${AGENDA_ID_BODY}$`, 'u');
+const AGENDA_TOKEN = new RegExp(`^!(${AGENDA_ID_BODY})$`, 'u');
 /**
  * A surface key is deliberately dot-free. Daemon terminal ids are twelve hex
  * characters and page keys are `page-<n>`, so a dot buys nothing — and it would
@@ -220,7 +220,7 @@ const BOUNDARY_AFTER_FILE = '(?=$|[\\s)\\]}"\'`,;!?<>.=—–])';
 const CANDIDATE_ALTERNATIVES = [
   `:${AGENT_NAME_BODY}${BOUNDARY_AFTER}`,
   `&${TASK_ID_BODY}${BOUNDARY_AFTER}`,
-  `!${ATTENTION_ID_BODY}${BOUNDARY_AFTER}`,
+  `!${AGENDA_ID_BODY}${BOUNDARY_AFTER}`,
   `%(?:terminal|browser):[A-Za-z0-9][A-Za-z0-9_-]{0,63}${BOUNDARY_AFTER}`,
   `[/$]${SKILL_NAME_BODY}${BOUNDARY_AFTER}`,
   `@(?!@)[/.\\p{L}\\p{N}_+@#-]*[\\p{L}\\p{N}_+@#-](?::[1-9][0-9]*(?:-[1-9][0-9]*)?)?${BOUNDARY_AFTER_FILE}`,
@@ -273,7 +273,7 @@ const DIRECT_SIGIL_PREFIX = {
   // Every prefix of an agent name is itself a valid agent name.
   ':': new RegExp(`^${AGENT_NAME_BODY}$`, 'iu'),
   '&': /^[BFIC][0-9]{0,9}$/iu,
-  // Case-sensitive, exactly as `ATTENTION_TOKEN` is: `!a3` is not a reference.
+  // Case-sensitive, exactly as `AGENDA_TOKEN` is: `!a3` is not a reference.
   '!': /^A(?:[1-9][0-9]*)?$/u,
   // Lowercase only, which is what keeps `$HOME` and `$PATH` out of the picker.
   $: new RegExp(`^${SKILL_NAME_BODY}$`, 'u'),
@@ -331,8 +331,8 @@ export function parseReferenceToken(raw: string): Reference | null {
   const task = raw.match(TASK_TOKEN);
   if (task?.[1]) return { kind: 'task', id: task[1].toUpperCase() };
 
-  const attention = raw.match(ATTENTION_TOKEN);
-  if (attention?.[1]) return { kind: 'attention', id: attention[1] as AttentionId };
+  const agenda = raw.match(AGENDA_TOKEN);
+  if (agenda?.[1]) return { kind: 'attention', id: agenda[1] as AgendaId };
 
   const surface = raw.match(SURFACE_TOKEN);
   // The KIND is case-folded, exactly as an agent callsign is. The KEY is not: it
@@ -391,7 +391,7 @@ export type AgentReferenceResolver = (lookup: AgentReferenceLookup) => ResolvedA
 /** Answers a candidate path with its canonical session-relative path, or nothing. */
 export type FileReferenceResolver = (candidatePath: string) => string | null | undefined;
 export type TaskReferenceResolver = (id: string) => boolean;
-export type AttentionReferenceResolver = (id: AttentionId) => boolean;
+export type AgendaReferenceResolver = (id: AgendaId) => boolean;
 /** Answers whether this session's own skills catalog carries that name. */
 export type SkillReferenceResolver = (name: string) => boolean;
 
@@ -427,7 +427,7 @@ export interface ReferenceResolvers {
   readonly agent?: AgentReferenceResolver;
   readonly file?: FileReferenceResolver;
   readonly task?: TaskReferenceResolver;
-  readonly attention?: AttentionReferenceResolver;
+  readonly attention?: AgendaReferenceResolver;
   readonly surface?: SurfaceReferenceResolver;
   readonly skill?: SkillReferenceResolver;
 }
@@ -466,7 +466,7 @@ export function formatReference(reference: Reference | ResolvedReference): strin
       return `&${id}`;
     }
     case 'attention':
-      if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid attention reference');
+      if (!AGENDA_ID.test(reference.id)) throw new TypeError('invalid attention reference');
       return `!${reference.id}`;
     case 'surface':
       if (!validSurfaceReference(reference)) throw new TypeError('invalid surface reference');
@@ -601,7 +601,7 @@ export function referenceHref(reference: ResolvedReference): string {
       query.set('id', reference.id.toUpperCase());
       break;
     case 'attention':
-      if (!ATTENTION_ID.test(reference.id)) throw new TypeError('invalid resolved attention reference');
+      if (!AGENDA_ID.test(reference.id)) throw new TypeError('invalid resolved attention reference');
       query.set('id', reference.id);
       break;
     case 'surface':
@@ -661,7 +661,7 @@ export function parseReferenceHref(href: string | undefined): ResolvedReference 
   if (kind === 'attention') {
     if (!exactKeys(query, ['kind', 'id'])) return null;
     const id = one(query, 'id');
-    return id && ATTENTION_ID.test(id) ? { kind: 'attention', id: id as AttentionId } : null;
+    return id && AGENDA_ID.test(id) ? { kind: 'attention', id: id as AgendaId } : null;
   }
   if (kind === 'surface') {
     if (!exactKeys(query, ['kind', 'daemon', 'session', 'surface', 'key'])) return null;
