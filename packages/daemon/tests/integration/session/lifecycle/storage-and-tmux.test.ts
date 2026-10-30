@@ -603,6 +603,9 @@ describe('TmuxSessionLifecycleLauncher', () => {
       ['set-option', '-t', 'fy-tmux-session', 'remain-on-exit', 'on'],
       ['has-session', '-t', 'fy-tmux-session'],
       ['has-session', '-t', 'fy-tmux-session'],
+      // Its control clients are listed first, so a subscribed one is released in the kill's own
+      // command list: tmux 3.6a crashes the whole server when one outlives its session.
+      ['list-clients', '-t', 'fy-tmux-session', '-F', '#{client_control_mode} #{client_name}'],
       ['kill-session', '-t', 'fy-tmux-session'],
     ]);
   });
