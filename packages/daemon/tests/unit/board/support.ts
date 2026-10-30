@@ -3,6 +3,7 @@ import {
   type BoardChangedEvent,
   type BoardProjectId,
   type BoardQuarantinedCard,
+  type BoardSkip,
   type BoardTask,
   type BoardTaskId,
   LANE_TEMPLATES,
@@ -13,12 +14,12 @@ import {
   taskIdPrefix,
 } from '@ferretry/protocol';
 import {
+  type AgendaLinkSource,
   type BoardChangeSink,
   type BoardServiceDependencies,
   type BoardSnapshot,
   type BoardStore,
   type BoardWrite,
-  type AgendaLinkSource,
   type LaneSetSource,
   LivenessActivityDeriver,
   type ReopenNotice,
@@ -189,6 +190,7 @@ export class FakeSessions implements SessionLivenessSource {
 
 export class FakeFocus implements SessionFocus {
   readonly focused = new Map<string, TaskRef>();
+  readonly skips = new Map<string, BoardSkip>();
 
   constructor(
     private readonly sessions: ReadonlySet<string> = new Set(['lead', 'child', 'grandchild', 'stranger', 'worker']),
@@ -199,11 +201,23 @@ export class FakeFocus implements SessionFocus {
     if (this.failing) throw new Error('config is read-only');
     if (!this.sessions.has(sessionId)) return false;
     this.focused.set(sessionId, task);
+    this.skips.delete(sessionId);
     return true;
   }
 
   async focusOf(sessionId: string): Promise<TaskRef | null> {
     return this.focused.get(sessionId) ?? null;
+  }
+
+  async skip(sessionId: string, skip: BoardSkip): Promise<boolean> {
+    if (this.failing) throw new Error('config is read-only');
+    if (!this.sessions.has(sessionId)) return false;
+    this.skips.set(sessionId, skip);
+    return true;
+  }
+
+  async skipOf(sessionId: string): Promise<BoardSkip | null> {
+    return this.skips.get(sessionId) ?? null;
   }
 }
 

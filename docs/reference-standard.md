@@ -46,8 +46,8 @@ rule exists so a model cannot fabricate a destination by writing one.
 | `@path`            | A file              | `@src/api.ts`, `@./README.md` | Session-relative, `./`-relative, or absolute inside the cwd |
 | `@path:line`       | A file at one line  | `@src/api.ts:120`             | 1-based                                                     |
 | `@path:line-end`   | A file line range   | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                           |
-| `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits                     |
-| `!AN`              | An agenda item      | `!A3`                         | Always `A` + a positive number                              |
+| `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits; machine-wide       |
+| `!AN`              | An agenda item      | `!A3`                         | Always `A` + a positive number; session-scoped              |
 | `/name` or `$name` | A skill             | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill         |
 | `%terminal:<key>`  | A live terminal     | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped     |
 | `%browser:<key>`   | A live browser page | `%browser:app`                | The page's name, or the worker's page id; session-scoped    |
@@ -56,9 +56,10 @@ Both skill sigils are accepted because the harnesses differ: Claude invokes a sk
 Codex as `$name`. Whichever you type is what the reader keeps seeing — a reference is never rewritten
 into "the canonical form" behind your back.
 
-Terminals and browser pages are **surfaces**, and they are the one family that is SESSION-scoped
-rather than fleet-scoped: the twelve hex characters that name a shell in one session name nothing at
-all in another, so a proved surface carries both the daemon and the session it was proved against.
+Terminals and browser pages are **surfaces**, and they are SESSION-scoped, as agenda ids are and
+card ids are not — a card id is minted machine-wide and is unique on this machine's board. The
+twelve hex characters that name a shell in one session name nothing at all in another, so a proved
+surface carries both the daemon and the session it was proved against.
 A surface reference is never an index — "the second terminal" shifts when a neighbour closes, and a
 shifted reference is how an agent types into the wrong shell.
 
@@ -73,7 +74,8 @@ The key grammar below is unchanged — a name is already a valid key.
 
 ### What is NOT a reference
 
-- `#F12` and `?A3` — the pre-Ferretry sigils. Gone; use `&F12` and `!A3`.
+- `#F12` and `?A3` — the pre-Ferretry sigils. Gone as output; use `&F12` and `!A3`. The CLI still
+  accepts `#F12` as input for one release, and nothing prints it.
 - A bare path (`src/api.ts`) — a path is only a reference with `@` in front of it.
 - `@@`, `@@@`, `@@@@` — those are composer **triggers** (section 5), not authored syntax.
 - `/plugin:skill`, `$apps/web:deploy` — a harness may accept these invocation forms; the reference
@@ -245,7 +247,11 @@ still share a shell. No listing at all still proves nothing, and stays prose.
 
 Everything is keyed by `(daemonId, …)`. A resolved agent reference carries the daemon it was proved
 against and navigates to `/d/:daemon/session/:id`, so a reference in one daemon's transcript can
-never open a same-named session on another.
+never open a same-named session on another. A resolved task reference carries the machine whose
+board proved it, because a card id is unique there and nowhere else. Agenda ids still collide per
+session, so an `!attention` reference stays session-scoped and resolves against the transcript's
+own session — on the Board and on a card an ask is always shown with its card chip and its ferret,
+so it is never ambiguous there.
 
 ## 7. References inside code
 

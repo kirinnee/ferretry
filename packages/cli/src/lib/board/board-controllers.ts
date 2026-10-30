@@ -7,11 +7,23 @@ import {
   type LaneSet,
   type TaskRef,
 } from '@ferretry/protocol';
+import { resolveBoardProject } from '../board-lanes/lane-request';
 import { refuse } from '../tasks/errors';
 import type { ITextFileReader } from '../tasks/ports';
-import { resolveBoardProject } from '../board-lanes/lane-request';
 import { explainingRefusals } from './board-refusal';
 import {
+  type BoardVerb,
+  renderActed,
+  renderBoard,
+  renderBoardMarkdown,
+  renderCard,
+  type SessionNames,
+} from './board-render';
+import {
+  type BoardCreateOptions,
+  type BoardEditOptions,
+  type BoardLinkOptions,
+  type BoardViewOptions,
   buildAssignAction,
   buildBlockAction,
   buildBoardCreateRequest,
@@ -28,23 +40,11 @@ import {
   buildOrderAction,
   buildRefileAction,
   buildReopenAction,
-  buildUndependAction,
   buildUnblockAction,
-  type BoardCreateOptions,
-  type BoardEditOptions,
-  type BoardLinkOptions,
-  type BoardViewOptions,
+  buildUndependAction,
   createPrLinks,
   requireCardRef,
 } from './board-request';
-import {
-  type BoardVerb,
-  renderActed,
-  renderBoard,
-  renderBoardMarkdown,
-  renderCard,
-  type SessionNames,
-} from './board-render';
 import type { IBoardGateway, IBoardOutput, SessionDirectoryEntry } from './ports';
 
 const asJson = (value: unknown): string => JSON.stringify(value, null, 2);
@@ -261,6 +261,26 @@ export class BoardController {
 
   async focus(idText: string, options: BoardCommonOptions) {
     await this.perform('focus', requireCardRef(idText), options, buildFocusAction());
+  }
+
+  /**
+   * `fy task skip "<why>"` (board-design.md §3.4): the calling session's work needs no card — chit-chat, or the
+   * owner said not to track it — so the turn-end check stays quiet until the session takes a card.
+   */
+  async skip(why: readonly string[], options: BoardCommonOptions) {
+    const reason = why.join(' ').trim();
+    if (reason === '') refuse(`say why this work needs no card: ${this.deps.binary} task skip "<why>"`);
+    const as = this.as(options);
+    if (as === undefined) {
+      refuse(`skip records why YOUR session has no card: run it from a ferret's pane, or pass --session <id>`);
+    }
+    const recorded = await explainingRefusals({ binary: this.deps.binary }, async () => {
+      return await this.gateway.skip(as, { reason });
+    });
+    if (options.json === true) return this.deps.output.success(asJson(recorded));
+    this.deps.output.success(
+      `no card for this work — ${recorded.skip.reason}. The board check stays quiet until you take a card.`,
+    );
   }
 
   async block(idText: string, why: readonly string[], options: BoardCommonOptions) {

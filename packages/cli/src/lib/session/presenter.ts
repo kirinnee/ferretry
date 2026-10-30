@@ -30,6 +30,14 @@ export class SessionPresenter {
     for (const line of lines) this.io.success(line);
   }
 
+  /**
+   * Prints a report to stdout without the success paint: a rendering that colour-codes its own
+   * cells has to be the last thing that paints them, or the green wrap flattens it.
+   */
+  report(lines: readonly string[]): void {
+    for (const line of lines) this.io.report(line);
+  }
+
   /** Prints a schema-parsed value as indented JSON. */
   json(value: unknown): void {
     this.io.success(JSON.stringify(value, null, 2));

@@ -13,6 +13,7 @@ import {
   AGENDA_INSTRUCTION,
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
+  BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CODEX_QUESTIONS_FEATURE,
   fixedLayerFor,
@@ -309,7 +310,7 @@ describe("each ferret's sections of the appended system prompt", () => {
 describe('the appended system prompt of a real agent runtime, for every combination of switches', () => {
   const FY = '/opt/f/bin/fy';
   const SWITCHES = [
-    { env: 'FY_HYPERMEDIA', text: HYPERMEDIA_INSTRUCTION },
+    { env: 'FY_HYPERMEDIA', text: HYPERMEDIA_INSTRUCTION('fy') },
     { env: 'FY_PACK', text: PACK_INSTRUCTION('fy') },
     { env: 'FY_AGENDA', text: AGENDA_INSTRUCTION('fy') },
     { env: 'FY_LEARNING_PASSIVE', text: LESSONS_INSTRUCTION('fy') },
@@ -389,7 +390,8 @@ describe('the appended system prompt of a real agent runtime, for every combinat
       tools: AGENT_TOOLS_INSTRUCTION.length,
       settings: SET_UP_FERRETRY_INSTRUCTION('fy').length,
       notify: NOTIFY_INSTRUCTION('fy').length,
-      hypermedia: HYPERMEDIA_INSTRUCTION.length,
+      board: BOARD_INSTRUCTION('fy').length,
+      hypermedia: HYPERMEDIA_INSTRUCTION('fy').length,
       pack: PACK_INSTRUCTION('fy').length,
       agenda: AGENDA_INSTRUCTION('fy').length,
       lessons: LESSONS_INSTRUCTION('fy').length,
@@ -397,11 +399,16 @@ describe('the appended system prompt of a real agent runtime, for every combinat
 
     // Assert — the whole prompt, every section on and the longest routing prompt as its one `Routing: ` line,
     // stays under 7.4 KB (docs/pack-mode.md records the sizes: raised from 6.7 KB for Attention's steps and
-    // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section)
+    // hypermedia's `chart`; the notify rule replaced Attention's 1 KB, Agenda mode adds its own section). The
+    // Board section (640) was paid for by naming the tools by prefix, moving map, media and chart's full spec
+    // behind `fy render guide`, and compressing the lessons rule: 7,246 measured, so keep 150 of headroom.
     const longestRouting = 1 + 'Routing: '.length + MAX_ROUTING_PROMPT_CHARS;
-    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_400);
+    should(Object.values(sizes).reduce((sum, size) => sum + size, 0) + longestRouting).be.below(7_400 - 150);
     should(sizes.pack).be.below(1_050);
-    should(sizes.tools).be.below(1_100);
+    should(sizes.tools).be.below(850);
+    should(sizes.board).be.below(660);
+    should(sizes.hypermedia).be.below(1_550);
+    should(sizes.lessons).be.below(270);
     should(sizes.settings).be.below(600);
     should(sizes.notify).be.below(450);
     should(sizes.agenda).be.below(1_300);

@@ -19,9 +19,35 @@ import type {
  */
 export interface ISessionIo {
   success(message: string): void;
+  /**
+   * stdout exactly as given, for a rendering that carries its own colour. `success` paints green,
+   * which flattens a report where one row must stand out — the amber of a `ps` row with no focus
+   * card is the case that made this seam.
+   */
+  report(message: string): void;
   warn(message: string): void;
   error(message: string): void;
   setExitCode(code: number): void;
+}
+
+/**
+ * The one cell-level colour a session report carries: amber, for the cell a reader must notice (a
+ * running session with no focus card). The composition root wires chalk in, so NO_COLOR and a
+ * non-TTY stdout turn it into the identity — and the table measures column widths on the plain
+ * text, never on what this returns.
+ */
+export interface ICellColour {
+  amber(cell: string): string;
+}
+
+/**
+ * The board read `ps` names each focus card's lane from, behind one method so the controller never
+ * paginates or retries itself. When the board cannot be read the method rejects, and the caller
+ * shows the card ids without lane names rather than failing the listing.
+ */
+export interface ISessionBoard {
+  /** Every card the one read covered: card id → lane name. Cards it missed are simply absent. */
+  laneNames(): Promise<ReadonlyMap<string, string>>;
 }
 
 /**

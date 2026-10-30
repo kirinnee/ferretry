@@ -182,6 +182,7 @@ export const LAUNCH_SECTION_LABEL: Readonly<Record<LaunchInstructionSectionId, s
   settings: 'Settings rules',
   attention: 'Notify rule',
   notify: 'Notify rule',
+  board: 'Board rules',
   hypermedia: 'Hypermedia',
   pack: 'Pack mode',
   agenda: 'Agenda mode',

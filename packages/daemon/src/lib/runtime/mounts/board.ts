@@ -2,16 +2,19 @@ import {
   type BoardErrorCode,
   BoardImportRequestSchema,
   type BoardImportSummary,
+  type BoardQuery,
   type BoardQueryInput,
   BoardQuerySchema,
   type BoardResponse,
+  type BoardSkipRequest,
+  BoardSkipRequestSchema,
+  type BoardSkipResponse,
   type BoardTaskActionRequest,
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequest,
   BoardTaskCreateRequestSchema,
   type BoardTaskId,
   type BoardTaskResponse,
-  type BoardQuery,
   parseTaskRef,
 } from '@ferretry/protocol';
 import { type ApiActor, parseActor } from '../../api/actor.ts';
@@ -24,8 +27,8 @@ import { type BoardCaller, BoardError, BoardUnavailableError } from '../../board
 import { parseLegacyRef } from '../../board-import/index.ts';
 
 /**
- * The project boards' HTTP surface (`board-design.md` §2): the board query, one card, a new card, and
- * every action on a card. `BoardService` satisfies this structurally.
+ * The project boards' HTTP surface (`board-design.md` §2): the board query, one card, a new card, every
+ * action on a card, and a ferret's record that its work needs no card. `BoardService` satisfies this structurally.
  */
 export interface BoardSubsystem {
   board(query: BoardQuery): Promise<BoardResponse>;
@@ -36,6 +39,7 @@ export interface BoardSubsystem {
   importLegacy(options: { readonly dryRun: boolean }): Promise<BoardImportSummary>;
   create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
   act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse>;
+  skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse>;
 }
 
 /** The HTTP status each refusal answers with. */
@@ -161,6 +165,18 @@ export function boardRoutes(board: BoardSubsystem): readonly ApiRoute[] {
         const caller = boardCaller(context.actor);
         const request = await parseBody(context.request, BoardTaskCreateRequestSchema);
         return await answer(async () => await board.create(request, caller));
+      },
+    },
+    {
+      method: 'POST',
+      path: '/v1/board/skip',
+      minimum: 'operator',
+      capability: fleet,
+      noStore: true,
+      handle: async context => {
+        const caller = boardCaller(context.actor);
+        const request = await parseBody(context.request, BoardSkipRequestSchema);
+        return await answer(async () => await board.skip(request, caller));
       },
     },
     {

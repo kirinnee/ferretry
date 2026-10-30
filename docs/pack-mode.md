@@ -66,19 +66,23 @@ and the longest routing prompt:
 
 | Section                                  | Characters | ≈ tokens | When                        |
 | ---------------------------------------- | ---------- | -------- | --------------------------- |
-| Tools (terminals, browser pages)         | 1,001      | 250      | every agent runtime         |
+| Tools (terminals, browser pages)         | 803        | 201      | every agent runtime         |
 | Ferretry settings (short "Set up" skill) | 478        | 120      | every agent runtime         |
 | Notify (`fy notify`, the Inbox)          | 303        | 76       | every agent runtime         |
-| Agenda (`fy agenda`, with steps)         | 1,000      | 250      | `FY_AGENDA=1`               |
-| Hypermedia                               | 1,920      | 480      | `FY_HYPERMEDIA=1`           |
+| Board (`fy task`, cards)                 | 640        | 160      | every agent runtime         |
+| Agenda (`fy agenda`, with steps)         | 1,044      | 261      | `FY_AGENDA=1`               |
+| Hypermedia                               | 1,503      | 376      | `FY_HYPERMEDIA=1`           |
 | Pack mode                                | 1,003      | 251      | `FY_PACK=1`                 |
 | Its routing line                         | ≤ 1,210    | ≤ 303    | `FY_PACK=1`                 |
-| Lessons                                  | 413        | 104      | `FY_LEARNING_PASSIVE=1`     |
+| Lessons                                  | 262        | 66       | `FY_LEARNING_PASSIVE=1`     |
 | The tools server's MCP instructions      | 112        | 28       | always — one line, no rules |
 
 The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settings section points at
 `fy config guide`, which prints it. A test keeps the whole prompt, with the longest routing prompt, under
-7.4 KB (the old always-on Agenda section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The routing line grew from a 150-character
+7.4 KB (the old always-on Agenda section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The always-on Board
+section (640) was paid for, not added on top: the tools are named by prefix (`terminal_*`, `browser_*`), map, media
+and chart's full spec moved behind `fy render guide <type>`, and the lessons rule was compressed. The measured total
+is 7,246, and the test keeps at least 150 characters of headroom under the 7.4 KB cap. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told.
 

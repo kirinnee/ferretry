@@ -7,17 +7,24 @@ import type {
   SignalKind,
   SignalOptions,
 } from '@ferretry/protocol';
-import type { IClock, ISessionApi, ISessionFiles, ISessionIo } from '../../../src/lib/session/ports.ts';
+import type { IClock, ISessionApi, ISessionBoard, ISessionFiles, ISessionIo } from '../../../src/lib/session/ports.ts';
 import { SessionPresenter } from '../../../src/lib/session/presenter.ts';
 
 /** Captured terminal output, so a test asserts what a user would actually see. */
 export class CapturedIo implements ISessionIo {
   readonly out: string[] = [];
   readonly err: string[] = [];
+  /** The same stdout as `out`, recorded apart so a test can tell the unpainted seam was used. */
+  readonly reported: string[] = [];
   exitCode = 0;
 
   success(message: string): void {
     this.out.push(message);
+  }
+
+  report(message: string): void {
+    this.out.push(message);
+    this.reported.push(message);
   }
 
   warn(message: string): void {
@@ -139,6 +146,21 @@ export class RecordingApi implements ISessionApi {
   /** The methods called, in order — the cheapest way to assert an ordering rule. */
   methods(): string[] {
     return this.calls.map(call => call.method);
+  }
+}
+
+/** The board read behind the CARD column, recorded so a test asserts whether `ps` made one. */
+export class RecordingBoard implements ISessionBoard {
+  calls = 0;
+
+  constructor(
+    private readonly lanes: ReadonlyMap<string, string> = new Map(),
+    private readonly failWith?: Error,
+  ) {}
+
+  laneNames(): Promise<ReadonlyMap<string, string>> {
+    this.calls += 1;
+    return this.failWith === undefined ? Promise.resolve(this.lanes) : Promise.reject(this.failWith);
   }
 }
 
