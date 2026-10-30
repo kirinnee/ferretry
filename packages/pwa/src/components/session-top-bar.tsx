@@ -8,15 +8,17 @@
  *   - the ferret's task title (and its callsign when that differs) — what it is;
  *   - its status as a dot and a word, which is also where "needs you" and a dead live feed show up;
  *   - Interrupt and Stop/Start, beside the name;
+ *   - the theme picker, an icon beside Interrupt/Stop (and beside ⓘ on a phone) — the owner asked for it
+ *     there, and a form buried in ▾ had no way to close;
  *   - ⓘ, an icon with no word, which opens Info (a right panel on a desktop, a bottom sheet on a phone);
- *   - Actions ▾, the ONE overflow: Theme and every action sit in it.
+ *   - Actions ▾, the ONE overflow: every action sits in it.
  *
  * Everything that left is in Info › Overview, in its "About this ferret" block: its sub-ferrets, its card,
  * its capabilities (the switch marks), Restart and its agenda. Nothing was removed, only moved.
  *
  * ON A PHONE THE BAR IS ONE COMPACT ROW: ☰ (the sessions drawer), the title (cut with an ellipsis; the whole
- * title is Info › Overview's Task row), ONE status dot, ⓘ and ▾ — and nothing else: the page puts Interrupt
- * in ▾, and this bar draws none of `actions`.
+ * title is Info › Overview's Task row), ONE status dot, the theme icon, ⓘ and ▾ — and nothing else: the page
+ * puts Interrupt in ▾, and this bar draws none of `actions`.
  *
  * PRESENTATIONAL ONLY. The page owns every action and every piece of state; this file draws what it is
  * handed, so a test can mount it with plain values and the page cannot end up with two owners of the
@@ -65,6 +67,8 @@ export interface SessionTopBarProps {
   readonly compact: boolean;
   /** The primary lifecycle actions, rendered by the page that owns them. Not drawn on a phone: they are in ▾. */
   readonly actions: ReactNode;
+  /** The theme picker's trigger, drawn after the lifecycle actions (beside ⓘ on a phone) at every width. */
+  readonly themeToggle?: ReactNode;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
   /**
@@ -88,6 +92,7 @@ export function SessionTopBar({
   compact,
   actions,
   status,
+  themeToggle,
   turn = null,
   infoOpen = false,
   onToggleInfo,
@@ -152,6 +157,7 @@ export function SessionTopBar({
           {actions}
         </div>
       )}
+      {themeToggle}
       {onToggleInfo === undefined ? null : (
         <button
           aria-label="Info"

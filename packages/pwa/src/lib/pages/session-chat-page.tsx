@@ -1,6 +1,6 @@
 import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
-import { Palette, Pause, Play } from 'lucide-react';
+import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
@@ -105,7 +105,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
-import { ThemeSettingsPanel } from '../../shell/theme-toggle.tsx';
+import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
 import type { AgendaLoadStatus } from '../agenda-store.ts';
@@ -1162,8 +1162,8 @@ export function SessionChatPage({
     setActionForm(next);
     if (next !== AGENDA_RESOLVED_ACTION_ID) setResolvedTarget(null);
   }, []);
-  // THE BAR'S ONE OVERFLOW (`session-top-bar.tsx`): Info and the theme are the top of ▾ at every width, and on
-  // a phone Interrupt too — a phone's bar is ☰, the name, one status dot and ▾.
+  // THE BAR'S ONE OVERFLOW (`session-top-bar.tsx`): on a phone Interrupt is the top of ▾ — a phone's bar is ☰,
+  // the name, one status dot, the theme icon, ⓘ and ▾. The theme picker is the bar's own icon, not a form in ▾.
   const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
   const barOverflowActions: readonly SessionActionContribution<CoreActionContext>[] = [
     ...(compact
@@ -1185,18 +1185,6 @@ export function SessionChatPage({
           } satisfies SessionActionContribution<CoreActionContext>,
         ]
       : []),
-    {
-      group: 'session',
-      order: 2,
-      build: () => ({
-        kind: 'form',
-        id: 'theme',
-        label: 'Theme…',
-        title: 'Theme',
-        icon: Palette,
-        render: () => <ThemeSettingsPanel />,
-      }),
-    },
   ];
   const contributions: readonly SessionActionContribution<CoreActionContext>[] = [
     ...barOverflowActions,
@@ -1406,6 +1394,7 @@ export function SessionChatPage({
         infoOpen={info.open}
         menu={actionsMenu}
         session={session}
+        themeToggle={<ThemeToggle iconOnly touch={compact} />}
         status={
           <>
             {liveSample?.compaction?.phase === 'running' ? <CompactionChip compaction={liveSample.compaction} /> : null}
