@@ -1,6 +1,8 @@
 import {
   type AgendaActionRequest,
   AgendaActionRequestSchema,
+  type AgendaClearAgentsResult,
+  AgendaClearAgentsResultSchema,
   type AgendaSnapshot,
   AgendaSnapshotSchema,
   HealthViewSchema,
@@ -96,6 +98,14 @@ export class ProtocolAgendaGateway implements IAgendaGateway {
       { current: agendaRepliesPath(sessionId), legacy: repliesPath(sessionId) },
       AgendaSnapshotSchema,
       jsonPost({}, this.#headers),
+    );
+  }
+
+  async clearAgents(dryRun: boolean): Promise<AgendaClearAgentsResult> {
+    return await this.client.request(
+      '/v1/agenda/clear-agents',
+      AgendaClearAgentsResultSchema,
+      jsonPost(dryRun ? { dryRun: true } : {}, this.#headers),
     );
   }
 

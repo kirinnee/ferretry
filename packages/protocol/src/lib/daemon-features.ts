@@ -47,6 +47,12 @@ export const DAEMON_FEATURES = {
    * clock only where the machine reports it, and otherwise says the machine needs an update.
    */
   agendaSnooze: 'agenda.snooze.1',
+  /**
+   * The owner's bulk "clear all from agent ferrets" (`POST /v1/agenda/clear-agents`, docs/agenda.md § Clearing
+   * the agent ferrets' backlog). A daemon without this name answers 404: the app offers the button only where the
+   * machine reports it, and otherwise says the machine needs an update.
+   */
+  agendaClearAgents: 'agenda.clear-agents.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

@@ -1,4 +1,4 @@
-import type { AgendaActionRequest, AgendaSnapshot, IFyApiClient } from '@ferretry/protocol';
+import type { AgendaActionRequest, AgendaClearAgentsResult, AgendaSnapshot, IFyApiClient } from '@ferretry/protocol';
 
 /**
  * Presentation port for the agenda commands — the narrowest slice of the shipped `ConsoleIo`
@@ -22,8 +22,16 @@ export interface IAgendaGateway {
   apply(sessionId: string, request: AgendaActionRequest): Promise<AgendaSnapshot>;
   /** Deliver the answers held for the ferret now, skipping the settle window; the board as it was left. */
   sendReplies(sessionId: string): Promise<AgendaSnapshot>;
+  /** The owner's bulk clear of the agent ferrets' open items; `dryRun` only counts them. */
+  clearAgents(dryRun: boolean): Promise<AgendaClearAgentsResult>;
   /** The features the daemon reports (`DAEMON_FEATURES`); empty when it reports none or cannot be asked. */
   features(): Promise<readonly string[]>;
+}
+
+/** Asking the person at the terminal; `interactive` is false when nobody can answer. */
+export interface IAgendaPrompt {
+  interactive(): boolean;
+  ask(message: string): Promise<string>;
 }
 
 /** The only client capability the attention gateway consumes. */

@@ -161,6 +161,9 @@ The list is closed. Everything the daemon does _inside its own state home_ — s
 the agenda, pins — is deliberately absent: a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
+One consequence: agenda actions are gated by **who acts** (the human or a ferret), never by a capability.
+`POST /v1/agenda/clear-agents` is owner-only on that axis — an agent credential gets 403 — and has no grant.
+
 ## Permissive by default; LOCALITY is the layer
 
 Both axes default to **enabled** for every capability. The dangerous act is structurally

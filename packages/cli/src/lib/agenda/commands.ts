@@ -3,6 +3,7 @@ import type { NotifyOptions } from '../notify/commands.ts';
 import { ASK_KIND_NAMES } from './ask.ts';
 import type {
   AgendaAddOptions,
+  AgendaClearOptions,
   AgendaCommandOptions,
   AgendaController,
   AgendaEditOptions,
@@ -317,6 +318,16 @@ function mountVerbs(
       .argument('<id>', 'the item reference, like !A3'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.unsnooze(id, merged<AgendaCommandOptions>(command));
+  });
+
+  scoped(
+    agenda
+      .command('clear')
+      .description('clear the agent ferrets’ backlog: dismiss every open item on non-interactive sessions (owner)')
+      .option('--agents', 'clear the boards of the agent ferrets (the only thing there is to clear yet)')
+      .option('--yes', 'do not ask first'),
+  ).action(async (_flags: unknown, command: Command) => {
+    await controller.clearAgents(merged<AgendaClearOptions>(command));
   });
 
   scoped(

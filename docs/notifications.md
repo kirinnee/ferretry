@@ -173,7 +173,7 @@ The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,000 characters, 
 test) names the verbs and flags `fy agenda` takes — its one `agenda add` example carries `--premise` and
 `--context`, which every new item requires ([agenda.md](agenda.md#rules-the-writing-keeps)) — what `--blocking`,
 `--will-block` and `--by` mean, and that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat that
-parks the item as replied (bring it back with `fy agenda surface` if the owner must still act, else `done` it —
+parks the item as replied (bring it back with `fy agenda edit` refreshing the whole card — `--summary`, `--premise` and `--context` — else `done` it —
 [agenda.md](agenda.md#parked-items)).
 
 - **The switch** is the session's own recorded setting, `config.agenda` (`sessionAgendaEnabled`, absent
