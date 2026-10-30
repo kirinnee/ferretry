@@ -114,6 +114,7 @@
         "harness/conversation-picker-screenshot.tsx",
         "harness/mobile-ui3-screenshot.tsx",
         "harness/pack-mode-screenshot.tsx",
+        "harness/task-picker-screenshot.tsx",
         "harness/agenda-switch-screenshot.tsx",
         "harness/needs-you-sidebar-screenshot.tsx",
         "harness/agenda-default-screenshot.tsx",

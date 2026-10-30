@@ -52,8 +52,8 @@ import type { DaemonId } from './daemon-connection.ts';
 /**
  * WHICH KEYS OPEN A REFERENCE MENU — Settings › Behaviour › "Open suggestions with".
  *
- *   ladder   @ files, @@ agents, @@@ attention. Typing `:` or `!` in prose never pops a menu.
- *   symbols  @ files, then the direct sigils `:` agents and `!` attention. No `@@` tiers.
+ *   ladder   @ files, @@ agents, @@@ agenda, @@@@ tasks. Typing `:`, `!` or `&` in prose never pops a menu.
+ *   symbols  @ files, then the direct sigils `:` agents, `!` agenda and `&` tasks. No `@@` tiers.
  *   both     either way works.
  *
  * `/` and `%` open in every mode. The default is the ladder because a single repeated key

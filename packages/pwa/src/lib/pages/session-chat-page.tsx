@@ -1544,6 +1544,7 @@ export function SessionChatPage({
               {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
               {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
               {...(composerCatalogs.attention === undefined ? {} : { autocompleteAgenda: composerCatalogs.attention })}
+              {...(composerCatalogs.tasks === undefined ? {} : { autocompleteTasks: composerCatalogs.tasks })}
               {...(composerCatalogs.skills?.skills === undefined
                 ? {}
                 : { autocompleteSkills: composerCatalogs.skills })}

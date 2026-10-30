@@ -47,7 +47,7 @@ import { fieldScore } from '../shell/palette-ranking.ts';
  * `%` IS ITS OWN TRIGGER RATHER THAN A FIFTH `@` TIER.
  *
  * The `@` run is repetition-as-selection, and the families behind it are all
- * FLEET-WIDE records: files in the session tree, agents, tasks, attention. A
+ * FLEET-WIDE records: files in the session tree, agents, the agenda, tasks. A
  * surface is not one of those — it is a live thing inside THIS session, and a
  * fifth tier would have been `@@@@@`, five keystrokes for the family a reader
  * reaches for while watching an agent work. It also keeps the tiers stable:
@@ -84,11 +84,11 @@ export interface ComposerReferenceTierLegendItem {
  * routing, UI teaching and tests cannot drift independently — including the
  * tier-to-direct-sigil mapping, which is the same fact read from the other end.
  *
- * THREE TIERS, AND TASKS ARE NOT ONE OF THEM — the owner's call: the task board
- * is out of the composer for now, so no menu offers `&ID`. The grammar is
- * untouched: an authored `&F12` still parses, proves and links.
+ * FOUR TIERS, AND TASKS ARE THE FOURTH — the owner's call (2026-10-30), which
+ * reverses the 2026-10-16 decision to offer no task menu. `@@@@` and the direct
+ * `&` both insert `&FN`, the token the grammar already parses, proves and links.
  *
- * There is no further tier. Pins were one; they are a top link strip rather than
+ * There is no fifth tier. Pins were one; they are a top link strip rather than
  * a reference family (handover #63), and readable composer text rather than a
  * second grammar. Template libraries are not a tier either — no build of this
  * app has ever had one, and this list is the guard that keeps it that way.
@@ -97,6 +97,7 @@ export const COMPOSER_REFERENCE_TIERS: readonly ComposerReferenceTierLegendItem[
   { tier: 1, trigger: '@', label: 'Files' },
   { tier: 2, trigger: '@@', label: 'Agents', direct: ':' },
   { tier: 3, trigger: '@@@', label: 'Agenda', direct: '!' },
+  { tier: 4, trigger: '@@@@', label: 'Tasks', direct: '&' },
 ];
 
 /** The reader's choice of keys (`SuggestionKeys`, owned by `lib/controls.ts`), as the switches the providers answer from. */
@@ -129,9 +130,9 @@ export interface ComposerSuggestionSwitches {
    * inserts one.
    */
   readonly mentionSuggestions: boolean;
-  /** The repeated `@@` and `@@@` tiers. Bare `@` files are `mentionSuggestions`' alone. */
+  /** The repeated `@@`, `@@@` and `@@@@` tiers. Bare `@` files are `mentionSuggestions`' alone. */
   readonly ladderSuggestions: boolean;
-  /** The `:` and `!` direct sigils. */
+  /** The `:`, `&` and `!` direct sigils. */
   readonly directReferenceSuggestions: boolean;
   /** `$` skills. `/` skills are unaffected, so a skill is always reachable. */
   readonly skillSuggestions: boolean;
@@ -440,7 +441,7 @@ function percentTrigger(value: string, caret: number): ComposerTriggerMatch | nu
 }
 
 /**
- * The direct family sigils: `:` agents, `&` tasks, `!` attention, `$` skills.
+ * The direct family sigils: `:` agents, `&` tasks, `!` agenda, `$` skills.
  *
  * Three rules, and each one exists because prose contains these characters:
  *

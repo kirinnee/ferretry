@@ -1733,7 +1733,8 @@ button.fy-receipt {
   align-items: baseline;
   border-bottom: var(--divider-width) solid var(--divider-color);
   display: flex;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 0 8px;
   justify-content: space-between;
   padding: 6px 10px;
 }
@@ -1746,6 +1747,8 @@ button.fy-receipt {
 }
 .fy-ac-count,
 .fy-ac-ladder {
+  /* Four tiers no longer fit beside the title on a phone: the ladder wraps to its own line, flush right. */
+  margin-left: auto;
   color: var(--faint, var(--fy-muted));
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 11px;

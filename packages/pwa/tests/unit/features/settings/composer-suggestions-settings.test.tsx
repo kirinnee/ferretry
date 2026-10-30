@@ -64,9 +64,8 @@ describe('ComposerSuggestionsSettings', () => {
     const tree = JSON.stringify(view.toJSON());
 
     expect(tree).toContain('Open suggestions with');
-    expect(tree).toContain('@ files · @@ agents · @@@ agenda');
-    expect(tree).toContain('@ files · : agents · ! agenda · % terminals');
-    expect(tree).not.toContain('task');
+    expect(tree).toContain('@ files · @@ agents · @@@ agenda · @@@@ tasks');
+    expect(tree).toContain('@ files · : agents · ! agenda · & tasks · % terminals');
     expect(tree).toContain('$name skill form');
 
     // The asymmetry is the contract: an offer is removed, never a capability.
