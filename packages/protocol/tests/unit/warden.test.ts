@@ -34,6 +34,20 @@ const dayStats = {
   asked: { auto: 1, jev: 0, llm: 0 },
 };
 
+const jevCheck = {
+  at: INSTANT,
+  sessionId: 'session-1',
+  anomalyKind: 'sus_thinking',
+  verdict: 'handed_on',
+  act: 'restart',
+  why: 'not_sure_enough',
+  route: 'investigation',
+  confidence: 0.21,
+  costUsd: 0.0004,
+};
+
+const jevDay = { checks: 9, healthy: 4, acted: 3, handedOn: 2, skippedForCap: 5 };
+
 const wardenVerdict = {
   at: INSTANT,
   verdict: 'needs_human',
@@ -165,6 +179,12 @@ const wardenCases: SchemaCase[] = [
   { name: 'outcome', schema: warden.WardenOutcomeSchema, value: 'moved' },
   { name: 'actor counts', schema: warden.WardenActorCountsSchema, value: dayStats.moved },
   { name: 'day stats', schema: warden.WardenDayStatsSchema, value: dayStats },
+  { name: 'day stats with Jev checks', schema: warden.WardenDayStatsSchema, value: { ...dayStats, jev: jevDay } },
+  { name: 'jev day stats', schema: warden.WardenJevDayStatsSchema, value: jevDay },
+  { name: 'jev check verdict', schema: warden.WardenJevCheckVerdictSchema, value: 'skipped' },
+  { name: 'jev check why', schema: warden.WardenJevCheckWhySchema, value: 'jev_cap' },
+  { name: 'jev check route', schema: warden.WardenJevCheckRouteSchema, value: 'owner' },
+  { name: 'jev check', schema: warden.WardenJevCheckSchema, value: jevCheck },
   {
     name: 'blessing',
     schema: warden.WardenBlessingViewSchema,
@@ -186,6 +206,7 @@ const wardenCases: SchemaCase[] = [
       investigations: [{ ...investigation, wardenName: 'warden-00002a' }],
       actions: [action, { ...action, actor: 'llm', investigator: 'warden-00002a' }],
       history: [dayStats],
+      jevChecks: [jevCheck],
     },
   },
   { name: 'run', schema: warden.WardenRunViewSchema, value: wardenRunView },

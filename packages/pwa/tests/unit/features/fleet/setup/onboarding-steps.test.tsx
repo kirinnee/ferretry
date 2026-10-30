@@ -466,7 +466,8 @@ describe('OnboardingWardenStep', () => {
     await click(buttonLabelled('Save'), 'Save');
     const patches = calls.filter(call => call.body !== undefined);
     expect(patches).toHaveLength(1);
-    expect(patches[0]?.body).toEqual({ layers: { jev: true, llm: false } });
+    // Only the key that changed: the default already has the LLM layer off.
+    expect(patches[0]?.body).toEqual({ layers: { jev: true } });
     expect(patches[0]?.headers['content-type']).toBe('application/json');
     expect(onSaved).toBe(1);
     expect(text('[role="status"]')).toContain('Saved — in effect now.');
