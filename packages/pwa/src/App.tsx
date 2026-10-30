@@ -2589,7 +2589,7 @@ export function AppShell() {
                 — can explicitly decline it.
               */}
                   <PullToPaletteRegion
-                    className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3"
+                    className={`relative min-h-0 min-w-0 flex-1 px-1 sm:px-3${phone && showsTabBar(pageRoute) ? ' overflow-clip' : ''}`}
                     enabled={touchAffected}
                     onOpen={openPalette}
                   >
