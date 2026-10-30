@@ -8,6 +8,28 @@ show, and what a person can do about a message that did not get through.
 The send ledger and its fates are in `packages/protocol/src/lib/session.ts` (`SendRecordSchema`); the
 decisions are in `packages/daemon/src/lib/tmux/` and `packages/daemon/src/lib/session/send/`.
 
+## The durable queue (being built)
+
+Every message to a session is moving onto ONE durable queue per session, owned by one deliverer, in
+slices (owner-approved 2026-10-30). Until delivery rides it, the queue is written and read but nothing
+is typed from it; the rest of this page is still how a message reaches the pane.
+
+- **Model** — `packages/protocol/src/lib/session-queue.ts` (`QueuedMessageSchema`): ✓ `queued` on accept,
+  ✓✓ `delivered` once typed and submitted (pane proof), ✓✓✓ `read` once the transcript shows it as a user
+  turn; `cancelled` and `failed` are final. A waiting message carries a `waitReason` a person can act on.
+- **Log** — `channel/queue.jsonl` beside the session, append-only and flushed to disk before an accept
+  answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
+  move that is legal from where the message stands, so a replayed or stale line changes nothing.
+- **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
+  one message typing at a time (`nextToDeliver`). A daemon notice to an interactive session is never in the
+  delivery order (`boardOnly`): that session is the owner's own chat, and the notice goes on its board.
+- **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
+  included (the harness queues it itself). It holds only for a draft in the box, a question, dialog or
+  permission form on screen, or a pane it cannot read, and says which as the `waitReason`.
+- **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
+- **Edit or cancel** — only while `queued` (`SessionQueueService.edit` / `.cancel`): once a key has gone to
+  the pane, the words are the agent's.
+
 ## The composer is read, never searched for
 
 Every proof reads **the composer itself** — the last prompt-glyph line (`›`, `❯`, `>`) and the indented

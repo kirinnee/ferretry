@@ -165,6 +165,8 @@ import { registerPinCommands } from '../src/lib/pins/commands';
 import { PinController } from '../src/lib/pins/controller';
 import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import type { IProgress } from '../src/lib/progress/index';
+import { registerQueueCommands } from '../src/lib/queue/commands';
+import { ProtocolQueueGateway } from '../src/lib/queue/gateway';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
 import { registerRenderCommands } from '../src/lib/render/commands';
@@ -859,6 +861,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   },
   ({ program, world, client, ownSessionId }) =>
     registerPinCommands(program, new PinController(new ProtocolPinGateway(client), world.io, ownSessionId)),
+  ({ program, world, client }) =>
+    registerQueueCommands(program, { gateway: new ProtocolQueueGateway(client), out: world.io }),
   ({ program, world, client, ownSessionId }) =>
     registerNotifyCommands(program, {
       gateway: new ProtocolNotifyGateway(client, ownSessionId),

@@ -12,6 +12,7 @@ import {
   type SendResult,
   SendRetryRequestSchema,
   SendSubmitRequestSchema,
+  type QueuedMessage,
   type SessionHandoff,
   SessionHandoffNameSchema,
   type SessionView,
@@ -97,6 +98,8 @@ export interface SessionSendSubsystem {
   sends(sessionId: string): Promise<readonly SendRecord[]>;
   /** One send by its id — how a sender learns where its message settled. */
   sendStatus(sessionId: string, sendId: string): Promise<SendRecord>;
+  /** Every message the session's durable queue holds, oldest first (`lib/session/queue`). */
+  queue(sessionId: string): Promise<readonly QueuedMessage[]>;
   /** Re-attempts one send under its original id, as a person asked. */
   retry(sessionId: string, sendId: string, force: boolean): Promise<SendRecord>;
   /** Takes back one send not proven delivered, erasing it from the composer when it is typed there. */
@@ -280,6 +283,15 @@ function sendLedgerRoutes(subsystem: SessionSendSubsystem): readonly ApiRoute[] 
       minimum: 'operator',
       noStore: true,
       handle: async context => jsonResponse({ sends: await subsystem.sends(pathSessionId(context)).catch(refuse) }),
+    },
+    // The durable queue every message will go through. Read-only until delivery moves onto it, and the
+    // same words as the ledger rows above, so the same minimum.
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/queue',
+      minimum: 'operator',
+      noStore: true,
+      handle: async context => jsonResponse({ messages: await subsystem.queue(pathSessionId(context)).catch(refuse) }),
     },
     {
       method: 'GET',

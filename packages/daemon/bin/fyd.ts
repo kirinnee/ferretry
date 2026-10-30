@@ -441,6 +441,7 @@ import {
   TmuxResumeLauncher,
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
+import { FileSessionQueueStore } from '../src/adapters/session/queue/index.ts';
 import {
   FileSendChannel,
   FileSendLedger,
@@ -1025,6 +1026,7 @@ import {
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
+  SessionQueueService,
   SessionSendService,
   type SessionSendSubsystem,
   SessionSignalError,
@@ -3188,6 +3190,8 @@ function createSessionSendSubsystem(
   sessions: SessionDirectorySubsystem,
   service: SessionSendService,
   ledger: Pick<SendLedger, 'list'>,
+  /** The session's durable queue, read here; delivery does not ride it yet. */
+  queue: Pick<SessionQueueService, 'list'>,
   tracker: Pick<SendTracker, 'check' | 'watching'>,
   /** Copies each named attachment out where the agent can open it by path; see `lib/attachments/delivery.ts`. */
   deliverAttachments: (
@@ -3288,6 +3292,7 @@ function createSessionSendSubsystem(
         .map(sendRecordView)
         .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt));
     },
+    queue: async reference => await queue.list(require(reference)),
     sendStatus: async (reference, sendId) => {
       const id = require(reference);
       await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
@@ -10759,6 +10764,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           sessions,
           sends,
           sendLedger,
+          new SessionQueueService({
+            store: new FileSessionQueueStore(id => createSessionPaths(paths, id).directory),
+            clock,
+            serial: new KeyedSerialExecutor(),
+          }),
           sendTracker,
           async (sessionId, attachmentIds) => {
             // Each copy sits beside its stored original, under the file's own name, written once: the
