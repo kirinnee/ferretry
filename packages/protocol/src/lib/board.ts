@@ -20,6 +20,7 @@
 import { z } from 'zod';
 import { AttentionIdSchema } from './attention.ts';
 import {
+  BoardProjectIdSchema,
   type BoardResult,
   BoardTaskIdSchema,
   boardErr,
@@ -29,7 +30,6 @@ import {
   TaskRefSchema,
 } from './board-refs.ts';
 import {
-  BoardProjectIdSchema,
   DependencyUntilSchema,
   isBackwardMove,
   type LaneCategory,

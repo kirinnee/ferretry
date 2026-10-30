@@ -3,6 +3,7 @@ import should from 'should';
 import * as refs from '../../src/lib/board-refs.ts';
 import {
   BOARD_TASK_ID_PATTERN,
+  BoardProjectIdSchema,
   BoardTaskIdSchema,
   boardErr,
   boardOk,
@@ -10,7 +11,10 @@ import {
   MachineIdSchema,
   parseTaskRef,
   TaskRefSchema,
+  UNFILED_PROJECT_ID,
 } from '../../src/lib/board-refs.ts';
+import { SessionConfigSchema } from '../../src/lib/session.ts';
+import { sessionView } from '../fixtures.ts';
 import { TaskIdSchema } from '../../src/lib/tasks.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
@@ -19,6 +23,8 @@ const VALID: readonly SchemaCase[] = [
   { name: 'machine', schema: MachineIdSchema, value: 'mac' },
   { name: 'local ref', schema: TaskRefSchema, value: { id: 'B1' } },
   { name: 'remote ref', schema: TaskRefSchema, value: { machineId: 'kirin-box', id: 'C999999999' } },
+  { name: 'project id', schema: BoardProjectIdSchema, value: '00000000-0000-4000-8000-000000000001' },
+  { name: 'unfiled', schema: BoardProjectIdSchema, value: UNFILED_PROJECT_ID },
 ];
 
 const INVALID: readonly SchemaCase[] = [
@@ -29,6 +35,7 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'lowercase', schema: BoardTaskIdSchema, value: 'f1' },
   { name: 'blank machine', schema: MachineIdSchema, value: '  ' },
   { name: 'stray field', schema: TaskRefSchema, value: { id: 'F1', session: 's' } },
+  { name: 'not a project', schema: BoardProjectIdSchema, value: 'ferretry' },
 ];
 
 describe('board task refs', () => {
@@ -73,5 +80,35 @@ describe('board task refs', () => {
   it('should build both rails of a result', () => {
     should(boardOk(1)).deepEqual({ ok: true, value: 1 });
     should(boardErr('no')).deepEqual({ ok: false, error: 'no' });
+  });
+});
+
+describe('a session’s board and focus card', () => {
+  const PROJECT = '00000000-0000-4000-8000-000000000001';
+
+  it('should keep the project and the focus card a session config names', () => {
+    // Act
+    const config = SessionConfigSchema.parse({ ...sessionView.config, projectId: PROJECT, focusTask: { id: 'F12' } });
+
+    // Assert
+    should(config.projectId).equal(PROJECT);
+    should(config.focusTask).deepEqual({ id: 'F12' });
+    should(SessionConfigSchema.parse({ ...sessionView.config, projectId: UNFILED_PROJECT_ID }).projectId).equal(
+      'unfiled',
+    );
+  });
+
+  it('should read a session from before boards as having neither', () => {
+    // Act
+    const config = SessionConfigSchema.parse(sessionView.config);
+
+    // Assert
+    should(config.projectId).be.undefined();
+    should(config.focusTask).be.undefined();
+  });
+
+  it('should refuse a malformed project or focus card', () => {
+    should(SessionConfigSchema.safeParse({ ...sessionView.config, projectId: 'ferretry' }).success).be.false();
+    should(SessionConfigSchema.safeParse({ ...sessionView.config, focusTask: '&F12' }).success).be.false();
   });
 });

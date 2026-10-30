@@ -14,7 +14,7 @@
  * Every helper here is total: it returns a {@link BoardResult} and never throws.
  */
 import { z } from 'zod';
-import { type BoardResult, boardErr, boardOk } from './board-refs.ts';
+import { BoardProjectIdSchema, type BoardResult, boardErr, boardOk } from './board-refs.ts';
 import { PositiveIntegerSchema } from './common.ts';
 import { type TaskWorkflow, TaskWorkflowSchema } from './tasks.ts';
 
@@ -136,11 +136,6 @@ const refineLaneLayout = (value: LaneLayout, context: z.RefinementCtx): void => 
 
 export const LaneLayoutSchema = z.object(LaneLayoutShape).superRefine(refineLaneLayout);
 export type LaneLayoutValue = z.infer<typeof LaneLayoutSchema>;
-
-/** A board's identity: a registered project's id, or the one machine-wide board for work with no project. */
-export const UNFILED_PROJECT_ID = 'unfiled';
-export const BoardProjectIdSchema = z.union([z.uuid(), z.literal(UNFILED_PROJECT_ID)]);
-export type BoardProjectId = z.infer<typeof BoardProjectIdSchema>;
 
 /**
  * A project's lanes. `version` rises with every edit, so an edit can say which set it was made against.

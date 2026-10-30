@@ -2,7 +2,6 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import * as lanesModule from '../../src/lib/board-lanes.ts';
 import {
-  BoardProjectIdSchema,
   categoryOf,
   DependencyUntilSchema,
   firstLaneOfCategory,
@@ -30,7 +29,6 @@ import {
   nextLane,
   StaleAfterSchema,
   staleAfterMinutes,
-  UNFILED_PROJECT_ID,
   variantLanes,
 } from '../../src/lib/board-lanes.ts';
 import { TaskWorkflowSchema } from '../../src/lib/tasks.ts';
@@ -68,8 +66,6 @@ const VALID: readonly SchemaCase[] = [
   { name: 'lane', schema: LaneSchema, value: FERRETRY.lanes[1] },
   { name: 'variants', schema: LaneVariantsSchema, value: { quick: ['todo', 'closed'] } },
   { name: 'layout', schema: LaneLayoutSchema, value: layout(SOUND) },
-  { name: 'project id', schema: BoardProjectIdSchema, value: PROJECT },
-  { name: 'unfiled', schema: BoardProjectIdSchema, value: UNFILED_PROJECT_ID },
   { name: 'lane set', schema: LaneSetSchema, value: FERRETRY },
   { name: 'confirmed lane set', schema: LaneSetSchema, value: { ...FERRETRY, confirmedBy: 'owner', version: 3 } },
   { name: 'template name', schema: LaneTemplateNameSchema, value: 'ops' },
@@ -90,7 +86,6 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'empty trigger list', schema: LaneSchema, value: lane('a', 'review', { enterOn: [] }) },
   { name: 'unknown workflow', schema: LaneVariantsSchema, value: { someday: ['todo'] } },
   { name: 'empty variant', schema: LaneVariantsSchema, value: { quick: [] } },
-  { name: 'not a project', schema: BoardProjectIdSchema, value: 'ferretry' },
   { name: 'proposed by nobody', schema: LaneSetSchema, value: { ...FERRETRY, proposedBy: '' } },
   { name: 'confirmed by a ferret', schema: LaneSetSchema, value: { ...FERRETRY, confirmedBy: 'session-1' } },
   { name: 'no lanes', schema: LaneLayoutSchema, value: layout([]) },

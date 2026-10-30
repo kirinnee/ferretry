@@ -32,6 +32,15 @@ export const MAX_MACHINE_ID_LENGTH = 128;
 /** The daemon a card lives on. Opaque to the board; the app's merged view keys on it. */
 export const MachineIdSchema = z.string().trim().min(1).max(MAX_MACHINE_ID_LENGTH);
 
+/**
+ * A board's identity: a registered project's id, or the one machine-wide board for work with no project.
+ * Here rather than beside the lanes because a session's config names its project, and `session.ts` may
+ * import only this leaf.
+ */
+export const UNFILED_PROJECT_ID = 'unfiled';
+export const BoardProjectIdSchema = z.union([z.uuid(), z.literal(UNFILED_PROJECT_ID)]);
+export type BoardProjectId = z.infer<typeof BoardProjectIdSchema>;
+
 /** A card, named. Without `machineId` it means "on this machine". */
 export const TaskRefSchema = z.strictObject({
   machineId: MachineIdSchema.optional(),
