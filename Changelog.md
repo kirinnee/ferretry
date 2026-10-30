@@ -1,3 +1,17 @@
+## [4.124.0](https://github.com/kirinnee/ferretry/compare/v4.123.0...v4.124.0) (2026-10-30)
+
+### Features
+
+* **pwa:** board on the phone (U13) ([#981](https://github.com/kirinnee/ferretry/issues/981)) ([a41a6a8](https://github.com/kirinnee/ferretry/commit/a41a6a8ab5768431e48a503a0458051050f71eac))
+* **warden:** report orphaned cards and hand a resumed ferret its focus card (U9) ([#983](https://github.com/kirinnee/ferretry/issues/983)) ([4d23982](https://github.com/kirinnee/ferretry/commit/4d2398269c11859154963636aaee0fb4508400bc))
+
+### Performance
+
+* **cli:** fy wait asks less often while the session it waits on is still ([#979](https://github.com/kirinnee/ferretry/issues/979)) ([42ddaa3](https://github.com/kirinnee/ferretry/commit/42ddaa3266ea9d8b130d578c49562956affc7d3d))
+* **daemon:** count running sessions from a tally the state feed keeps, not a read per catalogue ([#978](https://github.com/kirinnee/ferretry/issues/978)) ([24b22f1](https://github.com/kirinnee/ferretry/commit/24b22f14d900382ccfca8e9427d3a70cef1cecdc)), closes [#runningSessions](https://github.com/kirinnee/ferretry/issues/runningSessions)
+* **daemon:** derive Pack's routing line once per configuration, not per ferret view ([#977](https://github.com/kirinnee/ferretry/issues/977)) ([4c929cb](https://github.com/kirinnee/ferretry/commit/4c929cbdd588d2ad5a37b1bce869223b41eaeee8)), closes [#load](https://github.com/kirinnee/ferretry/issues/load) [facts/#runningSessions](https://github.com/facts/ferretry/issues/runningSessions)
+* **daemon:** read the fleet manifest once per file, not once per ask ([#980](https://github.com/kirinnee/ferretry/issues/980)) ([145efc2](https://github.com/kirinnee/ferretry/commit/145efc27bc4eb1752ceac2f4b4acdaa8d7d8d25f))
+
 ## [4.123.0](https://github.com/kirinnee/ferretry/compare/v4.122.0...v4.123.0) (2026-10-30)
 
 ### Features
