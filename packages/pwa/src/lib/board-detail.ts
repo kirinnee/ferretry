@@ -8,6 +8,7 @@
  */
 
 import {
+  attachmentsPhrase,
   type AgendaItem,
   type AgendaRef,
   type AgendaSnapshot,
@@ -22,6 +23,7 @@ import {
   type ResolvedAgendaItem,
   type TaskRef,
 } from '@ferretry/protocol';
+import { type DeclaredLanes, doneLaneOf, notGoodLaneOf } from './board-done.ts';
 import type { FerretNames } from './board-present.ts';
 
 type Lanes = Pick<LaneSet, 'lanes'>;
@@ -37,20 +39,16 @@ export const laneNameOf = (laneSet: Lanes | null, laneId: string): string =>
 // ---------------------------------------------------------------------------------------------------
 
 export interface VerdictLanes {
-  /** "✓ Works → Close": the Closed lane, a move forward that needs no words. */
+  /** "✓ Done": the Done lane (`doneLaneOf`), a move forward that needs no words. */
   readonly closeLaneId: string | null;
-  /** "✗ Not good → Implement": the last active lane, a move back that asks why. */
+  /** "✗ Not good → Implement": the Not good lane (`notGoodLaneOf`), a move back that asks why. */
   readonly reworkLaneId: string | null;
 }
 
 /** The lanes the two verdict buttons go to; `null` when the card is not in a 🧪 verify lane. */
-export const verdictLanes = (laneSet: Lanes | null, laneId: string): VerdictLanes | null => {
+export const verdictLanes = (laneSet: (Lanes & DeclaredLanes) | null, laneId: string): VerdictLanes | null => {
   if (laneSet === null || laneCategoryOf(laneSet, laneId) !== 'verify') return null;
-  const active = laneSet.lanes.filter(lane => lane.category === 'active');
-  return {
-    closeLaneId: laneSet.lanes.find(lane => lane.category === 'closed')?.id ?? null,
-    reworkLaneId: active[active.length - 1]?.id ?? null,
-  };
+  return { closeLaneId: doneLaneOf(laneSet), reworkLaneId: notGoodLaneOf(laneSet) };
 };
 
 // ---------------------------------------------------------------------------------------------------
@@ -160,7 +158,14 @@ const describe = (event: BoardTaskEvent, context: HistoryContext): Pick<HistoryR
         minor: false,
       };
     case 'reopened':
-      return { text: `reopened ${lane(event.from)} → ${lane(event.to)}`, detail: event.reason, minor: false };
+      return {
+        // The files the owner sent with it are part of what happened: "reopened To test → Implement with 2 images".
+        text: `reopened ${lane(event.from)} → ${lane(event.to)}${
+          event.attachments === undefined ? '' : ` with ${attachmentsPhrase(event.attachments)}`
+        }`,
+        detail: event.reason,
+        minor: false,
+      };
     case 'note':
       return { text: 'noted', detail: event.text, minor: false };
     case 'clarified':

@@ -10,8 +10,11 @@
  * The ordinary send path makes the alive-or-resume decision, so a reopen and a person's own message to the
  * same ferret can never disagree about it. A send the relaunch refused is HELD for an explicit revive: the
  * ferret still gets it then, but nobody is working the card now, so the next rung is told as well.
+ *
+ * FILES THE OWNER ATTACHED ("Not good" with a picture) ride the same line to whichever rung takes it: the
+ * messenger carries them out of the session they were uploaded to, so the ferret that is told gets them.
  */
-import type { BoardTask } from '@ferretry/protocol';
+import type { BoardReopenAttachments, BoardTask } from '@ferretry/protocol';
 import { effectiveAssignee } from './authority.ts';
 import type { ReopenNotice, ReopenNotifier } from './ports.ts';
 import { reopenMessage } from './service.ts';
@@ -29,10 +32,16 @@ export type ReopenDelivery =
 
 /**
  * Sends one owner message to one ferret, as the ordinary send path would. Never rejects. `key` is the
- * idempotency key: the same reopen delivered twice is typed once.
+ * idempotency key: the same reopen delivered twice is typed once. `attachments` go with the message, carried
+ * to the ferret's own session first when they were uploaded to another.
  */
 export interface ReopenMessenger {
-  deliver(sessionId: string, message: string, key: string): Promise<ReopenDelivery>;
+  deliver(
+    sessionId: string,
+    message: string,
+    key: string,
+    attachments?: BoardReopenAttachments,
+  ): Promise<ReopenDelivery>;
 }
 
 /** The idempotency key of one reopen: the card and the history event that reopened it. */
@@ -63,7 +72,14 @@ export class ReopenDeliveryLadder implements ReopenNotifier {
   async deliver(notice: ReopenNotice): Promise<ReopenDelivered> {
     const message = reopenMessage(notice.task, notice.by, notice.reason);
     const messenger = notice.by.kind === 'owner' ? this.ownerMessenger : this.messenger;
-    return await walkLadder(messenger, this.diagnostics, rungsOf(notice.task), message, reopenKey(notice));
+    return await walkLadder(
+      messenger,
+      this.diagnostics,
+      rungsOf(notice.task),
+      message,
+      reopenKey(notice),
+      notice.attachments,
+    );
   }
 }
 
@@ -79,10 +95,11 @@ export const walkLadder = async (
   rungs: readonly string[],
   message: string,
   key: string,
+  attachments?: BoardReopenAttachments,
 ): Promise<ReopenDelivered> => {
   let last: ReopenDelivered = { to: null, how: 'orphaned' };
   for (const sessionId of rungs) {
-    const how = await messenger.deliver(sessionId, message, key);
+    const how = await messenger.deliver(sessionId, message, key, attachments);
     if (reached(how)) return { to: sessionId, how };
     if (how === 'held' && last.to === null) last = { to: sessionId, how };
   }

@@ -53,6 +53,12 @@ export const DAEMON_FEATURES = {
    * machine reports it, and otherwise says the machine needs an update.
    */
   agendaClearAgents: 'agenda.clear-agents.1',
+  /**
+   * A board move back (`move` or `reopen`) may carry `attachments` — files the owner sent with "Not good" —
+   * which the daemon delivers to the card's ferret with the reopen and names in the card's history. A daemon
+   * without this name refuses the field: the app offers the composer's attach only where the machine reports it.
+   */
+  boardReopenAttachments: 'board.reopen.attachments.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

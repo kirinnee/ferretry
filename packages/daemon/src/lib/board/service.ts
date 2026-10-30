@@ -14,6 +14,7 @@ import {
   type BoardActor,
   type BoardProjectId,
   type BoardQuery,
+  type BoardReopenAttachments,
   type BoardResponse,
   type BoardSkipRequest,
   type BoardSkipResponse,
@@ -34,9 +35,10 @@ import {
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
 import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
-import { type BoardCaller, effectiveAssignee, standingOf } from './authority.ts';
+import { type BoardCaller, type BoardStanding, effectiveAssignee, standingOf } from './authority.ts';
 import {
   applyAction,
+  type CardContext,
   type CardOutcome,
   newCard,
   requireLocalCard,
@@ -58,6 +60,7 @@ import type {
   BoardStore,
   LaneSetSource,
   ProjectAdopter,
+  BoardAttachmentSource,
   DoneNotifier,
   ReopenNotifier,
   SessionFocus,
@@ -90,6 +93,8 @@ export interface BoardServiceDependencies {
   readonly adoption?: ProjectAdopter;
   /** Who started whom: a sub-ferret may only note and link PRs on its own card. Absent, every caller is a lead. */
   readonly subFerrets?: SubFerretDirectory;
+  /** The attachment store, for a move back that carries files. Absent, such a move is refused. */
+  readonly attachments?: BoardAttachmentSource;
 }
 
 /** What `fy signal done` did to the ferret's focus card. */
@@ -563,7 +568,48 @@ export class BoardService {
       request.action === 'reparent' && request.parent !== null
         ? await this.parentStanding(request.parent, caller, context.index)
         : null;
-    return applyAction(card, request, context, target, parentStanding);
+    const attachments =
+      (request.action === 'move' || request.action === 'reopen') && request.attachments !== undefined
+        ? await this.attachmentsFor(card, request.attachments, context.standing)
+        : undefined;
+    return applyAction(
+      card,
+      request,
+      attachments === undefined ? context : { ...context, attachments },
+      target,
+      parentStanding,
+    );
+  }
+
+  /**
+   * The files a move back carries, found where the app uploaded them. They are the OWNER's ("Not good" with a
+   * picture), and they must sit in the session of a ferret the reopen is delivered to — the card's assignee or
+   * its owner ferret — so a request cannot pull another session's files onto this card.
+   */
+  private async attachmentsFor(
+    card: BoardTask,
+    request: BoardReopenAttachments,
+    standing: BoardStanding,
+  ): Promise<NonNullable<CardContext['attachments']>> {
+    const ref = formatTaskRef(card);
+    if (standing !== 'owner-human') {
+      throw new BoardError('forbidden', `only the owner sends files with a move back of ${ref}`, ['owner-human']);
+    }
+    if (request.from !== effectiveAssignee(card) && request.from !== card.owner) {
+      throw new BoardError(
+        'invalid',
+        `the files for ${ref} must be uploaded to its ferret (${effectiveAssignee(card)}), not ${request.from}`,
+      );
+    }
+    const source = this.ports.attachments;
+    if (source === undefined) throw new BoardError('invalid', 'this daemon cannot carry files with a move back');
+    const files = await source.describe(request.from, request.ids).catch((error: unknown) => {
+      throw new BoardError(
+        'invalid',
+        `a file sent with ${ref} is not in its ferret's session: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    });
+    return { request, files };
   }
 
   /** The caller's standing on the card a re-parent would put a card under; `null` when that card is not here. */

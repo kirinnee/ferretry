@@ -278,6 +278,26 @@ Re-plan means retitle, rewrite the brief, reassign, drop and reorder. A ferret n
 an owner gate, and only the owner closes. Reaching the routes at all is a `fleet` capability matter for a caller
 who is not on this host ([grants.md](grants.md)).
 
+## Done and Not good
+
+The owner's two answers about a card, on every surface that shows one (Kanban, Table, card detail):
+
+- **Done** moves the card to the project's Closed lane, and its ferret is told in one plain line.
+- **Not good** opens a small composer: the words, plus any images or files. It is the owner's move back, so it
+  is a reopen: the card goes back to the rework lane, the words are added to its clarifications, and the
+  ferret is sent them through its queue as the owner. The `reopened` history event names the files, so the
+  card reads "reopened Released → Implement … with 2 images".
+
+The files travel as ordinary chat attachments. The app uploads them to the card's ferret (its assignee, else
+its owner ferret) through the session attachment route, then names them on the move (`attachments: { from,
+ids }`). The daemon refuses files from anyone but the owner, files in any other session, and files on a move
+that sends nothing back. Whichever ferret the reopen reaches gets a copy in its own session; if the copy
+fails, the line still lands with a sentence saying the files did not. A daemon reports
+`board.reopen.attachments.1` on `GET /v1/health` when it takes files; the app offers attaching only there.
+
+While a move is in flight, the pressed button shows a spinner and both answers are disabled; a refusal is
+shown next to them.
+
 ## Activity and staleness
 
 Activity is attributed to a session's focus card (`config.focusTask`, set by `fy task focus` and by creating a

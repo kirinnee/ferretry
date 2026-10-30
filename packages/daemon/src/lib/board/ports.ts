@@ -11,9 +11,11 @@
 import type {
   AgendaRef,
   BoardActor,
+  BoardAttachment,
   BoardChangedEvent,
   BoardProjectId,
   BoardQuarantinedCard,
+  BoardReopenAttachments,
   BoardSkip,
   BoardTask,
   BoardTaskActivity,
@@ -154,6 +156,16 @@ export interface ReopenNotice {
   readonly to: string;
   readonly reason: string;
   readonly by: BoardActor;
+  /** The files the owner sent with it, still in `from`'s session; the delivery carries them to whoever is told. */
+  readonly attachments?: BoardReopenAttachments;
+}
+
+/**
+ * The files the owner attached to a move back, as the attachment store holds them in one session. It names
+ * each (for the card's history) and refuses — by rejecting — an id the session does not hold.
+ */
+export interface BoardAttachmentSource {
+  describe(sessionId: string, ids: readonly string[]): Promise<readonly BoardAttachment[]>;
 }
 
 /**

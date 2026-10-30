@@ -9,7 +9,6 @@ import {
   cardPlaces,
   flattenTree,
   laneNames,
-  laneOfCategory,
   listRows,
   parseBoardView,
 } from '../../src/lib/board-view.ts';
@@ -172,14 +171,5 @@ describe('places', () => {
     const [first, second] = placed.cards;
     expect(places.get(first?.key ?? '')).toMatchObject({ laneName: 'Review/CI', category: 'review' });
     expect(places.get(second?.key ?? '')).toMatchObject({ laneName: 'ghost', category: null });
-  });
-
-  it('finds the first or last lane of a category, or null', () => {
-    const group = placed.groups[0];
-    if (group === undefined) throw new Error('no group');
-    expect(laneOfCategory(group, 'closed')).toBe('closed');
-    expect(laneOfCategory(group, 'active')).toBe('plan');
-    expect(laneOfCategory(group, 'active', 'last')).toBe('implement');
-    expect(laneOfCategory({ ...group, laneSet: null }, 'closed')).toBeNull();
   });
 });

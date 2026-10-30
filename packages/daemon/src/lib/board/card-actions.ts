@@ -10,11 +10,14 @@
  *   the `reopened` event and appends the owner's words to the clarifications, and the service then
  *   delivers it to the card's ferret.
  * - **Gates** (§2.3): only the owner passes an owner-gated lane (`needsOwner`), so only the owner closes.
+ * - **Files ride a reopen only**: an owner's move back may carry the files the owner attached ("Not good"),
+ *   which the service resolved first; the `reopened` event names them and the delivery carries them on.
  * - **Dependencies** (§2.7): a card with unfinished blockers cannot move to a later CATEGORY; only the
  *   owner overrides a dependency, and the override is recorded. Cycles are refused.
  */
 import {
   type BoardActor,
+  type BoardAttachment,
   type BoardClarification,
   type BoardEditableField,
   BoardEditableFieldSchema,
@@ -38,6 +41,7 @@ import {
   needsOwner,
   type PrLink,
   prUrlParts,
+  type BoardReopenAttachments,
   type TaskRef,
 } from '@ferretry/protocol';
 import { type BoardOperation, type BoardStanding, mayDo, OPERATION_STANDINGS, refusalMessage } from './authority.ts';
@@ -56,13 +60,27 @@ export interface CardContext {
   readonly laneSets: LaneSets;
   /** The version this daemon runs, for `release.running`; absent or `null` when it is not known. */
   readonly runningVersion?: string | null;
+  /**
+   * The files the request carries, as the service found them in the attachment store; absent when it carries
+   * none. Only a reopen takes them.
+   */
+  readonly attachments?: {
+    readonly request: BoardReopenAttachments;
+    readonly files: readonly BoardAttachment[];
+  };
 }
 
 /** What a rule decided. `task: null` changes nothing on the card. */
 export interface CardOutcome {
   readonly task: BoardTask | null;
   /** Set when the card was sent back with someone's words: the service delivers it to its ferret. */
-  readonly reopened?: { readonly from: string; readonly to: string; readonly reason: string };
+  readonly reopened?: {
+    readonly from: string;
+    readonly to: string;
+    readonly reason: string;
+    /** The files to carry to the ferret with it. */
+    readonly attachments?: BoardReopenAttachments;
+  };
 }
 
 /** The source recorded with an owner's words when they arrived as a move on the board. */
@@ -170,6 +188,9 @@ const move = (card: BoardTask, to: string, reason: string | undefined, context: 
   if (isBack && context.standing === 'owner-human') {
     return reopenTo(card, to, reason ?? '', { text: reason ?? '', source: OWNER_MOVE_SOURCE }, context);
   }
+  if (context.attachments !== undefined) {
+    throw new BoardError('invalid', `files ride only the owner's move back; ${ref} is not being sent back`);
+  }
   return {
     task: {
       ...withEvent(card, { type: 'moved', from: card.laneId, to, backward: isBack, reason: reason ?? null }, context),
@@ -187,10 +208,22 @@ const reopenTo = (
   context: CardContext,
 ): CardOutcome => {
   const clarification: BoardClarification = { text: ask.text, source: ask.source, at: context.now, by: context.actor };
-  const reopened = withEvent(card, { type: 'reopened', from: card.laneId, to, reason, ask }, context);
+  const files = context.attachments;
+  const reopened = withEvent(
+    card,
+    {
+      type: 'reopened',
+      from: card.laneId,
+      to,
+      reason,
+      ask,
+      ...(files === undefined ? {} : { attachments: [...files.files] }),
+    },
+    context,
+  );
   return {
     task: { ...reopened, laneId: to, dropped: null, clarifications: [...card.clarifications, clarification] },
-    reopened: { from: card.laneId, to, reason },
+    reopened: { from: card.laneId, to, reason, ...(files === undefined ? {} : { attachments: files.request }) },
   };
 };
 

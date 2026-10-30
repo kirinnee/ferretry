@@ -18,6 +18,7 @@ import { Columns3, List } from 'lucide-react';
 import { type ReactElement, useCallback, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { BoardChat } from '../../lib/board-chat.ts';
+import type { BoardAnswerState } from '../../lib/board-done.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import type { BoardSideView } from '../../lib/board-side-view.ts';
 import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
@@ -43,6 +44,8 @@ export interface BoardSideTabProps {
   readonly movesFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardCardMoves | undefined;
   /** The owner's Done ✓; absent: the cards cannot be closed from here. */
   readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
+  /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
+  readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
 }
 
 const VIEWS: readonly { readonly id: BoardSideView; readonly label: string; readonly Icon: typeof List }[] = [
@@ -86,6 +89,7 @@ export function BoardSideTab({
   onOpenCard,
   movesFor,
   doneFor,
+  answerFor,
 }: BoardSideTabProps): ReactElement {
   const { cards, status } = chat;
   const names = ferretNamer(callsigns);
@@ -101,6 +105,7 @@ export function BoardSideTab({
     const place = cards.places.get(card.key);
     const moves = place === undefined ? undefined : movesFor?.(card, place);
     const done = place === undefined ? undefined : doneFor?.(card, place);
+    const answer = answerFor?.(card);
     return (
       <BoardCard
         card={card}
@@ -115,6 +120,7 @@ export function BoardSideTab({
         showMachine={false}
         {...(moves === undefined ? {} : { moves })}
         {...(done === undefined ? {} : { done })}
+        {...(answer === undefined ? {} : { answer })}
         {...extra}
       />
     );
