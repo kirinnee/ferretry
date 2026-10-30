@@ -115,6 +115,55 @@ const texts = (view: ReactTestRenderer): string[] => {
 };
 
 describe('composer autocomplete popover', () => {
+  test('offers "Include agent tasks" on the task menu only, and flips it from a key or a tap', () => {
+    const flips: boolean[] = [];
+    const switchOf = (included: boolean) => ({ included, onToggle: () => flips.push(!included) });
+    const view = mounted(
+      render(
+        <ComposerAutocompletePopover
+          agentTasks={switchOf(false)}
+          surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0, contextLabel: '& tasks' })}
+        />,
+      ),
+    );
+    const toggle = view.root.findByProps({ 'data-agent-tasks-switch': '' });
+    expect(toggle.props.role).toBe('switch');
+    expect(toggle.props['aria-checked']).toBe(false);
+    run(() => toggle.props.onClick({ detail: 0 }));
+    run(() => toggle.props.onClick({ detail: 1 }));
+    run(() => {
+      toggle.props.onPointerDown({ pointerId: 7, preventDefault: () => undefined });
+      toggle.props.onPointerUp({ pointerId: 7 });
+    });
+    expect(flips).toEqual([true, true]);
+    run(() => {
+      toggle.props.onPointerDown({ pointerId: 8, preventDefault: () => undefined });
+      toggle.props.onPointerCancel();
+      toggle.props.onPointerUp({ pointerId: 8 });
+    });
+    expect(flips).toEqual([true, true]);
+
+    run(() =>
+      view.update(
+        <ComposerAutocompletePopover
+          agentTasks={switchOf(true)}
+          surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0, contextLabel: '& tasks' })}
+        />,
+      ),
+    );
+    expect(view.root.findByProps({ 'data-agent-tasks-switch': '' }).props['aria-checked']).toBe(true);
+
+    run(() =>
+      view.update(
+        <ComposerAutocompletePopover
+          agentTasks={switchOf(false)}
+          surface={surfaceOf({ candidates: CANDIDATES, activeIndex: 0, contextLabel: 'Agents' })}
+        />,
+      ),
+    );
+    expect(view.root.findAllByProps({ 'data-agent-tasks-switch': '' })).toHaveLength(0);
+  });
+
   test('keeps an empty live region mounted while closed so the first open state is announced', () => {
     const view = mounted(render(<ComposerAutocompletePopover surface={surfaceOf({ open: false })} />));
     const announcer = view.root.findByProps({ 'aria-live': 'polite' });

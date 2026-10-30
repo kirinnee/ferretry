@@ -18,6 +18,20 @@ describe('sessionCards', () => {
     expect(sessionCards(model, phone.daemonId, SESSION)).toEqual([]);
   });
 
+  test('marks a card the human did not raise, unless it waits on them', async () => {
+    const model = await boardModelOf([
+      card('F1', { owner: SESSION, createdBy: { kind: 'owner' } }),
+      card('F2', { owner: SESSION }),
+      card('F3', { owner: SESSION, createdBy: { kind: 'daemon' } }),
+    ]);
+
+    const byId = new Map(sessionCards(model, laptop.daemonId, SESSION).map(entry => [entry.id, entry]));
+
+    expect(byId.get('F1')?.agentAsked).toBe(false);
+    expect(byId.get('F2')?.agentAsked).toBe(true);
+    expect(byId.get('F3')?.agentAsked).toBe(true);
+  });
+
   test('carries the old id only from a legacyRef that names this session', async () => {
     const model = await boardModelOf([
       card('F96', { owner: SESSION, legacyRef: `${SESSION}:F12` }),

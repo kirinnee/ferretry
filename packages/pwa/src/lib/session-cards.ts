@@ -9,6 +9,7 @@
 
 import type { BoardTaskView } from '@ferretry/protocol';
 import type { BoardModel } from './board-model.ts';
+import { isMine } from './board-model.ts';
 import { cardPlaces } from './board-view.ts';
 import type { DaemonId } from './daemon-connection.ts';
 
@@ -27,6 +28,8 @@ export interface SessionCard {
   readonly assignee: string | null;
   /** The latest real activity, or the creation instant for a card never touched. */
   readonly touchedAt: string;
+  /** Its ask did not come from the human: another ferret, the Warden or an auto card raised it, and nothing waits on the owner. */
+  readonly agentAsked: boolean;
   /** The id this card had as an old task of this session, when it was imported from one. */
   readonly legacyId: string | null;
 }
@@ -57,6 +60,7 @@ export const sessionCards = (model: BoardModel, daemonId: DaemonId, sessionId: s
         active: category === 'active' || category === 'review',
         assignee: task.assignee,
         touchedAt: task.lastTouchedAt ?? task.createdAt,
+        agentAsked: !isMine(task),
         legacyId: legacyIdOf(task, sessionId),
       };
     });

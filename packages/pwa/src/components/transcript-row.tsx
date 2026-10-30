@@ -1,12 +1,13 @@
 import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
 import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
+import { parseInstructionsUpdate } from '../lib/instructions-update.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import { stripFraming } from '../lib/message-framing.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
-import { HandoffNoticeRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
+import { HandoffNoticeRow, InstructionsUpdateRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { ChatProse } from './chat-prose.tsx';
 import { CommandRow } from './command-row.tsx';
 import {
@@ -106,6 +107,8 @@ export function TranscriptRow({
       />
     );
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
+    const noted = parseInstructionsUpdate(entry.ledger.message, entry.ledger.queue?.by);
+    if (noted !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={noted} />;
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
         {isFerretryNoticeSend(entry.ledger) ? <span className="fy-system-label">Ferretry</span> : null}
@@ -142,6 +145,8 @@ export function TranscriptRow({
   if (entry.kind === 'system' && entry.event !== undefined)
     return <HarnessEventRow event={entry.event} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
+  const instructions = entry.kind === 'user' ? parseInstructionsUpdate(entry.text, entry.send?.queue?.by) : null;
+  if (instructions !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={instructions} />;
   if (entry.kind === 'user' && entry.send !== undefined && isFerretryNoticeSend(entry.send))
     return (
       <SystemNoticeRow entry={{ ...entry, text: parseFerretryNotice(entry.text) ?? entry.text }} rhythm={rhythm} />
@@ -263,6 +268,9 @@ function HandoffRow({
   const { reading, source } = useHandoffReading(handoff.name);
   const notice = reading.state === 'read' ? parseFerretryNotice(reading.handoff.message) : null;
   if (notice !== null) return <HandoffNoticeRow entry={entry} notice={notice} rhythm={rhythm} />;
+  const instructions =
+    reading.state === 'read' ? parseInstructionsUpdate(reading.handoff.message, entry.send?.queue?.by) : null;
+  if (instructions !== null) return <InstructionsUpdateRow entry={entry} rhythm={rhythm} update={instructions} />;
   const parsed = reading.state === 'read' ? parsePeerEnvelope(reading.handoff.message) : null;
   if (parsed !== null && source !== null && reading.state === 'read')
     return (
@@ -271,6 +279,7 @@ function HandoffRow({
         entry={entry}
         peer={parsed.envelope}
         rhythm={rhythm}
+        text={parsed.body}
       />
     );
   const sender = entry.send?.from;
@@ -287,6 +296,7 @@ function HandoffRow({
           note: '',
         }}
         rhythm={rhythm}
+        {...(reading.state === 'read' ? { text: stripFraming(reading.handoff.message).body } : {})}
       />
     );
   return (
