@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import {
   type BoardTaskActionRequestInput,
+  type BoardTaskCreateRequestInput,
   boardErr,
   boardOk,
   type LaneSetActionRequestInput,
@@ -16,6 +17,7 @@ const harness = (paired = [laptop]) => {
   const sent: { daemonId: string; id: string; request: BoardTaskActionRequestInput }[] = [];
   const lanesSent: { daemonId: string; projectId: string; request: LaneSetActionRequestInput }[] = [];
   const responses: unknown[][] = [];
+  const created: { daemonId: string; request: BoardTaskCreateRequestInput }[] = [];
   let refuse = false;
   const actions = createBoardActions({
     store: {
@@ -32,6 +34,12 @@ const harness = (paired = [laptop]) => {
         sent.push({ daemonId: machine.daemonId, id, request });
         return refuse ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }) : boardOk(card(id));
       },
+      create: async (machine, request) => {
+        created.push({ daemonId: machine.daemonId, request });
+        return refuse
+          ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const })
+          : boardOk(card('F9'));
+      },
     },
     agenda: {
       respond: async (...args: unknown[]) => {
@@ -46,6 +54,7 @@ const harness = (paired = [laptop]) => {
     sent,
     lanesSent,
     responses,
+    created,
     refuse: (value: boolean) => {
       refuse = value;
     },
@@ -105,6 +114,7 @@ describe('the other verbs', () => {
       until: 'merged' as never,
       overrideReason: 'urgent',
     });
+    await actions.undepend(card1, { daemonId: laptop.daemonId, id: 'F2' } as never, 'no longer needed');
     await actions.note(card1, 'a note');
     await actions.link(card1, { pr: 12 } as never);
     await actions.drop(card1, 'obsolete');
@@ -113,12 +123,14 @@ describe('the other verbs', () => {
       'reopen',
       'depend',
       'depend',
+      'undepend',
       'note',
       'link',
       'drop',
       'edit',
     ]);
     expect(sent[2]?.request).toMatchObject({ override: { reason: 'urgent' } });
+    expect(sent[3]?.request).toMatchObject({ action: 'undepend', reason: 'no longer needed' });
     expect(sent[1]?.request).not.toHaveProperty('override');
     expect(sent.every(entry => entry.daemonId === laptop.daemonId && entry.id === 'F1')).toBe(true);
   });
@@ -128,6 +140,27 @@ describe('the other verbs', () => {
     refuse(true);
     const answer = await actions.drop(card1, 'x');
     expect(!answer.ok && answer.error.boardCode).toBe('owner-gate');
+  });
+});
+
+describe('create', () => {
+  const request = { kind: 'feature', title: 'Try it', ask: { text: 'do it', source: 'owner (board)' } } as never;
+
+  it('opens the card on the machine it names', async () => {
+    const { actions, created } = harness();
+    const answer = await actions.create(laptop.daemonId, request);
+    expect(answer.ok && answer.value.id).toBe('F9');
+    expect(created).toEqual([{ daemonId: laptop.daemonId, request }]);
+  });
+
+  it('hands the daemon’s refusal back, and an unpaired machine as such', async () => {
+    const { actions, refuse, created } = harness();
+    refuse(true);
+    const refused = await actions.create(laptop.daemonId, request);
+    expect(!refused.ok && refused.error.boardCode).toBe('owner-gate');
+    const gone = await actions.create(workstation.daemonId, request);
+    expect(!gone.ok && gone.error.boardCode).toBe('no-machine');
+    expect(created).toHaveLength(1);
   });
 });
 
@@ -157,6 +190,7 @@ describe('answer', () => {
     const actions = createBoardActions({
       store: {
         act: async () => boardErr({ status: 0, message: '', boardCode: null }),
+        create: async () => boardErr({ status: 0, message: '', boardCode: null }),
         changeLanes: async () => boardErr({ status: 0, message: '', code: null }),
       },
       agenda: {
