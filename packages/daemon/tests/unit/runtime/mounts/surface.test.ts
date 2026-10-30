@@ -359,6 +359,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     has: id => id === 's1',
     candidates: async () => [{ id: 's1', name: 'aniya', status: 'running' }],
   },
+  boardProjects: {
+    projects: async () => [],
+    project: async () => undefined,
+    projectOf: async () => 'unfiled',
+    apply: async () => ({ ok: false, error: { code: 'not-found', projectId: 'unfiled' } }),
+  },
   catalogs: {
     projects: async () => [],
     registerProject: async () => {
@@ -814,7 +820,8 @@ describe('the mounted daemon surface', () => {
       1 + // one transcript image by its handle: the log's `[fy-image …]` marker, governed exactly like `logs` (docs/grants.md)
       1 + // handing a web address to this computer's own browser (loopback caller only)
       3 + // the skills inventory: the machine listing, one session's listing, and the Open read of a listed SKILL.md
-      3; // a ferret's processes: the list, one process's output, and Stop
+      3 + // a ferret's processes: the list, one process's output, and Stop
+      3; // the board's projects: the list, one project's lanes, and a propose, edit or confirm of them
     // `none` lost `POST /v1/pair`: redemption happens only inside a session now, so it is no route at all.
     // `authenticated` gained the Warden's "who needs you" feed, which a live warden reads like its status,
     // and the WebRTC offer: any paired device may ask for a shorter path to its own daemon (§16).
@@ -981,6 +988,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/skills/inventory',
       'GET /v1/skills',
       'GET /v1/skills/file',
+      'GET /v1/board/projects',
+      'GET /v1/board/projects/:projectId/lanes',
+      'POST /v1/board/projects/:projectId/lanes',
       'GET /v1/worktrees/removal',
       'POST /v1/worktrees/remove',
       'GET /v1/worktrees',

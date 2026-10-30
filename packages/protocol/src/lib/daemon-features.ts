@@ -39,6 +39,8 @@ export const DAEMON_FEATURES = {
    * daemon advertises it, and otherwise raise the item without one.
    */
   agendaTask: 'agenda.task.1',
+  /** The board's per-project lane sets: `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`. */
+  boardLanes: 'board.lanes.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

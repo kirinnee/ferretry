@@ -57,6 +57,8 @@ import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
 import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
+import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
+import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
 import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
@@ -898,6 +900,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       files: new BunTextFileReader(),
       environmentSessionId: ownSessionId,
     }),
+  ({ program, world, client }) =>
+    registerLaneCommands(program, { gateway: new FyLaneGateway(client), io: world.io, binaryName: BINARY_NAME }),
   ({ program, world, client }) =>
     registerTaskBoardCommands(program, {
       gateway: new FyTaskBoardGateway(client),

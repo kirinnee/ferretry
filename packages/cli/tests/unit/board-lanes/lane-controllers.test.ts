@@ -1,0 +1,121 @@
+import { describe, it } from 'bun:test';
+import type { BoardProject, BoardProjectId, LaneSetActionRequest, LaneSetChangeResponse } from '@ferretry/protocol';
+import should from 'should';
+import { LaneController } from '../../../src/lib/board-lanes/lane-controllers';
+import { renderBoardLanes, renderLaneChange, renderLaneSet } from '../../../src/lib/board-lanes/lane-render';
+import type { ILaneGateway } from '../../../src/lib/board-lanes/ports';
+import { FERRETRY_ID, laneSet, listing, project } from './fixtures';
+
+class FakeGateway implements ILaneGateway {
+  readonly changes: { projectId: BoardProjectId; request: LaneSetActionRequest }[] = [];
+
+  constructor(
+    private readonly board: BoardProject = project(),
+    private readonly agenda: LaneSetChangeResponse['agenda'] = 'raised',
+  ) {}
+
+  projects() {
+    return Promise.resolve(listing({ current: this.board.id }));
+  }
+
+  project() {
+    return Promise.resolve(this.board);
+  }
+
+  change(projectId: BoardProjectId, request: LaneSetActionRequest) {
+    this.changes.push({ projectId, request });
+    return Promise.resolve({ laneSet: laneSet({ version: 4 }), agenda: this.agenda });
+  }
+}
+
+const harness = (gateway = new FakeGateway()) => {
+  const lines: string[] = [];
+  return { gateway, lines, controller: new LaneController(gateway, { success: line => lines.push(line) }, 'fy') };
+};
+
+describe('fy board lanes propose', () => {
+  it('should propose for the calling session’s board and say the owner was asked', async () => {
+    const { controller, gateway, lines } = harness();
+    await controller.propose({ json: false }, { template: 'pr' });
+    should(gateway.changes).eql([
+      { projectId: FERRETRY_ID, request: { action: 'propose', template: 'pr', renames: {} } },
+    ]);
+    should(lines[0])
+      .match(/Ferretry lanes, version 4/u)
+      .and.match(/Accept \/ Edit choice/u);
+  });
+
+  it('should print the daemon’s answer as JSON on request', async () => {
+    const { controller, lines } = harness();
+    await controller.propose({ json: true, project: 'Ferretry' }, { template: 'pr' });
+    should(JSON.parse(lines[0] ?? '')).containEql({ agenda: 'raised' });
+  });
+});
+
+describe('fy board lanes show', () => {
+  it('should print the lanes with their ids', async () => {
+    const { controller, lines } = harness();
+    await controller.show({ json: false });
+    should(lines[0])
+      .match(/todo\tTodo\t\(backlog\)/u)
+      .and.match(/not yet confirmed/u);
+  });
+
+  it('should print the project as JSON on request', async () => {
+    const { controller, lines } = harness();
+    await controller.show({ json: true });
+    should(JSON.parse(lines[0] ?? '')).containEql({ id: FERRETRY_ID });
+  });
+
+  it('should give the command to run when the project has no lanes', async () => {
+    const { controller, lines } = harness(new FakeGateway(project({ laneSet: null })));
+    await controller.show({ json: false });
+    should(lines[0]).match(
+      /has no lanes yet\. Propose them: fy board lanes propose --template <template> --project Ferretry/u,
+    );
+  });
+});
+
+describe('fy board lanes edit', () => {
+  it('should edit against the version it just read', async () => {
+    const { controller, gateway, lines } = harness();
+    await controller.edit({ json: false }, { rename: ['todo=Backlog'] });
+    const request = gateway.changes[0]?.request;
+    should(request).containEql({ action: 'edit', version: 3 });
+    should(lines[0]).match(/version 4/u);
+  });
+
+  it('should print JSON on request', async () => {
+    const { controller, lines } = harness();
+    await controller.edit({ json: true }, { rename: ['todo=Backlog'] });
+    should(JSON.parse(lines[0] ?? '')).containEql({ agenda: 'raised' });
+  });
+
+  it('should refuse a project with no lanes and say how to get some', async () => {
+    const { controller, gateway } = harness(new FakeGateway(project({ laneSet: null })));
+    await controller.edit({ json: false }, { rename: ['todo=Backlog'] }).then(
+      () => should.fail('expected a refusal', 'a refusal'),
+      (error: Error) => should(error.message).match(/Ferretry has no lanes to edit.*fy board lanes propose/u),
+    );
+    should(gateway.changes).eql([]);
+  });
+});
+
+describe('rendering lanes', () => {
+  it('should mark a confirmed set and an owner-gated lane', () => {
+    const text = renderLaneSet(laneSet({ confirmedBy: 'owner' }), 'Ferretry');
+    should(text)
+      .match(/confirmed by the owner/u)
+      .and.match(/plan\tPlan\/Design\t\(active, owner-gated\)/u);
+  });
+
+  it('should explain each agenda outcome', () => {
+    const base = { laneSet: laneSet() };
+    should(renderLaneChange({ ...base, agenda: 'not-needed' }, 'Ferretry')).match(/No question for the owner/u);
+    should(renderLaneChange({ ...base, agenda: 'failed' }, 'Ferretry')).match(/tell the owner yourself/u);
+  });
+
+  it('should render a board that has lanes', () => {
+    should(renderBoardLanes(project(), 'fy')).match(/Ferretry lanes, version 3/u);
+  });
+});
