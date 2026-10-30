@@ -142,6 +142,11 @@ moment (its turn is the owner's, or it declared a wait), once the inventory agre
 - **The queue is durable** (`FileRestartQueue`, in the daemon state home), so a daemon restart does not
   lose it. A timer drains it every ten seconds. An entry made by `--outdated` is dropped, not restarted, if
   the ferret is current by the time it is idle.
+- **The drain is cheap.** The daemon holds the queue in memory after its first read, so an empty queue costs
+  nothing; a pass reads only the queued ferrets, never the fleet; and a ferret the inventory refused is
+  asked again after a backoff (10 s, doubling to at most 2 min) rather than on every tick — at once,
+  though, when its turn, wait, open tools or subprocess change. A queue that kept everything is not
+  rewritten.
 - **A repeat is harmless.** The request id is optional (a repeat restarts nothing that is already current),
   and the same id answers the same result.
 

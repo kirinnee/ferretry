@@ -103,6 +103,7 @@ export * from './session/reads/index.ts';
 export * from './session/reap.ts';
 export * from './session/reap-service.ts';
 export * from './session/context/index.ts';
+export * from './session/directory/index.ts';
 export * from './session/restart/index.ts';
 export * from './session/resume/index.ts';
 export * from './session/runtime-control/index.ts';
