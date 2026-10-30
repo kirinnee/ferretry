@@ -1,3 +1,9 @@
+## [4.141.4](https://github.com/kirinnee/ferretry/compare/v4.141.3...v4.141.4) (2026-10-30)
+
+### Fixes
+
+* **daemon:** a transcript paged past one step can prove a send absent again ([#1058](https://github.com/kirinnee/ferretry/issues/1058)) ([4ca2325](https://github.com/kirinnee/ferretry/commit/4ca2325aabaf29b47c125835152cc43d7408da9a))
+
 ## [4.141.3](https://github.com/kirinnee/ferretry/compare/v4.141.2...v4.141.3) (2026-10-30)
 
 ### Fixes

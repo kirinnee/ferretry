@@ -1,3 +1,9 @@
+## [4.141.5](https://github.com/kirinnee/ferretry/compare/v4.141.4...v4.141.5) (2026-10-30)
+
+### Fixes
+
+* **pwa:** give the Inbox card a margin and let it swipe from anywhere ([#1059](https://github.com/kirinnee/ferretry/issues/1059)) ([b5501ba](https://github.com/kirinnee/ferretry/commit/b5501ba37c6c86a9f26424abc67c39995033b9e6))
+
 ## [4.141.4](https://github.com/kirinnee/ferretry/compare/v4.141.3...v4.141.4) (2026-10-30)
 
 ### Fixes
