@@ -13,11 +13,9 @@
  * Set `FY_REFLOW_SHOTS_DIR` to keep the captures (written BEFORE the assertions, so a failing run still
  * leaves its evidence). Every name, id and path in them is fake.
  */
-import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { beforeAll, describe, it } from 'bun:test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -30,11 +28,11 @@ import type { ConnectionHealthState } from '../../../src/lib/connection-health.t
 import { type DaemonId, daemonConnection, daemonId } from '../../../src/lib/daemon-connection.ts';
 import { sessionView } from '../../support/sessions.ts';
 import { wardenAccount, wardenFailover, wardenStatus } from '../../support/warden.ts';
+import { appStylesheet } from '../support/app-stylesheet.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
 type Reconnecting = Extract<ConnectionHealthState, { kind: 'reconnecting' }>;
 
-const packageDir = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_REFLOW_SHOTS_DIR ?? '';
 const NOW = Date.parse('2026-10-22T12:00:00.000Z');
 const ago = (minutes: number): string => new Date(NOW - minutes * 60_000).toISOString();
@@ -167,7 +165,6 @@ const documentFor = (css: string, theme: string, body: string): string => `<!doc
 <body>${body}</body></html>`;
 
 let browser: Browser;
-let workspace = '';
 let css = '';
 
 const withPage = async <T,>(
@@ -211,30 +208,9 @@ const keep = async (page: import('playwright-core').Page, name: string): Promise
 describe('Sessions page and connection notice never reflow a phone', () => {
   beforeAll(async () => {
     browser = await sharedChromium();
-    workspace = await mkdtemp(join(tmpdir(), 'fy-reflow-visual-'));
-    const stylesheet = join(workspace, 'app.css');
-    const result = spawnSync(
-      './node_modules/.bin/tailwindcss',
-      [
-        '--config',
-        'tailwind.config.ts',
-        '--input',
-        'src/styles/index.css',
-        '--output',
-        stylesheet,
-        '--content',
-        './src/**/*.{ts,tsx},./tests/integration/features/*.tsx',
-      ],
-      { cwd: packageDir, stdio: 'pipe' },
-    );
-    if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
-    css = await readFile(stylesheet, 'utf8');
+    css = await appStylesheet();
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 120_000);
-
-  afterAll(async () => {
-    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
-  });
 
   const sessionsMarkup = renderToStaticMarkup(sessionsPage());
 

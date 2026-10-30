@@ -1,18 +1,14 @@
 /** Pixel comparison against the original BrowserLoginBanner JSX at phone and desktop widths. */
-import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { beforeAll, describe, it } from 'bun:test';
 import { ChevronDown, Copy, KeyRound } from 'lucide-react';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
 
 import { BrowserLoginBanner, type BrowserLoginView } from '../../../src/features/browser/browser-login-banner.tsx';
+import { appStylesheet } from '../support/app-stylesheet.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
-const packageDir = resolve(import.meta.dir, '../../..');
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const login: BrowserLoginView = {
   state: 'open',
@@ -82,35 +78,13 @@ const viewports = [
 ] as const;
 
 let browser: Browser;
-let workspace = '';
 let css = '';
 
 describe('BrowserLoginBanner visual contract', () => {
   beforeAll(async () => {
     browser = await sharedChromium();
-    workspace = await mkdtemp(join(tmpdir(), 'fy-browser-login-visual-'));
-    const stylesheet = join(workspace, 'app.css');
-    const result = spawnSync(
-      './node_modules/.bin/tailwindcss',
-      [
-        '--config',
-        'tailwind.config.ts',
-        '--input',
-        'src/styles/index.css',
-        '--output',
-        stylesheet,
-        '--content',
-        './src/**/*.{ts,tsx},./tests/integration/features/*.tsx',
-      ],
-      { cwd: packageDir, stdio: 'pipe' },
-    );
-    if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
-    css = await readFile(stylesheet, 'utf8');
+    css = await appStylesheet();
   }, 120_000);
-
-  afterAll(async () => {
-    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
-  });
 
   it('matches the original at both responsive viewports without horizontal overflow', async () => {
     const pageHtml = documentFor(
