@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
-import { LANE_TEMPLATES, type LaneSet, type ResolvedAttentionItem } from '@ferretry/protocol';
+import { LANE_TEMPLATES, type LaneSet, type ResolvedAgendaItem } from '@ferretry/protocol';
 import should from 'should';
-import type { AttentionBoardChange } from '../../../src/lib/attention/service.ts';
+import type { AgendaBoardChange } from '../../../src/lib/agenda/service.ts';
 import {
   acceptedProposal,
   LANE_PROPOSAL_ANSWERS,
@@ -19,8 +19,8 @@ const LANES: LaneSet = {
   ...LANE_TEMPLATES.quick,
 };
 
-const item = (sourceRef: string | null, response?: unknown): ResolvedAttentionItem =>
-  ({ sourceRef, ...(response === undefined ? {} : { response }) }) as unknown as ResolvedAttentionItem;
+const item = (sourceRef: string | null, response?: unknown): ResolvedAgendaItem =>
+  ({ sourceRef, ...(response === undefined ? {} : { response }) }) as unknown as ResolvedAgendaItem;
 
 const accept = { kind: 'multiple-choice', choice: ' Accept ' };
 
@@ -70,8 +70,8 @@ describe('acceptedProposal', () => {
 });
 
 describe('LaneProposalAcceptance', () => {
-  const change = (overrides: Partial<AttentionBoardChange>): AttentionBoardChange =>
-    ({ change: 'answered', ...overrides }) as AttentionBoardChange;
+  const change = (overrides: Partial<AgendaBoardChange>): AgendaBoardChange =>
+    ({ change: 'answered', ...overrides }) as AgendaBoardChange;
 
   it('should confirm the proposal when the owner accepts', async () => {
     const accepted: Array<readonly [string, number]> = [];

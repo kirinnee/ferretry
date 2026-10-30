@@ -1627,7 +1627,7 @@ describe('daemon boot lifecycle', () => {
    * the case checks by reading a file out of it. A session the index does not hold is absent, and a
    * session whose documents no longer satisfy the protocol is refused rather than reported missing.
    *
-   * The mounted attention board is held to those same two answers on those same two ids, because its
+   * The mounted agenda board is held to those same two answers on those same two ids, because its
    * existence proof is this registry. A board with no ledger file is legitimately empty, so a check
    * that read only the ledger would answer `200 { count: 0 }` both for a session that does not exist
    * and for one whose documents are damaged — the failure mode that hides a session waiting on the
@@ -1700,7 +1700,7 @@ describe('daemon boot lifecycle', () => {
     // Without this line the two refusals below could be a route that fails for everyone.
     should(liveBoard.status).equal(200);
     should((await liveBoard.json()) as { count: number }).have.property('count', 0);
-    // The attention board answers on the same two ids, and a missing ledger file is an empty board
+    // The agenda board answers on the same two ids, and a missing ledger file is an empty board
     // ONLY when the registry can prove the session. A session nothing holds is not-found rather than
     // a 200 board with nothing on it, which is what a ledger-only existence check would have served.
     should(absentBoard.status).equal(404);

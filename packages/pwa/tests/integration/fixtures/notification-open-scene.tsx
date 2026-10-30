@@ -6,8 +6,8 @@
  * It is wired the way `main.tsx` and `AppShell` wire it: the entry point attaches the inbox to
  * `navigator.serviceWorker` before anything mounts, the app's real `RouterProvider` mounts once its
  * "store" has loaded, and `useNotificationOpen` routes through the router's own `navigate`. What the
- * page shows is the route the app would render — parsed by the real `parseRoute`, with the Attention
- * item the real `attentionTargetFromSearch` reads — so the suite asserts what a reader would land on.
+ * page shows is the route the app would render — parsed by the real `parseRoute`, with the Agenda
+ * item the real `agendaTargetFromSearch` reads — so the suite asserts what a reader would land on.
  *
  * Two switches, read from `localStorage` so that no URL the worker opens carries them:
  *
@@ -19,7 +19,7 @@
 import { useCallback } from 'react';
 import { createRoot } from 'react-dom/client';
 import { NotificationOpenContext, useNotificationOpen } from '../../../src/hooks/use-notification-open.ts';
-import { attentionTargetFromSearch } from '../../../src/lib/attention-inbox.ts';
+import { agendaTargetFromSearch } from '../../../src/lib/agenda-inbox.ts';
 import { attachNotificationOpens, NotificationOpenInbox } from '../../../src/lib/notification-open.ts';
 import { RouterProvider, useRouter } from '../../../src/lib/router.tsx';
 
@@ -60,7 +60,7 @@ function Shown() {
       data-route={JSON.stringify({
         ...route,
         path: `${window.location.pathname}${window.location.search}`,
-        attention: attentionTargetFromSearch(window.location.search),
+        attention: agendaTargetFromSearch(window.location.search),
         entry: entryKey,
       })}
     />

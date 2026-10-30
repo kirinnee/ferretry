@@ -75,10 +75,10 @@ export type AnswerOutcome =
   | 'acknowledged';
 
 /** A possibly live form. Send/resume must continue treating this as an unknown native modal. */
-export const STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND = 'structured-answer-unconfirmed';
+export const STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND = 'structured-answer-unconfirmed';
 
 /** A form positively released from the pane. This warning is advisory, not an input modal. */
-export const STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND = 'structured-answer-released-unconfirmed';
+export const STRUCTURED_ANSWER_RELEASED_AGENDA_KIND = 'structured-answer-released-unconfirmed';
 
 /** One answer operation, durably, from the instant it was admitted. */
 export interface AnswerOperationRecord {

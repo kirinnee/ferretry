@@ -4,7 +4,7 @@ import {
   queuedMessageInstruction,
   turnFileInstruction,
 } from '@ferretry/protocol';
-import { STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND } from '../question/answer-ledger.ts';
+import { STRUCTURED_ANSWER_RELEASED_AGENDA_KIND } from '../question/answer-ledger.ts';
 import type { SessionSendSettings } from './settings.ts';
 import {
   IDLE_SEND_STATUSES,
@@ -42,7 +42,7 @@ export function authorizeSend(target: SendTarget, attachmentIds: readonly string
     throw new SendUnavailable(
       `the previous terminal shutdown for ${target.id} was not confirmed; stop it successfully before sending`,
     );
-  if (target.needsHumanKind !== undefined && target.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND)
+  if (target.needsHumanKind !== undefined && target.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_AGENDA_KIND)
     throw new SendUnavailable(
       `session ${target.id} is quarantined awaiting a person (${target.needsHumanKind}); clear it before sending`,
     );

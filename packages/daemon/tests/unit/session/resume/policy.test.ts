@@ -311,7 +311,7 @@ describe('resume plan', () => {
       prompt: SETTINGS.defaultResumePrompt,
       cancelPendingQuestion: false,
       clearNeedsHuman: true,
-      acknowledgeAnswerAttention: false,
+      acknowledgeAnswerAgenda: false,
       resetRetryAttempt: true,
     });
   });
@@ -452,7 +452,7 @@ describe('resume plan for a released structured-answer advisory', () => {
 
     // Assert
     should(actual.kind).equal('relaunch');
-    should(actual).have.property('acknowledgeAnswerAttention', true);
+    should(actual).have.property('acknowledgeAnswerAgenda', true);
     should(actual).have.property('clearNeedsHuman', true);
     should(actual).have.property('pane', 'snapshot-and-kill');
   });
@@ -468,7 +468,7 @@ describe('resume plan for a released structured-answer advisory', () => {
     // Assert
     should(actual).have.property('bare', false);
     should(actual).have.property('prompt', SETTINGS.defaultResumePrompt);
-    should(actual).have.property('acknowledgeAnswerAttention', true);
+    should(actual).have.property('acknowledgeAnswerAgenda', true);
   });
 
   it('should treat any caller-supplied message as prose that dismisses nothing', () => {
@@ -478,7 +478,7 @@ describe('resume plan for a released structured-answer advisory', () => {
 
     // Assert — one stays a send, one is a relaunch, and neither closes the warning.
     should(live).deepEqual({ kind: 'send', message: 'reply in prose' });
-    should(relaunched).have.property('acknowledgeAnswerAttention', false);
+    should(relaunched).have.property('acknowledgeAnswerAgenda', false);
     should(relaunched).have.property('clearNeedsHuman', false);
   });
 
@@ -491,7 +491,7 @@ describe('resume plan for a released structured-answer advisory', () => {
 
     // Assert — it still relaunches, and it still dismisses nothing.
     should(stopped.kind).equal('relaunch');
-    should(stopped).have.property('acknowledgeAnswerAttention', false);
+    should(stopped).have.property('acknowledgeAnswerAgenda', false);
     should(stopped).have.property('clearNeedsHuman', false);
     // And on a live pane it keeps the ordinary refusal rather than gaining the relaunch path.
     should(() => planResume(advisory(), LIVE, '   ', OPERATOR, SETTINGS)).throw(/already running/u);
@@ -503,9 +503,9 @@ describe('resume plan for a released structured-answer advisory', () => {
     const automatic = planResume(advisory({ status: 'stopped' }), NO_PANE, undefined, AUTOMATIC, SETTINGS);
 
     // Assert
-    should(peer).have.property('acknowledgeAnswerAttention', false);
+    should(peer).have.property('acknowledgeAnswerAgenda', false);
     should(peer).have.property('clearNeedsHuman', false);
-    should(automatic).have.property('acknowledgeAnswerAttention', false);
+    should(automatic).have.property('acknowledgeAnswerAgenda', false);
     should(automatic).have.property('clearNeedsHuman', false);
   });
 
@@ -523,11 +523,11 @@ describe('resume plan for a released structured-answer advisory', () => {
     const actual = planResume(blocked, NO_PANE, undefined, OPERATOR, SETTINGS);
 
     // Assert
-    should(actual).have.property('acknowledgeAnswerAttention', false);
+    should(actual).have.property('acknowledgeAnswerAgenda', false);
     should(actual).have.property('clearNeedsHuman', false);
   });
 
-  it('should leave every other attention kind clearing exactly as it did', () => {
+  it('should leave every other agenda kind clearing exactly as it did', () => {
     // Arrange — the narrowing is for the two answer kinds only.
     const other = target({ status: 'failed', needsHumanKind: 'picker_cleanup' });
 

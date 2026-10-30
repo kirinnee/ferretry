@@ -4,14 +4,14 @@
  * Total, as every change observer is: a store that fails leaves the card answered and the set a proposal,
  * and the owner can confirm it again from the Board.
  */
-import type { AttentionBoardChange, AttentionChangeObserver } from '../attention/service.ts';
+import type { AgendaBoardChange, AgendaChangeObserver } from '../agenda/service.ts';
 import { acceptedProposal } from './lane-proposal-card.ts';
 import type { LaneSetService } from './lane-set-service.ts';
 
-export class LaneProposalAcceptance implements AttentionChangeObserver {
+export class LaneProposalAcceptance implements AgendaChangeObserver {
   constructor(private readonly lanes: Pick<LaneSetService, 'acceptProposal'>) {}
 
-  async changed(_sessionId: string, change: AttentionBoardChange): Promise<void> {
+  async changed(_sessionId: string, change: AgendaBoardChange): Promise<void> {
     if (change.change !== 'answered' || change.addressed === undefined) return;
     const accepted = acceptedProposal(change.addressed);
     if (accepted === undefined) return;

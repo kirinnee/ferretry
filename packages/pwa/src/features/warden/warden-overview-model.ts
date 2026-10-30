@@ -17,10 +17,10 @@
  */
 
 import type {
-  FleetAttentionItem,
+  FleetAgendaItem,
   WardenAction,
   WardenAnomaly,
-  WardenAttentionView,
+  WardenAgendaView,
   WardenBlessingView,
   WardenFailoverAccountView,
   WardenInvestigation,
@@ -180,7 +180,7 @@ export const wardenHowItWorks = (layers: WardenLayers): string => {
 // ── Warden notifications ────────────────────────────────────────────────────────────────────────
 
 /**
- * What the one quiet line about Warden notifications says. The notifications live in the Attention
+ * What the one quiet line about Warden notifications says. The notifications live in the Agenda
  * inbox; this page only counts them, and counts honestly: a read that failed or came back incomplete is
  * a warning, never "none".
  */
@@ -192,31 +192,31 @@ export type WardenInboxLine =
 
 const COULD_NOT_COUNT: WardenInboxLine = { kind: 'warning', text: 'Couldn’t count Warden notifications' };
 
-export const wardenInboxLine = (attention: WardenReadState<WardenAttentionView>): WardenInboxLine => {
-  if (attention.status === 'loading') return { kind: 'hidden' };
-  if (attention.status === 'error') return COULD_NOT_COUNT;
-  const { view } = attention;
+export const wardenInboxLine = (agenda: WardenReadState<WardenAgendaView>): WardenInboxLine => {
+  if (agenda.status === 'loading') return { kind: 'hidden' };
+  if (agenda.status === 'error') return COULD_NOT_COUNT;
+  const { view } = agenda;
   if (view.outcome === 'degraded' || view.wardenDegraded !== undefined) return COULD_NOT_COUNT;
   const count = view.items.length;
   if (count === 0)
-    return attention.status === 'stale' || view.outcome === 'no-sweep'
+    return agenda.status === 'stale' || view.outcome === 'no-sweep'
       ? COULD_NOT_COUNT
       : { kind: 'none', text: 'No Warden notifications' };
   return {
     kind: 'link',
     text: `${count} Warden ${count === 1 ? 'notification' : 'notifications'} in Inbox`,
-    stale: attention.status === 'stale',
+    stale: agenda.status === 'stale',
   };
 };
 
-const SOURCE_CHIPS: Readonly<Record<Exclude<FleetAttentionItem['source'], 'warden-anomaly'>, WardenChip>> = {
+const SOURCE_CHIPS: Readonly<Record<Exclude<FleetAgendaItem['source'], 'warden-anomaly'>, WardenChip>> = {
   task: chip('task', 'pend'),
   question: chip('question', 'warn'),
   'agent-raised': chip('asks for you', 'warn'),
   'warden-action': chip('asks you', 'warn'),
 };
 
-const sourceChip = (item: FleetAttentionItem): WardenChip =>
+const sourceChip = (item: FleetAgendaItem): WardenChip =>
   item.source === 'warden-anomaly'
     ? item.anomalyKind === undefined
       ? chip('flagged', 'warn')
@@ -224,10 +224,10 @@ const sourceChip = (item: FleetAttentionItem): WardenChip =>
     : SOURCE_CHIPS[item.source];
 
 /** Being judged right now, so it is watched rather than waiting on the owner. */
-const inFlight = (item: FleetAttentionItem): boolean =>
+const inFlight = (item: FleetAgendaItem): boolean =>
   item.judgement?.state === 'pending' || item.judgement?.state === 'queued';
 
-const itemReason = (item: FleetAttentionItem): string => {
+const itemReason = (item: FleetAgendaItem): string => {
   const parts = [item.subject.trim(), item.why.trim()].filter(part => part !== '');
   return [...new Set(parts)].join(' — ') || 'No reason recorded.';
 };
@@ -315,7 +315,7 @@ export const cooldownChip = (blessing: WardenBlessingView, now: number): WardenC
  */
 export const watchingRows = (
   status: WardenStatusView,
-  attention: WardenAttentionView | undefined,
+  agenda: WardenAgendaView | undefined,
   now: number,
 ): readonly WardenRow[] => {
   const rows = new Map<string, WardenRow>();
@@ -343,7 +343,7 @@ export const watchingRows = (
       leave: true,
     });
   }
-  for (const item of attention?.items ?? []) {
+  for (const item of agenda?.items ?? []) {
     if (!inFlight(item) || rows.has(item.sessionId)) continue;
     rows.set(item.sessionId, {
       key: `watch:${item.sessionId}`,

@@ -8,13 +8,13 @@
  * `fy agenda add --task`, or by the daemon taking the raising session's focus card, which only a ferret
  * that may work the card can hold. A notice is context, never an ask, so it is not counted.
  */
-import type { AgendaRef, AttentionItem, BoardTask, BoardTaskId, TaskRef } from '@ferretry/protocol';
+import type { AgendaRef, AgendaItem, BoardTask, BoardTaskId, TaskRef } from '@ferretry/protocol';
 import { effectiveAssignee } from './authority.ts';
 import type { AgendaLinkSource, CardAsks } from './ports.ts';
 
 /** One session's open agenda items, read through the agenda's own reader. Empty for a session with none. */
 export interface AgendaItemsReader {
-  open(sessionId: string): Promise<readonly AttentionItem[]>;
+  open(sessionId: string): Promise<readonly AgendaItem[]>;
 }
 
 /** How many agendas are read at once. */
@@ -56,7 +56,7 @@ export class AgendaCardLinks implements AgendaLinkSource {
   }
 
   /** An agenda that cannot be read costs its asks, never the board read. */
-  private async read(sessionId: string): Promise<readonly AttentionItem[]> {
+  private async read(sessionId: string): Promise<readonly AgendaItem[]> {
     try {
       return await this.agendas.open(sessionId);
     } catch (error) {

@@ -146,11 +146,11 @@ const held = async (what: string): Promise<void> => {
 
 const daemonFetch = async (input: RequestInfo | URL): Promise<Response> => {
   const url = new URL(String(input));
-  const attention = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
-  if (attention?.[1] !== undefined)
+  const agenda = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u);
+  if (agenda?.[1] !== undefined)
     return Response.json({
       v: 1,
-      sessionId: decodeURIComponent(attention[1]),
+      sessionId: decodeURIComponent(agenda[1]),
       items: [],
       resolved: [],
       count: 0,
@@ -201,7 +201,7 @@ const store = await createAppStore({
         await never(undefined, signal),
       wardenStatus: async () => await Promise.reject(new Error('no warden in this scene')),
       wardenVerdicts: async () => [],
-      wardenAttention: async () => await Promise.reject(new Error('no warden in this scene')),
+      wardenAgenda: async () => await Promise.reject(new Error('no warden in this scene')),
       foreignHistory: async () => ({ conversations: [], skipped: [] }),
       request: async () => ({}),
     }) as never,

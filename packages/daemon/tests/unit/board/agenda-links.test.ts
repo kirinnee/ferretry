@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
-import type { AttentionItem } from '@ferretry/protocol';
+import type { AgendaItem } from '@ferretry/protocol';
 import should from 'should';
 import { AGENDA_READ_CONCURRENCY, AgendaCardLinks, type AgendaItemsReader } from '../../../src/lib/board/index.ts';
 import { card, MACHINE, NOW } from './support.ts';
 
 /** An open agenda item raised by a ferret, with whatever fields a case needs. */
-const item = (id: string, extra: Partial<AttentionItem> = {}): AttentionItem =>
+const item = (id: string, extra: Partial<AgendaItem> = {}): AgendaItem =>
   ({
     id,
     raisedBy: 'agent',
@@ -19,17 +19,17 @@ const item = (id: string, extra: Partial<AttentionItem> = {}): AttentionItem =>
     howToResolve: 'answer it',
     waitingSince: NOW,
     ...extra,
-  }) as AttentionItem;
+  }) as AgendaItem;
 
 class FakeAgendas implements AgendaItemsReader {
   readonly reads: string[] = [];
 
   constructor(
-    private readonly agendas: Readonly<Record<string, readonly AttentionItem[]>>,
+    private readonly agendas: Readonly<Record<string, readonly AgendaItem[]>>,
     private readonly failing: ReadonlySet<string> = new Set(),
   ) {}
 
-  async open(sessionId: string): Promise<readonly AttentionItem[]> {
+  async open(sessionId: string): Promise<readonly AgendaItem[]> {
     this.reads.push(sessionId);
     if (this.failing.has(sessionId)) throw new Error('agenda.json is damaged');
     return this.agendas[sessionId] ?? [];

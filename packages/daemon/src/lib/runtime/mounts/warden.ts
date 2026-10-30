@@ -1,5 +1,5 @@
 import {
-  type WardenAttentionView,
+  type WardenAgendaView,
   WardenConfigPatchSchema,
   type WardenConfigView,
   type WardenInvestigateRequest,
@@ -22,7 +22,7 @@ import type { ApiRoute, RouteContext } from '../../api/route.ts';
 
 /**
  * Warden supervision: `/v1/warden/status`, `/v1/warden/run`, `/v1/warden/config`, a read of the
- * Warden's own Attention cards at `/v1/warden/attention`, the owner's own request at `/v1/warden/investigate`, and the owner
+ * Warden's own Agenda cards at `/v1/warden/attention`, the owner's own request at `/v1/warden/investigate`, and the owner
  * leaving a ferret alone for longer at `/v1/warden/leave`.
  *
  * THIS MOUNT IS WHY SIX MODULES ARE PRODUCTION CODE. `packages/daemon/src/lib/warden/` held the
@@ -91,7 +91,7 @@ export interface WardenSubsystem {
   config(): Promise<WardenConfigView>;
   updateConfig(patch: unknown): Promise<WardenConfigView>;
   /** Every ferret that needs the owner, and why. */
-  attention(): Promise<WardenAttentionView>;
+  attention(): Promise<WardenAgendaView>;
   /**
    * The owner asks for an investigation of one ferret: it skips Jev, queues, and a sweep runs at once so
    * it starts if a slot is free. Refusals are {@link WardenRequestError}s.

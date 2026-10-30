@@ -28,9 +28,9 @@
  *     when `lib/api` evaluated. Authority is a property of the CONNECTION a row
  *     belongs to here, so it arrives as `canMutate`.
  *
- * The attention badge is the third: kteam's `useAttentionCount(id)` read a
+ * The agenda badge is the third: kteam's `useAgendaCount(id)` read a
  * process-wide snapshot, and one hook per row would also mean one hydrate per
- * row. The host — which already holds a `(daemonId, sessionId)`-scoped attention
+ * row. The host — which already holds a `(daemonId, sessionId)`-scoped agenda
  * store — passes a lookup instead, so a badge can never be sourced from a
  * different daemon's ledger.
  */
@@ -60,8 +60,8 @@ import { type OpenSessionMenu, useRowContextGesture } from './row-context-gestur
 import { sessionActionSpecs } from './session-actions.ts';
 import { StatusMark, statusMark } from './status-mark.tsx';
 
-/** How many unresolved attention items a session has, on THIS daemon. */
-export type AttentionCountFor = (sessionId: string) => number;
+/** How many unresolved agenda items a session has, on THIS daemon. */
+export type AgendaCountFor = (sessionId: string) => number;
 
 /**
  * The visible and spoken ancestry of a row that has been indented as far as the
@@ -111,7 +111,7 @@ export interface SidebarRowProps {
   readonly byId: ReadonlyMap<string, SessionView>;
   /** This connection may act. A read-only one draws no gesture at all. */
   readonly canMutate: boolean;
-  readonly attentionCountFor?: AttentionCountFor;
+  readonly agendaCountFor?: AgendaCountFor;
   /** Drawer only: picking a session has to shut the overlay covering it. */
   readonly onNavigate?: () => void;
   /** Right-click / long-press opens the row's action menu. */
@@ -121,7 +121,7 @@ export interface SidebarRowProps {
 export function SidebarRow({
   active,
   activeId,
-  attentionCountFor,
+  agendaCountFor,
   byId,
   canMutate,
   daemonId,
@@ -154,8 +154,8 @@ export function SidebarRow({
   const childDepth = children[0]?.depth ?? depth;
   const railIndent = Math.max(0, lineageIndent(childDepth) - lineageIndent(depth));
   const labels = rowLabels(config.label);
-  const attentionCount = attentionCountFor?.(config.id) ?? 0;
-  const attentionLabel = `${attentionCount} unresolved Inbox ${attentionCount === 1 ? 'item' : 'items'}`;
+  const agendaCount = agendaCountFor?.(config.id) ?? 0;
+  const agendaLabel = `${agendaCount} unresolved Inbox ${agendaCount === 1 ? 'item' : 'items'}`;
 
   return (
     <li>
@@ -192,15 +192,15 @@ export function SidebarRow({
             {view.context !== undefined && contextReadout(view.context).tone === 'err' ? (
               <ContextRing context={view.context} />
             ) : null}
-            {attentionCount > 0 ? (
+            {agendaCount > 0 ? (
               <span
-                aria-label={attentionLabel}
+                aria-label={agendaLabel}
                 className="mono inline-flex shrink-0 items-center gap-[3px] rounded-full border border-warn/40 bg-warn/10 px-1.5 font-semibold text-2xs text-warn"
                 role="status"
-                title={attentionLabel}
+                title={agendaLabel}
               >
                 <CircleAlert aria-hidden="true" size={10} />
-                <span aria-hidden="true">{attentionCount > 99 ? '99+' : attentionCount}</span>
+                <span aria-hidden="true">{agendaCount > 99 ? '99+' : agendaCount}</span>
               </span>
             ) : null}
           </div>
@@ -231,7 +231,7 @@ export function SidebarRow({
             <SidebarRow
               active={child.view.config.id === activeId}
               activeId={activeId}
-              attentionCountFor={attentionCountFor}
+              agendaCountFor={agendaCountFor}
               byId={byId}
               canMutate={canMutate}
               daemonId={daemonId}
@@ -254,7 +254,7 @@ export interface GroupBlockProps {
   readonly byId: ReadonlyMap<string, SessionView>;
   readonly canMutate: boolean;
   readonly activeId?: string;
-  readonly attentionCountFor?: AttentionCountFor;
+  readonly agendaCountFor?: AgendaCountFor;
   /** This group is the active folder scope: pinned first, accented, aria-current. */
   readonly scoped?: boolean;
   /** Drawer/touch context: the header button takes the 44px touch floor. */
@@ -268,7 +268,7 @@ export interface GroupBlockProps {
 /** One project folder and its nested sessions. */
 export function GroupBlock({
   activeId,
-  attentionCountFor,
+  agendaCountFor,
   byId,
   canMutate,
   coarse,
@@ -320,7 +320,7 @@ export function GroupBlock({
           <SidebarRow
             active={row.view.config.id === activeId}
             activeId={activeId}
-            attentionCountFor={attentionCountFor}
+            agendaCountFor={agendaCountFor}
             byId={byId}
             canMutate={canMutate}
             daemonId={daemonId}

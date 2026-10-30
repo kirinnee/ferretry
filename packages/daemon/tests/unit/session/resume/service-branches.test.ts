@@ -61,7 +61,7 @@ describe('session resume of a leftover pane whose process is already gone', () =
           register: () => ({ release: () => undefined }),
         },
         serial: inlineSerial,
-        answerAttention: { acknowledge: async () => undefined },
+        answerAgenda: { acknowledge: async () => undefined },
       },
       defaultSessionResumeSettings,
     );

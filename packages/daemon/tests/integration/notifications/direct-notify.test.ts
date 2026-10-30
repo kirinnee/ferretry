@@ -7,8 +7,8 @@ import { KeyedSerialExecutor } from '../../../src/adapters/system/keyed-serial-e
 import {
   ApiDispatcher,
   ApiRouter,
-  AttentionService,
-  attentionRoutes,
+  AgendaService,
+  agendaRoutes,
   createFoundationPaths,
   NO_GOVERNED_ROUTES_GUARD,
   NotificationService,
@@ -81,13 +81,13 @@ async function daemon(
     serial: new KeyedSerialExecutor(),
     clock: { now: () => AT },
   });
-  const attention = new AttentionService(
+  const agenda = new AgendaService(
     new FakeLedgerRepository(),
     { now: () => AT },
     { has: async sessionId => sessionId === SESSION },
     notifications,
   );
-  const routes = attentionRoutes(attention, notifications, NO_HELD_REPLIES);
+  const routes = agendaRoutes(agenda, notifications, NO_HELD_REPLIES);
   const surface = new ApiDispatcher(new ApiRouter([...routes]), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
   return { files, ledger, transport, routes, surface };
 }

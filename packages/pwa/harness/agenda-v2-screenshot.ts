@@ -6,7 +6,7 @@
  *
  *   bun harness/agenda-v2-screenshot.ts [outDir]   # writes <outDir>/agenda-v2-<name>-<phone|desktop>-<theme>.png
  *
- * It bundles `agenda-page.tsx` (the real `useAttentionAgenda`, invented data), serves it on an ephemeral loopback
+ * It bundles `agenda-page.tsx` (the real `useAgenda`, invented data), serves it on an ephemeral loopback
  * port, drives it with real clicks, and FAILS (after writing every picture) when: a page scrolls sideways; the
  * overlay's box is not the chat column's box or the composer shows through it; the top or the bar moves when the
  * body scrolls; the chat underneath loses its scroll position; anything but the one body scrolls; a drawer row
@@ -198,7 +198,7 @@ const checkOverlay = async (page: Page, form: Form, label: string): Promise<void
 
 const openItem = async (page: Page, id: string): Promise<void> => {
   await openDrawer(page);
-  await page.locator(`[data-attention-agenda-row="${id}"]`).click();
+  await page.locator(`[data-agenda-row="${id}"]`).click();
   await overlay(page).waitFor({ state: 'visible' });
   await page.waitForTimeout(200);
 };
@@ -214,7 +214,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const line = await boxOf(plain.locator('[data-agenda-line-toggle]'), 'the pill');
   await openDrawer(plain);
   sameBox(await composerBox(plain), composerRest, 'the drawer moved the composer');
-  const rows = await plain.locator('[data-attention-agenda-row]').all();
+  const rows = await plain.locator('[data-agenda-row]').all();
   check(rows.length >= 3, `the drawer has ${rows.length} rows`);
   for (const row of rows) {
     const extra = await row.evaluate(node => node.querySelectorAll('button, a, input, [role=button]').length);
@@ -256,7 +256,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const choice = await open(browserContext, theme, 'view=board&history=1');
   await openItem(choice, 'A5');
   await checkOverlay(choice, form, 'choice item');
-  check((await choice.locator('table[data-attention-terms]').count()) === 1, 'the terms are not a table');
+  check((await choice.locator('table[data-agenda-terms]').count()) === 1, 'the terms are not a table');
   check((await choice.locator('[data-agenda-history] li').count()) >= 3, 'the history has fewer than 3 rows');
   await shot(choice, 'item-choice', form, theme);
   // the bar with text typed
@@ -275,10 +275,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   const change = await open(browserContext, theme, 'view=board&history=1&config=1');
   await openItem(change, 'A2');
   await checkOverlay(change, form, 'config-change item');
-  check(
-    (await change.locator('[data-attention-confirms="warden.yaml"]').count()) === 1,
-    'the config change is not drawn',
-  );
+  check((await change.locator('[data-agenda-confirms="warden.yaml"]').count()) === 1, 'the config change is not drawn');
   check(
     !((await overlay(change).textContent()) ?? '').includes("What's going on"),
     'the premise is drawn beside the change',

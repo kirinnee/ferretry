@@ -22,7 +22,7 @@ export type NotifyKind = PushNotificationKind;
 /**
  * The kinds a SESSION transition can produce. `device-paired` is never one of them — no session
  * transition ever means "a new browser was paired" — and neither is `question`: a ferret parked on a
- * blocking prompt raises an Attention item, and THAT pushes, so a page notification would say it twice.
+ * blocking prompt raises an Agenda item, and THAT pushes, so a page notification would say it twice.
  * Both are excluded here rather than given dead switch cases below.
  */
 export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired' | 'question'>;
@@ -30,7 +30,7 @@ export type SessionNotifyKind = Exclude<NotifyKind, 'device-paired' | 'question'
 const FAILED_STATUSES: ReadonlySet<SessionStatus> = new Set(['failed', 'stalled', 'kill_failed']);
 
 /**
- * NOTIFICATIONS ARE ATTENTION (docs/attention.md): a ferret that wants the owner raises an Attention
+ * NOTIFICATIONS ARE ATTENTION (docs/agenda.md): a ferret that wants the owner raises an Agenda
  * item, and THAT is what pushes — its card title is the heading and its ask the body. So a ferret that
  * is merely waiting (`awaiting_user`, `your-turn`), that finished (`completed`), or that is parked on
  * a blocking prompt (`awaiting_question`, `needs-input` — the daemon raises an item for every one)

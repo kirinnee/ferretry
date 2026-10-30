@@ -15,7 +15,7 @@ import {
   type IFyApiClient,
   type SessionView,
   type WardenLeaveDuration,
-  WardenAttentionViewSchema,
+  WardenAgendaViewSchema,
 } from '@ferretry/protocol';
 import { useCallback, useState } from 'react';
 
@@ -31,13 +31,13 @@ import { WardenReportDialog, type WardenReportDialogRequest } from './warden-rep
 
 export type WardenOverviewClient = Pick<
   IFyApiClient,
-  'wardenStatus' | 'wardenAttention' | 'wardenRun' | 'wardenLeave' | 'wardenReport' | 'request'
+  'wardenStatus' | 'wardenAgenda' | 'wardenRun' | 'wardenLeave' | 'wardenReport' | 'request'
 >;
 /** The fleet's "who needs you" view, from whichever route this machine's daemon answers. */
 const readWhoNeedsYou = async (client: WardenOverviewClient, wire: AgendaWire) =>
   wire === 'agenda'
-    ? await client.request(wardenAgendaPath(wire), WardenAttentionViewSchema)
-    : await client.wardenAttention();
+    ? await client.request(wardenAgendaPath(wire), WardenAgendaViewSchema)
+    : await client.wardenAgenda();
 
 export type WardenOverviewClientFactory = (connection: DaemonConnection) => Promise<WardenOverviewClient>;
 
@@ -82,7 +82,7 @@ function WardenOverviewBody({
     [createClient],
   );
   const wire = useAgendaWire(connection.daemonId);
-  const readAttention = useCallback(
+  const readAgenda = useCallback(
     async (daemon: DaemonConnection) => await readWhoNeedsYou(await createClient(daemon), wire),
     [createClient, wire],
   );
@@ -91,7 +91,7 @@ function WardenOverviewBody({
     [createClient],
   );
   const status = useWardenPoll(connection, readStatus, { ...pollOptions, revision });
-  const attention = useWardenPoll(connection, readAttention, { ...pollOptions, revision });
+  const agenda = useWardenPoll(connection, readAgenda, { ...pollOptions, revision });
 
   const sweep = async (): Promise<void> => {
     setSweeping(true);
@@ -143,7 +143,7 @@ function WardenOverviewBody({
       <WardenOverview
         connection={connection}
         status={status}
-        attention={attention}
+        attention={agenda}
         sessions={sessions}
         now={now()}
         sweeping={sweeping}

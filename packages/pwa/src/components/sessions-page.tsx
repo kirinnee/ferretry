@@ -9,17 +9,17 @@
  * again — through that machine's own pairing, so it never waits on, or for, any other machine.
  *
  * NEEDS YOU, ON TOP: when anything on any paired machine is waiting on the reader, the newest few
- * Attention cards sit above the list (`AttentionNeedsYou`), answered into the shell's one undo window,
- * with "See all" into the inbox. It reads the shell's inbox (`useAttentionInbox`) and draws nothing
+ * Agenda cards sit above the list (`AgendaNeedsYou`), answered into the shell's one undo window,
+ * with "See all" into the inbox. It reads the shell's inbox (`useAgendaInbox`) and draws nothing
  * without one — a harness, a render test — or with nothing open.
  */
 
 import { useCallback, useEffect, useMemo } from 'react';
 
-import { AttentionNeedsYou } from '../features/attention/attention-inbox-page.tsx';
+import { AgendaNeedsYou } from '../features/agenda/agenda-inbox-page.tsx';
 import type { WardenReportRequest } from '../features/warden/warden-verdicts.tsx';
 import { useAccountPickerSlice, useMachineRosters } from '../hooks/use-account-picker.ts';
-import { useAttentionInbox } from '../hooks/use-attention-inbox.ts';
+import { useAgendaInbox } from '../hooks/use-agenda-inbox.ts';
 import { DiskPressureNote } from './disk-pressure-note.tsx';
 import { useConnectionHealth } from '../hooks/use-connection-health.ts';
 import { useDensity } from '../hooks/use-density.ts';
@@ -272,7 +272,7 @@ function DashboardContent({
 export function SessionsPage({ scopeNavigation, clock, ...props }: SessionsPageProps) {
   const navigation = scopeNavigation ?? browserScopeNavigation();
   const now = useLiveClock(clock);
-  const inbox = useAttentionInbox();
+  const inbox = useAgendaInbox();
 
   useEffect(() => {
     void props.fleet.hydrate(props.connection).catch(() => {});
@@ -282,7 +282,7 @@ export function SessionsPage({ scopeNavigation, clock, ...props }: SessionsPageP
   if (inbox === null) return dashboard;
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      <AttentionNeedsYou
+      <AgendaNeedsYou
         daemonId={props.connection.daemonId}
         inbox={inbox}
         now={now}

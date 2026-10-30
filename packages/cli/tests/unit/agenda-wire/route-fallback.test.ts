@@ -3,10 +3,10 @@ import { FyHttpError } from '@ferretry/protocol/client';
 import should from 'should';
 import { z } from 'zod';
 import { requestWithRouteFallback, type WireApiClient } from '../../../src/lib/agenda-wire/route-fallback';
-import { ProtocolAttentionGateway } from '../../../src/lib/attention/gateway';
+import { ProtocolAgendaGateway } from '../../../src/lib/agenda/gateway';
 import { ProtocolNotifyGateway } from '../../../src/lib/notify/gateway';
 import { composeNoticeRequest } from '../../../src/lib/notify/request';
-import { snapshot } from '../attention/fixtures';
+import { snapshot } from '../agenda/fixtures';
 
 const ROUTES = { current: '/v1/x/agenda', legacy: '/v1/x/attention' };
 const Reply = z.object({ ok: z.literal(true) });
@@ -125,13 +125,13 @@ describe('the agenda gateways against an older daemon', () => {
   it('should read, post, send replies and raise a notice over the older routes, sharing one memory per client', async () => {
     // Arrange
     const { client, dialed } = daemon(answers);
-    const attention = new ProtocolAttentionGateway(client, SESSION);
+    const agenda = new ProtocolAgendaGateway(client, SESSION);
     const notify = new ProtocolNotifyGateway(client, SESSION);
 
     // Act
-    await attention.snapshot(SESSION);
-    await attention.apply(SESSION, { action: 'dismiss', id: 'A1', note: 'stale' });
-    await attention.sendReplies(SESSION);
+    await agenda.snapshot(SESSION);
+    await agenda.apply(SESSION, { action: 'dismiss', id: 'A1', note: 'stale' });
+    await agenda.sendReplies(SESSION);
     await notify.raise(SESSION, composeNoticeRequest(['PR', 'ready'], {}));
 
     // Assert
