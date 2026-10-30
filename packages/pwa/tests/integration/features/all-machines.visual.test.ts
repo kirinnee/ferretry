@@ -102,6 +102,19 @@ const open = async (
   return { context, tab };
 };
 
+/** Switches theme and colour scheme on a loaded page — the scene only sets `data-theme` once, so this is what a reload with `?theme=` would give. */
+const restyle = async (tab: Page, theme: string, mode: 'light' | 'dark'): Promise<void> => {
+  await tab.emulateMedia({ colorScheme: mode });
+  await tab.evaluate(
+    value =>
+      new Promise<void>(resolve => {
+        document.documentElement.dataset.theme = value;
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+    `${theme}-${mode}`,
+  );
+};
+
 const evidence = async (tab: Page): Promise<Evidence> =>
   await tab.evaluate(() => (globalThis as unknown as { __allMachines: Evidence }).__allMachines);
 
@@ -298,65 +311,67 @@ describe('one session list across two machines, one offline', () => {
   overlap.it(
     'draws compact rows as one short line and Comfortable as the full rows, crowded, without sideways scroll',
     async () => {
-      // The four crowded lists (two modes, bar and drawer), each at both densities, are read at once.
-      const lists = (['light', 'dark'] as const).flatMap(mode =>
-        (['bar', 'drawer'] as const).map(scene => ({ mode, scene })),
-      );
+      // The crowded lists (bar and drawer), each at both densities, are read at once: one load per list, light
+      // and dark switched in place.
       await Promise.all(
-        lists.map(async ({ mode, scene }) => {
-          const heights: Record<string, number> = {};
+        (['bar', 'drawer'] as const).map(async scene => {
+          const heights: Record<string, Record<string, number>> = { light: {}, dark: {} };
           await Promise.all(
             (['compact', 'full'] as const).map(async density => {
-              const { context, tab } = await open(scene, 'studio', mode, 'laptop', `&big=1&density=${density}`);
+              const { context, tab } = await open(scene, 'studio', 'light', 'laptop', `&big=1&density=${density}`);
               try {
-                const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-                expect(wide).toBeLessThanOrEqual(0);
-                const listWide = await tab.$$eval('.fy-sbar__list', nodes =>
-                  nodes.map(node => node.scrollWidth - node.clientWidth),
-                );
-                for (const overflow of listWide) expect(overflow).toBeLessThanOrEqual(0);
-
-                const plain = '[data-sbar-machine-group] [data-sbar-session]:not([aria-current="page"])';
-                const rowHeights = await tab.$$eval(plain, nodes =>
-                  nodes.map(node => node.getBoundingClientRect().height),
-                );
-                expect(rowHeights.length).toBeGreaterThan(8);
-                const tallest = Math.max(...rowHeights);
-                heights[density] = Math.min(...rowHeights);
-                const head = await tab.$$eval('.fy-sbar__machine-head', nodes =>
-                  nodes.map(node => node.getBoundingClientRect().height),
-                );
-                expect(head.length).toBe(2);
-                for (const height of head) expect(height).toBeLessThanOrEqual(32);
-
-                const detailBox = await tab.$eval(`${plain} .fy-sbar__detail`, node => {
-                  const box = node.getBoundingClientRect().height;
-                  return box > 0 ? box : (node.firstElementChild?.getBoundingClientRect().height ?? 0);
-                });
-                const open = await tab.$eval('[aria-current="page"] .fy-sbar__detail', node => ({
-                  height: node.getBoundingClientRect().height,
-                  ferret: node.querySelector('[data-sbar-ferret]') !== null,
-                }));
-                if (density === 'compact') {
-                  // One line: 32px on a pointer, the 44px touch floor on a phone; the detail is clipped away.
-                  expect(tallest).toBeLessThanOrEqual(scene === 'bar' ? 34 : 46);
-                  expect(detailBox).toBeLessThanOrEqual(1);
-                  expect(open.height).toBeGreaterThan(8);
-                  expect(open.ferret).toBe(true);
-                } else {
-                  expect(detailBox).toBeGreaterThan(8);
-                }
-                if (shotsDir !== '')
-                  await writeFile(
-                    join(shotsDir, `sidebar-${density}-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
-                    await tab.screenshot({ animations: 'disabled' }),
+                for (const mode of ['light', 'dark'] as const) {
+                  await restyle(tab, 'studio', mode);
+                  const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+                  expect(wide).toBeLessThanOrEqual(0);
+                  const listWide = await tab.$$eval('.fy-sbar__list', nodes =>
+                    nodes.map(node => node.scrollWidth - node.clientWidth),
                   );
+                  for (const overflow of listWide) expect(overflow).toBeLessThanOrEqual(0);
+
+                  const plain = '[data-sbar-machine-group] [data-sbar-session]:not([aria-current="page"])';
+                  const rowHeights = await tab.$$eval(plain, nodes =>
+                    nodes.map(node => node.getBoundingClientRect().height),
+                  );
+                  expect(rowHeights.length).toBeGreaterThan(8);
+                  const tallest = Math.max(...rowHeights);
+                  (heights[mode] as Record<string, number>)[density] = Math.min(...rowHeights);
+                  const head = await tab.$$eval('.fy-sbar__machine-head', nodes =>
+                    nodes.map(node => node.getBoundingClientRect().height),
+                  );
+                  expect(head.length).toBe(2);
+                  for (const height of head) expect(height).toBeLessThanOrEqual(32);
+
+                  const detailBox = await tab.$eval(`${plain} .fy-sbar__detail`, node => {
+                    const box = node.getBoundingClientRect().height;
+                    return box > 0 ? box : (node.firstElementChild?.getBoundingClientRect().height ?? 0);
+                  });
+                  const open = await tab.$eval('[aria-current="page"] .fy-sbar__detail', node => ({
+                    height: node.getBoundingClientRect().height,
+                    ferret: node.querySelector('[data-sbar-ferret]') !== null,
+                  }));
+                  if (density === 'compact') {
+                    // One line: 32px on a pointer, the 44px touch floor on a phone; the detail is clipped away.
+                    expect(tallest).toBeLessThanOrEqual(scene === 'bar' ? 34 : 46);
+                    expect(detailBox).toBeLessThanOrEqual(1);
+                    expect(open.height).toBeGreaterThan(8);
+                    expect(open.ferret).toBe(true);
+                  } else {
+                    expect(detailBox).toBeGreaterThan(8);
+                  }
+                  if (shotsDir !== '')
+                    await writeFile(
+                      join(shotsDir, `sidebar-${density}-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
+                      await tab.screenshot({ animations: 'disabled' }),
+                    );
+                }
               } finally {
                 await context.close();
               }
             }),
           );
-          expect(heights.compact).toBeLessThan(heights.full as number);
+          for (const mode of ['light', 'dark'])
+            expect(heights[mode]?.compact).toBeLessThan(heights[mode]?.full as number);
         }),
       );
     },
@@ -366,20 +381,22 @@ describe('one session list across two machines, one offline', () => {
   overlap.it(
     'fits a phone and a desktop, light and dark, in two theme families',
     async () => {
-      const fits = ['studio', 'neo'].flatMap(theme =>
-        (['light', 'dark'] as const).flatMap(mode => (['bar', 'page'] as const).map(scene => ({ theme, mode, scene }))),
-      );
+      // One load per scene; the four theme and scheme combinations are switched in place.
       await Promise.all(
-        fits.map(async ({ theme, mode, scene }) => {
-          const { context, tab } = await open(scene, theme, mode);
+        (['bar', 'page'] as const).map(async scene => {
+          const { context, tab } = await open(scene, 'studio', 'light');
           try {
-            const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-            expect(wide).toBeLessThanOrEqual(0);
-            if (shotsDir !== '')
-              await writeFile(
-                join(shotsDir, `all-machines-${scene === 'bar' ? 'desktop' : 'phone'}-${theme}-${mode}.png`),
-                await tab.screenshot({ animations: 'disabled' }),
-              );
+            for (const theme of ['studio', 'neo'])
+              for (const mode of ['light', 'dark'] as const) {
+                await restyle(tab, theme, mode);
+                const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+                expect(wide).toBeLessThanOrEqual(0);
+                if (shotsDir !== '')
+                  await writeFile(
+                    join(shotsDir, `all-machines-${scene === 'bar' ? 'desktop' : 'phone'}-${theme}-${mode}.png`),
+                    await tab.screenshot({ animations: 'disabled' }),
+                  );
+              }
           } finally {
             await context.close();
           }

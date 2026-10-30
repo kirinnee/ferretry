@@ -87,6 +87,19 @@ const open = async (
   return { context, tab };
 };
 
+/** Switches theme and colour scheme on a loaded page — the scene only sets `data-theme` once, so this is what a reload with `?theme=` would give. */
+const restyle = async (tab: Page, theme: string, mode: 'light' | 'dark'): Promise<void> => {
+  await tab.emulateMedia({ colorScheme: mode });
+  await tab.evaluate(
+    value =>
+      new Promise<void>(resolve => {
+        document.documentElement.dataset.theme = value;
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+    `${theme}-${mode}`,
+  );
+};
+
 /** "Show stopped" lives in the bar's ⋯ menu: its row text (with the hidden count), read without choosing it. */
 const stoppedRow = async (tab: Page): Promise<string> => {
   await tab.click('[data-sbar-options]');
@@ -360,22 +373,23 @@ describe('the sessions list', () => {
   overlap.it(
     'never scrolls sideways, light or dark, in two theme families',
     async () => {
+      // One load per view; the four theme and scheme combinations are switched in place.
       await Promise.all(
-        ['studio', 'neo'].flatMap(theme =>
-          ['light', 'dark'].flatMap(mode =>
-            (['column', 'drawer'] as const).map(async view => {
-              const { context, tab } = await open(view, 'two', `${theme}-${mode}`);
-              try {
+        (['column', 'drawer'] as const).map(async view => {
+          const { context, tab } = await open(view, 'two', 'studio-light');
+          try {
+            for (const theme of ['studio', 'neo'])
+              for (const mode of ['light', 'dark'] as const) {
+                await restyle(tab, theme, mode);
                 const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
                 expect(wide).toBeLessThanOrEqual(0);
                 expect(await clippedControls(tab)).toEqual([]);
                 await shot(tab, `sessions-list-${view}-${theme}-${mode}`);
-              } finally {
-                await context.close();
               }
-            }),
-          ),
-        ),
+          } finally {
+            await context.close();
+          }
+        }),
       );
     },
     180_000,
