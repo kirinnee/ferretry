@@ -215,6 +215,15 @@ send stays watched for the repair window (`repairLimitMs`, 3 days), like a cance
 the transcript holds corrects it to delivered: the rows the old reader got wrong correct themselves the
 next time their ferret's sends are read.
 
+**A long transcript is slow, not unreadable.** The tracker reads a session's transcript through a window it
+holds from the oldest send it watches, appending only what is new on each later look, and a look reads at
+most `WINDOW_STEP_LIMIT` batches. A window that stopped at that budget kept its place and has more to read
+(`catchingUp`), so the send WAITS for the next look rather than settling `unaccounted`
+(`transcript_unreadable`) — the lead's 369 MB transcript was called unreadable on every look, each send to
+it read "unconfirmed", and each sender was told it might need sending again, though every one had arrived.
+Only a read that fails, or a window that cannot start where it was asked, is unreadable; the hold ceiling
+still ends a read that never finishes.
+
 The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
 (15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and
 the sender told "did not reach it: it was not delivered … after 4 attempt(s)".

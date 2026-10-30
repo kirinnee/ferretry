@@ -220,16 +220,37 @@ describe('transcript evidence for the tracker', () => {
     should(stillPartial.readable).be.false();
   });
 
-  it('is blind when a step throws or the file outgrows the steps one look may take', async () => {
+  it('is unreadable when a step throws, and catching up — not unreadable — when the file outgrows one look', async () => {
+    // A 369 MB transcript cannot be read in one look; calling it unreadable settled every send to it
+    // "unconfirmed" and told its sender it might need sending again, though each had arrived.
     const reader = new FakeReader();
     reader.script = [[new Error('EIO')], Array.from({ length: 80 }, () => ({ batch: batch([]), more: true }))];
 
     const failed = await evidence(reader).read(ID, AT);
-    const endless = await evidence(reader).read(ID, AT);
+    const long = await evidence(reader).read(ID, AT);
 
-    should(failed.readable).be.false();
-    should(endless.readable).be.false();
+    should(failed).match({ readable: false });
+    should(failed).not.have.property('catchingUp');
+    should(long).match({ readable: false, catchingUp: true });
     should(reader.opened[1]?.taken).equal(64);
+  });
+
+  it('keeps its place across looks, so a long transcript is read to the end and proves what is there', async () => {
+    const reader = new FakeReader();
+    reader.script = [
+      [
+        ...Array.from({ length: 64 }, () => ({ batch: batch([]), more: true })),
+        { batch: batch([input('late')]), more: false },
+      ],
+    ];
+    const subject = evidence(reader);
+
+    const first = await subject.read(ID, AT);
+    const second = await subject.read(ID, AT);
+
+    should(first).match({ readable: false, catchingUp: true });
+    should(second).match({ readable: true, inputs: [{ proofKey: 'late' }] });
+    should(reader.opened).have.length(1);
   });
 
   it('tells an unknown session, an unbound transcript and a missing source apart', async () => {
