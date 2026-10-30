@@ -7,6 +7,7 @@ import {
   BOARD_EVENT_TYPES,
   BoardActivityFilterSchema,
   BoardActorSchema,
+  BoardAttachmentSchema,
   BoardChangedEventSchema,
   BoardClarificationSchema,
   BoardCountsSchema,
@@ -18,6 +19,7 @@ import {
   BoardPrStateFilterSchema,
   BoardQuarantinedCardSchema,
   BoardQuerySchema,
+  BoardReopenAttachmentsSchema,
   BoardResponseSchema,
   BoardSkipRequestSchema,
   BoardSkipResponseSchema,
@@ -223,6 +225,16 @@ const BOARD = { projectId: PROJECT, laneSet: LANES, cards: [VIEW], counts: COUNT
 
 const VALID: readonly SchemaCase[] = [
   { name: 'skip request', schema: BoardSkipRequestSchema, value: { reason: 'the owner said not to track this' } },
+  {
+    name: 'a file named in a reopen',
+    schema: BoardAttachmentSchema,
+    value: { id: `att_${'a'.repeat(64)}`, filename: 'flicker.png', mime: 'image/png' },
+  },
+  {
+    name: 'files sent with a move back',
+    schema: BoardReopenAttachmentsSchema,
+    value: { from: 'child', ids: [`att_${'a'.repeat(64)}`] },
+  },
   {
     name: 'skip response',
     schema: BoardSkipResponseSchema,
