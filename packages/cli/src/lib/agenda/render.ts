@@ -130,6 +130,9 @@ function briefLines(item: AgendaItem): string[] {
       lines.push(`${INDENT}  recommended: ${compact(question.recommended, SHORT_WIDTH)}${why}`);
     }
   });
+  for (const each of item.optionDetails ?? []) {
+    lines.push(`${INDENT}option "${compact(each.label, OPTION_WIDTH)}": ${compact(each.detail)}`);
+  }
   if (item.recommendation !== undefined) {
     const why = item.recommendation.why === undefined ? '' : ` — ${compact(item.recommendation.why, SHORT_WIDTH)}`;
     lines.push(`${INDENT}recommend: ${compact(item.recommendation.decision, SHORT_WIDTH)}${why}`);

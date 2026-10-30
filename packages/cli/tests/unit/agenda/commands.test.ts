@@ -137,7 +137,7 @@ describe('agenda command surface', () => {
       ask: { kind: 'multiple-choice', options: [{ label: 'staging' }, { label: 'prod' }] },
       answers: [
         { direction: 'left', does: 'choose', label: 'prod' },
-        { direction: 'right', does: 'choose', label: 'staging' },
+        { direction: 'up', does: 'choose', label: 'staging' },
       ],
     });
   });

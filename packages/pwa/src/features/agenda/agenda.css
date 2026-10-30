@@ -167,10 +167,25 @@
   background: var(--surface);
 }
 .fy-item-view__nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-sm);
+  display: flow-root;
+}
+.fy-item-view__nav > .fy-item-view__pager {
+  float: right;
+  margin-left: var(--gap-sm);
+  /* The 44px tap targets would hold a second title line beside them; let it pass under their padding. */
+  margin-bottom: -0.75rem;
+}
+.fy-item-view__nav > .fy-item-view__title {
+  padding-top: 0.45em;
+}
+/* In the head only the status DOT shows; its words stay for screen readers and the hover title. */
+.fy-item-view__status {
+  display: inline-flex;
+  padding-inline: var(--gap-xs);
+}
+.fy-item-view__status .fy-agenda-pill {
+  gap: 0;
+  font-size: 0;
 }
 .fy-item-view__pager {
   display: flex;
@@ -218,16 +233,12 @@
   overflow-wrap: anywhere;
 }
 .fy-item-view__ask {
-  display: -webkit-box;
+  /* The ask is said ONCE, here, whole — never cut and never repeated in the body; ferrets keep it short. */
   margin: 0;
-  overflow: hidden;
   color: var(--muted);
   font-size: var(--text-sm);
   line-height: var(--leading-base);
   overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
 }
 .fy-item-view__body {
   min-height: 0;
@@ -273,49 +284,91 @@
 .fy-qr[data-swipeable] {
   touch-action: pan-y;
 }
+/* ONE row, equal-width buttons across the whole width: a letter or a word or two each, never a wrapped pile. */
 .fy-qr__row {
   display: flex;
   width: 100%;
   min-width: 0;
   max-width: var(--chat-column, 720px);
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: stretch;
   gap: var(--gap-xs);
   margin: 0 auto;
   border: 0;
   padding: 0;
 }
+/* THE SWIPE ROW: three equal slots, left · middle · right = ← ↑ →. A direction with no answer leaves its slot blank;
+   the "…" menu is the fourth, narrow column. */
+.fy-qr__row[data-slots] {
+  display: grid;
+  /* Each slot is at least as wide as its longest word, so a label wraps only between words — never "Postgre / s".
+     Labels with a word over 8 characters are drawn as letters, so three slots and "…" still fit a phone card. */
+  grid-template-columns: repeat(3, minmax(min-content, 1fr));
+}
+.fy-qr__row[data-slots] > [data-agenda-answer='left'] {
+  grid-column: 1;
+}
+.fy-qr__row[data-slots] > [data-agenda-answer='up'] {
+  grid-column: 2;
+}
+.fy-qr__row[data-slots] > [data-agenda-answer='right'] {
+  grid-column: 3;
+}
+/* The options past the swiped three: as many rows as they need, each filling the width; tap only. */
+.fy-qr__more {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(4.5rem, 1fr));
+  margin-top: var(--gap-xs);
+}
+/* "Not needed" is a plain, quiet button under the rows — never a popup. */
+.fy-qr__dismiss {
+  display: block;
+  min-height: 32px;
+  margin: var(--gap-xs) 0 0 auto;
+  border: 0;
+  padding: 0 var(--gap-xs);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.fy-qr__dismiss:hover:not(:disabled) {
+  color: var(--fg);
+  text-decoration: underline;
+}
+.fy-qr__dismiss:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: 2px;
+}
 .fy-qr__chip {
   display: inline-flex;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 36px;
+  padding-inline: var(--gap-xs);
   max-width: 100%;
   align-items: center;
   justify-content: center;
   gap: var(--gap-xs);
 }
 .fy-qr__label {
+  display: -webkit-box;
   min-width: 0;
-  overflow-wrap: anywhere;
-  text-align: left;
+  overflow: hidden;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
+  text-align: center;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
 }
-.fy-qr__stamp {
-  position: absolute;
-  inset: auto 0 100%;
-  z-index: 1;
-  margin: 0 auto var(--gap-xs);
-  width: fit-content;
-  padding: var(--gap-xs) var(--gap-md);
-  border: var(--stroke) solid var(--divider-color);
-  border-radius: var(--radius-control);
-  background: var(--surface-2);
-  color: var(--fg);
-  font-weight: var(--weight-strong);
-  pointer-events: none;
+.fy-qr__chip[data-recommended] {
+  border-color: var(--accent);
+  color: var(--accent);
 }
-.fy-qr__stamp[data-committed] {
-  background: var(--accent);
-  color: var(--accent-fg, var(--bg));
+.fy-qr__chip[data-variant='primary'][data-recommended] {
+  color: inherit;
 }
 .fy-qr__error,
 .fy-qr__note {
@@ -352,13 +405,13 @@
 }
 .fy-item-view .fy-attn-q__options {
   display: flex;
-  flex-wrap: wrap;
 }
 .fy-item-view .fy-attn-q__option {
   width: auto;
   min-height: 36px;
   max-width: 100%;
-  flex: 0 1 auto;
+  flex: 1 1 0;
+  flex-wrap: nowrap;
   align-items: center;
   padding: 4px var(--gap-md);
   border-color: var(--divider-color);
@@ -390,26 +443,6 @@
   color: var(--muted);
   font-size: var(--text-sm);
   font-weight: var(--weight-strong);
-}
-.fy-item-history__toggle {
-  display: inline-flex;
-  min-height: 36px;
-  align-items: center;
-  gap: var(--gap-xs);
-  border: 0;
-  background: transparent;
-  padding: 0;
-  color: inherit;
-  font: inherit;
-  cursor: pointer;
-}
-.fy-item-history__toggle:focus-visible {
-  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
-  outline-offset: 2px;
-}
-.fy-item-history__count {
-  color: var(--faint);
-  font-variant-numeric: tabular-nums;
 }
 .fy-item-history__list {
   display: flex;

@@ -9,18 +9,19 @@
  *                    mock-ups, then the history — what the owner said and what changed
  *   bottom  STICKY   the QUICK REPLIES (`agenda-quick-replies.tsx`), directly above the composer
  *
- * Top and bottom are flex items outside the scroller, so scrolling the body moves neither. ✕, Esc and ↓ go back
- * to the chat; ← ↑ → answer on a keyboard (a field or a button keeps its own keys). Everything typed goes through
- * the composer: this view has no text field of its own.
+ * Top and bottom are flex items outside the scroller, so scrolling the body moves neither. Every section is drawn
+ * open, in order, as plain Markdown: nothing in the body folds. ✕ and Esc go back to the chat; ↓ SKIPS — on to
+ * the next item, or back to the chat when there is none; ← ↑ → answer on a keyboard (a field or a button keeps
+ * its own keys). Everything typed goes through the composer: this view has no text field of its own.
  */
 
 import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
-import { hasOwnTitle } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { itemOptions } from '../../lib/agenda-options.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery, agendaHeading } from './agenda-delivery.tsx';
@@ -50,9 +51,6 @@ export interface AgendaItemViewProps {
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   readonly renderProse: (text: string) => ReactNode;
 }
-
-/** An ask longer than this is cut to one line in the heading, so the body says it whole. */
-const ASK_PREVIEW_CHARS = 80;
 
 /** The option a question's recommendation names, or '' when it names none. */
 const recommendedPick = (question: AgendaQuestion): string => {
@@ -98,8 +96,8 @@ export function AgendaItemView({
   const sendable = model.perQuestion && ready ? questionAnswersAction(questions, picks) : null;
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const ask = agendaAsk(item);
-  const pull = useDownSwipe(onClose, swipeable);
-  const askInBody = ask !== null && hasOwnTitle(item) && ask.length > ASK_PREVIEW_CHARS;
+  const skip = onNext ?? onClose;
+  const pull = useDownSwipe(skip, swipeable);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -123,7 +121,7 @@ export function AgendaItemView({
     if (ownsKeys(event.target) || event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === 'Escape' || event.key === 'ArrowDown') {
       event.preventDefault();
-      onClose();
+      (event.key === 'Escape' ? onClose : skip)();
       return;
     }
     const direction = { ArrowLeft: 'left', ArrowUp: 'up', ArrowRight: 'right' }[event.key] as
@@ -149,9 +147,15 @@ export function AgendaItemView({
       tabIndex={-1}
     >
       <header className="fy-item-view__top" data-agenda-top="" {...pull}>
+        {/* ONE compact head: the controls float right — status dot, n of N, ‹ › and ✕ — and the title flows beside and
+            under them, so a long title wraps across the full width instead of into a narrow column. */}
         <div className="fy-item-view__nav">
-          {status === null ? <span /> : <AgendaStatusPill status={status} />}
           <div className="fy-item-view__pager">
+            {status === null ? null : (
+              <span className="fy-item-view__status" title={status.label}>
+                <AgendaStatusPill status={status} />
+              </span>
+            )}
             <button
               aria-label="Previous item"
               className="fy-item-view__step"
@@ -183,14 +187,14 @@ export function AgendaItemView({
               <X aria-hidden="true" size={18} />
             </button>
           </div>
+          <h2 className="fy-item-view__title" data-agenda-title="">
+            {agendaHeading(item)}
+          </h2>
         </div>
-        <h2 className="fy-item-view__title" data-agenda-title="">
-          {agendaHeading(item)}
-        </h2>
         {ask === null ? null : (
-          <p className="fy-item-view__ask" data-agenda-ask="">
-            {ask}
-          </p>
+          <div className="fy-item-view__ask" data-agenda-ask="">
+            {renderProse(ask)}
+          </div>
         )}
       </header>
       <div className="fy-item-view__body" data-agenda-body="">
@@ -202,7 +206,6 @@ export function AgendaItemView({
               askShown: true,
               askLabel: null,
               ...(model.recommendation === undefined ? {} : { recommendation: model.recommendation }),
-              ...(askInBody ? { ask: item.subject } : {}),
               ...(picker === undefined ? {} : { picker }),
             }}
             busy={busy}
@@ -220,7 +223,8 @@ export function AgendaItemView({
         map={map}
         model={model}
         onAct={onAct}
-        onClose={onClose}
+        onSkip={skip}
+        options={itemOptions(item)}
         swipeable={swipeable}
         {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
         {...(model.perQuestion && asked.length > 0

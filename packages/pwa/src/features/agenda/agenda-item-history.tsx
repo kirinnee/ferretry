@@ -3,12 +3,11 @@
  * ferret answered, oldest first so it reads like the conversation it replaces. Nothing here is a second source:
  * `itemHistory` reads the item's revisions and the chat.
  *
- * It is folded: the owner's own latest message stays in view beside the fold (it is the thing they come back
- * for), and opening the fold shows the whole run, so nothing is drawn twice.
+ * It is never folded: every event is drawn, in order, as the conversation it replaces.
  */
 
-import { Check, ChevronDown, ChevronRight } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { Check } from 'lucide-react';
+import type { ReactNode } from 'react';
 import { AGENDA_KIND_LABEL } from '../../components/agenda-message.tsx';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { revisionAuthor, revisionStamp } from '../../lib/agenda-revisions.ts';
@@ -103,9 +102,6 @@ interface HistoryRowProps {
   readonly prose: (text: string) => ReactNode;
 }
 
-const latestOwner = (events: readonly HistoryEvent[]): HistoryEvent | undefined =>
-  events.findLast(event => event.kind === 'owner' || event.kind === 'owner-text');
-
 export function AgendaItemHistory({
   events,
   now,
@@ -117,37 +113,15 @@ export function AgendaItemHistory({
   readonly ferret: string;
   readonly prose: (text: string) => ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
   if (events.length === 0) return null;
-  const preview = open ? undefined : latestOwner(events);
-  const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <section aria-label="History" className="fy-item-history" data-agenda-history="" data-open={open || undefined}>
-      <h3 className="fy-item-history__title m-0">
-        <button
-          aria-expanded={open}
-          className="fy-item-history__toggle"
-          data-agenda-history-toggle=""
-          onClick={() => setOpen(current => !current)}
-          type="button"
-        >
-          <Chevron aria-hidden="true" size={14} />
-          History
-          <span className="fy-item-history__count">{events.length}</span>
-        </button>
-      </h3>
-      {preview === undefined ? null : (
-        <ol className="fy-item-history__list" data-agenda-history-latest="">
-          <HistoryRow event={preview} ferret={ferret} now={now} prose={prose} />
-        </ol>
-      )}
-      {open ? (
-        <ol className="fy-item-history__list">
-          {events.map(event => (
-            <HistoryRow event={event} ferret={ferret} key={event.key} now={now} prose={prose} />
-          ))}
-        </ol>
-      ) : null}
+    <section aria-label="History" className="fy-item-history" data-agenda-history="">
+      <h3 className="fy-item-history__title m-0">History</h3>
+      <ol className="fy-item-history__list">
+        {events.map(event => (
+          <HistoryRow event={event} ferret={ferret} key={event.key} now={now} prose={prose} />
+        ))}
+      </ol>
     </section>
   );
 }

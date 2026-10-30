@@ -120,6 +120,22 @@ describe('revisionList', () => {
     expect(lastRevision(item)?.at).toBe('2026-08-01T11:55:00.000Z');
   });
 
+  it('names an edited option explanation "Option details" and counts what it replaced', () => {
+    // Arrange
+    const item = withRevisions([
+      revision({
+        changed: ['optionDetails'],
+        previous: { optionDetails: [{ label: 'SQLite', detail: 'One file' }] },
+      }),
+    ]);
+
+    // Act
+    const [entry] = revisionList(item);
+
+    // Assert
+    expect(entry?.changed).toEqual([{ field: 'optionDetails', label: 'Option details', before: '1 entry' }]);
+  });
+
   it('says nothing for an item never edited', () => {
     expect(revisionList(agendaItem('A5'))).toEqual([]);
   });

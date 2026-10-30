@@ -176,9 +176,16 @@ describe('the question picker', () => {
     const container = must(view.container, 'view');
     const options = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-agenda-pick]'));
     expect(options.map(option => option.getAttribute('data-agenda-pick'))).toEqual(['SQLite', 'Postgres']);
-    expect(options[0]?.querySelector('.kt-attn-option__hint')?.textContent).toBe('No server to run.');
-    expect(options[1]?.querySelector('.kt-attn-option__hint')).toBeNull();
-    expect(options[0]?.textContent).toContain('Recommended');
+    // One short button each, named in full; the explanation lives in the lettered list under the row.
+    expect(options.map(option => option.textContent)).toEqual(['SQLite', 'Postgres']);
+    expect(options[0]?.getAttribute('aria-label')).toBe('SQLite, recommended');
+    expect(options[1]?.getAttribute('aria-label')).toBe('Postgres');
+    expect(options[0]?.getAttribute('title')).toBe('SQLite');
+    const listed = container.querySelector('[data-agenda-option-detail="SQLite"]');
+    expect(listed?.textContent).toContain('A — SQLite');
+    expect(listed?.textContent).toContain('No server to run.');
+    expect(listed?.querySelector('[data-agenda-recommended]')).not.toBeNull();
+    expect(container.querySelector('[data-agenda-option-detail="Postgres"]')?.textContent).toContain('B — Postgres');
     expect(options[1]?.getAttribute('aria-pressed')).toBe('true');
     await interact(() => {
       options[0]?.click();

@@ -58,7 +58,8 @@ describe('WaitingOnYou', () => {
         return null;
       },
     );
-    await tap(buttonNamed(root, 'Wait for Monday'));
+    // A long label is drawn as its letter; its full words are the button's name.
+    await tap(must(root.querySelector<HTMLButtonElement>('button[aria-label^="Wait for Monday"]'), 'Wait for Monday'));
     await interact(() => flush());
     expect(answered).toEqual([{ ref: REF, response: { kind: 'multiple-choice', choice: 'Wait for Monday' } }]);
     expect(root.querySelector('[role="alert"]')).toBeNull();
@@ -92,7 +93,7 @@ describe('WaitingOnYou', () => {
     expect(buttonNamed(root, 'Yes').disabled).toBe(false);
   });
 
-  it('draws the Inbox quick replies: a Recommended tag, no pre-checked option, no caps label', async () => {
+  it('draws the Inbox quick replies: the recommended one marked, no pre-checked option, no caps label', async () => {
     const root = await show(
       asks([
         row(
@@ -107,12 +108,12 @@ describe('WaitingOnYou', () => {
     const chips = [...root.querySelectorAll('.fy-qr__chip')];
     expect(chips.map(chip => chip.querySelector('.fy-qr__label')?.textContent).sort()).toEqual(['Postgres', 'SQLite']);
     expect(chips.filter(chip => chip.querySelector(':scope > svg') !== null)).toEqual([]);
-    const tagged = chips.filter(chip => chip.textContent?.includes('Recommended'));
+    const tagged = chips.filter(chip => chip.hasAttribute('data-recommended'));
     expect(tagged.map(chip => chip.querySelector('.fy-qr__label')?.textContent)).toEqual(['SQLite']);
     expect(root.textContent).not.toMatch(/CHOOSE THIS ANSWER/i);
   });
 
-  it('answers nothing when the menu dismisses: only an answer goes to the ferret', async () => {
+  it('answers nothing on Not needed: only an answer goes to the ferret', async () => {
     const answered: AgendaResponse[] = [];
     const root = await show(
       asks([row(agendaItem('A1', { title: 'Approve?', ask: choices('Yes', 'No') }))]),
@@ -121,7 +122,6 @@ describe('WaitingOnYou', () => {
         return null;
       },
     );
-    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-more]'), 'the ⋯ button').click());
     await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-dismiss]'), 'Not needed').click());
     expect(answered).toEqual([]);
     expect(root.querySelector('[role="alert"]')).toBeNull();

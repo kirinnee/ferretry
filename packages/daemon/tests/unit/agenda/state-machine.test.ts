@@ -2700,3 +2700,90 @@ describe('Agenda state machine board cards', () => {
     should(created.item?.task).be.undefined();
   });
 });
+
+describe('Agenda state machine: option details', () => {
+  const choices = (overrides: Partial<RaiseAgendaRequest> = {}) =>
+    raised(AGENT, {
+      ask: { kind: 'multiple-choice', options: [{ label: 'Go' }, { label: 'Wait' }] },
+      optionDetails: [{ label: 'Go', detail: 'Ship it **now**, see `plan.md`.' }],
+      ...overrides,
+    });
+  const editing = (ledger: AgendaLedger, patch: EditAgendaPatch): AgendaMutation =>
+    applyAgendaCommand(ledger, { action: 'edit', actor: AGENT, id: 'A1', patch, at: SECOND });
+
+  it('should carry the details onto the raised item', () => {
+    // Arrange / Act
+    const created = choices();
+
+    // Assert
+    should(created.item?.optionDetails).deepEqual([{ label: 'Go', detail: 'Ship it **now**, see `plan.md`.' }]);
+  });
+
+  it('should refuse details that name no option', () => {
+    // Arrange / Act
+    const refused = failed(
+      applyAgendaCommandToSession(
+        null,
+        SESSION_ID,
+        raiseCommand(AGENT, {
+          ask: { kind: 'multiple-choice', options: [{ label: 'Go' }, { label: 'Wait' }] },
+          optionDetails: [{ label: 'Stop', detail: 'x' }],
+        }),
+      ),
+    );
+
+    // Assert
+    should(refused.error.code).equal('invalid');
+    should(refused.error.message).containEql('"Stop"');
+  });
+
+  it('should revise the details, remember the earlier ones, and refuse a label that is not an option', () => {
+    // Arrange
+    const created = choices();
+
+    // Act
+    const edited = succeeded(editing(created.ledger, { optionDetails: [{ label: 'Wait', detail: 'Cheaper.' }] }));
+    const refused = failed(editing(created.ledger, { optionDetails: [{ label: 'Nope', detail: 'x' }] }));
+    const same = succeeded(editing(created.ledger, { optionDetails: created.item?.optionDetails ?? [] }));
+
+    // Assert
+    should(edited.item?.optionDetails).deepEqual([{ label: 'Wait', detail: 'Cheaper.' }]);
+    should(edited.item?.revisions?.[0]).containDeep({
+      changed: ['optionDetails'],
+      previous: { optionDetails: [{ label: 'Go', detail: 'Ship it **now**, see `plan.md`.' }] },
+    });
+    should(refused.error.code).equal('invalid');
+    should(same.changed).be.false();
+  });
+
+  it('should replace the details on a stable-source refresh and clear them when the refresh leaves them out', () => {
+    // Arrange
+    const stable: Partial<RaiseAgendaRequest> = {
+      source: 'task',
+      sourceRef: 'F12',
+      ask: undefined,
+      questions: [{ question: 'When?', options: [{ label: 'Go' }, { label: 'Wait' }] }],
+    };
+    const first = raised(DAEMON, { ...stable, optionDetails: [{ label: 'Go', detail: 'Now.' }] });
+
+    // Act
+    const same = succeeded(
+      applyAgendaCommand(
+        first.ledger,
+        raiseCommand(DAEMON, { ...stable, optionDetails: [{ label: 'Go', detail: 'Now.' }] }, SECOND),
+      ),
+    );
+    const replaced = succeeded(
+      applyAgendaCommand(
+        first.ledger,
+        raiseCommand(DAEMON, { ...stable, optionDetails: [{ label: 'Wait', detail: 'Later.' }] }, SECOND),
+      ),
+    );
+    const cleared = succeeded(applyAgendaCommand(replaced.ledger, raiseCommand(DAEMON, stable, THIRD)));
+
+    // Assert
+    should(same.changed).be.false();
+    should(replaced.item?.optionDetails).deepEqual([{ label: 'Wait', detail: 'Later.' }]);
+    should(cleared.item?.optionDetails).be.undefined();
+  });
+});

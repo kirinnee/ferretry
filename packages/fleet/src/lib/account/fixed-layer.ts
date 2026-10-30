@@ -443,9 +443,9 @@ export const AGENDA_ENV = 'FY_AGENDA';
 /** The Agenda mode teaching. Short on purpose — it is in every prompt that turns it on. */
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
-    `Agenda mode: keep an agenda of what ONLY the owner can do or decide. Before ending a reply that asks them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<what it is about>" "<the ask>"\`. Title ≤40 chars; ask ≤120. The owner reads it cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
-    `\`--premise\` = situation, \`--context\` = why now, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: a SMALL diagram (fy-render svg|html|mermaid). \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option\`s with \`--recommend <pick> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
-    `\`--blocking\`: you cannot go on without it; \`--will-block\`: it will block later; \`--by <time>\`: when it is needed (phone buzzes near it).`,
+    `Agenda mode: keep an agenda of what ONLY the owner can do or decide. To ask them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<why now>" "<the ask>"\` (required). Title ≤40 chars; ask ≤120. Read cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
+    `Each item stands ALONE: full Markdown (\`code\` names, **bold** key point), \`--decided\` = settled, \`--still-open\` = left; \`--body\`: hypermedia (fy-render image|chart|mermaid|svg). \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option "Label: why"\`; \`--recommend <label> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
+    `\`--blocking\`: you cannot go on; \`--will-block\`: blocks later; \`--by <time>\`: when needed.`,
     `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat that closes it: re-raise (\`${fy} agenda surface <id>\`) only if the owner must still decide or act. KEEP ITEMS CURRENT this turn: agenda \`edit <id>\` if changed, \`done <id>\` if settled; \`ls\` = open.`,
   ].join('\n');
 

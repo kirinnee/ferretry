@@ -97,19 +97,19 @@ describe('AgendaCard sections', () => {
 });
 
 describe('AgendaCard recommended option', () => {
-  test('a choice puts the recommended option on the right, as the primary answer', async () => {
+  test('a choice puts the recommended option in the middle (up), the other on the left', async () => {
     const single = agendaItem('A3', {
       subject: 'Pick',
       questions: [{ question: 'Which?', options: [{ label: 'SQLite' }, { label: 'Postgres' }], recommended: 'SQLite' }],
       ask: choices('SQLite', 'Postgres'),
     });
     view = await mount(<AgendaCard item={single} onAct={() => {}} />);
-    const right = must(view.container.querySelector('[data-agenda-answer="right"]'), 'right answer');
-    expect(right.getAttribute('data-agenda-option')).toBe('SQLite');
-    expect(right.getAttribute('data-variant')).toBe('primary');
+    const middle = must(view.container.querySelector('[data-agenda-answer="up"]'), 'middle answer');
+    expect(middle.getAttribute('data-agenda-option')).toBe('SQLite');
     expect(view.container.querySelector('[data-agenda-answer="left"]')?.getAttribute('data-agenda-option')).toBe(
       'Postgres',
     );
+    expect(view.container.querySelector('[data-agenda-answer="right"]')).toBeNull();
   });
 });
 
@@ -170,7 +170,7 @@ describe('AgendaDetail point form', () => {
     expect(points('impact')).toEqual(['blocks the release', 'costs a day']);
   });
 
-  test('with the plain renderer, prose or a mix of prose and bullets stays a paragraph', async () => {
+  test('prose or a mix of prose and bullets is drawn as Markdown, not split into points', async () => {
     view = await mount(
       <AgendaDetail
         item={{ ...rich, context: 'Lead.\n\nIntro line.\n- then a point', impact: 'Plain words.' }}
@@ -178,8 +178,9 @@ describe('AgendaDetail point form', () => {
         renderProse={text => <PointForm text={text} />}
       />,
     );
-    expect(view.container.querySelectorAll('[data-agenda-section="context"] li').length).toBe(0);
-    expect(view.container.querySelector('[data-agenda-section="context"]')?.textContent).toContain('Intro line.');
+    const context = view.container.querySelector('[data-agenda-section="context"]');
+    expect(context?.textContent).toContain('Intro line.');
+    expect(context?.querySelectorAll('.fy-attn-points').length).toBe(0);
     expect(view.container.querySelectorAll('[data-agenda-section="impact"] li').length).toBe(0);
   });
 });

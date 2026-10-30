@@ -28,6 +28,7 @@ const WRITING_GUIDE = `The reader has NOT been following this session. Write for
   --still-open   what is still open to decide, one bullet each (repeat); update it as the talk goes on
   --term         TERM=meaning for every codename or term of art you use (repeat)
   --question     each thing they must answer (repeat); --option gives a lone question its choices
+  --option       a choice's label; "Label: why" adds a one-line detail, --option-detail "Label=markdown" a longer one
   --recommend    your suggested decision (an option label, or the answer in words); --recommend-why
   --impact       what happens if nobody answers; --urgency by when ("before the 14:00 deploy")
   --link         a PR, file or reference worth opening (repeat)
@@ -155,7 +156,13 @@ function mountVerbs(
         'the board card this item belongs to (F18 or &F18; your focus card when omitted); a bare --task is the older --todo',
       )
       .option('--todo', 'a to-do: the human does something; nothing to choose (steps with no question imply it)')
-      .option('-o, --option <label>', 'a choice label; repeat for each option', collect, [])
+      .option(
+        '-o, --option <label>',
+        'a choice label, or "Label: why" to add its one-line detail; repeat for each option',
+        collect,
+        [],
+      )
+      .option('--option-detail <label=markdown>', "an option's longer explanation, in Markdown; repeat", collect, [])
       .option('--premise <point>', 'the situation: what is going on; repeat for bullet points', collect, [])
       .option(
         '-c, --context <point>',
@@ -204,6 +211,8 @@ function mountVerbs(
       .option('--still-open <point>', 'replace what is still open; repeat for bullet points', collect, [])
       .option('--term <TERM=meaning>', 'replace the terms with these; repeat', collect, [])
       .option('-q, --question <text>', "reword the item's questions, in order, one per question; repeat", collect, [])
+      .option('-o, --option <label-and-detail>', "give an existing option's detail; repeat", collect, [])
+      .option('--option-detail <label=markdown>', "replace an option's longer explanation; repeat", collect, [])
       .option('--recommend <decision>', 'replace the recommendation')
       .option('--recommend-why <reason>', 'why you recommend it')
       .option('--impact <point>', 'replace what happens if nobody answers; repeat for bullet points', collect, [])

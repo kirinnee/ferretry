@@ -513,16 +513,16 @@ describe('AgendaInboxPage on a phone', () => {
     const answers = [...mounted.container.querySelectorAll('.fy-attn-deck__top [data-agenda-answer]')].map(button =>
       button.getAttribute('data-agenda-option'),
     );
-    expect(answers).toEqual(['Skip', 'Wait', 'Rebase now']);
+    expect(answers).toEqual(['Wait', 'Rebase now', 'Skip']);
     expect(mounted.container.querySelector('.fy-attn-inbox__hint')?.textContent).toBe(
-      'Swipe ← Skip · ↑ Wait · → Rebase now · ↓ Discuss',
+      'Swipe ← Wait · ↑ Rebase now · → Skip · ↓ Discuss',
     );
     await mounted.unmount();
   });
 
   it('names the swipes of the card on top, and names a plain card’s swipes', () => {
     expect(swipeHintFor(undefined)).toBe('');
-    expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · → Ship · ↓ Discuss');
+    expect(swipeHintFor(twoWay)).toBe('Swipe ← Hold · ↑ Ship · ↓ Discuss');
     expect(swipeHintFor(bare)).toBe('Swipe → Got it · ↓ Discuss');
     const task = inboxCard(agendaItem('A9', { subject: 'Do the list', answers: [] } as never));
     expect(swipeHintFor(task)).toBe('Reply in words, or open the chat · ↓ Discuss');

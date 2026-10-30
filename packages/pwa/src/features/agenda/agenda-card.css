@@ -376,15 +376,43 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-options__row {
   display: flex;
   min-width: 0;
-  align-items: flex-start;
-  gap: var(--gap-xs);
+  flex-direction: column;
+  gap: 2px;
 }
-.fy-attn-options__text {
+/* "A — Keep both" and, when it is the pick, the Recommended badge on the same line. */
+.fy-attn-options__head {
+  display: flex;
   min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
   overflow-wrap: anywhere;
 }
-.fy-attn-options__what {
+.fy-attn-options__row[data-agenda-option-detail] > .fy-attn-options__what {
+  min-width: 0;
   color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* Markdown inside the card's fields: a code token reads as one, a bullet's paragraph sits on its marker. */
+.fy-attn-card__why .md,
+.fy-attn-prose .md,
+.fy-attn-points .md,
+.fy-attn-terms-table .md,
+.fy-attn-q__ask .md,
+.fy-attn-q__why .md {
+  font-size: inherit;
+  line-height: inherit;
+}
+.fy-attn-points > li > .fy-attn-new {
+  float: left;
+  margin-right: var(--gap-xs);
+}
+.fy-attn-q__ask[data-numbered] {
+  display: flex;
+  gap: var(--gap-xs);
+}
+.fy-attn-q__ask[data-numbered] > .fy-attn-q__n {
+  flex: none;
 }
 /* Terms: ALWAYS a two-column table — Term | Meaning, the term bold on the left — wherever terms are drawn. */
 .fy-attn-terms-table {
@@ -479,14 +507,35 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   flex-direction: column;
   gap: var(--gap-xs);
 }
+/* A question's own row: equal-width short buttons across the whole width, as the quick replies are. */
 .fy-attn-q__options {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
   gap: var(--gap-xs);
   margin: 0;
   min-width: 0;
   border: 0;
   padding: 0;
+}
+.fy-attn-q__option {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+}
+.fy-attn-q__option-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-attn-q__option[data-recommended] {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 .fy-attn-q__option[aria-pressed='true'] {
   border-color: var(--accent);
@@ -585,6 +634,7 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   z-index: 5;
   display: flex;
   min-width: 10rem;
+  max-width: min(22rem, calc(100vw - 2 * var(--gap-md)));
   flex-direction: column;
   border: var(--stroke-panel) solid var(--border);
   border-radius: var(--radius-control);
@@ -627,14 +677,6 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 .fy-attn-card__option > .kt-attn-option__body,
 .fy-attn-q__option > .kt-attn-option__body {
   flex: 1 1 6rem;
-}
-.fy-attn-q__options {
-  grid-template-columns: 1fr;
-}
-@media (min-width: 640px) {
-  .fy-attn-q__options {
-    grid-template-columns: repeat(auto-fit, minmax(10rem, 1fr));
-  }
 }
 .fy-attn-actions__row[data-agenda-row] {
   align-items: flex-start;
@@ -737,6 +779,14 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 }
 .md-copy-span code {
   min-width: 0;
+}
+/* A Copy button belongs on a step's command, not on every token a ferret put in backticks inside a sentence. */
+.fy-attn-card [data-md-copy='span'] > button,
+.fy-item-view [data-md-copy='span'] > button {
+  display: none;
+}
+.fy-attn-steps [data-md-copy='span'] > button {
+  display: inline-flex;
 }
 
 /* A pinned card never loses its header or its actions: only the middle (details, body, steps, history)
@@ -940,16 +990,17 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 }
 
 /*
- * ILLUSTRATIONS FIT THE CARD. An fy-render mock-up (svg, mermaid, chart, html) is at most the card's width,
- * and scrolls inside its OWN box when it is bigger — in both directions — so the page never scrolls sideways
- * and one tall picture cannot push the answers off the screen. A wide table or code block pans in its box too.
+ * ILLUSTRATIONS FIT THE CARD, AND NEVER TRAP A SCROLL. An fy-render mock-up (svg, mermaid, chart, html) is at
+ * most the card's width and as tall as it is: the card has ONE scroll, so a finger-drag over a picture moves the
+ * card, never the picture. Only something wider than the card pans — sideways, in its own box. A wide table or
+ * code block pans sideways too.
  */
 .fy-attn-card .fy-render,
 .fy-attn-detail .fy-render {
   max-width: 100%;
-  max-height: min(60dvh, 32rem);
-  overflow: auto;
-  overscroll-behavior: contain;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 .fy-attn-card .fy-render :is(svg, img, canvas, video, iframe),
 .fy-attn-detail .fy-render :is(svg, img, canvas, video, iframe) {
