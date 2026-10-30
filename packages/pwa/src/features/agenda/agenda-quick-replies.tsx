@@ -1,12 +1,13 @@
 /**
- * THE QUICK REPLIES OF AN OPEN AGENDA ITEM — THE SWIPE ROW, directly above the REAL composer (never covering it):
- * at most THREE buttons, laid out by DIRECTION in three equal slots — the LEFT slot is the ← answer, the MIDDLE
- * slot ↑, the RIGHT slot →, always. A direction with no answer leaves its slot BLANK, so a button never shifts
- * position and the others keep their widths. Each is SHORT: its letter ("A", "B"), or its label when that is one
- * or two words ("Looks good"), one way per row; the full label is its accessible name and its title. The
- * recommended one is in the accent. A tap answers at once. Options past the three swiped ones are not buttons:
- * they are in the "…" menu ("D — label"). Answering is replying, so there is no text field here: the composer
- * below is the one box, and what is typed in it rides an answer as its note.
+ * THE QUICK REPLIES OF AN OPEN AGENDA ITEM — ONE ROW OF EVERY ACTION, directly above the REAL composer (never
+ * covering it) and on the card body's edges: at most THREE answer buttons in DIRECTION order — the ← answer, the
+ * ↑ (recommended) one, the → one — then a quiet "Not needed". A direction with no answer draws NOTHING: the
+ * buttons there share the width, never a hole (owner: "doesn't waste so much space"). Each is SHORT: its letter
+ * ("A", "B"), or its label when that is one or two words ("Looks good"), one way per row, never wrapped; the full
+ * label is its accessible name and its title. The recommended one is in the accent. A tap answers at once.
+ * Options past the three swiped ones are the same buttons in full-width rows under it, tap only. Answering is
+ * replying, so there is no text field here: the composer below is the one box, and what is typed in it rides an
+ * answer as its note.
  *
  * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ SKIPS: on to the next
  * item, or back to the chat when there is none.
@@ -148,9 +149,14 @@ interface Reply {
   readonly answer: AgendaCardAnswer;
 }
 
-/** The row's buttons: the card's answers (three at most), each with its letter among the item's options. */
+/** Where a direction sits in the row, read left to right: ← ↑ →. */
+const ROW_ORDER: Readonly<Record<string, number>> = { left: 0, up: 1, right: 2 };
+
+/** The row's buttons, in ← ↑ → order: the card's answers (three at most), each with its letter among the item's options. */
 const repliesOf = (model: CardModel, options: readonly AgendaAskOption[]): readonly Reply[] =>
-  model.answers.map(answer => ({ label: answer.label, letter: letterOf(options, answer.label), answer }));
+  model.answers
+    .map(answer => ({ label: answer.label, letter: letterOf(options, answer.label), answer }))
+    .toSorted((a, b) => (ROW_ORDER[a.answer.direction] ?? 3) - (ROW_ORDER[b.answer.direction] ?? 3));
 
 /** Whether the row has anything to draw: chips, a clear, a send, a waiting line or an error. */
 const hasReplies = (model: CardModel, sending: QuestionSending | undefined): boolean =>
@@ -223,8 +229,6 @@ export function AgendaQuickReplies({
   const slotted = replies.length > 0 && sending === undefined && !model.notice;
   // Every row reads one way: one long label letters the swipe row AND the rows under it.
   const lettered = rowLettered([...replies, ...extras]);
-  // "Not needed" takes the swipe row's right slot when no answer is there, rather than a row of its own.
-  const dismissInRow = canDismiss && slotted && !replies.some(reply => reply.answer.direction === 'right');
   if (!hasReplies(model, sending) && error === null && waitingOn === undefined) return null;
   return (
     <div
@@ -279,21 +283,19 @@ export function AgendaQuickReplies({
           />
         ))}
         {sending === undefined ? null : <QuestionChips busy={busy} sending={sending} />}
-        {dismissInRow ? <NotNeeded busy={busy} give={give} inRow /> : null}
+        {canDismiss ? <NotNeeded busy={busy} give={give} /> : null}
       </fieldset>
       <MoreChoices busy={busy} extras={extras} give={give} lettered={lettered} />
-      {canDismiss && !dismissInRow ? <NotNeeded busy={busy} give={give} inRow={false} /> : null}
     </div>
   );
 }
 
-/** "Not needed": a plain, quiet button — in the swipe row's empty right slot, or under the rows. */
-function NotNeeded({ busy, give, inRow }: { busy: boolean; give: (action: InboxAction) => void; inRow: boolean }) {
+/** "Not needed": a plain, quiet text button, last in the one row of actions. */
+function NotNeeded({ busy, give }: { busy: boolean; give: (action: InboxAction) => void }) {
   return (
     <button
       className="fy-qr__dismiss"
       data-agenda-dismiss=""
-      data-in-row={inRow || undefined}
       disabled={busy}
       onClick={() => give(DISMISS_ACTION)}
       type="button"

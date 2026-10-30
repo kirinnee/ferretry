@@ -164,21 +164,22 @@ describe('the quick replies', () => {
     expect(spy.acted.at(-1)?.kind).toBe('dismiss');
   });
 
-  test('puts Not needed in the swipe row when no answer takes its right slot', async () => {
+  test('draws one row of every action: the answers in ← ↑ → order, then Not needed, with no hole for an empty slot', async () => {
     const spy = await draw(agendaItem('A10', { ask: choices('Now', 'Later') } as Partial<AgendaItem>));
-    expect(root().querySelector('[data-agenda-answer="right"]')).toBeNull();
-    const dismiss = one<HTMLButtonElement>('fieldset[data-slots] > [data-agenda-dismiss]');
-    expect(dismiss.hasAttribute('data-in-row')).toBe(true);
+    const row = one('fieldset.fy-qr__row');
+    const kids = [...row.children] as HTMLElement[];
+    expect(
+      kids.map(kid => kid.dataset.agendaAnswer ?? (kid.hasAttribute('data-agenda-dismiss') ? 'dismiss' : '?')),
+    ).toEqual(['left', 'up', 'dismiss']);
     expect(root().querySelectorAll('[data-agenda-dismiss]')).toHaveLength(1);
-    await interact(() => dismiss.click());
+    await interact(() => (kids.at(-1) as HTMLButtonElement).click());
     expect(spy.acted.at(-1)?.kind).toBe('dismiss');
   });
 
-  test('keeps Not needed under the rows when the right slot is taken', async () => {
+  test('keeps Not needed last in the row when all three slots are answered', async () => {
     await draw(agendaItem('A11', { ask: choices('Now', 'Later', 'Never') } as Partial<AgendaItem>));
-    expect(root().querySelector('[data-agenda-answer="right"]')).not.toBeNull();
-    expect(root().querySelector('fieldset [data-agenda-dismiss]')).toBeNull();
-    expect(one('[data-agenda-dismiss]').hasAttribute('data-in-row')).toBe(false);
+    const kids = [...one('fieldset.fy-qr__row').children] as HTMLElement[];
+    expect(kids.map(kid => kid.dataset.agendaAnswer ?? 'dismiss')).toEqual(['left', 'up', 'right', 'dismiss']);
   });
 
   test('has no arrows on a mouse', async () => {
