@@ -4,15 +4,15 @@
  *
  * ═══ ONE PLACE TO LOOK ═══
  *
- * A Warden notification is an Attention item marked `notice` (and `ping`, so the phone buzzes): it lands
+ * A Warden notification is an Agenda item marked `notice` (and `ping`, so the phone buzzes): it lands
  * in the owner's Inbox with every machine's, opens the flagged ferret's chat when tapped, and has no
- * answers — reading it is acting on it. It is written through the one Attention service every other
+ * answers — reading it is acting on it. It is written through the one Agenda service every other
  * caller uses, and nothing else lists the Warden's asks: the Warden page links to the Inbox.
  *
  * ═══ WHAT MAY INTERRUPT A PERSON ═══
  *
  * The subject must be anomalous RIGHT NOW, in this sweep's detector output. A status transition is not
- * evidence; an Attention row the session already has is not evidence either. Then ONE of two reasons
+ * evidence; an Agenda row the session already has is not evidence either. Then ONE of two reasons
  * must hold for it:
  *
  * 1. A warden wrote an EXPLICIT `Verdict: NEEDS_HUMAN` marker for that exact node and anomaly class,
@@ -54,13 +54,13 @@
  */
 
 import {
-  ATTENTION_PUSH_BODY_LENGTH,
-  ATTENTION_PUSH_TITLE_LENGTH,
-  type AttentionBy,
-  type AttentionSource,
-  type AttentionTerm,
-  MAX_ATTENTION_DETAIL_LENGTH,
-  MAX_ATTENTION_REASON_LENGTH,
+  AGENDA_PUSH_BODY_LENGTH,
+  AGENDA_PUSH_TITLE_LENGTH,
+  type AgendaBy,
+  type AgendaSource,
+  type AgendaTerm,
+  MAX_AGENDA_DETAIL_LENGTH,
+  MAX_AGENDA_REASON_LENGTH,
   type WardenLayerStatus,
 } from '@ferretry/protocol';
 import { wardenAnomalySubject, type WardenAnomaly, type WardenAnomalyKind } from './detect.ts';
@@ -82,7 +82,7 @@ import {
  * `agent-raised` is the only source the state machine lets a stable `sourceRef` ride on, and a non-null
  * `sourceRef` is reserved for a daemon actor — which is precisely the dedupe key this module turns on.
  */
-export const WARDEN_ESCALATION_SOURCE: AttentionSource = 'agent-raised';
+export const WARDEN_ESCALATION_SOURCE: AgendaSource = 'agent-raised';
 
 /** A parsed report row as the escalation reads it: the verdict, plus the daemon-owned sidecar naming
  *  which account and model actually judged it. */
@@ -96,12 +96,12 @@ export interface WardenEscalationNode {
 
 /** One active board row, as the escalation reads it. */
 export interface WardenEscalationBoardItem {
-  readonly source: AttentionSource;
+  readonly source: AgendaSource;
   readonly sourceRef: string | null;
-  readonly raisedBy: AttentionBy;
+  readonly raisedBy: AgendaBy;
 }
 
-/** One session's board. An `AttentionSnapshot` satisfies it as read. */
+/** One session's board. An `AgendaSnapshot` satisfies it as read. */
 export interface WardenEscalationBoard {
   readonly sessionId: string;
   readonly items: readonly WardenEscalationBoardItem[];
@@ -244,7 +244,7 @@ export interface WardenEscalationRaise {
   readonly anomalyKind: WardenAnomalyKind;
   /** Its subject's identity across sweeps (`WardenRuntimeState.notified`). */
   readonly subjectKey: string;
-  readonly source: AttentionSource;
+  readonly source: AgendaSource;
   readonly sourceRef: string;
   /** A few words: the notification's title. */
   readonly title: string;
@@ -254,7 +254,7 @@ export interface WardenEscalationRaise {
   readonly premise: string;
   readonly context: string;
   readonly howToResolve: string;
-  readonly terms?: readonly AttentionTerm[];
+  readonly terms?: readonly AgendaTerm[];
   readonly waitingSince: string;
   /** A plain notification, not an agenda item, and one that buzzes the phone. */
   readonly notice: true;
@@ -272,7 +272,7 @@ export type WardenEscalationReasonKind = 'needs_human' | WardenOwnerRoute['reaso
 export interface WardenEscalationResolution {
   readonly sessionId: string;
   readonly anomalyKind: WardenAnomalyKind;
-  readonly source: AttentionSource;
+  readonly source: AgendaSource;
   readonly sourceRef: string;
   /** Kept as the resolution note, so the audit trail says why it cleared. */
   readonly note: string;
@@ -446,7 +446,7 @@ function jevLine(handoff: {
   }
 }
 
-const JEV_TERM: AttentionTerm = {
+const JEV_TERM: AgendaTerm = {
   term: 'Jev',
   meaning: 'The Warden’s quick first look at a flag: a small model that says leave it, act, or unsure.',
 };
@@ -567,11 +567,11 @@ function ferretNotice(input: {
   const cli = input.clientName;
   const usesJev = reason.kind === 'jev' || (reason.kind === 'held' && reason.action.by === 'jev');
   return {
-    title: clamp(`${nodeName(node)} ${PREDICATE[kind]}`, ATTENTION_PUSH_TITLE_LENGTH),
-    subject: clamp(flatten(`${nodeReference(node)} ${PREDICATE[kind]}. ${remedy}`), ATTENTION_PUSH_BODY_LENGTH),
-    why: clamp(flatten(now.why), MAX_ATTENTION_DETAIL_LENGTH),
-    premise: bullets([nodeFactsLine(node, input.machine), detectorLine(subject.anomaly)], MAX_ATTENTION_REASON_LENGTH),
-    context: bullets([...now.lines, remedy], MAX_ATTENTION_DETAIL_LENGTH),
+    title: clamp(`${nodeName(node)} ${PREDICATE[kind]}`, AGENDA_PUSH_TITLE_LENGTH),
+    subject: clamp(flatten(`${nodeReference(node)} ${PREDICATE[kind]}. ${remedy}`), AGENDA_PUSH_BODY_LENGTH),
+    why: clamp(flatten(now.why), MAX_AGENDA_DETAIL_LENGTH),
+    premise: bullets([nodeFactsLine(node, input.machine), detectorLine(subject.anomaly)], MAX_AGENDA_REASON_LENGTH),
+    context: bullets([...now.lines, remedy], MAX_AGENDA_DETAIL_LENGTH),
     howToResolve: clamp(
       [
         `Open ${nodeReference(node)} (session ${id}) and read its last turn. ${remedy}`,
@@ -579,7 +579,7 @@ function ferretNotice(input: {
         `From a terminal: \`${cli} send ${id} <message>\`, \`${cli} resume ${id}\` or \`${cli} stop ${id}\`.`,
         'This notification clears itself once the ferret stops being flagged.',
       ].join('\n'),
-      MAX_ATTENTION_DETAIL_LENGTH,
+      MAX_AGENDA_DETAIL_LENGTH,
     ),
     ...(usesJev ? { terms: [JEV_TERM] } : {}),
     waitingSince: input.waitingSince,
@@ -620,20 +620,20 @@ function fleetNotice(input: {
         ? `${ferrets} can’t reach ${subject.anomaly.provider}`
         : `${ferrets}: ${wardenAnomalySubject(kind)}`;
   return {
-    title: clamp(title, ATTENTION_PUSH_TITLE_LENGTH),
+    title: clamp(title, AGENDA_PUSH_TITLE_LENGTH),
     subject: clamp(
       flatten(`${wardenAnomalySubject(kind)} on ${where}, for ${ferrets}. Check the machine.`),
-      ATTENTION_PUSH_BODY_LENGTH,
+      AGENDA_PUSH_BODY_LENGTH,
     ),
-    why: clamp(flatten(now.why), MAX_ATTENTION_DETAIL_LENGTH),
+    why: clamp(flatten(now.why), MAX_AGENDA_DETAIL_LENGTH),
     premise: bullets(
       [`Ferrets on ${where}: ${named}${more}.`, detectorLine(subject.anomaly)],
-      MAX_ATTENTION_REASON_LENGTH,
+      MAX_AGENDA_REASON_LENGTH,
     ),
-    context: bullets(now.lines, MAX_ATTENTION_DETAIL_LENGTH),
+    context: bullets(now.lines, MAX_AGENDA_DETAIL_LENGTH),
     howToResolve: clamp(
       'This is about the machine, not one ferret: look at its daemon, its provider and its logins. It clears itself once the fault does.',
-      MAX_ATTENTION_DETAIL_LENGTH,
+      MAX_AGENDA_DETAIL_LENGTH,
     ),
     ...(input.reason.kind === 'jev' ? { terms: [JEV_TERM] } : {}),
     waitingSince: input.waitingSince,

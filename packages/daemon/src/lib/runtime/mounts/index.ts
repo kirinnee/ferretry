@@ -7,7 +7,7 @@ import type { ApiRoute } from '../../api/route.ts';
 import { ApiRouter } from '../../api/router.ts';
 import { type DaemonApiDependencies, daemonApiRoutes } from '../../api/server.ts';
 import { ApiSocketDispatcher, type SocketRoute } from '../../api/socket.ts';
-import type { AttentionRepliesSubsystem, AttentionService } from '../../attention/index.ts';
+import type { AgendaRepliesSubsystem, AgendaService } from '../../agenda/index.ts';
 import type { AuditedRoutesSubsystem } from '../../audit/index.ts';
 import { auditedRoutes, auditedSocketRoutes } from '../../audit/routes.ts';
 import type { BrowserLoginLifecycle } from '../../browser/control/index.ts';
@@ -37,8 +37,8 @@ import { agentControlledRoutes, agentControlledSockets } from './agent-control.t
 import { agentToolRoutes } from './agent-tools.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
-import { attentionRoutes, type DirectNotificationSubsystem } from './attention.ts';
-import { configFilesConfirmations } from './attention-confirms.ts';
+import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
+import { configFilesConfirmations } from './agenda-confirms.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BoardProjectsSubsystem, boardProjectRoutes } from './board-projects.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
@@ -235,11 +235,11 @@ export interface MountedSubsystems {
   readonly foreignHistory: ForeignHistorySubsystem;
   /** Existing Claude/Codex conversations the owner may keep as ferrets: listed, searched and adopted. */
   readonly conversationImport: ConversationImportSubsystem;
-  readonly attention: AttentionService;
-  /** Audited direct and committed-Attention presentation through the sole push fan-out. */
+  readonly attention: AgendaService;
+  /** Audited direct and committed-Agenda presentation through the sole push fan-out. */
   readonly notifications: DirectNotificationSubsystem;
   /** The owner's answers each ferret's outbox holds before delivering them as one message. */
-  readonly attentionReplies: AttentionRepliesSubsystem;
+  readonly agendaReplies: AgendaRepliesSubsystem;
   readonly pins: PinService;
   /** The session read: what the fleet holds, and one session in full. */
   readonly sessions: SessionDirectorySubsystem;
@@ -617,10 +617,10 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // Attachment routes are mounted before sends may honour attachment ids. Their
         // deeper unlock path cannot shadow this one-segment upload route.
         ...sessionAttachmentRoutes(subsystems.sessionAttachments),
-        ...attentionRoutes(
+        ...agendaRoutes(
           subsystems.attention,
           subsystems.notifications,
-          subsystems.attentionReplies,
+          subsystems.agendaReplies,
           configFilesConfirmations(subsystems.configFiles.service),
         ),
         ...pinRoutes(subsystems.pins),

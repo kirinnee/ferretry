@@ -70,14 +70,14 @@ const summaryLine = (task: TaskSummary): string => {
 export function renderTaskBoard(board: TaskBoard): string {
   if (board.tasks.length === 0) return ['No tasks.', ...parseErrorNotice(board)].join('\n');
   const ordered = [...board.tasks].sort(byUrgency);
-  const attention = new Set(ordered.filter(task => task.blocked && task.blockedBy.length === 0).map(task => task.id));
+  const agenda = new Set(ordered.filter(task => task.blocked && task.blockedBy.length === 0).map(task => task.id));
   const lines: string[] = [];
-  if (attention.size > 0) {
+  if (agenda.size > 0) {
     lines.push('NEEDS YOU');
-    for (const task of ordered) if (attention.has(task.id)) lines.push(summaryLine(task));
-    if (attention.size < ordered.length) lines.push('');
+    for (const task of ordered) if (agenda.has(task.id)) lines.push(summaryLine(task));
+    if (agenda.size < ordered.length) lines.push('');
   }
-  for (const task of ordered) if (!attention.has(task.id)) lines.push(summaryLine(task));
+  for (const task of ordered) if (!agenda.has(task.id)) lines.push(summaryLine(task));
   return [...lines, ...parseErrorNotice(board)].join('\n');
 }
 

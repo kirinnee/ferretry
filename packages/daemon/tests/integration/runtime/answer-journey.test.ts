@@ -7,7 +7,7 @@ import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import {
   ANSWER_NOT_DELIVERED,
   createSessionPaths,
-  firstWriteReleasedAnswerAttention,
+  firstWriteReleasedAnswerAgenda,
   parseSessionId,
   RELOAD_THE_APP,
 } from '../../../src/lib/index.ts';
@@ -680,19 +680,19 @@ describe('the structured answer journey', () => {
       {
         label: 'released',
         kind: 'structured-answer-released-unconfirmed' as const,
-        message: firstWriteReleasedAnswerAttention(olderToolUseId),
+        message: firstWriteReleasedAnswerAgenda(olderToolUseId),
       },
     ];
 
-    for (const attention of cases) {
-      const home = await tempDirectory(`fyd-answer-colliding-${attention.label}-home`);
-      const scratch = await tempDirectory(`fyd-answer-colliding-${attention.label}-scratch`);
+    for (const agenda of cases) {
+      const home = await tempDirectory(`fyd-answer-colliding-${agenda.label}-home`);
+      const scratch = await tempDirectory(`fyd-answer-colliding-${agenda.label}-scratch`);
       const transcript = join(scratch, 'session.jsonl');
       await writeFile(transcript, transcriptFor(currentToolUseId));
       const sessionDirectory = await seed(home, transcript);
       await patchStateOffline(home, {
-        needsHumanKind: attention.kind,
-        needsHuman: attention.message,
+        needsHumanKind: agenda.kind,
+        needsHuman: agenda.message,
       });
       const log = await failingPane(home, scratch);
       const daemon = await boot(home);
@@ -701,14 +701,14 @@ describe('the structured answer journey', () => {
       const pending = await waitForPendingQuestion(port, daemon, currentToolUseId);
       should(pending.state).match({
         pendingQuestion: { toolUseId: currentToolUseId },
-        needsHumanKind: attention.kind,
-        needsHuman: attention.message,
+        needsHumanKind: agenda.kind,
+        needsHuman: agenda.message,
       });
 
       // `Other` is valid protocol input, but this real pane renders only Yes/No. The production
       // driver therefore fails with `choice-missing` before any answer key, positively binds the
       // same form for one Escape, and settles this operation as a proved failure.
-      const requestId = `${REQUEST_ID}:colliding-${attention.label}`;
+      const requestId = `${REQUEST_ID}:colliding-${agenda.label}`;
       const failed = await otherAnswerRequest(port, daemon, requestId, currentToolUseId, 'Explain in prose');
       const failureBody = JSON.parse(await statusOf(failed, 409)) as {
         readonly code: string;
@@ -725,8 +725,8 @@ describe('the structured answer journey', () => {
       });
       const released = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
       should(released.state).match({
-        needsHumanKind: attention.kind,
-        needsHuman: attention.message,
+        needsHumanKind: agenda.kind,
+        needsHuman: agenda.message,
       });
       should(released.state.pendingQuestion ?? undefined).be.undefined();
       const outcomes = (await readFile(join(sessionDirectory, 'channel', 'answers.jsonl'), 'utf8'))
@@ -1119,7 +1119,7 @@ describe('the structured answer journey', () => {
     await offline.storage.updateState(parseSessionId(SESSION_ID), current => ({
       ...(current as Record<string, unknown>),
       needsHumanKind: 'structured-answer-released-unconfirmed',
-      needsHuman: firstWriteReleasedAnswerAttention(TOOL_USE_ID),
+      needsHuman: firstWriteReleasedAnswerAgenda(TOOL_USE_ID),
     }));
     await offline.storage.close();
     const recovered = await boot(home);

@@ -1,4 +1,4 @@
-export * from './attention.ts';
+export * from './agenda.ts';
 export * from './backoff.ts';
 export * from './bless.ts';
 export * from './concurrency.ts';

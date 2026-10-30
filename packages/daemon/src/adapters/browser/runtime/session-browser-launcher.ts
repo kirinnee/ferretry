@@ -35,6 +35,8 @@ export interface SessionBrowserModeOptions {
   /** The private display a Linux `window` browser draws into. */
   readonly display?: BrowserDisplayPort;
   readonly platform?: NodeJS.Platform;
+  /** How long a signalled Chrome gets to exit before the next, harder step. Defaults to the shipped bound. */
+  readonly shutdownTimeoutMs?: number;
 }
 
 export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
@@ -87,7 +89,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         endpoint,
         workerExecutable: this.worker.kind === 'executable',
       });
-      return new LeasedBrowser(worker, chrome, lease);
+      return new LeasedBrowser(worker, chrome, lease, this.modes.shutdownTimeoutMs);
     } catch (error) {
       // A failed launch owns the same ordering obligation as a close: the browser it started is still
       // holding this profile, so the lease is released only once that Chrome is CONFIRMED gone — and
@@ -96,7 +98,9 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       // outcome and never the reported one: the caller still gets the error that failed the launch —
       // and the obvious retry of that same session is refused by the store like anyone else, because
       // the Chrome this record still names may be the one that would not die.
-      if (chrome === undefined || (await reapChrome(chrome, 'SIGKILL'))) await lease.release().catch(() => undefined);
+      if (chrome === undefined || (await reapChrome(chrome, 'SIGKILL', this.modes.shutdownTimeoutMs))) {
+        await lease.release().catch(() => undefined);
+      }
       throw error;
     }
   }
@@ -132,6 +136,7 @@ class LeasedBrowser implements BrowserAutomation {
     private readonly worker: BrowserWorkerClient,
     private readonly chrome: ReturnType<typeof Bun.spawn>,
     private readonly lease: Awaited<ReturnType<BrowserProfilePort['acquire']>>,
+    private readonly shutdownTimeoutMs: number = CHROME_SHUTDOWN_TIMEOUT_MS,
   ) {
     // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
     // Chrome without its worker is an unreachable window still holding the profile. So both mean the
@@ -177,7 +182,7 @@ class LeasedBrowser implements BrowserAutomation {
     // browser still reachable, whatever happened to Chrome.
     const workerGone = await this.worker.close().then(succeeded, failed);
     // Chrome is reaped either way — a worker that would not die is no reason to leave a browser up.
-    const chromeGone = await reapChrome(this.chrome, 'SIGTERM');
+    const chromeGone = await reapChrome(this.chrome, 'SIGTERM', this.shutdownTimeoutMs);
     // Released LAST and only on BOTH confirmations: a lease that outlives either child by even a
     // moment lets a login window or the next session open a second Chrome over a profile the first one
     // is still writing to. A survivor therefore KEEPS the lease — an unreleased lease costs this
@@ -207,11 +212,15 @@ const CHROME_SHUTDOWN_TIMEOUT_MS = 2_000;
  * can stand in for it: Chrome's own SingletonLock would warn the next acquirer, but a browser killed
  * before it finished starting has not written one yet.
  */
-async function reapChrome(chrome: ReturnType<typeof Bun.spawn>, first: 'SIGTERM' | 'SIGKILL'): Promise<boolean> {
+async function reapChrome(
+  chrome: ReturnType<typeof Bun.spawn>,
+  first: 'SIGTERM' | 'SIGKILL',
+  timeoutMs: number = CHROME_SHUTDOWN_TIMEOUT_MS,
+): Promise<boolean> {
   signalChrome(chrome, first);
-  if (await exitedWithin(chrome, CHROME_SHUTDOWN_TIMEOUT_MS)) return true;
+  if (await exitedWithin(chrome, timeoutMs)) return true;
   signalChrome(chrome, 'SIGKILL');
-  return await exitedWithin(chrome, CHROME_SHUTDOWN_TIMEOUT_MS);
+  return await exitedWithin(chrome, timeoutMs);
 }
 
 /** Named so a shutdown reads as the two-outcome question it is, rather than as a swallowed rejection. */

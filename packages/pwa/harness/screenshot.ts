@@ -132,7 +132,7 @@ const SCHEME: 'light' | 'dark' = process.argv.includes('--light') ? 'light' : 'd
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
-const ATTENTION_ONLY = process.argv.includes('--attention-only');
+const AGENDA_ONLY = process.argv.includes('--agenda-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent actions, nothing else. */
 const WARDEN_ONLY = process.argv.includes('--warden-only');
@@ -191,7 +191,7 @@ const VIEWPORT_MATRIX_ONLY = process.argv.includes('--viewport-matrix-only');
  */
 const WALKS_SETTINGS = !(
   SEARCH_ONLY ||
-  ATTENTION_ONLY ||
+  AGENDA_ONLY ||
   FILES_ONLY ||
   TASK_BOARD_ONLY ||
   PROJECTS_ONLY ||
@@ -2319,7 +2319,7 @@ try {
             await captureSessionSearchEvidence(page, viewport, server.url.toString());
             continue;
           }
-          if (ATTENTION_ONLY) {
+          if (AGENDA_ONLY) {
             // Pressing the real line is the point — this proves the journey (the line → the open drawer),
             // not just that the component renders.
             const harness = page.locator('[data-harness="agenda"]');
@@ -3559,13 +3559,13 @@ try {
           // A four-kind ledger is taller than a phone viewport. Chrome may cull
           // unpainted rows during an element screenshot, so temporarily borrow
           // a tall viewport to capture the full, real phone-width board.
-          const attentionTarget = join(outDir, `attention-${viewport.name}.png`);
+          const agendaTarget = join(outDir, `attention-${viewport.name}.png`);
           await page.setViewportSize({ width: viewport.width, height: 2_400 });
-          const attention = page.getByLabel('Inbox ledger');
-          await attention.locator('summary').filter({ hasText: 'Resolution audit' }).click();
-          await captureElement(page, attention, attentionTarget);
+          const agenda = page.getByLabel('Inbox ledger');
+          await agenda.locator('summary').filter({ hasText: 'Resolution audit' }).click();
+          await captureElement(page, agenda, agendaTarget);
           await page.setViewportSize({ width: viewport.width, height: viewport.height });
-          process.stdout.write(`📸 Inbox ledger -> ${attentionTarget}\n`);
+          process.stdout.write(`📸 Inbox ledger -> ${agendaTarget}\n`);
           const pinsTriggerTarget = join(outDir, `pins-trigger-${viewport.name}.png`);
           await captureElement(page, page.getByLabel('Pins trigger'), pinsTriggerTarget);
           process.stdout.write(`📸 Pins trigger -> ${pinsTriggerTarget}\n`);
@@ -3623,7 +3623,7 @@ try {
           // them is a frame where a control is refused, so every one has to show the reason beside it
           // — that is the thing being reviewed, not the switches.
           //
-          // A TALL VIEWPORT IS BORROWED, for the reason the attention ledger borrows one: five
+          // A TALL VIEWPORT IS BORROWED, for the reason the agenda ledger borrows one: five
           // capabilities × two axes × a reason under each is far taller than a phone, and Chrome may
           // cull unpainted rows during an element screenshot. Captured at 390 wide and 844 high, the
           // card came out clipped at the second row and the desktop shot stitched the NEXT card's

@@ -1,21 +1,21 @@
-import type { AttentionItem, AttentionSnapshot } from '@ferretry/protocol';
+import type { AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
 import {
-  type AttentionBoardChange,
-  type AttentionChangeObserver,
-  type AttentionLedgerRepository,
-  type AttentionRaisedObserver,
-  attentionSnapshot,
-  emptyAttentionLedger,
+  type AgendaBoardChange,
+  type AgendaChangeObserver,
+  type AgendaLedgerRepository,
+  type AgendaRaisedObserver,
+  agendaSnapshot,
+  emptyAgendaLedger,
   ownerTurnItems,
   type SessionStops,
-} from '../attention/index.ts';
+} from '../agenda/index.ts';
 
 /** What a buzz reaches the owner's phone through: each call is at most one push, deduped by the ledger. */
 export interface BuzzSink {
-  stopped(sessionId: string, stoppedAt: string, snapshot: AttentionSnapshot): Promise<void>;
-  deadline(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
+  stopped(sessionId: string, stoppedAt: string, snapshot: AgendaSnapshot): Promise<void>;
+  deadline(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
   /** A notice was raised: it buzzes only when it asked to (`--ping`). */
-  raised(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void>;
+  raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
 }
 
 /** The deadline an item's `neededBy` is warned at: this long before it, by default (`attention.deadlineWarnHours`). */
@@ -36,16 +36,16 @@ export const DEFAULT_DEADLINE_WARN_HOURS = 3;
  * arrive in does not matter: each one re-reads the board and the idle state, and the ledger under the sink
  * makes a repeat a no-op. Total: a trigger that cannot read or push says nothing.
  */
-export class AttentionBuzz implements AttentionRaisedObserver, AttentionChangeObserver {
+export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
   constructor(
-    private readonly boards: Pick<AttentionLedgerRepository, 'read'>,
+    private readonly boards: Pick<AgendaLedgerRepository, 'read'>,
     private readonly stops: SessionStops,
     private readonly sink: BuzzSink,
     private readonly clock: { now(): string },
     private readonly warnHours: number = DEFAULT_DEADLINE_WARN_HOURS,
   ) {}
 
-  async raised(sessionId: string, item: AttentionItem, snapshot: AttentionSnapshot): Promise<void> {
+  async raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
     if (item.notice === true) {
       await this.sink.raised(sessionId, item, snapshot).catch(() => undefined);
       return;
@@ -54,7 +54,7 @@ export class AttentionBuzz implements AttentionRaisedObserver, AttentionChangeOb
   }
 
   /** The owner's own moves never buzz their own phone: only a ferret's, the warden's or a source's can. */
-  async changed(sessionId: string, change: AttentionBoardChange): Promise<void> {
+  async changed(sessionId: string, change: AgendaBoardChange): Promise<void> {
     if (change.actor.kind !== 'human') await this.settle(sessionId, true);
   }
 
@@ -73,8 +73,8 @@ export class AttentionBuzz implements AttentionRaisedObserver, AttentionChangeOb
 
   private async settle(sessionId: string, stop: boolean): Promise<void> {
     try {
-      const ledger = (await this.boards.read(sessionId)) ?? emptyAttentionLedger(sessionId, this.clock.now());
-      const snapshot = attentionSnapshot(ledger);
+      const ledger = (await this.boards.read(sessionId)) ?? emptyAgendaLedger(sessionId, this.clock.now());
+      const snapshot = agendaSnapshot(ledger);
       const owner = ownerTurnItems(snapshot.items);
       if (owner.length === 0) return;
       const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;

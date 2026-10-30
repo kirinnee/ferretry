@@ -1,17 +1,17 @@
 /**
  * A ferret's chat as the agenda sits in it: a header (where the "Agenda" dock button lives), the transcript, and
  * above a composer-shaped box the line, the drawer and the "re:" chips. An opened item is the full-height overlay
- * over the whole chat column. The REAL `useAttentionAgenda` drives it; only the data is invented and the answers go
+ * over the whole chat column. The REAL `useAgenda` drives it; only the data is invented and the answers go
  * nowhere.
  *
  * The composer is a box of one fixed height, so what the screenshot script measures — that nothing the agenda
  * does ever moves it in the normal chat — is the layout's doing, not the box's.
  */
 
-import type { AttentionId, AttentionSnapshot } from '@ferretry/protocol';
+import type { AgendaId, AgendaSnapshot } from '@ferretry/protocol';
 import { type ReactElement, type ReactNode, useMemo } from 'react';
 import { Markdown } from '../src/components/markdown.tsx';
-import { useAttentionAgenda } from '../src/features/attention/attention-agenda.tsx';
+import { useAgenda } from '../src/features/agenda/agenda.tsx';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../src/lib/daemon-scope.ts';
 import type { TranscriptEntry } from '../src/lib/session-screens.ts';
@@ -29,12 +29,12 @@ const CLIENT = { respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, d
 const harnessIsDesktop = (): boolean => window.innerWidth >= 1_024;
 
 export interface AgendaChatHarnessProps {
-  readonly board: AttentionSnapshot;
+  readonly board: AgendaSnapshot;
   readonly now: number;
   readonly ferret?: string;
   readonly agendaMode?: boolean;
   readonly desktop?: boolean;
-  readonly target?: AttentionId | null;
+  readonly target?: AgendaId | null;
   readonly entries?: readonly TranscriptEntry[];
   readonly live?: ReactNode;
 }
@@ -62,7 +62,7 @@ export function AgendaChatHarness({
   live,
 }: AgendaChatHarnessProps): ReactElement {
   const scope = useMemo(() => daemonSessionScope(CONNECTION, 'fr'), []);
-  const agenda = useAttentionAgenda({
+  const agenda = useAgenda({
     agendaMode,
     client: CLIENT,
     connection: CONNECTION,
@@ -95,7 +95,7 @@ export function AgendaChatHarness({
                 {ferret.toLowerCase()} · {message.when}
               </p>
               <Markdown
-                attentionReferenceResolver={id => board.items.some(entry => entry.id === id)}
+                agendaReferenceResolver={id => board.items.some(entry => entry.id === id)}
                 text={message.text}
               />
             </article>

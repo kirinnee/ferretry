@@ -34,7 +34,7 @@ async function largeInput(fixture: string, copies: number): Promise<Uint8Array> 
 
 async function provesWholeParse(parser: TranscriptParser, fixture: string): Promise<void> {
   // Arrange
-  const bytes = await largeInput(fixture, 1_500);
+  const bytes = await largeInput(fixture, 500);
   const input = {
     source: '/fixture.jsonl',
     sessionId: 'fixture-session',

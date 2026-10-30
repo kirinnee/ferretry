@@ -2514,7 +2514,7 @@ html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-compos
   color: var(--warn);
   font-weight: var(--weight-strong);
 }
-/* An Attention ask is the loud one: "!" in the accent, the same as the badge beside the name. */
+/* An Agenda ask is the loud one: "!" in the accent, the same as the badge beside the name. */
 .fy-dashboard-row__question[data-session-ask]::before {
   content: '! ';
   color: var(--accent);

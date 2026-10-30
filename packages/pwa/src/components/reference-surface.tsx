@@ -23,7 +23,7 @@
  * file, terminal or session.
  */
 
-import type { AttentionId, BrowserStatus, SessionView, TerminalListView } from '@ferretry/protocol';
+import type { AgendaId, BrowserStatus, SessionView, TerminalListView } from '@ferretry/protocol';
 import { createContext, type ReactNode, useContext } from 'react';
 
 import { createAgentReferenceResolver } from '../lib/agent-references.ts';
@@ -83,12 +83,12 @@ export interface SessionReferenceSurfaceOptions {
   /** This session's task board, when the host already holds it. */
   readonly tasks?: readonly { readonly id: string }[];
   /**
-   * This session's Attention LEDGER — open and resolved ids — when the host already holds it. An
+   * This session's Agenda LEDGER — open and resolved ids — when the host already holds it. An
    * answered item is still on the record, so its `!A3` stays a link.
    */
-  readonly attentionIds?: readonly AttentionId[];
-  /** Opens the session's Attention panel at one proved item, open or resolved. */
-  readonly onAttentionOpen?: (id: AttentionId, opener?: HTMLElement | null) => void;
+  readonly agendaIds?: readonly AgendaId[];
+  /** Opens the session's Agenda panel at one proved item, open or resolved. */
+  readonly onAgendaOpen?: (id: AgendaId, opener?: HTMLElement | null) => void;
   /** This session's skills catalog names, when the host already holds it. */
   readonly skills?: readonly string[];
   /**
@@ -147,15 +147,15 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     cwd,
     sessions,
     tasks,
-    attentionIds,
-    onAttentionOpen,
+    agendaIds,
+    onAgendaOpen,
     skills,
     terminals,
     browser,
     onNavigate,
     destinations = {},
   } = options;
-  const attention = attentionIds === undefined ? undefined : new Set<string>(attentionIds);
+  const agenda = agendaIds === undefined ? undefined : new Set<string>(agendaIds);
   // EXACT names, never case-folded. The catalog accepts any nonempty trimmed
   // name, while the reference grammar accepts lowercase ones only — so folding a
   // catalog entry `Floop` into `floop` would prove `/floop`, a DIFFERENT and
@@ -170,7 +170,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       ? {}
       : { agentReferenceResolver: createAgentReferenceResolver(scope.daemonId, sessions) }),
     ...(tasks === undefined ? {} : { taskReferenceResolver: createTaskReferenceResolver(tasks) }),
-    ...(attention === undefined ? {} : { attentionReferenceResolver: (id: AttentionId) => attention.has(id) }),
+    ...(agenda === undefined ? {} : { agendaReferenceResolver: (id: AgendaId) => agenda.has(id) }),
     ...(skillNames === undefined ? {} : { skillReferenceResolver: (name: string) => skillNames.has(name) }),
     // Always supplied, because this resolver is the only thing that can say
     // "closed" as opposed to "unknown", and it answers nothing when it has no
@@ -189,10 +189,10 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     },
     onTaskOpen: destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')),
     // Attention is deliberately NOT a side-pane tab (handover #35). A proved
-    // id opens the Attention panel at the top of the conversation, at that item;
+    // id opens the Agenda panel at the top of the conversation, at that item;
     // when either the ledger or opener is absent Markdown still leaves `!A3` as
     // prose rather than manufacturing a dead link.
-    ...(attention === undefined || onAttentionOpen === undefined ? {} : { onAttentionOpen }),
+    ...(agenda === undefined || onAgendaOpen === undefined ? {} : { onAgendaOpen }),
     onSkillOpen: destinations.openSkills ?? (() => openSidePaneTab(scope, 'skills')),
     ...(onNavigate === undefined ? {} : { onNavigate }),
     onSurfaceOpen: reference => {

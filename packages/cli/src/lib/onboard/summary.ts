@@ -162,10 +162,10 @@ export function summarize(input: SummaryInput): SetupSummary {
 }
 
 const OK = '✓';
-const ATTENTION = '!';
+const AGENDA = '!';
 
 /** One aligned status row. */
-const row = (ok: boolean, label: string, text: string): string => `  ${ok ? OK : ATTENTION} ${label.padEnd(9)}${text}`;
+const row = (ok: boolean, label: string, text: string): string => `  ${ok ? OK : AGENDA} ${label.padEnd(9)}${text}`;
 
 function daemonRow(summary: SetupSummary): string {
   const daemon = summary.daemon;

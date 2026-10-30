@@ -16,7 +16,7 @@
  * identities.
  */
 
-import type { AttentionItem, SessionView, TerminalListView } from '@ferretry/protocol';
+import type { AgendaItem, SessionView, TerminalListView } from '@ferretry/protocol';
 import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.ts';
@@ -58,7 +58,7 @@ const COMPOSER_BUILTIN_COMMANDS: readonly ComposerBuiltinCommand[] = [
   },
 ];
 
-export type ComposerAttentionItem = Pick<AttentionItem, 'id' | 'subject' | 'source'>;
+export type ComposerAgendaItem = Pick<AgendaItem, 'id' | 'subject' | 'source'>;
 
 /** Exactly the facts the daemon's skills route reports. */
 interface ComposerSkillSummary {
@@ -121,8 +121,8 @@ export interface ComposerSkillsProviderOptions extends ComposerProviderScopeOpti
 export interface ComposerReferenceProviderOptions extends ComposerProviderScopeOptions {
   /** Must return only the fleet slice belonging to `scope.daemonId`. */
   readonly getSessions?: ComposerScopedGetter<SessionView>;
-  readonly getAttentionItems?: ComposerScopedGetter<ComposerAttentionItem>;
-  readonly waitForAttentionItems?: ComposerProviderWarmup;
+  readonly getAgendaItems?: ComposerScopedGetter<ComposerAgendaItem>;
+  readonly waitForAgendaItems?: ComposerProviderWarmup;
 }
 
 /** Injected so a test can drive the surfaces family without a live daemon; the
@@ -177,9 +177,9 @@ const surfaceCandidate =
   });
 
 const EMPTY_SESSIONS: readonly SessionView[] = [];
-const EMPTY_ATTENTION: readonly ComposerAttentionItem[] = [];
+const EMPTY_AGENDA: readonly ComposerAgendaItem[] = [];
 const noSessions: ComposerScopedGetter<SessionView> = () => EMPTY_SESSIONS;
-const noAttention: ComposerScopedGetter<ComposerAttentionItem> = () => EMPTY_ATTENTION;
+const noAgenda: ComposerScopedGetter<ComposerAgendaItem> = () => EMPTY_AGENDA;
 
 const assertProviderScope = (daemon: DaemonConnection, scope: DaemonSessionScope): void => {
   if (daemon.daemonId !== scope.daemonId) throw new Error('composer scope must belong to the requested daemon');
@@ -720,9 +720,9 @@ const agentCandidates = (
   });
 };
 
-const attentionCandidates = (
+const agendaCandidates = (
   scope: DaemonSessionScope,
-  items: readonly ComposerAttentionItem[],
+  items: readonly ComposerAgendaItem[],
 ): ComposerAutocompleteCandidate[] =>
   items.map(item => {
     const reference = formatReference({ kind: 'attention', id: item.id });
@@ -758,12 +758,12 @@ const agentsResult = (
   contextLabel,
 });
 
-const attentionResult = (
+const agendaResult = (
   scope: DaemonSessionScope,
-  items: readonly ComposerAttentionItem[],
+  items: readonly ComposerAgendaItem[],
   query: string,
   contextLabel: string,
-): ComposerProviderResult => ({ candidates: attentionCandidates(scope, items), filterQuery: query, contextLabel });
+): ComposerProviderResult => ({ candidates: agendaCandidates(scope, items), filterQuery: query, contextLabel });
 
 /** A stable token that changes only when one of the read sources does, so the
  *  engine re-asks a provider whose store moved and no other. */
@@ -843,8 +843,8 @@ export function createReferencesProvider({
   fetcher = browserFetch,
   suggestions = DEFAULT_COMPOSER_SUGGESTIONS,
   getSessions = noSessions,
-  getAttentionItems = noAttention,
-  waitForAttentionItems,
+  getAgendaItems = noAgenda,
+  waitForAgendaItems,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider {
   assertProviderScope(daemon, scope);
   const files = createFilesProvider({ daemon, scope, fetcher });
@@ -853,11 +853,11 @@ export function createReferencesProvider({
   /** Only the two host-backed tiers warm: agents read a prop the page already
    *  holds, and tier 1 files are the provider's own request. */
   const tierWarmup = (tier: number): ComposerProviderWarmup | undefined =>
-    tier === 3 ? waitForAttentionItems : undefined;
+    tier === 3 ? waitForAgendaItems : undefined;
 
   const tierResult = (tier: number, query: string): ComposerProviderResult => {
     if (tier === 2) return agentsResult(scope, getSessions(scope), query, 'Agents');
-    if (tier === 3) return attentionResult(scope, getAttentionItems(scope), query, 'Agenda');
+    if (tier === 3) return agendaResult(scope, getAgendaItems(scope), query, 'Agenda');
     return {
       candidates: [],
       filterQuery: query,
@@ -878,7 +878,7 @@ export function createReferencesProvider({
     shouldOpen: match => composerSuggestionsAllow(suggestions, match),
     get snapshotKey() {
       const sessions = getSessions(scope);
-      return track([sessions, getAttentionItems(scope), agentReferenceIdentityKey(scope.daemonId, sessions)]);
+      return track([sessions, getAgendaItems(scope), agentReferenceIdentityKey(scope.daemonId, sessions)]);
     },
     reset: () => files.reset?.(),
     initialCandidates: context => {
@@ -913,13 +913,13 @@ export function createDirectReferenceProviders({
   scope,
   suggestions = DEFAULT_COMPOSER_SUGGESTIONS,
   getSessions = noSessions,
-  getAttentionItems = noAttention,
-  waitForAttentionItems,
+  getAgendaItems = noAgenda,
+  waitForAgendaItems,
 }: ComposerReferenceProviderOptions): ComposerAutocompleteProvider[] {
   assertProviderScope(daemon, scope);
   const scopeKey = daemonSessionKey(scope);
   const trackAgents = snapshotTracker(scopeKey);
-  const trackAttention = snapshotTracker(scopeKey);
+  const trackAgenda = snapshotTracker(scopeKey);
   const allow = (match: ComposerTriggerMatch): boolean => composerSuggestionsAllow(suggestions, match);
   const { initialUnlessWarming, warmed } = hostWarmupGate(daemon, scope);
   return [
@@ -940,15 +940,15 @@ export function createDirectReferenceProviders({
       label: 'Agenda',
       shouldOpen: allow,
       get snapshotKey() {
-        return trackAttention([getAttentionItems(scope)]);
+        return trackAgenda([getAgendaItems(scope)]);
       },
       initialCandidates: ({ query, signal }) =>
-        initialUnlessWarming(waitForAttentionItems, signal, () =>
-          attentionResult(scope, getAttentionItems(scope), query, '! open agenda items'),
+        initialUnlessWarming(waitForAgendaItems, signal, () =>
+          agendaResult(scope, getAgendaItems(scope), query, '! open agenda items'),
         ),
       candidates: ({ query, signal }) =>
-        warmed(waitForAttentionItems, signal, () =>
-          attentionResult(scope, getAttentionItems(scope), query, '! open agenda items'),
+        warmed(waitForAgendaItems, signal, () =>
+          agendaResult(scope, getAgendaItems(scope), query, '! open agenda items'),
         ),
     },
   ];

@@ -15,6 +15,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
+import { boundedContext, overlapped } from '../support/overlap.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_OPEN_LINKS_SHOTS_DIR ?? '';
@@ -26,6 +27,8 @@ const SCENE_CSS = `
 const GUIDE_HTML = `<!doctype html><html><head><meta charset="utf-8"><title>Setup guide</title></head><body style="font-family: system-ui; padding: 24px"><h1>Setup guide</h1><p>Pair a phone from Settings › This device.</p></body></html>`;
 
 let browser: Browser;
+const overlap = overlapped();
+const bounded = boundedContext(() => browser, 4);
 let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 
@@ -70,13 +73,15 @@ beforeAll(async () => {
   if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
 }, 180_000);
 
+beforeAll(overlap.start);
+
 afterAll(async () => {
   server?.stop(true);
   if (directory !== '') await rm(directory, { force: true, recursive: true });
 });
 
 const newContext = async (phone: boolean, mode: 'light' | 'dark'): Promise<BrowserContext> => {
-  const context = await browser.newContext({
+  const context = await bounded({
     viewport: phone ? { width: 390, height: 844 } : { width: 1_440, height: 900 },
     colorScheme: mode,
     deviceScaleFactor: phone ? 2 : 1,
@@ -114,7 +119,7 @@ const chooseSidePanel = async (tab: Page): Promise<void> => {
 const guideLink = (tab: Page) => tab.locator('.md a', { hasText: 'the setup guide' });
 
 describe('Settings › Appearance › Open links in', () => {
-  it('shows the plain two-way row, Your browser first and chosen', async () => {
+  overlap.it('shows the plain two-way row, Your browser first and chosen', async () => {
     const context = await newContext(false, 'light');
     try {
       const tab = await openSettings(context, 'light');
@@ -132,7 +137,7 @@ describe('Settings › Appearance › Open links in', () => {
 });
 
 describe('a chat link', () => {
-  it('opens a new browser tab by default', async () => {
+  overlap.it('opens a new browser tab by default', async () => {
     const context = await newContext(false, 'light');
     try {
       const tab = await openChat(context, 'light');
@@ -146,36 +151,39 @@ describe('a chat link', () => {
     }
   });
 
-  it('opens the side panel beside the chat on a desktop once it is chosen, and a Cmd/Ctrl-click still opens a tab', async () => {
-    const context = await newContext(false, 'light');
-    try {
-      await chooseSidePanel(await openSettings(context, 'light'));
-      const tab = await openChat(context, 'light');
-      expect(await tab.locator('[data-open-links-in]').getAttribute('data-open-links-in')).toBe('panel');
+  overlap.it(
+    'opens the side panel beside the chat on a desktop once it is chosen, and a Cmd/Ctrl-click still opens a tab',
+    async () => {
+      const context = await newContext(false, 'light');
+      try {
+        await chooseSidePanel(await openSettings(context, 'light'));
+        const tab = await openChat(context, 'light');
+        expect(await tab.locator('[data-open-links-in]').getAttribute('data-open-links-in')).toBe('panel');
 
-      const pages = context.pages().length;
-      await guideLink(tab).click();
-      const pane = tab.locator('aside');
-      await pane.waitFor();
-      expect(await pane.innerText()).toContain(`${server?.url.origin}/guide`);
-      // Beside, not over: the conversation keeps its width to the pane's left.
-      const chat = await tab.locator('.kt-chat-surface').boundingBox();
-      const side = await pane.boundingBox();
-      expect(chat !== null && side !== null && chat.x + chat.width <= side.x).toBe(true);
-      expect(context.pages().length).toBe(pages);
+        const pages = context.pages().length;
+        await guideLink(tab).click();
+        const pane = tab.locator('aside');
+        await pane.waitFor();
+        expect(await pane.innerText()).toContain(`${server?.url.origin}/guide`);
+        // Beside, not over: the conversation keeps its width to the pane's left.
+        const chat = await tab.locator('.kt-chat-surface').boundingBox();
+        const side = await pane.boundingBox();
+        expect(chat !== null && side !== null && chat.x + chat.width <= side.x).toBe(true);
+        expect(context.pages().length).toBe(pages);
 
-      const [popup] = await Promise.all([
-        context.waitForEvent('page'),
-        guideLink(tab).click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] }),
-      ]);
-      await popup.waitForLoadState();
-      expect(popup.url()).toBe(`${server?.url.origin}/guide`);
-    } finally {
-      await context.close();
-    }
-  });
+        const [popup] = await Promise.all([
+          context.waitForEvent('page'),
+          guideLink(tab).click({ modifiers: [process.platform === 'darwin' ? 'Meta' : 'Control'] }),
+        ]);
+        await popup.waitForLoadState();
+        expect(popup.url()).toBe(`${server?.url.origin}/guide`);
+      } finally {
+        await context.close();
+      }
+    },
+  );
 
-  it('opens the side panel as a sheet on a phone', async () => {
+  overlap.it('opens the side panel as a sheet on a phone', async () => {
     const context = await newContext(true, 'light');
     try {
       await chooseSidePanel(await openSettings(context, 'light'));

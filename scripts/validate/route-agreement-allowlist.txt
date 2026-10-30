@@ -86,8 +86,8 @@ unreached POST /v1/sessions/:sessionId/notify # CORRECT: kept for older CLIs; th
 # attention one through a per-daemon choice — the PWA's sessionAgendaPath(id, wire) and wardenAgendaPath(wire), the CLI's
 # requestWithRouteFallback({current, legacy}) — and this pass cannot follow that choice to a verb, so these routes'
 # readers are named here instead. Delete the attention lines in the agenda removal release, with the routes.
-unreached GET /v1/sessions/:sessionId/agenda # CORRECT: dialed by the PWA (lib/agenda-wire.ts) and the CLI (lib/attention/gateway.ts) behind the agenda.wire.1 choice this pass cannot follow
-unreached POST /v1/sessions/:sessionId/agenda # CORRECT: dialed by the PWA (lib/agenda-wire.ts) and the CLI (lib/attention/gateway.ts, lib/notify/gateway.ts) behind the agenda.wire.1 choice this pass cannot follow
+unreached GET /v1/sessions/:sessionId/agenda # CORRECT: dialed by the PWA (lib/agenda-wire.ts) and the CLI (lib/agenda/gateway.ts) behind the agenda.wire.1 choice this pass cannot follow
+unreached POST /v1/sessions/:sessionId/agenda # CORRECT: dialed by the PWA (lib/agenda-wire.ts) and the CLI (lib/agenda/gateway.ts, lib/notify/gateway.ts) behind the agenda.wire.1 choice this pass cannot follow
 unreached GET /v1/warden/agenda # CORRECT: dialed by the PWA warden overview (lib/agenda-wire.ts) behind the agenda.wire.1 choice this pass cannot follow
 unreached GET /v1/sessions/:sessionId/attention # CORRECT: the older spelling, dialed only for a daemon without agenda.wire.1 (same choice); kept for older clients until the agenda removal release
 unreached POST /v1/sessions/:sessionId/attention # CORRECT: the older spelling, dialed only for a daemon without agenda.wire.1 (same choice); kept for older clients until the agenda removal release

@@ -34,7 +34,7 @@ export const DAEMON_FEATURES = {
    */
   agendaWire: 'agenda.wire.1',
   /**
-   * An agenda add (`AddAttentionRequestSchema`) may name the board card it belongs to (`task`). A daemon
+   * An agenda add (`AddAgendaRequestSchema`) may name the board card it belongs to (`task`). A daemon
    * without this name refuses the whole add, because the request is strict: send `task` only when the
    * daemon advertises it, and otherwise raise the item without one.
    */

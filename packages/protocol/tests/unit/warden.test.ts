@@ -5,7 +5,7 @@ import { displaySystemCallsign, isSystemCallsign } from '../../src/lib/system-ca
 import * as warden from '../../src/lib/warden.ts';
 import {
   INSTANT,
-  wardenAttentionView,
+  wardenAgendaView,
   wardenConfig,
   wardenConfigView,
   wardenInvestigateView,
@@ -103,7 +103,7 @@ const action = {
   confidence: 0.96,
 };
 
-const attentionItem = wardenAttentionView.items[0];
+const agendaItem = wardenAgendaView.items[0];
 
 const wardenCases: SchemaCase[] = [
   { name: 'policy', schema: warden.WardenFailoverPolicySchema, value: 'fallback' },
@@ -241,9 +241,9 @@ const wardenCases: SchemaCase[] = [
     schema: warden.WardenJudgementSchema,
     value: { state: 'judged', verdict: 'needs_human', reason: 'blocked', at: INSTANT, stale: false },
   },
-  { name: 'attention item', schema: warden.FleetAttentionItemSchema, value: attentionItem },
-  { name: 'attention outcome', schema: warden.WardenAttentionOutcomeSchema, value: 'degraded' },
-  { name: 'attention view', schema: warden.WardenAttentionViewSchema, value: wardenAttentionView },
+  { name: 'attention item', schema: warden.FleetAgendaItemSchema, value: agendaItem },
+  { name: 'attention outcome', schema: warden.WardenAgendaOutcomeSchema, value: 'degraded' },
+  { name: 'attention view', schema: warden.WardenAgendaViewSchema, value: wardenAgendaView },
 ];
 
 describe('warden schemas', () => {

@@ -38,7 +38,7 @@
 # it sees the OTHER half — and neither gate can see what the other does.
 #
 # Six fields were reported. Three were deleted as duplicate handles on a live wiring or as a
-# capability with no caller anywhere: `createAttentionLedgerRepository` (the mounted attention
+# capability with no caller anywhere: `createAgendaLedgerRepository` (the mounted agenda
 # service constructs its own over the parsed layout), `createTeamAdvisor` (`/v1/recommend` is served
 # through the `advisorOver` local), and `createReadinessWaiter` with its duplicated decision table
 # (waiting for a daemon to come up is `fy daemon start`'s job, and `packages/cli` owns its own copy).
@@ -372,11 +372,11 @@
 # PR #19 — port warden supervision: detection, verdicts, failover and provenance
 # BLOCKED ON THE SUPERVISOR ITSELF. All four are policy for a sweep loop that does not exist: they
 # decide which sessions get a warden, which account judges them, when a blessing suppresses an
-# anomaly, and how a fleet attention view reads. Every one of them consumes durable warden state —
+# anomaly, and how a fleet agenda view reads. Every one of them consumes durable warden state —
 # assignments, strikes, blessings, the last sweep instant — and nothing writes any of it.
 #
 # `attention.ts` was investigated closely, because on paper the daemon holds all four of its other
-# inputs: sessions from the index, boards from the attention ledgers it already serves, verdicts from
+# inputs: sessions from the index, boards from the agenda ledgers it already serves, verdicts from
 # the mounted WardenReportReader, and anomalies from `detectAnomalies`. It is the LAST of those that
 # refuses. `detectAnomalies` takes a `hasLiveMonitor` per session, and this daemon mounts no monitor
 # subsystem at all — `StorageSessionHealthInventory` is constructed with `monitors: false`. Every

@@ -1,4 +1,4 @@
-import type { AttentionId, AttentionSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
+import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
@@ -38,22 +38,19 @@ import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import {
-  type AttentionActionClient,
-  type AttentionFocus,
-  attentionLedgerIds,
-  useAttentionAgenda,
-} from '../../features/attention/attention-agenda.tsx';
-import { AttentionRepliesNotice } from '../../features/attention/attention-replies-notice.tsx';
-import {
-  ATTENTION_RESOLVED_ACTION_ID,
-  resolvedActionContribution,
-} from '../../features/attention/attention-resolved.tsx';
+  type AgendaActionClient,
+  type AgendaFocus,
+  agendaLedgerIds,
+  useAgenda,
+} from '../../features/agenda/agenda.tsx';
+import { AgendaRepliesNotice } from '../../features/agenda/agenda-replies-notice.tsx';
+import { AGENDA_RESOLVED_ACTION_ID, resolvedActionContribution } from '../../features/agenda/agenda-resolved.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
 import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
 import {
-  attentionSignalsPort,
+  agendaSignalsPort,
   instructionDocsLoader,
   sessionMcpLoader,
   sessionSkillsInventoryLoader,
@@ -96,7 +93,7 @@ import { useAgentSurfaceTabs } from '../../features/workspace/use-agent-surface-
 import { useSessionWorkspace } from '../../features/workspace/use-session-workspace.ts';
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
-import type { AttentionReplies } from '../../hooks/use-attention-replies.ts';
+import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
@@ -113,9 +110,9 @@ import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
-import type { DaemonAttentionClient } from '../attention-client.ts';
-import { needsYouItems, unreadCount } from '../attention-inbox.ts';
-import type { AttentionLoadStatus } from '../attention-store.ts';
+import type { DaemonAgendaClient } from '../agenda-client.ts';
+import { needsYouItems, unreadCount } from '../agenda-inbox.ts';
+import type { AgendaLoadStatus } from '../agenda-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
@@ -160,11 +157,11 @@ const runtimeModelCatalogs = new DaemonRuntimeModelCatalogStore();
  * no trigger is rendered. That is also what keeps every existing caller — the
  * harness, the page-host tests — working unchanged.
  */
-export interface SessionAttentionModel {
+export interface SessionAgendaModel {
   /** The one canonical client; the page never opens its own transport. */
-  readonly client: AttentionActionClient;
-  readonly snapshot: AttentionSnapshot | null;
-  readonly status: AttentionLoadStatus;
+  readonly client: AgendaActionClient;
+  readonly snapshot: AgendaSnapshot | null;
+  readonly status: AgendaLoadStatus;
 }
 
 export interface SessionChatPageProps {
@@ -260,19 +257,19 @@ export interface SessionChatPageProps {
   /** In-app navigation for a proved agent reference. */
   readonly onNavigate?: (to: string) => void;
   /** This session's live Attention, when the host has subscribed to it. */
-  readonly attention?: SessionAttentionModel;
+  readonly attention?: SessionAgendaModel;
   /** Answers the machine is holding before it tells the ferret: counted down above the composer. */
-  readonly attentionReplies?: AttentionReplies;
+  readonly agendaReplies?: AgendaReplies;
   /**
    * The item the conversation was opened AT (`?attention=A3`, from a notification or an unread row):
    * the agenda opens that item's full card. A new value re-targets; a session change forgets it.
    */
-  readonly attentionTarget?: AttentionId | null;
+  readonly agendaTarget?: AgendaId | null;
   /**
-   * Which navigation named `attentionTarget` (the router's entry key). A new key re-targets even the
+   * Which navigation named `agendaTarget` (the router's entry key). A new key re-targets even the
    * SAME item — tapping its notification a second time, after the panel was folded, opens it again.
    */
-  readonly attentionTargetKey?: string;
+  readonly agendaTargetKey?: string;
   /**
    * This session's live-feed state and the reader's manual reconnect.
    *
@@ -342,7 +339,7 @@ export interface SessionChatPageProps {
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */
 interface SessionContextDependencies {
-  readonly attention: DaemonAttentionClient;
+  readonly attention: DaemonAgendaClient;
   readonly createFleetClient: FleetClientFactory;
   /** The machine's own name, as the MCP sign-in sheet says it. */
   readonly machineName: string;
@@ -442,10 +439,10 @@ export function SessionChatPage({
   deck,
   daemonSessions,
   onNavigate,
-  attention,
-  attentionReplies,
-  attentionTarget = null,
-  attentionTargetKey,
+  attention: agendaModel,
+  agendaReplies,
+  agendaTarget = null,
+  agendaTargetKey,
   liveStream,
   project = null,
   onOpenSessions,
@@ -518,16 +515,16 @@ export function SessionChatPage({
     [referenceFetch],
   );
   const skills = useSessionSkills(connection, scope, referenceFetch);
-  const attentionId = useId();
+  const agendaId = useId();
   // THE LATEST REQUEST TO SHOW ONE ITEM (a `?attention=` link, a `!A3` click): the agenda opens its card.
   // It belongs to this session and resets with it.
-  const [attentionFocus, setAttentionFocus] = useState<AttentionFocus | null>(null);
-  const showAttention = useCallback((target: AttentionId | null): void => {
-    setAttentionFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
+  const [agendaFocus, setAgendaFocus] = useState<AgendaFocus | null>(null);
+  const showAgenda = useCallback((target: AgendaId | null): void => {
+    setAgendaFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
   }, []);
   // The resolved item a link named, so the list the header menu opens rings it. Cleared with the form.
-  const [resolvedTarget, setResolvedTarget] = useState<AttentionId | null>(null);
-  const openAttentionReference = useCallback((id: AttentionId): void => showAttention(id), [showAttention]);
+  const [resolvedTarget, setResolvedTarget] = useState<AgendaId | null>(null);
+  const openAgendaReference = useCallback((id: AgendaId): void => showAgenda(id), [showAgenda]);
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
@@ -544,12 +541,12 @@ export function SessionChatPage({
       ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
       // The `!` menu reads the SAME live board the panel draws, so an item raised a moment ago is offered
       // without a reload — and the page asks the daemon for this board once, not twice.
-      ...(attention === undefined
+      ...(agendaModel === undefined
         ? {}
         : {
             attention: {
-              items: attention.snapshot?.items,
-              ...(attention.status === 'error' && attention.snapshot === null
+              items: agendaModel.snapshot?.items,
+              ...(agendaModel.status === 'error' && agendaModel.snapshot === null
                 ? { failure: 'this session’s agenda could not be read' }
                 : {}),
             },
@@ -596,17 +593,17 @@ export function SessionChatPage({
   // THE LEDGER proves a `!A3` — open AND resolved — so a reference in older chat stays a link after
   // the item is answered and opens its resolved entry. A host with no live board falls back to the
   // catalog's one read; a board not yet read proves nothing (unread is not empty).
-  const attentionProof =
-    attention === undefined
+  const agendaProof =
+    agendaModel === undefined
       ? composerCatalogs.attention?.map(item => item.id)
-      : attention.snapshot === null
+      : agendaModel.snapshot === null
         ? undefined
-        : attentionLedgerIds(attention.snapshot);
+        : agendaLedgerIds(agendaModel.snapshot);
   // The ledger's IDENTITY, not its array identity: a re-hydration that returns
   // the same ids must not rebuild the reference surface and re-parse every
   // Markdown block in the transcript.
-  const attentionKey = attentionProof?.join(',') ?? null;
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fleetIdentity and attentionKey are the stable memo keys for daemonSessions and the attention ledger
+  const agendaKey = agendaProof?.join(',') ?? null;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fleetIdentity and agendaKey are the stable memo keys for daemonSessions and the agenda ledger
   const references = useMemo(
     () =>
       sessionReferenceSurface({
@@ -616,7 +613,7 @@ export function SessionChatPage({
         ...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd }),
         ...(daemonSessions === undefined ? {} : { sessions: daemonSessions }),
         ...(composerCatalogs.tasks === undefined ? {} : { tasks: composerCatalogs.tasks }),
-        ...(attentionProof === undefined ? {} : { attentionIds: attentionProof }),
+        ...(agendaProof === undefined ? {} : { agendaIds: agendaProof }),
         ...(composerCatalogs.skills?.skills === undefined
           ? {}
           : { skills: composerCatalogs.skills.skills.map(skill => skill.name) }),
@@ -629,7 +626,7 @@ export function SessionChatPage({
         // a host that has not subscribed leaves the token as prose, which the
         // reference standard calls the only honest state. A proved click opens
         // the agenda's card for that item.
-        ...(attention === undefined ? {} : { onAttentionOpen: openAttentionReference }),
+        ...(agendaModel === undefined ? {} : { onAgendaOpen: openAgendaReference }),
       }),
     [
       connection,
@@ -640,9 +637,9 @@ export function SessionChatPage({
       composerCatalogs.tasks,
       composerCatalogs.skills,
       onNavigate,
-      attention === undefined,
-      attentionKey,
-      openAttentionReference,
+      agendaModel === undefined,
+      agendaKey,
+      openAgendaReference,
       terminals,
       browserPages.status,
       referenceDestinations,
@@ -685,7 +682,7 @@ export function SessionChatPage({
     // An agenda belongs to the session that raised it. Carrying a requested `!A3` across a navigation
     // would open one session's id on another session's board, so it resets with the pairing and the
     // session id.
-    setAttentionFocus(null);
+    setAgendaFocus(null);
     setResolvedTarget(null);
   }, [connection, session.config.id]);
 
@@ -693,8 +690,8 @@ export function SessionChatPage({
   // navigation that carries a target, the reset runs first and the new target wins.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing, the session id and the navigation re-arm the same target
   useEffect(() => {
-    if (attentionTarget !== null) showAttention(attentionTarget);
-  }, [attentionTarget, attentionTargetKey, showAttention, connection, session.config.id]);
+    if (agendaTarget !== null) showAgenda(agendaTarget);
+  }, [agendaTarget, agendaTargetKey, showAgenda, connection, session.config.id]);
 
   const publish = useCallback(
     (view: SessionView): void => {
@@ -1090,33 +1087,33 @@ export function SessionChatPage({
       <AddMcpForm agentName={agentName} host={host} login={runtime} ports={mcpPorts} project={project} />
     ),
   };
-  const openResolved = useCallback((id: AttentionId): void => {
+  const openResolved = useCallback((id: AgendaId): void => {
     setResolvedTarget(id);
-    setActionForm(ATTENTION_RESOLVED_ACTION_ID);
+    setActionForm(AGENDA_RESOLVED_ACTION_ID);
   }, []);
   const finePointer = useFinePointer();
   const wide = formFactor === 'desktop' && finePointer;
-  const agendaMode = attention !== undefined && sessionAgendaSummary(session.state)?.agendaMode === true;
-  const agenda = useAttentionAgenda({
+  const agendaMode = agendaModel !== undefined && sessionAgendaSummary(session.state)?.agendaMode === true;
+  const agenda = useAgenda({
     agendaMode,
-    client: attention?.client,
+    client: agendaModel?.client,
     connection,
     desktop: wide,
     ferret: sessionDisplayName(session),
-    focus: attentionFocus,
+    focus: agendaFocus,
     onOpenResolved: openResolved,
     repliesSlot:
-      attentionReplies === undefined ||
-      (attentionReplies.secondsLeft === null &&
-        !attentionReplies.heldForTurn &&
-        !attentionReplies.heldForComposer) ? undefined : (
-        <AttentionRepliesNotice
+      agendaReplies === undefined ||
+      (agendaReplies.secondsLeft === null &&
+        !agendaReplies.heldForTurn &&
+        !agendaReplies.heldForComposer) ? undefined : (
+        <AgendaRepliesNotice
           ferret={sessionDisplayName(session)}
-          heldForComposer={attentionReplies.heldForComposer}
-          heldForTurn={attentionReplies.heldForTurn}
-          onSendNow={attentionReplies.sendNow}
-          secondsLeft={attentionReplies.secondsLeft}
-          sending={attentionReplies.sending}
+          heldForComposer={agendaReplies.heldForComposer}
+          heldForTurn={agendaReplies.heldForTurn}
+          onSendNow={agendaReplies.sendNow}
+          secondsLeft={agendaReplies.secondsLeft}
+          sending={agendaReplies.sending}
         />
       ),
     live:
@@ -1131,17 +1128,17 @@ export function SessionChatPage({
     entries,
     send: message => client.send(session.config.id, { message, now: false }),
     scope,
-    snapshot: attention?.snapshot ?? null,
-    status: attention?.status ?? 'idle',
+    snapshot: agendaModel?.snapshot ?? null,
+    status: agendaModel?.status ?? 'idle',
     swipeable: !finePointer,
   });
   const changeActionForm = useCallback((next: string | null): void => {
     setActionForm(next);
-    if (next !== ATTENTION_RESOLVED_ACTION_ID) setResolvedTarget(null);
+    if (next !== AGENDA_RESOLVED_ACTION_ID) setResolvedTarget(null);
   }, []);
   const contributions: readonly SessionActionContribution<CoreActionContext>[] = [
     ...CORE_SESSION_ACTIONS,
-    resolvedActionContribution(attention?.snapshot?.resolved ?? [], attentionId, resolvedTarget),
+    resolvedActionContribution(agendaModel?.snapshot?.resolved ?? [], agendaId, resolvedTarget),
     ...actionContributions,
   ];
   const actionSections = sessionActionSections(contributions, coreContext);
@@ -1238,7 +1235,7 @@ export function SessionChatPage({
         agentName,
         sessionId: scope.sessionId,
         machineName: contextDependencies.machineName,
-        signals: attentionSignalsPort(contextDependencies.attention, connection, scope),
+        signals: agendaSignalsPort(contextDependencies.attention, connection, scope),
         loadMcp: sessionMcpLoader(connection, createClient, scope.sessionId),
         loadSkills: sessionSkillsInventoryLoader(connection, createClient, scope.sessionId),
         loadSkillFile: skillFileLoader(connection, createClient, scope.sessionId),
@@ -1318,10 +1315,10 @@ export function SessionChatPage({
     <>
       <SessionTopBar
         actions={lifecycleActions}
-        attentionOpen={
-          attention?.snapshot === null || attention?.snapshot === undefined
+        agendaOpen={
+          agendaModel?.snapshot === null || agendaModel?.snapshot === undefined
             ? unreadCount(session)
-            : needsYouItems(attention.snapshot.items)
+            : needsYouItems(agendaModel.snapshot.items)
         }
         turn={turn}
         compact={compact}
@@ -1412,7 +1409,7 @@ export function SessionChatPage({
       ) : null}
       <div className="fy-chat-log" inert={agenda.covered || undefined}>
         {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
-        <AgendaItemsProvider snapshot={attention?.snapshot}>
+        <AgendaItemsProvider snapshot={agendaModel?.snapshot}>
           <Transcript
             activity={pane.activity}
             activityFallback={session.state.activity ?? null}
@@ -1491,9 +1488,7 @@ export function SessionChatPage({
               api={composerClient}
               {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
               {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
-              {...(composerCatalogs.attention === undefined
-                ? {}
-                : { autocompleteAttention: composerCatalogs.attention })}
+              {...(composerCatalogs.attention === undefined ? {} : { autocompleteAgenda: composerCatalogs.attention })}
               {...(composerCatalogs.skills?.skills === undefined
                 ? {}
                 : { autocompleteSkills: composerCatalogs.skills })}

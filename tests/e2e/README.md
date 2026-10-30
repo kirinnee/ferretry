@@ -66,7 +66,7 @@ journeys.
 and `codex` into `paths.harnessBin`, which is first on every child's PATH —
 including a daemon started with `useDaemonPrivateTmux`, which gets no `bin`
 router. That matters because a generated runtime wrapper ends in `exec claude`
-by NAME: before `harnessBin`, `attention-lifecycle.e2e.test.ts` resolved that
+by NAME: before `harnessBin`, `agenda-lifecycle.e2e.test.ts` resolved that
 name on the host PATH and ran the developer's real Claude Code in a tmux server
 nothing killed. Children also get `FERRETRY_TEST=1`, which turns on the daemon's
 launch guard (`packages/daemon/src/lib/tmux/harness-guard.ts`): a session whose

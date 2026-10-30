@@ -17,7 +17,7 @@ import {
   type PaneObservation,
   ResumeAcknowledgementFailed,
   type ResumeActor,
-  type ResumeAnswerAttention,
+  type ResumeAnswerAgenda,
   type ResumeLauncher,
   type ResumeMonitorControl,
   type ResumePolicy,
@@ -52,7 +52,7 @@ export interface SessionResumePorts {
   readonly serial: SerialExecutor;
   /** Durable dismissal of the released structured-answer advisory. Required, so the clear can
    *  never happen without a record: a composition with nothing to append has nothing to clear. */
-  readonly answerAttention: ResumeAnswerAttention;
+  readonly answerAgenda: ResumeAnswerAgenda;
 }
 
 export interface ResumeRequest {
@@ -253,9 +253,9 @@ export class SessionResumeService {
     // one that was just dismissed. Comparing the standing message instead would NOT be enough: the
     // first-write sentence is byte-identical for every request id naming the same tool, so a
     // replacement can be indistinguishable from what was acknowledged.
-    if (action.acknowledgeAnswerAttention) {
+    if (action.acknowledgeAnswerAgenda) {
       try {
-        await this.ports.answerAttention.acknowledge(target.id, actor);
+        await this.ports.answerAgenda.acknowledge(target.id, actor);
       } catch (cause) {
         // Never relaunch again here: the replacement is already up. Record it as running WITHOUT
         // clearing, so the advisory survives exactly as it was, and hand the failure out. Its
@@ -328,8 +328,8 @@ export class SessionResumeService {
         // A preserved harness is a relaunch that FAILED and was survived, so it never acknowledges
         // and therefore never clears the answer advisory: dropping the warning on the strength of a
         // probe, with nothing durable recording that anyone dismissed it, is exactly the ordering
-        // this slice exists to not reproduce. Every other attention kind keeps its clear.
-        ...(action.clearNeedsHuman && !action.acknowledgeAnswerAttention ? { clearNeedsHuman: true } : {}),
+        // this slice exists to not reproduce. Every other agenda kind keeps its clear.
+        ...(action.clearNeedsHuman && !action.acknowledgeAnswerAgenda ? { clearNeedsHuman: true } : {}),
         data: { promptReady: exit.pane.promptReady },
       });
       return { target: preserved, disposition: 'preserved' };

@@ -1,10 +1,10 @@
 import {
-  ATTENTION_PUSH_BODY_LENGTH,
-  ATTENTION_PUSH_TITLE_LENGTH,
-  type AttentionItem,
-  type AttentionSnapshot,
-  attentionNotificationPath,
-  attentionTitle,
+  AGENDA_PUSH_BODY_LENGTH,
+  AGENDA_PUSH_TITLE_LENGTH,
+  type AgendaItem,
+  type AgendaSnapshot,
+  agendaNotificationPath,
+  agendaTitle,
   clipAtWord,
   type PushNotificationPayload,
   PushNotificationPayloadSchema,
@@ -21,7 +21,7 @@ export type SessionNotificationPayload = Extract<PushNotificationPayload, { read
 export interface NotificationIdentity {
   readonly sessionId: string;
   /** The item the push opens: the notice, the item past its deadline, or the stop's first item. */
-  readonly attentionId: string;
+  readonly agendaId: string;
   /** A notice's own push: it asked the phone to buzz (`fy notify --ping`). */
   readonly ping?: boolean;
   /** The one push an item makes when its `neededBy` comes within the warning window. */
@@ -52,7 +52,7 @@ export function notificationKey(identity: NotificationIdentity): string {
   // A stop is about the ferret, not about one of its items: the item that triggers it may change within
   // the stop, and the key must not.
   if (identity.stoppedAt !== undefined) return `${KEY_PREFIX}${identity.sessionId}:stopped:${identity.stoppedAt}`;
-  const base = `${KEY_PREFIX}${identity.sessionId}:${identity.attentionId}`;
+  const base = `${KEY_PREFIX}${identity.sessionId}:${identity.agendaId}`;
   if (identity.ping === true) return `${base}:ping`;
   if (identity.deadline === true) return `${base}:deadline`;
   return `${base}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}${identity.surfaced === true ? ':surfaced' : ''}`;
@@ -64,18 +64,18 @@ export function notificationKey(identity: NotificationIdentity): string {
  */
 export function pingNotificationPayload(
   sessionId: string,
-  item: AttentionItem,
-  snapshot: AttentionSnapshot,
+  item: AgendaItem,
+  snapshot: AgendaSnapshot,
 ): SessionNotificationPayload {
   return PushNotificationPayloadSchema.parse({
     version: 1,
     eventKey: `notice-ping:${item.id}`,
     sessionId,
     kind: 'attention',
-    title: attentionNotificationTitle(attentionTitle(item)),
-    body: clipAtWord(oneLine(item.subject), ATTENTION_PUSH_BODY_LENGTH),
+    title: agendaNotificationTitle(agendaTitle(item)),
+    body: clipAtWord(oneLine(item.subject), AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
-    url: attentionNotificationPath(sessionId, item.id),
+    url: agendaNotificationPath(sessionId, item.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
 }
@@ -86,8 +86,8 @@ export function pingNotificationPayload(
  */
 export function deadlineNotificationPayload(
   sessionId: string,
-  item: AttentionItem,
-  snapshot: AttentionSnapshot,
+  item: AgendaItem,
+  snapshot: AgendaSnapshot,
   now: string,
 ): SessionNotificationPayload {
   return PushNotificationPayloadSchema.parse({
@@ -95,10 +95,10 @@ export function deadlineNotificationPayload(
     eventKey: `attention-deadline:${item.id}`,
     sessionId,
     kind: 'attention',
-    title: attentionNotificationTitle(attentionTitle(item)),
-    body: clipAtWord(`${timeLeftPhrase(item.neededBy, now)}: ${oneLine(item.subject)}`, ATTENTION_PUSH_BODY_LENGTH),
+    title: agendaNotificationTitle(agendaTitle(item)),
+    body: clipAtWord(`${timeLeftPhrase(item.neededBy, now)}: ${oneLine(item.subject)}`, AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
-    url: attentionNotificationPath(sessionId, item.id),
+    url: agendaNotificationPath(sessionId, item.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
 }
@@ -114,21 +114,21 @@ const STOPPED_NAME_LENGTH = 24;
 export function stoppedNotificationPayload(
   sessionId: string,
   ferret: string,
-  waiting: readonly [AttentionItem, ...AttentionItem[]],
-  snapshot: AttentionSnapshot,
+  waiting: readonly [AgendaItem, ...AgendaItem[]],
+  snapshot: AgendaSnapshot,
 ): SessionNotificationPayload {
   const first = waiting.find(item => item.blockingNow === true) ?? waiting[0];
   const count = waiting.length;
-  const name = attentionNotificationTitle(clipAtWord(oneLine(ferret), STOPPED_NAME_LENGTH));
+  const name = agendaNotificationTitle(clipAtWord(oneLine(ferret), STOPPED_NAME_LENGTH));
   return PushNotificationPayloadSchema.parse({
     version: 1,
     eventKey: `attention-stopped:${sessionId}`,
     sessionId,
     kind: 'attention',
     title: `${name} is stopped · ${count === 1 ? '1 needs you' : `${count} need you`}`,
-    body: clipAtWord(oneLine(attentionTitle(first)), ATTENTION_PUSH_BODY_LENGTH),
+    body: clipAtWord(oneLine(agendaTitle(first)), AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
-    url: attentionNotificationPath(sessionId, first.id),
+    url: agendaNotificationPath(sessionId, first.id),
     count: snapshot.count,
   }) as SessionNotificationPayload;
 }
@@ -148,7 +148,7 @@ function oneLine(text: string): string {
 }
 
 /** Server-derived attribution for a board item the daemon chose to announce. */
-export function attentionNotificationAttribution(item: AttentionItem): string {
+export function agendaNotificationAttribution(item: AgendaItem): string {
   if (item.raisedBy === 'agent') {
     if (item.raisedBySession === null) throw new Error('agent-raised agenda item has no raising session');
     return `attention:agent:${item.raisedBySession}`;
@@ -205,17 +205,17 @@ const RESERVED_ALERT_SKELETONS = [
 ].filter(skeleton => skeleton !== '');
 
 /**
- * An Attention push's title: the card's own, plain, trimmed to `ATTENTION_PUSH_TITLE_LENGTH` at a word
+ * An Attention push's title: the card's own, plain, trimmed to `AGENDA_PUSH_TITLE_LENGTH` at a word
  * boundary.
  *
  * A ferret chooses these words, so one that READS as the daemon's own new-device alert
  * (`DEVICE_PAIRED_TITLE`) — in any letters that look like it (`letterSkeleton`) — is labelled, as
  * `Ferret “…”`, which no real alert ever opens with. Every other title is the words as written.
  */
-export function attentionNotificationTitle(title: string): string {
+export function agendaNotificationTitle(title: string): string {
   const name = oneLine(title);
   const letters = letterSkeleton(name);
   if (!RESERVED_ALERT_SKELETONS.some(reserved => letters.includes(reserved)))
-    return clipAtWord(name, ATTENTION_PUSH_TITLE_LENGTH);
-  return `Ferret “${clipAtWord(name, ATTENTION_PUSH_TITLE_LENGTH - 9)}”`;
+    return clipAtWord(name, AGENDA_PUSH_TITLE_LENGTH);
+  return `Ferret “${clipAtWord(name, AGENDA_PUSH_TITLE_LENGTH - 9)}”`;
 }

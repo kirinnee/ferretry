@@ -1522,7 +1522,7 @@ function callsIn(
  *
  * A PARTIAL unknown segment still names the literal segment its interpolation could be empty for, so
  * `tasks*` can be `tasks`. It may not absorb extra literal route text: letting `attention*` match
- * `attention-REMOVED` hid a route rename.
+ * `agenda-REMOVED` hid a route rename.
  */
 function segmentMatches(routeSegment: string, clientSegment: string): boolean {
   if (routeSegment.startsWith(':')) return clientSegment.length > 0;

@@ -7,7 +7,7 @@ import {
   nextOwnerItem,
   sortAgenda,
 } from '../../src/lib/agenda-status.ts';
-import { attentionItem } from '../support/attention-inbox.tsx';
+import { agendaItem } from '../support/agenda-inbox.tsx';
 
 const NOW = new Date(2026, 9, 29, 12, 0).getTime();
 const at = (day: number, hour: number, minute = 0): string => new Date(2026, 9, day, hour, minute).toISOString();
@@ -28,7 +28,7 @@ describe('clockWords', () => {
 
 describe('agendaStatus', () => {
   it('is the owner turn "Needs you" for a plain open item', () => {
-    expect(agendaStatus(attentionItem('A1'), 'Johnnie', NOW)).toMatchObject({
+    expect(agendaStatus(agendaItem('A1'), 'Johnnie', NOW)).toMatchObject({
       turn: 'owner',
       tone: 'needs-you',
       label: 'Needs you',
@@ -37,53 +37,53 @@ describe('agendaStatus', () => {
   });
   it('prefers Blocking now, then Will block, then the deadline', () => {
     const base = { neededBy: at(29, 17), willBlock: 'the deploy' };
-    expect(agendaStatus(attentionItem('A1', { ...base, blockingNow: true }), 'J', NOW)).toMatchObject({
+    expect(agendaStatus(agendaItem('A1', { ...base, blockingNow: true }), 'J', NOW)).toMatchObject({
       tone: 'blocking',
       label: 'Blocking now',
       deadline: 'Needed by 17:00',
     });
-    expect(agendaStatus(attentionItem('A1', base), 'J', NOW)).toMatchObject({
+    expect(agendaStatus(agendaItem('A1', base), 'J', NOW)).toMatchObject({
       tone: 'will-block',
       label: 'Will block: the deploy',
       deadline: 'Needed by 17:00',
     });
-    expect(agendaStatus(attentionItem('A1', { neededBy: at(29, 17) }), 'J', NOW)).toMatchObject({
+    expect(agendaStatus(agendaItem('A1', { neededBy: at(29, 17) }), 'J', NOW)).toMatchObject({
       tone: 'needed-by',
       label: 'Needed by 17:00',
       deadline: null,
     });
   });
   it('flags a deadline that has passed', () => {
-    expect(agendaStatus(attentionItem('A1', { neededBy: at(29, 9) }), 'J', NOW)?.overdue).toBe(true);
-    expect(agendaStatus(attentionItem('A1', { neededBy: at(29, 17) }), 'J', NOW)?.overdue).toBe(false);
+    expect(agendaStatus(agendaItem('A1', { neededBy: at(29, 9) }), 'J', NOW)?.overdue).toBe(true);
+    expect(agendaStatus(agendaItem('A1', { neededBy: at(29, 17) }), 'J', NOW)?.overdue).toBe(false);
   });
   it("is dimmed 'With <ferret>' on the ferret's turn, and Done once resolved", () => {
-    expect(agendaStatus(attentionItem('A1', { waitingOn: 'ferret' }), 'Johnnie', NOW)).toMatchObject({
+    expect(agendaStatus(agendaItem('A1', { waitingOn: 'ferret' }), 'Johnnie', NOW)).toMatchObject({
       turn: 'ferret',
       label: 'With Johnnie',
       dimmed: true,
     });
-    const finished = { ...attentionItem('A1'), resolvedAt: at(29, 11) };
+    const finished = { ...agendaItem('A1'), resolvedAt: at(29, 11) };
     expect(agendaStatus(finished, 'J', NOW)).toMatchObject({
       turn: 'done',
       label: 'Done',
     });
   });
   it('gives a plain notification no status at all', () => {
-    expect(agendaStatus(attentionItem('A1', { notice: true }), 'J', NOW)).toBeNull();
+    expect(agendaStatus(agendaItem('A1', { notice: true }), 'J', NOW)).toBeNull();
   });
 });
 
 describe('sortAgenda', () => {
   it('orders blocking, needed-by, will-block, plain needs you, then the ferret', () => {
     const items = [
-      attentionItem('A1', { waitingOn: 'ferret' }),
-      attentionItem('A2', { waitingSince: at(29, 10) }),
-      attentionItem('A3', { blockingNow: true, waitingSince: at(29, 11) }),
-      attentionItem('A4', { waitingSince: at(29, 9) }),
-      attentionItem('A5', { neededBy: at(29, 17), waitingSince: at(29, 11) }),
-      attentionItem('A6', { willBlock: 'the release', waitingSince: at(29, 12) }),
-      attentionItem('A7', { neededBy: at(29, 15), waitingSince: at(29, 12) }),
+      agendaItem('A1', { waitingOn: 'ferret' }),
+      agendaItem('A2', { waitingSince: at(29, 10) }),
+      agendaItem('A3', { blockingNow: true, waitingSince: at(29, 11) }),
+      agendaItem('A4', { waitingSince: at(29, 9) }),
+      agendaItem('A5', { neededBy: at(29, 17), waitingSince: at(29, 11) }),
+      agendaItem('A6', { willBlock: 'the release', waitingSince: at(29, 12) }),
+      agendaItem('A7', { neededBy: at(29, 15), waitingSince: at(29, 12) }),
     ];
     expect(sortAgenda(items).map(item => item.id)).toEqual(['A3', 'A7', 'A5', 'A6', 'A4', 'A2', 'A1']);
     expect(items[0]?.id).toBe('A1');
@@ -92,10 +92,10 @@ describe('sortAgenda', () => {
 
 describe('nextOwnerItem', () => {
   it("jumps to the next item that is the owner's turn, wrapping round, and none when nothing is left", () => {
-    const list = [attentionItem('A1'), attentionItem('A2', { waitingOn: 'ferret' }), attentionItem('A3')];
+    const list = [agendaItem('A1'), agendaItem('A2', { waitingOn: 'ferret' }), agendaItem('A3')];
     expect(nextOwnerItem(list, 'A1')?.id).toBe('A3');
     expect(nextOwnerItem(list, 'A3')?.id).toBe('A1');
-    expect(nextOwnerItem([attentionItem('A1')], 'A1')).toBeNull();
+    expect(nextOwnerItem([agendaItem('A1')], 'A1')).toBeNull();
   });
 });
 

@@ -137,7 +137,7 @@ describe('ContextRailBody — Signals', () => {
     expect(text(root, '[data-context-chip="answered"]')).toBe('Answered1');
   });
 
-  it('answers through the attention answer controls and shows a refusal on the item', async () => {
+  it('answers through the agenda answer controls and shows a refusal on the item', async () => {
     const { root, signals } = await body();
     const yes = must(
       [...root.querySelectorAll<HTMLButtonElement>('[data-context-signal="A1"] button')].find(button =>

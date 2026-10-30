@@ -35,7 +35,7 @@ import {
   TERMINAL_MAX_PER_SESSION,
   type TerminalListView,
   type TerminalView,
-  type WardenAttentionView,
+  type WardenAgendaView,
   type WardenConfigView,
   type WardenInvestigateRequest,
   type WardenInvestigateView,
@@ -56,12 +56,12 @@ import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/st
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
 import {
-  type AttentionLedger,
-  type AttentionLedgerRepository,
-  type AttentionMutation,
-  type AttentionRepliesSubsystem,
-  AttentionService,
-} from '../../../../src/lib/attention/index.ts';
+  type AgendaLedger,
+  type AgendaLedgerRepository,
+  type AgendaMutation,
+  type AgendaRepliesSubsystem,
+  AgendaService,
+} from '../../../../src/lib/agenda/index.ts';
 import type {
   BrowserControlError,
   BrowserLoginLifecycle,
@@ -265,27 +265,24 @@ export function pinService(known: readonly string[], instant: string = AT): PinS
   );
 }
 
-/** An in-memory attention ledger: the state machine is real, the JSONL file is not. */
-export class FakeLedgerRepository implements AttentionLedgerRepository {
-  constructor(private ledger: AttentionLedger | null = null) {}
+/** An in-memory agenda ledger: the state machine is real, the JSONL file is not. */
+export class FakeLedgerRepository implements AgendaLedgerRepository {
+  constructor(private ledger: AgendaLedger | null = null) {}
 
-  async read(): Promise<AttentionLedger | null> {
+  async read(): Promise<AgendaLedger | null> {
     return this.ledger;
   }
 
-  async transact(
-    _sessionId: string,
-    apply: (current: AttentionLedger | null) => AttentionMutation,
-  ): Promise<AttentionMutation> {
+  async transact(_sessionId: string, apply: (current: AgendaLedger | null) => AgendaMutation): Promise<AgendaMutation> {
     const mutation = apply(this.ledger);
     if (mutation.ok) this.ledger = mutation.ledger;
     return mutation;
   }
 }
 
-/** An attention service over an in-memory ledger, with a fixed instant. */
-export function attentionService(repository: AttentionLedgerRepository = new FakeLedgerRepository()): AttentionService {
-  return new AttentionService(
+/** An agenda service over an in-memory ledger, with a fixed instant. */
+export function agendaService(repository: AgendaLedgerRepository = new FakeLedgerRepository()): AgendaService {
+  return new AgendaService(
     repository,
     { now: () => AT },
     { has: async sessionId => sessionId === 's1' },
@@ -1890,7 +1887,7 @@ export class FakeWarden implements WardenSubsystem {
     };
   }
 
-  async attention(): Promise<WardenAttentionView> {
+  async attention(): Promise<WardenAgendaView> {
     if (this.failure !== undefined) throw this.failure;
     return {
       generatedAt: '2026-07-31T00:00:00.000Z',
@@ -2376,7 +2373,7 @@ export function configChangeSubsystem(announced: (readonly ConfigChangeKind[])[]
 }
 
 /** An outbox that holds nothing: for routes whose test is not about batched answers. */
-export const NO_HELD_REPLIES: AttentionRepliesSubsystem = {
+export const NO_HELD_REPLIES: AgendaRepliesSubsystem = {
   pending: async () => undefined,
   delivery: async () => undefined,
   sendNow: async () => undefined,

@@ -1,5 +1,5 @@
 import { describe, test } from 'bun:test';
-import type { AttentionId } from '@ferretry/protocol';
+import type { AgendaId } from '@ferretry/protocol';
 import should from 'should';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
 import {
@@ -194,7 +194,7 @@ describe('formatReference', () => {
     should(formatReference({ kind: 'file', path: 'src/api.ts', line: 12 })).equal('@src/api.ts:12');
     should(formatReference({ kind: 'file', path: 'src/api.ts', line: 12, endLine: 20 })).equal('@src/api.ts:12-20');
     should(formatReference({ kind: 'task', id: 'f12' })).equal('&F12');
-    should(formatReference({ kind: 'attention', id: 'A3' as AttentionId })).equal('!A3');
+    should(formatReference({ kind: 'attention', id: 'A3' as AgendaId })).equal('!A3');
   });
 
   test('should refuse to render a reference the grammar would not accept', () => {
@@ -202,7 +202,7 @@ describe('formatReference', () => {
     should(() => formatReference({ kind: 'agent', name: '1nope' })).throw(TypeError);
     should(() => formatReference({ kind: 'file', path: '../secret' })).throw(TypeError);
     should(() => formatReference({ kind: 'task', id: 'Z9' })).throw(TypeError);
-    should(() => formatReference({ kind: 'attention', id: 'A0' as AttentionId })).throw(TypeError);
+    should(() => formatReference({ kind: 'attention', id: 'A0' as AgendaId })).throw(TypeError);
   });
 
   test('should format a file open target from its bare location', () => {
@@ -281,11 +281,11 @@ describe('resolveReference', () => {
     // Assert
     should(resolveReference({ kind: 'task', id: 'F12' }, { task: () => true })).deepEqual({ kind: 'task', id: 'F12' });
     should(resolveReference({ kind: 'task', id: 'F12' }, { task: () => false })).be.null();
-    should(resolveReference({ kind: 'attention', id: 'A3' as AttentionId }, { attention: () => true })).deepEqual({
+    should(resolveReference({ kind: 'attention', id: 'A3' as AgendaId }, { attention: () => true })).deepEqual({
       kind: 'attention',
       id: 'A3',
     });
-    should(resolveReference({ kind: 'attention', id: 'A3' as AttentionId }, { attention: () => false })).be.null();
+    should(resolveReference({ kind: 'attention', id: 'A3' as AgendaId }, { attention: () => false })).be.null();
   });
 
   test('should treat a resolver that throws as no proof at all', () => {
@@ -310,7 +310,7 @@ describe('referenceHref and parseReferenceHref', () => {
     { kind: 'file', path: 'src/api.ts', line: 12 },
     { kind: 'file', path: 'src/api.ts', line: 12, endLine: 20 },
     { kind: 'task', id: 'F12' },
-    { kind: 'attention', id: 'A3' as AttentionId },
+    { kind: 'attention', id: 'A3' as AgendaId },
     { kind: 'skill', name: 'summary' },
   ];
 
@@ -343,7 +343,7 @@ describe('referenceHref and parseReferenceHref', () => {
     should(() => referenceHref({ kind: 'agent', daemonId, sessionId: '..', name: 'zelda' })).throw(TypeError);
     should(() => referenceHref({ kind: 'file', path: '../secret' })).throw(TypeError);
     should(() => referenceHref({ kind: 'task', id: 'Z1' })).throw(TypeError);
-    should(() => referenceHref({ kind: 'attention', id: 'A0' as AttentionId })).throw(TypeError);
+    should(() => referenceHref({ kind: 'attention', id: 'A0' as AgendaId })).throw(TypeError);
   });
 
   test('should reject anything that is not the reserved envelope', () => {
@@ -404,7 +404,7 @@ describe('referenceIdentity', () => {
     should(referenceIdentity({ kind: 'file', path: 'a.ts', line: 2, endLine: 3 })).equal('file:a.ts:2:3');
     should(referenceIdentity({ kind: 'file', path: 'a.ts' })).equal('file:a.ts::');
     should(referenceIdentity({ kind: 'task', id: 'F12' })).equal('task:F12');
-    should(referenceIdentity({ kind: 'attention', id: 'A3' as AttentionId })).equal('attention:A3');
+    should(referenceIdentity({ kind: 'attention', id: 'A3' as AgendaId })).equal('attention:A3');
     should(referenceIdentity({ kind: 'skill', name: 'summary' })).equal('skill:summary');
   });
 });
@@ -469,11 +469,11 @@ describe('revalidateReference', () => {
       id: 'F12',
     });
     should(revalidateReference({ kind: 'task', id: 'F12' }, { task: () => false })).be.null();
-    should(revalidateReference({ kind: 'attention', id: 'A3' as AttentionId }, { attention: () => true })).deepEqual({
+    should(revalidateReference({ kind: 'attention', id: 'A3' as AgendaId }, { attention: () => true })).deepEqual({
       kind: 'attention',
       id: 'A3',
     });
-    should(revalidateReference({ kind: 'attention', id: 'A3' as AttentionId }, { attention: () => false })).be.null();
+    should(revalidateReference({ kind: 'attention', id: 'A3' as AgendaId }, { attention: () => false })).be.null();
   });
 
   test('should treat a throwing resolver as no proof', () => {
@@ -606,7 +606,7 @@ describe('remarkReferences', () => {
     ).deepEqual(['Open @src/api.ts', 'Open @src/api.ts at line 12', 'Open @src/api.ts at lines 12–20']);
   });
 
-  test('should title agent and attention links in their own voice', () => {
+  test('should title agent and agenda links in their own voice', () => {
     // Arrange
     const tree = paragraph('ask :zelda about !A3');
 

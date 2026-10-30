@@ -32,7 +32,7 @@ const pinBoard = {
   updatedAt: '2026-07-31T09:00:00.000Z',
 };
 
-const attentionBoard = {
+const agendaBoard = {
   v: 1,
   sessionId: SESSION,
   items: [
@@ -141,7 +141,7 @@ async function startStubDaemon(): Promise<Stub> {
 
 function route(path: string): unknown {
   if (path === `/v1/sessions/${SESSION}/pins`) return pinBoard;
-  if (path === `/v1/sessions/${SESSION}/attention`) return attentionBoard;
+  if (path === `/v1/sessions/${SESSION}/attention`) return agendaBoard;
   if (path === `/v1/sessions/${SESSION}/notify`) return { sessionId: SESSION, delivered: 2 };
   if (path === '/v1/analytics') return analyticsFeed;
   return undefined;
@@ -195,7 +195,7 @@ describe('command group journeys', () => {
     });
   });
 
-  it('should raise and answer an attention item through the shipped binary', async () => {
+  it('should raise and answer an agenda item through the shipped binary', async () => {
     await withE2eEnvironment(async environment => {
       // Arrange
       const stub = await startStubDaemon();

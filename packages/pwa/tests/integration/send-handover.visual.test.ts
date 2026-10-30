@@ -23,6 +23,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from './support/chromium.ts';
+import { gate } from './support/overlap.ts';
 
 const packageRoot = resolve(import.meta.dir, '../..');
 const shotsDir = process.env.FY_HANDOVER_SHOTS_DIR ?? '';
@@ -129,6 +130,7 @@ const play = async (query: string): Promise<Probe> => {
 };
 
 const PATHS = ['direct', 'turn-file', 'queued-file', 'merged'] as const;
+const HARNESSES = ['claude', 'codex'] as const;
 const ORDERS = ['transcript-first', 'ledger-first', 'together'] as const;
 /** A local carrier answers within a frame or two; a relayed one is a poll behind. */
 const PACES = [
@@ -136,24 +138,50 @@ const PACES = [
   { name: 'relayed', land: 300, gap: 1_200, read: 700 },
 ] as const;
 
-describe('a sent message hands over to its transcript row in place', () => {
+/**
+ * A timeline is real time and a run spends nearly all of it waiting for the scene's own timers, so the runs
+ * overlap instead of queueing: every path and harness starts with the file, `CONCURRENT_RUNS` timelines at a
+ * time, each in its own context so no run sees another's page. A test then reads its own runs' probes.
+ */
+const CONCURRENT_RUNS = 12;
+const inTurn = gate(CONCURRENT_RUNS);
+const playInTurn = async (query: string): Promise<Probe> => await inTurn(async () => await play(query));
+
+interface Run {
+  readonly order: string;
+  readonly pace: string;
+  readonly probe: Probe;
+}
+const runsOf = new Map<string, Promise<PromiseSettledResult<Run>[]>>();
+const startRuns = (): void => {
   for (const path of PATHS)
-    for (const harness of ['claude', 'codex'] as const)
+    for (const harness of HARNESSES)
+      runsOf.set(
+        `${path}/${harness}`,
+        Promise.allSettled(
+          ORDERS.flatMap(order =>
+            PACES.map(async (pace): Promise<Run> => {
+              const query = `path=${path}&harness=${harness}&order=${order}&land=${pace.land}&gap=${pace.gap}&read=${pace.read}`;
+              return { order, pace: pace.name, probe: await playInTurn(query) };
+            }),
+          ),
+        ),
+      );
+};
+
+describe('a sent message hands over to its transcript row in place', () => {
+  beforeAll(startRuns);
+  for (const path of PATHS)
+    for (const harness of HARNESSES)
       it(`${path} · ${harness}: one bubble, one element, at every frame in every order and pace`, async () => {
-        for (const order of ORDERS)
-          for (const pace of PACES) {
-            const probe = await play(
-              `path=${path}&harness=${harness}&order=${order}&land=${pace.land}&gap=${pace.gap}&read=${pace.read}`,
-            );
-            // The run really went through every stage and was really watched while it did.
-            expect(probe.stages.at(-1)).toBe('replied');
-            expect(probe.frames).toBeGreaterThan(10);
-            expect({ order, pace: pace.name, violations: probe.violations }).toEqual({
-              order,
-              pace: pace.name,
-              violations: [],
-            });
-          }
+        for (const result of await (runsOf.get(`${path}/${harness}`) as Promise<PromiseSettledResult<Run>[]>)) {
+          if (result.status === 'rejected') throw result.reason;
+          const { order, pace, probe } = result.value;
+          // The run really went through every stage and was really watched while it did.
+          expect(probe.stages.at(-1)).toBe('replied');
+          expect(probe.frames).toBeGreaterThan(10);
+          expect({ order, pace, violations: probe.violations }).toEqual({ order, pace, violations: [] });
+        }
       }, 120_000);
 });
 
