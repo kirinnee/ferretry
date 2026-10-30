@@ -89,6 +89,8 @@ class ScriptedClient {
   readonly asked: string[] = [];
   watches = 0;
   closed = 0;
+  /** What a client's stop waits on: its process exiting. */
+  exit: Promise<void> = Promise.resolve();
   private listener: ((value: string) => void) | undefined;
 
   client(): WorkerTmuxClient {
@@ -117,8 +119,9 @@ class ScriptedClient {
           script.listener = undefined;
         };
       },
-      close: () => {
+      stop: async () => {
         script.closed += 1;
+        await script.exit;
       },
     };
   }
@@ -651,5 +654,51 @@ describe('SessionWorkerRuntime — hosting', () => {
     // Assert
     should(lookedByThen).equal(1);
     should(looks().length).equal(2);
+  });
+});
+
+describe('a stopping session worker', () => {
+  it('should answer stopped only once every client it started has exited, the ones it let go before included', async () => {
+    // Arrange — one client let go when the session was rebound, still exiting, and the one it was rebound to.
+    const { subject, pane, posted, attach, send, binding, settle } = await rig();
+    await attach();
+    let exited = (): void => undefined;
+    pane.exit = new Promise<void>(resolve => {
+      exited = resolve;
+    });
+    await send({
+      kind: 'bind',
+      session: 'a',
+      generation: 1,
+      binding: { ...binding, tmux: { ...binding.tmux, socket: '/tmp/other' } },
+    });
+    const stoppedOf = () => posted.filter(message => 'kind' in message && message.kind === 'stopped');
+
+    // Act — the daemon says stop; the clients' processes have not exited yet, then they do.
+    const stopping = subject.handle({ kind: 'stop' });
+    await settle();
+    const beforeExit = stoppedOf().length;
+    exited();
+    await stopping;
+
+    // Assert — both clients were ended, nothing is hosted, and stopped came only after the exits.
+    should(pane.closed).equal(2);
+    should(subject.size).equal(0);
+    should(beforeExit).equal(0);
+    should(stoppedOf()).deepEqual([{ kind: 'stopped' }]);
+  });
+
+  it('should still answer stopped when a client could not say it exited', async () => {
+    // Arrange
+    const { subject, pane, posted, attach } = await rig();
+    await attach();
+    pane.exit = Promise.reject(new Error('the client is gone'));
+
+    // Act
+    await subject.handle({ kind: 'stop' });
+
+    // Assert
+    should(pane.closed).equal(1);
+    should(posted.at(-1)).deepEqual({ kind: 'stopped' });
   });
 });

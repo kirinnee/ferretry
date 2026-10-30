@@ -66,6 +66,7 @@ import type {
   WardenGuardConfig,
   WardenInvestigateView,
   WardenInvestigationOrigin,
+  WardenJevBefore,
   WardenJevCheck,
   WardenLayerStatus,
   WardenLeaveDuration,
@@ -156,9 +157,13 @@ import {
 import {
   capSkipKey,
   JEV_CHECKS_SHOWN,
+  jevBeforeInvestigation,
+  jevBeforeOf,
   jevCapSkipOf,
   jevCheckOf,
   pruneCapSkips,
+  pruneJevBefore,
+  rememberJevBefore,
   type WardenJevCheckLog,
 } from './jev-checks.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
@@ -184,6 +189,7 @@ import {
 } from './remedy.ts';
 import {
   parseWardenRuntimeState,
+  jevHandoffKey,
   recordJevHandoff,
   type WardenJevHandoff,
   recordSweepFingerprint,
@@ -716,6 +722,14 @@ export class WardenSweepService {
           meta: state.queueMeta ?? {},
           records: state.investigations ?? [],
           live: wardenId => liveIds.has(wardenId),
+          // A queued flag says what Jev has done about it so far, as its investigation will once it starts.
+          jevFor: anomaly =>
+            jevBeforeInvestigation({
+              kind: anomaly.kind,
+              ...optionalLast(state.jevBefore?.[jevHandoffKey(anomaly.sessionId, anomaly.kind)]),
+              jevOn: stored.config.layers.jev,
+              force: false,
+            }),
         }).map(entry => {
           const wardenName = entry.wardenSession === undefined ? undefined : investigators.get(entry.wardenSession);
           return wardenName === undefined ? entry : { ...entry, wardenName };
@@ -1145,6 +1159,7 @@ export class WardenSweepService {
       clearStreaks: reconcileClearStreaks(state.clearStreaks ?? {}, statuses, anomalies, pruned.store, nowMs),
       passedOn: prunePassedOn(state.passedOn ?? [], anomalies),
       jevCapSkips: pruneCapSkips(state.jevCapSkips ?? [], anomalies, nowMs),
+      jevBefore: pruneJevBefore(state.jevBefore ?? {}, anomalies),
       backoff: reconcileBackoff(state.backoff ?? {}, live, nowMs),
     };
   }
@@ -1401,11 +1416,22 @@ export class WardenSweepService {
           agent: facts.agent,
           ...(facts.model === undefined ? {} : { model: facts.model }),
           ...(investigator === undefined ? {} : { wardenName: investigator }),
+          jev: jevBeforeInvestigation({
+            kind: anomaly.kind,
+            ...optionalLast(state.jevBefore?.[jevHandoffKey(targetId, anomaly.kind)]),
+            jevOn: input.config.layers.jev,
+            force: input.force,
+          }),
         },
         ...records,
       ];
-      // The investigation looks for itself: once it is done, a flag that still stands is put to Jev afresh.
-      state = { ...state, passedOn: forgetPassedOn(state.passedOn ?? [], targetId) };
+      // The investigation looks for itself: once it is done, a flag that still stands is put to Jev afresh —
+      // and what Jev said before is this investigation's, not the next one's.
+      state = {
+        ...state,
+        passedOn: forgetPassedOn(state.passedOn ?? [], targetId),
+        jevBefore: forgetJevBefore(state.jevBefore ?? {}, targetId, anomaly.kind),
+      };
       delete meta[targetId];
       spawned.push(facts.sessionId);
       this.ports.journal.record('fleet.warden_assigned', {
@@ -1490,11 +1516,15 @@ export class WardenSweepService {
           kind: anomaly.kind,
           why: 'not_judgeable',
         });
-        next = withJevHandoff(
-          { ...next, passedOn: [...(next.passedOn ?? []), key] },
+        next = withJevBefore(
+          withJevHandoff(
+            { ...next, passedOn: [...(next.passedOn ?? []), key] },
+            anomaly,
+            { why: 'not_judgeable', confidence: 0 },
+            nowMs,
+          ),
           anomaly,
-          { why: 'not_judgeable', confidence: 0 },
-          nowMs,
+          { verdict: 'not_asked', why: 'not_judgeable' },
         );
         continue;
       }
@@ -1539,8 +1569,12 @@ export class WardenSweepService {
       ...(acted === undefined ? {} : { action: acted.action, actedAt: acted.at, sameSubject: same }),
     });
     const today = triageDayFor(state.triageDay, nowMs);
+    const handedOn = withJevHandoff(state, anomaly, { why: 'already_acted', confidence: 0 }, nowMs);
+    const before = state.jevBefore?.[jevHandoffKey(anomaly.sessionId, anomaly.kind)];
     return {
-      ...withJevHandoff(state, anomaly, { why: 'already_acted', confidence: 0 }, nowMs),
+      ...(before === undefined
+        ? withJevBefore(handedOn, anomaly, { verdict: 'not_asked', why: 'already_acted' })
+        : handedOn),
       passedOn: [...(state.passedOn ?? []), key],
       triageDay: same ? retractJevAction(today, instantMs(acted?.at)) : today,
     };
@@ -1581,7 +1615,11 @@ export class WardenSweepService {
     const today = triageDayFor(state.triageDay, nowMs);
     if (!jevWithinBudget(today, config.caps, nowMs)) return { state };
     const health = state.guard ?? {};
-    if (guardBackingOff(health, nowMs)) return { state, outcome: { kind: 'escalate', why: 'failed', confidence: 0 } };
+    if (guardBackingOff(health, nowMs))
+      return {
+        state: withJevBefore(state, anomaly, { verdict: 'not_asked', why: 'backoff' }),
+        outcome: { kind: 'escalate', why: 'failed', confidence: 0 },
+      };
 
     const evidence = await this.ports.evidence.evidence(anomaly.sessionId).catch(() => ({ recentTurns: [] }));
     let snapshot: Awaited<ReturnType<typeof redactTriageSnapshot>>;
@@ -1590,7 +1628,10 @@ export class WardenSweepService {
     } catch {
       this.ports.journal.record('fleet.warden_guard_unredacted', { sessionId: anomaly.sessionId, kind: anomaly.kind });
       return {
-        state: { ...state, guard: { ...health, lastFailure: { code: 'unredacted', at } } },
+        state: withJevBefore({ ...state, guard: { ...health, lastFailure: { code: 'unredacted', at } } }, anomaly, {
+          verdict: 'not_asked',
+          why: 'unredacted',
+        }),
         outcome: { kind: 'escalate', why: 'failed', confidence: 0, failure: 'unredacted' },
       };
     }
@@ -1717,7 +1758,15 @@ export class WardenSweepService {
         error: error instanceof Error ? error.message : String(error),
       });
     });
-    return recordWardenJevCheck(state, check);
+    const counted = recordWardenJevCheck(state, check);
+    // A healthy check settled its flag: there is nothing for an investigation to say Jev did first.
+    return check.verdict === 'healthy'
+      ? counted
+      : withJevBefore(
+          counted,
+          { sessionId: check.sessionId, kind: check.anomalyKind },
+          jevBeforeOf({ ...check, verdict: check.verdict }),
+        );
   }
 
   /**
@@ -1829,15 +1878,18 @@ export class WardenSweepService {
    * investigator it was.
    */
   private recordAction(state: WardenRuntimeState, action: WardenAction): WardenRuntimeState {
-    const investigator =
-      action.investigator ??
-      (action.reportPath === undefined
+    const record =
+      action.reportPath === undefined
         ? undefined
-        : state.investigations?.find(record => record.reportPath === action.reportPath)?.wardenName);
+        : state.investigations?.find(entry => entry.reportPath === action.reportPath);
+    const investigator = action.investigator ?? record?.wardenName;
+    // An investigation's act says what Jev did first, so the list never shows an LLM verdict without it.
+    const jev = action.jev ?? record?.jev;
     const stamped: WardenAction = {
       ...action,
       actor: action.actor ?? wardenActionActor(action),
       ...(investigator === undefined ? {} : { investigator }),
+      ...(jev === undefined ? {} : { jev }),
     };
     return recordWardenOutcome(
       { ...state, actions: [stamped, ...(state.actions ?? [])].slice(0, WARDEN_HISTORY_LIMIT) },
@@ -2179,8 +2231,24 @@ export class WardenSweepService {
     const { facts, selection } = result.started;
     const investigator = result.started.investigator;
     await this.writeProvenance(reportPath, facts, selection, undefined, investigator);
+    // What Jev did first is one answer only when every flag the triage covers got the same one.
+    const jevPerFlag = anomalies.map(anomaly =>
+      jevBeforeInvestigation({
+        kind: anomaly.kind,
+        ...optionalLast(state.jevBefore?.[jevHandoffKey(anomaly.sessionId, anomaly.kind)]),
+        jevOn: config.layers.jev,
+        force,
+      }),
+    );
+    const jev = jevPerFlag.every(entry => JSON.stringify(entry) === JSON.stringify(jevPerFlag[0]))
+      ? jevPerFlag[0]
+      : undefined;
     state = {
       ...state,
+      jevBefore: anomalies.reduce(
+        (store, anomaly) => forgetJevBefore(store, anomaly.sessionId, anomaly.kind),
+        state.jevBefore ?? {},
+      ),
       lastSpawnAt: input.at,
       lastSpawnFingerprint: key,
       sweepCoverage: {
@@ -2199,6 +2267,7 @@ export class WardenSweepService {
             agent: facts.agent,
             ...(facts.model === undefined ? {} : { model: facts.model }),
             ...(investigator === undefined ? {} : { wardenName: investigator }),
+            ...(jev === undefined ? {} : { jev }),
           },
           ...(state.investigations ?? []),
         ],
@@ -2755,6 +2824,31 @@ export class WardenSweepService {
 function jevCapped(layer: WardenLayerStatus): boolean {
   return layer.configured && layer.reason === 'jev_cap';
 }
+
+/** Remember Jev's last word on one flag (`jev-checks.ts` {@link rememberJevBefore}). */
+function withJevBefore(
+  state: WardenRuntimeState,
+  anomaly: { readonly sessionId: string; readonly kind: string },
+  before: WardenJevBefore,
+): WardenRuntimeState {
+  return {
+    ...state,
+    jevBefore: rememberJevBefore(state.jevBefore ?? {}, jevHandoffKey(anomaly.sessionId, anomaly.kind), before),
+  };
+}
+
+/** Forget Jev's last word on one flag: an investigation has taken it. */
+function forgetJevBefore(
+  store: Readonly<Record<string, WardenJevBefore>>,
+  sessionId: string,
+  kind: WardenAnomaly['kind'],
+): Readonly<Record<string, WardenJevBefore>> {
+  const key = jevHandoffKey(sessionId, kind);
+  return Object.fromEntries(Object.entries(store).filter(([existing]) => existing !== key));
+}
+
+const optionalLast = (last: WardenJevBefore | undefined): { readonly last?: WardenJevBefore } =>
+  last === undefined ? {} : { last };
 
 /** Remember why Jev handed one flag on (`state.ts` {@link recordJevHandoff}): an escalation, or one it never judges. */
 function withJevHandoff(

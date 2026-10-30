@@ -54,7 +54,13 @@ import { z } from 'zod';
 
 /** A host as an operator writes one: a name or an address, never empty. */
 export const HostSchema = z.string().trim().min(1).max(255);
-export const PortSchema = z.number().int().min(1).max(65_535);
+/**
+ * The port a document writes to say "let the operating system choose": the daemon binds port 0, reads what it
+ * was given, and records that — after which the document claims a real port like any other. Nothing in the
+ * product writes it; it is how a fixture avoids guessing a free port and racing whoever takes it first.
+ */
+export const OS_CHOSEN_PORT = 0;
+export const PortSchema = z.number().int().min(OS_CHOSEN_PORT).max(65_535);
 
 /** How many of each kind one daemon may declare. See the module note: the asymmetry is the point. */
 export const MAX_BIND_CARRIERS = 1;

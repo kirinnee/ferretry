@@ -22,6 +22,7 @@ import type {
   WardenStatusView,
 } from '@ferretry/protocol';
 import { displaySystemCallsign, wardenActionActor, wardenActionOutcome } from '@ferretry/protocol';
+import { jevBeforeLine, jevCost } from './warden-jev-line.ts';
 import { compactAgo, fullTime, optional, percent } from './warden-overview-model.ts';
 import { ANOMALY_CHIPS, ACTOR_LABEL, chip, outcomeChip, type WardenChip } from './warden-vocabulary.ts';
 
@@ -102,6 +103,8 @@ export interface WardenActionRow {
   readonly check?: 'handed_on' | 'skipped';
   /** What the check cost, `$0.0004`. Jev checks only. */
   readonly cost?: string;
+  /** What Jev did before the investigation whose verdict this was (`warden-jev-line.ts`). LLM rows only. */
+  readonly jev?: string;
 }
 
 const rowChip = (action: WardenAction, outcome: WardenOutcome | undefined): WardenChip =>
@@ -134,6 +137,7 @@ const rowFor = (action: WardenAction, now: number): WardenActionRow => {
     ...optional('anomalyKind', action.anomalyKind),
     ...optional('failoverTo', action.agent),
     ...optional('reportPath', action.reportPath),
+    ...optional('jev', actor === 'llm' ? jevBeforeLine(action.jev) : undefined),
     count: 1,
     times: [{ compact: compactAgo(action.at, now), full: fullTime(action.at) }],
     outcome,
@@ -206,9 +210,6 @@ const checkReason = (check: WardenJevCheck): string =>
 /** A check worth its own row: one that settled nothing. A healthy or acted check is already an action. */
 const handedOn = (check: WardenJevCheck): check is WardenJevCheck & { readonly verdict: 'handed_on' | 'skipped' } =>
   check.verdict === 'handed_on' || check.verdict === 'skipped';
-
-/** Four decimal places: one Jev call costs a fraction of a cent. */
-const jevCost = (usd: number): string => `$${usd.toFixed(4)}`;
 
 const checkRowFor = (
   check: WardenJevCheck & { readonly verdict: 'handed_on' | 'skipped' },

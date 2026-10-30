@@ -30,6 +30,8 @@ import {
   type WardenInvestigationOrigin,
   WardenInvestigationOriginSchema,
   WardenJevActsSchema,
+  type WardenJevBefore,
+  WardenJevBeforeSchema,
   WARDEN_INVESTIGATOR_MAX_SEQUENCE,
   WardenVerdictKindSchema,
 } from '@ferretry/protocol';
@@ -199,6 +201,7 @@ const InvestigationRecordSchema = z.object({
   agent: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   wardenName: z.string().min(1).optional(),
+  jev: WardenJevBeforeSchema.optional(),
 }) satisfies z.ZodType<unknown, WardenInvestigationRecord>;
 
 const CostAverageSchema = z.object({
@@ -276,7 +279,7 @@ const JevHandoffSchema = z.object({
 export const WARDEN_JEV_HANDOFF_LIMIT = 200;
 
 /** The key a hand-on is stored under: one per (ferret, kind), as the backoff keys its looks. */
-export const jevHandoffKey = (sessionId: string, kind: WardenAnomalyKind): string => `${sessionId}|${kind}`;
+export const jevHandoffKey = (sessionId: string, kind: string): string => `${sessionId}|${kind}`;
 
 /** Record Jev's hand-on of one flag, replacing any earlier one for it, bounded newest first. */
 export function recordJevHandoff(
@@ -341,6 +344,11 @@ export interface WardenRuntimeState {
   readonly passedOn?: readonly string[];
   /** The flags handed on unasked because Jev's cap was spent, already written down (`jev-checks.ts` {@link capSkipKey}). */
   readonly jevCapSkips?: readonly string[];
+  /**
+   * Jev's last word on each standing flag it did not settle (`jev-checks.ts`), keyed by {@link jevHandoffKey}:
+   * what an investigation of that flag records as what Jev did first.
+   */
+  readonly jevBefore?: Readonly<Record<string, WardenJevBefore>>;
   /** Why Jev passed each flag on, keyed by {@link jevHandoffKey}: what the owner's notification says about it. */
   readonly jevHandoffs?: Readonly<Record<string, WardenJevHandoff>>;
   /**
@@ -389,6 +397,7 @@ const RuntimeStateSchema = z.object({
   clearStreaks: z.record(z.string(), ClearStreakSchema).optional(),
   passedOn: z.array(z.string().min(1)).optional(),
   jevCapSkips: z.array(z.string().min(1)).optional(),
+  jevBefore: z.record(z.string(), WardenJevBeforeSchema).optional(),
   jevHandoffs: z.record(z.string(), JevHandoffSchema).optional(),
   notified: z.record(z.string(), Instant).optional(),
   assignments: z.record(z.string(), AssignmentSchema).optional(),

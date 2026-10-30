@@ -2,6 +2,7 @@ import { CAPABILITY_AXES, DAEMON_CAPABILITIES, isLoopbackHost } from '@ferretry/
 import { dialledRelayUrl, type RelayCarrierSource } from '../relay/discovery.ts';
 import type { RunOverrides } from './arguments.ts';
 import { foreignAdvertisementNotice } from './boot.ts';
+import { OS_CHOSEN_PORT } from './carriers.ts';
 import { advertisesForeignAddress, type DaemonConfig } from './config.ts';
 
 /**
@@ -105,6 +106,9 @@ export function describeConfiguration(report: ConfigurationReport): readonly Res
       value: render(effective[key]),
       origin: overridden ? 'flag' : document[key] === undefined ? 'default' : 'config file',
       ...(unrecordedPort ? { note: 'preferred, not claimed — this boot may take the next free address' } : {}),
+      ...(key === 'port' && !overridden && document[key] === OS_CHOSEN_PORT
+        ? { note: 'the operating system assigns the port when this daemon binds, and it is then recorded here' }
+        : {}),
       ...(key === 'publicUrl' && document[key] === undefined ? { note: 'follows host and port' } : {}),
     });
   }

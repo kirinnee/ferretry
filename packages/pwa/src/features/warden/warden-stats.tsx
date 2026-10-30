@@ -13,6 +13,7 @@ import {
   hasHistory,
   layerLines,
   PERIOD_LABEL,
+  spendTotals,
   type StatTile,
   type WardenPeriod,
   wardenDayChart,
@@ -54,6 +55,7 @@ export function WardenStatsPanel({ status, now }: { readonly status: WardenStatu
   const history = hasHistory(status);
   const stats = wardenStats(status, history ? period : 'today', now);
   const lines = layerLines(status);
+  const totals = spendTotals(status);
   const chart = wardenDayChart(status, now);
   return (
     <section aria-label="Warden stats" className="flex min-w-0 flex-col gap-md">
@@ -89,6 +91,11 @@ export function WardenStatsPanel({ status, now }: { readonly status: WardenStatu
           <Tile key={tile.key} tile={tile} />
         ))}
       </div>
+      {totals !== undefined && (
+        <p className="m-0 text-cell leading-base text-fg-soft [font-variant-numeric:tabular-nums]" data-warden-spend>
+          {totals}
+        </p>
+      )}
       {lines.length > 0 && (
         <ul className="m-0 flex list-none flex-col gap-sm p-0">
           {lines.map(line => (

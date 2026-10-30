@@ -134,6 +134,7 @@ function WardenOverviewBody({
         verdict: row.verdict ?? 'unknown',
         reportPath: row.reportPath,
       },
+      ...(row.jev === undefined ? {} : { jev: row.jev }),
     });
   };
 

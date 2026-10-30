@@ -640,6 +640,7 @@ import {
   CredentialUsageSource,
   canServeModel,
   childGrantRequester,
+  choosesPortAtBind,
   chooseRelayCarrierSources,
   claimStartName,
   classifyPaneProcesses,
@@ -6234,6 +6235,12 @@ async function decideAddress(
   world: DaemonWorld,
   loaded: DaemonConfig,
 ): Promise<{ readonly config: DaemonConfig } | BootRefusal> {
+  if (choosesPortAtBind(loaded)) {
+    // Nothing to probe and nothing to walk: the bind itself asks the kernel, so no number is ever held
+    // between "found free" and "bound". The address is only known — and only recorded — once it is.
+    world.notices.step('address chosen', 'the operating system will assign the port when the daemon binds');
+    return { config: loaded };
+  }
   if (loaded.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: loaded.bindUrl });
     if (occupant.kind !== 'vacant')
@@ -10814,11 +10821,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.notices.state(decided.message);
     return decided.exitCode;
   }
-  const config = decided.config;
+  const decidedConfig = decided.config;
   // Read ONCE for this boot and handed to every surface that reports a harness, so the milestone
   // below and the doctor route this daemon serves cannot disagree about which `claude` is here.
-  const harnessDiscovery = harnessDeclarations(config, world.userHome);
-  for (const key of supersededCarrierKeys({ rawDocument: peeked.document ?? {}, carriers: config.carriers })) {
+  const harnessDiscovery = harnessDeclarations(decidedConfig, world.userHome);
+  for (const key of supersededCarrierKeys({ rawDocument: peeked.document ?? {}, carriers: decidedConfig.carriers })) {
     world.notices.state(
       `the legacy "${key}" key in ${world.config.path} is superseded by its explicit carriers entry and has no effect`,
     );
@@ -10827,15 +10834,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // does not already say it: a recorded port is already written, and a port named on the command
   // line was said about this run only and must not be turned into a claim on disk behind the
   // operator's back. Recording is what makes choosing safe — the next boot binds this or refuses.
-  if (!loaded.portIsRecorded) {
-    await world.config.record(config.port);
-    world.notices.step('address recorded', `${world.config.path} now claims port ${String(config.port)}`);
+  const portComesFromBind = choosesPortAtBind(decidedConfig);
+  if (!loaded.portIsRecorded && !portComesFromBind) {
+    await world.config.record(decidedConfig.port);
+    world.notices.step('address recorded', `${world.config.path} now claims port ${String(decidedConfig.port)}`);
   }
   // Stated rather than refused: advertising an address other than the bound one is a real deployment
   // (a proxy, a tunnel), and it is also what a home written before derived values stopped being
   // persisted looks like. Either way the operator is the one who can tell which, so say it.
-  if (advertisesForeignAddress(config))
-    world.notices.state(foreignAdvertisementNotice(config.bindUrl, config.publicUrl, world.config.path));
+  if (advertisesForeignAddress(decidedConfig))
+    world.notices.state(foreignAdvertisementNotice(decidedConfig.bindUrl, decidedConfig.publicUrl, world.config.path));
   /**
    * The address is bound HERE — as soon as it is decided, and before every step that can take time.
    *
@@ -10855,6 +10863,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   const surface = new StagedApiSurface(world.clock, startedAtMs, liveness);
   progress.enter('binding the address');
   let server: ApiServerHandle;
+  // Read on every request, so an OS-chosen port can correct the list once the bind has told it.
+  let originsAdmitted = browserOrigins(decidedConfig);
   try {
     server = await world.boot.binder.bind(
       async () =>
@@ -10862,15 +10872,17 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
           {
             http: surface.http,
             sockets: surface.sockets,
-            corsOrigins: browserOrigins(config),
+            get corsOrigins() {
+              return originsAdmitted;
+            },
           },
           {
-            host: config.host,
-            port: config.port,
+            host: decidedConfig.host,
+            port: decidedConfig.port,
             // A loopback peer is privileged only on a loopback-only direct bind. A wildcard bind
             // can still have a local reverse proxy forwarding a remote browser, so Bun's immediate
             // peer is never enough proof there — even when its public URL is the pairing remedy.
-            directLoopbackIsPrivileged: mayTrustDirectLoopback(config),
+            directLoopbackIsPrivileged: mayTrustDirectLoopback(decidedConfig),
           },
         ),
     );
@@ -10881,7 +10893,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     // operator's to resolve, and a stack trace about a socket says none of it. The exit is non-zero,
     // so a service manager never mistakes a daemon that could not bind for one that is serving.
     const refusal = refuseUnbindableAddress(
-      config.bindUrl,
+      decidedConfig.bindUrl,
       error instanceof Error ? error.message : String(error),
       world.config.path,
     );
@@ -10892,6 +10904,14 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // stops after, so a live terminal stream's redraw timer is told it is over while its socket exists.
   closeLiveSockets = () => server.closeSockets();
   cleanups.push(() => server.stop());
+  // Everything below reads the address the socket really has. For an OS-chosen port that is the first
+  // moment it exists, and writing it down here is what lets whoever started this daemon find it.
+  const config = portComesFromBind ? configuredAt(decidedConfig, server.port) : decidedConfig;
+  if (portComesFromBind) {
+    originsAdmitted = browserOrigins(config);
+    await world.config.record(config.port);
+    world.notices.step('address recorded', `${world.config.path} now claims port ${String(config.port)}`);
+  }
   world.notices.step('listening', `${config.bindUrl} — answering /healthz while the boot continues`);
   /**
    * The runtime relay advertisement is read ONCE, here, before either consumer receives the set.
@@ -11454,9 +11474,11 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // changes, and this thread reconciles which session has a worker when something changes — observing on a
   // 2 s cadence only a session no worker has. Spends no tokens.
   subsystems.observer.arm();
-  cleanups.push(() => {
-    // The session workers, and the tmux clients they hold, end with the observer.
-    subsystems.observer.close();
+  cleanups.push(async () => {
+    // The session workers, and the tmux clients they hold, end with the observer — the clients WAITED
+    // OUT, as the shared one is: a client left to notice this process's exit is still on its server
+    // after the process has gone.
+    await subsystems.observer.close();
   });
   cleanups.push(async () => {
     clearInterval(waitTicks);
@@ -11926,6 +11948,10 @@ export async function checkConfiguration(
       say(line);
   }
   const checkExitCode = Math.max(doctor.ready ? 0 : 1, carrierExitCode);
+  if (choosesPortAtBind(config)) {
+    say('address      the operating system will assign the port when this daemon starts, and it is then recorded');
+    return checkExitCode;
+  }
   if (config.portIsRecorded) {
     const occupant = await world.boot.probe.identify({ url: config.bindUrl });
     if (occupant.kind === 'vacant') {

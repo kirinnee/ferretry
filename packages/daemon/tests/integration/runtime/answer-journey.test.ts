@@ -12,6 +12,7 @@ import {
   RELOAD_THE_APP,
 } from '../../../src/lib/index.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 
 /**
  * The whole answer, over the daemon the product actually ships.
@@ -155,13 +156,6 @@ const TMUX = Bun.which('tmux');
 
 const sockets = new Set<string>();
 
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
-  const port = server.port;
-  server.stop(true);
-  return port;
-}
-
 async function tmuxCommand(socket: string, ...args: string[]): Promise<number> {
   if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
   const child = Bun.spawn([TMUX, '-S', socket, ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
@@ -282,7 +276,6 @@ async function failingPane(home: string, scratch: string): Promise<string> {
  */
 async function seed(
   home: string,
-  port: number,
   transcript: string | undefined,
   /**
    * What a RELAUNCH will actually run. The journeys that never resume keep the shipped
@@ -355,11 +348,14 @@ async function seed(
   );
   const directory = createSessionPaths(opened.storage.paths, id).directory;
   await opened.storage.close();
-  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+  await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT }), {
+    mode: 0o600,
+  });
   return directory;
 }
 
 interface Daemon {
+  readonly port: number;
   readonly exit: Promise<number>;
   readonly release: () => void;
   readonly cleanups: Array<() => void | Promise<void>>;
@@ -379,7 +375,7 @@ type Started = Pick<Daemon, 'exit' | 'release' | 'cleanups'>;
 const started = new Map<Promise<number>, Started>();
 
 /** Boots the production world against the seeded home and waits for it to answer. */
-async function boot(home: string, port: number): Promise<Daemon> {
+async function boot(home: string): Promise<Daemon> {
   process.env.FY_HOME = home;
   const shutdownSignal = Promise.withResolvers<void>();
   const world: DaemonWorld = {
@@ -391,6 +387,7 @@ async function boot(home: string, port: number): Promise<Daemon> {
   const daemon: Started = { exit, release: () => shutdownSignal.resolve(), cleanups };
   // Before anything below can fail, so a boot this journey never finished waiting for is stopped too.
   started.set(exit, daemon);
+  const port = await recordedPort(home);
   for (let attempt = 0; attempt < 200; attempt += 1) {
     const health = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
     if (health?.ok === true) break;
@@ -399,6 +396,7 @@ async function boot(home: string, port: number): Promise<Daemon> {
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
   return {
     ...daemon,
+    port,
     headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli', 'content-type': 'application/json' },
   };
 }
@@ -534,10 +532,10 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, TRANSCRIPT);
-    const port = await freeLoopbackPort();
-    const sessionDirectory = await seed(home, port, transcript);
+    const sessionDirectory = await seed(home, transcript);
     const log = await livePane(home, scratch);
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     // Act + Assert — the read is what materializes the question from the transcript.
     const pending = await waitForPendingQuestion(port, daemon);
@@ -569,7 +567,7 @@ describe('the structured answer journey', () => {
 
     // Act — the daemon goes away and comes back, and the client retries across the restart.
     await shutdown(daemon);
-    const restarted = await boot(home, port);
+    const restarted = await boot(home);
     const afterRestart = await answerRequest(port, restarted, REQUEST_ID, ['Yes']);
 
     // Assert — the receipt outlived the daemon, so the restart replays instead of re-typing.
@@ -592,10 +590,10 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-failure-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, TRANSCRIPT);
-    const port = await freeLoopbackPort();
-    const sessionDirectory = await seed(home, port, transcript);
+    const sessionDirectory = await seed(home, transcript);
     const log = await failingPane(home, scratch);
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     should((await waitForPendingQuestion(port, daemon)).state.pendingQuestion).match({
       toolUseId: TOOL_USE_ID,
@@ -652,7 +650,7 @@ describe('the structured answer journey', () => {
     }
 
     await shutdown(daemon);
-    const restarted = await boot(home, port);
+    const restarted = await boot(home);
     const replay = await answerRequest(port, restarted, `${REQUEST_ID}:failure`, ['Yes']);
     should((JSON.parse(await statusOf(replay, 409)) as { readonly code: string }).code).equal('answer_released');
     const freshId = await answerRequest(port, restarted, `${REQUEST_ID}:fresh`, ['Yes']);
@@ -696,14 +694,14 @@ describe('the structured answer journey', () => {
       const scratch = await tempDirectory(`fyd-answer-colliding-${attention.label}-scratch`);
       const transcript = join(scratch, 'session.jsonl');
       await writeFile(transcript, transcriptFor(currentToolUseId));
-      const port = await freeLoopbackPort();
-      const sessionDirectory = await seed(home, port, transcript);
+      const sessionDirectory = await seed(home, transcript);
       await patchStateOffline(home, {
         needsHumanKind: attention.kind,
         needsHuman: attention.message,
       });
       const log = await failingPane(home, scratch);
-      const daemon = await boot(home, port);
+      const daemon = await boot(home);
+      const { port } = daemon;
 
       const pending = await waitForPendingQuestion(port, daemon, currentToolUseId);
       should(pending.state).match({
@@ -756,14 +754,14 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-kill-failed-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, TRANSCRIPT);
-    const port = await freeLoopbackPort();
-    const sessionDirectory = await seed(home, port, transcript);
+    const sessionDirectory = await seed(home, transcript);
     await patchStateOffline(home, {
       status: 'kill_failed',
       reason: 'the pane remained live after its stop failed',
     });
     const log = await livePane(home, scratch);
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     // No session route has been read. The daemon's immediate monitor tick alone must discover the
     // question in raw storage, while preserving the unsafe live-pane verdict that hides/refuses it.
@@ -794,14 +792,14 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-failed-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, TRANSCRIPT);
-    const port = await freeLoopbackPort();
-    const sessionDirectory = await seed(home, port, transcript);
+    const sessionDirectory = await seed(home, transcript);
     await patchStateOffline(home, {
       status: 'failed',
       reason: 'the session already reached a terminal failure',
     });
     const log = await livePane(home, scratch);
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     const materialized = await waitForRawPendingQuestion(sessionDirectory, TOOL_USE_ID);
     should(materialized).match({
@@ -828,10 +826,9 @@ describe('the structured answer journey', () => {
   it('serializes a stop after live answer keys and lets its kill-failed verdict win durably', async () => {
     const home = await tempDirectory('fyd-answer-stop-race-home');
     const scratch = await tempDirectory('fyd-answer-stop-race-scratch');
-    const port = await freeLoopbackPort();
     // Deliberately no transcript provenance: the exact pending form is seeded below, so no monitor
     // projection changes its lifecycle `running` status before the real stop service reads it.
-    const sessionDirectory = await seed(home, port, undefined);
+    const sessionDirectory = await seed(home, undefined);
     await patchStateOffline(home, {
       status: 'running',
       pendingQuestion: {
@@ -843,7 +840,8 @@ describe('the structured answer journey', () => {
     // adapter fail while the real tmux pane stays live, deterministically producing `kill_failed`.
     await mkdir(join(sessionDirectory, 'last-snapshot.txt'));
     const pane = await gatedPane(home, scratch);
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     let earlyAnswer: Response | undefined;
     const answering = answerRequest(port, daemon, `${REQUEST_ID}:stop-race`, ['Yes']).then(response => {
@@ -896,9 +894,9 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-dead-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, TRANSCRIPT);
-    const port = await freeLoopbackPort();
-    await seed(home, port, transcript);
-    const daemon = await boot(home, port);
+    await seed(home, transcript);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     should((await waitForPendingQuestion(port, daemon)).state.pendingQuestion).match({
       toolUseId: TOOL_USE_ID,
@@ -930,7 +928,7 @@ describe('the structured answer journey', () => {
     should((JSON.parse(await statusOf(refusedProse, 409)) as { readonly code: string }).code).equal('send_refused');
 
     await shutdown(daemon);
-    const restarted = await boot(home, port);
+    const restarted = await boot(home);
     const replay = await answerRequest(port, restarted, `${REQUEST_ID}:dead`, ['Yes']);
     should((JSON.parse(await statusOf(replay, 409)) as { readonly code: string }).code).equal('answer_unconfirmed');
     const afterRestart = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
@@ -951,8 +949,7 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-monitor-quarantine-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, RESOLVED_TRANSCRIPT);
-    const port = await freeLoopbackPort();
-    const sessionDirectory = await seed(home, port, transcript);
+    const sessionDirectory = await seed(home, transcript);
     const ledger = join(sessionDirectory, 'channel', 'answers.jsonl');
     await mkdir(join(sessionDirectory, 'channel'), { recursive: true });
     await writeFile(
@@ -965,7 +962,8 @@ describe('the structured answer journey', () => {
         outcome: 'accepted',
       })}\n`,
     );
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     // The production projector, not a coordinator retry, observes that the exact form advanced.
     // Boot's first monitor reconciliation may still hold the answer key when health begins serving,
@@ -1019,14 +1017,13 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-dismiss-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, TRANSCRIPT);
-    const port = await freeLoopbackPort();
     // A relaunch under this journey runs a real prompt-rendering fixture; see `RELAUNCH_SCRIPT`.
     const relaunchScript = join(scratch, 'relaunched-agent.sh');
     const relaunchLog = join(scratch, 'relaunch-turns.log');
     await writeFile(relaunchScript, RELAUNCH_SCRIPT, { mode: 0o700 });
     await chmod(relaunchScript, 0o700);
     await writeFile(relaunchLog, '');
-    const sessionDirectory = await seed(home, port, transcript, ['/usr/bin/env', 'bash', relaunchScript, relaunchLog]);
+    const sessionDirectory = await seed(home, transcript, ['/usr/bin/env', 'bash', relaunchScript, relaunchLog]);
     const ledgerPath = join(sessionDirectory, 'channel', 'answers.jsonl');
     // The DURABLE row keeps `outcome: accepted` and names the settlement in `resolution`, so reading
     // `outcome` alone would never see an acknowledgement and the whole assertion would be vacuous.
@@ -1038,7 +1035,9 @@ describe('the structured answer journey', () => {
         .map(line => JSON.parse(line) as { readonly outcome: string; readonly resolution?: string })
         .map(row => row.resolution ?? row.outcome);
     const advisoryOf = async (client: Daemon): Promise<Record<string, unknown>> => {
-      const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, { headers: client.headers });
+      const response = await fetch(`http://127.0.0.1:${client.port}/v1/sessions/${SESSION_ID}`, {
+        headers: client.headers,
+      });
       return SessionViewSchema.parse(JSON.parse(await statusOf(response, 200))).state as Record<string, unknown>;
     };
     /** Every acknowledgement audit line, parsed — never a regex over the whole journal, where
@@ -1051,7 +1050,8 @@ describe('the structured answer journey', () => {
         .filter(entry => entry.type === 'interaction.answer_acknowledged')
         .map(entry => entry.data);
     const log = await failingPane(home, scratch);
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     // Arrange — the real ambiguous drive: keys may have landed, the form was released to prose.
     should((await waitForPendingQuestion(port, daemon)).state.pendingQuestion).match({ toolUseId: TOOL_USE_ID });
@@ -1129,7 +1129,7 @@ describe('the structured answer journey', () => {
       needsHuman: firstWriteReleasedAnswerAttention(TOOL_USE_ID),
     }));
     await offline.storage.close();
-    const recovered = await boot(home, port);
+    const recovered = await boot(home);
 
     // Act — THE RETRY, immediately, with no read in front of it and nothing arranged in its favour.
     // The transcript is exactly where it always was and the recovery daemon projects the whole of it
@@ -1154,7 +1154,7 @@ describe('the structured answer journey', () => {
 
     // Act + Assert — ACROSS ANOTHER RESTART, with the real evidence back in place. Projection reads
     // the whole transcript again and must not re-mint what a person dismissed.
-    const restarted = await boot(home, port);
+    const restarted = await boot(home);
     for (let read = 0; read < 2; read += 1)
       should((await advisoryOf(restarted)).needsHumanKind ?? undefined).be.undefined();
     should(await outcomes()).deepEqual(['accepted', 'quarantined', 'acknowledged']);
@@ -1211,13 +1211,12 @@ describe('the structured answer journey', () => {
     // pending question would refuse the resume before ownership was ever consulted.
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, '');
-    const port = await freeLoopbackPort();
     const relaunchScript = join(scratch, 'relaunched-agent.sh');
     const relaunchLog = join(scratch, 'relaunch-turns.log');
     await writeFile(relaunchScript, RELAUNCH_SCRIPT, { mode: 0o700 });
     await chmod(relaunchScript, 0o700);
     await writeFile(relaunchLog, '');
-    const sessionDirectory = await seed(home, port, transcript, ['/usr/bin/env', 'bash', relaunchScript, relaunchLog]);
+    const sessionDirectory = await seed(home, transcript, ['/usr/bin/env', 'bash', relaunchScript, relaunchLog]);
     const ledgerPath = join(sessionDirectory, 'channel', 'answers.jsonl');
     await mkdir(join(sessionDirectory, 'channel'), { recursive: true });
     const row = (requestId: string, toolUseId: string, outcome: string, resolution?: string) =>
@@ -1243,7 +1242,8 @@ describe('the structured answer journey', () => {
     // It is opened here rather than by a pane fixture so that `%0` is spent before the replacement
     // asks for a pane id the domain would refuse — see `paneSocket`.
     await paneSocket(home);
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     // Arrange — the daemon's OWN projection mints the advisory from the quarantined row, so the
     // standing sentence is one this daemon really writes rather than one the test invented. The
@@ -1285,10 +1285,10 @@ describe('the structured answer journey', () => {
     const scratch = await tempDirectory('fyd-answer-damaged-ledger-scratch');
     const transcript = join(scratch, 'session.jsonl');
     await writeFile(transcript, TRANSCRIPT);
-    const port = await freeLoopbackPort();
-    const sessionDirectory = await seed(home, port, transcript);
+    const sessionDirectory = await seed(home, transcript);
     await mkdir(join(sessionDirectory, 'channel', 'answers.jsonl'), { recursive: true });
-    const daemon = await boot(home, port);
+    const daemon = await boot(home);
+    const { port } = daemon;
 
     const roster = await fetch(`http://127.0.0.1:${port}/v1/sessions`, { headers: daemon.headers });
     const rosterBody = await statusOf(roster, 200);

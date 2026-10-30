@@ -572,12 +572,11 @@ describe('NodeBrowserLoginRuntime', () => {
       secretsDirectory: root,
       pollIntervalMs: 1,
     });
-    const port = await subject.freePort();
-    const server = Bun.listen({ hostname: '127.0.0.1', port, socket: { data: () => undefined } });
+    const server = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => undefined } });
 
     try {
       // Act + Assert
-      await subject.waitForVnc(port, fakeChild(running()));
+      await subject.waitForVnc(server.port, fakeChild(running()));
     } finally {
       server.stop(true);
     }

@@ -21,6 +21,7 @@
 
 import {
   type WardenDayStats,
+  type WardenJevBefore,
   type WardenJevCheck,
   WardenJevCheckSchema,
   type WardenJevCheckRoute,
@@ -28,6 +29,7 @@ import {
 } from '@ferretry/protocol';
 import type { TriageDecision } from '../speedups/jev.ts';
 import type { WardenAnomaly } from './detect.ts';
+import { jevHandoffKey } from './state.ts';
 import { instantMs } from './time.ts';
 import type { WardenGuardOutcome } from './triage.ts';
 
@@ -187,4 +189,74 @@ export function pruneCapSkips(
   const day = new Date(nowMs).toISOString().slice(0, 10);
   const live = new Set(standing.map(anomaly => capSkipKey(anomaly, day)));
   return keys.filter(key => live.has(key));
+}
+
+// ── What Jev did before an investigation ─────────────────────────────────────────────────────────
+
+/** How many flags' last word from Jev the state keeps: newest first, the rest dropped. */
+export const JEV_BEFORE_LIMIT = 200;
+
+/** A check that left its flag to someone else: one Jev handed on or was not asked about, or an act of Jev's. */
+export type JevCheckBefore = WardenJevCheck & { readonly verdict: 'handed_on' | 'skipped' | 'acted' };
+
+/**
+ * What Jev's check of a flag says to an investigation that follows it: the check, without its text. An
+ * act that did not settle its flag is why Jev was not asked again.
+ */
+export function jevBeforeOf(check: JevCheckBefore): WardenJevBefore {
+  return {
+    verdict: check.verdict === 'acted' ? 'not_asked' : check.verdict,
+    ...(check.verdict === 'acted'
+      ? { why: 'already_acted' as const }
+      : check.why === undefined
+        ? {}
+        : { why: check.why }),
+    ...(check.act === undefined ? {} : { act: check.act }),
+    at: check.at,
+    confidence: check.confidence,
+    costUsd: check.costUsd,
+  };
+}
+
+/** Remember Jev's last word on one flag, replacing any earlier one for it, bounded newest first. */
+export function rememberJevBefore(
+  store: Readonly<Record<string, WardenJevBefore>>,
+  key: string,
+  before: WardenJevBefore,
+): Readonly<Record<string, WardenJevBefore>> {
+  const rest = Object.entries(store).filter(([existing]) => existing !== key);
+  return Object.fromEntries([[key, before], ...rest.slice(0, JEV_BEFORE_LIMIT - 1)]);
+}
+
+/** Jev's last word on the flags that still stand; a flag that went away is a new situation if it returns. */
+export function pruneJevBefore(
+  store: Readonly<Record<string, WardenJevBefore>>,
+  standing: readonly Pick<WardenAnomaly, 'kind' | 'sessionId'>[],
+): Readonly<Record<string, WardenJevBefore>> {
+  const live = new Set(standing.map(anomaly => jevHandoffKey(anomaly.sessionId, anomaly.kind)));
+  return Object.fromEntries(Object.entries(store).filter(([existing]) => live.has(existing)));
+}
+
+export interface JevBeforeInvestigationInput {
+  readonly kind: WardenAnomaly['kind'];
+  /** What Jev last said about this flag, when it said anything. */
+  readonly last?: WardenJevBefore;
+  /** Whether the owner has the Jev layer on. */
+  readonly jevOn: boolean;
+  /** A forced run, which skips Jev. */
+  readonly force: boolean;
+}
+
+/**
+ * What Jev did before an investigation of one flag, said without ambiguity: the owner's own request was
+ * never Jev's; otherwise Jev's last word on the flag; otherwise why Jev was not asked — the layer is off, a
+ * forced run skipped it — or, for an investigation queued before Jev's checks were kept, that there is no
+ * record.
+ */
+export function jevBeforeInvestigation(input: JevBeforeInvestigationInput): WardenJevBefore {
+  if (input.kind === 'owner_request') return { verdict: 'not_asked', why: 'owner_request' };
+  if (input.last !== undefined) return input.last;
+  if (!input.jevOn) return { verdict: 'off' };
+  if (input.force) return { verdict: 'not_asked', why: 'forced' };
+  return { verdict: 'not_asked', why: 'no_record' };
 }

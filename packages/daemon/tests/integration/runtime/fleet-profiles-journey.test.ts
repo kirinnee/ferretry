@@ -22,6 +22,7 @@ import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import { NO_RELAY_DIRECTORY, type RelayAdvertisement } from '../../../src/lib/index.ts';
 import { writeModelFiles } from '../fleet/config-files-fixture.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 
 const ACCOUNT = '00000000-0000-4000-8000-0000000000f1';
 const WRAPPER = 'claude-auto-profiled';
@@ -44,14 +45,6 @@ function world(): DaemonWorld {
     ...buildWorld({}, { userHome: ABSENT_USER_HOME }),
     relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
   };
-}
-
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
 }
 
 /**
@@ -134,19 +127,21 @@ describe('a runtime an environment credential authenticates, on a booted daemon'
   it('should list its missing credential before anything runs, and refuse the start that needs it', async () => {
     // Arrange
     const home = await tempDirectory('ferretry-profile-journey-');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     process.env.FY_HOME = home;
     const opened = await world().storage.open();
     await opened.storage.close();
     await mkdir(join(home, 'config'), { recursive: true });
-    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port }), { mode: 0o600 });
+    await writeFile(join(home, 'config', 'daemon.json'), JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT }), {
+      mode: 0o600,
+    });
     await seedProfiledFleet(home);
     const shutdown = new Promise<void>(resolve => {
       release = resolve;
     });
     const exit = start({ ...world(), untilShutdown: () => shutdown }, cleanups);
+    const port = await recordedPort(home);
     await waitForHealth(port);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };

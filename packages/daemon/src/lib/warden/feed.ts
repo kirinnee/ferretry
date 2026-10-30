@@ -8,7 +8,7 @@
  * Pure: every input is a value.
  */
 
-import type { WardenAction, WardenBlessingView, WardenInvestigation } from '@ferretry/protocol';
+import type { WardenAction, WardenBlessingView, WardenInvestigation, WardenJevBefore } from '@ferretry/protocol';
 import type { BlessingStore } from './bless.ts';
 import type { WardenAnomaly } from './detect.ts';
 import type { WardenQueueEntryMeta } from './state.ts';
@@ -68,7 +68,12 @@ export interface WardenInvestigationListInput {
   readonly meta: Readonly<Record<string, WardenQueueEntryMeta>>;
   readonly records: readonly WardenInvestigationRecord[];
   readonly live: (wardenId: string) => boolean;
+  /** What Jev has said so far about a queued flag (`jev-checks.ts` {@link jevBeforeInvestigation}). */
+  readonly jevFor?: (anomaly: WardenAnomaly) => WardenJevBefore | undefined;
 }
+
+const optionalJev = (jev: WardenJevBefore | undefined): { readonly jev?: WardenJevBefore } =>
+  jev === undefined ? {} : { jev };
 
 /** Queued investigations first, in queue order; then started ones, newest first. */
 export function investigationList(input: WardenInvestigationListInput): readonly WardenInvestigation[] {
@@ -82,6 +87,7 @@ export function investigationList(input: WardenInvestigationListInput): readonly
       targetSession: anomaly.sessionId,
       anomalyKind: anomaly.kind,
       ...(meta === undefined ? {} : { queuedAt: meta.queuedAt }),
+      ...optionalJev(input.jevFor?.(anomaly)),
     };
   });
   const started: WardenInvestigation[] = input.records.map(record => ({
@@ -99,6 +105,7 @@ export function investigationList(input: WardenInvestigationListInput): readonly
     ...(record.costUsd === undefined ? {} : { costUsd: record.costUsd }),
     ...(record.agent === undefined ? {} : { agent: record.agent }),
     ...(record.model === undefined ? {} : { model: record.model }),
+    ...optionalJev(record.jev),
   }));
   return [...queued, ...started].slice(0, WARDEN_STATUS_LIST_LIMIT);
 }

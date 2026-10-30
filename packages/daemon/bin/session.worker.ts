@@ -50,7 +50,7 @@ const runtime = new SessionWorkerRuntime({
           if (notification.kind === 'subscription-changed' && notification.name === PANE_WATCH)
             listener(notification.value);
         }),
-      close: () => port.close(),
+      stop: async () => await port.stop(),
     };
   },
   transcripts: {

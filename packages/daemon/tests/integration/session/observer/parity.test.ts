@@ -344,7 +344,7 @@ async function pair(harness: 'claude' | 'codex', initialFrame: string, kind: Hos
     });
     observer = workerHost;
     cleanups.add(async () => {
-      observer.close();
+      await observer.close();
       files.close();
     });
     // Hosted before the scenario starts, so both sides begin it with no previous observation.

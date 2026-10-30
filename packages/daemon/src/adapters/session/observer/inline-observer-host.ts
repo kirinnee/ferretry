@@ -110,7 +110,7 @@ export class InlineObserverHost implements SessionObserverHost {
   }
 
   /** Stops the tick, when one was armed. */
-  close(): void {
+  async close(): Promise<void> {
     this.ticks?.();
     this.ticks = undefined;
   }

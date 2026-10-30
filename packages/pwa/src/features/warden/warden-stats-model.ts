@@ -30,6 +30,7 @@ import {
 } from '@ferretry/protocol';
 
 import type { MetricChartPoint, MetricChartSeries } from '../analytics/analytics-metric-chart.tsx';
+import { jevCost } from './warden-jev-line.ts';
 import { usd } from './warden-overview-model.ts';
 import { wardenPacedUntil } from './warden-status-model.ts';
 import { ACTOR_LABEL } from './warden-vocabulary.ts';
@@ -219,6 +220,30 @@ export const wardenStats = (status: WardenStatusView, period: WardenPeriod, now:
   };
 };
 
+// ── Spend ───────────────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Dollars as the page shows spend: to the cent, except an amount under a cent, which Jev at its real price
+ * spends all day — that is shown to four places (`$0.0041`), never rounded down to a `$0.00` that hides it.
+ */
+export const spendUsd = (amount: number): string => (amount > 0 && amount < 0.01 ? jevCost(amount) : usd(amount));
+
+/**
+ * Today's spend at a glance, both layers and their sum: `Today: Jev $0.0055 · LLM $1.20 · together $1.21`.
+ * A layer the owner has off is left out, and so is the sum when only one is on; nothing at all when
+ * neither spends.
+ */
+export const spendTotals = (status: WardenStatusView): string | undefined => {
+  const { spend, config } = status;
+  const parts = [
+    ...(config.layers.jev ? [`Jev ${spendUsd(spend.jevUsd)}`] : []),
+    ...(config.layers.llm ? [`LLM ${spendUsd(spend.investigationUsd)}`] : []),
+  ];
+  if (parts.length === 0) return undefined;
+  const together = parts.length === 2 ? [`together ${spendUsd(spend.jevUsd + spend.investigationUsd)}`] : [];
+  return `Today: ${[...parts, ...together].join(' · ')}`;
+};
+
 // ── The layers ──────────────────────────────────────────────────────────────────────────────────
 
 export interface LayerLine {
@@ -259,6 +284,9 @@ export const layerLines = (status: WardenStatusView): readonly LayerLine[] => {
         ? plural(decisions, 'decision')
         : `${plural(checks.checks, 'check')}: ${checks.healthy} healthy · ${checks.acted} acted · ${checks.handedOn} handed on`;
     const clauses = [
+      ...(checks === undefined || checks.checks === 0 || spend.jevUsd === 0
+        ? []
+        : [`~${spendUsd(spend.jevUsd / checks.checks)} per check`]),
       ...(checks === undefined || checks.skippedForCap === 0
         ? []
         : [`${plural(checks.skippedForCap, 'flag')} not checked for the cap`]),
@@ -268,7 +296,7 @@ export const layerLines = (status: WardenStatusView): readonly LayerLine[] => {
     lines.push({
       key: 'jev',
       name: 'Jev',
-      summary: `${work} · ${usd(spend.jevUsd)} of ${usd(spend.jevCapUsd)} today${pause}`,
+      summary: `${work} · ${spendUsd(spend.jevUsd)} of ${usd(spend.jevCapUsd)} today${pause}`,
       ...(clauses.length === 0 ? {} : { clause: clauses.join(' · ') }),
       ...(ratio === undefined ? {} : { ratio }),
       warn: capped || paced !== undefined,
@@ -336,7 +364,7 @@ const readoutFor = (day: WardenDayStats): string => {
     : total === 0 && actors.owner === 0
       ? 'no actions'
       : `${plural(total, 'action')}${who === '' ? '' : ` — ${who}`}`;
-  return `${weekday} ${date} · ${head} · ${plural(day.flags, 'flag')}`;
+  return `${weekday} ${date} · ${head} · ${plural(day.flags, 'flag')} · Jev ${spendUsd(day.jevUsd)}, LLM ${spendUsd(day.investigationUsd)}`;
 };
 
 /**

@@ -103,6 +103,8 @@ Key structural decisions:
    is installed onto, so the shipped default is single-sourced in `packages/protocol` and is not
    that number. A first boot with no recorded port takes the first free address from it and writes
    the choice into `config/daemon.json`; every port below is that recorded value, not a constant.
+   A document that says `port: 0` asks the operating system to choose at bind time and has the
+   real port recorded over the 0 — only a test writes it, so a fixture never has to guess a number.
 2. **Files stay authoritative, SQLite stays a disposable index** — this philosophy survives the
    move untouched. `~/.pitwall/` mirrors today's `~/.kteam/` layout.
 3. **kfleet folds into the product** as `packages/fleet`. The three ugly couplings die:
