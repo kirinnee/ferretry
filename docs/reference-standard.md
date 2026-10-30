@@ -102,15 +102,15 @@ never rewritten.
 
 ## 4. What each click opens
 
-| Reference    | Click opens                                                                   |
-| ------------ | ----------------------------------------------------------------------------- |
-| `:agent`     | That agent's session, **on the daemon the reference was proved against**      |
-| `@file`      | A file tab in the session workspace, scrolled to the referenced line or range |
-| `&task`      | That card's detail on **this machine's board** (`/d/<daemon>/board/<id>`)     |
-| `!attention` | The agenda panel at the top of this conversation, at that item                |
-| `/skill`     | The Skills tab of this session's "This folder" context                        |
-| `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open        |
-| `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view    |
+| Reference    | Click opens                                                                           |
+| ------------ | ------------------------------------------------------------------------------------- |
+| `:agent`     | That agent's session, **on the daemon the reference was proved against**              |
+| `@file`      | A file tab in the session workspace, scrolled to the referenced line or range         |
+| `&task`      | The card detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
+| `!attention` | The agenda panel at the top of this conversation, at that item                        |
+| `/skill`     | The Skills tab of this session's "This folder" context                                |
+| `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open                |
+| `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view            |
 
 The `!attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
 agenda (renamed in a later release).
@@ -220,7 +220,8 @@ What "proved" means per kind:
 
 **A `&task` click opens the card, not a sheet.** The card detail is the Board's own route, so the link
 survives a reload, Back leaves it, and the id is no longer dropped on the way (the Tasks sheet opened
-with no card selected). A host with no router keeps the session's Tasks sheet. A card id is unique on
+with no card selected). Chat included: the host's own Tasks destination is only the fallback when the card
+route is unavailable (an older daemon without `/v1/board`, or a host with no router). A card id is unique on
 its machine only, so the destination always carries the daemon the reference was proved against.
 
 > **GAP — task proof still reads the session's task catalog.** The proof set behind `&F12` is the

@@ -218,7 +218,7 @@ describe('sessionReferenceSurface', () => {
     should(readSidePaneTabsState(scope).active).equal(null);
   });
 
-  test("should keep the host's own Tasks destination over the board when it has one", () => {
+  test('should open the card even when the host has its own Tasks destination', () => {
     // Arrange
     const visited: string[] = [];
     const surface = sessionReferenceSurface({
@@ -226,6 +226,25 @@ describe('sessionReferenceSurface', () => {
       scope,
       fetcher: browserFetch,
       onNavigate: to => visited.push(to),
+      destinations: { openTasks: () => visited.push('tasks') },
+    });
+
+    // Act
+    surface.onTaskOpen?.('f412');
+
+    // Assert
+    should(visited).deepEqual(['/d/daemon-a/board/F412']);
+  });
+
+  test("should fall back to the host's Tasks destination when the machine has no card route", () => {
+    // Arrange
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+      cardRoute: false,
       destinations: { openTasks: () => visited.push('tasks') },
     });
 
