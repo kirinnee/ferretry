@@ -4366,7 +4366,7 @@ try {
           ...(SESSION_LAYOUT_ONLY ? { captureDir: outDir, captureFamilies: ['studio', 'neo', 'wayfinding'] } : {}),
         })
       : undefined;
-    for (const step of sessionLayoutPlan?.steps ?? []) walkTasks.push({ weight: 1, run: step });
+    for (const step of sessionLayoutPlan?.steps ?? []) walkTasks.push(step);
 
     // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
     // down, and rotated. Its own contexts.
