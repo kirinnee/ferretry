@@ -8,6 +8,7 @@ import {
   PushNotificationPayloadSchema,
 } from '@ferretry/protocol';
 import should from 'should';
+import { z } from 'zod';
 import { DEVICE_PAIRED_EVENT_PREFIX, DEVICE_PAIRED_TITLE } from '../../../src/lib/audit/policy.ts';
 import {
   attentionNotificationAttribution,
@@ -212,5 +213,43 @@ describe('attention push title', () => {
       should(title.startsWith('Ferret “')).be.true();
       should(title.length).be.lessThanOrEqual(ATTENTION_PUSH_TITLE_LENGTH);
     }
+  });
+});
+
+describe('a push an older app still reads (agenda.wire.1)', () => {
+  /** A PINNED copy of the push-kind enum an installed service worker holds: no `agenda`, and it never will. */
+  const OLD_PUSH_KINDS = z.enum(['attention', 'question', 'failed', 'completed', 'device-paired']);
+
+  const sent = [
+    ['a notice ping', pingNotificationPayload('session-1', item, snapshot)],
+    ['a deadline push', deadlineNotificationPayload('session-1', item, snapshot, AT)],
+    ['a stop push', stoppedNotificationPayload('session-1', 'Release agent', [item], snapshot)],
+  ] as const;
+
+  it.each(sent)('should keep the kind of %s inside the older enum', (_name, payload) => {
+    // Act
+    const actual = OLD_PUSH_KINDS.safeParse(payload.kind);
+
+    // Assert
+    should(actual.success).be.true();
+    should(payload.kind).equal('attention');
+  });
+
+  it.each(sent)('should keep the tag and the link of %s on the older spelling', (_name, payload) => {
+    // Assert
+    should(payload.tag).equal('attention-session-1');
+    should(payload.url).startWith('/session/session-1?attention=');
+    should(payload.url).not.containEql('agenda');
+  });
+
+  it('should still accept the later kind in the current schema, so a newer sender is not refused', () => {
+    // Assert
+    should(
+      PushNotificationPayloadSchema.safeParse({
+        ...pingNotificationPayload('session-1', item, snapshot),
+        kind: 'agenda',
+      }).success,
+    ).be.true();
+    should(OLD_PUSH_KINDS.safeParse('agenda').success).be.false();
   });
 });
