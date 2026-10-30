@@ -3,6 +3,7 @@ import type { AgentControlKind, AgentControlPolicy } from '../../../src/lib/flee
 import {
   type AgentIdentity,
   type AgentIdentityResolver,
+  type AgentToolPorts,
   AgentToolService,
   type AuditEntry,
   type AuditSink,
@@ -190,7 +191,7 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
 }
 
 /** A whole agent-tools domain over fakes, with every collaborator exposed for assertions. */
-export function agentToolWorld() {
+export function agentToolWorld(extra: Pick<AgentToolPorts, 'input' | 'scrub'> = {}) {
   const terminals = new FakeTerminals(['s1', 's2']);
   const browser = new FakeBrowserPages();
   const audit = new RecordingAudit();
@@ -207,6 +208,7 @@ export function agentToolWorld() {
     policy,
     audit,
     clock,
+    ...extra,
     sleep: async milliseconds => {
       slept.push(milliseconds);
       clock.ms += milliseconds;

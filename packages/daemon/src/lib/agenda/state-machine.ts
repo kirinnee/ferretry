@@ -9,6 +9,7 @@ import {
   type AgendaErrorCode,
   type AgendaHistoryEntry,
   type AgendaId,
+  type AgendaInputRef,
   type AgendaItem,
   AgendaItemSchema,
   type AgendaKind,
@@ -35,7 +36,12 @@ import {
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
 export const MAX_AGENT_AGENDA_PER_SESSION = 10;
 
-export type DaemonAgendaCause = 'source-reconciliation' | 'warden-escalation' | 'system' | 'harness-prompt';
+export type DaemonAgendaCause =
+  | 'source-reconciliation'
+  | 'warden-escalation'
+  | 'system'
+  | 'harness-prompt'
+  | 'input-request';
 
 /**
  * Provenance is a tagged value, not a user-supplied collection of nullable fields. The daemon
@@ -92,6 +98,8 @@ export interface RaiseAgendaRequest extends AgendaBrief, AgendaCardFields {
   readonly confirms?: AgendaConfirms;
   /** The board card the item belongs to, kept on the item as sent (`DAEMON_FEATURES.agendaTask`). */
   readonly task?: TaskRef;
+  /** The input request an `input` card presents (`AgendaInputRef`); only the daemon raises one. */
+  readonly input?: AgendaInputRef;
 }
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
@@ -528,6 +536,7 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
       ...(request.ping === true ? { ping: true as const } : {}),
       ...(request.confirms === undefined ? {} : { confirms: request.confirms }),
       ...(request.task === undefined ? {} : { task: request.task }),
+      ...(request.input === undefined ? {} : { input: request.input }),
     },
     actor,
   );
@@ -620,6 +629,10 @@ function addressById(
     return failure('forbidden', 'an agent or daemon may resolve only an agenda item it raised');
   }
   if (command.action === 'answer') {
+    // The input form answers an input card, because the value never travels as an agenda answer.
+    if (target.item.kind === 'input') {
+      return failure('use_input_form', `${command.id} is answered in its input form, not as an agenda answer`);
+    }
     // An answer to a confirmation is the owner's decision about a configuration change: never a ferret's.
     if (target.item.confirms !== undefined && command.actor.kind !== 'human') {
       return failure(
@@ -687,7 +700,8 @@ function parseAgendaActor(value: unknown): AgendaActor | null {
     (raw.cause === 'source-reconciliation' ||
       raw.cause === 'warden-escalation' ||
       raw.cause === 'system' ||
-      raw.cause === 'harness-prompt')
+      raw.cause === 'harness-prompt' ||
+      raw.cause === 'input-request')
   ) {
     return { kind: 'daemon', cause: raw.cause };
   }

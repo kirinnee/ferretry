@@ -1,0 +1,554 @@
+import {
+  type AgendaId,
+  type InputActor,
+  type InputAgentView,
+  type InputAuditDetail,
+  type InputAuditEvent,
+  type InputDeliverBody,
+  type InputDeliverResult,
+  type InputEvent,
+  type InputRaise,
+  type InputReason,
+  type InputRequest,
+  type InputTarget,
+  type InputTargetFacts,
+  INPUT_DEFAULT_EXPIRY_SECONDS,
+  INPUT_ERROR_CODES,
+  INPUT_JOURNAL_EVENT_TYPES,
+  INPUT_MAX_CHECK_FAILURES,
+  INPUT_MAX_PENDING_PER_SESSION,
+  INPUT_MAX_RAISES_PER_HOUR,
+  inputValueProblem,
+  unpadInputValue,
+} from '@ferretry/protocol';
+import { digestFacts } from './digest.ts';
+import type { EphemeralValues } from './ephemeral-values.ts';
+import { InputRequestError } from './errors.ts';
+import type {
+  InputAgendaPort,
+  InputAgentNotifier,
+  InputAudit,
+  InputCaller,
+  InputClock,
+  InputIds,
+  InputJournal,
+  InputSessionDirectory,
+  InputTargetPort,
+  InputTimers,
+  InputTrustedPrograms,
+} from './ports.ts';
+
+/**
+ * THE INPUT REQUEST SERVICE (docs/input-requests.md): an agent stuck at a password prompt raises a request;
+ * the owner, and only the owner, types the value; the daemon checks the target is still what the card
+ * showed and types it once.
+ *
+ * ## THE VALUE'S WHOLE LIFE IS ONE CALL
+ *
+ * `deliver` unpads the value, checks it, holds it in {@link EphemeralValues} (so a read racing the write
+ * is already masked), hands it to {@link InputTargetPort.type} and lets go. It is never stored in a
+ * request, a delivery record, a journal event, an audit entry, a log line or an error message: every
+ * port besides `type` is told ids, states, names and flags.
+ *
+ * ## THE REQUEST LIVES IN RAM
+ *
+ * The journal holds ids and states, so a restart brings a pending request back and re-observes its target
+ * before Send is allowed again. What was observed is never persisted.
+ */
+
+const HOUR_MS = 3_600_000;
+const WAIT_CEILING_MS = 600_000;
+
+const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired', 'cancelled']);
+
+const TITLES = { secret: 'Needs a secret', private: 'Needs a code', plain: 'Needs an answer' } as const;
+
+interface Held {
+  request: InputRequest;
+  checkFailures: number;
+  /** Every `deliveryId` seen and what came of it, so a retry gets the first outcome and never types twice. */
+  readonly deliveries: Map<string, Promise<InputDeliverResult>>;
+  readonly waiters: Set<() => void>;
+}
+
+export interface InputRequestServiceDependencies {
+  readonly target: InputTargetPort;
+  readonly agenda: InputAgendaPort;
+  readonly notifier: InputAgentNotifier;
+  readonly journal: InputJournal;
+  readonly audit: InputAudit;
+  readonly clock: InputClock;
+  readonly ids: InputIds;
+  readonly timers: InputTimers;
+  readonly trusted: InputTrustedPrograms;
+  readonly sessions: InputSessionDirectory;
+  readonly values: EphemeralValues;
+}
+
+const instant = (ms: number): string => new Date(ms).toISOString();
+
+const isFinal = (request: InputRequest): boolean => FINAL.has(request.state);
+
+export class InputRequestService {
+  private readonly held = new Map<string, Held>();
+  private readonly raises = new Map<string, number[]>();
+
+  constructor(private readonly deps: InputRequestServiceDependencies) {}
+
+  /** The agent raises. Nothing in `raise` was observed; everything in the answer and the card was. */
+  async raise(sessionId: string, raise: InputRaise): Promise<InputAgentView> {
+    if (raise.target.kind !== 'terminal')
+      throw new InputRequestError('bad_request', 'only terminal inputs can be requested for now');
+    await this.sweep();
+    const now = this.deps.clock.now();
+    this.guardRate(sessionId, raise.target, now);
+    const seen = await this.deps.target.observe(sessionId, raise.target);
+    if (!seen.ok) {
+      throw new InputRequestError(
+        seen.reason === 'target_gone' ? 'not_found' : 'bad_request',
+        seen.reason === 'target_gone'
+          ? `there is no terminal named ${raise.target.key} in this session`
+          : 'that target cannot take an input request',
+      );
+    }
+    const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
+    const requestId = this.deps.ids.requestId();
+    const card = await this.deps.agenda.raise(sessionId, {
+      requestId,
+      title: TITLES[raise.sensitivity],
+      ask: askOf(seen.facts),
+      prompt: raise.prompt,
+      blocking: raise.blocking ?? raise.sensitivity === 'secret',
+      expiresAt,
+      ...(raise.chain === undefined ? {} : { chain: raise.chain }),
+    });
+    if (!card.ok) throw new InputRequestError('unavailable', card.message);
+    const request: InputRequest = {
+      id: requestId,
+      sessionId,
+      agendaItemId: card.id,
+      target: raise.target,
+      prompt: raise.prompt,
+      sensitivity: raise.sensitivity,
+      submit: raise.submit,
+      raisedAt: instant(now),
+      expiresAt,
+      ...(raise.chain === undefined ? {} : { chain: raise.chain }),
+      observed: seen.facts,
+      observedDigest: digestFacts(seen.facts),
+      state: 'pending',
+    };
+    this.held.set(requestId, { request, checkFailures: 0, deliveries: new Map(), waiters: new Set() });
+    this.noteRaise(sessionId, now);
+    await this.journal(request, 'requested');
+    await this.record(request, 'input.requested', { kind: 'agent' }, auditDetail(request));
+    return this.view(request);
+  }
+
+  /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
+  async agentView(sessionId: string, id: AgendaId, waitMs: number): Promise<InputAgentView> {
+    await this.sweep();
+    const held = this.byCard(sessionId, id);
+    if (held === undefined) throw new InputRequestError('not_found', `no input request ${id} in this session`);
+    if (waitMs > 0 && !isFinal(held.request)) {
+      await Promise.race([
+        new Promise<void>(resolve => held.waiters.add(resolve)),
+        this.deps.timers.after(Math.min(waitMs, WAIT_CEILING_MS)),
+      ]);
+      await this.sweep();
+    }
+    return this.view(held.request);
+  }
+
+  /** The requests still open, newest last: for one session or, with none named, for all. Owner only. */
+  async list(caller: InputCaller, sessionId?: string): Promise<readonly InputRequest[]> {
+    requireOwner(caller);
+    await this.sweep();
+    return [...this.held.values()]
+      .map(held => held.request)
+      .filter(request => !isFinal(request) && (sessionId === undefined || request.sessionId === sessionId))
+      .sort((a, b) => (a.raisedAt < b.raisedAt ? -1 : a.raisedAt > b.raisedAt ? 1 : 0));
+  }
+
+  /** `text` with any value delivered to this session in the redaction window masked, for an agent's terminal reads. */
+  scrub(sessionId: string, text: string): string {
+    return this.deps.values.scrub(sessionId, text);
+  }
+
+  /** The pending request on a surface, so an agent cannot type into the field the owner has been asked about. */
+  pendingOn(sessionId: string, target: { readonly kind: string; readonly key: string }): AgendaId | undefined {
+    for (const { request } of this.held.values()) {
+      if (request.sessionId !== sessionId || isFinal(request)) continue;
+      if (request.target.kind === target.kind && request.target.key === target.key) return request.agendaItemId;
+    }
+    return undefined;
+  }
+
+  /**
+   * The owner types the value. Owner only, twice: the route refuses an agent before it reads the body, and
+   * this refuses any caller that is not the host or a paired device. A retry of a `deliveryId` returns the
+   * first outcome and writes nothing.
+   */
+  async deliver(
+    sessionId: string,
+    requestId: string,
+    body: InputDeliverBody,
+    caller: InputCaller,
+  ): Promise<InputDeliverResult> {
+    const owner = requireOwner(caller);
+    await this.sweep();
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.sessionId !== sessionId)
+      throw new InputRequestError('not_found', 'no such input request');
+    const earlier = held.deliveries.get(body.deliveryId);
+    if (earlier !== undefined) return await earlier;
+    this.guardDeliverable(held);
+    const attempt = this.attempt(held, body, owner);
+    held.deliveries.set(body.deliveryId, attempt);
+    return await attempt;
+  }
+
+  /** The owner declines, or the raising agent withdraws. Only a pending request can be cancelled. */
+  async cancel(sessionId: string, requestId: string, caller: InputCaller): Promise<InputRequest> {
+    if (caller.kind === 'agent' && caller.sessionId !== sessionId)
+      throw new InputRequestError('forbidden', 'that request belongs to another session');
+    await this.sweep();
+    const held = this.held.get(requestId);
+    if (held === undefined || held.request.sessionId !== sessionId)
+      throw new InputRequestError('not_found', 'no such input request');
+    if (isFinal(held.request)) throw new InputRequestError('gone', `the request is already ${held.request.state}`);
+    if (held.request.state === 'delivering')
+      throw new InputRequestError('conflict', 'the value is being typed now', INPUT_ERROR_CODES.alreadyDelivered);
+    const by = caller.kind === 'owner' ? caller.actor : undefined;
+    await this.finish(held, 'cancelled', by === undefined ? 'agent_cancelled' : 'owner_declined', by, {
+      closeCard: true,
+      tellAgent: by !== undefined,
+    });
+    return held.request;
+  }
+
+  /** The owner dismissed the card without answering: the request ends, and the card is already closed. */
+  async cardDismissed(sessionId: string, id: AgendaId): Promise<void> {
+    const held = this.byCard(sessionId, id);
+    if (held === undefined || held.request.state !== 'pending') return;
+    await this.finish(held, 'cancelled', 'owner_declined', undefined, { closeCard: false, tellAgent: true });
+  }
+
+  /** Expire every pending request whose time has passed. Cheap; called before every read and by a timer. */
+  async sweep(): Promise<void> {
+    const now = this.deps.clock.now();
+    for (const held of [...this.held.values()]) {
+      if (held.request.state === 'pending' && Date.parse(held.request.expiresAt) <= now)
+        await this.finish(held, 'expired', 'expired', undefined, { closeCard: true, tellAgent: true });
+    }
+  }
+
+  /**
+   * Bring pending requests back after a restart from the session journals, and re-observe each target. A
+   * request whose session or terminal is gone ends as `interrupted`; `observed` stays empty until the daemon
+   * has seen the target again, so Send is disabled until then.
+   */
+  async restore(): Promise<void> {
+    const now = this.deps.clock.now();
+    for (const sessionId of await this.deps.sessions.all()) {
+      const latest = new Map<string, InputEvent>();
+      for (const event of await this.deps.journal.history(sessionId)) {
+        if (event.sessionId === sessionId) latest.set(event.requestId, event);
+      }
+      for (const event of latest.values()) await this.revive(event, now);
+    }
+  }
+
+  private async revive(event: InputEvent, now: number): Promise<void> {
+    if (event.type !== INPUT_JOURNAL_EVENT_TYPES.requested || event.expiresAt === undefined) return;
+    if (Date.parse(event.expiresAt) <= now || event.target.kind !== 'terminal') return;
+    const prompt = await this.deps.agenda.promptOf(event.sessionId, event.agendaItemId);
+    if (prompt === undefined || this.held.has(event.requestId)) return;
+    const target: InputTarget = { kind: 'terminal', key: event.target.key };
+    const request: InputRequest = {
+      id: event.requestId,
+      sessionId: event.sessionId,
+      agendaItemId: event.agendaItemId,
+      target,
+      prompt,
+      sensitivity: event.sensitivity,
+      submit: event.submit ?? 'offer-owner',
+      raisedAt: event.at,
+      expiresAt: event.expiresAt,
+      state: 'pending',
+    };
+    const held: Held = { request, checkFailures: 0, deliveries: new Map(), waiters: new Set() };
+    this.held.set(request.id, held);
+    const seen = await this.deps.target.observe(request.sessionId, target);
+    if (!seen.ok) {
+      await this.finish(held, 'cancelled', 'interrupted', undefined, { closeCard: true, tellAgent: true });
+      return;
+    }
+    held.request = { ...request, observed: seen.facts, observedDigest: digestFacts(seen.facts) };
+  }
+
+  private guardRate(sessionId: string, target: InputTarget, now: number): void {
+    const open = [...this.held.values()].filter(h => h.request.sessionId === sessionId && !isFinal(h.request));
+    if (open.length >= INPUT_MAX_PENDING_PER_SESSION)
+      throw new InputRequestError(
+        'capacity',
+        `${INPUT_MAX_PENDING_PER_SESSION} input requests are already waiting on the owner; wait for one to be answered`,
+        INPUT_ERROR_CODES.rateLimited,
+      );
+    const recent = (this.raises.get(sessionId) ?? []).filter(at => at > now - HOUR_MS);
+    if (recent.length >= INPUT_MAX_RAISES_PER_HOUR)
+      throw new InputRequestError(
+        'capacity',
+        `this session has raised ${INPUT_MAX_RAISES_PER_HOUR} input requests in the last hour; try again later`,
+        INPUT_ERROR_CODES.rateLimited,
+      );
+    if (open.some(h => h.request.target.kind === target.kind && h.request.target.key === target.key))
+      throw new InputRequestError('conflict', `an input request is already waiting on ${target.key}`);
+  }
+
+  private noteRaise(sessionId: string, now: number): void {
+    this.raises.set(sessionId, [...(this.raises.get(sessionId) ?? []).filter(at => at > now - HOUR_MS), now]);
+  }
+
+  private guardDeliverable(held: Held): void {
+    const { state } = held.request;
+    if (state === 'delivering' || state === 'delivered')
+      throw new InputRequestError(
+        'conflict',
+        'this request was already answered with another delivery',
+        INPUT_ERROR_CODES.alreadyDelivered,
+      );
+    if (state !== 'pending') throw new InputRequestError('gone', `the request is ${state}`, INPUT_ERROR_CODES.gone);
+    if (held.request.observed === undefined)
+      throw new InputRequestError('unavailable', 'Ferretry is looking at the target again; try Send in a moment');
+  }
+
+  private async attempt(held: Held, body: InputDeliverBody, by: InputActor): Promise<InputDeliverResult> {
+    const { request } = held;
+    const fail = async (code: InputReason, error: InputRequestError): Promise<never> => {
+      await this.checkFailed(held, code);
+      throw error;
+    };
+    held.request = { ...request, state: 'delivering' };
+    try {
+      if (body.secretName !== undefined)
+        throw new InputRequestError('bad_request', 'saved secrets are not available yet; type the value instead');
+      const value = body.padded === undefined ? undefined : unpadInputValue(body.padded);
+      if (value === undefined)
+        throw new InputRequestError('bad_request', 'the value was not sent in the expected form');
+      const problem = inputValueProblem(value, request.sensitivity);
+      if (problem !== undefined) throw new InputRequestError('bad_request', problem);
+      if (body.observedDigest !== request.observedDigest) return await fail('target_changed', targetChanged());
+      const seen = await this.deps.target.observe(request.sessionId, request.target);
+      if (!seen.ok) return await fail('target_gone', targetChanged());
+      if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', targetChanged());
+      const refusal = this.consumerRefusal(request, seen.facts, body);
+      if (refusal !== undefined) return await fail(refusal.reason, refusal.error);
+      this.deps.values.hold(request.sessionId, value, request.agendaItemId);
+      const submitted = body.submit && request.submit !== 'agent';
+      const typed = await this.deps.target.type(request.sessionId, request.target, value, submitted, seen.facts);
+      if (typed !== 'typed') return await fail('target_gone', targetChanged());
+      await this.finish(held, 'delivered', undefined, by, { closeCard: true, tellAgent: true, submitted });
+      return {
+        id: request.id,
+        deliveryId: body.deliveryId,
+        state: 'delivered',
+        submitted,
+      };
+    } catch (error) {
+      if (held.request.state === 'delivering') held.request = { ...held.request, state: 'pending' };
+      throw error;
+    }
+  }
+
+  private consumerRefusal(
+    request: InputRequest,
+    facts: InputTargetFacts,
+    body: InputDeliverBody,
+  ): { reason: InputReason; error: InputRequestError } | undefined {
+    if (facts.kind !== 'terminal') return undefined;
+    if (request.sensitivity === 'secret' && facts.echo !== 'off')
+      return {
+        reason: 'echo_on',
+        error: new InputRequestError(
+          'conflict',
+          facts.echo === 'on'
+            ? 'the terminal is echoing what is typed, so a secret would show on screen'
+            : 'Ferretry could not tell whether the terminal echoes, so it will not type a secret',
+          INPUT_ERROR_CODES.echoOn,
+        ),
+      };
+    if (
+      request.sensitivity !== 'plain' &&
+      !facts.recognisedConsumer &&
+      !this.deps.trusted.isTrusted(facts.foreground.comm)
+    ) {
+      if (body.trustProgram !== true)
+        return {
+          reason: 'not_secret_field',
+          error: new InputRequestError(
+            'conflict',
+            `${facts.foreground.comm} is not a program Ferretry knows asks for secrets; tick "I trust this program" to type anyway`,
+            'trust_required',
+          ),
+        };
+      this.deps.trusted.trust(facts.foreground.comm);
+    }
+    return undefined;
+  }
+
+  /** A check failed: nothing was typed. Three failures end the request; fewer leave it pending. */
+  private async checkFailed(held: Held, reason: InputReason): Promise<void> {
+    held.checkFailures += 1;
+    held.request = { ...held.request, state: 'pending' };
+    if (held.checkFailures >= INPUT_MAX_CHECK_FAILURES)
+      await this.finish(held, 'refused', 'check_failures', undefined, { closeCard: true, tellAgent: true });
+    else await this.record(held.request, 'input.refused', { kind: 'daemon' }, { ...auditDetail(held.request), reason });
+  }
+
+  private async finish(
+    held: Held,
+    state: 'delivered' | 'refused' | 'expired' | 'cancelled',
+    reason: InputReason | undefined,
+    by: InputActor | undefined,
+    options: { closeCard: boolean; tellAgent: boolean; submitted?: boolean },
+  ): Promise<void> {
+    const at = instant(this.deps.clock.now());
+    const outcome =
+      state === 'delivered' && by !== undefined
+        ? { at, by, submitted: options.submitted ?? false, source: 'typed' as const }
+        : undefined;
+    held.request = {
+      ...held.request,
+      state,
+      ...(outcome === undefined ? {} : { outcome }),
+    };
+    const { request } = held;
+    const kind =
+      state === 'delivered'
+        ? 'delivered'
+        : state === 'expired'
+          ? 'expired'
+          : state === 'refused'
+            ? 'refused'
+            : 'cancelled';
+    await this.journal(request, kind, reason, options.submitted);
+    await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
+      ...auditDetail(request),
+      ...(reason === undefined ? {} : { reason }),
+      ...(state === 'delivered' ? { source: 'typed' as const, submitted: options.submitted ?? false } : {}),
+    });
+    if (options.closeCard) await this.deps.agenda.close(request.sessionId, request.agendaItemId, noteOf(state, reason));
+    if (options.tellAgent)
+      await this.deps.notifier.tell(request.sessionId, request.agendaItemId, tellOf(request, state, reason));
+    for (const wake of held.waiters) wake();
+    held.waiters.clear();
+  }
+
+  private byCard(sessionId: string, id: AgendaId): Held | undefined {
+    for (const held of this.held.values()) {
+      if (held.request.sessionId === sessionId && held.request.agendaItemId === id) return held;
+    }
+    return undefined;
+  }
+
+  private view(request: InputRequest): InputAgentView {
+    const facts = request.observed;
+    const terminal = facts?.kind === 'terminal' ? facts : undefined;
+    return {
+      id: request.agendaItemId,
+      state: request.state,
+      ...(terminal === undefined
+        ? {}
+        : {
+            observed: {
+              consumer: terminal.foreground.comm,
+              echo: terminal.echo,
+              recognised: terminal.recognisedConsumer,
+            },
+          }),
+      ...(request.outcome === undefined
+        ? {}
+        : { submitted: request.outcome.submitted, source: request.outcome.source }),
+      ...(request.state === 'pending' ? { note: `Waiting for the owner on ${request.agendaItemId}.` } : {}),
+    };
+  }
+
+  private async journal(
+    request: InputRequest,
+    kind: keyof typeof INPUT_JOURNAL_EVENT_TYPES,
+    reason?: InputReason,
+    submitted?: boolean,
+  ): Promise<void> {
+    await this.deps.journal
+      .publish(request.sessionId, {
+        type: INPUT_JOURNAL_EVENT_TYPES[kind],
+        requestId: request.id,
+        agendaItemId: request.agendaItemId,
+        sessionId: request.sessionId,
+        target: { kind: request.target.kind, key: request.target.key },
+        sensitivity: request.sensitivity,
+        submit: request.submit,
+        state: request.state,
+        ...(submitted === undefined ? {} : { submitted }),
+        ...(reason === undefined ? {} : { reason }),
+        ...(kind === 'requested' ? { expiresAt: request.expiresAt } : {}),
+        at: instant(this.deps.clock.now()),
+      })
+      .catch(() => undefined);
+  }
+
+  private async record(
+    request: InputRequest,
+    event: InputAuditEvent,
+    actor: Parameters<InputAudit['record']>[0]['actor'],
+    detail: InputAuditDetail,
+  ): Promise<void> {
+    await this.deps.audit
+      .record({
+        event,
+        sessionId: request.sessionId,
+        actor,
+        requestId: request.id,
+        detail,
+      })
+      .catch(() => undefined);
+  }
+}
+
+function requireOwner(caller: InputCaller): InputActor {
+  if (caller.kind !== 'owner')
+    throw new InputRequestError('forbidden', 'only the owner answers an input request; an agent cannot');
+  return caller.actor;
+}
+
+function targetChanged(): InputRequestError {
+  return new InputRequestError(
+    'conflict',
+    'what is on the terminal is no longer what the card showed; nothing was typed',
+    INPUT_ERROR_CODES.targetChanged,
+  );
+}
+
+function askOf(facts: InputTargetFacts): string {
+  return facts.kind === 'terminal' ? `Type it into ${facts.foreground.comm}` : 'Type it into the page';
+}
+
+function auditDetail(request: InputRequest): InputAuditDetail {
+  const facts = request.observed;
+  return {
+    targetKind: request.target.kind,
+    sensitivity: request.sensitivity,
+    ...(facts?.kind === 'terminal' ? { consumer: facts.foreground.comm, recognised: facts.recognisedConsumer } : {}),
+  };
+}
+
+function noteOf(state: string, reason: InputReason | undefined): string {
+  return reason === undefined ? `Input request ${state}.` : `Input request ${state}: ${reason.replaceAll('_', ' ')}.`;
+}
+
+function tellOf(request: InputRequest, state: string, reason: InputReason | undefined): string {
+  if (state === 'delivered')
+    return `${request.agendaItemId} was answered and typed into %terminal:${request.target.key}. Read the terminal to continue.`;
+  return `${request.agendaItemId} ended without a value (${state}${reason === undefined ? '' : `: ${reason.replaceAll('_', ' ')}`}). Ask in chat if you still need it.`;
+}

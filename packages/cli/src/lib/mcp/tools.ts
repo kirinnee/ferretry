@@ -2,9 +2,12 @@ import {
   AGENT_TOOL_DEFAULT_WAIT_MS,
   AGENT_TOOL_MAX_READ_LINES,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
+  AGENT_TOOL_MAX_WAIT_MS,
   type AgentConfigToolName,
   type AgentLessonToolName,
   type AgentToolName,
+  INPUT_MAX_EXPIRY_SECONDS,
+  INPUT_PROMPT_MAX_LENGTH,
   LESSON_RULE_MAX_CHARS,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
@@ -136,6 +139,62 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
     description:
       'Hand a terminal to the owner when you need them to act in it (a password, a code, "press Enter"): their tab comes forward with "Your turn here". Then wait; read the terminal to see when they are done.',
     inputSchema: object({ name: NAME, message: ASK_MESSAGE }, ['name']),
+  },
+  {
+    name: 'terminal_request_input',
+    tool: 'terminal.request_input',
+    description:
+      'Ask the owner to type ONE value into a terminal: a password, sudo password, passphrase, one-time code or 2FA code. Have the program show its prompt first; then raise this and the owner types the value on a card, so you never hold it. Returns the card (!A<n>) at once; call input_wait. "prompt" is shown to the owner as "the agent says", never as fact: say what the value is for. Put no secret anywhere in the call. The value is never returned to you, and terminal_send is blocked on this terminal until the card is answered, cancelled or expires.',
+    inputSchema: object(
+      {
+        name: NAME,
+        prompt: {
+          type: 'string',
+          maxLength: INPUT_PROMPT_MAX_LENGTH,
+          description:
+            'What the value is for, in a plain sentence, e.g. "sudo password to install the package". Never a secret.',
+        },
+        sensitivity: {
+          type: 'string',
+          enum: ['secret', 'private', 'plain'],
+          description:
+            'secret: a password or passphrase (echo must be off). private: a one-time or 2FA code, a username or an e-mail. plain: nothing sensitive.',
+        },
+        submit: {
+          type: 'string',
+          enum: ['agent', 'offer-owner', 'owner-default'],
+          description:
+            'Who presses Enter after the value is typed: "agent" (you do), "offer-owner" (the card offers it; the default), "owner-default" (it is on by default).',
+        },
+        expiresInSeconds: {
+          type: 'integer',
+          minimum: 30,
+          maximum: INPUT_MAX_EXPIRY_SECONDS,
+          description: 'How long the card waits; 600 by default.',
+        },
+        blocking: { type: 'boolean', description: 'You are stopped until it is answered: also ping the owner.' },
+        chain: { type: 'string', description: 'A follow-up in a multi-step login: the card it follows, like A7.' },
+      },
+      ['name', 'prompt', 'sensitivity'],
+    ),
+  },
+  {
+    name: 'input_wait',
+    tool: 'input.wait',
+    description:
+      'Wait for the owner to answer an input card (!A<n>) you raised. Returns where it stands (pending, delivered, refused, expired or cancelled), and for a delivered one the terminal text with the value masked. It never returns the value.',
+    inputSchema: object(
+      {
+        id: { type: 'string', description: 'The card, like !A7.' },
+        timeoutMs: {
+          type: 'integer',
+          minimum: 100,
+          maximum: AGENT_TOOL_MAX_WAIT_MS,
+          description: 'How long to wait in this call; call again to keep waiting.',
+        },
+      },
+      ['id'],
+    ),
   },
   {
     name: 'browser_list',

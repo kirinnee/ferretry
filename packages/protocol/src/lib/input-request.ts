@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AgendaIdSchema } from './agenda.ts';
-import { SurfaceKeySchema, SurfaceKindSchema } from './agent-tools.ts';
+import { SurfaceKeySchema, SurfaceKindSchema } from './surface-names.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { SecretNameSchema } from './secrets.ts';
 
@@ -303,6 +303,10 @@ export const InputDeliverResultSchema = z.strictObject({
 });
 export type InputDeliverResult = z.infer<typeof InputDeliverResultSchema>;
 
+/** `GET /v1/input-requests` and `GET /v1/sessions/:sessionId/input-requests`: the requests still open, newest last. */
+export const InputRequestListSchema = z.strictObject({ requests: z.array(InputRequestSchema) });
+export type InputRequestList = z.infer<typeof InputRequestListSchema>;
+
 /** `POST …/cancel`: the owner declines. */
 export const InputCancelBodySchema = z.strictObject({});
 export type InputCancelBody = z.infer<typeof InputCancelBodySchema>;
@@ -354,6 +358,8 @@ export const InputEventSchema = z.strictObject({
   sessionId: boundedLine(128),
   target: z.strictObject({ kind: SurfaceKindSchema, key: SurfaceKeySchema }),
   sensitivity: InputSensitivitySchema,
+  /** Who presses Enter, so a restart can rebuild a pending request. */
+  submit: InputSubmitModeSchema.optional(),
   state: InputRequestStateSchema,
   submitted: z.boolean().optional(),
   source: z.enum(['typed', 'saved']).optional(),

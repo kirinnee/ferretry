@@ -131,7 +131,9 @@ function controllerOf(context: RouteContext): SurfaceController {
   return credential?.tokenClass === 'device' ? { by: 'human', deviceId: credential.deviceId } : { by: 'local' };
 }
 
-const kindOf = (call: AgentToolCall): SurfaceKind => (call.tool.startsWith('terminal.') ? 'terminal' : 'browser');
+/** The kind a person's route must match; `input.wait` is about a request, so no per-kind route takes it. */
+const kindOf = (call: AgentToolCall): SurfaceKind | undefined =>
+  call.tool === 'input.wait' ? undefined : call.tool.startsWith('terminal.') ? 'terminal' : 'browser';
 
 async function agentCall(
   service: AgentToolService,

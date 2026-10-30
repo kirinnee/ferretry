@@ -1,5 +1,6 @@
 import type { AgentToolService } from '../../agent-tools/service.ts';
 import type { AgentIdentityResolver } from '../../agent-tools/types.ts';
+import type { InputRequestService } from '../../input-requests/service.ts';
 import type { AnalyticsIngestionLoop } from '../../analytics/ingestion.ts';
 import type { CapabilityGuard } from '../../api/capability.ts';
 import { ApiDispatcher } from '../../api/dispatcher.ts';
@@ -35,6 +36,7 @@ import type { MillisecondClockPort } from '../boot.ts';
 import type { PublishedCarrierView } from '../published-carriers.ts';
 import { agentControlledRoutes, agentControlledSockets } from './agent-control.ts';
 import { agentToolRoutes } from './agent-tools.ts';
+import { inputRequestRoutes } from './input-requests.ts';
 import { type AnalyticsSubsystem, analyticsRoutes } from './analytics.ts';
 import { type AnalyticsPricingSubsystem, analyticsPricingRoutes } from './analytics-pricing.ts';
 import { agendaRoutes, type DirectNotificationSubsystem } from './agenda.ts';
@@ -365,6 +367,8 @@ export interface MountedSubsystems {
   /** Terminals and browser pages driven by name — by an agent through its own session credential, and
    *  by a person through the CLI or the app — with take over / hand back. */
   readonly agentTools: { readonly service: AgentToolService; readonly identities: AgentIdentityResolver };
+  /** The owner's answers to an agent's request for a password, a code or an answer (docs/input-requests.md). */
+  readonly inputRequests: InputRequestService;
   /** Free teammate callsigns, for composing a session title before starting one. */
   readonly names: NameSubsystem;
   /** The learning review board: the evidence the daemon holds, and a human's verdict on each rule
@@ -634,6 +638,7 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The agent's route is a fixed literal under `/v1/agent`, and a person's are under
         // `/v1/sessions/:sessionId/surfaces`, which no other subsystem uses: none can shadow or be shadowed.
         ...agentToolRoutes(subsystems.agentTools.service, subsystems.agentTools.identities),
+        ...inputRequestRoutes(subsystems.inputRequests),
         ...terminalRoutes(subsystems.terminals),
         // The login window is a fixed literal under `/v1/browser`, which no other subsystem uses, so it
         // can neither shadow nor be shadowed. Its per-session refusal is a deeper pattern ending in the

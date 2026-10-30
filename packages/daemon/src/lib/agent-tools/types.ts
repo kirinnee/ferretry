@@ -1,4 +1,4 @@
-import type { AuditActor, SurfaceKind, SurfaceOpener } from '@ferretry/protocol';
+import type { AgendaId, AuditActor, InputAgentView, InputRaise, SurfaceKind, SurfaceOpener } from '@ferretry/protocol';
 
 /**
  * WHO IS CALLING A TOOL — derived by the route, never stated by the caller.
@@ -63,4 +63,17 @@ export interface ResolvedSurface {
   readonly openedBy?: SurfaceOpener;
   /** A browser page in its own throwaway context. */
   readonly incognito?: true;
+}
+
+/**
+ * What the agent tools ask of the input-request service (docs/input-requests.md): raise a request, wait on
+ * one, and say whether a surface has one pending. It throws `InputRequestError` for a refusal. Nothing it
+ * takes or returns carries a value.
+ */
+export interface AgentInputPort {
+  raise(sessionId: string, raise: InputRaise): Promise<InputAgentView>;
+  /** Waits up to `waitMs` for the request to reach a final state, then says where it stands. */
+  agentView(sessionId: string, id: AgendaId, waitMs: number): Promise<InputAgentView>;
+  /** The card of a request pending on this surface, if any. */
+  pendingOn(sessionId: string, target: { readonly kind: SurfaceKind; readonly key: string }): AgendaId | undefined;
 }

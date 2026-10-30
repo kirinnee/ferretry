@@ -79,6 +79,8 @@ import {
   type RuntimeModelChoice,
   refusalNotice,
   type SessionConfig,
+  type InputEvent,
+  InputEventSchema,
   SessionConfigSchema,
   type SessionHandoff,
   SessionStateSchema,
@@ -483,6 +485,7 @@ import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { KeyedSerialExecutor as LearningSerialExecutor } from '../src/adapters/atomic-file/index.ts';
 import {
   ManagedTerminalService,
+  runProgram,
   systemLoginShell,
   TerminalRuntimeError,
   TerminalServiceError,
@@ -1153,6 +1156,16 @@ import {
   withLivenessLedger,
   withOutdated,
   xvfbMissingMessage,
+  EphemeralValues,
+  InputAgendaAdapter,
+  InputAgentNotifierAdapter,
+  InputAuditAdapter,
+  InputCardClosedObserver,
+  InputRequestService,
+  SttyTerminalModes,
+  TmuxInputTarget,
+  type AgentInputPort,
+  type TmuxCommandPort,
 } from '../src/lib/index.ts';
 import {
   admitChild,
@@ -5944,6 +5957,8 @@ function createAgentToolsSubsystem(input: {
   readonly browser: MountedSubsystems['browser'];
   readonly audit: AuditLog;
   readonly policy: AgentControlPolicy;
+  readonly input: AgentInputPort;
+  readonly scrub: (sessionId: string, text: string) => string;
 }): MountedSubsystems['agentTools'] {
   const clock = { now: () => Date.now() };
   const control = new SurfaceControl(
@@ -5973,11 +5988,85 @@ function createAgentToolsSubsystem(input: {
       control,
       policy: input.policy,
       audit: input.audit,
+      input: input.input,
+      scrub: input.scrub,
       clock,
       sleep: async milliseconds => await Bun.sleep(milliseconds),
     }),
     identities: agentIdentities(input.storage),
   };
+}
+
+/** How often a request that outlived its time is found and ended, so its card does not wait for the next event. */
+const INPUT_REQUEST_SWEEP_MS = 15_000;
+
+/**
+ * The input bridge: tmux and the kernel for what a terminal is doing, the agenda for the owner's form, and
+ * the session journal and audit log for names and flags. Nothing built here stores a value except the
+ * service's own in-memory map of values to scrub.
+ */
+function createInputRequestService(input: {
+  readonly storage: DaemonStorage;
+  readonly terminals: TerminalRuntimePort;
+  readonly tmux: TmuxCommandPort;
+  readonly agenda: AgendaService;
+  readonly agentReplies: AgendaReplyBatcher;
+  readonly audit: AuditLog;
+}): InputRequestService {
+  const clock = { now: () => Date.now() };
+  const trusted = new Set<string>();
+  return new InputRequestService({
+    target: new TmuxInputTarget(
+      input.tmux,
+      {
+        locate: async (sessionId, key) =>
+          (await input.terminals.list()).find(
+            record => record.ownerId === sessionId && (record.name === key || record.id === key),
+          ),
+      },
+      new SttyTerminalModes(process.platform, runProgram),
+      runProgram,
+    ),
+    agenda: new InputAgendaAdapter(input.agenda),
+    notifier: new InputAgentNotifierAdapter(
+      async (sessionId, key, message) => await input.agentReplies.add(sessionId, key, message),
+    ),
+    journal: {
+      publish: async (sessionId, event) => {
+        const id = tryParseSessionId(sessionId);
+        if (id !== undefined) await input.storage.append(id, event.type, { ...event });
+      },
+      history: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        const events: InputEvent[] = [];
+        if (id === undefined || input.storage.findSession(id) === undefined) return events;
+        for (let after = 0; ; ) {
+          const page = await input.storage.replay(id, after, 10_000);
+          for (const recorded of page.events) {
+            const parsed = recorded.type.startsWith('surface.input_')
+              ? InputEventSchema.safeParse(recorded.data)
+              : undefined;
+            if (parsed?.success === true) events.push(parsed.data);
+          }
+          if (!page.hasMore || page.nextSequence === undefined) return events;
+          after = page.nextSequence;
+        }
+      },
+    },
+    audit: new InputAuditAdapter(input.audit),
+    clock,
+    ids: { requestId: () => crypto.randomUUID().replaceAll('-', '') },
+    timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
+    trusted: { isTrusted: comm => trusted.has(comm), trust: comm => void trusted.add(comm) },
+    sessions: {
+      has: async sessionId => {
+        const id = tryParseSessionId(sessionId);
+        return id !== undefined && input.storage.findSession(id) !== undefined;
+      },
+      all: async () => input.storage.listSessions().map(session => session.id),
+    },
+    values: new EphemeralValues(clock),
+  });
 }
 
 /** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
@@ -9444,6 +9533,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
+      // Built after the agenda it reads and writes; an owner's dismissal heard before then has nothing to cancel.
+      let inputRequests: InputRequestService | undefined;
       const agenda = new AgendaService(
         agendaBoards,
         clock,
@@ -9464,6 +9555,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
           agendaBuzz,
+          // The owner dismissing an input card without its form cancels the request behind it.
+          new InputCardClosedObserver(async (sessionId, id) => await inputRequests?.cardDismissed(sessionId, id)),
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {
@@ -9501,6 +9594,24 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       setInterval(sweepDeadlines, AGENDA_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
+      // An agent stuck at a password prompt asks the owner through an agenda card (docs/input-requests.md). The value
+      // lives only in this process's memory and in the one tmux write; the journal and the audit log carry names and flags.
+      const inputRequestService = createInputRequestService({
+        storage,
+        terminals,
+        tmux,
+        agenda,
+        agentReplies: agendaReplies,
+        audit: auditLog,
+      });
+      inputRequests = inputRequestService;
+      const sweepInputRequests = asActivity(
+        activities,
+        'input-requests',
+        async () => await inputRequestService.sweep(),
+      );
+      void asActivity(activities, 'input-requests-restore', async () => await inputRequestService.restore())();
+      setInterval(sweepInputRequests, INPUT_REQUEST_SWEEP_MS).unref();
       // The board's own sweep (`lib/board/sweep.ts`): each minute a stale card's ferret is nudged through the
       // ordinary send path, and a lead's quiet events wait in its pending context for its next turn.
       const boardSweep = new BoardSweep({
@@ -10920,12 +11031,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         terminals: terminalSubsystem,
         browserLogin,
         browser: browserHost,
+        inputRequests: inputRequestService,
         agentTools: createAgentToolsSubsystem({
           storage,
           terminals: terminalSubsystem,
           browser: browserHost,
           audit: auditLog,
           policy: agentControl,
+          input: inputRequestService,
+          scrub: (sessionId, text) => inputRequestService.scrub(sessionId, text),
         }),
         configFiles: createConfigFilesSubsystem({
           activities,

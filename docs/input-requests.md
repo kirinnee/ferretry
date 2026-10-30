@@ -119,6 +119,14 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 - **A browser `private` code can appear in an after-screenshot** (a later phase).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.
+- **The value is briefly visible to `ps`.** Delivery is one `tmux send-keys -H` call, so the value's hex
+  is in that process's arguments for the instant it runs. It is the same limit the terminal's own
+  keystroke write has today.
+- **Saved secrets are refused for now.** A deliver body that names a vault secret instead of typing a
+  value answers 400 until P3.
+- **The relay carrier is not known where the owner is identified.** A paired device is recorded as
+  `direct` in the audit record even when it came over the relay. GAP: `INPUT_MAX_REMOTE_DELIVERIES_PER_HOUR`
+  is declared but not enforced yet, which waits on the carrier being known.
 - **Today's transcript.** If an agent `terminal_send`s a password itself, the harness transcript keeps
   it. This bridge is how an agent avoids doing that; it does not scrub what an agent already did.
 
@@ -126,8 +134,8 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 
 | Phase | What                                                                                    | State       |
 | ----- | --------------------------------------------------------------------------------------- | ----------- |
-| P0    | This contract and the schemas                                                           | this change |
-| P1    | Terminal secret: the daemon service, agent tools, deliver and cancel routes, `fy input` | next        |
+| P0    | This contract and the schemas                                                           | done        |
+| P1    | Terminal secret: the daemon service, agent tools, deliver and cancel routes, `fy input` | this change |
 | P2    | The app card                                                                            | later       |
 | P3    | Saved secrets (one tap) and "save as"                                                   | later       |
 | P4    | Browser fields, and the agent-instruction extension for the browser                     | later       |
