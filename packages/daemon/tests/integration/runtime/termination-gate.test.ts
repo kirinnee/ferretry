@@ -4,6 +4,7 @@ import { join, resolve } from 'node:path';
 import should from 'should';
 import {
   INTERRUPTED_BOOT_EXIT_CODE,
+  releaseAcquired,
   type SignalTarget,
   terminationGate,
 } from '../../../src/adapters/runtime/termination-gate.ts';
@@ -123,6 +124,36 @@ describe('terminationGate edges', () => {
 
     // Assert
     should(order).deepEqual(['released', `exit ${String(INTERRUPTED_BOOT_EXIT_CODE)}`]);
+  });
+
+  it('should release what a boot still running registers during the early release, before it exits', async () => {
+    // Arrange — the boot goes on after the signal and registers the session observer's release while
+    // the first cleanup is still running, which is where a stop in the boot's `finishing` stretch lands.
+    const target = scriptedTarget();
+    const order: string[] = [];
+    const cleanups: Array<() => void | Promise<void>> = [];
+    cleanups.push(async () => {
+      order.push('first');
+      cleanups.push(() => {
+        order.push('registered meanwhile');
+      });
+    });
+    cleanups.push(() => {
+      throw new Error('a cleanup failed');
+    });
+    terminationGate(
+      async () => await releaseAcquired(cleanups),
+      code => order.push(`exit ${String(code)}`),
+      target,
+    );
+
+    // Act
+    target.fire('SIGTERM');
+    await waitFor(() => order.some(entry => entry.startsWith('exit')), 'the gate to exit');
+
+    // Assert
+    should(order).deepEqual(['first', 'registered meanwhile', `exit ${String(INTERRUPTED_BOOT_EXIT_CODE)}`]);
+    should(cleanups).be.empty();
   });
 
   it('should resolve the wait on SIGINT too once serving, running no early release', async () => {

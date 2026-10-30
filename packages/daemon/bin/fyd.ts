@@ -361,7 +361,7 @@ import {
 import { FilePinRepository, FilePinSessionDirectory } from '../src/adapters/pins/index.ts';
 import { HostCodexAppServerProcesses } from '../src/adapters/process/codex-app-server-stopper.ts';
 import { runPackageInstall } from '../src/adapters/process/package-install.ts';
-import { terminationGate } from '../src/adapters/runtime/termination-gate.ts';
+import { releaseAcquired, terminationGate } from '../src/adapters/runtime/termination-gate.ts';
 import {
   AccountAutoResumeAvailability,
   BootExitRecorder,
@@ -12766,19 +12766,14 @@ async function execute(answer: ArgumentAnswer & { readonly kind: 'boot' | 'check
   // when that failed, the only thing this daemon had ever written was nothing at all.
   const notices = bootJournal(answer.overrides.logLevel);
   // A boot listens for SIGINT/SIGTERM from its first instant: interrupted before it serves, it releases
-  // what it has acquired so far and exits; once serving, the signal ends the wait below as always.
+  // what it has acquired — including what the still-running boot acquires meanwhile — and exits; once
+  // serving, the signal ends the wait below as always.
   const gate =
     answer.kind === 'boot'
       ? terminationGate(
           async () => {
             notices.state('stopping during boot — releasing what this boot acquired so far');
-            for (const cleanup of cleanups.splice(0)) {
-              try {
-                await cleanup();
-              } catch {
-                // Intentionally ignored, as below: the process is ending either way.
-              }
-            }
+            await releaseAcquired(cleanups);
           },
           code => process.exit(code),
         )
