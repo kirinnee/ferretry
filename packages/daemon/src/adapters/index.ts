@@ -45,6 +45,7 @@ export * from './session/observer/index.ts';
 export * from './session/provenance/index.ts';
 export * from './session/question/index.ts';
 export * from './session/resume/index.ts';
+export * from './session/queue/index.ts';
 export * from './session/send/index.ts';
 export * from './session/signal/index.ts';
 export * from './session/snapshot/index.ts';

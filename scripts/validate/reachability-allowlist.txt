@@ -282,3 +282,4 @@ packages/pwa/src/lib/lane-editor-model.ts # the lane editor draft model, used by
 packages/pwa/src/lib/board-move.ts # the Board page's move rules (U11), reached from board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-present.ts # the Board card's meta line (U11), reached from board-card.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-phone.ts # the phone Board's lane switching and tab badge (U13), reached from board-phone.tsx and App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/daemon/src/lib/session/queue/policy.ts # the queue's delivery order (S1 of the durable queue, &F121); the deliverer in S2 wires it and deletes this line
