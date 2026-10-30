@@ -7,8 +7,8 @@
  * here a segment never shrinks below its own label and the strip WRAPS onto a second line before it would clip
  * one.
  *
- * "Show stopped" is one line under the segment, with the number it would add, so a reader who sees
- * fewer sessions than they remember is told how many are tucked away and where the tick is.
+ * "Show stopped" is not drawn here: it is a row of the bar's ⋯ menu (sessions-bar-options.tsx), and an empty
+ * list says how many stopped sessions it is hiding and where the switch is.
  */
 
 import type { ModeFilter } from '../lib/controls.ts';
@@ -32,12 +32,10 @@ const MODE_ORDER: readonly ModeFilter[] = ['interactive', 'all', 'auto'];
 export function SessionsBarFilters({
   filter,
   counts,
-  hiddenStopped,
   onChange,
 }: {
   readonly filter: SessionsListFilter;
   readonly counts: ModeCounts;
-  readonly hiddenStopped: number;
   readonly onChange: (next: SessionsListFilter) => void;
 }) {
   return (
@@ -58,20 +56,6 @@ export function SessionsBarFilters({
           </button>
         ))}
       </fieldset>
-      <label className="fy-sbar__stopped" title="Completed, failed, stalled or stopped sessions">
-        <input
-          checked={filter.showStopped}
-          data-sbar-show-stopped=""
-          onChange={event => onChange({ ...filter, showStopped: event.target.checked })}
-          type="checkbox"
-        />
-        <span>Show stopped</span>
-        {filter.showStopped || hiddenStopped === 0 ? null : (
-          <span className="fy-sbar__count" data-sbar-hidden-stopped="">
-            {hiddenStopped}
-          </span>
-        )}
-      </label>
     </div>
   );
 }
@@ -79,6 +63,6 @@ export function SessionsBarFilters({
 /** What an empty list says: which kind found nothing, and how many stopped ones the tick would add. */
 export const sessionsBarEmptyMessage = (filter: SessionsListFilter, hiddenStopped: number): string => {
   const kind = filter.mode === 'all' ? '' : `${MODE_LABEL[filter.mode].toLowerCase()} `;
-  if (hiddenStopped > 0) return `No live ${kind}sessions — ${hiddenStopped} stopped. Tick Show stopped.`;
+  if (hiddenStopped > 0) return `No live ${kind}sessions — ${hiddenStopped} stopped. Choose ⋯ › Show stopped.`;
   return filter.mode === 'all' ? 'No sessions running.' : `No ${kind}sessions.`;
 };
