@@ -4,7 +4,8 @@
  * The tab itself only draws. This host owns what the Board page owns for the same cards, scaled down to one
  * ferret's: the view the reader picked (kept on this device), the card detail drawer that opens OVER the chat
  * (portalled to the body, so the Info panel's own scrolling and stacking cannot clip it), and the move flow
- * behind Done ✓, Not good and the ⋯ menu — a move back asks for its reason first, exactly as on the Board.
+ * behind Done ✓, Not good and the ⋯ menu, which is the Board's own (`useBoardAnswers`): a move back opens the same
+ * composer, the pressed answer spins and the card's others wait, and a refusal is said on the card.
  * Nothing here navigates: a card link inside the drawer reopens the drawer on that card.
  */
 
@@ -13,17 +14,17 @@ import { createPortal } from 'react-dom';
 import { type BoardMachine, useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
 import type { BoardChat } from '../../lib/board-chat.ts';
 import { chatSiblings } from '../../lib/board-chat.ts';
-import { boardDone, isReleaseLane } from '../../lib/board-done.ts';
-import { moveChoices, planMove } from '../../lib/board-move.ts';
+import { boardDone, doneLaneOf, isReleaseLane, notGoodLaneOf } from '../../lib/board-done.ts';
+import { moveChoices } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import { boardSideView } from '../../lib/board-side-view.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
-import { type BoardCardOf, type BoardCardPlace, laneOfCategory } from '../../lib/board-view.ts';
+import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
 import type { BoardCardMoves } from './board-card.tsx';
-import { BoardReasonBox } from './board-reason-box.tsx';
+import { useBoardAnswers } from './board-answers.tsx';
 import { BoardSideTab } from './board-side-tab.tsx';
 import type { BoardDoneControl } from './board-views.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
@@ -42,13 +43,6 @@ export interface ChatTasksProps {
   readonly now: number;
   /** Where a link inside the drawer that is not a card of this ferret goes. */
   readonly onNavigate?: (to: string) => void;
-}
-
-interface PendingMove {
-  readonly card: BoardCardOf;
-  readonly place: BoardCardPlace;
-  readonly to: string;
-  readonly toName: string;
 }
 
 const refuseAgenda = (): Promise<never> => Promise.reject(new Error('this host has no agenda'));
@@ -83,50 +77,16 @@ export function ChatTasks({
   const connections = useMemo(() => [machine.connection], [machine.connection]);
   const actions = useBoardActions(store, agenda ?? NO_AGENDA, connections);
   const [openId, setOpenId] = useState<string | null>(null);
-  const [pending, setPending] = useState<PendingMove | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-
-  const send = useCallback(
-    async (card: BoardCardOf, place: BoardCardPlace, to: string, reason?: string): Promise<boolean> => {
-      setBusy(true);
-      setProblem(null);
-      const result = await actions.moveTask(
-        { daemonId: card.daemonId, id: card.task.id, laneId: card.task.laneId, laneSet: place.group.laneSet },
-        to,
-        reason,
-      );
-      setBusy(false);
-      if (result.ok) return true;
-      setProblem(result.error.message);
-      return false;
-    },
-    [actions],
-  );
-
-  const requestMove = useCallback(
-    (card: BoardCardOf, place: BoardCardPlace, laneId: string): void => {
-      const plan = planMove(place.group.laneSet, card.task.laneId, laneId);
-      setNotice(null);
-      if (plan.kind === 'refused') {
-        setNotice(plan.message);
-        return;
-      }
-      if (plan.kind === 'ask-reason') {
-        const toName = place.group.laneSet?.lanes.find(lane => lane.id === plan.to)?.name ?? plan.to;
-        setProblem(null);
-        setPending({ card, place, to: plan.to, toName });
-        return;
-      }
-      if (plan.kind === 'send') {
-        void send(card, place, plan.to).then(ok => {
-          if (!ok) setNotice('The move did not go through.');
-        });
-      }
-    },
-    [send],
-  );
+  const { requestMove, answerFor, composer } = useBoardAnswers({
+    actions,
+    ports,
+    connectionOf: id => (id === machine.connection.daemonId ? machine.connection : undefined),
+    phone,
+    onNotice: setNotice,
+    // The Info panel scrolls and stacks on its own; the composer goes over the whole page.
+    portal: true,
+  });
 
   const movesFor = useCallback(
     (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {
@@ -136,9 +96,9 @@ export function ChatTasks({
       const closed = place.category === 'closed';
       return {
         choices: closed ? [] : moveChoices(group.laneSet, card.task.laneId),
-        onMove: (target, laneId) => requestMove(target, place, laneId),
-        closeLaneId: closed ? null : laneOfCategory(group, 'closed'),
-        reworkLaneId: closed ? null : laneOfCategory(group, 'active', 'last'),
+        onMove: (target, laneId, answer) => requestMove(target, group, laneId, answer),
+        closeLaneId: closed ? null : doneLaneOf(group.laneSet),
+        reworkLaneId: closed ? null : notGoodLaneOf(group.laneSet),
         onDragStart: () => undefined,
         onDragEnd: () => undefined,
       };
@@ -157,18 +117,12 @@ export function ChatTasks({
         ? undefined
         : {
             done,
-            press: () => requestMove(card, place, done.laneId),
+            press: () => requestMove(card, place.group, done.laneId, done.kind),
             atRelease: isReleaseLane(place.group.laneSet, card.task.laneId),
           };
     },
     [requestMove],
   );
-
-  const submitReason = async (reason: string): Promise<void> => {
-    if (pending === null) return;
-    const ok = await send(pending.card, pending.place, pending.to, reason);
-    if (ok) setPending(null);
-  };
 
   // CALLED ON `agenda`, NEVER COPIED OFF IT: its methods read the client's own private fields.
   const detailAgenda = useMemo((): BoardAgenda | null => {
@@ -222,6 +176,7 @@ export function ChatTasks({
       <BoardSideTab
         callsigns={callsigns}
         chat={chat}
+        answerFor={answerFor}
         doneFor={doneFor}
         movesFor={movesFor}
         now={now}
@@ -230,23 +185,7 @@ export function ChatTasks({
         scope={scope}
         view={view}
       />
-      {pending === null
-        ? null
-        : createPortal(
-            <div className="fy-board__scrim" data-phone={phone ? '' : undefined}>
-              <BoardReasonBox
-                busy={busy}
-                error={problem}
-                heading={`Move ${pending.card.task.title} back to ${pending.toName}`}
-                onCancel={() => {
-                  setPending(null);
-                  setProblem(null);
-                }}
-                onSubmit={reason => void submitReason(reason)}
-              />
-            </div>,
-            document.body,
-          )}
+      {composer}
       {openId === null || detailAgenda === null || ports === undefined
         ? null
         : createPortal(
