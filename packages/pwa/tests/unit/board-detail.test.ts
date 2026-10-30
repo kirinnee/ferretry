@@ -250,6 +250,19 @@ describe('history', () => {
     expect(rowOf('migrated', { legacyRef: '#F1' }).text).toBe('brought it over from #F1');
   });
 
+  it('says a re-parent, from top level, between cards and back to top level', () => {
+    const a = { id: 'F1' };
+    const b = { id: 'F2' };
+    expect(rowOf('reparented', { from: null, to: a, reason: 'r' })).toMatchObject({
+      text: 'moved it under &F1 (was top level)',
+      detail: 'r',
+    });
+    expect(rowOf('reparented', { from: a, to: b, reason: null }).text).toBe('moved it under &F2 (was under &F1)');
+    expect(rowOf('reparented', { from: a, to: null, reason: null }).text).toBe(
+      'made it a top-level card (was under &F1)',
+    );
+  });
+
   it('says an assignment, a reassignment and an unassignment', () => {
     expect(rowOf('assigned', { from: null, to: 'x' }).text).toBe('assigned it to ferret x');
     expect(rowOf('assigned', { from: 'y', to: 'x' }).text).toBe('assigned it to ferret x (was ferret y)');
