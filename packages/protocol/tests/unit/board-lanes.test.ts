@@ -13,9 +13,6 @@ import {
   LaneCategorySchema,
   LaneIdSchema,
   LaneLayoutSchema,
-  laneForTrigger,
-  laneLayoutFromTemplate,
-  laneLayoutProblems,
   LaneNameSchema,
   LaneRenamesSchema,
   LaneSchema,
@@ -24,6 +21,9 @@ import {
   LaneTemplateNameSchema,
   LaneTriggerSchema,
   LaneVariantsSchema,
+  laneForTrigger,
+  laneLayoutFromTemplate,
+  laneLayoutProblems,
   laneOf,
   needsOwner,
   nextLane,
@@ -199,7 +199,7 @@ describe('lane templates', () => {
       },
       { id: 'merged', name: 'Merged', category: 'shipped', enterOn: ['pr.merged'], staleAfter: '3d' },
       { id: 'released', name: 'Released', category: 'shipped', enterOn: ['release.published'] },
-      { id: 'tested', name: 'Manually tested', category: 'verify', enterOn: ['release.running'], ownerGate: true },
+      { id: 'tested', name: 'To test', category: 'verify', enterOn: ['release.running'], ownerGate: true },
       { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true },
     ]);
     should(FERRETRY.variants.quick).deepEqual([

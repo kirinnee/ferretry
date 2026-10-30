@@ -36,6 +36,7 @@ import { z } from 'zod';
 import { cardStaleAfterMs, isWorking, presenceOf, type SessionLivenessSource, type SessionRoster } from './activity.ts';
 import { effectiveAssignee } from './authority.ts';
 import { cardCategory, type LaneSets } from './graph.ts';
+import { FACT_TRIGGERS } from './lane-facts.ts';
 import {
   BOARD_MARK,
   type PendingContext,
@@ -162,10 +163,9 @@ const eventItem = (view: BoardTaskView, event: BoardTaskEvent, board: SweepBoard
     case 'moved': {
       // `fy signal done` already told the lead, with the ferret's own words (`SessionCards.signalled`).
       if (event.trigger === 'signal.done') return null;
-      const pr = view.links.prs.at(-1);
-      const fromPr = event.trigger?.startsWith('pr.') === true || event.trigger === 'ci.green';
-      const suffix = fromPr && pr !== undefined ? ` (PR #${pr.number})` : '';
-      return item('lane', `${ref} → ${laneName(board, view, event.to)}${suffix}`);
+      // A move a fact made (a PR opened, merged, released) is the daemon following GitHub, not news: history keeps it.
+      if (event.auto === true && event.trigger !== undefined && FACT_TRIGGERS.has(event.trigger)) return null;
+      return item('lane', `${ref} → ${laneName(board, view, event.to)}`);
     }
     case 'reopened':
       return item('lane', `${ref} reopened → ${laneName(board, view, event.to)}: ${oneLine(event.reason)}`);

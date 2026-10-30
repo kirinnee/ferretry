@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { boardOk } from '@ferretry/protocol';
-import { PhoneKanban } from '../../../src/features/board/board-phone.tsx';
 import { BoardPage, type BoardPageProps } from '../../../src/features/board/board-page.tsx';
+import { PhoneKanban } from '../../../src/features/board/board-phone.tsx';
 import type { BoardCardEnv } from '../../../src/features/board/board-views.tsx';
 import { ferretNamer } from '../../../src/lib/board-present.ts';
-import { cardPlaces } from '../../../src/lib/board-view.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
+import { cardPlaces } from '../../../src/lib/board-view.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import {
   boardAnswer,
@@ -114,7 +114,7 @@ describe('Board on a phone — the lane strip', () => {
       'Review/CI, 1 card',
       'Merged, 0 cards',
       'Released, 0 cards',
-      'Manually tested, 1 card',
+      'To test, 1 card',
     ]);
     expect(chipNamed(root, 'Plan/Design').getAttribute('aria-selected')).toBe('true');
     expect(titles(root)).toEqual(['Plan the thing']);

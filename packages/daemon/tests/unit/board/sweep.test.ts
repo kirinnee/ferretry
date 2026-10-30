@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { BoardActor, BoardTask, BoardTaskEvent, BoardTaskView, PrLink } from '@ferretry/protocol';
+import type { BoardActor, BoardTask, BoardTaskEvent, BoardTaskView, LaneTrigger, PrLink } from '@ferretry/protocol';
 import should from 'should';
 import {
   BoardSweep,
@@ -283,7 +283,7 @@ describe('the sweep plan: quiet events', () => {
     ]);
   });
 
-  it('should name the PR when a PR trigger moved the card, and announce a drop before forgetting the card', () => {
+  it('should keep a daemon move that a PR fact made out of the quiet lines, and announce a drop before forgetting the card', () => {
     // Arrange
     const moved = childCard(
       [
@@ -313,8 +313,34 @@ describe('the sweep plan: quiet events', () => {
     const plan = planSweep(memory, board(leadCard, view(moved), view(dropped)), everyone, NOW);
 
     // Assert
-    should(plan.quiet.map(each => each.item.text)).eql(['&F2 → Review/CI (PR #930)', '&F3 dropped: superseded by &F9']);
+    should(plan.quiet.map(each => each.item.text)).eql(['&F3 dropped: superseded by &F9']);
     should(Object.keys(plan.memory.seen)).eql(['F1', 'F2']);
+  });
+
+  it('should keep every move a fact made quiet, and still tell of a daemon move no fact made', () => {
+    // Arrange
+    const daemonMove = (to: string, trigger: LaneTrigger) =>
+      ({
+        at: EARLIER,
+        actor: { kind: 'daemon' },
+        type: 'moved',
+        from: 'implement',
+        to,
+        backward: false,
+        reason: null,
+        auto: true,
+        trigger,
+      }) as const;
+    const facts = (
+      ['pr.opened', 'pr.ready', 'ci.green', 'pr.merged', 'release.published', 'release.running'] as const
+    ).map(trigger => daemonMove('review', trigger));
+    const started = childCard([...facts, daemonMove('implement', 'work.started')], { laneId: 'implement' });
+
+    // Act
+    const texts = quietTexts(sawChild(), board(leadCard, view(started)));
+
+    // Assert
+    should(texts).eql(['lead: &F2 → Implement [F2:lane]']);
   });
 
   it("should leave a done move to the done's own quiet line", () => {

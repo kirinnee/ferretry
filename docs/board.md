@@ -54,6 +54,18 @@ it; moving an open card into Closed stays the owner's.
 `fy board lanes show|propose|edit --project <name|id>` and `fy board --project <name|id|all>` name a board by its
 name or id, wherever the flag is written on the line.
 
+## Lanes follow PR facts
+
+A card never sits behind its own PR. `laneFromFacts` (`packages/daemon/src/lib/board/lane-facts.ts`) is the one
+owner of where PR facts put a card: all PRs merged and released is the `release.published` lane (`release.running`
+once this machine runs that release), any merged with none open is `pr.merged`, any open is `pr.opened` /
+`pr.ready`, and otherwise no opinion. It never moves a card backward, never out of Closed or a drop, and never into
+a Closed lane in a set with a To test lane. A fact passes an owner gate (out of Plan/Design); gates still stop ferrets.
+The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a
+PR nobody has asked GitHub about is polled on the next tick. A card the owner sent back stays back until a PR newer
+than that move merges. History names the fact; a daemon move from a fact is never a quiet line
+([ferret-messages.md](ferret-messages.md#board-events-that-ride-the-next-message)).
+
 ## The turn-end check
 
 When a turn ends, the daemon reads it (`packages/daemon/src/lib/board/turn-check.ts`). If the turn did

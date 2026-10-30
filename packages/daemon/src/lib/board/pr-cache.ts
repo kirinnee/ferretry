@@ -6,10 +6,11 @@
  * here is ONE write: the cache, the automatic links, the notes and the lane moves those facts trigger land
  * together, so a crash can never leave a merged PR cached on a card that did not move.
  *
- * - **Triggers fire on a change, never on a state.** `pr.merged` fires when the cache goes from not merged
- *   to merged, not whenever a merged PR is seen, so a card the owner sent back to Implement after its PR
- *   merged stays there. `release.running` is the one exception that reads a state — this machine's version
- *   — and it only moves a card that is still in a `shipped` lane, which a card sent back no longer is.
+ * - **Triggers fire on a change, in the order a PR lives them.** Then every poll RECONCILES the card
+ *   ({@link reconcileFacts}): whatever the cached facts say of its PRs, the card is caught up to it, so a
+ *   card can never sit behind its own PR because an event was missed (the daemon was off, the card was
+ *   refiled after the merge, the PR was linked late). A card sent back after its PR merged stays back
+ *   (`lane-facts.ts`); `release.running` reads this machine's version.
  * - **Never backwards.** Every move goes through {@link triggerMove}, which refuses a move back and records
  *   "… while blocked by &F18" when a dependency had not shipped: reality wins over the gate (§2.7).
  * - **A PR closed unmerged** moves nothing: it adds a note and asks the watcher to nudge the card's owner
@@ -18,8 +19,6 @@
  */
 import {
   type BoardTask,
-  categoryOf,
-  compareProtocolVersions,
   formatTaskRef,
   type LaneTrigger,
   type PrChecks,
@@ -28,7 +27,7 @@ import {
   type ReleasedIn,
 } from '@ferretry/protocol';
 import { effectiveAssignee } from './authority.ts';
-import { type CardContext, requireStanding, triggerMove, withEvent } from './card-actions.ts';
+import { type CardContext, reconcileFacts, requireStanding, triggerMove, withEvent } from './card-actions.ts';
 
 /**
  * How often an unchanged PR's `polledAt` is rewritten. A poll that learns nothing new does not write the
@@ -165,20 +164,11 @@ const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
   };
 };
 
-/** A release one of the card's merged PRs shipped in that this machine already runs, if any. */
-const runningRelease = (card: BoardTask, version: string | null): ReleasedIn | null => {
-  if (version === null) return null;
-  const running = card.links.prs
-    .map(pr => pr.releasedIn)
-    .filter((release): release is ReleasedIn => release !== null)
-    .filter(release => (compareProtocolVersions(version, release.version) ?? -1) >= 0);
-  return running[0] ?? null;
-};
-
 /**
  * One poll applied to one card, by the daemon: the automatic links, the refreshed cache, the notes, and
  * every lane move those facts trigger, in the order a PR lives them (opened, ready, checks, merged,
- * released, running here). `task: null` when nothing changed.
+ * released), then the reconcile that puts the card where its facts say (running here included).
+ * `task: null` when nothing changed.
  */
 export const applyPrUpdate = (card: BoardTask, update: PrUpdate, context: CardContext): PrUpdateOutcome => {
   requireStanding('trigger', context.standing, card);
@@ -225,11 +215,8 @@ export const applyPrUpdate = (card: BoardTask, update: PrUpdate, context: CardCo
   for (const pending of triggers) {
     next = triggerMove(next, pending.trigger, pending.reason, context) ?? next;
   }
-  const category = categoryOf(context.laneSet, next.laneId);
-  const running = category.ok && category.value === 'shipped' ? runningRelease(next, update.runningVersion) : null;
-  if (running !== null) {
-    const reason = `this machine runs ${update.runningVersion ?? ''}, which includes ${running.version}`;
-    next = triggerMove(next, 'release.running', reason, context) ?? next;
-  }
+  next =
+    reconcileFacts(next, { ...context, runningVersion: update.runningVersion ?? context.runningVersion ?? null }) ??
+    next;
   return { task: next === card ? null : next, nudges };
 };

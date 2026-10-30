@@ -27,8 +27,8 @@
 import { type BoardTask, formatTaskRef, ProtocolVersionSchema, prUrlParts, type ReleasedIn } from '@ferretry/protocol';
 import {
   applyPrUpdate,
-  BoardIndex,
   type BoardDiagnostics,
+  BoardIndex,
   effectiveAssignee,
   type LaneSets,
   type PrObservation,
@@ -43,8 +43,8 @@ import {
   MAX_COMPARES_PER_TICK,
   MAX_REPOSITORIES_PER_TICK,
   needsPoll,
-  pollDelay,
   PROJECT_REMOTES_TTL_MS,
+  pollDelay,
   prKey,
   refileTargets,
   repoKey,
@@ -124,6 +124,8 @@ const detail = (error: unknown): string => (error instanceof Error ? error.messa
 export class GitHubWatcher {
   /** When each repository (case-folded) is next due. Forgotten on restart, so a fresh daemon polls at once. */
   private readonly due = new Map<string, number>();
+  /** PRs (`owner/name#n`, case-folded) already asked about once while their state was unknown. */
+  private readonly looked = new Set<string>();
   /** Release tags already known NOT to contain a merge, keyed `repo#sha`: each pair is compared once. */
   private readonly notIn = new Map<string, Set<string>>();
   /** The keys warned about, so each problem is reported once until it clears. */
@@ -172,7 +174,8 @@ export class GitHubWatcher {
     const projects = await this.projectRemotes(nowMs);
     const candidates = await this.candidates(watched, laneSets, projects);
     const polls = this.polls(watched, candidates);
-    const { answers, reachable, polled } = await this.poll(polls, nowMs);
+    const fresh = this.freshRepositories(watched);
+    const { answers, reachable, polled } = await this.poll(polls, nowMs, fresh);
     const claimed = new Set(cards.flatMap(card => card.links.prs.map(pr => prKey(pr.repo, pr.number))));
     const budget = { compares: MAX_COMPARES_PER_TICK };
     const written: string[] = [];
@@ -299,10 +302,28 @@ export class GitHubWatcher {
   // Polling
   // -------------------------------------------------------------------------------------------------
 
+  /**
+   * The repositories with a linked PR nobody has asked GitHub about yet, and those PRs: a repository is
+   * polled at once rather than when its cadence next comes round, so a PR linked after it merged moves its
+   * card within one tick. Each PR gets that one early look, whatever GitHub answers.
+   */
+  private freshRepositories(watched: readonly BoardTask[]): ReadonlyMap<string, readonly string[]> {
+    const fresh = new Map<string, string[]>();
+    for (const card of watched) {
+      for (const pr of card.links.prs) {
+        const key = prKey(pr.repo, pr.number);
+        if (pr.state !== 'unknown' || this.looked.has(key)) continue;
+        fresh.set(repoKey(pr.repo), [...(fresh.get(repoKey(pr.repo)) ?? []), key]);
+      }
+    }
+    return fresh;
+  }
+
   /** Polls the repositories that are due, at most {@link MAX_REPOSITORIES_PER_TICK} of them, longest-waiting first. */
   private async poll(
     polls: ReadonlyMap<string, RepositoryPoll>,
     nowMs: number,
+    fresh: ReadonlyMap<string, readonly string[]>,
   ): Promise<{ answers: Map<string, RepositoryAnswer>; reachable: boolean; polled: string[] }> {
     const answers = new Map<string, RepositoryAnswer>();
     const polled: string[] = [];
@@ -310,13 +331,14 @@ export class GitHubWatcher {
     const due = [...polls]
       .flatMap(([key, poll]) => {
         const args = pollArguments(poll);
-        return args === null || (this.due.get(key) ?? 0) > nowMs ? [] : [{ key, poll, args }];
+        return args === null || ((this.due.get(key) ?? 0) > nowMs && !fresh.has(key)) ? [] : [{ key, poll, args }];
       })
       .toSorted((left, right) => (this.due.get(left.key) ?? 0) - (this.due.get(right.key) ?? 0))
       .slice(0, MAX_REPOSITORIES_PER_TICK);
     for (const { key, poll, args } of due) {
       if (this.stopped) break;
       const outcome = await this.ports.gh.run(args);
+      for (const asked of fresh.get(key) ?? []) this.looked.add(asked);
       if (this.unreachable(outcome)) {
         for (const pending of polls.keys()) this.due.set(pending, nowMs + pollDelay(false, this.ports.clock.random()));
         return { answers, reachable: false, polled };
