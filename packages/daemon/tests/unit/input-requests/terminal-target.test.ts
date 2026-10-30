@@ -23,7 +23,7 @@ interface World {
   display: TmuxCommandResult | undefined;
   capture: TmuxCommandResult;
   write: TmuxCommandResult;
-  enter: TmuxCommandResult;
+  throwOnSend: boolean;
   ps: string | undefined;
   echo: 'off' | 'on' | 'unknown';
   located: boolean;
@@ -36,7 +36,7 @@ const world = (): World => ({
   display: undefined,
   capture: ok('[sudo] password for kirin:                       \n'),
   write: ok(''),
-  enter: ok(''),
+  throwOnSend: false,
   ps: PS,
   echo: 'off',
   located: true,
@@ -51,7 +51,10 @@ function target(w: World): TmuxInputTarget {
       if (args[0] === 'display-message')
         return w.display ?? ok(args.at(-1)?.includes('pane_tty') ? `${w.proof}\t/dev/pts/9\t7\n` : `${w.proof}\n`);
       if (args[0] === 'capture-pane') return w.capture;
-      if (args[0] === 'send-keys') return args.includes('-H') ? w.write : w.enter;
+      if (args[0] === 'send-keys') {
+        if (w.throwOnSend) throw new Error('socket closed');
+        return w.write;
+      }
       return failed;
     },
   };
@@ -202,32 +205,34 @@ describe('parsing the foreground of a terminal', () => {
 });
 
 describe('typing into a terminal an input request aims at', () => {
-  it('should write the value as ONE hex send-keys, never as argv text, then Enter', async () => {
+  it('should write value and Enter as ONE hex send-keys, never as argv text', async () => {
     const w = world();
     const expected = await observed(w);
     w.calls.length = 0;
 
     const result = await target(w).type('s1', dev, SECRET, true, expected);
 
-    const bytes = [...new TextEncoder().encode(SECRET)].map(b => b.toString(16).padStart(2, '0'));
+    const bytes = [...new TextEncoder().encode(SECRET), 0x0d].map(b => b.toString(16).padStart(2, '0'));
+    const sends = w.calls.filter(call => call[0] === 'send-keys');
     should(result).equal('typed');
-    should(w.calls.at(-2)).deepEqual(['send-keys', '-H', '-t', PANE, ...bytes]);
-    should(w.calls.at(-1)).deepEqual(['send-keys', '-t', PANE, 'Enter']);
+    should(sends).deepEqual([['send-keys', '-H', '-t', '%3', ...bytes]]);
     should(w.calls.flat().filter(arg => arg.includes(SECRET))).deepEqual([]);
   });
 
-  it('should write a long value in a single call', async () => {
+  it('should write a long value in a single call and no Enter when not submitting', async () => {
     const w = world();
     const expected = await observed(w);
     w.calls.length = 0;
 
     await target(w).type('s1', dev, 'p'.repeat(1_000), false, expected);
 
-    should(w.calls.filter(call => call.includes('-H'))).have.length(1);
-    should(w.calls.some(call => call.includes('Enter'))).be.false();
+    const sends = w.calls.filter(call => call[0] === 'send-keys');
+    should(sends).have.length(1);
+    should(sends[0]).have.length(4 + 1_000);
+    should(sends[0]?.includes('0d')).be.false();
   });
 
-  it('should write nothing when the pane is no longer the one the card showed', async () => {
+  it('should write nothing when the pane, its process or its creation time changed', async () => {
     const base = world();
     const expected = await observed(base);
     const pane = world();
@@ -236,6 +241,30 @@ describe('typing into a terminal an input request aims at', () => {
     pid.proof = '%3|4243|0|1700000000';
     const created = world();
     created.proof = '%3|4242|0|1700000001';
+
+    for (const w of [pane, pid, created]) {
+      should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
+      should(w.calls.some(call => call[0] === 'send-keys')).be.false();
+    }
+  });
+
+  it('should write nothing when the foreground program, echo state or prompt changed after the card', async () => {
+    const expected = await observed(world());
+    const foreground = world();
+    foreground.ps = ' 4400  4400  4400 ssh ssh evil\n';
+    const echo = world();
+    echo.echo = 'on';
+    const prompt = world();
+    prompt.capture = ok('Username: \n');
+
+    for (const w of [foreground, echo, prompt]) {
+      should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
+      should(w.calls.some(call => call[0] === 'send-keys')).be.false();
+    }
+  });
+
+  it('should write nothing when the pane is dead, unreadable or the terminal is gone', async () => {
+    const expected = await observed(world());
     const dead = world();
     dead.proof = '%3||1|1700000000';
     const unreadable = world();
@@ -243,7 +272,7 @@ describe('typing into a terminal an input request aims at', () => {
     const missing = world();
     missing.located = false;
 
-    for (const w of [pane, pid, created, dead, unreadable, missing]) {
+    for (const w of [dead, unreadable, missing]) {
       should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_gone');
       should(w.calls.some(call => call[0] === 'send-keys')).be.false();
     }
@@ -260,14 +289,15 @@ describe('typing into a terminal an input request aims at', () => {
     should(await target(w).type('s1', dev, SECRET, true, browserFacts)).equal('target_gone');
   });
 
-  it('should report the target gone when a write or the Enter fails', async () => {
+  it('should report an uncertain write when the send fails or throws, and never retry', async () => {
     const expected = await observed(world());
     const writeFails = world();
     writeFails.write = failed;
-    const enterFails = world();
-    enterFails.enter = failed;
+    const throws = world();
+    throws.throwOnSend = true;
 
-    should(await target(writeFails).type('s1', dev, SECRET, true, expected)).equal('target_gone');
-    should(await target(enterFails).type('s1', dev, SECRET, true, expected)).equal('target_gone');
+    should(await target(writeFails).type('s1', dev, SECRET, true, expected)).equal('uncertain');
+    should(writeFails.calls.filter(call => call[0] === 'send-keys')).have.length(1);
+    should(await target(throws).type('s1', dev, SECRET, true, expected)).equal('uncertain');
   });
 });

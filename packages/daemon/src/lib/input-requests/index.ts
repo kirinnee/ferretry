@@ -6,3 +6,5 @@ export * from './ports.ts';
 export * from './service.ts';
 export * from './terminal-modes.ts';
 export * from './terminal-target.ts';
+export * from './ephemeral-redactor.ts';
+export * from './session-lock.ts';

@@ -75,16 +75,29 @@ press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
 
 - **Raise**: only an agent, through `/v1/agent/tools`, on a surface it opened or was handed.
 - **Answer or cancel**: the owner only. The route refuses an agent caller (`peer:`, `warden:`) before
-  it reads the body, and the service refuses again unless the actor is `admin-cli`, `admin-ui` or a
+  it reads the body, and the service refuses again **before anything else** (`cancel` included: an
+  agent's cancel is forbidden and has no side effects) unless the actor is `admin-cli`, `admin-ui` or a
   paired device. A remote device follows the owner's "ask again for each change" setting; there is no
   separate passkey act.
-- **Retries never type twice.** Each Send carries a `deliveryId`; the daemon remembers its outcome (no
-  value) for the request's life. A second id after delivery is 409 `already_delivered`.
-- **Re-observe before inject.** Deliver compares the target with the facts the owner was shown
-  (`observedDigest`). Any difference is 409 `target_changed` and nothing is written. Three failed
-  checks end the request.
-- **One write.** A terminal delivery is one hex `send-keys -H` write of the value, plus `\r` when the
-  owner wants Enter pressed (on by default for a terminal secret, off for a browser).
+- **Retries never type twice.** Each Send carries a `deliveryId`. The daemon journals
+  `surface.input_delivering` (the id and the fact that a write is about to start, never a value)
+  **before** it writes, and fails closed if it cannot. A daemon that restarts with a delivery started
+  and not finished restores the request as **interrupted**, never pending, and never retries it. A
+  second id after delivery is 409 `already_delivered`.
+- **Re-observe at the write.** Deliver compares the target with the facts the owner was shown
+  (`observedDigest`, a keyed HMAC whose key lives only in this daemon process). The pane, the
+  foreground program, the echo state and the prompt line are checked again **at the injection
+  boundary**, immediately before the write, not only earlier in the handler. Any difference is 409
+  `target_changed` (or `target_gone`) and nothing is written. Three failed checks end the request.
+- **One write, never repeated.** A terminal delivery is **one** hex `send-keys -H` call carrying the
+  value and, when the owner wants Enter pressed, the `\r` in the same call (on by default for a
+  terminal secret, off for a browser). If that call fails or throws, the outcome is _uncertain_: the
+  value may or may not have been typed. That is a terminal `interrupted` outcome. It is never
+  retried, whatever `deliveryId` the next Send carries.
+- **Serialised per session.** Raising a request, an agent's own `terminal.send`/`close`, a delivery
+  and a card closing take one lock per session, so an agent send cannot complete after a request is
+  raised on its pane, and two raises on one target cannot both be admitted. Admission reserves the
+  surface and the pending-request capacity under that lock.
 - **Limits**: 3 pending requests and 20 raises an hour per session; 30 remote deliveries an hour per
   daemon.
 
@@ -107,6 +120,22 @@ The daemon holds each delivered value in RAM, for the window above, and masks it
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,
 and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 
+- **The same text is scrubbed everywhere.** The ephemeral window and the vault's `SecretRedactor` are
+  composed into one redactor (`EphemeralAwareRedactor`), and the operator's list and read routes go
+  through it, so an owner read never shows what an agent read hides.
+- **`terminal.wait` tests scrubbed text.** Its predicate runs on the redacted screen, so waiting for a
+  prefix of the value never reveals whether the screen holds it.
+- **The operator's list is a projection.** A request's `promptLine` and foreground `argv` are scrubbed
+  before they leave, and nothing that is a digest of a value is returned.
+- **Digests are keyed.** `observedDigest` and the prompt-line digest are HMACs under a per-process key,
+  so a leaked digest cannot be used to test guesses against a low-entropy prompt line.
+- **Values are really dropped.** Each purge replaces the stored array with only the unexpired entries.
+  A clock-driven sweep purges every session, not only the one that was just read, and a session that
+  ends drops its values at once. Neither depends on someone reading the window.
+- **An input card takes no free text.** Resolving or dismissing an `input` card from a human actor
+  ignores any note, and the app clears the composer draft for it, because a note is the one place a
+  value could be pasted into the ledger by mistake.
+
 ## Honest limits
 
 - **Not a sandbox.** An agent running as the owner's user that builds a capture program and talks the
@@ -119,6 +148,9 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 - **A browser `private` code can appear in an after-screenshot** (a later phase).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.
+- **An uncertain write is not a retry.** If the single write fails or throws the owner is told the
+  value may have been typed, and must raise a new request. Typing it again could put the password in
+  the wrong place twice.
 - **The value is briefly visible to `ps`.** Delivery is one `tmux send-keys -H` call, so the value's hex
   is in that process's arguments for the instant it runs. It is the same limit the terminal's own
   keystroke write has today.

@@ -31,7 +31,7 @@ import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence } from '../../lib/agenda-inbox.ts';
-import { withComposerNote } from '../../lib/agenda-reply.ts';
+import { composerNoteFor, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -229,8 +229,9 @@ export const useAgenda = ({
     });
   }, []);
 
-  const act = (item: AgendaItem, action: InboxAction, note: string): void => {
+  const act = (item: AgendaItem, action: InboxAction, composer: string): void => {
     if (client === undefined || busy.get(item.id) === null) return;
+    const note = composerNoteFor(item, composer);
     const sent = withComposerNote(action, note);
     setCard(item.id, null);
     setAnnouncement('');

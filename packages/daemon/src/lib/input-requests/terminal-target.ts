@@ -1,8 +1,8 @@
 import type { InputForeground, InputTarget, InputTargetFacts } from '@ferretry/protocol';
 import { hexInputChunks, terminalPaneTarget } from '../terminal/runtime-policy.ts';
 import type { TmuxCommandPort } from '../tmux/contracts.ts';
-import { PANE_PROOF_FORMAT, parsePaneSighting, provePane } from '../tmux/pane-proof.ts';
-import { digestLine } from './digest.ts';
+import { PANE_PROOF_FORMAT, parsePaneSighting } from '../tmux/pane-proof.ts';
+import { digestFacts, digestLine } from './digest.ts';
 import type { InputTargetPort, ObserveResult, TypeResult } from './ports.ts';
 import { recognisedConsumer } from './recognised.ts';
 import type { ProgramRunner, TerminalModes } from './terminal-modes.ts';
@@ -15,6 +15,8 @@ export interface TerminalLocator {
 const TTY_PATH = /^\/dev\/[A-Za-z0-9._/-]+$/u;
 const CONTROL = /[\p{Cc}\p{Cf}]/gu;
 const ROW = /^\s*(\d+)\s+(\d+)\s+(-?\d+)\s+(\S+)\s*(.*)$/u;
+
+const CARRIAGE_RETURN = 0x0d;
 
 const plain = (text: string, limit: number): string => text.replaceAll(CONTROL, '').slice(0, limit);
 
@@ -43,8 +45,12 @@ export function parseForeground(output: string): InputForeground | undefined {
 
 /**
  * LOOKS AT, AND TYPES INTO, A TMUX TERMINAL. Every fact is read from tmux and the kernel; nothing the agent
- * wrote is used. `type` writes only into the pane the card showed: its fresh proof must match, or nothing is
- * written. The value goes to tmux as hex bytes in one `send-keys -H`, never as typed text.
+ * wrote is used. `type` looks at the terminal again, in full, and writes only if every fact (the pane, the
+ * foreground program, echo, the prompt line, the cursor) still digests to what the card showed; otherwise
+ * nothing is written. The value goes to tmux as hex bytes in ONE `send-keys -H` aimed at the pane id the
+ * facts were read from, with Enter as a trailing carriage return in the same command: there is no second
+ * command to fail between the value and Enter, so a write that did not complete cleanly is `uncertain`
+ * (the value may be sitting in a hidden buffer) and is never retried.
  */
 export class TmuxInputTarget implements InputTargetPort {
   constructor(
@@ -56,7 +62,11 @@ export class TmuxInputTarget implements InputTargetPort {
 
   async observe(sessionId: string, target: InputTarget): Promise<ObserveResult> {
     if (target.kind !== 'terminal') return { ok: false, reason: 'unsupported' };
-    const located = await this.terminals.locate(sessionId, target.key);
+    return await this.look(sessionId, target.key);
+  }
+
+  private async look(sessionId: string, key: string): Promise<ObserveResult> {
+    const located = await this.terminals.locate(sessionId, key);
     if (located === undefined) return { ok: false, reason: 'target_gone' };
     const pane = terminalPaneTarget(located);
     const described = await this.tmux.execute([
@@ -113,23 +123,17 @@ export class TmuxInputTarget implements InputTargetPort {
     expected: InputTargetFacts,
   ): Promise<TypeResult> {
     if (target.kind !== 'terminal' || expected.kind !== 'terminal') return 'target_gone';
-    const located = await this.terminals.locate(sessionId, target.key);
-    if (located === undefined) return 'target_gone';
-    const pane = terminalPaneTarget(located);
-    const seen = await this.tmux.execute(['display-message', '-p', '-t', pane, PANE_PROOF_FORMAT]);
-    const sighting = seen.code === 0 ? parsePaneSighting(seen.stdout) : undefined;
-    if (sighting === undefined || sighting.dead || provePane(sighting, expected.paneProof) !== 'proven') {
-      return 'target_gone';
-    }
+    const fresh = await this.look(sessionId, target.key);
+    if (!fresh.ok || fresh.facts.kind !== 'terminal') return 'target_gone';
+    if (digestFacts(fresh.facts) !== digestFacts(expected)) return 'target_changed';
     const bytes = new TextEncoder().encode(text);
-    for (const chunk of hexInputChunks(bytes, Math.max(1, bytes.byteLength))) {
-      const written = await this.tmux.execute(['send-keys', '-H', '-t', pane, ...chunk]);
-      if (written.code !== 0) return 'target_gone';
+    const keys = submit ? new Uint8Array([...bytes, CARRIAGE_RETURN]) : bytes;
+    const [chunk = []] = hexInputChunks(keys, keys.byteLength);
+    try {
+      const written = await this.tmux.execute(['send-keys', '-H', '-t', fresh.facts.paneProof.paneId, ...chunk]);
+      return written.code === 0 ? 'typed' : 'uncertain';
+    } catch {
+      return 'uncertain';
     }
-    if (submit) {
-      const entered = await this.tmux.execute(['send-keys', '-t', pane, 'Enter']);
-      if (entered.code !== 0) return 'target_gone';
-    }
-    return 'typed';
   }
 }

@@ -30,3 +30,10 @@ export const withReferences = (text: string, ids: readonly AgendaItem['id'][]): 
   const missing = [...new Set(ids)].filter(id => !new RegExp(`(?:^|\\s)!${id}(?=$|[\\s.,;:!?)])`, 'u').test(text));
   return missing.length === 0 ? text : `${missing.map(id => `!${id}`).join(' ')} ${text}`;
 };
+
+/**
+ * What the composer may add to an action on an item. An input card's owner may have a password in the composer
+ * (the input form sits next to it), so nothing from the composer rides on Resolve or Dismiss for that kind.
+ */
+export const composerNoteFor = (item: Pick<AgendaItem, 'kind'>, composer: string): string =>
+  item.kind === 'input' ? '' : composer;

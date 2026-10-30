@@ -262,20 +262,23 @@ export class AgentToolService {
     const { sessionId } = caller;
     const reference = surfaceReference(surface.surface, surface.name ?? surface.id);
     switch (call.tool) {
-      case 'terminal.send': {
-        const pending = this.ports.input?.pendingOn(sessionId, { kind: 'terminal', key: surface.name ?? surface.id });
-        if (pending !== undefined)
-          throw new AgentToolError(
-            'conflict',
-            `an input request is pending on ${reference}; wait for !${pending} (input.wait) and do not type there yourself`,
-          );
-        await this.ports.terminals.write(sessionId, surface.id, terminalInput(call.text, call.keys));
-        const parts = [
-          ...(call.text === undefined ? [] : [plural(call.text.length, 'character')]),
-          ...(call.keys === undefined ? [] : [plural(call.keys.length, 'key')]),
-        ];
-        return { summary: `Sent ${parts.join(' and ')} to ${reference}.` };
-      }
+      case 'terminal.send':
+        // The check and the keystrokes are one turn in the session: a request cannot be raised on this
+        // pane between them, and the secure write cannot land in the middle of them.
+        return await this.exclusively(sessionId, async () => {
+          const pending = this.ports.input?.pendingOn(sessionId, { kind: 'terminal', key: surface.name ?? surface.id });
+          if (pending !== undefined)
+            throw new AgentToolError(
+              'conflict',
+              `an input request is pending on ${reference}; wait for !${pending} (input.wait) and do not type there yourself`,
+            );
+          await this.ports.terminals.write(sessionId, surface.id, terminalInput(call.text, call.keys));
+          const parts = [
+            ...(call.text === undefined ? [] : [plural(call.text.length, 'character')]),
+            ...(call.keys === undefined ? [] : [plural(call.keys.length, 'key')]),
+          ];
+          return { summary: `Sent ${parts.join(' and ')} to ${reference}.` };
+        });
       case 'terminal.read': {
         const lines = call.lines ?? AGENT_TOOL_DEFAULT_READ_LINES;
         const output = clipOutput(
@@ -314,9 +317,11 @@ export class AgentToolService {
           summary: `Asked the owner to take over ${reference}${call.message === undefined ? '' : ' and told them what to do'}. Wait for them: read the surface to see when they are done.`,
         };
       case 'terminal.close':
-        await this.ports.terminals.close(sessionId, surface.id);
-        this.ports.control.forget(sessionId, surface);
-        return { summary: `Closed ${reference}.` };
+        return await this.exclusively(sessionId, async () => {
+          await this.ports.terminals.close(sessionId, surface.id);
+          this.ports.control.forget(sessionId, surface);
+          return { summary: `Closed ${reference}.` };
+        });
       case 'browser.close':
         await this.ports.browser.closePage(sessionId, surface.id, this.browserGuard(caller, surface));
         this.ports.control.forget(sessionId, surface);
@@ -398,10 +403,15 @@ export class AgentToolService {
     for (;;) {
       await this.ports.sleep(AGENT_TOOL_POLL_MS);
       if (caller.kind === 'agent') await this.assertFree(sessionId, surface);
+      // The predicate sees what the agent may see: a value the daemon just typed is masked BEFORE the match,
+      // so neither "matched" nor "not matched" can tell the agent whether a guess is in the hidden text.
       const matched =
         call.text === undefined
           ? await this.ended(sessionId, surface)
-          : (await this.ports.terminals.text(sessionId, surface.id, WAIT_SEARCH_LINES)).includes(call.text);
+          : this.scrubbed(
+              sessionId,
+              await this.ports.terminals.text(sessionId, surface.id, WAIT_SEARCH_LINES),
+            ).includes(call.text);
       if (matched === 'closed') return { summary: `${reference} closed while waiting.`, matched: true };
       if (matched) {
         const what = call.text === undefined ? 'The command ended' : 'The text appeared';
@@ -410,6 +420,11 @@ export class AgentToolService {
       if (this.ports.clock.now() >= deadline)
         return { summary: `Still waiting on ${reference}: the wait timed out.`, matched: false, output: await tail() };
     }
+  }
+
+  /** Runs `work` as one turn in the session when input requests are wired; just runs it where they are not. */
+  private async exclusively<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    return this.ports.input === undefined ? await work() : await this.ports.input.exclusive(sessionId, work);
   }
 
   /** Screen text with the values the daemon just typed masked; text unchanged where no mask is wired. */

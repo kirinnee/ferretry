@@ -169,8 +169,13 @@ describe('the events and the audit detail', () => {
   it('should publish one journal event per move, by the closed list of types', () => {
     should(InputEventSchema.safeParse(EVENT).success).be.true();
     should(InputEventSchema.safeParse({ ...EVENT, type: 'surface.input_typed' }).success).be.false();
+    should(
+      InputEventSchema.safeParse({ ...EVENT, type: 'surface.input_delivering', deliveryId: DELIVERY }).success,
+    ).be.true();
+    should(InputEventSchema.safeParse({ ...EVENT, deliveryId: 'not a delivery id' }).success).be.false();
     should(Object.values(INPUT_JOURNAL_EVENT_TYPES)).deepEqual([
       'surface.input_requested',
+      'surface.input_delivering',
       'surface.input_delivered',
       'surface.input_refused',
       'surface.input_expired',

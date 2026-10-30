@@ -76,4 +76,6 @@ export interface AgentInputPort {
   agentView(sessionId: string, id: AgendaId, waitMs: number): Promise<InputAgentView>;
   /** The card of a request pending on this surface, if any. */
   pendingOn(sessionId: string, target: { readonly kind: SurfaceKind; readonly key: string }): AgendaId | undefined;
+  /** Runs `work` as one turn in the session, so a send or close and a raise or secure write never interleave. */
+  exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T>;
 }

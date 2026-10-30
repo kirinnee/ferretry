@@ -332,6 +332,8 @@ export const INPUT_ERROR_CODES = {
 /** The session-journal events a request is published as; the payload is {@link InputEventSchema}. */
 export const INPUT_JOURNAL_EVENT_TYPES = {
   requested: 'surface.input_requested',
+  /** Written BEFORE the one write, so a restart knows a value may have been typed and never types it again. */
+  delivering: 'surface.input_delivering',
   delivered: 'surface.input_delivered',
   refused: 'surface.input_refused',
   expired: 'surface.input_expired',
@@ -339,6 +341,7 @@ export const INPUT_JOURNAL_EVENT_TYPES = {
 } as const;
 export const InputJournalEventTypeSchema = z.enum([
   INPUT_JOURNAL_EVENT_TYPES.requested,
+  INPUT_JOURNAL_EVENT_TYPES.delivering,
   INPUT_JOURNAL_EVENT_TYPES.delivered,
   INPUT_JOURNAL_EVENT_TYPES.refused,
   INPUT_JOURNAL_EVENT_TYPES.expired,
@@ -361,6 +364,8 @@ export const InputEventSchema = z.strictObject({
   /** Who presses Enter, so a restart can rebuild a pending request. */
   submit: InputSubmitModeSchema.optional(),
   state: InputRequestStateSchema,
+  /** The attempt a `delivering` event starts: an id, never the value. */
+  deliveryId: InputDeliveryIdSchema.optional(),
   submitted: z.boolean().optional(),
   source: z.enum(['typed', 'saved']).optional(),
   reason: InputReasonSchema.optional(),

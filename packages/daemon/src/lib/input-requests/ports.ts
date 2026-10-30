@@ -19,15 +19,21 @@ export type ObserveResult =
   | { readonly ok: true; readonly facts: InputTargetFacts }
   | { readonly ok: false; readonly reason: 'target_gone' | 'unsupported' };
 
-export type TypeResult = 'typed' | 'target_gone';
+/**
+ * What came of the one write. `target_gone` and `target_changed` mean NOTHING was written. `uncertain` means the
+ * write was attempted and did not complete cleanly: the value may be in the terminal, so the request ends and
+ * is never retried.
+ */
+export type TypeResult = 'typed' | 'target_gone' | 'target_changed' | 'uncertain';
 
 /** Looks at, and types into, the surface a request names. The daemon observes; the agent never states a fact. */
 export interface InputTargetPort {
   /** What is at the target right now. A terminal answers pane proof, foreground program, echo and the cursor row. */
   observe(sessionId: string, target: InputTarget): Promise<ObserveResult>;
   /**
-   * ONE write of `text`, then Enter when `submit`. `expected` is what the card showed: an adapter that finds
-   * its pane is not `expected.paneProof` writes nothing and answers `target_gone`.
+   * ONE write of `text` with Enter appended when `submit`, in a single command. `expected` is what the card
+   * showed: an adapter that finds anything about the target different (the pane, the foreground program, echo,
+   * the prompt) writes nothing and answers `target_changed`, or `target_gone` when it cannot find it.
    */
   type(
     sessionId: string,
@@ -99,9 +105,10 @@ export interface InputTrustedPrograms {
   trust(comm: string): void;
 }
 
-/** Sessions that exist now; a request for a session that is gone is dropped on restore. */
+/** Sessions that exist now. */
 export interface InputSessionDirectory {
-  has(sessionId: string): Promise<boolean>;
+  /** The session is gone or has finished (completed, failed or stopped): nothing it was given is held for it any more. */
+  ended(sessionId: string): Promise<boolean>;
   /** Every session with a journal, for restore. */
   all(): Promise<readonly string[]>;
 }

@@ -26,6 +26,11 @@ class FakeInput implements AgentInputPort {
   pendingOn(_sessionId: string, target: { readonly kind: string; readonly key: string }): AgendaId | undefined {
     return this.pending.get(`${target.kind}:${target.key}`);
   }
+  readonly turns: string[] = [];
+  async exclusive<T>(sessionId: string, work: () => Promise<T>): Promise<T> {
+    this.turns.push(sessionId);
+    return await work();
+  }
 }
 
 const refusal = async (work: Promise<unknown>): Promise<AgentToolError> => {
@@ -331,5 +336,71 @@ describe('AgentToolService — scrubbing what an agent reads', () => {
 
     // Assert
     should(page.output).equal('••• back');
+  });
+});
+
+describe('AgentToolService — what terminal.wait can learn about a typed value', () => {
+  const mask = (_sessionId: string, text: string): string => text.replaceAll('hunter2', '••••');
+
+  it('should never match a guess against the hidden value: the predicate sees scrubbed text', async () => {
+    // Arrange
+    const world = agentToolWorld({ scrub: mask });
+    await world.service.call(agent, { tool: 'terminal.open', name: 'dev' });
+    world.terminals.screens.set('000000000001', 'password: hunter2\n');
+
+    // Act
+    const guess = await world.service.call(agent, {
+      tool: 'terminal.wait',
+      name: 'dev',
+      text: 'hunter2',
+      timeoutMs: 100,
+    });
+    const prefix = await world.service.call(agent, {
+      tool: 'terminal.wait',
+      name: 'dev',
+      text: 'hunt',
+      timeoutMs: 100,
+    });
+    const visible = await world.service.call(agent, {
+      tool: 'terminal.wait',
+      name: 'dev',
+      text: '••••',
+      timeoutMs: 100,
+    });
+
+    // Assert
+    should(guess.matched).be.false();
+    should(prefix.matched).be.false();
+    should(visible.matched).be.true();
+    should(JSON.stringify([guess, prefix, visible])).not.containEql('hunter2');
+  });
+});
+
+describe('AgentToolService — keystrokes and closing are turns in the session', () => {
+  it('should run terminal.send and terminal.close through the session’s exclusive turn', async () => {
+    // Arrange
+    const input = new FakeInput();
+    const world = await worldWith(input);
+
+    // Act
+    await world.service.call(agent, { tool: 'terminal.send', name: 'dev', text: 'ls' });
+    await world.service.call(agent, { tool: 'terminal.close', name: 'dev' });
+
+    // Assert
+    should(input.turns).eql(['s1', 's1']);
+  });
+
+  it('should not let a send land while a turn holds the session, and refuse it at once when a request is pending', async () => {
+    // Arrange
+    const input = new FakeInput();
+    const world = await worldWith(input);
+    input.pending.set('terminal:dev', 'A7');
+
+    // Act
+    const blocked = await refusal(world.service.call(agent, { tool: 'terminal.send', name: 'dev', text: 'x' }));
+
+    // Assert
+    should(blocked.code).equal('conflict');
+    should(world.terminals.typed.size).equal(0);
   });
 });

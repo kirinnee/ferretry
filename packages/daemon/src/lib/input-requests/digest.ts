@@ -1,5 +1,14 @@
-import { createHash } from 'node:crypto';
+import { createHmac, randomBytes } from 'node:crypto';
 import type { InputTargetFacts } from '@ferretry/protocol';
+
+/**
+ * KEYED, NOT PLAIN. A digest of a prompt line is shown to the owner's client and compared on Send; had it been
+ * a bare sha-256, anyone who could read it could test guesses against a line that echoed a value. The key is
+ * random per process and never leaves it, so a digest is only ever compared, never reproduced elsewhere.
+ */
+const KEY = randomBytes(32);
+
+const keyed = (text: string): string => createHmac('sha256', KEY).update(text).digest('hex');
 
 function sorted(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(sorted);
@@ -13,14 +22,12 @@ function sorted(value: unknown): unknown {
   return value;
 }
 
-/** sha-256 (lowercase hex) of the facts with every object's keys sorted: any changed fact changes the digest. */
+/** Keyed sha-256 (lowercase hex) of the facts with every object's keys sorted: any changed fact changes the digest. */
 export function digestFacts(facts: InputTargetFacts): string {
-  return createHash('sha256')
-    .update(JSON.stringify(sorted(facts)))
-    .digest('hex');
+  return keyed(JSON.stringify(sorted(facts)));
 }
 
-/** sha-256 (lowercase hex) of one line of text. */
+/** Keyed sha-256 (lowercase hex) of one line of text. */
 export function digestLine(line: string): string {
-  return createHash('sha256').update(line).digest('hex');
+  return keyed(line);
 }

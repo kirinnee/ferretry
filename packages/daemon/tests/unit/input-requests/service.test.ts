@@ -66,6 +66,10 @@ interface World {
   nextId: number;
   gate: Promise<void> | undefined;
   observeGate: Promise<void> | undefined;
+  failJournal: string | undefined;
+  typeThrows: boolean;
+  order: string[];
+  closeThrows: boolean;
 }
 
 function build(overrides: Partial<World> = {}) {
@@ -91,6 +95,10 @@ function build(overrides: Partial<World> = {}) {
     nextId: 1,
     gate: undefined,
     observeGate: undefined,
+    failJournal: undefined,
+    typeThrows: false,
+    order: [],
+    closeThrows: false,
     ...overrides,
   };
   const clock = { now: () => w.now };
@@ -103,8 +111,10 @@ function build(overrides: Partial<World> = {}) {
         return w.facts === undefined ? { ok: false, reason: w.observeReason } : { ok: true, facts: w.facts };
       },
       type: async (_session, _target, text, submit) => {
+        w.order.push('write');
         w.writes.push({ text, submit });
         await w.gate;
+        if (w.typeThrows) throw new Error('tmux went away');
         return w.typeResult;
       },
     },
@@ -119,7 +129,11 @@ function build(overrides: Partial<World> = {}) {
     },
     notifier: { tell: async (_session, id, message) => void w.told.push({ id, message }) },
     journal: {
-      publish: async (_session, event) => void w.events.push(event),
+      publish: async (_session, event) => {
+        if (w.failJournal === event.type) throw new Error('the journal is full');
+        w.order.push(event.type);
+        w.events.push(event);
+      },
       history: async () => w.history,
     },
     audit: { record: async entry => void w.audits.push(entry) },
@@ -130,8 +144,9 @@ function build(overrides: Partial<World> = {}) {
       isTrusted: comm => w.trusted.has(comm),
       trust: comm => void w.trusted.add(comm),
     },
-    sessions: { has: async id => w.sessions.includes(id), all: async () => w.sessions },
+    sessions: { ended: async id => !w.sessions.includes(id), all: async () => w.sessions },
     values,
+    redact: async text => values.scrubAll(text),
   });
   return { w, service, values };
 }
@@ -241,7 +256,7 @@ describe('InputRequestService.raise', () => {
     const { w, service } = build();
     for (let n = 0; n < 20; n += 1) {
       const view = await service.raise(SESSION, RAISE);
-      await service.cancel(SESSION, (await findId(service, view.id)) ?? '', AGENT);
+      await service.cancel(SESSION, (await findId(service, view.id)) ?? '', HOST);
     }
     const error = await refused(service.raise(SESSION, RAISE));
     w.now += 3_600_001;
@@ -541,12 +556,20 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     should(again.code).equal('gone');
   });
 
-  it('should let the raising agent withdraw without telling itself', async () => {
+  it('should refuse the raising agent’s cancel before anything is read or changed', async () => {
     const { w, service, id } = await raised();
-    await service.cancel(SESSION, id, AGENT);
+    const events = w.events.length;
+    const audits = w.audits.length;
+    const error = await refused(service.cancel(SESSION, id, AGENT));
+    const missing = await refused(service.cancel(SESSION, 'e'.repeat(32), AGENT));
 
+    should(error.code).equal('forbidden');
+    should(missing.code).equal('forbidden');
     should(w.told.length).equal(0);
-    should(w.audits.at(-1)?.detail.reason).equal('agent_cancelled');
+    should(w.closed.length).equal(0);
+    should(w.events.length).equal(events);
+    should(w.audits.length).equal(audits);
+    should((await service.list(HOST)).length).equal(1);
   });
 
   it('should refuse another session’s agent and an unknown request', async () => {
@@ -701,5 +724,198 @@ describe('InputRequestService.cancel, expire, wait and restore', () => {
     await twice.service.restore();
     await twice.service.restore();
     should((await twice.service.list(HOST)).length).equal(1);
+  });
+});
+
+describe('review regressions: delivery is one recorded, serialised, never-repeated write', () => {
+  it('should record the delivery start durably BEFORE the write, then end uncertain and never type twice', async () => {
+    const { w, service, id, digest } = await raised({ typeResult: 'uncertain' });
+    const body = bodyFor(digest);
+    const first = await refused(service.deliver(SESSION, id, body, HOST));
+    const retry = await refused(service.deliver(SESSION, id, body, HOST));
+    const other = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+
+    should(first.code).equal('unavailable');
+    should(first.message).containEql('will not type it again');
+    should(retry).equal(first);
+    should(other.code).equal('gone');
+    should(w.writes.length).equal(1);
+    should(w.order).eql(['surface.input_requested', 'surface.input_delivering', 'write', 'surface.input_refused']);
+    should(w.events.find(event => event.type === 'surface.input_delivering')?.deliveryId).equal(body.deliveryId);
+    should(w.events.at(-1)?.reason).equal('interrupted');
+    should(w.told.at(-1)?.message).containEql('partly or fully typed');
+    should(w.closed.length).equal(1);
+    should((await service.list(HOST)).length).equal(0);
+  });
+
+  it('should treat a throwing write like an uncertain one', async () => {
+    const { w, service, id, digest } = await raised({ typeThrows: true });
+    const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+
+    should(error.code).equal('unavailable');
+    should(w.writes.length).equal(1);
+    should(w.events.at(-1)?.reason).equal('interrupted');
+  });
+
+  it('should type nothing, hold nothing and stay pending when the delivery start cannot be recorded', async () => {
+    const { w, service, values, id, digest } = await raised({ failJournal: 'surface.input_delivering' });
+    const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+
+    should(error.code).equal('unavailable');
+    should(error.message).containEql('nothing was typed');
+    should(w.writes.length).equal(0);
+    should(values.heldCount()).equal(0);
+    should((await service.list(HOST)).length).equal(1);
+    w.failJournal = undefined;
+    should((await service.deliver(SESSION, id, bodyFor(digest), HOST)).state).equal('delivered');
+  });
+
+  it('should ask nobody and keep nothing when the request cannot be recorded', async () => {
+    const { w, service } = build({ failJournal: 'surface.input_requested' });
+    const error = await refused(service.raise(SESSION, RAISE));
+
+    should(error.code).equal('unavailable');
+    should(w.closed.length).equal(1);
+    should((await service.list(HOST)).length).equal(0);
+    w.failJournal = undefined;
+    should((await service.raise(SESSION, RAISE)).state).equal('pending');
+  });
+
+  it('should end a restart-time delivering request as interrupted and type nothing', async () => {
+    const first = await raised();
+    await first.service.deliver(SESSION, first.id, bodyFor(first.digest), HOST);
+    const requested = first.w.events[0];
+    const delivering = first.w.events.find(event => event.type === 'surface.input_delivering');
+    if (requested === undefined || delivering === undefined) throw new Error('no events');
+
+    const second = build({ history: [requested, delivering] });
+    await second.service.restore();
+    const promptless = build({ history: [requested, delivering], prompt: undefined });
+    await promptless.service.restore();
+    const browser = build({ history: [requested, { ...delivering, target: { kind: 'browser', key: 'app' } }] });
+    await browser.service.restore();
+    const again = build({ history: [delivering] });
+    await again.service.restore();
+    await again.service.restore();
+
+    should(second.w.writes.length).equal(0);
+    should((await second.service.list(HOST)).length).equal(0);
+    should(second.w.events.at(-1)?.reason).equal('interrupted');
+    should(second.w.told.at(-1)?.message).containEql('partly or fully typed');
+    should(second.w.closed.length).equal(1);
+    should(promptless.w.closed.length).equal(1);
+    should(browser.w.closed.length).equal(0);
+    should(again.w.closed.length).equal(1);
+  });
+
+  it('should leave the request pending, and pending after a restart, when the target changed at the last moment', async () => {
+    const { w, service, id, digest } = await raised({ typeResult: 'target_changed' });
+    const error = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+    const restored = build({ history: [...w.events] });
+    await restored.service.restore();
+
+    should(error.reason).equal('target_changed');
+    should(w.events.at(-1)?.type).equal('surface.input_requested');
+    should((await service.list(HOST)).length).equal(1);
+    should((await restored.service.list(HOST)).length).equal(1);
+  });
+
+  it('should make a raise wait for an agent turn and a secure write wait for both', async () => {
+    const { w, service, id, digest } = await raised();
+    let release: () => void = () => undefined;
+    const turn = service.exclusive(SESSION, async () => await new Promise<void>(resolve => (release = resolve)));
+    const observes = w.observes;
+    const raise = service.raise(SESSION, { ...RAISE, target: { kind: 'terminal', key: 'other' } });
+    const deliver = service.deliver(SESSION, id, bodyFor(digest), HOST);
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    should(w.observes).equal(observes);
+    should(w.writes.length).equal(0);
+    release();
+    await turn;
+    await Promise.all([raise, deliver]);
+    should(w.writes.length).equal(1);
+    should(w.cards.length).equal(2);
+  });
+
+  it('should admit one of two simultaneous raises on the same terminal, and no more than the capacity overall', async () => {
+    const same = build();
+    const results = await Promise.allSettled([same.service.raise(SESSION, RAISE), same.service.raise(SESSION, RAISE)]);
+    const many = build();
+    const keys = ['a', 'b', 'c', 'd', 'e'];
+    const crowd = await Promise.allSettled(
+      keys.map(key => many.service.raise(SESSION, { ...RAISE, target: { kind: 'terminal', key } })),
+    );
+
+    should(results.filter(result => result.status === 'fulfilled')).have.length(1);
+    should(same.w.cards.length).equal(1);
+    should(crowd.filter(result => result.status === 'fulfilled')).have.length(3);
+    should(many.w.cards.length).equal(3);
+  });
+
+  it('should recompute nothing from the agent: a cancel by the owner still works', async () => {
+    const { w, service, id } = await raised();
+    const request = await service.cancel(SESSION, id, DEVICE);
+
+    should(request.state).equal('cancelled');
+    should(w.audits.at(-1)?.actor).eql({ kind: 'device', deviceId: 'phone-1' });
+  });
+});
+
+describe('review regressions: what the operator reads and how long values live', () => {
+  it('should mask a value the terminal echoed from the prompt line and the command line the owner reads', async () => {
+    const built = build();
+    built.values.hold(SESSION, 'leaked-LEAK', 'A9');
+    built.w.facts = {
+      ...FACTS,
+      promptLine: `Password: leaked-LEAK ${'x'.repeat(300)}`,
+      foreground: { ...FACTS.foreground, argv: 'sudo --pass leaked-LEAK' },
+    } as InputTargetFacts;
+    await built.service.raise(SESSION, RAISE);
+    const [request] = await built.service.list(HOST);
+    const terminal = request?.observed?.kind === 'terminal' ? request.observed : undefined;
+
+    should(JSON.stringify(request)).not.containEql('leaked-LEAK');
+    should(terminal?.promptLine.startsWith('Password: [redacted:input A9]')).be.true();
+    should(terminal?.promptLine.length).be.belowOrEqual(200);
+    should(terminal?.foreground.argv).equal('sudo --pass [redacted:input A9]');
+    should(request?.observedDigest).equal(digestFacts(built.w.facts));
+  });
+
+  it('should mask the owner-visible prompt and return the redacted request from a cancel', async () => {
+    const { w, service, values, id } = await raised();
+    values.hold(SESSION, 'sudo wants', 'A9');
+    const cancelled = await service.cancel(SESSION, id, HOST);
+
+    should(cancelled.prompt).containEql('[redacted:input A9]');
+    should(w.events.at(-1)?.type).equal('surface.input_cancelled');
+  });
+
+  it('should let go of a value when its window ends, even if nobody reads, and when the session ends', async () => {
+    const { w, service, values, id, digest } = await raised();
+    await service.deliver(SESSION, id, bodyFor(digest), HOST);
+    should(values.heldCount(SESSION)).equal(1);
+    w.now += 601_000;
+    await service.sweep();
+    should(values.heldCount()).equal(0);
+
+    const ended = await raised();
+    await ended.service.deliver(SESSION, ended.id, bodyFor(ended.digest), HOST);
+    ended.w.sessions.length = 0;
+    await ended.service.sweep();
+    should(ended.values.heldCount()).equal(0);
+  });
+
+  it('should end what a finished session left pending as interrupted without telling the gone agent', async () => {
+    const { w, service, values } = await raised();
+    values.hold(SESSION, 'v', 'A9');
+    await service.sessionEnded(SESSION);
+    await service.sessionEnded('someone-else');
+
+    should(values.heldCount()).equal(0);
+    should(w.events.at(-1)?.reason).equal('interrupted');
+    should(w.closed.length).equal(1);
+    should(w.told.length).equal(0);
+    should((await service.list(HOST)).length).equal(0);
   });
 });

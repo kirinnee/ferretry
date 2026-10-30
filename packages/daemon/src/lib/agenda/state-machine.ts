@@ -651,7 +651,11 @@ function addressById(
   // A structured ask may still be RESOLVED without its response: the owner can reply in words instead
   // of picking (the note carries them to the ferret), and the raising ferret closes its own item once
   // the matter settled some other way. An answer, when given, must still match the ask.
-  return addressed(ledger, target, command.actor, command.note ?? null, command.at, disposition, change, response);
+  //
+  // THE EXCEPTION IS AN INPUT CARD: the owner's field next to it may hold a password, and the app sends
+  // whatever is in the composer with Resolve or Dismiss. Only the daemon's own status words are kept.
+  const note = target.item.kind === 'input' && command.actor.kind !== 'daemon' ? null : (command.note ?? null);
+  return addressed(ledger, target, command.actor, note, command.at, disposition, change, response);
 }
 
 function resolveSource(ledger: AgendaLedger, command: ResolveSourceCommand): AgendaMutation {

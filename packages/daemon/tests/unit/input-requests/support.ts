@@ -29,6 +29,7 @@ export function inputRequestService(options: { readonly crash?: () => boolean } 
   let card = 1;
   let id = 1;
   const clock = { now: () => Date.parse('2026-10-30T12:00:00.000Z') };
+  const values = new EphemeralValues(clock);
   const service = new InputRequestService({
     target: {
       observe: async () => {
@@ -52,8 +53,9 @@ export function inputRequestService(options: { readonly crash?: () => boolean } 
     ids: { requestId: () => (id++).toString(16).padStart(32, '0') },
     timers: { after: async () => await new Promise<void>(() => undefined) },
     trusted: { isTrusted: () => false, trust: () => undefined },
-    sessions: { has: async candidate => candidate === SESSION, all: async () => [SESSION] },
-    values: new EphemeralValues(clock),
+    sessions: { ended: async candidate => candidate !== SESSION, all: async () => [SESSION] },
+    values,
+    redact: async text => values.scrubAll(text),
   });
   return { service, writes, events };
 }

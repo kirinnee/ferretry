@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, it } from 'bun:test';
 import type { InputTargetFacts } from '@ferretry/protocol';
 import should from 'should';
@@ -37,6 +38,11 @@ describe('digesting what the daemon saw at a target', () => {
     ];
 
     for (const other of changed) should(digestFacts(other)).not.equal(digestFacts(facts));
+  });
+
+  it('should key every digest so a guess cannot be tested against a shown one', () => {
+    should(digestLine('hunter2-UNIQUE')).not.equal(createHash('sha256').update('hunter2-UNIQUE').digest('hex'));
+    should(digestFacts(facts)).not.equal(createHash('sha256').update(JSON.stringify(facts)).digest('hex'));
   });
 
   it('should digest a line deterministically', () => {

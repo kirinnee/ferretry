@@ -1156,6 +1156,7 @@ import {
   withLivenessLedger,
   withOutdated,
   xvfbMissingMessage,
+  EphemeralAwareRedactor,
   EphemeralValues,
   InputAgendaAdapter,
   InputAgentNotifierAdapter,
@@ -6000,6 +6001,8 @@ function createAgentToolsSubsystem(input: {
 /** How often a request that outlived its time is found and ended, so its card does not wait for the next event. */
 const INPUT_REQUEST_SWEEP_MS = 15_000;
 
+const INPUT_ENDED_SESSION_STATUSES: ReadonlySet<string> = new Set(['completed', 'failed', 'stopped']);
+
 /**
  * The input bridge: tmux and the kernel for what a terminal is doing, the agenda for the owner's form, and
  * the session journal and audit log for names and flags. Nothing built here stores a value except the
@@ -6012,6 +6015,8 @@ function createInputRequestService(input: {
   readonly agenda: AgendaService;
   readonly agentReplies: AgendaReplyBatcher;
   readonly audit: AuditLog;
+  readonly values: EphemeralValues;
+  readonly redact: (text: string) => Promise<string>;
 }): InputRequestService {
   const clock = { now: () => Date.now() };
   const trusted = new Set<string>();
@@ -6059,13 +6064,16 @@ function createInputRequestService(input: {
     timers: { after: async milliseconds => await Bun.sleep(milliseconds) },
     trusted: { isTrusted: comm => trusted.has(comm), trust: comm => void trusted.add(comm) },
     sessions: {
-      has: async sessionId => {
+      ended: async sessionId => {
         const id = tryParseSessionId(sessionId);
-        return id !== undefined && input.storage.findSession(id) !== undefined;
+        if (id === undefined || input.storage.findSession(id) === undefined) return true;
+        const state = SessionStateSchema.safeParse(await input.storage.readState(id));
+        return state.success && INPUT_ENDED_SESSION_STATUSES.has(state.data.status);
       },
       all: async () => input.storage.listSessions().map(session => session.id),
     },
-    values: new EphemeralValues(clock),
+    values: input.values,
+    redact: input.redact,
   });
 }
 
@@ -7098,10 +7106,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   // child printed is a mask by the time anybody sees it. Read `lib/secrets/redaction.ts` for what
   // that does and does not promise — in particular that a value an agent deliberately transformed is
   // not recognisable, and this is not a defence against one that is trying.
-  const secretRedactor = new SecretRedactor(secretVault);
   // Its own executor: a learning verdict must not queue behind another document's transaction, and the
   // snapshots share no file.
   const learningBoard = new LearningSerialExecutor();
+  // The values the daemon has just typed for the owner are masked at the SAME boundary as a vault secret:
+  // every read below that takes this redactor (screen, transcript, journal, processes) hides them too.
+  const justTyped = new EphemeralValues({ now: () => Date.now() });
+  const secretRedactor = new EphemeralAwareRedactor(new SecretRedactor(secretVault), justTyped);
   // ONE executor for the callsign ledger. It is what makes a claim atomic across concurrent starts:
   // the read-modify-write of that one file must never interleave with another start's.
   const callsignClaims = new KeyedSerialExecutor();
@@ -9603,6 +9614,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         agenda,
         agentReplies: agendaReplies,
         audit: auditLog,
+        values: justTyped,
+        redact: async text => await secretRedactor.redact(text),
       });
       inputRequests = inputRequestService;
       const sweepInputRequests = asActivity(
