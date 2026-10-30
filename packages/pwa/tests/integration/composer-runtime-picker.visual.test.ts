@@ -80,7 +80,8 @@ describe('the composer runtime chips on a phone', () => {
       // measured the sheet still parked below the phone (bottom 1220 of 844) whenever that frame was late.
       await page.waitForFunction(() =>
         [...document.querySelectorAll<HTMLElement>('[data-bottom-sheet] [role="dialog"]')].some(
-          dialog => dialog.style.transform === 'translateY(0)',
+          // A browser serializes the inline `translateY(0)` as `translateY(0px)`.
+          dialog => /^translateY\(0(px)?\)$/u.test(dialog.style.transform),
         ),
       );
       await page.evaluate(async () => {
