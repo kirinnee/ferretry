@@ -188,17 +188,17 @@ every combination of old and new meets.
 
 ### Both spellings, one window
 
-| Older name (still answered)               | Agenda name                       | Today                                           |
-| ----------------------------------------- | --------------------------------- | ----------------------------------------------- |
-| `GET/POST /v1/sessions/:id/attention`     | `/v1/sessions/:id/agenda`         | both served, same handler and grants            |
-| `POST /v1/sessions/:id/attention/replies` | `/v1/sessions/:id/agenda/replies` | both served                                     |
-| `GET /v1/warden/attention`                | `/v1/warden/agenda`               | both served                                     |
-| `SessionState.attention`                  | `SessionState.agenda`             | both written, same value                        |
-| journal `attention.*` events              | `agenda.*`                        | new names written; readers accept both          |
-| `machine.yaml` `attentionNudge`           | `agendaNudge`                     | both read, the new one wins; config check warns |
-| `config/daemon.json` `attention.{…}`      | `agenda.{…}`                      | both read, the new one wins; config check warns |
-| push kind `attention`, tag, `?attention=` | `agenda`, `?agenda=`              | old still SENT; apps read both                  |
-| handover `references.attention` count     | `references.agenda`               | old still written; new accepted                 |
+| Older name (still answered)               | Agenda name                       | Today                                                                      |
+| ----------------------------------------- | --------------------------------- | -------------------------------------------------------------------------- |
+| `GET/POST /v1/sessions/:id/attention`     | `/v1/sessions/:id/agenda`         | both served, same handler and grants                                       |
+| `POST /v1/sessions/:id/attention/replies` | `/v1/sessions/:id/agenda/replies` | both served                                                                |
+| `GET /v1/warden/attention`                | `/v1/warden/agenda`               | both served                                                                |
+| `SessionState.attention`                  | `SessionState.agenda`             | both written, same value                                                   |
+| journal `attention.*` events              | `agenda.*`                        | new names written; readers accept both                                     |
+| `machine.yaml` `attentionNudge`           | `agendaNudge`                     | both read, the new one wins; config check warns                            |
+| `config/daemon.json` `attention.{…}`      | `agenda.{…}`                      | both read, key by key the new one wins; a start notice names the old block |
+| push kind `attention`, tag, `?attention=` | `agenda`, `?agenda=`              | old still SENT; apps read both                                             |
+| handover `references.attention` count     | `references.agenda`               | old still written; new accepted                                            |
 
 The last two rows are still sent the old way on purpose: an older app's service worker drops a push kind it does not
 know, and the handover counts are a strict object an older reader refuses an unknown key in.
