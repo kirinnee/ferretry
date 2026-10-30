@@ -4,8 +4,10 @@
  *   ?view=sections        all three sections: Stopped on you, Needs you, With ferrets (folded), plus a notice
  *   ?view=sections-open   the same with "With ferrets" unfolded
  *   ?view=warden          `/inbox?from=warden`: the "From Warden" chip and only what the Warden raised
- *   ?view=open            an item OPEN: who and what, the chat's full item view, the swipe hint and the ferret's
- *                         REAL composer under it (`inbox-v2-screenshot.ts` drags it mid-swipe up and down)
+ *   ?view=open            an item OPEN: who and what, the chat's full item view and the ferret's REAL composer
+ *                         under it (`inbox-v2-screenshot.ts` drags it mid-swipe up and down)
+ *   ?view=open-long       a LONG item open (premise, context, options, terms, a picture): one scroll for all of it
+ *   ?view=open-5|open-7   an item with five or seven options: the row of three, the rest in full-width rows
  *
  * The REAL `AgendaInboxPage` and `Composer`; only the data is invented and nothing is sent anywhere.
  */
@@ -150,6 +152,58 @@ const W1 = warden(
 );
 const W2 = warden('A31', 70, 'Drop two old build caches?', 'Two caches are 18 GB and unused since August.', 'cache');
 
+const options = (labels: readonly string[]) => ({
+  kind: 'multiple-choice' as const,
+  options: labels.map(label => ({ label })),
+});
+const LONG = item('A40', 6, 'ottilie', {
+  title: 'Move the ledger to SQLite?',
+  subject: 'Should the ledger move from flat files to SQLite before the board ships on Friday?',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Move now', description: 'One evening of work; the board ships on SQLite' },
+      { label: 'After Friday', description: 'Ship on flat files, move next week' },
+      { label: 'Postgres', description: 'A server to run, patch and back up' },
+    ],
+  },
+  recommendation: { decision: 'Move now', why: 'Nothing new to run, and every read gets faster.' },
+  premise:
+    '- The ledger keeps every finished task, forever\n- It is read in full each time the board opens\n- On the studio machine that read now takes **1.8 s**\n- The files are rewritten whole on every change',
+  context:
+    '- The board ships on **Friday** and opens the ledger first\n- A slow first paint is the first thing the owner sees\n- SQLite is already a dependency of the daemon\n- Moving later means migrating live data twice',
+  decided: '- Finished tasks are kept forever\n- The ledger stays on the machine',
+  stillOpen: '- When to move\n- Whether a server database is worth running',
+  terms: [
+    { term: 'WAL', meaning: 'write-ahead log: how SQLite keeps a write safe if the machine stops' },
+    { term: 'ledger', meaning: "the board's record of every finished task" },
+    { term: 'first paint', meaning: 'the moment the board first shows anything' },
+  ],
+  body: 'How the read time grew as the ledger did:\n\n![Read time by ledger size](/fleet-grid.svg)\n\nThe move is a one-off copy; the old files stay as a backup for a month.',
+} as Partial<AgendaItem>);
+const FIVE = item('A41', 8, 'hadi', {
+  title: 'Which region for the relay?',
+  subject: 'Which region should the second relay run in?',
+  ask: options(['Frankfurt', 'London', 'Virginia', 'Oregon', 'Singapore']),
+  recommendation: { decision: 'Frankfurt', why: 'Closest to most of the fleet.' },
+  premise: '- One relay serves every phone today',
+  context: '- A second one halves the round trip for half the fleet',
+} as Partial<AgendaItem>);
+const SEVEN = item('A42', 10, 'johnnie', {
+  title: 'Which day for the release?',
+  subject: 'Which day should the next release go out?',
+  ask: options(['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']),
+  recommendation: { decision: 'Tuesday', why: 'Everyone is around for two days after it.' },
+  premise: '- The release train is ready',
+  context: '- A release needs two quiet days after it',
+} as Partial<AgendaItem>);
+/** The items the open-* views open: drawn first, so each is the top card. */
+const OPENED: Readonly<Record<string, InboxCard>> = {
+  'open-long': card(LONG, LEDGER, 'studio'),
+  'open-5': card(FIVE, RELAY, 'studio'),
+  'open-7': card(SEVEN, RELEASE, 'studio'),
+};
+
 const OWNER: readonly InboxCard[] = [
   card(A5, LEDGER, 'studio'),
   card(A2, RELAY, 'studio'),
@@ -180,18 +234,20 @@ function Inbox({
   from,
   withFerretsOpen,
   openAt,
+  extra,
 }: {
   readonly phone: boolean;
   readonly from: 'warden' | null;
   readonly withFerretsOpen: boolean;
   readonly openAt?: string | undefined;
+  readonly extra?: InboxCard | undefined;
 }): ReactElement {
   const state = useSyncExternalStore(deferred.subscribe, deferred.getSnapshot);
   const [source, setSource] = useState(from);
   const inbox: AgendaInbox = {
     unread: [],
-    total: OWNER.length,
-    cards: OWNER,
+    total: OWNER.length + (extra === undefined ? 0 : 1),
+    cards: extra === undefined ? OWNER : [extra, ...OWNER],
     withFerret: FERRET,
     reading: false,
     resolved: [],
@@ -255,6 +311,7 @@ createRoot(root).render(
     from={view === 'warden' ? 'warden' : null}
     phone={window.innerWidth < 768}
     withFerretsOpen={view === 'sections-open'}
-    openAt={view === 'open' ? OWNER[0]?.key : undefined}
+    openAt={view === 'open' ? OWNER[0]?.key : OPENED[view]?.key}
+    extra={OPENED[view]}
   />,
 );

@@ -75,7 +75,6 @@ export const inboxWho = (card: InboxCard): InboxWho => {
   };
 };
 
-
 /** The cards grouped by ferret. Each group's items are in the agenda's order; its notices keep their (newest-first) order. */
 const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
   const grouped = new Map<string, InboxCard[]>();

@@ -3,7 +3,8 @@
  * an item OPEN as the chat's full item view with the ferret's real composer under it, and that item held mid-swipe
  * UP (stamped with its primary answer) and DOWN (stamped "Skip"). Phone 390 and desktop 1440, Studio light and dark.
  *
- *   bun harness/inbox-v2-screenshot.ts [outDir]   # writes <outDir>/inbox-v2-<name>-<phone|desktop>-<theme>.png
+ *   bun harness/inbox-v2-screenshot.ts [outDir] [series]   # writes <outDir>/<series>-<name>-<phone|desktop>-<theme>.png
+ *                                                          # (series defaults to inbox-v2)
  *
  * It bundles `inbox-page.tsx` (the real `AgendaInboxPage` and `Composer`, invented data), serves it on an ephemeral
  * loopback port, drives it with a real pointer, and FAILS (after writing every picture) when: a page scrolls
@@ -24,6 +25,7 @@ const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
 const buildDir = join(harnessDir, 'out', 'inbox-v2-build');
 const outDir = resolve(process.argv[2] ?? '/tmp/claude-1000');
+const series = process.argv[3] ?? 'inbox-v2';
 
 const fail = (message: string): never => {
   process.stderr.write(`❌ ${message}\n`);
@@ -130,7 +132,7 @@ const shot = async (page: Page, name: string, form: Form, theme: string): Promis
     theme.endsWith('-dark') ? light < 0.35 : light > 0.65,
     `${name} ${form} ${theme}: the page is not ${theme.endsWith('-dark') ? 'dark' : 'light'} (lightness ${light.toFixed(2)})`,
   );
-  const path = join(outDir, `inbox-v2-${name}-${form}-${theme}.png`);
+  const path = join(outDir, `${series}-${name}-${form}-${theme}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -195,13 +197,13 @@ for (const form of ['phone', 'desktop'] as const) {
       composerBox !== null && composerBox.y + composerBox.height <= height + 1,
       `${form} ${theme}: the composer is off screen (${JSON.stringify(composerBox)})`,
     );
-    if (form === 'phone') {
-      const arrows = await item.locator('.fy-attn-deck__top [data-agenda-quick-replies] button svg').count();
-      check(
-        arrows >= 2,
-        `${form} ${theme}: the quick-reply row draws ${arrows} arrows, not one per answer as the chat does`,
-      );
-    }
+    // The chat's row: letters or short labels, no arrow glyphs (round 3), no "…" menu.
+    const arrows = await item
+      .locator(
+        '.fy-attn-deck__top [data-agenda-quick-replies] button svg.lucide-arrow-left, .fy-attn-deck__top [data-agenda-quick-replies] button svg.lucide-arrow-up, .fy-attn-deck__top [data-agenda-quick-replies] button svg.lucide-arrow-right',
+      )
+      .count();
+    check(arrows === 0, `${form} ${theme}: the quick-reply row still draws ${arrows} arrow glyphs`);
     const task = item.locator('.fy-attn-deck__top [data-inbox-who-main]');
     const cut = await task.evaluate(element => element.scrollWidth > element.clientWidth + 1);
     check(!cut, `${form} ${theme}: the task name is cut in the who-and-what line`);
@@ -209,6 +211,38 @@ for (const form of ['phone', 'desktop'] as const) {
     await holdDrag(item, -150, 'swipe-up', form, theme, 'SQLite');
     await holdDrag(item, 150, 'swipe-down', form, theme, 'Skip');
     await item.close();
+
+    // A LONG item: one scroll for the whole body, nothing nested that traps the finger, the page itself still.
+    const long = await open(context, theme, 'open-long');
+    const scrollers = await long.evaluate(
+      () =>
+        [...document.querySelectorAll<HTMLElement>('.fy-attn-deck__top *')].filter(element => {
+          const overflow = getComputedStyle(element).overflowY;
+          return (overflow === 'auto' || overflow === 'scroll') && element.scrollHeight > element.clientHeight + 1;
+        }).length,
+    );
+    check(scrollers === 1, `${form} ${theme}: the long item has ${scrollers} vertical scroll areas, not one`);
+    const pageScrolls = await long.evaluate(() => {
+      const main = document.querySelector<HTMLElement>('[data-agenda-inbox]');
+      return main === null ? 0 : main.scrollHeight - main.clientHeight;
+    });
+    check(pageScrolls <= 1, `${form} ${theme}: the page around the open item also scrolls (by ${pageScrolls}px)`);
+    await shot(long, 'long', form, theme);
+    await long.evaluate(() => {
+      const body = document.querySelector<HTMLElement>('.fy-attn-deck__top [data-agenda-body]');
+      body?.scrollBy(0, Math.round(body.clientHeight * 0.8));
+    });
+    await shot(long, 'long-scrolled', form, theme);
+    await long.close();
+
+    // Five and seven options: the top row of three swipes; the rest are full-width rows below it.
+    for (const view of ['open-5', 'open-7'] as const) {
+      const many = await open(context, theme, view);
+      const buttons = await many.locator('.fy-attn-deck__top [data-agenda-quick-replies] button').count();
+      check(buttons >= (view === 'open-5' ? 5 : 7), `${form} ${theme} ${view}: only ${buttons} reply buttons`);
+      await shot(many, view.replace('open-', 'options-'), form, theme);
+      await many.close();
+    }
     await context.close();
   }
 }
