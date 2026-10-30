@@ -3,6 +3,7 @@ import {
   type AttentionId,
   AttentionIdSchema,
   type AttentionReplies,
+  agendaBatchMessage,
   InstantSchema,
   MAX_ATTENTION_RESOLUTIONS,
 } from '@ferretry/protocol';
@@ -135,7 +136,7 @@ export function attentionReplyDueAt(
  * exactly as it did before batching.
  */
 export function attentionBatchMessage(pending: readonly PendingReply[]): string {
-  return pending.map(each => each.message).join('\n\n');
+  return agendaBatchMessage(pending.map(each => each.message));
 }
 
 /**

@@ -1,7 +1,14 @@
 import {
+  type AgendaMessageItem,
   type AttentionItem,
   type AttentionResponse,
   type AttentionSnapshot,
+  agendaAnswerMessage,
+  agendaDiscussMessage,
+  agendaDismissedMessage,
+  agendaDoneMessage,
+  agendaNeedsInfoMessage,
+  agendaReMessage,
   attentionTitle,
   type ResolvedAttentionItem,
   type SessionAttentionSummary,
@@ -18,6 +25,9 @@ import {
  * references nothing is delivered exactly as typed: the ferret learns of its items when something happens to
  * one, and reads its board on demand (`agenda ls`).
  *
+ * The WORDS of every such message are the protocol's (`agenda-message.ts`), which the app reads back to draw
+ * them as cards; this module decides which message an event becomes.
+ *
  * Pure: every decision here is a function of the board and the words; the composition root does the
  * reading, the sending and the resolving.
  */
@@ -29,14 +39,14 @@ import {
  */
 const ATTENTION_REFERENCE = /(?:^|[\s([{"'`<>=—–])!(A[1-9][0-9]*)(?=$|[\s)\]}"'`,;!?<>:.=—–])/gu;
 
-/** The longest ask quoted back to the ferret; the board holds the rest. */
-const ASK_QUOTE_CHARS = 120;
+/** An item as a heading names it: by its ask, the words the ferret raised it with. */
+const byAsk = (item: Pick<AttentionItem, 'id' | 'subject'>): AgendaMessageItem => ({
+  id: item.id,
+  quote: item.subject,
+});
 
-const quoted = (ask: string): string => (ask.length > ASK_QUOTE_CHARS ? `${ask.slice(0, ASK_QUOTE_CHARS)}…` : ask);
-
-const named = (item: Pick<AttentionItem, 'id' | 'subject'>): string => `!${item.id} «${quoted(item.subject)}»`;
-
-const namedByTitle = (item: AttentionItem): string => `!${item.id} «${quoted(attentionTitle(item))}»`;
+/** An item as a heading names it: by its title, the card the owner is looking at. */
+const byTitle = (item: AttentionItem): AgendaMessageItem => ({ id: item.id, quote: attentionTitle(item) });
 
 /** The open items a message references, in board order, each once. */
 export function referencedAttention(message: string, items: readonly AttentionItem[]): readonly AttentionItem[] {
@@ -73,15 +83,9 @@ export function responseWords(response: AttentionResponse): string {
  */
 export function boardReplyMessage(item: ResolvedAttentionItem): string {
   const note = item.resolutionNote?.trim() ?? '';
-  if (item.response !== undefined) {
-    const words = responseWords(item.response);
-    return `[answer to ${named(item)}] ${words}${note === '' || note === words ? '' : ` · note: ${note}`}`;
-  }
-  if (item.disposition === 'dismissed')
-    return `[dismissed ${named(item)}] ${note === '' ? 'Not needed — the owner dismissed this without a reason.' : `Not needed: ${note}`}`;
-  return note === ''
-    ? `[done ${named(item)}] The owner marked this done.`
-    : `[answer to ${named(item)}] Done · note: ${note}`;
+  if (item.response !== undefined) return agendaAnswerMessage(byAsk(item), responseWords(item.response), note);
+  if (item.disposition === 'dismissed') return agendaDismissedMessage(byAsk(item), note);
+  return note === '' ? agendaDoneMessage(byAsk(item)) : agendaAnswerMessage(byAsk(item), 'Done', note);
 }
 
 /**
@@ -90,7 +94,7 @@ export function boardReplyMessage(item: ResolvedAttentionItem): string {
  */
 export function needsInfoMessage(item: AttentionItem): string {
   const note = item.history?.findLast(entry => entry.kind === 'needs-info')?.note?.trim() ?? '';
-  return `[needs more info ${named(item)}] ${note === '' ? 'The owner needs more information.' : note}`;
+  return agendaNeedsInfoMessage(byAsk(item), note);
 }
 
 /**
@@ -100,8 +104,7 @@ export function needsInfoMessage(item: AttentionItem): string {
  */
 export function discussMessage(item: AttentionItem, binary: string): string {
   const note = item.history?.findLast(entry => entry.kind === 'discuss')?.note?.trim() ?? '';
-  const heading = `!${item.id} «${quoted(attentionTitle(item))}»`;
-  return `[discuss ${heading}] The owner wants to talk this through before answering: ${note === '' ? 'no note' : note}. Reply in chat to clear it up; then update the item (\`${binary} agenda edit ${item.id}\`) or close it if the premise was wrong (\`${binary} agenda done ${item.id}\`).`;
+  return agendaDiscussMessage(byTitle(item), note, binary);
 }
 
 /** What a person's chat message becomes once the open board is taken into account. */
@@ -123,7 +126,7 @@ export interface ConversationTurn {
 export function conversationTurn(message: string, open: readonly AttentionItem[]): ConversationTurn {
   const referenced = referencedAttention(message, open).filter(item => item.notice !== true);
   return {
-    message: referenced.length === 0 ? message : `[re ${referenced.map(namedByTitle).join(', ')}] ${message}`,
+    message: referenced.length === 0 ? message : agendaReMessage(referenced.map(byTitle), message),
     referenced,
   };
 }
