@@ -503,11 +503,14 @@ function assertSameDevice(source: string, sourceDeviceId: number, destination: s
 function planMove(
   state: PlanningState,
   source: string,
+  sourceNode: SharedHistoryNode,
   sourceDirectoryDeviceId: number,
   destination: string,
   destinationDeviceId: number,
 ): void {
   assertSameDevice(source, sourceDirectoryDeviceId, destination, destinationDeviceId);
+  // A directory that is itself a mount point reports the mounted device, and rename(2) cannot move it.
+  if (sourceNode.kind === 'directory') assertSameDevice(source, sourceNode.deviceId, destination, destinationDeviceId);
   state.actions.push({ kind: 'move', source, destination });
 }
 
@@ -584,10 +587,11 @@ function planForeignLink(
   account: string,
   source: string,
   poolPath: string,
+  sourceNode: SharedHistorySymbolicLinkNode,
   sourceDirectoryDeviceId: number,
 ): void {
   const preservedAt = reserveConflictPath(join(conflictRoot(state.pool, account), basename(poolPath)), state);
-  planMove(state, source, sourceDirectoryDeviceId, preservedAt, conflictDeviceId(state, preservedAt));
+  planMove(state, source, sourceNode, sourceDirectoryDeviceId, preservedAt, conflictDeviceId(state, preservedAt));
   state.changes.push({
     kind: 'collision',
     incoming: source,
@@ -619,11 +623,18 @@ function planCollision(
   const owner = incomingWins ? pooledOwner(state, existingPath) : account;
   const preservedAt = reserveConflictPath(join(conflictRoot(state.pool, owner), entryRelativePath, name), state);
   if (incomingWins) {
-    planMove(state, existingPath, pooledDeviceId, preservedAt, conflictDeviceId(state, preservedAt));
-    planMove(state, incomingPath, incomingDirectoryDeviceId, existingPath, pooledDeviceId);
+    planMove(state, existingPath, existing, pooledDeviceId, preservedAt, conflictDeviceId(state, preservedAt));
+    planMove(state, incomingPath, incoming, incomingDirectoryDeviceId, existingPath, pooledDeviceId);
     state.contributors.set(existingPath, account);
   } else {
-    planMove(state, incomingPath, incomingDirectoryDeviceId, preservedAt, conflictDeviceId(state, preservedAt));
+    planMove(
+      state,
+      incomingPath,
+      incoming,
+      incomingDirectoryDeviceId,
+      preservedAt,
+      conflictDeviceId(state, preservedAt),
+    );
   }
   state.changes.push({ kind: 'collision', incoming: incomingPath, pooled: existingPath, winner, loser, preservedAt });
   state.conflicts++;
@@ -647,7 +658,7 @@ function planDirectoryMerge(
     const incomingPath = join(sourcePath, name);
     const existingPath = join(pooledPath, name);
     if (existing === undefined) {
-      planMove(state, incomingPath, source.deviceId, existingPath, pooled.deviceId);
+      planMove(state, incomingPath, incoming, source.deviceId, existingPath, pooled.deviceId);
       state.changes.push({ kind: 'move', source: incomingPath, destination: existingPath });
       state.contributors.set(existingPath, account);
       state.migrated++;
@@ -771,7 +782,7 @@ function planEntry(
   let next = pooled;
   if (next === undefined) {
     if (source !== undefined && source.kind !== 'symbolic-link') {
-      planMove(state, sourcePath, homeDeviceId, pooledPath, state.poolDeviceId);
+      planMove(state, sourcePath, source, homeDeviceId, pooledPath, state.poolDeviceId);
       state.changes.push({ kind: 'move', source: sourcePath, destination: pooledPath });
       state.contributors.set(pooledPath, account);
       state.migrated++;
@@ -787,7 +798,7 @@ function planEntry(
     next = planJsonlMerge(state, account, sourcePath, pooledPath, homeDeviceId, source, next);
   }
 
-  if (source?.kind === 'symbolic-link') planForeignLink(state, account, sourcePath, pooledPath, homeDeviceId);
+  if (source?.kind === 'symbolic-link') planForeignLink(state, account, sourcePath, pooledPath, source, homeDeviceId);
   state.actions.push({ kind: 'link', path: sourcePath, target: pooledPath });
   state.changes.push({ kind: 'link', path: sourcePath, target: pooledPath });
   state.links++;

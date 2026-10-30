@@ -662,6 +662,20 @@ describe('SharedHistoryMigration', () => {
       'a whole entry': (files: MemorySharedHistoryFileSystem): void => {
         files.seed(HOME_A, directory({ projects: directory({ session: file('evidence', 1) }) }, 1, 3));
       },
+      'a bind-mounted entry directory': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(HOME_A, directory({ projects: directory({ session: file('evidence', 1) }, 1, 3) }));
+      },
+      'a bind-mounted child directory': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(`${POOL}/projects`, directory());
+        files.seed(
+          HOME_A,
+          directory({ projects: directory({ nested: directory({ session: file('evidence', 1) }, 1, 3) }) }),
+        );
+      },
+      'the winner of a collision, as a mount point': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(`${POOL}/projects`, directory({ same: file('pooled', 1) }));
+        files.seed(HOME_A, directory({ projects: directory({ same: directory({}, 9, 3) }) }));
+      },
       'a child of a merged directory': (files: MemorySharedHistoryFileSystem): void => {
         files.seed(`${POOL}/projects`, directory());
         files.seed(HOME_A, directory({ projects: directory({ session: file('evidence', 1) }, 1, 3) }));
