@@ -22,7 +22,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { type AgendaWire, sessionAgendaPath } from './agenda-wire.ts';
 
 export type ComposerReferenceCatalogFamily = 'tasks' | 'attention' | 'skills';
-type ComposerReferenceTask = Pick<TaskSummary, 'id' | 'title' | 'status'>;
+/**
+ * What proof needs (`id`, `title`, `status`) plus the optional facts the `&` menu prints on a row. A host that
+ * knows only the first three still proves; the row then says less rather than guessing.
+ */
+export type ComposerReferenceTask = Pick<TaskSummary, 'id' | 'title' | 'status'> &
+  Partial<Pick<TaskSummary, 'phase' | 'blocked' | 'assignee' | 'createdAt' | 'updatedAt'>>;
 
 export interface ComposerReferenceCatalogs {
   readonly tasks?: readonly ComposerReferenceTask[];

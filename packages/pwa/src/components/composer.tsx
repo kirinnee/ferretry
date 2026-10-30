@@ -16,6 +16,7 @@ import { uploadAttachment as uploadSessionAttachment } from '../lib/attachment-u
 import { formatAttachmentSize } from '../lib/attachments.ts';
 import { continueList, type DraftEdit, insideCodeBlock } from '../lib/composer-editing.ts';
 import { useComposerHostWarmup } from '../lib/composer-host-warmup.ts';
+import type { ComposerReferenceTask } from '../lib/composer-reference-catalogs.ts';
 import {
   type ComposerEnterKeyPreference,
   composerEnterAction,
@@ -142,6 +143,8 @@ export interface ComposerProps {
   readonly autocompleteSessions?: readonly SessionView[];
   /** The session's unresolved Agenda items, shared with reference proof. */
   readonly autocompleteAgenda?: readonly ComposerAgendaItem[];
+  /** The session's tasks, shared with reference proof and offered by the `@@@@` and `&` menus. */
+  readonly autocompleteTasks?: readonly ComposerReferenceTask[];
   /** The session's already-read skills catalog, shared with reference proof. */
   readonly autocompleteSkills?: ComposerSkillsCatalog;
   /**
@@ -302,6 +305,7 @@ const hasFiles = (transfer: Pick<DataTransfer, 'types'> | null): boolean =>
  *  getter that is missing — and never a new array identity per render. */
 const EMPTY_SESSIONS: readonly SessionView[] = [];
 const EMPTY_AGENDA: readonly ComposerAgendaItem[] = [];
+const EMPTY_TASKS: readonly ComposerReferenceTask[] = [];
 
 /** The selection half of the field: a textarea has it, and so does the live editor's handle. */
 interface ComposerFieldSelection {
@@ -371,6 +375,7 @@ export function Composer({
   dictationConversation,
   autocompleteSessions,
   autocompleteAgenda,
+  autocompleteTasks,
   autocompleteSkills,
   autocompleteReady,
   autocompleteFetcher,
@@ -464,17 +469,20 @@ export function Composer({
   const hosted =
     autocompleteSessions !== undefined ||
     autocompleteAgenda !== undefined ||
+    autocompleteTasks !== undefined ||
     autocompleteSkills !== undefined ||
     autocompleteReady !== undefined;
   const hostRef = useRef({
     sessions: autocompleteSessions,
     attention: autocompleteAgenda,
+    tasks: autocompleteTasks,
     skills: autocompleteSkills,
     ready: autocompleteReady,
   });
   hostRef.current = {
     sessions: autocompleteSessions,
     attention: autocompleteAgenda,
+    tasks: autocompleteTasks,
     skills: autocompleteSkills,
     ready: autocompleteReady,
   };
@@ -506,7 +514,9 @@ export function Composer({
               getSessions: () => hostRef.current.sessions ?? EMPTY_SESSIONS,
               getAgendaItems: () => hostRef.current.attention ?? EMPTY_AGENDA,
               getSkills: () => hostRef.current.skills,
+              getTasks: () => hostRef.current.tasks ?? EMPTY_TASKS,
               waitForAgendaItems: hostWarmup,
+              waitForTasks: hostWarmup,
               waitForSkills: hostWarmup,
             }
           : {}),

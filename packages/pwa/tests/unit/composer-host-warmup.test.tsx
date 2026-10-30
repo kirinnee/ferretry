@@ -28,10 +28,12 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { Profiler, useCallback, useRef, useState } from 'react';
 import type { ReactTestInstance, ReactTestRenderer } from 'react-test-renderer';
 import { Composer } from '../../src/components/composer.tsx';
+import { composerSuggestionSwitches } from '../../src/components/composer-autocomplete.ts';
 import type {
   ComposerAgendaItem,
   ComposerSkillsCatalog,
 } from '../../src/components/composer-autocomplete-providers.ts';
+import type { ComposerReferenceTask } from '../../src/lib/composer-reference-catalogs.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
@@ -63,6 +65,7 @@ const CATALOG: ComposerSkillsCatalog = {
   skills: [{ name: 'summary', description: 'Give a fast recap' }],
 };
 const AGENDA: readonly ComposerAgendaItem[] = [{ id: 'A3', subject: 'Pick a window', source: 'question' }];
+const TASKS: readonly ComposerReferenceTask[] = [{ id: 'F12', title: 'Ship the picker', status: 'in_progress' }];
 
 const mounted = (element: Parameters<typeof render>[0]): ReactTestRenderer => {
   const renderer = render(element);
@@ -88,10 +91,10 @@ interface MenuFrame {
 
 /** What a reader would see in THIS committed frame: the popover's own text and
  *  how many rows of the family it is offering. */
-const sampleMenu = (view: ReactTestRenderer, family: 'Skills' | 'References'): MenuFrame => {
+const sampleMenu = (view: ReactTestRenderer, family: 'Skills' | 'References' | 'Tasks', kind?: string): MenuFrame => {
   const popover = view.root.findAllByProps({ 'data-composer-autocomplete': family })[0];
   return {
-    rows: view.root.findAllByProps({ 'data-kind': family === 'Skills' ? 'skill' : 'attention' }).length,
+    rows: view.root.findAllByProps({ 'data-kind': kind ?? (family === 'Skills' ? 'skill' : 'attention') }).length,
     text: popover === undefined ? '' : textOf(popover),
   };
 };
@@ -228,6 +231,43 @@ describe('composer host warm-up handshake', () => {
     if (firstReady === undefined) throw new Error('the menu never settled');
     expect(firstReady.rows).toBeGreaterThan(0);
     expect(frames.filter(isReady).every(frame => frame.rows > 0)).toBe(true);
+  });
+
+  test('never publishes a ready tasks menu that invents an empty family, on the ladder or the sigil', async () => {
+    for (const draft of ['@@@@F1', '&F1']) {
+      let deliver: (items: readonly ComposerReferenceTask[]) => void = () => undefined;
+      const read = new Promise<readonly ComposerReferenceTask[]>(resolve => {
+        deliver = resolve;
+      });
+      const frames: MenuFrame[] = [];
+      const holder: { view?: ReactTestRenderer } = {};
+      holder.view = mounted(
+        <CatalogHost
+          onCommit={() => {
+            if (holder.view !== undefined)
+              frames.push(sampleMenu(holder.view, draft === '&F1' ? 'Tasks' : 'References', 'task'));
+          }}
+          prop={value => ({
+            suggestions: composerSuggestionSwitches('both', true),
+            ...(value === undefined ? {} : { autocompleteTasks: value }),
+          })}
+          read={read}
+        />,
+      );
+      const view = holder.view;
+
+      type(view, draft);
+      frames.length = 0;
+      await runAsync(async () => {
+        deliver(TASKS);
+        await drain();
+      });
+
+      const firstReady = frames.find(isReady);
+      if (firstReady === undefined) throw new Error('the menu never settled');
+      expect(firstReady.rows).toBeGreaterThan(0);
+      expect(frames.filter(isReady).every(frame => frame.rows > 0)).toBe(true);
+    }
   });
 
   test('still answers when the host has nothing in flight to wait for', async () => {

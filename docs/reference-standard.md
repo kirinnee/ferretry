@@ -84,8 +84,7 @@ The key grammar below is unchanged — a name is already a valid key.
 ### Boundaries
 
 A token has to start at the beginning of the text or after whitespace or one of `([{"'`` ` ``<>=—–`,
-and end at the end or before whitespace or ordinary punctuation. So `bob@example.com` is an address,
-`and/or` is a word, and `see :zelda.` links `:zelda` and keeps the full stop.
+and end at the end or before whitespace or ordinary punctuation. So `bob@example.com`is an address,`and/or`is a word, and`see :zelda.`links`:zelda` and keeps the full stop.
 
 ## 3. Escaping
 
@@ -127,25 +126,29 @@ one of the tokens in section 2.
 | `@`     | Files               | `@path`                             |
 | `@@`    | Fleet agents        | `:name`                             |
 | `@@@`   | The agenda          | `!AN`                               |
+| `@@@@`  | Tasks               | `&FN`                               |
 | `:`     | Fleet agents        | `:name`                             |
 | `!`     | The agenda          | `!AN`                               |
+| `&`     | Tasks               | `&FN`                               |
 | `$`     | Skills              | `/name` on Claude, `$name` on Codex |
 | `/`     | Commands and skills | `/name` on Claude, `$name` on Codex |
 | `%`     | Live surfaces       | `%terminal:<key>`                   |
 
 Every family is reachable two ways, and both ways read one source. The repeated-`@` ladder is the
-DISCOVERABLE one — a single sigil, repeated, teaches three families from a legend — and the direct
+DISCOVERABLE one — a single sigil, repeated, teaches four families from a legend — and the direct
 sigil is what you use once you know, because it is the first character of the token itself.
 
-**No menu offers tasks** (owner decision, 2026-10-16): there is no `@@@` task tier and `&` opens
-nothing. Only the OFFER is withdrawn — an authored `&F12` still parses, proves and links (sections 2
-and 6), and Add to chat still inserts one.
+**Tasks have a menu** (owner decision, 2026-10-30, which REVERSES the 2026-10-16 decision that no menu
+offers tasks): `@@@@` is the fourth rung of the ladder and `&` is its direct sigil. Both insert
+`&FN`, the token section 2 already parses, proves and links. Rows are newest and active first, closed
+tasks stay hidden until the query names one exactly, and each row says the id, the title, the lane and
+the owning ferret.
 
 The picker inserts what the harness invokes, which is why `$` can insert `/name`: an invocation the
 harness ignores is a broken offer. That is not the same as rewriting an authored reference, which
 never happens.
 
-There is deliberately no fourth `@@@@` tier: Pins are a top link strip, not a reference tier
+There is deliberately no fifth `@@@@@` tier: Pins are a top link strip, not a reference tier
 (handover #63), and they are readable composer text rather than a second reference grammar. Template
 libraries are not an `@` tier either, and no build of this app has ever had one.
 
