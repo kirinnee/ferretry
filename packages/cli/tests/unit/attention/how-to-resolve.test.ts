@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { DEFAULT_HOW_TO_RESOLVE, displayHowToResolve } from '../../../src/lib/attention/how-to-resolve';
+import { CLEARS_WHEN } from '../../../src/lib/notify/request';
 
 describe('displayHowToResolve', () => {
   it.each([
@@ -12,6 +13,14 @@ describe('displayHowToResolve', () => {
 
     // Assert
     should(actual).equal(DEFAULT_HOW_TO_RESOLVE);
+  });
+
+  it('should read the legacy notice default as the current notice default', () => {
+    // Arrange + Act
+    const actual = displayHowToResolve('Acknowledge it on the attention board (Got it).');
+
+    // Assert
+    should(actual).equal(CLEARS_WHEN);
   });
 
   it('should leave the current default alone', () => {
