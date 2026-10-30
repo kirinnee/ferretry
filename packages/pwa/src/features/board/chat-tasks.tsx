@@ -296,15 +296,3 @@ export function ChatTasks({
     </>
   );
 }
-
-/** What the Info panel shows in place of the tab while the board fills the chat. */
-export function ChatTasksStub({ onCollapse }: { readonly onCollapse: () => void }): ReactElement {
-  return (
-    <p className="fy-board-empty fy-board-side" data-board-side-stub="">
-      The tasks are open in the chat.{' '}
-      <button className="fy-board__retry" onClick={onCollapse} type="button">
-        Collapse
-      </button>
-    </p>
-  );
-}

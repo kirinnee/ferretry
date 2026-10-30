@@ -1540,11 +1540,13 @@
 }
 .fy-board-side__expand {
   display: inline-flex;
-  min-height: 26px;
+  width: 26px;
+  height: 26px;
+  flex: none;
   margin-left: auto;
   align-items: center;
-  gap: var(--gap-xs);
-  padding: 0 var(--gap-md);
+  justify-content: center;
+  padding: 0;
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-pill);
   background: transparent;
@@ -1558,7 +1560,10 @@
   color: var(--fg);
 }
 @media (pointer: coarse) {
-  .fy-board-side__expand,
+  .fy-board-side__expand {
+    width: 36px;
+    height: 36px;
+  }
   .fy-board-side__view {
     min-height: 36px;
   }

@@ -121,10 +121,10 @@ function Toolbar({
           className="fy-board-side__expand"
           data-board-side-expand={expanded ? 'collapse' : 'expand'}
           onClick={onExpand}
+          title={expanded ? 'Collapse' : 'Expand'}
           type="button"
         >
-          <Icon aria-hidden="true" size={12} />
-          {expanded ? 'Collapse' : 'Expand'}
+          <Icon aria-hidden="true" size={14} />
         </button>
       )}
     </div>

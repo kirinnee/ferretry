@@ -4,7 +4,7 @@
  *
  * `?state=card|none` picks a session with or without a focus card, `?view=kanban|list` the Tasks view, `?cards=few`
  * the six-card fixture (the default is 70 cards), `?agents=1` turns "Show agent tasks" on, `?expanded=1` opens the
- * Tasks tab over the whole chat area (the desktop Info panel then holds only its stub). `?origin=0` serves cards
+ * Tasks tab over the whole chat area (the desktop Info panel steps out of the way). `?origin=0` serves cards
  * the way an older daemon does, with no `origin`.
  */
 
@@ -12,7 +12,7 @@ import type { BoardTaskView, SessionView } from '@ferretry/protocol';
 import { useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SessionTopBar } from '../src/components/session-top-bar.tsx';
-import { ChatTasks, ChatTasksStub } from '../src/features/board/chat-tasks.tsx';
+import { ChatTasks } from '../src/features/board/chat-tasks.tsx';
 import { InfoPanel } from '../src/features/session-info/info-panel.tsx';
 import { INFO_TABS } from '../src/features/session-info/info-model.ts';
 import { useChatCard } from '../src/hooks/use-chat-card.ts';
@@ -256,8 +256,7 @@ function Harness() {
       onTabChange={() => undefined}
       render={{
         overview: () => null,
-        tasks: () =>
-          expanded && !compact ? <ChatTasksStub onCollapse={() => tasks.setExpanded(false)} /> : board(false),
+        tasks: () => board(false),
         runtime: () => null,
         usage: () => null,
         folder: () => null,
@@ -292,7 +291,6 @@ function Harness() {
               {board(true)}
             </section>
           </div>
-          {compact ? null : <aside style={{ width: 460, overflowY: 'auto' }}>{info}</aside>}
         </div>
       ) : (
         <div style={{ margin: compact ? '0' : '0 0 0 auto', maxWidth: compact ? 'none' : 460 }}>{info}</div>

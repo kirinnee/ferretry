@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test';
 import { boardOk } from '@ferretry/protocol';
-import { ChatTasks, type ChatTasksProps, ChatTasksStub } from '../../../src/features/board/chat-tasks.tsx';
+import { ChatTasks, type ChatTasksProps } from '../../../src/features/board/chat-tasks.tsx';
 import { DaemonAgendaStore } from '../../../src/lib/agenda-store.ts';
 import { type BoardChat, chatCards, chatChip } from '../../../src/lib/board-chat.ts';
 import { boardSideView } from '../../../src/lib/board-side-view.ts';
@@ -419,7 +419,8 @@ describe('ChatTasks — Show agent tasks and Expand', () => {
     const panel = await open({ expanded: false });
     const expand = must(panel.root.querySelector<HTMLButtonElement>('[data-board-side-expand]'), 'Expand');
     expect(expand.dataset['boardSideExpand']).toBe('expand');
-    expect(expand.textContent).toBe('Expand');
+    expect(expand.textContent).toBe('');
+    expect(expand.getAttribute('aria-label')).toBe('Expand the tasks to the whole chat');
     expect(panel.root.querySelector('.fy-board-side__title')).toBeNull();
     await interact(() => expand.click());
     expect(panel.expands).toEqual([false]);
@@ -488,15 +489,5 @@ describe('ChatTasks — Show agent tasks and Expand', () => {
   it('draws no drag handle in the panel', async () => {
     const { root } = await open();
     expect(root.querySelector('[data-task="F18"]')?.getAttribute('draggable')).toBe('false');
-  });
-});
-
-describe('ChatTasksStub', () => {
-  it('says where the tasks went and collapses them', async () => {
-    const collapsed: boolean[] = [];
-    view = await mount(<ChatTasksStub onCollapse={() => void collapsed.push(true)} />);
-    expect(view.container.textContent).toContain('The tasks are open in the chat.');
-    await interact(() => must(view?.container.querySelector<HTMLButtonElement>('button'), 'Collapse').click());
-    expect(collapsed).toEqual([true]);
   });
 });

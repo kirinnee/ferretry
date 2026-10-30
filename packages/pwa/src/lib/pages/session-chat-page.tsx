@@ -44,7 +44,7 @@ import { AGENDA_RESOLVED_ACTION_ID, resolvedActionContribution } from '../../fea
 import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
-import { ChatTasks, ChatTasksStub } from '../../features/board/chat-tasks.tsx';
+import { ChatTasks } from '../../features/board/chat-tasks.tsx';
 import type { BoardDetailPorts } from '../../features/board/detail/board-detail.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
@@ -1321,11 +1321,14 @@ export function SessionChatPage({
       },
     };
   }, [contextDependencies, connection, scope, referenceFetch, openFile, agentName, routedClient]);
+  const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
+  // The board takes the whole chat column on a desktop: the side panel steps out of the way.
+  const panelCovered = tasksFull && formFactor === 'desktop';
   const infoSlot: SessionInfoSlot | undefined =
     infoPorts === undefined
       ? undefined
       : {
-          open: info.open,
+          open: info.open && !panelCovered,
           onClose: info.close,
           sheetSize: info.sheetSize,
           render: (presentation, titleId) => (
@@ -1357,28 +1360,25 @@ export function SessionChatPage({
                       chip: cardChat.chip,
                       onOpen: () => onNavigate?.(cardHref),
                       ...(onNavigate === undefined ? {} : { onOpenBoard: () => onNavigate(boardHref) }),
-                      tasks:
-                        tasks.expanded && presentation !== 'sheet' ? (
-                          <ChatTasksStub onCollapse={() => tasks.setExpanded(false)} />
-                        ) : (
-                          <ChatTasks
-                            callsigns={callsigns}
-                            chat={cardChat}
-                            machine={{ connection, name: machineName }}
-                            now={Date.now()}
-                            onAgents={tasks.setAgents}
-                            onExpand={() => {
-                              // The phone's sheet gives way to the board; Collapse brings it back (below).
-                              if (presentation === 'sheet') info.close();
-                              tasks.setExpanded(true);
-                            }}
-                            phone={formFactor === 'phone'}
-                            scope={scope}
-                            store={board}
-                            {...(boardTasks === undefined ? {} : boardTasks)}
-                            {...(onNavigate === undefined ? {} : { onNavigate })}
-                          />
-                        ),
+                      tasks: (
+                        <ChatTasks
+                          callsigns={callsigns}
+                          chat={cardChat}
+                          machine={{ connection, name: machineName }}
+                          now={Date.now()}
+                          onAgents={tasks.setAgents}
+                          onExpand={() => {
+                            // The phone's sheet gives way to the board; Collapse brings it back (below).
+                            if (presentation === 'sheet') info.close();
+                            tasks.setExpanded(true);
+                          }}
+                          phone={formFactor === 'phone'}
+                          scope={scope}
+                          store={board}
+                          {...(boardTasks === undefined ? {} : boardTasks)}
+                          {...(onNavigate === undefined ? {} : { onNavigate })}
+                        />
+                      ),
                     },
                   })}
               onOpenPage={page => openSurface('browser', page.name ?? page.id, browserPageLabel(page))}
@@ -1425,7 +1425,7 @@ export function SessionChatPage({
       <SessionTopBar
         actions={lifecycleActions}
         compact={compact}
-        infoOpen={info.open}
+        infoOpen={info.open && !panelCovered}
         menu={actionsMenu}
         session={session}
         themeToggle={<ThemeToggle iconOnly touch={compact} />}
@@ -1439,7 +1439,16 @@ export function SessionChatPage({
           </>
         }
         turn={turn}
-        {...(infoSlot === undefined ? {} : { onToggleInfo: info.toggle })}
+        {...(infoSlot === undefined
+          ? {}
+          : {
+              onToggleInfo: panelCovered
+                ? () => {
+                    tasks.setExpanded(false);
+                    info.show('tasks');
+                  }
+                : info.toggle,
+            })}
         {...(onOpenSessions === undefined ? {} : { onOpenSessions })}
       />
       {/* NOT a live region. App.tsx owns the single announcement for a refresh
@@ -1462,7 +1471,6 @@ export function SessionChatPage({
   // The text column and the composer share one measure (`.kt-chat-surface`, styles/index.css); the
   // composer's row reserves the transcript scrollbar's width so both centre on one axis.
   const { references: agendaReferences, composer: agendaComposer } = agenda;
-  const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
   const agendaSent = agendaComposer.onSent;
   const onSentWithAgenda = useCallback(() => {
     agendaSent();

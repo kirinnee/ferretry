@@ -1656,6 +1656,67 @@ describe('SessionChatPage', () => {
     }
   });
 
+  describe('the Tasks tab expanded over the chat', () => {
+    const expandedOn = async (formFactor: 'desktop' | 'phone') => {
+      const expansions: boolean[] = [];
+      const board = new DaemonBoardStore(
+        fakePort({
+          board: async () =>
+            boardAnswer([boardCard('F18', { owner: 'shared' })], { projectId: PROJECT, laneSet: laneSetFor() }),
+        }),
+        fakeEnvironment(),
+      );
+      const current = sessionView('shared', { config: { focusTask: { id: 'F18' } } });
+      const page = renderSessionChatPage(
+        <SessionChatPage
+          board={board}
+          client={client([], current)}
+          connection={alpha}
+          context={contextDependencies()}
+          entries={[]}
+          formFactor={formFactor}
+          initialInfo="tasks"
+          onSessionChange={() => undefined}
+          presentation="pane"
+          session={current}
+          tasksView={{
+            expanded: true,
+            agents: false,
+            setAgents: () => undefined,
+            setExpanded: next => void expansions.push(next),
+          }}
+        />,
+        fakeDaemon().factory,
+      );
+      await flush();
+      return { page, expansions };
+    };
+
+    test('on a desktop the board takes the whole chat, the Info panel steps out, and the Info button collapses it', async () => {
+      const { page, expansions } = await expandedOn('desktop');
+      try {
+        expect(page.root.findAllByProps({ 'data-board-full': '' })).toHaveLength(1);
+        expect(page.root.findAllByType(BoardSideTab)).toHaveLength(1);
+        expect(page.root.findByType(SessionTopBar).props.infoOpen).toBe(false);
+        run(() => page.root.findByType(SessionTopBar).props.onToggleInfo());
+        expect(expansions).toEqual([false]);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('on a phone the board still covers the chat, and the Info button keeps its own meaning', async () => {
+      const { page, expansions } = await expandedOn('phone');
+      try {
+        expect(page.root.findAllByProps({ 'data-board-full': '' })).toHaveLength(1);
+        run(() => page.root.findByType(SessionTopBar).props.onToggleInfo());
+        expect(expansions).toEqual([]);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+  });
+
   test('a /skill reference opens Info › Context › Skills, and the composer’s catalog is read ONCE and proves it', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const asked: string[] = [];
