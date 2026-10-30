@@ -2,6 +2,7 @@ import type { AttentionId, AttentionSnapshot, IFyApiClient, SessionView } from '
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
 import { Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { CacheUpdating } from '../../components/cache-updating.tsx';
 import { CompactionChip } from '../../components/compaction-card.tsx';
 import { Composer } from '../../components/composer.tsx';
@@ -1386,24 +1387,27 @@ export function SessionChatPage({
         </div>
       ) : null}
       <div className="fy-chat-log">
-        <Transcript
-          activity={pane.activity}
-          activityFallback={session.state.activity ?? null}
-          live={liveSample}
-          turnStartedAt={working ? (session.state.turnStateAt ?? null) : null}
-          agentName={agentName}
-          busy={busy}
-          daemonId={connection.daemonId}
-          entries={entries}
-          {...(onRetry === undefined ? {} : { onRetry })}
-          {...(onCancel === undefined ? {} : { onCancel })}
-          {...(onSubmit === undefined ? {} : { onSubmit })}
-          {...(onDismiss === undefined ? {} : { onDismiss })}
-          {...(onExpand === undefined ? {} : { onExpand })}
-          pinSignal={pinSignal}
-          {...(readingPosition === undefined ? {} : { readingPosition })}
-          sessionId={session.config.id}
-        />
+        {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
+        <AgendaItemsProvider snapshot={attention?.snapshot}>
+          <Transcript
+            activity={pane.activity}
+            activityFallback={session.state.activity ?? null}
+            live={liveSample}
+            turnStartedAt={working ? (session.state.turnStateAt ?? null) : null}
+            agentName={agentName}
+            busy={busy}
+            daemonId={connection.daemonId}
+            entries={entries}
+            {...(onRetry === undefined ? {} : { onRetry })}
+            {...(onCancel === undefined ? {} : { onCancel })}
+            {...(onSubmit === undefined ? {} : { onSubmit })}
+            {...(onDismiss === undefined ? {} : { onDismiss })}
+            {...(onExpand === undefined ? {} : { onExpand })}
+            pinSignal={pinSignal}
+            {...(readingPosition === undefined ? {} : { readingPosition })}
+            sessionId={session.config.id}
+          />
+        </AgendaItemsProvider>
         {agenda.card}
       </div>
       <div className="fy-chat-input" data-safe-bottom="" data-session-input="">

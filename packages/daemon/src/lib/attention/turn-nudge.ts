@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { parseAgendaMessage } from '@ferretry/protocol';
 import type { TranscriptEvent } from '../transcript/types.ts';
 import { ownerAsks } from './owner-asks.ts';
 
@@ -67,10 +68,6 @@ const raises = (event: TranscriptEvent): boolean => {
   return RAISING_COMMAND.test(JSON.stringify(event.call.input));
 };
 
-/** The opener the daemon words for a chat message that names items: `[re !A5 «title», !A7 «title»] …` (conversation.ts). */
-const RE_OPENER = /^\s*\[re ((?:[^\]]|\](?!\s))*)\]/u;
-const RE_ID = /!(A[1-9][0-9]*)\b/gu;
-
 /** A command that edits, closes or surfaces the item: `agenda edit|done|dismiss|surface` naming it. */
 const handles = (event: TranscriptEvent, id: string): boolean =>
   event.kind === 'tool-call' &&
@@ -78,9 +75,11 @@ const handles = (event: TranscriptEvent, id: string): boolean =>
     JSON.stringify(event.call.input),
   );
 
-const discussedIn = (opener: string): string[] => [
-  ...new Set([...(RE_OPENER.exec(opener)?.[1] ?? '').matchAll(RE_ID)].map(match => match[1] as string)),
-];
+/** The items an owner chat message was about: the opener the daemon words for one, `[re !A5 «title», !A7 «title»] …` (agenda-message.ts). */
+const discussedIn = (opener: string): string[] => {
+  const [first] = parseAgendaMessage(opener)?.parts ?? [];
+  return first?.kind === 're' ? [...new Set(first.items.map(item => item.id))] : [];
+};
 
 const digest = (text: string): string => createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 16);
 

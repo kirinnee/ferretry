@@ -275,3 +275,33 @@ The grammar is meant to be extended in one place, not forked. To add a kind:
 nothing could prove it. The surface resolver now reads the session's browser status as well as its
 terminal listing (`packages/pwa/src/lib/surface-references.ts`), and the session page opens a proved
 page in its own workspace tab.
+
+## 9. Agenda message headings
+
+Some chat messages are ABOUT agenda items: the owner's answer from a card, a request for more
+information, a wish to talk an item through, and the owner's own message that references `!AN`. The
+daemon words each with a bracketed heading — a kind, then every item it names as this grammar's `!AN`
+token and its quoted ask or title — so the ferret always knows which item a message is about:
+
+| Heading                           | Means                                    | What the card shows as the owner's words                               |
+| --------------------------------- | ---------------------------------------- | ---------------------------------------------------------------------- |
+| `[answer to !A3 «ask»] …`         | The owner answered from the card         | The answer (a choice as a selected pill), and any `· note: …` under it |
+| `[done !A3 «ask»] …`              | The owner marked it done, with no note   | The body as written                                                    |
+| `[dismissed !A3 «ask»] …`         | The owner dismissed it                   | The body as written                                                    |
+| `[needs more info !A3 «ask»] …`   | The owner needs more before answering    | Their note                                                             |
+| `[discuss !A3 «title»] …`         | The owner wants to talk it through       | Their note, without the instructions to the ferret                     |
+| `[re !A5 «title», !A7 «title»] …` | The owner's own chat message about items | What they typed                                                        |
+
+A burst of board answers is ONE message: each form in turn, a blank line apart.
+
+**One owner, both directions.** The writer and the reader are the same module,
+`packages/protocol/src/lib/agenda-message.ts`: the daemon builds every heading through it, and the app
+reads them back through `parseAgendaMessage` to draw each as a compact card (kind, the `!AN` chip, the
+item's title, the owner's words) instead of raw text. Never parse or word a heading anywhere else — a
+second reader is how the two drift apart.
+
+The `!AN` in a card is an ordinary reference: proved against the session's ledger and opened exactly as
+in section 4, or left as plain text when it cannot be proved. The text the ferret actually received is
+always one tap away on the card ("Show sent text", and copy), so the card is a reading of the message,
+never a replacement for it. A message that does not read as headings in full — prose before the first
+heading, an unknown kind, an id that is not `A` and a positive number — is drawn as the words it is.
