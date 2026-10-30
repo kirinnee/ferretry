@@ -1,3 +1,10 @@
+## [4.141.2](https://github.com/kirinnee/ferretry/compare/v4.141.1...v4.141.2) (2026-10-30)
+
+### Fixes
+
+* **pwa:** put the theme picker back in the chat bar and make it always closable ([#1053](https://github.com/kirinnee/ferretry/issues/1053)) ([924962e](https://github.com/kirinnee/ferretry/commit/924962ed7acc8d6a660bc2e965e48480e0d31a3f))
+* **pwa:** small inline On/Off switch in runtime and login card headers ([#1052](https://github.com/kirinnee/ferretry/issues/1052)) ([1f6f206](https://github.com/kirinnee/ferretry/commit/1f6f20684f4cb589e98db515174ef7fbed1349c5))
+
 ## [4.141.1](https://github.com/kirinnee/ferretry/compare/v4.141.0...v4.141.1) (2026-10-30)
 
 ### Fixes
