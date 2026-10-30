@@ -364,7 +364,6 @@ export function planRevives(
     else refused.push({ subject, why });
   }
 
-  const acceptedIds = new Set(accepted.map(subject => subject.id));
   const leads = new Set(accepted.flatMap(subject => (subject.parent === undefined ? [] : [subject.parent])));
   const rank = (subject: ReviveSubject): readonly [number, number, number, string] => [
     subject.mode === 'interactive' ? 0 : 1,
@@ -390,5 +389,5 @@ export function planRevives(
     waves.push(wave.map(subject => ({ ...subject, wave: waves.length + 1 })));
     for (const placed of wave) waiting.splice(waiting.indexOf(placed), 1);
   }
-  return { waves, refused, cascade: members.size > 0 && accepted.some(subject => acceptedIds.has(subject.id)) };
+  return { waves, refused, cascade: accepted.some(subject => members.has(subject.id)) };
 }

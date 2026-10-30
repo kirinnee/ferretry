@@ -198,6 +198,32 @@ describe('a fleet-wide death', () => {
     ]);
   });
 
+  it('should not wait on tmux for a cascade whose members are all refused', () => {
+    // Arrange — the cluster is under a stopped lead, so only an unrelated late death is revived.
+    const together = [
+      subject('a', { diedAt: ago(60), parent: 'lead' }),
+      subject('b', { diedAt: ago(59), parent: 'lead' }),
+      subject('c', { diedAt: ago(58), parent: 'lead' }),
+      subject('d', { diedAt: ago(30) }),
+    ];
+
+    // Act
+    const planned = plan(together, {
+      fleet: [
+        { id: 'lead', status: 'stopped' },
+        ...together.map(entry => ({
+          id: entry.id,
+          status: 'failed',
+          ...(entry.parent === undefined ? {} : { parent: entry.parent }),
+        })),
+      ],
+    });
+
+    // Assert
+    should(planned.waves.flat().map(entry => entry.id)).deepEqual(['d']);
+    should(planned.cascade).be.false();
+  });
+
   it('should say a lone vanished terminal was only its own', () => {
     // Act
     const planned = plan([subject('a')]);

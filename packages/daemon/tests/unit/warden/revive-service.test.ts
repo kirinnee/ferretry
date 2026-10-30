@@ -7,9 +7,9 @@ import {
   type ReviveEvent,
   type ReviveState,
   WARDEN_LABEL,
-  WardenReviveService,
   type WardenResumeOutcome,
   type WardenReviveNotice,
+  WardenReviveService,
   type WardenSessionView,
 } from '../../../src/lib/warden/index.ts';
 
@@ -175,18 +175,23 @@ describe('auto-revive of a session that died', () => {
     should(h.resumed[0]?.message).containEql('the agent crashed (exit 2)');
   });
 
-  it('should do nothing at all while auto-revive, or the Warden, is off', async () => {
+  it('should do nothing at all while auto-revive or the Warden is off, or the Warden may not resume alone', async () => {
     // Arrange
     const h = harness({ a: [gone()] });
 
     // Act
     const off = await run(h, [view('a')], undefined, config({ enabled: false }));
     const wardenOff = await run(h, [view('a')], undefined, config({}, false));
+    const resumeNotAlone = await run(h, [view('a')], undefined, {
+      ...config(),
+      mayActAlone: { ...DEFAULT_WARDEN_CONFIG.mayActAlone, resume: false },
+    });
 
     // Assert
     should(h.resumed).deepEqual([]);
     should(off.revive).equal(EMPTY_REVIVE_STATE);
     should(wardenOff.actions).deepEqual([]);
+    should(resumeNotAlone.actions).deepEqual([]);
     should(h.persisted).deepEqual([]);
   });
 

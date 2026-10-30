@@ -106,7 +106,9 @@ export class WardenReviveService {
       actions: [],
       revived: new Set(),
     };
-    if (!config.enabled || !config.revive.enabled) return none;
+    // A revive IS a resume of a dead agent: an owner who has not let the Warden resume alone has not let it
+    // revive alone either, whatever `revive.enabled` says.
+    if (!config.enabled || !config.revive.enabled || !config.mayActAlone.resume) return none;
 
     let state = this.housekeeping(input.revive ?? EMPTY_REVIVE_STATE, input.fleet, nowMs);
     const found = await this.candidates(input, state);
