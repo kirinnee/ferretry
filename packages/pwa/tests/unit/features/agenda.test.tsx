@@ -423,6 +423,24 @@ describe('a request to show an item (`?attention=A5`)', () => {
     expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
   });
 
+  test('a resolved item named on ENTRY (a link, a notification) never opens the resolved list; it says it is no longer open', () => {
+    const opened: string[] = [];
+    const view = mount({
+      snapshot: board(MIXED, {}, [item('A9', { resolvedAt: '2026-07-31T12:00:00.000Z' })]),
+      focus: { ...target('A9'), onEntry: true },
+      onOpenResolved: id => opened.push(id),
+    });
+    expect(opened).toEqual([]);
+    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(0);
+    const note = view.root.find(node => node.props?.['data-agenda-missing'] !== undefined);
+    expect(note.props['data-agenda-missing']).toBe('A9');
+  });
+
+  test('an open item named on entry still opens its card', () => {
+    const view = mount({ snapshot: board(MIXED), focus: { ...target('A2'), onEntry: true } });
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
+  });
+
   test('hands a resolved item to the resolved list and opens no card', () => {
     const opened: string[] = [];
     const view = mount({
