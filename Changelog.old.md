@@ -1,3 +1,9 @@
+## [4.109.0](https://github.com/kirinnee/ferretry/compare/v4.108.1...v4.109.0) (2026-10-30)
+
+### Features
+
+* retire Attention for notifications, an optional agenda mode and the Inbox ([#897](https://github.com/kirinnee/ferretry/issues/897)) ([4810173](https://github.com/kirinnee/ferretry/commit/4810173fdc8b984f582aac0b7de2bff36ed8cb85))
+
 ## [4.108.1](https://github.com/kirinnee/ferretry/compare/v4.108.0...v4.108.1) (2026-10-30)
 
 ### Fixes
