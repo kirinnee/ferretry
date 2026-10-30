@@ -8,8 +8,8 @@
  * item when it names it as a `!A47` reference.
  */
 
-import { type AgendaMessagePart, type AttentionItem, parseAgendaMessage } from '@ferretry/protocol';
-import { type RevisionEntry, revisionList } from './attention-revisions.ts';
+import { type AgendaMessagePart, type AgendaItem, parseAgendaMessage } from '@ferretry/protocol';
+import { type RevisionEntry, revisionList } from './agenda-revisions.ts';
 import type { TranscriptEntry } from './session-screens.ts';
 
 /** The longest ferret message kept whole; the rest is cut and marked, the chat holds the whole. */
@@ -21,14 +21,14 @@ export type HistoryEvent =
   | { readonly kind: 'owner-text'; readonly key: string; readonly at: number; readonly text: string }
   | { readonly kind: 'ferret'; readonly key: string; readonly at: number; readonly text: string };
 
-const mentions = (text: string, id: AttentionItem['id']): boolean =>
+const mentions = (text: string, id: AgendaItem['id']): boolean =>
   new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u').test(text);
 
 const cut = (text: string): string =>
   text.length > HISTORY_FERRET_CHARS ? `${text.slice(0, HISTORY_FERRET_CHARS).trimEnd()}…` : text;
 
 /** The conversation's rows about one item, in the order they were said. */
-const spoken = (id: AttentionItem['id'], entries: readonly TranscriptEntry[]): readonly HistoryEvent[] => {
+const spoken = (id: AgendaItem['id'], entries: readonly TranscriptEntry[]): readonly HistoryEvent[] => {
   let clock = 0;
   return entries.flatMap((entry): readonly HistoryEvent[] => {
     clock = entry.at ?? clock;
@@ -48,7 +48,7 @@ const spoken = (id: AttentionItem['id'], entries: readonly TranscriptEntry[]): r
   });
 };
 
-const revisions = (item: AttentionItem): readonly HistoryEvent[] =>
+const revisions = (item: AgendaItem): readonly HistoryEvent[] =>
   [...revisionList(item)].reverse().map(
     entry =>
       ({
@@ -60,7 +60,7 @@ const revisions = (item: AttentionItem): readonly HistoryEvent[] =>
   );
 
 /** The item's revisions and the conversation about it, oldest first: the item view reads top-down, newest last. */
-export const itemHistory = (item: AttentionItem, entries: readonly TranscriptEntry[]): readonly HistoryEvent[] =>
+export const itemHistory = (item: AgendaItem, entries: readonly TranscriptEntry[]): readonly HistoryEvent[] =>
   [...revisions(item), ...spoken(item.id, entries)]
     .map((event, order) => ({ event, order }))
     .sort((a, b) => a.event.at - b.event.at || a.order - b.order)

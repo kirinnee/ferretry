@@ -49,7 +49,7 @@ describe('Jev with investigations off', () => {
 
     // Act
     await subject.service.run({ force: false });
-    const feed = await subject.service.attention();
+    const feed = await subject.service.agenda();
     const status = await subject.service.status();
 
     // Assert

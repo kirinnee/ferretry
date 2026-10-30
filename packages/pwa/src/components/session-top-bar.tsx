@@ -63,10 +63,10 @@ export interface SessionTopBarProps {
   /** The primary lifecycle actions, rendered by the page that owns them. */
   readonly actions: ReactNode;
   /**
-   * How many Attention items are open on this ferret. A small accent count beside the name when there are
+   * How many Agenda items are open on this ferret. A small accent count beside the name when there are
    * any, nothing when there are none — the pinned block above the composer is the item itself.
    */
-  readonly attentionOpen?: number;
+  readonly agendaOpen?: number;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
   /**
@@ -101,7 +101,7 @@ export function SessionTopBar({
   project,
   compact,
   actions,
-  attentionOpen = 0,
+  agendaOpen = 0,
   status,
   turn = null,
   infoOpen = false,
@@ -142,7 +142,7 @@ export function SessionTopBar({
       )}
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
-        {attentionOpen > 0 ? <UnreadBadge className="fy-session-bar__attention" count={attentionOpen} /> : null}
+        {agendaOpen > 0 ? <UnreadBadge className="fy-session-bar__agenda" count={agendaOpen} /> : null}
         <OutdatedMark view={session} />
         {compact ? null : (
           <SwitchMarks

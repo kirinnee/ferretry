@@ -4,8 +4,8 @@ import {
   type AnswerOperationRecord,
   answerEvidenceForQuestion,
   type QuestionDocument,
-  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
 } from './answer-ledger.ts';
 
 export type StructuredQuestionProjection =
@@ -26,13 +26,13 @@ export type StructuredQuestionProjection =
 // words themselves. Anything this daemon would not have written fails closed to NOT owned: nothing
 // is cleared on its evidence, and the next read re-mints the canonical message from the record the
 // ledger still holds.
-const unconfirmedBoundAnswerAttention = (record: AnswerOperationRecord): string =>
+const unconfirmedBoundAnswerAgenda = (record: AnswerOperationRecord): string =>
   `answer request ${record.requestId} for ${record.toolUseId} may have reached the form, and release was not confirmed; the bound question remains blocked and was not sent again`;
 
-const unconfirmedOrphanAnswerAttention = (record: AnswerOperationRecord): string =>
+const unconfirmedOrphanAnswerAgenda = (record: AnswerOperationRecord): string =>
   `answer request ${record.requestId} for ${record.toolUseId} may have reached the form, and release was not confirmed; inspect the session before continuing`;
 
-const releasedAnswerAttention = (record: AnswerOperationRecord): string =>
+const releasedAnswerAgenda = (record: AnswerOperationRecord): string =>
   `answer request ${record.requestId} for ${record.toolUseId} may have reached the form; the form was released, so prose may continue, but the original answer remains unconfirmed`;
 
 /**
@@ -44,14 +44,14 @@ const releasedAnswerAttention = (record: AnswerOperationRecord): string =>
  * ownership check would be comparing against a copy it does not own and a later authoritative
  * confirmation could never clear that first write.
  */
-export function firstWriteReleasedAnswerAttention(toolUseId: string): string {
+export function firstWriteReleasedAnswerAgenda(toolUseId: string): string {
   return `an answer to ${toolUseId} may have reached the form and was never confirmed; the form was released, so prose may continue, but do not assume the original answer landed`;
 }
 
-const unconfirmedAttentionOwnedBy = (state: QuestionDocument, record: AnswerOperationRecord): boolean =>
-  state.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND &&
-  (state.needsHuman === unconfirmedBoundAnswerAttention(record) ||
-    state.needsHuman === unconfirmedOrphanAnswerAttention(record));
+const unconfirmedAgendaOwnedBy = (state: QuestionDocument, record: AnswerOperationRecord): boolean =>
+  state.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND &&
+  (state.needsHuman === unconfirmedBoundAnswerAgenda(record) ||
+    state.needsHuman === unconfirmedOrphanAnswerAgenda(record));
 
 /**
  * Does the RELEASED answer advisory standing on this session belong to THIS ledger record?
@@ -64,16 +64,16 @@ const unconfirmedAttentionOwnedBy = (state: QuestionDocument, record: AnswerOper
  * any non-empty tool or request id, whitespace and the message's own delimiter words included, and
  * answers false for every message this daemon would not have written.
  */
-export function releasedAnswerAttentionOwnedBy(state: QuestionDocument, record: AnswerOperationRecord): boolean {
+export function releasedAnswerAgendaOwnedBy(state: QuestionDocument, record: AnswerOperationRecord): boolean {
   return (
-    state.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND &&
-    (state.needsHuman === releasedAnswerAttention(record) ||
-      state.needsHuman === firstWriteReleasedAnswerAttention(record.toolUseId))
+    state.needsHumanKind === STRUCTURED_ANSWER_RELEASED_AGENDA_KIND &&
+    (state.needsHuman === releasedAnswerAgenda(record) ||
+      state.needsHuman === firstWriteReleasedAnswerAgenda(record.toolUseId))
   );
 }
 
-const answerAttentionOwnedBy = (state: QuestionDocument, record: AnswerOperationRecord): boolean =>
-  unconfirmedAttentionOwnedBy(state, record) || releasedAnswerAttentionOwnedBy(state, record);
+const answerAgendaOwnedBy = (state: QuestionDocument, record: AnswerOperationRecord): boolean =>
+  unconfirmedAgendaOwnedBy(state, record) || releasedAnswerAgendaOwnedBy(state, record);
 
 // The tool-level questions this projector asks are that same predicate over the records it holds,
 // and they demand EXACTLY ONE owner. Ownership is a fact about a record, so a tool owns the
@@ -84,7 +84,7 @@ const answerAttentionOwnedBy = (state: QuestionDocument, record: AnswerOperation
 // confirmation or an acknowledgement of one of them clear an advisory that belongs to the other, so
 // more than one owner fails closed to NOT owned: nothing is cleared on ambiguous evidence, and the
 // projector re-asserts the attention for the record it is actually projecting.
-const attentionOwnedForTool = (
+const agendaOwnedForTool = (
   state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
@@ -95,23 +95,23 @@ const attentionOwnedForTool = (
   return owners.length === 1 && owners[0]?.toolUseId === toolUseId;
 };
 
-const unresolvedAnswerAttentionFor = (
+const unresolvedAnswerAgendaFor = (
   state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
-): boolean => attentionOwnedForTool(state, toolUseId, records, unconfirmedAttentionOwnedBy);
+): boolean => agendaOwnedForTool(state, toolUseId, records, unconfirmedAgendaOwnedBy);
 
-const releasedAnswerAttentionFor = (
+const releasedAnswerAgendaFor = (
   state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
-): boolean => attentionOwnedForTool(state, toolUseId, records, releasedAnswerAttentionOwnedBy);
+): boolean => agendaOwnedForTool(state, toolUseId, records, releasedAnswerAgendaOwnedBy);
 
-const ownedAnswerAttentionFor = (
+const ownedAnswerAgendaFor = (
   state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
-): boolean => attentionOwnedForTool(state, toolUseId, records, answerAttentionOwnedBy);
+): boolean => agendaOwnedForTool(state, toolUseId, records, answerAgendaOwnedBy);
 
 /**
  * What a READ may retire because the ledger holds an acknowledgement: the blocking state, and only
@@ -130,9 +130,9 @@ const acknowledgementClears = (
   state: QuestionDocument,
   toolUseId: string | undefined,
   records: readonly AnswerOperationRecord[],
-): boolean => unresolvedAnswerAttentionFor(state, toolUseId, records);
+): boolean => unresolvedAnswerAgendaFor(state, toolUseId, records);
 
-const clearAnswerAttention = { needsHuman: undefined, needsHumanKind: undefined } as const;
+const clearAnswerAgenda = { needsHuman: undefined, needsHumanKind: undefined } as const;
 
 function isQuestionTool(name: string): boolean {
   return /^(askuserquestion|request_user_input)$/iu.test(name);
@@ -220,7 +220,7 @@ export function structuredQuestionStatePatch(
     if (
       current.lastAnsweredQuestionToolUseId === toolUseId &&
       current.pendingQuestion === undefined &&
-      !ownedAnswerAttentionFor(current, toolUseId, records)
+      !ownedAnswerAgendaFor(current, toolUseId, records)
     )
       return {};
     return {
@@ -233,34 +233,34 @@ export function structuredQuestionStatePatch(
             ? 'running'
             : current.status
           : 'awaiting_question',
-      ...(ownedAnswerAttentionFor(current, toolUseId, records) ? clearAnswerAttention : {}),
+      ...(ownedAnswerAgendaFor(current, toolUseId, records) ? clearAnswerAgenda : {}),
     };
   }
   if (evidence.kind === 'quarantined') {
     if (
       newerQuestion === undefined &&
       current.pendingQuestion === undefined &&
-      releasedAnswerAttentionFor(current, evidence.record.toolUseId, records)
+      releasedAnswerAgendaFor(current, evidence.record.toolUseId, records)
     )
       return {};
     return {
       pendingQuestion: newerQuestion,
       status: statusProtected ? current.status : newerQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
-      needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-      needsHuman: releasedAnswerAttention(evidence.record),
+      needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
+      needsHuman: releasedAnswerAgenda(evidence.record),
       ...(evidence.record.reason === undefined ? {} : { reason: evidence.record.reason }),
     };
   }
   if (evidence.kind === 'released' || evidence.kind === 'acknowledged') {
-    const clearOwnedAttention =
+    const clearOwnedAgenda =
       evidence.kind === 'acknowledged'
         ? acknowledgementClears(current, toolUseId, records)
-        : ownedAnswerAttentionFor(current, toolUseId, records);
+        : ownedAnswerAgendaFor(current, toolUseId, records);
     if (
       newerQuestion === undefined &&
       current.pendingQuestion === undefined &&
       current.status !== 'awaiting_question' &&
-      !clearOwnedAttention
+      !clearOwnedAgenda
     )
       return {};
     return {
@@ -269,7 +269,7 @@ export function structuredQuestionStatePatch(
       ...(evidence.kind === 'released' && evidence.record.reason !== undefined
         ? { reason: evidence.record.reason }
         : {}),
-      ...(clearOwnedAttention ? clearAnswerAttention : {}),
+      ...(clearOwnedAgenda ? clearAnswerAgenda : {}),
     };
   }
   if (evidence.kind === 'unconfirmed') {
@@ -285,14 +285,14 @@ export function structuredQuestionStatePatch(
           : undefined;
     if (
       current.pendingQuestion?.toolUseId === boundQuestion?.toolUseId &&
-      unresolvedAnswerAttentionFor(current, evidence.record.toolUseId, records)
+      unresolvedAnswerAgendaFor(current, evidence.record.toolUseId, records)
     )
       return {};
     return {
       pendingQuestion: boundQuestion,
       status: statusProtected ? current.status : boundQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
-      needsHuman: unconfirmedBoundAnswerAttention(evidence.record),
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
+      needsHuman: unconfirmedBoundAnswerAgenda(evidence.record),
       ...(evidence.record.reason === undefined ? {} : { reason: evidence.record.reason }),
     };
   }
@@ -324,7 +324,7 @@ export function structuredQuestionStatePatch(
             ? 'awaiting_user'
             : current.status
           : 'awaiting_question',
-      ...clearAnswerAttention,
+      ...clearAnswerAgenda,
     };
   }
 
@@ -340,16 +340,16 @@ export function structuredQuestionStatePatch(
   );
   if (orphanQuarantine !== undefined) {
     const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
-    const attentionStanding = releasedAnswerAttentionFor(current, orphanQuarantine.toolUseId, records);
-    if (pendingQuestion === undefined && current.pendingQuestion === undefined && attentionStanding) return {};
+    const agendaStanding = releasedAnswerAgendaFor(current, orphanQuarantine.toolUseId, records);
+    if (pendingQuestion === undefined && current.pendingQuestion === undefined && agendaStanding) return {};
     return {
       pendingQuestion,
       status: statusProtected ? current.status : pendingQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
-      ...(attentionStanding
+      ...(agendaStanding
         ? {}
         : {
-            needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-            needsHuman: releasedAnswerAttention(orphanQuarantine),
+            needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
+            needsHuman: releasedAnswerAgenda(orphanQuarantine),
           }),
       ...(orphanQuarantine.reason === undefined ? {} : { reason: orphanQuarantine.reason }),
     };
@@ -367,14 +367,14 @@ export function structuredQuestionStatePatch(
     const pendingQuestion = projection.kind === 'pending' ? projection.question : undefined;
     if (
       current.pendingQuestion?.toolUseId === pendingQuestion?.toolUseId &&
-      unresolvedAnswerAttentionFor(current, orphan.toolUseId, records)
+      unresolvedAnswerAgendaFor(current, orphan.toolUseId, records)
     )
       return {};
     return {
       pendingQuestion,
       status: statusProtected ? current.status : pendingQuestion === undefined ? 'awaiting_user' : 'awaiting_question',
-      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
-      needsHuman: unconfirmedOrphanAnswerAttention(orphan),
+      needsHumanKind: STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
+      needsHuman: unconfirmedOrphanAnswerAgenda(orphan),
       ...(orphan.reason === undefined ? {} : { reason: orphan.reason }),
     };
   }
@@ -382,7 +382,7 @@ export function structuredQuestionStatePatch(
   if (projection.kind === 'pending' && current.lastAnsweredQuestionToolUseId === projection.question.toolUseId)
     return {};
   if (projection.kind === 'pending') {
-    const staleAnswerAttention = records.some(
+    const staleAnswerAgenda = records.some(
       record =>
         record.toolUseId !== projection.question.toolUseId &&
         record.outcome !== 'withdrawn' &&
@@ -392,13 +392,13 @@ export function structuredQuestionStatePatch(
         // (`acknowledgementClears`), while its re-mint stays suppressed.
         (record.outcome === 'acknowledged'
           ? acknowledgementClears(current, record.toolUseId, records)
-          : ownedAnswerAttentionFor(current, record.toolUseId, records)),
+          : ownedAnswerAgendaFor(current, record.toolUseId, records)),
     );
     return {
       pendingQuestion: projection.question,
       status: statusProtected ? current.status : 'awaiting_question',
       ...(current.needsHumanKind === 'structured-question-unrecognized' ? { needsHumanKind: undefined } : {}),
-      ...(staleAnswerAttention ? clearAnswerAttention : {}),
+      ...(staleAnswerAgenda ? clearAnswerAgenda : {}),
     };
   }
   if (projection.kind === 'needs-human')

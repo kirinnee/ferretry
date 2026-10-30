@@ -229,7 +229,7 @@ export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FI
  * recomputed on every read, which makes disagreement between the two unrepresentable.
  */
 /**
- * HOW LONG THE OWNER'S ATTENTION ANSWERS ARE HELD before they reach the ferret (docs/attention.md § Delivery).
+ * HOW LONG THE OWNER'S ATTENTION ANSWERS ARE HELD before they reach the ferret (docs/agenda.md § Delivery).
  * An answer wakes the ferret and every message is re-read on every later turn, so answers are batched:
  * delivered `replySettleSeconds` after the owner's LAST action (each further card action restarts it), and
  * never more than `replyMaxWaitSeconds` after the FIRST. A settle longer than the max wait could never
@@ -245,7 +245,7 @@ export const CapabilityGrantsDocumentSchema = z.strictObject(CAPABILITY_GRANT_FI
  * `resurfaceAfterMinutes` is off unless set: an ask that has sat in discussion that long is surfaced to the
  * owner's queue by the daemon, its history saying the timer did it.
  */
-export const DaemonAttentionConfigSchema = z
+export const LegacyDaemonAttentionConfigSchema = z
   .strictObject({
     replySettleSeconds: z.number().int().min(1).max(3_600).default(10),
     replyMaxWaitSeconds: z.number().int().min(1).max(3_600).default(120),
@@ -289,19 +289,19 @@ export const DaemonAgendaConfigSchema = z
     },
   );
 
-type DaemonAttentionConfig = z.output<typeof DaemonAttentionConfigSchema>;
+type DaemonAgendaConfig = z.output<typeof LegacyDaemonAttentionConfigSchema>;
 
 /** Which spelling of the reply-window block a document used, so the boot can say so once. */
-export type AttentionBlockSpelling = 'agenda' | 'attention' | 'both' | 'none';
+export type AgendaBlockSpelling = 'agenda' | 'attention' | 'both' | 'none';
 
-function attentionBlockSpelling(attention: unknown, agenda: unknown): AttentionBlockSpelling {
-  if (attention !== undefined && agenda !== undefined) return 'both';
+function agendaBlockSpelling(legacyAttention: unknown, agenda: unknown): AgendaBlockSpelling {
+  if (legacyAttention !== undefined && agenda !== undefined) return 'both';
   if (agenda !== undefined) return 'agenda';
-  return attention === undefined ? 'none' : 'attention';
+  return legacyAttention === undefined ? 'none' : 'attention';
 }
 
 /** The sentence a boot says when the older `attention` block is in the document; absent when it is not. */
-export function attentionBlockNotice(spelling: AttentionBlockSpelling): string | undefined {
+export function agendaBlockNotice(spelling: AgendaBlockSpelling): string | undefined {
   if (spelling === 'attention')
     return 'daemon config: "attention" is renamed to "agenda"; the old key is still read until the agenda removal release — rename it';
   if (spelling === 'both')
@@ -356,7 +356,7 @@ export const DaemonConfigDocumentSchema = z
      */
     housekeeping: z.strictObject({ enabled: z.boolean().default(true) }).prefault({}),
     /** How long the owner's attention answers are held and batched before they reach the ferret. */
-    attention: DaemonAttentionConfigSchema.optional(),
+    attention: LegacyDaemonAttentionConfigSchema.optional(),
     /** The same block under its new name; wins key by key when both are written. */
     agenda: DaemonAgendaConfigSchema.optional(),
     /** The rendezvous carrier, if this host has one. Absent means direct-only. */
@@ -537,8 +537,8 @@ function recordedAdvertisement(config: DaemonConfig): { readonly operatorPublicU
  */
 export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(
   ({ accountModel, fleet, agenda, ...value }, ctx) => {
-    const reply: DaemonAttentionConfig = {
-      ...(value.attention ?? DaemonAttentionConfigSchema.parse({})),
+    const reply: DaemonAgendaConfig = {
+      ...(value.attention ?? LegacyDaemonAttentionConfigSchema.parse({})),
       ...Object.fromEntries(Object.entries(agenda ?? {}).filter(([, setting]) => setting !== undefined)),
     };
     if (reply.replySettleSeconds > reply.replyMaxWaitSeconds) {
@@ -562,7 +562,7 @@ export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(
       /** The ONE reply-window value every consumer reads, whichever spelling set it. */
       attention: reply,
       agenda: reply,
-      attentionSpelling: attentionBlockSpelling(value.attention, agenda),
+      agendaSpelling: agendaBlockSpelling(value.attention, agenda),
       host,
       port,
       // Read off the resolved bind, not off `value.port`: a `port` key superseded by a portless bind

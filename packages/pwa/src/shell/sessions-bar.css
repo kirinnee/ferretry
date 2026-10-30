@@ -357,7 +357,7 @@
 }
 /* The collapsed rail: the pill sits on the dot's corner, smaller, with a ring cut out of the bar behind it. */
 .fy-sbar__dot,
-.fy-sbar__attention-icon {
+.fy-sbar__agenda-icon {
   position: relative;
 }
 .fy-unread-badge--dot {
@@ -375,10 +375,10 @@
 }
 
 /* ---- THE ATTENTION ENTRY: a door to the inbox under the search, calm at zero --------------------- */
-.fy-sbar__attention-slot {
+.fy-sbar__agenda-slot {
   padding: 0 var(--gap-sm) var(--gap-xs);
 }
-.fy-sbar__attention {
+.fy-sbar__agenda {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -391,36 +391,36 @@
   font-weight: var(--weight-medium);
   text-decoration: none;
 }
-.fy-sbar__attention:hover {
+.fy-sbar__agenda:hover {
   background: var(--nav-hover, var(--surface-2));
   color: var(--fg);
 }
-.fy-sbar__attention[data-sbar-unread] {
+.fy-sbar__agenda[data-sbar-unread] {
   border-color: var(--accent-border);
   background: var(--accent-soft);
   color: var(--fg);
   font-weight: var(--weight-strong);
 }
-.fy-sbar__attention[aria-current='page'] {
+.fy-sbar__agenda[aria-current='page'] {
   border-color: var(--nav-sel-edge, var(--accent-border));
   background: var(--nav-sel-bg, var(--accent-soft));
   color: var(--nav-sel-fg, var(--accent));
   font-weight: var(--weight-strong);
 }
-.fy-sbar__attention-name {
+.fy-sbar__agenda-name {
   min-width: 0;
   flex: 1;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.fy-sbar__attention-calm {
+.fy-sbar__agenda-calm {
   color: var(--muted);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
   white-space: nowrap;
 }
-.fy-sbar--drawer .fy-sbar__attention {
+.fy-sbar--drawer .fy-sbar__agenda {
   min-height: 44px;
 }
 .fy-sbar__sub {

@@ -363,7 +363,7 @@ describe('notification watch', () => {
 });
 
 /**
- * AN ASK REACHES THE OWNER AS AN ATTENTION CARD, not as a session notification: a ferret parked on a
+ * AN ASK REACHES THE OWNER AS AN AGENDA CARD, not as a session notification: a ferret parked on a
  * question, a permission prompt or a dialog raises an item whose own title and ask are the push. The
  * session watch keeps only a session's failure.
  */

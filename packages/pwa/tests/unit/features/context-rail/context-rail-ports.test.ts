@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'bun:test';
 import {
-  attentionSignalsPort,
+  agendaSignalsPort,
   instructionDocsLoader,
   sessionMcpLoader,
   sessionSkillsInventoryLoader,
   skillFileLoader,
 } from '../../../../src/features/context-rail/context-rail-ports.ts';
-import { DaemonAttentionClient } from '../../../../src/lib/attention-client.ts';
+import { DaemonAgendaClient } from '../../../../src/lib/agenda-client.ts';
 import { daemonConnection } from '../../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../../src/lib/daemon-scope.ts';
 import type { DaemonFetch } from '../../../../src/lib/runtime-models.ts';
@@ -19,8 +19,8 @@ const scope = daemonSessionScope(daemon, 'session-a');
 const json = (value: unknown, status = 200): Response =>
   new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } });
 
-describe('attentionSignalsPort', () => {
-  it('reads, answers and resolves through the shared attention client and store', async () => {
+describe('agendaSignalsPort', () => {
+  it('reads, answers and resolves through the shared agenda client and store', async () => {
     const requests: { url: string; method: string; body: unknown }[] = [];
     let answers: Response[] = [json({ error: 'down' }, 503)];
     const fetcher: DaemonFetch = async (url, init) => {
@@ -33,8 +33,8 @@ describe('attentionSignalsPort', () => {
       if (next === undefined) throw new Error('no answer scripted');
       return next;
     };
-    const client = new DaemonAttentionClient(undefined, fetcher);
-    const port = attentionSignalsPort(client, daemon, scope);
+    const client = new DaemonAgendaClient(undefined, fetcher);
+    const port = agendaSignalsPort(client, daemon, scope);
     let notified = 0;
     const stop = port.subscribe(() => {
       notified += 1;

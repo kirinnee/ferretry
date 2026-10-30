@@ -3,7 +3,7 @@ import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
 import {
-  firstWriteReleasedAnswerAttention,
+  firstWriteReleasedAnswerAgenda,
   parseSessionId,
   type SerialExecutor,
   type SessionId,
@@ -14,7 +14,7 @@ import {
   type PaneObservation,
   ResumeAcknowledgementFailed,
   type ResumeActor,
-  type ResumeAnswerAttention,
+  type ResumeAnswerAgenda,
   ResumeCancelled,
   type ResumeLauncher,
   type ResumeMonitorControl,
@@ -38,7 +38,7 @@ const UNCONFIRMED = 'structured-answer-unconfirmed';
  * It is the strongest identity case in the codebase for the queue fixture below: it names only the
  * TOOL, so two different request ids over one tool render this exact same string.
  */
-const FIRST_WRITE_ADVISORY = firstWriteReleasedAnswerAttention('tool-1');
+const FIRST_WRITE_ADVISORY = firstWriteReleasedAnswerAgenda('tool-1');
 
 /** Let every already-resolved continuation run, without inventing a timer to wait on. */
 const drain = async (): Promise<void> => {
@@ -202,7 +202,7 @@ class FakeGate implements LaunchGate {
  * contract is that the acknowledgement lands after the relaunch and delivery and before the state
  * clears — and three separate spies cannot show that.
  */
-class FakeAnswerAttention implements ResumeAnswerAttention {
+class FakeAnswerAgenda implements ResumeAnswerAgenda {
   readonly acknowledged: ResumeActor[] = [];
   /** The transitions already journalled at the moment of the call — how "before the clear" is proved. */
   eventsWhenCalled: readonly string[] = [];
@@ -237,12 +237,12 @@ function build(
   const launcher = new FakeLauncher(pane);
   const turns = new FakeTurns();
   const monitors = new FakeMonitors();
-  const answerAttention = new FakeAnswerAttention(launcher.calls, () => repository.events);
+  const answerAgenda = new FakeAnswerAgenda(launcher.calls, () => repository.events);
   const service = new SessionResumeService(
-    { repository, launcher, turns, monitors, gate, serial: inlineSerial, answerAttention },
+    { repository, launcher, turns, monitors, gate, serial: inlineSerial, answerAgenda },
     SETTINGS,
   );
-  return { service, repository, launcher, turns, monitors, gate, answerAttention };
+  return { service, repository, launcher, turns, monitors, gate, answerAgenda };
 }
 
 describe('session resume service', () => {
@@ -572,7 +572,7 @@ describe('session resume answer-advisory acknowledgement', () => {
       'deliver',
       'acknowledge',
     ]);
-    should(world.answerAttention.eventsWhenCalled).not.containEql('session.resumed');
+    should(world.answerAgenda.eventsWhenCalled).not.containEql('session.resumed');
     should(resumedTransition(world)).have.property('clearNeedsHuman', true);
   });
 
@@ -584,7 +584,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     await world.service.resume({ id: ID, actor: 'admin-ui' });
 
     // Assert — attribution, not authorization: the action bit decided, this only records who.
-    should(world.answerAttention.acknowledged).deepEqual(['admin-ui']);
+    should(world.answerAgenda.acknowledged).deepEqual(['admin-ui']);
   });
 
   it('should reach a bare operator relaunch on a live pane instead of refusing it as already running', async () => {
@@ -610,7 +610,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Assert
     should(actual.disposition).equal('sent');
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.transitions).deepEqual([]);
   });
 
@@ -624,7 +624,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Assert
     should(actual.disposition).equal('revived');
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(resumedTransition(world)).not.have.property('clearNeedsHuman');
   });
 
@@ -637,7 +637,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     await world.service.resume({ id: ID, policy: { automatic: false, dedupeSharedRecoveryScope: false } });
 
     // Assert
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(resumedTransition(world)).not.have.property('clearNeedsHuman');
   });
 
@@ -656,7 +656,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     });
 
     // Assert — the resume still happens; the privilege does not.
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(resumedTransition(world)).not.have.property('clearNeedsHuman');
   });
 
@@ -672,7 +672,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     });
 
     // Assert
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(resumedTransition(world)).not.have.property('clearNeedsHuman');
   });
 
@@ -689,7 +689,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     });
 
     // Assert
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(resumedTransition(world)).not.have.property('clearNeedsHuman');
   });
 
@@ -706,7 +706,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     });
 
     // Assert
-    should(world.answerAttention.acknowledged).deepEqual(['admin-ui']);
+    should(world.answerAgenda.acknowledged).deepEqual(['admin-ui']);
     should(resumedTransition(world)).have.property('clearNeedsHuman', true);
   });
 
@@ -734,7 +734,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     await world.service.resume({ id: ID, actor: 'admin-cli' });
 
     // Assert
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(resumedTransition(world)).not.have.property('clearNeedsHuman');
   });
 
@@ -745,7 +745,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act / Assert
     await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejected();
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.events).not.containEql('session.resumed');
   });
 
@@ -756,7 +756,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act / Assert
     await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/tmux refused the pane/u);
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.events).containEql('session.failed');
   });
 
@@ -767,7 +767,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act / Assert
     await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/injection timed out/u);
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
   });
 
   it('should keep the advisory when a preserved harness survived a failed relaunch', async () => {
@@ -782,7 +782,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Assert
     should(actual.disposition).equal('preserved');
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(
       world.repository.transitions.findLast(change => change.event === 'session.resume_false_terminal_averted'),
     ).not.have.property('clearNeedsHuman');
@@ -795,7 +795,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act / Assert
     await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(UnregisteredResumeReplacement);
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.events).containEql('session.failed');
   });
 
@@ -803,7 +803,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     // Arrange — the revive WORKED; only the dismissal failed. Relaunching again would leave two
     // panes, and calling it a terminal failure would lie about a session that is plainly running.
     const world = build(advisory({ status: 'stopped' }), NO_PANE);
-    world.answerAttention.failure = new Error('answer ledger is unwritable');
+    world.answerAgenda.failure = new Error('answer ledger is unwritable');
 
     // Act
     const failure = world.service.resume({ id: ID, actor: 'admin-cli' });
@@ -835,7 +835,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Assert
     await should(failure).be.rejectedWith(/the journal refused session\.resumed/u);
-    should(world.answerAttention.acknowledged).deepEqual(['admin-cli']);
+    should(world.answerAgenda.acknowledged).deepEqual(['admin-cli']);
     should(world.launcher.calls.filter(call => call === 'relaunch')).have.length(1);
     should(world.launcher.calls).not.containEql('kill:failed resume cleanup');
     should(world.monitors.calls).deepEqual(['stop', 'start']);
@@ -856,7 +856,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     // Assert
     await should(failure).be.rejectedWith(/pane is already gone/u);
     should(world.launcher.calls).not.containEql('relaunch');
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.repository.events).not.containEql('session.resumed');
     should(world.monitors.calls).deepEqual(['stop', 'start']);
   });
@@ -866,7 +866,7 @@ describe('session resume answer-advisory acknowledgement', () => {
     // monitor: only `ResumeAcknowledgementFailed` starts one, so a live replacement was left with
     // nothing watching it.
     const world = build(advisory({ status: 'stopped' }), NO_PANE);
-    world.answerAttention.failure = new Error('answer ledger is unwritable');
+    world.answerAgenda.failure = new Error('answer ledger is unwritable');
     world.repository.failEvent = 'session.resumed';
 
     // Act
@@ -885,7 +885,7 @@ describe('session resume answer-advisory acknowledgement', () => {
 
     // Act / Assert
     await should(world.service.resume({ id: ID, actor: 'admin-cli' })).be.rejectedWith(/answer or abandon/u);
-    should(world.answerAttention.acknowledged).deepEqual([]);
+    should(world.answerAgenda.acknowledged).deepEqual([]);
     should(world.launcher.calls).deepEqual([]);
   });
 
@@ -913,14 +913,14 @@ describe('session resume answer-advisory acknowledgement', () => {
       }
     };
     const held = Promise.withResolvers<void>();
-    const answerAttention: ResumeAnswerAttention = {
+    const answerAgenda: ResumeAnswerAgenda = {
       acknowledge: async () => {
         trace.push('append');
         await held.promise;
       },
     };
     const service = new SessionResumeService(
-      { repository, launcher, turns: new FakeTurns(), monitors, gate: new FakeGate(), serial, answerAttention },
+      { repository, launcher, turns: new FakeTurns(), monitors, gate: new FakeGate(), serial, answerAgenda },
       SETTINGS,
     );
 

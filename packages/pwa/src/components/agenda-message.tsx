@@ -22,11 +22,11 @@
 import {
   type AgendaMessageKind,
   type AgendaMessagePart,
-  type AttentionItem,
-  type AttentionSnapshot,
-  attentionTitle,
+  type AgendaItem,
+  type AgendaSnapshot,
+  agendaTitle,
   parseAgendaMessage,
-  type ResolvedAttentionItem,
+  type ResolvedAgendaItem,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useId, useMemo, useState } from 'react';
@@ -35,10 +35,10 @@ import { Markdown } from './markdown.tsx';
 import { useReferenceSurface } from './reference-surface.tsx';
 
 /** An item as the agenda holds it, open or resolved. */
-type AgendaItem = AttentionItem | ResolvedAttentionItem;
+type AgendaItemOrResolved = AgendaItem | ResolvedAgendaItem;
 
 /** Finds an item of this session's agenda by id; `undefined` when the board is unread or does not hold it. */
-export type AgendaItemLookup = (id: string) => AgendaItem | undefined;
+export type AgendaItemLookup = (id: string) => AgendaItemOrResolved | undefined;
 
 const AgendaItemsContext = createContext<AgendaItemLookup>(() => undefined);
 
@@ -50,11 +50,11 @@ export function AgendaItemsProvider({
   snapshot,
   children,
 }: {
-  readonly snapshot: AttentionSnapshot | null | undefined;
+  readonly snapshot: AgendaSnapshot | null | undefined;
   readonly children: ReactNode;
 }) {
   const lookup = useMemo((): AgendaItemLookup => {
-    const byId = new Map<string, AgendaItem>(
+    const byId = new Map<string, AgendaItemOrResolved>(
       snapshot == null ? [] : [...snapshot.resolved, ...snapshot.items].map(item => [item.id, item]),
     );
     return id => byId.get(id);
@@ -76,7 +76,7 @@ export const AGENDA_KIND_LABEL: Readonly<Record<AgendaMessageKind, string>> = {
  * Whether an answer is a CHOICE — drawn as the selected option rather than as words: the option the owner
  * picked, an approval or rejection, or a plain "Done". A written answer stays words.
  */
-export const isChosenAnswer = (part: AgendaMessagePart, item: AgendaItem | undefined): boolean => {
+export const isChosenAnswer = (part: AgendaMessagePart, item: AgendaItemOrResolved | undefined): boolean => {
   if (part.kind !== 'answer') return false;
   if (part.text === 'Done') return true;
   const response = item !== undefined && 'response' in item ? item.response : undefined;
@@ -110,7 +110,7 @@ function AgendaPart({ part }: { readonly part: AgendaMessagePart }) {
       </header>
       {items.map(({ named, item }) => (
         <p className="fy-agenda-msg-title" key={named.id}>
-          {item === undefined ? named.quote : attentionTitle(item)}
+          {item === undefined ? named.quote : agendaTitle(item)}
         </p>
       ))}
       {part.text === '' ? null : chosen ? (

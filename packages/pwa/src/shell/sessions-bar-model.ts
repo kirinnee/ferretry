@@ -2,7 +2,7 @@
  * WHAT THE SESSIONS BAR LISTS, as pure decisions.
  *
  * The left bar replaces the Sessions tab (the approved session-view redesign): every session on this
- * machine, grouped by project, with a status dot, an unread Attention badge and the fleet filters kteam's
+ * machine, grouped by project, with a status dot, an unread Agenda badge and the fleet filters kteam's
  * sidebar has — Interactive · All · Agents, and "Show stopped". It is a navigator, not the dashboard, so
  * it answers a narrower question than the dashboard does: "which of my agents is doing what right
  * now, and which one wants me?"
@@ -24,19 +24,19 @@
  *
  * ONE SIGNAL THAT A SESSION NEEDS YOU: OPEN ATTENTION.
  *
- *   The daemon puts `state.attention` on a session while it has open Attention items and removes it when
+ *   The daemon puts `state.attention` on a session while it has open Agenda items and removes it when
  *   none are left, so the summary rides the session list: reading it costs no request per row. An unread
  *   row gets a bold name and an accent count badge, opens the conversation AT the first item, and — while
  *   the device setting "Group Needs you at the top" is on — is gathered into "Needs you" at the top, newest
  *   `latestAt` first. It clears only when the items resolve, never because the reader looked.
  *
  *   Nothing else puts a row there. A ferret parked on a person (`awaiting_user`, "Your turn") is a status,
- *   drawn by the status mark; it is not Needs you, so the group, its count, the Attention badge and the
- *   rollup chip can never disagree. A pending question or permission arrives as a real Attention item.
+ *   drawn by the status mark; it is not Needs you, so the group, its count, the Agenda badge and the
+ *   rollup chip can never disagree. A pending question or permission arrives as a real Agenda item.
  */
 
 import { PACK_CLEAN_UP_LABEL, type SessionView } from '@ferretry/protocol';
-import { attentionConversationPath, attentionFirst, sessionAttention } from '../lib/attention-inbox.ts';
+import { agendaConversationPath, agendaFirst, sessionAgenda } from '../lib/agenda-inbox.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import type { Density, ModeFilter } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
@@ -60,18 +60,18 @@ export interface SessionsListFilter {
 export const DEFAULT_LIST_FILTER: SessionsListFilter = { mode: 'interactive', showStopped: false };
 
 /** The session has open Attention: the daemon's summary is on it. Clears only when the items resolve. */
-export const hasAttention = (view: SessionView): boolean => sessionAttention(view) !== undefined;
+export const hasAgenda = (view: SessionView): boolean => sessionAgenda(view) !== undefined;
 
 /** Where a session's row opens: its conversation, AT the first open item when it has Attention. */
 export const sessionRowPath = (daemonId: DaemonId, view: SessionView): string => {
-  const attention = sessionAttention(view);
-  return attention === undefined
+  const agenda = sessionAgenda(view);
+  return agenda === undefined
     ? daemonSessionPath(daemonId, view.config.id)
-    : attentionConversationPath(daemonId, view.config.id, attention.first);
+    : agendaConversationPath(daemonId, view.config.id, agenda.first);
 };
 
-/** What a badge or a link says aloud: "3 open Attention items". */
-export const attentionWords = (count: number): string => `${count} open Inbox ${count === 1 ? 'item' : 'items'}`;
+/** What a badge or a link says aloud: "3 open Agenda items". */
+export const agendaWords = (count: number): string => `${count} open Inbox ${count === 1 ? 'item' : 'items'}`;
 
 /** The longest question the list echoes; the row truncates visually, this just keeps the DOM small. */
 const QUESTION_PREVIEW_MAX = 160;
@@ -92,13 +92,13 @@ export const pendingQuestionPreview = (view: SessionView): string | undefined =>
 };
 
 /**
- * The one line a row echoes under its name: the ask of the newest open Attention item (the chat-preview
+ * The one line a row echoes under its name: the ask of the newest open Agenda item (the chat-preview
  * of a Telegram row), else the question a parked ferret is waiting on. Whitespace collapsed and capped.
  */
 export const rowPreview = (
   view: SessionView,
 ): { readonly text: string; readonly kind: 'attention' | 'question' } | undefined => {
-  const ask = sessionAttention(view)?.ask.replace(/\s+/gu, ' ').trim() ?? '';
+  const ask = sessionAgenda(view)?.ask.replace(/\s+/gu, ' ').trim() ?? '';
   if (ask !== '')
     return {
       kind: 'attention',
@@ -118,8 +118,8 @@ export const pullNeedsYou = <T>(
   group = true,
 ): { readonly waiting: readonly T[]; readonly rest: readonly T[] } => {
   if (!group) return { waiting: [], rest: rows };
-  const count = rows.filter(row => hasAttention(viewOf(row))).length;
-  const ordered = attentionFirst(rows, viewOf);
+  const count = rows.filter(row => hasAgenda(viewOf(row))).length;
+  const ordered = agendaFirst(rows, viewOf);
   return { waiting: ordered.slice(0, count), rest: ordered.slice(count) };
 };
 
@@ -143,8 +143,7 @@ export const listedBeforeMode = (
   view: SessionView,
   { showStopped }: SessionsListFilter,
   keep?: (view: SessionView) => boolean,
-): boolean =>
-  keep?.(view) === true || (!isGuideBuilder(view) && (showStopped || !isStopped(view) || hasAttention(view)));
+): boolean => keep?.(view) === true || (!isGuideBuilder(view) && (showStopped || !isStopped(view) || hasAgenda(view)));
 
 /** The tallies the filter controls print, from the sessions already past the stopped rule. */
 export interface ListTallies {
