@@ -2710,7 +2710,6 @@ export function AppShell() {
                     onNavigate={navigate}
                     settings={paletteSettings}
                     touchAffected={touchAffected}
-                    shortcutAvailable={!barSessionSearch}
                     commands={[
                       ...(pairPhoneAllowed
                         ? [
