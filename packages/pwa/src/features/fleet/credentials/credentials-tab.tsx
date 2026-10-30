@@ -261,8 +261,7 @@ function CredentialPage({
         )}
       </div>
 
-      <div className="flex flex-col gap-2" data-credential-switch="">
-        <h4 className="m-0 text-meta font-semibold uppercase text-muted">Use for new starts</h4>
+      <div data-credential-switch="">
         <DisableSwitch
           target={{ kind: 'login', id: credential.id }}
           disabled={credential.disabled}
@@ -484,45 +483,53 @@ function CredentialRow({
 }) {
   return (
     <div
-      className="kt-panel flex min-w-0 flex-col gap-2 p-panel hover:border-accent"
+      className="kt-panel relative flex min-w-0 flex-col gap-2 p-panel hover:border-accent"
       data-credential-card={credential.id}
     >
-      <a
-        href={href}
-        className="flex min-h-control min-w-0 items-start gap-3 text-left no-underline hover:no-underline"
-        data-credential-row={credential.id}
+      <DisableSwitch
+        compact
+        target={{ kind: 'login', id: credential.id }}
+        disabled={credential.disabled}
+        machineName={machineName}
+        online={online}
+        changes={changes}
+        now={() => now}
+        onChanged={reload}
       >
-        <AccountStatus word={credential.status.word} className="mt-1" />
-        <span className="flex min-w-0 flex-1 flex-col gap-1">
-          <span className="truncate font-mono text-row text-fg">
-            {credential.store === 'environment' ? credential.id : credentialEmail(credential)}
-          </span>
-          <CredentialBadges credential={credential} />
-          <span className="text-cell text-muted">
-            {credential.status.label} · {credentialUse(credential)}
-          </span>
-          {credential.usage.provider === undefined ? (
-            credential.status.word === 'ready' ? (
-              <UsageBars credential={credential} now={now} />
-            ) : null
-          ) : (
-            <ProviderQuota reading={credential.usage.provider} now={now} />
-          )}
-        </span>
-        <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
-      </a>
-      <div className="flex flex-wrap items-start justify-between gap-2 border-t border-border-soft pt-2">
-        <DisableSwitch
-          compact
-          className="min-w-[14rem] flex-1"
-          target={{ kind: 'login', id: credential.id }}
-          disabled={credential.disabled}
-          machineName={machineName}
-          online={online}
-          changes={changes}
-          now={() => now}
-          onChanged={reload}
-        />
+        {({ toggle, details }) => (
+          <>
+            <div className="flex min-w-0 items-start gap-3">
+              <a
+                href={href}
+                className="flex min-h-control min-w-0 flex-1 items-start gap-3 text-left no-underline after:absolute after:inset-0 after:content-[''] hover:no-underline"
+                data-credential-row={credential.id}
+              >
+                <AccountStatus word={credential.status.word} className="mt-1" />
+                <span className="flex min-w-0 flex-1 flex-col gap-1">
+                  <span className="truncate font-mono text-row text-fg">
+                    {credential.store === 'environment' ? credential.id : credentialEmail(credential)}
+                  </span>
+                  <CredentialBadges credential={credential} />
+                  <span className="text-cell text-muted">
+                    {credential.status.label} · {credentialUse(credential)}
+                  </span>
+                  {credential.usage.provider === undefined ? (
+                    credential.status.word === 'ready' ? (
+                      <UsageBars credential={credential} now={now} />
+                    ) : null
+                  ) : (
+                    <ProviderQuota reading={credential.usage.provider} now={now} />
+                  )}
+                </span>
+              </a>
+              {toggle}
+              <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
+            </div>
+            {details}
+          </>
+        )}
+      </DisableSwitch>
+      <div className="relative flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
         <RemoveLoginButton credential={credential} refusal={removeRefusal} onRemove={onRemove} />
       </div>
     </div>
