@@ -11,7 +11,10 @@
  *     conversation took the whole cell and swallowed every touch);
  *   - Jump to latest cannot be tapped, or does not land on the newest line;
  *   - the "N need you" pill does not open the agenda drawer where a finger can reach it, or a drawer row does not
- *     open its item.
+ *     open its item;
+ *   - at 360, 390 and 430 px the header draws anything but ☰, the name, the card's reference, one status dot and ▾,
+ *     any two of those overlap or leave the row, or ▾ does not hold what moved out of the bar (Interrupt, Info,
+ *     Theme, and Restart CLI marked Outdated).
  */
 
 import { spawnSync } from 'node:child_process';
@@ -145,6 +148,37 @@ const shot = async (page: Page, name: string, scheme: string): Promise<void> => 
   process.stdout.write(`📸 ${path}\n`);
 };
 
+const overlaps = (a: Box, b: Box): boolean =>
+  a.x < b.x + b.width - 0.5 && b.x < a.x + a.width - 0.5 && a.y < b.y + b.height - 0.5 && b.y < a.y + a.height - 0.5;
+
+/** Every visible box drawn directly in the header's row, named; a phone's must be exactly the five it allows. */
+const headerParts = async (page: Page): Promise<{ name: string; box: Box }[]> =>
+  await page.evaluate(() => {
+    const header = document.querySelector('[data-session-bar]');
+    if (header === null) return [];
+    const named: [string, string][] = [
+      ['sessions', '[data-session-bar-sessions]'],
+      ['name', '.fy-session-bar__name'],
+      ['agenda badge', '.fy-session-bar__agenda'],
+      ['outdated', '[data-outdated-mark]'],
+      ['card chip', '[data-card-chip]'],
+      ['status dot', '.fy-session-bar__status'],
+      ['actions', '[data-session-actions]'],
+      ['info', '[data-session-info-toggle]'],
+      ['menu', '[data-session-actions-trigger]'],
+      ['theme', '[data-theme-trigger]'],
+    ];
+    return named.flatMap(([name, selector]) => {
+      const element = header.querySelector(selector);
+      const rect = element?.getBoundingClientRect();
+      return rect === undefined || rect.width === 0 || rect.height === 0
+        ? []
+        : [{ name, box: { x: rect.x, y: rect.y, width: rect.width, height: rect.height } }];
+    });
+  });
+
+const PHONE_BAR = ['sessions', 'name', 'card chip', 'status dot', 'menu'];
+
 try {
   for (const theme of ['studio-light', 'studio-dark']) {
     const scheme = theme.endsWith('dark') ? 'dark' : 'light';
@@ -217,6 +251,73 @@ try {
       const before = await scrollTop(page);
       await wheelOver(page, -900);
       check((await scrollTop(page)) < before - 100, `${scheme}: the conversation scrolls again after the item closes`);
+      await page.context().close();
+    }
+
+    // 3. The header at a phone's widths: ☰ · name · card reference · one status dot · ▾, apart and on the row.
+    for (const width of [360, 390, 430]) {
+      const page = await open(theme, width);
+      const header = await box(page, '[data-session-bar]');
+      const parts = await headerParts(page);
+      if (width === 390 && header !== null)
+        await page.screenshot({ path: join(outDir, `pwa-broken-${tag}-header-${scheme}.png`), clip: header });
+      const names = parts.map(part => part.name);
+      check(
+        JSON.stringify(names) === JSON.stringify(PHONE_BAR),
+        `${scheme} ${width}px: the bar is ☰ · name · card · dot · ▾ (${names.join(' · ')})`,
+      );
+      const clashes = parts.flatMap((a, index) =>
+        parts.slice(index + 1).flatMap(b => (overlaps(a.box, b.box) ? [`${a.name} × ${b.name}`] : [])),
+      );
+      check(clashes.length === 0, `${scheme} ${width}px: nothing in the bar overlaps (${clashes.join(', ')})`);
+      const outside = parts.filter(
+        part =>
+          header === null ||
+          part.box.x < header.x - 0.5 ||
+          part.box.x + part.box.width > header.x + header.width + 0.5 ||
+          part.box.y < header.y - 0.5 ||
+          part.box.y + part.box.height > header.y + header.height + 0.5,
+      );
+      check(
+        outside.length === 0,
+        `${scheme} ${width}px: all of it sits on the row (${outside.map(part => part.name).join(', ')})`,
+      );
+      const chip = await page
+        .locator('[data-card-chip]')
+        .first()
+        .evaluate(element => ({
+          text: (element as HTMLElement).innerText,
+        }));
+      check(
+        chip.text.startsWith('&F11') && !chip.text.includes('active'),
+        `${scheme} ${width}px: the chip is the reference alone (${chip.text})`,
+      );
+
+      if (width === 390) {
+        await page.locator('[data-session-actions-trigger]').tap();
+        await page.waitForTimeout(400);
+        const items = await page
+          .locator('[data-session-action-item]')
+          .evaluateAll(rows =>
+            rows.map(row => `${row.getAttribute('data-session-action-item')}:${row.textContent ?? ''}`),
+          );
+        await shot(page, 'menu', scheme);
+        // Info is offered only by a host with Info (`context`), which this page leaves out; the unit tests cover it.
+        for (const id of ['interrupt', 'theme'])
+          check(
+            items.some(item => item.startsWith(`${id}:`)),
+            `${scheme}: ▾ holds ${id}`,
+          );
+        check(
+          items.some(item => item.startsWith('restart:') && item.includes('Outdated')),
+          `${scheme}: ▾ says the ferret is outdated, on its remedy`,
+        );
+        await page.locator('[data-session-action-item="theme"]').tap();
+        await page.waitForTimeout(400);
+        const radios = await page.locator('[data-session-action-sheet] input[type="radio"]').count();
+        await shot(page, 'menu-theme', scheme);
+        check(radios > 0, `${scheme}: ▾ › Theme… opens the theme controls (${radios} choices)`);
+      }
       await page.context().close();
     }
   }

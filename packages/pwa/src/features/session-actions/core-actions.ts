@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
+import { isOutdated, outdatedSectionWords } from '../restart-outdated/outdated-model.ts';
 import { HARNESS_SHORT, otherHarness } from '../fleet/credentials/credentials-model.ts';
 import type { SessionActionContribution, SessionActionFormHost } from './registry.ts';
 
@@ -185,8 +186,14 @@ export const CORE_SESSION_ACTIONS: readonly SessionActionContribution<CoreAction
             id: SESSION_ACTION_IDS.restart,
             label: 'Restart CLI',
             icon: RotateCw,
+            // An outdated ferret says so HERE on a phone, whose bar has no room for the mark: this is its remedy.
+            ...(isOutdated(context.view) ? { detail: 'Outdated' } : {}),
             question: `Restart ${context.name}’s CLI?`,
-            consequence: 'It relaunches on the same login and resumes the conversation.',
+            consequence: isOutdated(context.view)
+              ? `It relaunches on the same login, resumes the conversation and loads the new instructions${
+                  outdatedSectionWords(context.view) === '' ? '' : ` (${outdatedSectionWords(context.view)})`
+                }.`
+              : 'It relaunches on the same login and resumes the conversation.',
             confirmLabel: 'Restart',
             run: context.restart,
           }

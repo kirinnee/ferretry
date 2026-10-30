@@ -1,6 +1,6 @@
 import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
-import { Pause, Play } from 'lucide-react';
+import { Info, Palette, Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
@@ -107,7 +107,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
-import { ThemeToggle } from '../../shell/theme-toggle.tsx';
+import { ThemeSettingsPanel, ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
 import { needsYouItems, unreadCount } from '../agenda-inbox.ts';
@@ -1162,7 +1162,50 @@ export function SessionChatPage({
     setActionForm(next);
     if (next !== AGENDA_RESOLVED_ACTION_ID) setResolvedTarget(null);
   }, []);
+  // A PHONE'S BAR IS ☰, the name, the card's reference, one status dot and ▾ (`session-top-bar.tsx`): what a
+  // wider bar draws beside the name — Interrupt, ⓘ Info and the theme switch — is the top of ▾ instead.
+  const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
+  const phoneBarActions: readonly SessionActionContribution<CoreActionContext>[] = compact
+    ? [
+        {
+          group: 'session',
+          order: 0,
+          build: () =>
+            interruptSpec === undefined
+              ? null
+              : {
+                  kind: 'run',
+                  id: 'interrupt',
+                  label: interruptSpec.label,
+                  icon: Pause,
+                  ...(pendingAction === null ? {} : { unavailable: 'Another action is still running.' }),
+                  run: () => runAction('interrupt'),
+                },
+        },
+        {
+          group: 'session',
+          order: 1,
+          build: () =>
+            contextDependencies === undefined
+              ? null
+              : { kind: 'run', id: 'info', label: info.open ? 'Close Info' : 'Info', icon: Info, run: info.toggle },
+        },
+        {
+          group: 'session',
+          order: 2,
+          build: () => ({
+            kind: 'form',
+            id: 'theme',
+            label: 'Theme…',
+            title: 'Theme',
+            icon: Palette,
+            render: () => <ThemeSettingsPanel />,
+          }),
+        },
+      ]
+    : NO_CONTRIBUTIONS;
   const contributions: readonly SessionActionContribution<CoreActionContext>[] = [
+    ...phoneBarActions,
     ...CORE_SESSION_ACTIONS,
     resolvedActionContribution(agendaModel?.snapshot?.resolved ?? [], agendaId, resolvedTarget),
     ...actionContributions,

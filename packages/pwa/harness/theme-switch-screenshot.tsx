@@ -6,7 +6,9 @@
  *   * desktop-page — a page with no session header: the Insights tab strip carries it at its right end (the REAL
  *     `InsightsFrame` and `PageThemeSwitch`, 1440px).
  *   * phone — the top bar of a non-session page (the REAL `AppBar` with its theme slot, 390px).
- *   * phone-session — the session page's compact bar, where the switch is the last control after Actions.
+ *
+ * A session page on a phone has no switch in its bar: it is Actions ▾ › Theme… there
+ * (`phone-chat-screenshot.ts` shoots and checks it).
  *
  *   bun harness/theme-switch-screenshot.tsx   # writes harness/out/theme-switch-<scene>-<scheme>-<state>.png
  *
@@ -101,25 +103,8 @@ const phone = (
   </div>
 );
 
-const phoneSession = (
-  <div className="kt-shell flex flex-col overflow-hidden">
-    <SessionTopBar
-      actions={<button type="button" className="fy-session-bar__icon" aria-label="Interrupt">■</button>}
-      compact
-      menu={<button type="button" className="fy-session-bar__icon" aria-label="Actions">▾</button>}
-      onOpenSessions={noop}
-      onToggleInfo={noop}
-      project="ferretry"
-      session={session}
-      trailing={<ThemeToggle iconOnly touch />}
-      turn="your-turn"
-    />
-    <Body />
-  </div>
-);
-
 createRoot(document.getElementById('root')).render(
-  scene === 'desktop' ? desktop : scene === 'desktop-page' ? desktopPage : scene === 'phone' ? phone : phoneSession,
+  scene === 'desktop' ? desktop : scene === 'desktop-page' ? desktopPage : phone,
 );
 `;
 
@@ -162,7 +147,6 @@ const SCENES = [
   { name: 'desktop', width: 1440, height: 900, mobile: false },
   { name: 'desktop-page', width: 1440, height: 900, mobile: false },
   { name: 'phone', width: 390, height: 844, mobile: true },
-  { name: 'phone-session', width: 390, height: 844, mobile: true },
 ] as const;
 
 try {
