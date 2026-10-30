@@ -66,8 +66,9 @@ trap 'exit 143' TERM
 # The homes and sockets the inherited environment names, recorded before it is removed.
 product="$(jq -r '.name' "${root_dir}/package.json")"
 protected="${FY_TEST_PROTECTED_PATHS:-}"
-for path in "${FY_HOME:-}" "${TMUX%%,*}" "${HOME:-}/.${product}"; do
-  [[ ${path} == /* ]] && protected="${protected:+${protected}:}${path}"
+tmux_socket="${TMUX:-}"
+for path in "${FY_HOME:-}" "${tmux_socket%%,*}" "${HOME:-}/.${product}"; do
+  if [[ ${path} == /* ]]; then protected="${protected:+${protected}:}${path}"; fi
 done
 export FY_TEST_PROTECTED_PATHS="${protected}"
 
