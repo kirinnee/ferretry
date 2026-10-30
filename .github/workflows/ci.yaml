@@ -84,7 +84,7 @@ jobs:
       - name: Run pre-commit (${{ matrix.part }})
         env:
           PART: ${{ matrix.part }}
-        run: nix develop .#ci -c ./scripts/ci/pre-commit.sh "$PART"
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/pre-commit.sh "$PART"
 
   # Three checks that each finish in under 20 seconds, in ONE job. Namespace bills a job by the minute
   # with a one-minute floor and holds a runner and a cache attachment for each, so three 15-second jobs
@@ -121,7 +121,7 @@ jobs:
       # catches schema, migration, binding and module-resolution drift before a deploy sees secrets.
       - name: Compile relay Workers without publishing
         run: |
-          nix develop .#ci -c bash -c '
+          ./scripts/ci/in-devshell.sh bash -c '
             set -euo pipefail
             cd packages/relay
             bun install --frozen-lockfile
@@ -134,7 +134,7 @@ jobs:
       # are present and non-empty; running it pre-merge makes a lost generation step a red PR instead
       # of a shipped 404 shell that silently degrades every diagram and animation.
       - name: Build static PWA bundle
-        run: nix develop .#ci -c ./scripts/ci/build-pwa.sh
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/build-pwa.sh
       # Only `main` commits the cache volume (`nscloud-cache-allow-commit-from-main`), so only `main`
       # prunes it: everything the dev shell and the install bundle no longer reach, once the store
       # outgrows its budget. scripts/ci/nix-store-hygiene.sh says why the budget is what it is.
@@ -200,7 +200,7 @@ jobs:
           SCHEME: ${{ matrix.scheme }}
           SCOPE: ${{ matrix.scope }}
           VIEWPORT: ${{ matrix.viewport }}
-        run: nix develop .#ci -c ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE" ${VIEWPORT:+"$VIEWPORT"}
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/pwa-screenshot-proof.sh "$SCHEME" "$SCOPE" ${VIEWPORT:+"$VIEWPORT"}
       # `always()` because a red run is the run whose frames matter most: the artifact carries this
       # colour scheme at its viewports plus the run's full log, so a reviewer can see the panel that
       # broke instead of reading a geometry number and guessing.
@@ -244,7 +244,7 @@ jobs:
       - name: Run the ${{ matrix.group }} unit tests
         env:
           TEST_GROUP: ${{ matrix.group }}
-        run: nix develop .#ci -c ./scripts/ci/test.sh unit "$TEST_GROUP"
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh unit "$TEST_GROUP"
       - name: Upload the ${{ matrix.group }} coverage ledger
         if: always()
         uses: actions/upload-artifact@v4
@@ -312,7 +312,7 @@ jobs:
       - name: Run the ${{ matrix.group }} integration tests
         env:
           TEST_GROUP: ${{ matrix.group }}
-        run: nix develop .#ci -c ./scripts/ci/test.sh int "$TEST_GROUP"
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh int "$TEST_GROUP"
       - name: Upload the ${{ matrix.group }} coverage ledger
         if: always()
         uses: actions/upload-artifact@v4
@@ -376,7 +376,7 @@ jobs:
           cache: nix
       - uses: ./.github/actions/install-nix
       - name: Cross-compile standalone binaries
-        run: nix develop .#ci -c ./scripts/release/compile.sh
+        run: ./scripts/ci/in-devshell.sh ./scripts/release/compile.sh
       # The manifest every consumer holds its download to (.github/actions/download-binaries).
       - name: List the binaries
         run: ./scripts/ci/binaries-manifest.sh write dist/bin
@@ -402,7 +402,7 @@ jobs:
       - name: Download compiled binaries
         uses: ./.github/actions/download-binaries
       - name: Run SIT
-        run: nix develop .#ci -c ./scripts/ci/test.sh sit
+        run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh sit
 
   smoke:
     timeout-minutes: 10
