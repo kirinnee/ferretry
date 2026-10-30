@@ -50,10 +50,14 @@ import {
 import {
   boardAnswer,
   card as boardCard,
+  fakeEnvironment as fakeBoardEnvironment,
+  fakePort as fakeBoardPort,
   COUNTS as BOARD_COUNTS,
   laneSetFor,
   PROJECT as BOARD_PROJECT,
 } from '../tests/unit/board-support.ts';
+import { BoardPage } from '../src/features/board/board-page.tsx';
+import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
 import { DaemonBoardStore } from '../src/lib/board-store.ts';
 import { daemonBoardPort } from '../src/lib/board-client.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
@@ -2744,6 +2748,7 @@ const HARNESS_DRIVEN_READS: Readonly<Record<string, DrivenRead>> = {
  * carries the old id this ferret knew it by (`legacyRef`), so the old text still finds the card.
  */
 const HARNESS_BOARD_OWNER = 'harness-session';
+const HARNESS_CHAT_OWNER = 'harness-workspace';
 const HARNESS_BOARD_CARDS: readonly BoardTaskView[] = [
   boardCard('F12', {
     title: 'Port the remaining PWA components',
@@ -2768,6 +2773,23 @@ const HARNESS_BOARD_CARDS: readonly BoardTaskView[] = [
     owner: HARNESS_BOARD_OWNER,
     legacyRef: `${HARNESS_BOARD_OWNER}:C1`,
     lastTouchedAt: '2026-07-30T09:00:00.000Z',
+  }),
+  // The workspace chat's own cards: a current one, and one that replaced the old task this chat knew as F12.
+  boardCard('B21', {
+    kind: 'bug',
+    title: 'Chat reference opens wrong pane',
+    summary: 'A tap on a card reference should open that card.',
+    laneId: 'implement',
+    owner: HARNESS_CHAT_OWNER,
+    lastTouchedAt: '2026-07-31T09:30:00.000Z',
+  }),
+  boardCard('F96', {
+    title: 'Retire the old task list',
+    summary: 'Chats read the board now; the old list is gone.',
+    laneId: 'review',
+    owner: HARNESS_CHAT_OWNER,
+    legacyRef: `${HARNESS_CHAT_OWNER}:F12`,
+    lastTouchedAt: '2026-07-31T09:00:00.000Z',
   }),
   // The truncated-index session owns one card, so its task half is seen to survive a short file index.
   boardCard('F40', {
@@ -3463,9 +3485,11 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   if (
     method === 'GET' &&
     url.pathname === '/v1/board' &&
-    HARNESS_SEARCH_SESSION_IDS.includes(url.searchParams.get('ferret') ?? '')
+    (HARNESS_SEARCH_SESSION_IDS.includes(url.searchParams.get('ferret') ?? '') ||
+      url.searchParams.get('ferret') === HARNESS_CHAT_OWNER ||
+      url.searchParams.get('project') === BOARD_PROJECT)
   )
-    return harnessJson(harnessBoardResponse(url.searchParams.get('ferret') ?? ''));
+    return harnessJson(harnessBoardResponse(url.searchParams.get('ferret') ?? HARNESS_CHAT_OWNER));
   if (url.pathname.includes('/fs')) {
     const path = url.searchParams.get('path') ?? '';
     if (url.pathname.endsWith('/fs/changes')) return harnessJson(HARNESS_FS_CHANGES);
@@ -8012,8 +8036,25 @@ const PEER_SENDER_LOG = [
   '[10:09:12] user/message: [ferretry] Your message to kamila (send 7f3a) did not reach it: it could not be confirmed (timeout) — it may still have landed. Decide whether to send it again with `fy send kamila …`.',
 ].join('\n');
 const PEER_VIEW = new URLSearchParams(window.location.search).get('peer');
-const SESSION_ENTRIES: readonly TranscriptEntry[] =
-  PEER_VIEW === 'receiver'
+/** `?cards`: a chat that mentions one current card and one the chat knew by its old id, with the board wired. */
+const CARDS_VIEW = new URLSearchParams(window.location.search).has('cards');
+const CARDS_ENTRIES: readonly TranscriptEntry[] = [
+  {
+    id: 'cards-user-0',
+    kind: 'user',
+    text: 'Which cards does this chat still owe? Look at &B21 and the old &F12.',
+    label: 'You',
+  },
+  {
+    id: 'cards-assistant-0',
+    kind: 'assistant',
+    text: 'Two of them. &B21 is the open bug about references opening the wrong pane. &F12 was a task of this chat before the import; it is now the card that retired the per-session task list. Tap either one to open its card.',
+    label: 'hadi',
+  },
+];
+const SESSION_ENTRIES: readonly TranscriptEntry[] = CARDS_VIEW
+  ? CARDS_ENTRIES
+  : PEER_VIEW === 'receiver'
     ? transcriptEntriesFromLog(PEER_RECEIVER_LOG, HARNESS_NOW)
     : PEER_VIEW === 'sender'
       ? transcriptEntriesFromLog(PEER_SENDER_LOG, HARNESS_NOW)
@@ -8234,13 +8275,40 @@ const HARNESS_WIRE_CONFIG = {
   retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
 } as const;
 
+const CARD_DETAIL_CALLSIGNS = new Map([[HARNESS_CHAT_OWNER, 'hadi']]);
+const CARD_DETAIL_STORE = new DaemonBoardStore(
+  fakeBoardPort({
+    board: async () =>
+      boardAnswer(
+        HARNESS_BOARD_CARDS.filter(entry => entry.owner === HARNESS_CHAT_OWNER),
+        { projectId: BOARD_PROJECT, laneSet: laneSetFor(), counts: BOARD_COUNTS },
+      ),
+    task: async (_daemon, id) => {
+      const task = HARNESS_BOARD_CARDS.find(entry => entry.owner === HARNESS_CHAT_OWNER && entry.id === id);
+      return task === undefined ? null : { task, laneSet: laneSetFor() };
+    },
+    projects: async () => [{ id: BOARD_PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
+  }),
+  fakeBoardEnvironment(),
+);
+const CARD_DETAIL_AGENDA = {
+  store: new DaemonAgendaStore(),
+  hydrate: async () => undefined,
+  respond: async () => undefined,
+};
+
 function SessionWorkspaceHarness() {
   useAppViewport();
+  const [openCard, setOpenCard] = useState<string | null>(null);
   const layout = useLayoutMode();
   const presentation = layout === 'drawer' ? 'sheet' : 'pane';
   const [session, setSession] = useState({
     ...WORKSPACE_SESSION,
-    config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' },
+    config: {
+      ...WORKSPACE_SESSION.config,
+      teammate: 'hadi',
+      ...(CARDS_VIEW ? { projectId: BOARD_PROJECT, focusTask: { id: 'F96' } } : {}),
+    },
     ...(WORKSPACE_TURN === undefined
       ? {}
       : {
@@ -8310,7 +8378,14 @@ function SessionWorkspaceHarness() {
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}
           entries={SESSION_ENTRIES}
-          {...(PEER_VIEW === null ? {} : { onNavigate: () => undefined })}
+          {...(CARDS_VIEW
+            ? {
+                board: HARNESS_BOARD,
+                onNavigate: (to: string) => setOpenCard(/\/board\/([^/?#]+)/.exec(to)?.[1] ?? null),
+              }
+            : PEER_VIEW === null
+              ? {}
+              : { onNavigate: () => undefined })}
           onSessionChange={setSession}
           {...(layout === 'drawer' ? { onOpenSessions: () => setDrawer(true) } : {})}
           presentation={presentation}
@@ -8332,6 +8407,23 @@ function SessionWorkspaceHarness() {
       </div>
       {layout === 'drawer' && drawer ? bar('drawer') : null}
       {learningActions.host}
+      {openCard === null ? null : (
+        <div className="absolute inset-0 z-50 overflow-y-auto bg-bg" data-harness-card-detail={openCard}>
+          <BoardPage
+            agenda={CARD_DETAIL_AGENDA as never}
+            callsigns={CARD_DETAIL_CALLSIGNS}
+            machines={[{ connection: daemon, name: 'AMER-D22HXVF42W' }]}
+            now={Date.parse('2026-07-31T10:00:00.000Z')}
+            onNavigate={to => setOpenCard(/\/board\/([^/?#]+)/.exec(to)?.[1] ?? null)}
+            onSearch={() => undefined}
+            openCard={{ daemonId: daemon.daemonId, taskId: openCard }}
+            phone={layout === 'drawer'}
+            ports={{ sendMessage: async () => undefined, startFerret: async () => 'harness-workspace' }}
+            search=""
+            store={CARD_DETAIL_STORE}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -8621,7 +8713,19 @@ if (host) {
         ) : settingsHarness ? (
           <StandaloneSettingsPageHarness />
         ) : window.location.hash === '#session-workspace' ? (
-          <SessionWorkspaceHarness />
+          CARDS_VIEW ? (
+            // The app's search provider follows the open chat; this chat is the workspace session.
+            <SessionSearchProvider
+              board={HARNESS_BOARD}
+              connection={daemon}
+              focusSignal={0}
+              scope={daemonSessionScope(daemon, HARNESS_CHAT_OWNER)}
+            >
+              <SessionWorkspaceHarness />
+            </SessionSearchProvider>
+          ) : (
+            <SessionWorkspaceHarness />
+          )
         ) : window.location.hash === '#session-new' ? (
           <NewSessionHarness />
         ) : window.location.hash === '#session-search' ? (

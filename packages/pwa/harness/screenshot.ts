@@ -139,6 +139,8 @@ const SCHEME: 'light' | 'dark' = process.argv.includes('--light') ? 'light' : 'd
 
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
+/** A chat that mentions cards: the `&` menu, a new and an old reference, each tapped, and the card beside the chat. */
+const CARD_REFS_ONLY = process.argv.includes('--card-refs-only');
 const AGENDA_ONLY = process.argv.includes('--agenda-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent actions, nothing else. */
@@ -198,6 +200,7 @@ const VIEWPORT_MATRIX_ONLY = process.argv.includes('--viewport-matrix-only');
  */
 const WALKS_SETTINGS = !(
   SEARCH_ONLY ||
+  CARD_REFS_ONLY ||
   AGENDA_ONLY ||
   FILES_ONLY ||
   PROJECTS_ONLY ||
@@ -1845,6 +1848,76 @@ async function waitForBoardRead(page: Page, sessionId: string): Promise<void> {
   );
 }
 
+/**
+ * A chat that mentions two cards, through the real workspace shell with the board wired: the `&` menu, the
+ * references as the transcript draws them, each one tapped (the card it opens), and the Info rail's Tasks tab.
+ * The ledger proves nothing in the journey asked for a per-session task list.
+ */
+async function captureCardReferences(page: Page, viewport: HarnessViewport, rootUrl: string): Promise<void> {
+  const shot = async (name: string): Promise<void> => {
+    const target = join(outDir, `${viewport.name}-card-refs-${name}.png`);
+    await page.screenshot({ path: target });
+    process.stdout.write(`📸 ${viewport.name} card refs ${name} -> ${target}\n`);
+  };
+  page.on('pageerror', error => process.stdout.write(`   page error: ${error.message}\n`));
+  const open = async (query: string): Promise<void> => {
+    await page.goto(`${rootUrl}?cards${query}#session-workspace`);
+    await page.reload();
+    await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+  };
+  const refs = (): ReturnType<Page['locator']> => page.locator('[data-fy-reference^="task"]');
+
+  await open('');
+  await refs().first().waitFor({ state: 'visible' });
+  const written = await refs().evaluateAll(nodes => nodes.map(node => node.textContent ?? ''));
+  process.stdout.write(`   references drawn: ${written.join(' ')}\n`);
+  if (!written.includes('&B21') || !written.includes('&F12'))
+    fail(`the chat did not draw both card references at ${viewport.name}: ${written.join(' ')}`);
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-fy-reference^="task"]:not([data-fy-reference-closed])').length >= 2,
+  );
+  await shot('refs');
+
+  const composer = page.locator('[data-live-editor], textarea').last();
+  await composer.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('@@@@');
+  await page.locator('[data-composer-autocomplete]').waitFor({ state: 'visible' });
+  await page.locator('[data-kind="task"]').first().waitFor({ state: 'visible' });
+  await shot('amp-menu');
+
+  for (const [name, text] of [
+    ['new', '&B21'],
+    ['legacy', '&F12'],
+  ] as const) {
+    await open('');
+    await refs().first().waitFor({ state: 'visible' });
+    const target = page.locator('[data-fy-reference^="task"]', { hasText: text }).first();
+    await target.scrollIntoViewIfNeeded();
+    await target.click();
+    await page.locator('[data-harness-card-detail]').waitFor({ state: 'visible' });
+    const opened = await page.locator('[data-harness-card-detail]').getAttribute('data-harness-card-detail');
+    process.stdout.write(`   ${text} opened card ${String(opened)}\n`);
+    const expected = name === 'new' ? 'B21' : 'F96';
+    if (opened !== expected) fail(`tapping ${text} opened ${String(opened)}, wanted ${expected}, at ${viewport.name}`);
+    await page.locator('.fy-board-detail h2, .fy-board-detail h1').first().waitFor({ state: 'visible' });
+    await page.waitForTimeout(300);
+    await shot(`clicked-${name}`);
+  }
+
+  await open('&info=tasks');
+  await page.getByText('Chat reference opens wrong pane').first().waitFor({ state: 'visible' });
+  await shot('card-from-chat');
+
+  const stray = await page.evaluate(() => {
+    const requests = (window as unknown as { __harnessRequests?: readonly string[] }).__harnessRequests ?? [];
+    return requests.filter(entry => /\/v1\/sessions\/[^/]+\/tasks|\/v1\/tasks/.test(entry));
+  });
+  if (stray.length > 0)
+    fail(`the card chat asked for a per-session task list at ${viewport.name}: ${stray.join(', ')}`);
+}
+
 function describeLedger(ledger: ReturnType<typeof sessionRequestLedger>): string {
   return (
     `board=${ledger.board} tasks=${ledger.legacyTasks} fs/index=${ledger.index} ` +
@@ -2330,6 +2403,10 @@ try {
           if (!WALKS_SETTINGS || parts.has('gallery') || parts.has('overlays')) await page.goto(server.url.toString());
           if (SEARCH_ONLY) {
             await captureSessionSearchEvidence(page, viewport, server.url.toString());
+            return;
+          }
+          if (CARD_REFS_ONLY) {
+            await captureCardReferences(page, viewport, server.url.toString());
             return;
           }
           if (AGENDA_ONLY) {
