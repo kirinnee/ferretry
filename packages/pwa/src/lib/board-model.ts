@@ -439,6 +439,34 @@ const addCounts = (left: BoardCounts, right: BoardCounts): BoardCounts => ({
   waitingOnYou: left.waitingOnYou + right.waitingOnYou,
 });
 
+/** The header pills and the activity each one counts: the same rule the pill applies as a filter. */
+const COUNTED: readonly (readonly [
+  BoardActivityFilter,
+  'toTest' | 'waitingOnYou' | 'stale' | 'orphaned' | 'active',
+])[] = [
+  ['to_test', 'toTest'],
+  ['waiting_on_you', 'waitingOnYou'],
+  ['stale', 'stale'],
+  ['orphaned', 'orphaned'],
+  ['active', 'active'],
+];
+
+/** A machine's header counts without the agent cards the board is not showing, so a pill and its cards agree. */
+const withoutCards = (
+  counts: BoardCounts,
+  hidden: readonly { readonly task: BoardTaskView; readonly category: LaneCategory | null }[],
+): BoardCounts =>
+  COUNTED.reduce(
+    (left, [filter, key]) => ({
+      ...left,
+      [key]: Math.max(
+        0,
+        left[key] - hidden.filter(({ task, category }) => matchesActivity(filter, task, category)).length,
+      ),
+    }),
+    counts,
+  );
+
 /** The card's place in its lane: ordered cards first (by `order`), then the longest-untouched first. */
 const compareCards = (left: BoardCard, right: BoardCard): number => {
   const a = left.task.order;
@@ -470,14 +498,17 @@ export const mergeBoard = (
   const quarantined: BoardQuarantine[] = [];
 
   for (const data of kept) {
-    if (data.counts !== null) counts = addCounts(counts, data.counts);
+    const hiddenAgents: { readonly task: BoardTaskView; readonly category: LaneCategory | null }[] = [];
     if (data.quarantined.length > 0) {
       quarantined.push({ daemonId: data.daemonId, machine: data.machine, cards: data.quarantined });
     }
     const byProject = new Map<BoardProjectId, BoardCard[]>();
     for (const task of data.cards) {
+      if (!showAgents && isAgentTask(task)) {
+        hiddenAgents.push({ task, category: categoryIn(data.laneSets.get(task.projectId) ?? null, task) });
+        continue;
+      }
       if (filters.mine && !isMine(task)) continue;
-      if (!showAgents && isAgentTask(task)) continue;
       if (filters.lane !== null && !inLane(filters.lane, task, data.laneSets.get(task.projectId) ?? null)) continue;
       if (!inDateRange(filters.created, task.createdAt, now)) continue;
       if (!inDateRange(filters.touched, task.lastTouchedAt, now)) continue;
@@ -493,6 +524,7 @@ export const mergeBoard = (
       if (members === undefined) byProject.set(task.projectId, [card]);
       else members.push(card);
     }
+    if (data.counts !== null) counts = addCounts(counts, withoutCards(data.counts, hiddenAgents));
     for (const [projectId, members] of byProject) {
       const laneSet = data.laneSets.get(projectId) ?? null;
       const known = new Set(laneSet?.lanes.map(lane => lane.id));

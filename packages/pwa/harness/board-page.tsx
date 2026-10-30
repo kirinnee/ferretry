@@ -409,30 +409,30 @@ const DROPPED = [
 
 const store = new DaemonBoardStore(
   fakePort({
-    board: async (_daemon, query) =>
-      boardAnswer(
-        (query.state === 'closed'
+    board: async (_daemon, query) => {
+      const cards = (
+        query.state === 'closed'
           ? CLOSED
           : query.state === 'dropped'
             ? DROPPED
             : BIG_ON
               ? [...withOrigin(OPEN, 0), ...withOrigin(BIG, 300)]
               : OPEN
-        ).filter(item => query.ferret === null || item.owner === query.ferret || item.assignee === query.ferret),
-        {
-          projectId: PROJECT,
-          laneSet: laneSetFor(),
-          counts: {
-            ...COUNTS,
-            closedHidden: CLOSED.length,
-            stale: 2,
-            orphaned: 1,
-            active: 8,
-            toTest: 2,
-            waitingOnYou: 1,
-          },
+      ).filter(item => query.ferret === null || item.owner === query.ferret || item.assignee === query.ferret);
+      return boardAnswer(cards, {
+        projectId: PROJECT,
+        laneSet: laneSetFor(),
+        counts: {
+          ...COUNTS,
+          closedHidden: CLOSED.length,
+          stale: 2,
+          orphaned: 1,
+          active: 8,
+          toTest: cards.filter(item => item.laneId === 'tested').length,
+          waitingOnYou: 1,
         },
-      ),
+      });
+    },
     projects: async () => [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
   }),
   fakeEnvironment(),

@@ -236,9 +236,11 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
         {task.summary === '' ? null : <Summary href={href} onNavigate={env.onNavigate} text={task.summary} />}
       </div>
       <div className="fy-board-summary__meta">
-        <span className="fy-board-pill" data-category={row.category ?? 'unplaced'} title="Lane">
-          {row.laneName}
-        </span>
+        {action ? null : (
+          <span className="fy-board-pill" data-category={row.category ?? 'unplaced'} title="Lane">
+            {row.laneName}
+          </span>
+        )}
         <span className="fy-board-summary__when">{entry.when}</span>
       </div>
       <div className="fy-board-summary__act">

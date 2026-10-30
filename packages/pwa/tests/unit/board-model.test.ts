@@ -126,6 +126,32 @@ describe('mergeBoard', () => {
     expect(mergeBoard(machines, NO_BOARD_FILTERS).splitsAgents).toBe(true);
   });
 
+  it('takes the agent cards the board is not showing out of the header counts, so a pill and its cards agree', () => {
+    const laneSet = laneSetFor();
+    const counted = (cards: ReturnType<typeof originCard>[]) =>
+      mergeBoard(
+        [{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, toTest: 3, active: 4, waitingOnYou: 1 } }],
+        NO_BOARD_FILTERS,
+      ).counts;
+    expect(laneSet.lanes.some(lane => lane.id === 'tested' && lane.category === 'verify')).toBe(true);
+    const cards = [
+      originCard('F1', 'human', null, { laneId: 'tested' }),
+      originCard('F2', 'agent', { id: 'F1' }, { laneId: 'tested', activity: 'active' }),
+      originCard('F3', 'agent', null, {
+        laneId: 'tested',
+        waitingOnOwner: [{ sessionId: CHILD, id: 'A1' }],
+        openAsks: [{ sessionId: CHILD, id: 'A1' }],
+      }),
+    ];
+    expect(counted(cards)).toMatchObject({ toTest: 1, active: 2, waitingOnYou: 0 });
+    const shown = mergeBoard([{ ...data(laptop, 'laptop', cards), counts: { ...COUNTS, toTest: 3 } }], {
+      ...NO_BOARD_FILTERS,
+      agents: true,
+    });
+    expect(shown.counts.toTest).toBe(3);
+    expect(counted([originCard('F9', 'agent', null, { laneId: 'tested' })]).toTest).toBe(2);
+  });
+
   it('shows every card and offers no toggle when the daemon does not say who asked', () => {
     const machines = [data(laptop, 'laptop', [card('F1'), card('F2')])];
     const model = mergeBoard(machines, NO_BOARD_FILTERS);

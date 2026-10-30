@@ -49,7 +49,11 @@ const cleared = (filters: BoardFilters): BoardFilters => ({ ...NO_BOARD_FILTERS,
  * "Show agent tasks": cards ferrets made for other ferrets, off by default. It is on whenever a ferret or an
  * activity is chosen (those show agent cards by themselves), so it is drawn pressed and locked then.
  */
-function AgentsToggle({ filters, onChange }: Pick<BoardFiltersProps, 'filters' | 'onChange'>) {
+function AgentsToggle({
+  filters,
+  onChange,
+  short = false,
+}: Pick<BoardFiltersProps, 'filters' | 'onChange'> & { readonly short?: boolean }) {
   const forced = !filters.agents && (filters.ferret !== null || filters.activity !== null);
   return (
     <label
@@ -65,7 +69,7 @@ function AgentsToggle({ filters, onChange }: Pick<BoardFiltersProps, 'filters' |
         type="checkbox"
       />
       <Bot aria-hidden="true" size={12} />
-      Show agent tasks
+      {short ? 'Agent tasks' : 'Show agent tasks'}
     </label>
   );
 }
@@ -387,6 +391,7 @@ export function BoardFilterSheet({
           <span className="fy-board-filters__label">Filters</span>
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
+        {splitsAgents ? <AgentsToggle filters={filters} onChange={onChange} short /> : null}
         {count > 0 ? (
           <button className="fy-board-filters__clear" onClick={() => onChange(cleared(filters))} type="button">
             <X aria-hidden="true" size={12} />
@@ -406,7 +411,6 @@ export function BoardFilterSheet({
           Filters
         </h2>
         <div className="fy-board-filter-sheet__fields">
-          {splitsAgents ? <AgentsToggle filters={filters} onChange={onChange} /> : null}
           <BoardFilterFields archive={archive} choices={choices} filters={filters} onChange={onChange} />
         </div>
         <div className="fy-board-filter-sheet__actions">

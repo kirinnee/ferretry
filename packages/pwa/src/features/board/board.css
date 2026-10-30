@@ -1428,7 +1428,11 @@
     flex-direction: row;
     flex-wrap: wrap;
     align-items: center;
+    align-self: center;
     gap: var(--gap-sm);
+  }
+  .fy-board-summary__act {
+    align-self: center;
   }
 }
 

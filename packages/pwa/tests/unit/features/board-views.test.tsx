@@ -225,7 +225,8 @@ describe('TableView', () => {
     );
     expect(root.querySelector('[data-task="F1"] .fy-board-table__summary-text')?.textContent).toBe('Short summary');
     expect(root.querySelector('[data-task="F2"] .fy-board-table__summary')).toBeNull();
-    expect(root.querySelector('[data-task="F1"] .fy-board-pill')?.textContent).toBe('To test');
+    expect(root.querySelector('[data-task="F1"] .fy-board-pill')).toBeNull();
+    expect(root.querySelector('[data-task="F4"] .fy-board-pill')?.textContent).toBe('Merged');
     expect(root.querySelector('[data-task="F1"] .fy-board-summary__when')?.textContent).toBe(
       'released in 4.110.0 \u00B7 1h ago',
     );
