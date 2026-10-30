@@ -529,7 +529,7 @@ function CredentialRow({
           </>
         )}
       </DisableSwitch>
-      <div className="flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
+      <div className="relative flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
         <RemoveLoginButton credential={credential} refusal={removeRefusal} onRemove={onRemove} />
       </div>
     </div>

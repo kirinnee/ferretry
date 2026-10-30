@@ -158,7 +158,7 @@ export function DisableSwitch({
   );
 
   const details = (
-    <div className={cn('flex min-w-0 flex-col gap-1', className)} data-disable-details={name}>
+    <div className={cn('relative flex min-w-0 flex-col gap-1', className)} data-disable-details={name}>
       {off ? (
         <span id={`${id}-note`} className="min-w-0 text-meta leading-base text-muted" data-disable-note="">
           <span className="block" data-disable-headline="">

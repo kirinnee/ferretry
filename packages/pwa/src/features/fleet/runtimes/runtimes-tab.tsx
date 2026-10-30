@@ -435,7 +435,7 @@ function RuntimeRow({
             </>
           )}
         </RuntimeSwitch>
-        <div className="flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
+        <div className="relative flex flex-wrap items-start justify-end gap-2 border-t border-border-soft pt-2">
           <RuntimeActionButtons
             runtime={runtime}
             refusal={refusal}

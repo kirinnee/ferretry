@@ -183,6 +183,15 @@ try {
           }
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${where} scrolls sideways by ${overflow}px`);
+          for (const control of await page
+            .locator(
+              '[data-runtime-rename], [data-runtime-remove], [data-credential-remove], [data-disable-login-link]',
+            )
+            .all()) {
+            await control
+              .click({ trial: true, timeout: 3000 })
+              .catch(() => fail(`${where}: a control is covered and cannot be tapped`));
+          }
           if (vp === '390') {
             const small = await page.evaluate(() =>
               [...document.querySelectorAll<HTMLElement>('[data-disable-toggle]')]
