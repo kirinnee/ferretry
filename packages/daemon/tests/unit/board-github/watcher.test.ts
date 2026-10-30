@@ -11,7 +11,7 @@ import {
   MAX_COMPARES_PER_TICK,
   POLL_IDLE_MS,
   POLL_OPEN_MS,
-  UNFILED_REFILE_AFTER_MS,
+  UnfiledRefiler,
   WATCH_FIRST_TICK_MS,
   WATCH_TICK_MS,
 } from '../../../src/lib/board-github/index.ts';
@@ -97,6 +97,8 @@ interface RigOptions {
   readonly failingNudges?: boolean;
   readonly board?: (service: BoardService) => GitHubWatcherPorts['board'];
   readonly lanes?: FakeLanes;
+  /** The board each session's folder names, for the Unfiled refile; absent is none. */
+  readonly sessionBoards?: Readonly<Record<string, string>>;
 }
 
 const rig = (options: RigOptions): Rig => {
@@ -121,23 +123,27 @@ const rig = (options: RigOptions): Rig => {
   const timers: { ms: number; run: () => Promise<void>; cancelled: boolean }[] = [];
   const clock = { ms: Date.parse(NOW) };
   const folders = options.folders ?? { '/p': { repo: REPO, branch: 'main' } };
+  const board = options.board?.(service) ?? service;
+  const copies = {
+    repositoryOf: async (path: string) => folders[path]?.repo ?? null,
+    branchOf: async (path: string) => folders[path]?.branch ?? null,
+  };
+  const projects = {
+    projects: options.listProjects ?? (async () => options.projects ?? [{ id: PROJECT, name: 'Ferretry', path: '/p' }]),
+  };
+  const diagnostics = { warn: (message: string) => warnings.push(message) };
+  const now = () => new Date(clock.ms).toISOString();
   const watcher = new GitHubWatcher({
-    board: options.board?.(service) ?? service,
+    board,
     gh,
-    copies: {
-      repositoryOf: async path => folders[path]?.repo ?? null,
-      branchOf: async path => folders[path]?.branch ?? null,
-    },
+    copies,
     sessions: {
       cwdOf: async sessionId => {
         if (sessionId === 'broken') throw new Error('no config');
         return options.cwds?.[sessionId] ?? null;
       },
     },
-    projects: {
-      projects:
-        options.listProjects ?? (async () => options.projects ?? [{ id: PROJECT, name: 'Ferretry', path: '/p' }]),
-    },
+    projects,
     transcripts: {
       tail: async sessionId => {
         if (sessionId === 'broken') throw new Error('unreadable');
@@ -159,8 +165,16 @@ const rig = (options: RigOptions): Rig => {
         };
       },
     },
-    clock: { now: () => new Date(clock.ms).toISOString(), random: () => 0.5 },
-    diagnostics: { warn: message => warnings.push(message) },
+    clock: { now, random: () => 0.5 },
+    diagnostics,
+    unfiled: new UnfiledRefiler({
+      board,
+      sessions: { boardOf: async sessionId => options.sessionBoards?.[sessionId] ?? null },
+      projects,
+      copies,
+      clock: { now },
+      diagnostics,
+    }),
     version: options.version ?? '4.114.0',
   });
   return {
@@ -680,11 +694,10 @@ describe('GitHubWatcher: nudges and refiling', () => {
     should(failing.warnings).deepEqual(['GitHub watcher: could not nudge lead about &F1: session gone']);
   });
 
-  it('should refile a day-old Unfiled card to the project that owns its PR, and only the first such project', async () => {
-    const old = new Date(Date.parse(NOW) - UNFILED_REFILE_AFTER_MS - 60_000).toISOString();
+  it('should refile an Unfiled card to the project that owns its PR at once, and only the first such project', async () => {
     const done = link(940, { state: 'closed', polledAt: NOW });
     const subject = rig({
-      cards: [withLinks([done], { projectId: UNFILED_PROJECT_ID, laneId: 'doing', createdAt: old })],
+      cards: [withLinks([done], { projectId: UNFILED_PROJECT_ID, laneId: 'doing' })],
       projects: [
         { id: OTHER_PROJECT, name: 'Nothing', path: '/none' },
         { id: PROJECT, name: 'Ferretry', path: '/p' },
@@ -697,14 +710,48 @@ describe('GitHubWatcher: nudges and refiling', () => {
     should(subject.stored().history.at(-1)).match({ type: 'refiled', actor: { kind: 'daemon' }, toProject: PROJECT });
   });
 
+  it('should move a merged card on the Unfiled board to To test when no project claims it', async () => {
+    // Arrange: a PR in a repository no project owns, and a ferret whose folder names no board.
+    const elsewhere = link(96, {
+      url: prUrl(96, 'AtomiCloud/nix-registry'),
+      repo: 'AtomiCloud/nix-registry',
+      state: 'merged',
+      mergedAt: '2026-10-30T09:00:00Z',
+      mergeSha: SHA,
+      polledAt: NOW,
+    });
+    const subject = rig({
+      cards: [withLinks([elsewhere], { projectId: UNFILED_PROJECT_ID, laneId: 'doing' })],
+      gh: new FakeGh(repoAnswer({ prs: { 96: prNode(96, { repo: 'AtomiCloud/nix-registry', state: 'MERGED' }) } })),
+    });
+
+    // Act
+    const report = await subject.watcher.tick();
+
+    // Assert
+    should(report.refiled).deepEqual([]);
+    should(subject.stored()).match({ projectId: UNFILED_PROJECT_ID, laneId: 'to-test' });
+    should(subject.stored().history.at(-1)).match({ type: 'moved', to: 'to-test', trigger: 'pr.merged' });
+  });
+
+  it('should refile an Unfiled card with no PR to the board its ferret’s folder names', async () => {
+    // Arrange
+    const subject = rig({
+      cards: [card({ projectId: UNFILED_PROJECT_ID, laneId: 'doing', workflow: 'quick' })],
+      sessionBoards: { lead: OTHER_PROJECT },
+    });
+
+    // Act / Assert
+    should((await subject.watcher.tick()).refiled).deepEqual(['F1']);
+    should(subject.stored()).match({ projectId: OTHER_PROJECT, laneId: 'implement' });
+  });
+
   it('should warn once about a card it cannot refile, and about projects it cannot list', async () => {
-    const old = new Date(Date.parse(NOW) - UNFILED_REFILE_AFTER_MS - 60_000).toISOString();
     const subject = rig({
       cards: [
         withLinks([link(940, { state: 'closed', polledAt: NOW })], {
           projectId: UNFILED_PROJECT_ID,
           laneId: 'doing',
-          createdAt: old,
         }),
       ],
       lanes: new FakeLanes(new Map([[UNFILED_PROJECT_ID, lanes(UNFILED_PROJECT_ID, 'quick')]])),
@@ -712,7 +759,7 @@ describe('GitHubWatcher: nudges and refiling', () => {
     await subject.watcher.tick();
     await subject.watcher.tick();
     should(subject.warnings).have.length(1);
-    should(subject.warnings[0]).match(/^GitHub watcher: could not refile &F1: /u);
+    should(subject.warnings[0]).match(/^Unfiled board: could not refile &F1: /u);
 
     const unlisted = rig({ cards: [], listProjects: async () => Promise.reject(new Error('registry damaged')) });
     await unlisted.watcher.tick();

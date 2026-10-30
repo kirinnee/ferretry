@@ -101,6 +101,23 @@ project's board moves there with `fy task refile <id> --project <name>`. A refil
 is already closed lands in the other board's closed lane without the owner's gate, because the owner already closed
 it; moving an open card into Closed stays the owner's.
 
+**The daemon refiles Unfiled cards that belong on a board, at once** (`UnfiledRefiler`,
+`packages/daemon/src/lib/board-github/unfiled.ts`): on every GitHub watcher tick and once at boot, an open Unfiled
+card moves to a project's board when
+
+1. a linked PR's repository is a registered project's, or
+2. the folder its owner ferret works in belongs to one: the board that session was stamped with, else the board its
+   folder resolves to now, else its repository registered by the automatic path above, with the same rules (never
+   the home folder, a temp or scratch folder, a folder that is not a git repository, or one outside every project
+   root).
+
+The refile goes through `BoardService` as the daemon, and its history says which rule moved it. A refiled card whose
+PRs say something lands where work resumes on the new board (its last active lane) and its PR facts move it on from
+there, so a card merged but not released lands in Merged, never in Released · to test because it sat in the Unfiled
+board's To test. A card with nothing to say lands by its lane's category, as a refile by hand does. It is idempotent
+and safe under races: runs never overlap, a card someone (not the daemon) refiled to Unfiled on purpose stays there,
+and a ferret whose folder names no board is asked again only after ten minutes.
+
 `fy board lanes show|propose|edit --project <name|id>` and `fy board --project <name|id|all>` name a board by its
 name or id, wherever the flag is written on the line.
 
@@ -170,12 +187,20 @@ set's own while those lanes are still there, so an app that predates them never 
 | `pr`                | Todo, Plan/Design, In progress; Merged closes                      | Merged / In progress   |
 | `ops`               | Todo, Investigate, Fix, Verify, Closed                             | Closed / Fix           |
 | `writing`           | Todo, Research, Draft, Review, Published, Closed                   | Closed / Draft         |
-| `quick`             | Todo, Doing, Closed; closes when the ferret signals done           | Closed / Doing         |
+| `quick`             | Todo, Doing, To test, Closed                                       | Closed / Doing         |
 
 In the PR templates In progress keeps its old id `implement` and is entered on `work.started`, `pr.opened` and
 `pr.ready`; Released · to test (id `released`, category `verify`, owner-gated) is entered on `release.published`,
 and the owner's Done moves it on. A card that signals done with no PR goes to Released · to test for the owner to
-check. No shipped template uses `release.running`; it stays a trigger for a hand-made set.
+check. In `quick` (the Unfiled board's lanes) To test (id `to-test`, category `verify`, owner-gated) is entered on
+`pr.merged`, `release.published` and `signal.done`: quick work has no release step, so a merge is what the owner
+tries, and only the owner's Done closes. No shipped template uses `release.running`; it stays a trigger for a
+hand-made set.
+
+**`fy signal done` with no PR** moves a card still in an active lane to the lane its variant enters on `signal.done`,
+else the first review or verify lane ahead: a review lane where one comes first (today's behaviour on a board that
+has one), else the verify lane where the owner tries it. It never moves a card into a closed lane, because only the
+owner closes. A card with a PR is left where it is; its PR moves it.
 
 A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`) selects its variant of the lane
 set and cannot change after creation. In the PR templates only `design-first` and `research-first` work walks
@@ -188,6 +213,14 @@ category `verify`, entered on release, gated as To test was. The cards of both e
 history says "Released and To test are one lane now: Released · to test", the set's version rises, its confirmation
 stands, and the owner is asked nothing. It is idempotent. Nothing else on an existing board changes: Review/CI
 stays a lane there until the owner edits it out.
+
+**Quick lanes gained To test.** A `quick` set stored before it (Todo → Doing → Closed, closing on `signal.done`) had
+nowhere for a merged card to go: facts never enter Closed, so a card whose PRs all merged sat in Doing. At every boot
+the daemon gives such a set its To test lane between Doing and Closed (`addQuickToTestLane`): every lane keeps its
+id, name and place, Closed becomes owner-gated and is no longer entered on `signal.done`, every variant walks To test
+where it walked Doing or Closed, the version rises, the confirmation stands and the owner is asked nothing. No card
+moves in the migration itself; the cards whose PRs merged then move to To test on their facts, each with its own
+history ("PR #985 merged"). It is idempotent. The Unfiled board with no stored set reads the new template directly.
 
 A proposal is live at once but unconfirmed. The owner gets one agenda choice, Accept or Edit
 ([agenda.md](agenda.md)); accepting confirms the set. Edits are version-checked (a stale edit is a
@@ -339,8 +372,7 @@ than that move merges. History names the fact; no move is ever typed into a chat
 ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
 
 The watcher itself polls GitHub through the host's `gh` about once a minute while a repository has an open linked
-PR, and every ten minutes otherwise, and after `gh` is missing or signed out. A card that sits on Unfiled with a PR
-linked is refiled to its repository's project after a day.
+PR, and every ten minutes otherwise, and after `gh` is missing or signed out.
 
 ## Dependencies
 

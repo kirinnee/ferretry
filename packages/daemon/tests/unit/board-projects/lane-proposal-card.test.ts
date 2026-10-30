@@ -32,7 +32,7 @@ describe('laneProposalReference and laneProposalCard', () => {
   it('should offer Accept and Edit with the lane path as its subject', () => {
     const card = laneProposalCard('Ferretry', LANES);
 
-    should(card.subject).equal('Lanes for Ferretry: Todo → Doing → Closed');
+    should(card.subject).equal('Lanes for Ferretry: Todo → Doing → To test → Closed');
     should(card.title).equal('Lanes for Ferretry');
     should(card.kind).equal('choice');
     should(card.ask.kind).equal('multiple-choice');

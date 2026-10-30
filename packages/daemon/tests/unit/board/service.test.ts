@@ -25,9 +25,9 @@ import { unfiledLaneSet } from '../../../src/lib/board-projects/index.ts';
 import {
   card,
   FakeChanges,
+  FakeDone,
   FakeFocus,
   FakeLanes,
-  FakeDone,
   FakeReopen,
   FakeSessions,
   lanes,
@@ -36,6 +36,7 @@ import {
   OTHER_PROJECT,
   PROJECT,
   type ServiceWorld,
+  templateLanes,
   world,
 } from './support.ts';
 
@@ -1681,6 +1682,67 @@ describe('lanes follow PR facts at the write', () => {
 
     // Assert
     should(stored(ports).links.prs[0]?.state).equal('merged');
+  });
+
+  describe('a refile out of the Unfiled board', () => {
+    const unfiledWorld = (task: BoardTask) =>
+      serviceWith([task], {
+        lanes: new FakeLanes(
+          new Map([
+            [UNFILED_PROJECT_ID, unfiledLaneSet()],
+            [PROJECT, templateLanes(PROJECT)],
+          ]),
+        ),
+      });
+    const unfiledAt = (laneId: string, prs: readonly PrLink[]): BoardTask =>
+      card({ projectId: UNFILED_PROJECT_ID, laneId, links: { prs: [...prs], branch: null, commits: [], docs: [] } });
+
+    it('should land a card merged but not released in Merged, not in Released · to test by its To test lane', async () => {
+      // Arrange
+      const { ports, service } = unfiledWorld(unfiledAt('to-test', [known()]));
+
+      // Act
+      await service.act(
+        'F1',
+        action({ action: 'refile', projectId: PROJECT, reason: 'its PR is in Ferretry' }),
+        daemon,
+      );
+
+      // Assert
+      should(stored(ports)).match({ projectId: PROJECT, laneId: 'merged' });
+      should(stored(ports).history.at(-2)).match({
+        type: 'refiled',
+        toLane: 'implement',
+        reason: 'its PR is in Ferretry',
+      });
+      should(moves(stored(ports)).at(-1)).eql(['merged', 'pr.merged', 'PR #930 merged', 'daemon', true]);
+    });
+
+    it('should land a card whose PR shipped in a release in Released · to test, from Doing', async () => {
+      // Arrange
+      const { ports, service } = unfiledWorld(unfiledAt('doing', [known({ releasedIn: RELEASE })]));
+
+      // Act
+      await service.act('F1', action({ action: 'refile', projectId: PROJECT }), daemon);
+
+      // Assert
+      should(stored(ports)).match({ projectId: PROJECT, laneId: 'released' });
+      should(moves(stored(ports)).at(-1)?.slice(0, 2)).eql(['released', 'release.published']);
+    });
+
+    it('should land by category when the PR facts say nothing, and take a named lane over them', async () => {
+      // Arrange
+      const noPr = unfiledWorld(unfiledAt('to-test', []));
+      const named = unfiledWorld(unfiledAt('to-test', [known()]));
+
+      // Act
+      await noPr.service.act('F1', action({ action: 'refile', projectId: PROJECT }), daemon);
+      await named.service.act('F1', action({ action: 'refile', projectId: PROJECT, laneId: 'released' }), daemon);
+
+      // Assert
+      should(stored(noPr.ports)).match({ projectId: PROJECT, laneId: 'released' });
+      should(stored(named.ports)).match({ projectId: PROJECT, laneId: 'released' });
+    });
   });
 
   it('should re-evaluate a card refiled to another board against that board lanes', async () => {
