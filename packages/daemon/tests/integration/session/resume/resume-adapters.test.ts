@@ -752,7 +752,7 @@ describe('the resume launcher and a profile-authenticated account', () => {
     should(launch).containDeep(['-e', `FY_SESSION_ID=${ID}`]);
   });
 
-  it('should hand the replacement the same media folder', async () => {
+  it('should hand the replacement the same media folder and question file', async () => {
     // Arrange
     const port = new RecordingTmuxPort();
     const controller = new TmuxController(port);
@@ -771,7 +771,10 @@ describe('the resume launcher and a profile-authenticated account', () => {
       undefined,
       undefined,
       undefined,
-      async id => `/state/sessions/${id}/media`,
+      async id => ({
+        media: `/state/sessions/${id}/media`,
+        questionAsked: `/state/sessions/${id}/question-asked.json`,
+      }),
     );
 
     // Act
@@ -781,6 +784,7 @@ describe('the resume launcher and a profile-authenticated account', () => {
     // Assert
     const launch = port.calls.filter(call => call[0] === 'new-session')[0];
     should(launch).containDeep(['-e', `FY_MEDIA_DIR=/state/sessions/${ID}/media`]);
+    should(launch).containDeep(['-e', `FY_QUESTION_FILE=/state/sessions/${ID}/question-asked.json`]);
   });
 
   it('should let the session keep its own variable when a profile names the same one', async () => {

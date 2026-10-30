@@ -154,6 +154,8 @@ describe('foundation paths', () => {
       // owns this directory — the sweep kills nothing it cannot find a registration for here.
       terminalPane: '/tmp/fy-home/state/sessions/session-01/terminal-pane.json',
       media: '/tmp/fy-home/state/sessions/session-01/media',
+      // Claude's question hook's record of an open AskUserQuestion, which its transcript holds back.
+      questionAsked: '/tmp/fy-home/state/sessions/session-01/question-asked.json',
     });
   });
 

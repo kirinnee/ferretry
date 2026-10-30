@@ -418,7 +418,11 @@ import {
   SigtermProcessSignal,
 } from '../src/adapters/session/processes/index.ts';
 import { StorageSessionProvenanceStore } from '../src/adapters/session/provenance/index.ts';
-import { FileAnswerLedger, TmuxStructuredQuestionDriver } from '../src/adapters/session/question/index.ts';
+import {
+  FileAnswerLedger,
+  readAskedQuestion,
+  TmuxStructuredQuestionDriver,
+} from '../src/adapters/session/question/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -7332,10 +7336,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   );
   // Where a session's agent puts media it made to show the person, created per launch so a pane is never
   // handed a folder that does not exist. Owner-only, like the rest of the session's state.
-  const sessionMedia = async (id: SessionId): Promise<string> => {
-    const directory = createSessionPaths(paths, id).media;
-    await mkdir(directory, { mode: 0o700, recursive: true });
-    return directory;
+  // Beside it, the file Claude's question hook records an asked question in (`FY_QUESTION_FILE`).
+  const sessionMedia = async (id: SessionId) => {
+    const session = createSessionPaths(paths, id);
+    await mkdir(session.media, { mode: 0o700, recursive: true });
+    return { media: session.media, questionAsked: session.questionAsked };
   };
   // ONE durable owner for every irreversible pane effect in this daemon. Lifecycle turn delivery
   // and runtime controls deliberately share it so neither can mint a second replay vocabulary.
@@ -8534,6 +8539,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // The ONE writer of everything the observer derives, on whichever host it runs.
       const observationApplier = new SessionObservationApplier(storage, answerLedger, new KeyedSerialExecutor());
       const observerFold = new SessionObserver(text => createHash('sha256').update(text, 'utf8').digest('hex'));
+      const observerTranscripts = createTranscriptFileResolver(storage);
       const inlineObserver = new InlineObserverHost(
         {
           storage,
@@ -8545,6 +8551,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           tail: createSessionTranscriptTail(storage),
           pane: async id => await turnPorts.pane(id),
           answers: answerLedger,
+          // Claude's hook record of the question it is asking, which its transcript holds back until the form
+          // is answered (lib/session/question/asked.ts). Bound to the transcript the resolver proves.
+          asked: async id =>
+            await readAskedQuestion(
+              createSessionPaths(paths, id).questionAsked,
+              await observerTranscripts.file(id).catch(() => undefined),
+            ),
           answerSerial,
           applier: observationApplier,
           liveness: {
@@ -8568,7 +8581,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // its own worker, through its own attached observe-only tmux client on the daemon's server, and only when
       // something happened; this thread still writes every patch. The inline host above observes a session
       // only while it has no worker — starting, backing off, or after its worker crashed five times.
-      const observerTranscripts = createTranscriptFileResolver(storage);
       const unrefTimer = (delayMs: number, run: () => void): (() => void) => {
         const timer = setTimeout(run, delayMs);
         timer.unref();
@@ -8621,11 +8633,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           const target = config?.tmuxSession;
           if (typeof target !== 'string' || !isControlAttachable(target)) return undefined;
           const file = await observerTranscripts.file(id).catch(() => undefined);
+          const harness = config?.harness === 'codex' ? 'codex' : 'claude';
           return {
             tmux: { executable: tmuxExecutable, socket: tmuxSocket, target },
-            ...(file === undefined
-              ? {}
-              : { transcript: { file, harness: config?.harness === 'codex' ? 'codex' : 'claude' } }),
+            ...(file === undefined ? {} : { transcript: { file, harness } }),
+            ...(harness === 'claude'
+              ? { questionAsked: createSessionPaths(paths, id as SessionId).questionAsked }
+              : {}),
           };
         },
         applier: observationApplier,

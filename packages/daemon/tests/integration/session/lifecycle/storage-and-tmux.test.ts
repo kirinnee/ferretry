@@ -1467,7 +1467,7 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
     should(launch?.filter(word => word === '-e')).have.length(2);
   });
 
-  it('should hand the pane its media folder when one is wired', async () => {
+  it('should hand the pane its media folder and question file when they are wired', async () => {
     // Arrange
     const port = new RecordingTmuxPort();
     const controller = new TmuxController(port);
@@ -1483,17 +1483,22 @@ describe('TmuxSessionLifecycleLauncher and a profile-authenticated account', () 
       undefined,
       async id => {
         asked.push(id);
-        return `/state/sessions/${id}/media`;
+        return {
+          media: `/state/sessions/${id}/media`,
+          questionAsked: `/state/sessions/${id}/question-asked.json`,
+        };
       },
     );
 
     // Act
     await subject.launch(record('media-session'));
 
-    // Assert — created per launch and handed over as FY_MEDIA_DIR (docs/hypermedia.md).
+    // Assert — created per launch and handed over as FY_MEDIA_DIR (docs/hypermedia.md), with the file
+    // Claude's question hook records an open question in (FY_QUESTION_FILE).
     should(asked).deepEqual(['media-session']);
     const launch = port.calls.filter(call => call[0] === 'new-session')[0];
     should(launch).containDeep(['-e', 'FY_MEDIA_DIR=/state/sessions/media-session/media']);
+    should(launch).containDeep(['-e', 'FY_QUESTION_FILE=/state/sessions/media-session/question-asked.json']);
   });
 
   it('should launch an interactive ferret with hypermedia on and an auto one with it off', async () => {

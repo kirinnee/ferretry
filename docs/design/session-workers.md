@@ -186,15 +186,15 @@ reply's blocks as they are written; nothing in the journal says a transcript gre
 
 One **SessionObserver** per live session, hosted by the worker, doing exactly the derivations that are R above:
 
-| Observer part       | Replaces                                                                   | Inputs inside the worker                                                        |
-| ------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `turn`              | `SessionTurnWatcher` + `StorageTurnPorts.transcript/pane` for this session | pane frames (own control client), transcript tail (own reader), facts           |
-| `question`          | the monitor's question pass + the read-path `projectSessionEvidence`       | transcript tail (same parse), answer-ledger rows, facts                         |
-| `runtime`           | `projectObservedRuntime` (rides in the question patch, as today)           | transcript tail                                                                 |
-| `liveness`          | `WardenLivenessMonitor`'s sample collection (not its fold or reflex)       | pane digest/counters, transcript digest, process tree (Linux `/proc`, mac `ps`) |
-| `delivery evidence` | `TranscriptSendEvidence` + `TmuxSendTerminal.heldAt/observe` reads         | the already-parsed tail and the latest frame                                    |
-| `live activity`     | `StorageLiveActivitySource` captures                                       | the latest frame                                                                |
-| `exit` (3d)         | the exit observer's tmux calls for this session                            | `%exit`/`%session-changed`/pane-exited from the attached client                 |
+| Observer part       | Replaces                                                                   | Inputs inside the worker                                                             |
+| ------------------- | -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `turn`              | `SessionTurnWatcher` + `StorageTurnPorts.transcript/pane` for this session | pane frames (own control client), transcript tail (own reader), facts                |
+| `question`          | the monitor's question pass + the read-path `projectSessionEvidence`       | transcript tail (same parse), Claude's question-hook file, answer-ledger rows, facts |
+| `runtime`           | `projectObservedRuntime` (rides in the question patch, as today)           | transcript tail                                                                      |
+| `liveness`          | `WardenLivenessMonitor`'s sample collection (not its fold or reflex)       | pane digest/counters, transcript digest, process tree (Linux `/proc`, mac `ps`)      |
+| `delivery evidence` | `TranscriptSendEvidence` + `TmuxSendTerminal.heldAt/observe` reads         | the already-parsed tail and the latest frame                                         |
+| `live activity`     | `StorageLiveActivitySource` captures                                       | the latest frame                                                                     |
+| `exit` (3d)         | the exit observer's tmux calls for this session                            | `%exit`/`%session-changed`/pane-exited from the attached client                      |
 
 Stays on main: every durable write and journal append; the send tracker's policy and ledger; the parks pass;
 the Warden liveness fold and reflex (pure and cheap, fed samples); the exit settle (CAS, lease release); all
