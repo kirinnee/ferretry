@@ -156,6 +156,18 @@ the tests check every cursor tmux could report).
   shows a `Try "…"` suggestion with the cursor at its first column.
 - **`C-u` erases back to the start of the wrapped ROW the cursor is on**, not the message: a pointer
   wrapped over three rows loses only its last row (`claude-2.1.281-titled-draft-pointer-after-cu`).
+- A queued prompt Claude feeds into the running turn is recorded as an `attachment` › `queued_command`,
+  and its `prompt` is a STRING only for plain text. A drain that carries an image, a paste, or several
+  queued prompts at once records CONTENT BLOCKS, read like a user record's (`claudeUserText`). Read as a
+  string only, that drain proved nothing: on 2026-10-30 a ferret's message the lead had read was called
+  absent, typed three more times, and shown on the owner's phone as "not delivered".
+
+**"Not delivered" is a claim of absence, and only absence earns it.** A typed send whose session ended
+before anything proved it is `unaccounted` (`session_ended`) — a harness queue holding it at a restart
+delivers it all the same — and only a send nothing was ever typed for is `timed_out` there. A `timed_out`
+send stays watched for the repair window (`repairLimitMs`, 3 days), like a cancelled one, so a record
+the transcript holds corrects it to delivered: the rows the old reader got wrong correct themselves the
+next time their ferret's sends are read.
 
 The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
 (15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and
