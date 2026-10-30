@@ -102,6 +102,37 @@ describe('moveTask', () => {
   });
 });
 
+describe('files on a move back', () => {
+  const files = { from: CHILD, ids: [`att_${'a'.repeat(64)}`] };
+
+  it('names the files on a move and on a reopen, and leaves them out when there are none', async () => {
+    const { actions, sent } = harness();
+    await actions.moveTask(target('review'), 'implement', 'still broken', files);
+    await actions.reopen(
+      { daemonId: laptop.daemonId, id: 'F1' },
+      'implement',
+      'again',
+      { text: 'again', source: 'owner' },
+      files,
+    );
+    await actions.reopen({ daemonId: laptop.daemonId, id: 'F1' }, 'implement', 'again', {
+      text: 'again',
+      source: 'owner',
+    });
+    expect(sent.map(entry => entry.request)).toEqual([
+      { action: 'move', to: 'implement', reason: 'still broken', attachments: files },
+      {
+        action: 'reopen',
+        to: 'implement',
+        reason: 'again',
+        ask: { text: 'again', source: 'owner' },
+        attachments: files,
+      },
+      { action: 'reopen', to: 'implement', reason: 'again', ask: { text: 'again', source: 'owner' } },
+    ]);
+  });
+});
+
 describe('the other verbs', () => {
   const card1 = { daemonId: laptop.daemonId, id: 'F1' };
 

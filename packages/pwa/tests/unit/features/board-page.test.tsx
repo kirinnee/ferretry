@@ -107,8 +107,8 @@ const titles = (root: HTMLElement) =>
   [...root.querySelectorAll('.fy-board-card__title, .fy-board-table__title-text')].map(node => node.textContent);
 /** The advanced filters start folded behind "Filters"; this opens them. */
 const unfold = (root: HTMLElement) => click(root, '.fy-board-filters__toggle');
-const typeInto = async (input: HTMLInputElement, value: string) => {
-  Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value);
+const typeInto = async (input: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+  Object.getOwnPropertyDescriptor(Object.getPrototypeOf(input), 'value')?.set?.call(input, value);
   await interact(() => input.dispatchEvent(new Event('input', { bubbles: true })));
 };
 
@@ -264,7 +264,7 @@ describe('BoardPage — views', () => {
     expect(acts).toEqual([]);
     const dialog = must(root.querySelector('[role="dialog"]'), 'the reason box');
     await typeInto(
-      must(dialog.querySelector<HTMLInputElement>('input[aria-label="Reason"]'), 'reason'),
+      must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'),
       'it broke again',
     );
     await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
@@ -506,7 +506,7 @@ describe('BoardPage — moving cards', () => {
     const submit = must(dialog.querySelector<HTMLButtonElement>('button[type="submit"]'), 'submit');
     expect(submit.disabled).toBe(true);
     await typeInto(
-      must(dialog.querySelector<HTMLInputElement>('input[aria-label="Reason"]'), 'reason'),
+      must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'),
       'CI is red again',
     );
     await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
@@ -532,7 +532,7 @@ describe('BoardPage — moving cards', () => {
     });
     await pickLane(await openMenu(root, 'F3'), 'Todo');
     const dialog = must(root.querySelector('[role="dialog"]'), 'the reason box');
-    await typeInto(must(dialog.querySelector<HTMLInputElement>('input[aria-label="Reason"]'), 'reason'), 'because');
+    await typeInto(must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'), 'because');
     await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
     expect(acts).toHaveLength(1);
     expect(root.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('That lane is gated.');
@@ -542,14 +542,21 @@ describe('BoardPage — moving cards', () => {
     expect(root.querySelector('[role="dialog"]')).toBeNull();
   });
 
-  it('says so when a forward move does not go through, and the notice can be dismissed', async () => {
-    const { root } = await open({
-      act: async () => boardErr({ status: 500, message: 'boom', boardCode: 'owner-gate' as const }),
+  it('says on the card itself when a forward move does not go through, and clears it on the next try', async () => {
+    let answer: 'refuse' | 'take' = 'refuse';
+    const { root, acts } = await open({
+      act: async () =>
+        answer === 'refuse'
+          ? boardErr({ status: 500, message: 'boom', boardCode: 'owner-gate' as const })
+          : boardOk(card('F2')),
     });
     await pickLane(await openMenu(root, 'F2'), 'Review/CI');
-    expect(root.querySelector('.fy-board__notice')?.textContent).toContain('The move did not go through.');
-    await click(root, '.fy-board__notice-x');
-    expect(root.querySelector('.fy-board__notice')).toBeNull();
+    expect(root.querySelector('[data-task="F2"] [data-answer-error]')?.textContent).toBe('boom');
+    expect(root.querySelectorAll('[data-answer-error]')).toHaveLength(1);
+    answer = 'take';
+    await pickLane(await openMenu(root, 'F2'), 'Review/CI');
+    expect(acts).toHaveLength(2);
+    expect(root.querySelector('[data-answer-error]')).toBeNull();
   });
 
   it('closes a card from To test in one tap with Done', async () => {
@@ -561,7 +568,9 @@ describe('BoardPage — moving cards', () => {
   it('sends "Not good" back to the last active lane, with a reason', async () => {
     const { root, acts } = await open();
     await click(root, '[data-task="F4"] [data-verdict="not-good"]');
-    expect(root.querySelector('[role="dialog"]')?.textContent).toContain('Move Try the thing back to Implement');
+    expect(root.querySelector('[role="dialog"]')?.textContent).toContain(
+      'Not good: send Try the thing back to Implement',
+    );
     expect(acts).toEqual([]);
   });
 
@@ -772,5 +781,190 @@ describe('BoardPage — the phone header', () => {
     await click(root, '.fy-board__retry');
     await interact(() => flush());
     expect(root.querySelector('[data-machine="daemon/workstation"]')?.textContent).toContain('timed out');
+  });
+});
+
+describe('BoardPage — an answer in flight', () => {
+  const hold = () => {
+    let release: (answer: Awaited<ReturnType<DaemonBoardStore['act']>>) => void = () => undefined;
+    const act = () =>
+      new Promise<Awaited<ReturnType<DaemonBoardStore['act']>>>(resolve => {
+        release = resolve;
+      });
+    return { act, release: (answer: Awaited<ReturnType<DaemonBoardStore['act']>>) => release(answer) };
+  };
+
+  it('spins the pressed Done, holds every answer on that card, and sends one move however often it is pressed', async () => {
+    const held = hold();
+    const { root, acts } = await open({ act: held.act });
+    await click(root, '[data-task="F4"] .fy-board-done');
+    const done = must(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-done'), 'Done');
+    expect(done.hasAttribute('data-pending')).toBe(true);
+    expect(done.disabled).toBe(true);
+    expect(done.getAttribute('aria-busy')).toBe('true');
+    expect(done.querySelector('[data-spinner]')).not.toBeNull();
+    expect(done.textContent).toBe('Done');
+    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] [data-verdict="not-good"]')?.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-card__more')?.disabled).toBe(true);
+    expect(root.querySelector('[data-task="F4"]')?.getAttribute('data-settling')).toBe('done');
+    expect(root.querySelector('[data-task="F4"]')?.getAttribute('draggable')).toBe('false');
+    // Other cards are not held.
+    expect(root.querySelector<HTMLButtonElement>('[data-task="F2"] .fy-board-card__more')?.disabled).toBe(false);
+    await interact(() => done.click());
+    expect(acts).toHaveLength(1);
+    held.release(boardOk(card('F4', { laneId: 'closed' })));
+    await interact(() => flush());
+    expect(root.querySelector('[data-settling]')).toBeNull();
+  });
+
+  it('ignores another answer on a card while one is on its way', async () => {
+    const held = hold();
+    const { root, acts } = await open({ act: held.act });
+    await click(root, '[data-task="F4"] .fy-board-done');
+    // The buttons are held; a drop that still arrives must not start a second move either.
+    const dragged = (type: string) => {
+      const event = new Event(type, { bubbles: true, cancelable: true });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { effectAllowed: '', dropEffect: '', setData: () => undefined },
+      });
+      return event;
+    };
+    await interact(() => must(root.querySelector('[data-task="F4"]'), 'F4').dispatchEvent(dragged('dragstart')));
+    const merged = must(
+      [...root.querySelectorAll<HTMLElement>('.fy-board-lane')].find(lane =>
+        lane.getAttribute('aria-label')?.startsWith('Merged'),
+      ),
+      'Merged',
+    );
+    await interact(() => merged.dispatchEvent(dragged('drop')));
+    expect(acts).toHaveLength(1);
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+    held.release(boardOk(card('F4')));
+    await interact(() => flush());
+  });
+
+  it('says a refused Done on the card, and nowhere else', async () => {
+    const { root } = await open({
+      act: async () => boardErr({ status: 409, message: 'only the owner closes', boardCode: 'owner-gate' as const }),
+    });
+    await click(root, '[data-task="F4"] .fy-board-done');
+    expect(root.querySelector('[data-task="F4"] [data-answer-error][role="alert"]')?.textContent).toBe(
+      'only the owner closes',
+    );
+    expect(root.querySelector('.fy-board__notice')).toBeNull();
+    expect(root.querySelector<HTMLButtonElement>('[data-task="F4"] .fy-board-done')?.disabled).toBe(false);
+  });
+
+  it('spins Done on a Table row and says its refusal under the row', async () => {
+    const held = hold();
+    const { root } = await open({ act: held.act, props: { search: 'view=list' } });
+    await click(root, '.fy-board-table__row[data-task="F4"] .fy-board-done');
+    const row = must(root.querySelector('.fy-board-table__row[data-task="F4"]'), 'the row');
+    expect(row.getAttribute('data-settling')).toBe('done');
+    expect(row.querySelector('.fy-board-done [data-spinner]')).not.toBeNull();
+    held.release(boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }));
+    await interact(() => flush());
+    expect(row.querySelector('[data-answer-error]')?.textContent).toBe('no');
+    expect(row.hasAttribute('data-settling')).toBe(false);
+  });
+
+  it('words a Reopen from the Archive as one', async () => {
+    const { root } = await open({ props: { search: 'view=archive' } });
+    await click(root, '[data-task="F8"] .fy-board-done');
+    expect(root.querySelector('.fy-board-reason__heading')?.textContent).toBe(
+      'Reopen Old closed thing: back to Implement',
+    );
+    expect(root.querySelector('[aria-label="Reason"]')?.getAttribute('placeholder')).toBe(
+      'Why is it going back? The ferret reads this.',
+    );
+  });
+});
+
+describe('BoardPage — Not good with pictures', () => {
+  const IMAGE = `att_${'a'.repeat(64)}`;
+  const withFiles = (offered: boolean, uploads: string[] = []): Partial<BoardPageProps> => ({
+    ports: {
+      sendMessage: async () => undefined,
+      startFerret: async () => 'sess',
+      sendBackFiles: async () => offered,
+      uploadAttachment: async (daemon, sessionId, file) => {
+        uploads.push(`${daemon.daemonId}:${sessionId}:${file.name}`);
+        return { id: IMAGE, filename: file.name, mime: file.type, size: 3, sha256: '0'.repeat(64), createdAt: 'x' };
+      },
+    },
+  });
+  const pickFile = async (root: HTMLElement): Promise<void> => {
+    const picker = must(root.querySelector<HTMLInputElement>('[data-send-back-picker]'), 'the picker');
+    Object.defineProperty(picker, 'files', {
+      configurable: true,
+      value: [new File(['png'], 'flicker.png', { type: 'image/png' })],
+    });
+    await interact(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+    await interact(() => flush());
+  };
+
+  it("uploads to the card's ferret and sends the files with the words, spinning Not good meanwhile", async () => {
+    const uploads: string[] = [];
+    let release: () => void = () => undefined;
+    const { root, acts } = await open({
+      props: withFiles(true, uploads),
+      act: () =>
+        new Promise(resolve => {
+          release = () => resolve(boardOk(card('F4', { laneId: 'implement' })));
+        }),
+    });
+    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
+    await interact(() => flush());
+    await pickFile(root);
+    const ferret = card('F4').owner;
+    expect(uploads).toEqual([`${laptop.daemonId}:${ferret}:flicker.png`]);
+    const dialog = must(root.querySelector('[role="dialog"]'), 'the composer');
+    await typeInto(
+      must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'),
+      'still flickers',
+    );
+    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(acts).toEqual([
+      {
+        daemonId: laptop.daemonId,
+        id: 'F4',
+        request: {
+          action: 'move',
+          to: 'implement',
+          reason: 'still flickers',
+          attachments: { from: ferret, ids: [IMAGE] },
+        },
+      },
+    ]);
+    expect(root.querySelector('[data-task="F4"] [data-verdict="not-good"]')?.hasAttribute('data-pending')).toBe(true);
+    expect(root.querySelector('.fy-board-sendback__send')?.getAttribute('aria-label')).toBe('Sending…');
+    release();
+    await interact(() => flush());
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+  });
+
+  it('keeps the composer, and the words, when the daemon refuses', async () => {
+    const { root } = await open({
+      props: withFiles(true),
+      act: async () => boardErr({ status: 409, message: 'not in its session', boardCode: 'owner-gate' as const }),
+    });
+    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
+    const dialog = must(root.querySelector('[role="dialog"]'), 'the composer');
+    await typeInto(must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'), 'no');
+    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(root.querySelector('[role="dialog"] [role="alert"]')?.textContent).toBe('not in its session');
+    expect(root.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]')?.value).toBe('no');
+  });
+
+  it('sends the words alone to a machine too old for pictures', async () => {
+    const { root, acts } = await open({ props: withFiles(false) });
+    await click(root, '[data-task="F4"] [data-verdict="not-good"]');
+    await interact(() => flush());
+    expect(root.querySelector('[data-send-back-picker]')).toBeNull();
+    expect(root.querySelector('[data-send-back-note="update"]')).not.toBeNull();
+    const dialog = must(root.querySelector('[role="dialog"]'), 'the composer');
+    await typeInto(must(dialog.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'reason'), 'broken');
+    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(acts[0]?.request).toEqual({ action: 'move', to: 'implement', reason: 'broken' });
   });
 });

@@ -1,10 +1,15 @@
 /**
  * THE ONE "DONE ✓" CONTROL: drawn the same on a Table row, a card, and the card detail (where it is the primary
  * "Mark done"). Closed cards in the Archive wear "Reopen" instead. It only reports a press; the page decides what
- * a move means, so a reopen still opens the reason box.
+ * a move means, so a reopen still opens the composer.
+ *
+ * While its move is in flight it is `pending`: the icon turns into a spinner of the same size and the label stays,
+ * so the button keeps its width and nothing slides under the next tap; it is disabled until the move settles.
  */
 
 import { Check, RotateCcw } from 'lucide-react';
+import type { ComponentType } from 'react';
+import { Spinner } from '../../components/spinner.tsx';
 import { type BoardDone, doneLabel, doneTitle } from '../../lib/board-done.ts';
 
 export interface BoardDoneActionProps {
@@ -16,6 +21,25 @@ export interface BoardDoneActionProps {
   readonly size?: 'row' | 'primary';
   readonly touch?: boolean;
   readonly disabled?: boolean;
+  /** This control's move is in flight: a spinner where the icon was, and no second press. */
+  readonly pending?: boolean;
+}
+
+/** An answer's icon, or a spinner of the same size while its move is in flight. */
+export function AnswerIcon({
+  icon: Icon,
+  size,
+  pending,
+}: {
+  readonly icon: ComponentType<{ readonly 'aria-hidden'?: 'true'; readonly size?: number }>;
+  readonly size: number;
+  readonly pending: boolean;
+}) {
+  return pending ? (
+    <Spinner className="fy-board-answer-spinner" size={size} />
+  ) : (
+    <Icon aria-hidden="true" size={size} />
+  );
 }
 
 export function BoardDoneAction({
@@ -25,17 +49,19 @@ export function BoardDoneAction({
   size = 'row',
   touch = false,
   disabled = false,
+  pending = false,
 }: BoardDoneActionProps) {
-  const Icon = done.kind === 'reopen' ? RotateCcw : Check;
   const label = doneLabel(done, size === 'primary');
   return (
     <button
+      aria-busy={pending}
       aria-label={doneTitle(done, title)}
       className="fy-board-done"
       data-done={done.kind}
+      data-pending={pending ? '' : undefined}
       data-size={size}
       data-touch={touch ? '' : undefined}
-      disabled={disabled}
+      disabled={disabled || pending}
       onClick={event => {
         event.stopPropagation();
         onPress();
@@ -43,8 +69,12 @@ export function BoardDoneAction({
       title={doneTitle(done, title)}
       type="button"
     >
-      <Icon aria-hidden="true" size={size === 'primary' ? 14 : 12} />
-      {label}
+      <AnswerIcon
+        icon={done.kind === 'reopen' ? RotateCcw : Check}
+        pending={pending}
+        size={size === 'primary' ? 14 : 12}
+      />
+      <span className="fy-board-done__label">{label}</span>
     </button>
   );
 }

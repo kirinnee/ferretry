@@ -19,7 +19,7 @@ import {
   flattenTree,
   laneOfCategory,
 } from '../../lib/board-view.ts';
-import type { BoardDone } from '../../lib/board-done.ts';
+import type { BoardAnswerState, BoardDone } from '../../lib/board-done.ts';
 import { BoardCard, type BoardCardMoves } from './board-card.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
@@ -52,6 +52,8 @@ export interface BoardCardEnv {
   readonly dragging: { readonly cardKey: string; readonly groupKey: string } | null;
   /** A phone: thumb-sized cards and the To test buttons spelled out. */
   readonly touch?: boolean;
+  /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
+  readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
 }
 
 interface PlacedProps {
@@ -65,6 +67,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
   const moves = place === undefined ? undefined : env.movesFor(card, place);
   const done = place === undefined ? undefined : env.doneFor?.(card, place);
+  const answer = env.answerFor?.(card);
   return (
     <BoardCard
       card={card}
@@ -81,6 +84,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
       {...(done === undefined ? {} : { done })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
+      {...(answer === undefined ? {} : { answer })}
     />
   );
 }

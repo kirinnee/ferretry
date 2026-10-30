@@ -2,8 +2,10 @@
  * THE BOARD PAGE (`/d/<id>/board`): every task on every paired machine as lanes.
  *
  * It owns what the views must not: the reads (the U10 board store, once per kind of read), the filters in
- * the URL, the drag in the air and the move flow. A move forward is sent as dropped; a move BACK opens a
- * one-line reason box and is sent only with it. Everything drawn is `BoardCard`, `BoardLane`,
+ * the URL, the drag in the air and the move flow. A move forward is sent as dropped; a move BACK opens the
+ * send-back composer (the words, and pictures where the machine takes them) and is sent only with its words.
+ * Each card's answer in flight is tracked here, so the pressed button spins, the card's other answers wait,
+ * and a refusal is said on the card it belongs to. Everything drawn is `BoardCard`, `BoardLane`,
  * `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
  */
 
@@ -20,7 +22,15 @@ import {
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { type BoardFilters, boardFiltersToSearch } from '../../lib/board-model.ts';
-import { boardDone, isReleaseLane } from '../../lib/board-done.ts';
+import {
+  ANSWER_AT_REST,
+  type BoardAnswer,
+  type BoardAnswerState,
+  boardDone,
+  doneLaneOf,
+  isReleaseLane,
+  notGoodLaneOf,
+} from '../../lib/board-done.ts';
 import { moveChoices, planMove } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import {
@@ -34,7 +44,6 @@ import {
   type BoardViewId,
   cardPlaces,
   laneNames,
-  laneOfCategory,
   parseBoardView,
 } from '../../lib/board-view.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -46,7 +55,7 @@ import { DEFAULT_SUMMARY_WINDOW, parseSummaryWindow, type SummaryWindow } from '
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
 import { BoardNotice } from './board-notice.tsx';
 import { PhoneKanban } from './board-phone.tsx';
-import { BoardReasonBox } from './board-reason-box.tsx';
+import { BoardSendBack, type SendBack, type SendBackPorts, useSendBackFiles } from './board-send-back.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
 import { BoardNewCard, type NewCardPorts } from './detail/board-new-card.tsx';
 import { TableView } from './board-table.tsx';
@@ -76,7 +85,7 @@ export interface BoardPageProps {
   /** The card the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
   readonly openCard?: { readonly daemonId: DaemonId; readonly taskId: string } | null;
   /** Speaking to ferrets and starting one; without them the detail cannot comment and there is no "+ Card". */
-  readonly ports?: BoardDetailPorts & NewCardPorts;
+  readonly ports?: BoardDetailPorts & NewCardPorts & SendBackPorts;
   /** A phone: one lane at a time under a chip strip, the filters in a bottom sheet, rows sized for a thumb. */
   readonly phone?: boolean;
   /**
@@ -91,7 +100,39 @@ interface PendingMove {
   readonly group: BoardGroupOf;
   readonly to: string;
   readonly toName: string;
+  /** Which control asked: it words the composer, and it is the one that spins while the move goes. */
+  readonly answer: BoardAnswer;
 }
+
+/** How the composer reads for the control that opened it. */
+const sendBackWords = (pending: PendingMove) => {
+  const title = pending.card.task.title;
+  switch (pending.answer) {
+    case 'not-good':
+      return { heading: `Not good: send ${title} back to ${pending.toName}`, submitLabel: 'Send back' };
+    case 'reopen':
+      return {
+        heading: `Reopen ${title}: back to ${pending.toName}`,
+        placeholder: 'Why is it going back? The ferret reads this.',
+        submitLabel: 'Reopen',
+        busyLabel: 'Reopening…',
+      };
+    default:
+      return {
+        heading: `Move ${title} back to ${pending.toName}`,
+        placeholder: 'Why is it going back? The ferret reads this.',
+        submitLabel: 'Move back',
+        busyLabel: 'Moving…',
+      };
+  }
+};
+
+const without = <Value,>(map: ReadonlyMap<string, Value>, key: string): ReadonlyMap<string, Value> => {
+  if (!map.has(key)) return map;
+  const next = new Map(map);
+  next.delete(key);
+  return next;
+};
 
 const useNow = (fixed: number | undefined): number => {
   const [now, setNow] = useState(() => fixed ?? Date.now());
@@ -251,32 +292,44 @@ export function BoardPage({
   // ----- moving -------------------------------------------------------------------------------------
   const [dragging, setDragging] = useState<{ cardKey: string; groupKey: string } | null>(null);
   const [pending, setPending] = useState<PendingMove | null>(null);
-  const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  // Per card: the answer in flight, and the last refusal. Several cards can be settling at once.
+  const [settling, setSettling] = useState<ReadonlyMap<string, BoardAnswer>>(() => new Map());
+  const [refusals, setRefusals] = useState<ReadonlyMap<string, string>>(() => new Map());
   const [notice, setNotice] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   // A phone can dismiss a machine's error; it comes back if the machine says something else.
   const [dismissedErrors, setDismissedErrors] = useState<ReadonlySet<string>>(() => new Set());
 
   const send = useCallback(
-    async (card: BoardCardOf, group: BoardGroupOf, to: string, reason?: string): Promise<boolean> => {
-      setBusy(true);
-      setProblem(null);
+    async (
+      card: BoardCardOf,
+      group: BoardGroupOf,
+      to: string,
+      answer: BoardAnswer,
+      sendBack?: SendBack & { readonly from: string | null },
+    ): Promise<string | null> => {
+      setSettling(current => new Map(current).set(card.key, answer));
+      setRefusals(current => without(current, card.key));
+      const ids = sendBack?.attachmentIds ?? [];
       const result = await actions.moveTask(
         { daemonId: card.daemonId, id: card.task.id, laneId: card.task.laneId, laneSet: group.laneSet },
         to,
-        reason,
+        sendBack?.reason,
+        ids.length === 0 || sendBack?.from == null ? undefined : { from: sendBack.from, ids: [...ids] },
       );
-      setBusy(false);
-      if (result.ok) return true;
-      setProblem(result.error.message);
-      return false;
+      setSettling(current => without(current, card.key));
+      if (result.ok) return null;
+      setRefusals(current => new Map(current).set(card.key, result.error.message));
+      return result.error.message;
     },
     [actions],
   );
 
   const requestMove = useCallback(
-    (card: BoardCardOf, group: BoardGroupOf, laneId: string): void => {
+    (card: BoardCardOf, group: BoardGroupOf, laneId: string, answer: BoardAnswer = 'move'): void => {
+      // One answer at a time per card: a second press while the first is in flight is not a second move.
+      if (settling.has(card.key)) return;
       const plan = planMove(group.laneSet, card.task.laneId, laneId);
       setNotice(null);
       if (plan.kind === 'refused') {
@@ -286,16 +339,12 @@ export function BoardPage({
       if (plan.kind === 'ask-reason') {
         const toName = group.laneSet?.lanes.find(lane => lane.id === plan.to)?.name ?? plan.to;
         setProblem(null);
-        setPending({ card, group, to: plan.to, toName });
+        setPending({ card, group, to: plan.to, toName, answer });
         return;
       }
-      if (plan.kind === 'send') {
-        void send(card, group, plan.to).then(ok => {
-          if (!ok) setNotice('The move did not go through.');
-        });
-      }
+      if (plan.kind === 'send') void send(card, group, plan.to, answer);
     },
-    [send],
+    [send, settling],
   );
 
   const movesFor = useCallback(
@@ -304,9 +353,9 @@ export function BoardPage({
       if (group.laneSet === null || place.category === 'closed') return undefined;
       return {
         choices: moveChoices(group.laneSet, card.task.laneId),
-        onMove: (target, laneId) => requestMove(target, group, laneId),
-        closeLaneId: laneOfCategory(group, 'closed'),
-        reworkLaneId: laneOfCategory(group, 'active', 'last'),
+        onMove: (target, laneId, answer) => requestMove(target, group, laneId, answer),
+        closeLaneId: doneLaneOf(group.laneSet),
+        reworkLaneId: notGoodLaneOf(group.laneSet),
         onDragStart: target => setDragging({ cardKey: target.key, groupKey: group.key }),
         onDragEnd: () => setDragging(null),
       };
@@ -325,7 +374,7 @@ export function BoardPage({
         ? undefined
         : {
             done,
-            press: () => requestMove(card, place.group, done.laneId),
+            press: () => requestMove(card, place.group, done.laneId, done.kind),
             atRelease: isReleaseLane(place.group.laneSet, card.task.laneId),
           };
     },
@@ -345,11 +394,32 @@ export function BoardPage({
     [dragging, model, requestMove],
   );
 
-  const submitReason = async (reason: string): Promise<void> => {
+  // The composer's files go to the card's ferret: its assignee, else its owner ferret (where the daemon looks).
+  const pendingMachine =
+    pending === null ? undefined : machines.find(machine => machine.connection.daemonId === pending.card.daemonId);
+  const sendBackFiles = useSendBackFiles(
+    ports,
+    pendingMachine?.connection,
+    pending === null ? null : (pending.card.task.assignee ?? pending.card.task.owner),
+  );
+  const submitSendBack = async (sendBack: SendBack): Promise<void> => {
     if (pending === null) return;
-    const ok = await send(pending.card, pending.group, pending.to, reason);
-    if (ok) setPending(null);
+    setProblem(null);
+    const refused = await send(pending.card, pending.group, pending.to, pending.answer, {
+      ...sendBack,
+      from: sendBackFiles?.sessionId ?? null,
+    });
+    if (refused === null) setPending(null);
+    else setProblem(refused);
   };
+  const answerFor = useCallback(
+    (card: BoardCardOf): BoardAnswerState => {
+      const pressed = settling.get(card.key) ?? null;
+      const error = refusals.get(card.key) ?? null;
+      return pressed === null && error === null ? ANSWER_AT_REST : { pressed, error };
+    },
+    [settling, refusals],
+  );
 
   // ----- what the views are given -------------------------------------------------------------------
   const env = useMemo<BoardCardEnv>(
@@ -364,8 +434,22 @@ export function BoardPage({
       doneFor,
       places,
       dragging,
+      answerFor,
     }),
-    [names, now, model.multiMachine, machines.length, onNavigate, archive, movesFor, doneFor, places, dragging, phone],
+    [
+      names,
+      now,
+      model.multiMachine,
+      machines.length,
+      onNavigate,
+      archive,
+      movesFor,
+      doneFor,
+      places,
+      dragging,
+      phone,
+      answerFor,
+    ],
   );
 
   const [archiveQuery, setArchiveQuery] = useState('');
@@ -631,15 +715,17 @@ export function BoardPage({
       )}
       {pending === null ? null : (
         <div className="fy-board__scrim" data-phone={phone ? '' : undefined}>
-          <BoardReasonBox
-            busy={busy}
+          <BoardSendBack
+            busy={settling.has(pending.card.key)}
             error={problem}
-            heading={`Move ${pending.card.task.title} back to ${pending.toName}`}
+            files={sendBackFiles}
+            key={pending.card.key}
             onCancel={() => {
               setPending(null);
               setProblem(null);
             }}
-            onSubmit={reason => void submitReason(reason)}
+            onSubmit={sendBack => void submitSendBack(sendBack)}
+            {...sendBackWords(pending)}
           />
         </div>
       )}
