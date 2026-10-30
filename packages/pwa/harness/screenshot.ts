@@ -545,23 +545,20 @@ let sidewaysChecks = 0;
  * margins first. Their codes are the harness's fixed fake one, never a real code.
  */
 const capturePairingFailures = async (page: Page, viewportName: string): Promise<void> => {
-  for (const [label, slug] of [
+  // One theme flip each way for the whole set rather than a flip per card: a flip restyles the entire
+  // gallery document, which is the expensive part. Every card is pressed and fit-checked in dark (the
+  // theme the page is in on entry), shot in dark, then the same states are shot in light.
+  const failures = [
     ['Pairing failed — machine is older', 'pairing-failed-older-machine'],
     ['Pairing failed — app is older', 'pairing-failed-older-app'],
     ['Pairing failed — browser cannot make the key', 'pairing-failed-no-device-key'],
-  ] as const) {
+  ] as const;
+  for (const [label] of failures) {
     const card = page.getByLabel(label, { exact: true });
     await card.scrollIntoViewIfNeeded();
     await card.getByRole('button', { name: 'Pair this device' }).click();
     await card.locator('[data-pairing-failure="stated"]').waitFor();
     await assertCardFitsWithMargins(card, `${label} at ${viewportName}`);
-    for (const theme of ['studio-dark', 'studio-light'] as const) {
-      await applyTheme(page, theme);
-      const target = join(outDir, `${slug}${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
-      await captureElement(page, card, target);
-      process.stdout.write(`📸 ${label} ${theme} ${viewportName} -> ${target}\n`);
-    }
-    await applyTheme(page, 'studio-dark');
   }
   // The notice a refused device sees in place of the page: no button to press, the same fit rule.
   const refused = page.getByLabel('Machine no longer accepts this browser', { exact: true });
@@ -572,6 +569,11 @@ const capturePairingFailures = async (page: Page, viewportName: string): Promise
   if (sideways) throw new Error(`the refused-device notice scrolls sideways at ${viewportName}`);
   for (const theme of ['studio-dark', 'studio-light'] as const) {
     await applyTheme(page, theme);
+    for (const [label, slug] of failures) {
+      const target = join(outDir, `${slug}${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
+      await captureElement(page, page.getByLabel(label, { exact: true }), target);
+      process.stdout.write(`📸 ${label} ${theme} ${viewportName} -> ${target}\n`);
+    }
     const target = join(outDir, `device-refused${theme === 'studio-light' ? '-light' : ''}-${viewportName}.png`);
     await captureElement(page, refused, target);
     process.stdout.write(`📸 device refused ${theme} ${viewportName} -> ${target}\n`);
