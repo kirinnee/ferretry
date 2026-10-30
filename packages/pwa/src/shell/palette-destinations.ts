@@ -89,6 +89,7 @@ export const SHELL_DESTINATIONS = [
 const DESTINATION_KEYWORDS: Readonly<Record<string, readonly string[]>> = {
   sessions: ['sessions', 'fleet', 'dashboard', 'home', 'teammates', 'list'],
   'new-session': ['new', 'start', 'spawn', 'launch', 'create', 'teammate', 'agent'],
+  board: ['board', 'kanban', 'tasks', 'cards', 'lanes', 'backlog', 'stale', 'to test', 'tree'],
   projects: ['projects', 'project', 'workspace', 'folder', 'repository', 'repo'],
   // No `accounts` entry: Accounts is no longer a destination. Logins and runtimes are Settings ›
   // Machines, which the Settings palette links find by these words instead.

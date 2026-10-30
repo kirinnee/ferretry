@@ -141,6 +141,55 @@ describe('PageHost', () => {
     ).throw('the machine setup route is not mounted');
   });
 
+  it('should mount the board with the matched connection and the card the address names', () => {
+    // Arrange
+    const connection = daemonConnection({
+      daemonId: 'daemon-a',
+      baseUrl: 'https://a.example.test',
+      deviceId: 'device-secret',
+    });
+    const unusedDaemonPage = (): never => {
+      throw new Error('a daemon page must not render');
+    };
+    const slots: PageHostSlots = {
+      ConnectionPicker: unusedDaemonPage,
+      Setup: unusedDaemonPage,
+      Sessions: unusedDaemonPage,
+      NewSession: unusedDaemonPage,
+      Projects: unusedDaemonPage,
+      SessionChat: unusedDaemonPage,
+      Settings: unusedDaemonPage,
+      Warden: unusedDaemonPage,
+      Analytics: unusedDaemonPage,
+      Learning: unusedDaemonPage,
+      ImportedHistory: unusedDaemonPage,
+      Board: ({ connection: matched, taskId }) => (
+        <p>
+          {matched.daemonId}:{taskId ?? 'none'}
+        </p>
+      ),
+    };
+
+    // Act
+    const html = (path: string): string =>
+      renderToStaticMarkup(<PageHost route={pageRoute(path)} connection={connection} slots={slots} />);
+
+    // Assert
+    should([html('/d/daemon-a/board'), html('/d/daemon-a/board/F12')]).deepEqual([
+      '<p>daemon-a:none</p>',
+      '<p>daemon-a:F12</p>',
+    ]);
+    should(() =>
+      renderToStaticMarkup(
+        <PageHost
+          route={pageRoute('/d/daemon-a/board')}
+          connection={connection}
+          slots={{ ...slots, Board: undefined }}
+        />,
+      ),
+    ).throw('the board route is not mounted');
+  });
+
   it('should render the connection picker without inventing a default daemon', () => {
     // Arrange
     const unusedDaemonPage = (): never => {
