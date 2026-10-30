@@ -3205,7 +3205,9 @@ function createSessionSendSubsystem(
         ? await conversation.prepare(id, request.message)
         : { message: request.message, referenced: [] };
       // `now` stops the running turn first: that is the send path's to do, not a queue's to wait for.
-      if (queueing && request.now !== true) {
+      // `now` rides the queue as an interrupt flag: it keeps its order, and the deliverer stops the running
+      // turn when its turn comes and the input box is empty.
+      if (queueing) {
         // The refusals only a person can lift are said now, exactly as the direct path says them.
         await service.authorize(id, request.attachmentIds ?? []).catch((error: unknown) => sendRefusal(error));
         const enqueued = await queue
@@ -3217,6 +3219,7 @@ function createSessionSendSubsystem(
             text: messageWithAttachments(turn.message, delivered),
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+            ...(request.now === true ? { interrupt: true } : {}),
           })
           .catch((error: unknown) => sendRefusal(error));
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the

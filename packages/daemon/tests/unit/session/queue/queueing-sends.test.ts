@@ -103,16 +103,23 @@ describe('a producer sending through the queue', () => {
     should(owner.enqueued[0]).not.have.property('from');
   });
 
-  it('should never queue a daemon message into the owner’s own chat, nor a send that stops the turn first', async () => {
+  it('should never queue a daemon message into the owner’s own chat', async () => {
     const inChat = world(chat);
-    const urgent = world(auto, 'human');
 
     await inChat.sends.send({ id: ID, sendId: 'w', message: 'Warden notice' });
-    await urgent.sends.send({ id: ID, sendId: 'n', message: 'stop and do this', now: true });
 
     should(inChat.direct.map(request => request.sendId)).eql(['w']);
-    should(urgent.direct.map(request => request.sendId)).eql(['n']);
-    should([...inChat.enqueued, ...urgent.enqueued]).be.empty();
+    should(inChat.enqueued).be.empty();
+  });
+
+  it('should queue a send that stops the turn first as an interrupt, keeping its place', async () => {
+    // `fy send --now` is a flag on a queued message, not a separate path (owner, 2026-10-30).
+    const urgent = world(auto, 'human');
+
+    await urgent.sends.send({ id: ID, sendId: 'n', message: 'stop and do this', now: true });
+
+    should(urgent.direct).be.empty();
+    should(urgent.enqueued).containDeep([{ id: 'n', interrupt: true }]);
   });
 
   it('should queue a person’s and a ferret’s message to the owner’s chat as usual', async () => {
