@@ -24,8 +24,11 @@ import { BoardError } from './errors.ts';
  * Pure except {@link BoardTurnCheck}, which reads and sends through its ports.
  */
 
-/** The first words of every nudge: how a later turn knows the nudge started it. */
-export const BOARD_CHECK_MARK = '[board]';
+/**
+ * The first words of every nudge: how a later turn knows the nudge started it. A plain sentence, never a tag:
+ * who sent it is the queue item's metadata, not text the owner reads.
+ */
+const BOARD_CHECK_OPENING = 'You changed code this turn without a card.';
 
 /** How many transcript events back the turn is looked for. A longer turn is read in part. */
 export const BOARD_CHECK_TAIL = 400;
@@ -75,7 +78,9 @@ const lastTurn = (
  */
 export function mutatingWork(events: readonly TranscriptEvent[], binary: string): readonly string[] {
   const { opener, turn } = lastTurn(events);
-  if (opener.trimStart().startsWith(BOARD_CHECK_MARK)) return [];
+  const opened = opener.trimStart();
+  // A nudge typed before it lost its `[board] ` tag still started the turn it opened.
+  if (opened.startsWith(BOARD_CHECK_OPENING) || opened.startsWith(`[board] ${BOARD_CHECK_OPENING}`)) return [];
   const commands = mutatingCommands(binary);
   const seen: string[] = [];
   const note = (label: string) => {
@@ -93,7 +98,7 @@ export function mutatingWork(events: readonly TranscriptEvent[], binary: string)
 
 /** The words of the nudge. Short on purpose: it starts a turn. */
 export const boardCheckMessage = (binary: string): string =>
-  `${BOARD_CHECK_MARK} You changed code this turn without a card. Create one (${binary} task create …) or record why not: ${binary} task skip "<why>"`;
+  `${BOARD_CHECK_OPENING} Create one (${binary} task create …) or record why not: ${binary} task skip "<why>"`;
 
 /** The send id of the one nudge a session may get in an hour. */
 export const boardCheckSendId = (sessionId: string, now: number): string =>

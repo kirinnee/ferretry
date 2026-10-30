@@ -416,9 +416,9 @@ function PickerRow<Option extends PickerOption>({
       aria-disabled={enabled ? undefined : true}
       aria-selected={active}
       className={cn(
-        'flex min-h-[44px] w-full select-none items-start gap-sm border-l-heavy border-l-transparent px-control-x py-row-y text-left text-cell outline-none',
+        'flex min-h-[44px] w-full select-none items-start gap-sm px-control-x py-row-y text-left text-cell outline-none',
         enabled ? 'cursor-pointer text-fg hover:bg-surface-2' : 'cursor-not-allowed text-muted',
-        active && 'border-l-accent bg-accent-soft shadow-active',
+        active && 'bg-accent-soft shadow-active',
       )}
       data-active={active ? 'true' : undefined}
       // Distinct from `aria-selected`, which ARIA reserves for the cursor in a

@@ -26,7 +26,7 @@
  * Pure: no IO, no clock (`nowMs` is a parameter), no globals.
  */
 
-import { ferretryNotice, type WardenReviveConfig } from '@ferretry/protocol';
+import type { WardenReviveConfig } from '@ferretry/protocol';
 import { focusCardBrief, type WardenFocusCard } from './focus-card.ts';
 import { instantMs } from './time.ts';
 
@@ -179,12 +179,11 @@ export function reviveMessage(
   mode: 'auto' | 'interactive',
   card?: WardenFocusCard,
 ): string {
-  const notice = `Your terminal ended because ${causeText(cause)} at ${clock(diedAt)}; it was started again.`;
-  if (mode === 'interactive') return ferretryNotice(notice);
-  return ferretryNotice(
-    `${notice}\n\nThis notice is from Ferretry, not from the owner. Your conversation was resumed as it was. ` +
-      'Re-read your last turn file and continue where you left off' +
-      (card === undefined ? '.' : `, on the card below.\n\n${focusCardBrief(card)}`),
+  const notice = `Ferretry started your terminal again: it ended because ${causeText(cause)} at ${clock(diedAt)}.`;
+  if (mode === 'interactive') return notice;
+  return (
+    `${notice} Your conversation was resumed as it was. Re-read your last turn file and continue where you left off` +
+    (card === undefined ? '.' : `, on the card below.\n\n${focusCardBrief(card)}`)
   );
 }
 

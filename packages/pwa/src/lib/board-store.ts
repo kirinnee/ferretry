@@ -149,6 +149,8 @@ interface View {
   refs: number;
   state: BoardViewState;
   timer: unknown;
+  /** A watcher wants the whole board re-read every beat. A view nobody asked that of stays live by events alone. */
+  beat: boolean;
   /** The stamp of whatever last set (or removed) each card, per machine. */
   readonly stamps: Map<DaemonId, Map<BoardTaskId, number>>;
   /** The stamp of the newest whole-board read applied, per machine. */
@@ -212,7 +214,11 @@ export class DaemonBoardStore {
    * answers the view's key and how to let go. Letting go of the last watcher stops the 30-second re-read
    * and drops the view.
    */
-  watch(query: BoardServerQuery, machines: readonly DaemonConnection[]): { readonly key: string; release(): void } {
+  watch(
+    query: BoardServerQuery,
+    machines: readonly DaemonConnection[],
+    options: { readonly beat?: boolean } = {},
+  ): { readonly key: string; release(): void } {
     const key = boardViewKey(query, machines);
     let view = this.#views.get(key);
     if (view === undefined) {
@@ -223,12 +229,14 @@ export class DaemonBoardStore {
         refs: 0,
         state: { key, query, slices: new Map() },
         timer: undefined,
+        beat: false,
         stamps: new Map(),
         fullStamp: new Map(),
       };
       this.#views.set(key, view);
     }
     view.refs += 1;
+    view.beat ||= options.beat ?? true;
     const joined = view;
     for (const machine of machines) {
       this.#connections.set(machine.daemonId, machine);
@@ -379,6 +387,7 @@ export class DaemonBoardStore {
   /** The next whole-board read of a view, one beat after the last; a hidden page waits a beat. */
   #arm(view: View): void {
     if (view.timer !== undefined) this.#env.clearTimeout(view.timer);
+    if (!view.beat) return;
     view.timer = this.#env.setTimeout(() => {
       view.timer = undefined;
       if (this.#views.get(view.key) !== view) return;

@@ -1,6 +1,6 @@
 /**
- * Screenshots of one ferret's chat — the header card chip and the Info side pane on its Tasks tab — at a 390px
- * phone and a 1440px desktop, light and dark, plus the amber "No card" header:
+ * Screenshots of one ferret's chat — the slim header and the Info side pane on its Tasks tab — at a 390px
+ * phone and a 1440px desktop, light and dark, plus a ferret with no card:
  *
  *   bun harness/board-chat-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-u14-*.png
  *
@@ -85,7 +85,7 @@ const open = async (context: BrowserContext, theme: string, state: 'card' | 'non
   );
   await page.goto(`${server.url}?theme=${theme}&state=${state}&tab=${tab}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
-  await page.locator('[data-card-chip]').first().waitFor({ state: 'visible' });
+  await page.locator('[data-session-bar]').first().waitFor({ state: 'visible' });
   if (state === 'card' && tab === 'tasks') await page.locator('.fy-board-card').first().waitFor({ state: 'visible' });
   await page.waitForTimeout(200);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

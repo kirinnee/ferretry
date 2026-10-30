@@ -36,6 +36,7 @@ import { Spinner } from '../../components/spinner.tsx';
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
+import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -66,6 +67,7 @@ import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
+import { escapeCloses } from '../../lib/escape-closes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
@@ -115,6 +117,7 @@ interface CardHostProps {
   readonly onNavigate: (to: string) => void;
   readonly now: number | undefined;
   readonly readRecent?: ((card: InboxCard) => Promise<readonly RecentMessage[]>) | undefined;
+  readonly readConversation?: ((card: InboxCard) => Promise<readonly TranscriptEntry[]>) | undefined;
   readonly recentOpen?: boolean | undefined;
 }
 
@@ -230,35 +233,77 @@ interface OpenItemPlace {
 }
 
 /** The open item: who and what, then the SAME full view the chat shows, answering into the undo window. */
-const renderOpenItem = (
-  { inbox, onNavigate, now }: CardHostProps,
+function OpenItem({
+  host: { inbox, onNavigate, now, readConversation },
+  card,
+  act,
+  skip,
+  place,
+}: {
+  readonly host: CardHostProps;
+  readonly card: InboxCard;
+  readonly act: (action: InboxAction) => void;
+  readonly skip: () => void;
+  readonly place: OpenItemPlace;
+}) {
+  const entries = useItemConversation(card, readConversation);
+  const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
+  return (
+    <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
+      <InboxWhoLine card={card} onNavigate={onNavigate} />
+      <AgendaItemView
+        busy={false}
+        closeLabel="Back to the Inbox"
+        error={failureFor(inbox.deferredState.failed, card.key)}
+        ferret={inboxWho(card).ferret}
+        history={history}
+        item={card.item}
+        onAct={act}
+        onClose={place.onClose}
+        onNext={skip}
+        position={{ index: place.index, total: place.total }}
+        quoteScope={scopeOf(card)}
+        renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
+        // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
+        // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
+        swipeable={place.swipeable}
+        {...(now === undefined ? {} : { now })}
+        {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
+      />
+    </div>
+  );
+}
+
+const NO_ENTRIES: readonly TranscriptEntry[] = [];
+
+/** What was said about the card's item in its conversation; nothing until it is read, and nothing when it cannot be. */
+function useItemConversation(
   card: InboxCard,
-  act: (action: InboxAction) => void,
-  skip: () => void,
-  place: OpenItemPlace,
-) => (
-  <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
-    <InboxWhoLine card={card} onNavigate={onNavigate} />
-    <AgendaItemView
-      busy={false}
-      closeLabel="Back to the Inbox"
-      error={failureFor(inbox.deferredState.failed, card.key)}
-      ferret={inboxWho(card).ferret}
-      history={itemHistory(card.item, [])}
-      item={card.item}
-      onAct={act}
-      onClose={place.onClose}
-      onNext={skip}
-      position={{ index: place.index, total: place.total }}
-      renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
-      // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
-      // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
-      swipeable={place.swipeable}
-      {...(now === undefined ? {} : { now })}
-      {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
-    />
-  </div>
-);
+  read: ((card: InboxCard) => Promise<readonly TranscriptEntry[]>) | undefined,
+): readonly TranscriptEntry[] {
+  const [loaded, setLoaded] = useState<{ readonly key: string; readonly entries: readonly TranscriptEntry[] }>({
+    key: '',
+    entries: NO_ENTRIES,
+  });
+  const key = card.key;
+  const latest = useRef({ read, card });
+  latest.current = { read, card };
+  const reads = read !== undefined;
+  useEffect(() => {
+    if (!reads) return;
+    let live = true;
+    latest.current.read?.(latest.current.card).then(
+      entries => {
+        if (live) setLoaded({ key, entries });
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [key, reads]);
+  return loaded.key === key ? loaded.entries : NO_ENTRIES;
+}
 
 /**
  * Past the last item: the ones the reader skipped are still open. Said once, with the way back to them —
@@ -471,6 +516,8 @@ export interface AgendaInboxPageProps {
   readonly banner?: ReactNode;
   /** Reads the last few things the card's ferret said. Absent: the card has no "Last messages" fold. */
   readonly readRecent?: (card: InboxCard) => Promise<readonly RecentMessage[]>;
+  /** Reads what was said about the card's item in its conversation, for the open item's History. Absent: revisions only. */
+  readonly readConversation?: (card: InboxCard) => Promise<readonly TranscriptEntry[]>;
   /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
   /** Starts the deck card's "Last messages" fold open (a harness). */
@@ -743,6 +790,7 @@ export function AgendaInboxPage({
   clock,
   banner,
   readRecent,
+  readConversation,
   reducedMotion,
   recentOpen,
   initialOpen,
@@ -833,7 +881,7 @@ export function AgendaInboxPage({
   const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
   const nothingForYou = inbox.cards.length === 0;
   const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
-  const host: CardHostProps = { inbox, onNavigate, now, readRecent, recentOpen };
+  const host: CardHostProps = { inbox, onNavigate, now, readRecent, readConversation, recentOpen };
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
     setDeckAt(key);
@@ -981,13 +1029,22 @@ export function AgendaInboxPage({
               renderCard={(card, act, skipCard) => {
                 const index = order.indexOf(card.key);
                 const previous = index > 0 ? order[index - 1] : undefined;
-                return renderOpenItem(host, card, act, skipCard, {
-                  index: Math.max(0, index),
-                  total: order.length,
-                  onClose: () => setDeckOpen(false),
-                  swipeable: phone,
-                  ...(previous === undefined ? {} : { onPrevious: () => setDeckAt(previous) }),
-                });
+                return (
+                  <OpenItem
+                    act={act}
+                    card={card}
+                    host={host}
+                    key={card.key}
+                    place={{
+                      index: Math.max(0, index),
+                      total: order.length,
+                      onClose: () => setDeckOpen(false),
+                      swipeable: phone,
+                      ...(previous === undefined ? {} : { onPrevious: () => setDeckAt(previous) }),
+                    }}
+                    skip={skipCard}
+                  />
+                );
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
@@ -1002,7 +1059,12 @@ export function AgendaInboxPage({
                 />
               )}
               {deck[0] === undefined || renderComposer === undefined ? null : (
-                <div className="fy-inbox-composer" data-inbox-composer={deck[0].key}>
+                // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
+                <div
+                  className="fy-inbox-composer"
+                  data-inbox-composer={deck[0].key}
+                  onKeyDown={escapeCloses(() => setDeckOpen(false))}
+                >
                   {renderComposer(deck[0])}
                 </div>
               )}

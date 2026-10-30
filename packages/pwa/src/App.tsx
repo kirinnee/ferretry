@@ -1,5 +1,5 @@
 import { DoctorReportSchema, HealthViewSchema, type QueuedMessage } from '@ferretry/protocol';
-import { QrCode, Sparkles } from 'lucide-react';
+import { KanbanSquare, QrCode, Sparkles } from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -205,6 +205,7 @@ import {
   daemonLearningPath,
   daemonProjectPath,
   daemonSessionsPath,
+  daemonBoardForFerretPath,
   daemonSettingsPath,
   daemonWardenPath,
   type PageRoute,
@@ -228,6 +229,7 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
+import { readItemConversation } from './lib/item-conversation.ts';
 import { RECENT_MESSAGE_COUNT, type RecentMessagesMemory, readRecentMessages } from './lib/recent-messages.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
@@ -265,7 +267,11 @@ import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
-import { pairPhonePaletteCommand, whatsNewPaletteCommand } from './shell/palette-destinations.ts';
+import {
+  boardForFerretPaletteCommand,
+  pairPhonePaletteCommand,
+  whatsNewPaletteCommand,
+} from './shell/palette-destinations.ts';
 import { machinePaletteSessions, paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
@@ -2010,6 +2016,11 @@ function AgendaRoute({ connection }: DaemonPageProps) {
           />
         );
       }}
+      readConversation={async card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
+        return await readItemConversation(await store.clients.client(target), card.view.config.id, card.item.id);
+      }}
       readRecent={async card => {
         const target = inbox.connectionFor(card.daemonId);
         if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
@@ -2661,6 +2672,19 @@ export function AppShell() {
       allMachines === undefined
         ? { sessions: paletteSessionEntries(sessions), note: null }
         : machinePaletteSessions(allMachines.sources);
+    // Cmd-K "Board for <ferret>": only on a chat, where there is a ferret to narrow the Board to.
+    const chatFerret =
+      pageRoute.kind === 'session'
+        ? paletteSearch.sessions.find(entry => entry.view.config.id === pageRoute.sessionId)
+        : undefined;
+    const boardForFerret =
+      pageRoute.kind !== 'session'
+        ? null
+        : boardForFerretPaletteCommand(chatFerret?.headline ?? pageRoute.sessionId, KanbanSquare, () =>
+            navigate(
+              daemonBoardForFerretPath(connection.daemonId, pageRoute.sessionId, chatFerret?.view.config.focusTask?.id),
+            ),
+          );
     // Every paired machine, so one that is down is counted whichever machine's page is open.
     const noticeMachines = machineDisplayOrder(connectionSnapshot.connections, savedMachineOrder).map(record => ({
       daemonId: record.daemonId,
@@ -2683,7 +2707,7 @@ export function AppShell() {
       />
     );
     content = (
-      <SessionSearchProvider connection={connection} scope={currentSessionScope}>
+      <SessionSearchProvider board={store.board} connection={connection} scope={currentSessionScope}>
         <BoardOriginProvider value={boardOrigin}>
           <WhatsNewProvider value={whatsNew.entry}>
             <RestartOverlayProvider>
@@ -2779,6 +2803,7 @@ export function AppShell() {
                           ]
                         : []),
                       whatsNewPaletteCommand(Sparkles, whatsNew.entry.open),
+                      ...(boardForFerret === null ? [] : [boardForFerret]),
                     ]}
                   />
                   {/* After the finder, so the finder hands focus back to its opener before this captures it. */}

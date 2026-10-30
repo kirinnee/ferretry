@@ -2731,7 +2731,8 @@ describe('daemon boot lifecycle', () => {
     // Both turn documents, in the session's own private directory: the assignment the start handed
     // over, and the one the revive did.
     const turnDirectory = join(home, 'state', 'sessions', id, 'turns');
-    const turns = (await readdir(turnDirectory)).sort();
+    // The turn DOCUMENTS: who a turn is from now sits beside it as `turn-NNN.by.json`, which is not a turn.
+    const turns = (await readdir(turnDirectory)).filter(name => name.endsWith('.md')).sort();
     const turnOne = await readFile(join(turnDirectory, 'turn-001.md'), 'utf8');
     const turnTwo = await readFile(join(turnDirectory, 'turn-002.md'), 'utf8');
     // The same revive over the WARDEN token, which must not be able to relaunch an agent.
@@ -3120,7 +3121,9 @@ describe('daemon boot lifecycle', () => {
     // second relaunch write `turn-002.md` a second time — over an assignment the agent may not have
     // read yet.
     const movedBack = await migrate({ agent: WRAPPER }, 'req-migrate-back');
-    const turnsAfterSecond = (await readdir(join(home, 'state', 'sessions', id, 'turns'))).sort();
+    const turnsAfterSecond = (await readdir(join(home, 'state', 'sessions', id, 'turns')))
+      .filter(name => name.endsWith('.md'))
+      .sort();
     const secondReport = await readFile(reportFile, 'utf8');
     // RESTART ANYWAY. The session is back on its original account and rate-limited again, and a
     // process the gate cannot classify is in the pane. Without the flag the refusal says so as data;
@@ -3295,7 +3298,8 @@ describe('daemon boot lifecycle', () => {
     // notice through the same turn document a revive writes, never the old "You were migrated mid-turn" message.
     // The report is still written; the notice only points at it when work was interrupted.
     should(reviver.delivered[0]).containEql('turns/turn-002.md');
-    should(turnTwo).containEql('[ferretry] Restarted — nothing was interrupted.');
+    should(turnTwo).containEql('Ferretry restarted you, and nothing was interrupted.');
+    should(turnTwo).not.containEql('[ferretry]');
     should(turnTwo).not.containEql('migrated mid-turn');
     // Both halves of the report: the inventory written before the pane died, and the outcome that is
     // the only part allowed to claim the move happened.

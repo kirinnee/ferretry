@@ -313,8 +313,8 @@ function SuggestionRow({
       aria-selected={active}
       data-model-option={model.id}
       className={cn(
-        'flex min-h-[44px] cursor-pointer select-none items-center gap-2 border-l-heavy border-l-transparent px-control-x py-1 hover:bg-surface-2',
-        active && 'border-l-accent bg-accent-soft',
+        'flex min-h-[44px] cursor-pointer select-none items-center gap-2 px-control-x py-1 hover:bg-surface-2',
+        active && 'bg-accent-soft',
       )}
       // Before the field loses focus, so the press lands on the option and not on a closed list.
       onPointerDown={event => event.preventDefault()}

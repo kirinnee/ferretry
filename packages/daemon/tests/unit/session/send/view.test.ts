@@ -220,16 +220,37 @@ describe('transcript evidence for the tracker', () => {
     should(stillPartial.readable).be.false();
   });
 
-  it('is blind when a step throws or the file outgrows the steps one look may take', async () => {
+  it('is unreadable when a step throws, and catching up — not unreadable — when the file outgrows one look', async () => {
+    // A 369 MB transcript cannot be read in one look; calling it unreadable settled every send to it
+    // "unconfirmed" and told its sender it might need sending again, though each had arrived.
     const reader = new FakeReader();
     reader.script = [[new Error('EIO')], Array.from({ length: 80 }, () => ({ batch: batch([]), more: true }))];
 
     const failed = await evidence(reader).read(ID, AT);
-    const endless = await evidence(reader).read(ID, AT);
+    const long = await evidence(reader).read(ID, AT);
 
-    should(failed.readable).be.false();
-    should(endless.readable).be.false();
+    should(failed).match({ readable: false });
+    should(failed).not.have.property('catchingUp');
+    should(long).match({ readable: false, catchingUp: true });
     should(reader.opened[1]?.taken).equal(64);
+  });
+
+  it('keeps its place across looks, so a long transcript is read to the end and proves what is there', async () => {
+    const reader = new FakeReader();
+    reader.script = [
+      [
+        ...Array.from({ length: 64 }, () => ({ batch: batch([]), more: true })),
+        { batch: batch([input('late')]), more: false },
+      ],
+    ];
+    const subject = evidence(reader);
+
+    const first = await subject.read(ID, AT);
+    const second = await subject.read(ID, AT);
+
+    should(first).match({ readable: false, catchingUp: true });
+    should(second).match({ readable: true, inputs: [{ proofKey: 'late' }] });
+    should(reader.opened).have.length(1);
   });
 
   it('tells an unknown session, an unbound transcript and a missing source apart', async () => {
@@ -267,13 +288,13 @@ describe('transcript evidence for the tracker', () => {
 describe('telling an agent its message did not arrive', () => {
   it('says why, how many attempts, and that the decision is theirs', () => {
     should(sendFailureNotice('hadi', record({ fate: 'timed_out', attempt: 4 }), 'fy')).match(
-      /Your message to hadi \(send send-1\) did not reach it: it was not delivered \(not delivered\) after 4 attempt\(s\)\. Decide whether to send it again with `fy send hadi …`\./,
+      /^Ferretry could not deliver your message to hadi \(send send-1\): it was not delivered \(not delivered\) after 4 attempt\(s\)\. Decide whether to send it again with `fy send hadi …`\.$/,
     );
     should(sendFailureNotice('hadi', record({ fate: 'timed_out', unaccountedReason: 'session_ended' }), 'fy')).match(
       /\(session ended\) after 1 attempt/,
     );
     should(sendFailureNotice('hadi', record({ fate: 'unaccounted' }), 'fy')).match(
-      /could not be confirmed \(timeout\) — it may still have landed/,
+      /^Ferretry could not confirm your message to hadi \(send send-1\) \(timeout\) — it may still have landed/,
     );
     // Unconfirmed is not "did not reach it": it may be in the recipient's queue right now.
     should(sendFailureNotice('hadi', record({ fate: 'unaccounted' }), 'fy')).not.match(/did not reach it/);
@@ -289,8 +310,8 @@ describe('telling an agent its message did not arrive', () => {
       'fy',
     );
 
-    should(notice).match(/was typed into zarah’s terminal/);
-    should(notice).match(/no transcript Ferretry can prove is zarah’s/);
+    should(notice).match(/^Ferretry typed your message to zarah \(send send-1\) into zarah’s terminal/);
+    should(notice).match(/no transcript it can prove is zarah’s/);
     should(notice).match(/Do not send it again/);
     should(notice).not.match(/did not reach it/);
   });
@@ -302,7 +323,9 @@ describe('telling an agent its message did not arrive', () => {
       'fy',
     );
 
-    should(notice).match(/was handed to hank as the first turn of its relaunch/);
+    should(notice).match(
+      /^Ferretry handed your message to hank \(send send-1\) to hank as the first turn of its relaunch/,
+    );
     should(notice).match(/delivery cannot be confirmed/);
     should(notice).match(/do not send it again unless hank stays silent/);
     should(notice).not.match(/did not reach it/);

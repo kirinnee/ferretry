@@ -45,14 +45,13 @@ this page, which is still how a message reaches the pane.
   start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
   structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
   path says them, and nothing is queued. The person's agenda context and the attachment paths are baked
-  into the text; the board's held events are NOT — they go as a message of their own, Ferretry's
-  (`[ferretry] [board] …`, `chat: true`), never on top of the sender's words. The route then waits, up to
+  into the text, and nothing else is: no board news rides on it, on top or as a message of its own. The route then waits, up to
   `QUEUE_ANSWER_WAIT_MS` (20 s), for the deliverer's first look and answers what the send ledger says the
   hand-over did (`answerOf`), so a message into an empty box is answered exactly as the direct path
   answered it; one held for a draft or a question is answered `queued` at once, with the message id as
   `sendId`. `--now` (stop the running turn first) still goes straight down the send path.
-- **A daemon notice made for the chat** (`chat: true`) is typed into an interactive session as a message of
-  its own: the board's news for a lead. Every other daemon message stays out of the owner's chat.
+- **No daemon notice is typed into the owner's own chat** (an interactive session): there is no exception
+  for board news, which is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
   re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
   own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the
@@ -214,6 +213,15 @@ delivers it all the same — and only a send nothing was ever typed for is `time
 send stays watched for the repair window (`repairLimitMs`, 3 days), like a cancelled one, so a record
 the transcript holds corrects it to delivered: the rows the old reader got wrong correct themselves the
 next time their ferret's sends are read.
+
+**A long transcript is slow, not unreadable.** The tracker reads a session's transcript through a window it
+holds from the oldest send it watches, appending only what is new on each later look, and a look reads at
+most `WINDOW_STEP_LIMIT` batches. A window that stopped at that budget kept its place and has more to read
+(`catchingUp`), so the send WAITS for the next look rather than settling `unaccounted`
+(`transcript_unreadable`) — the lead's 369 MB transcript was called unreadable on every look, each send to
+it read "unconfirmed", and each sender was told it might need sending again, though every one had arrived.
+Only a read that fails, or a window that cannot start where it was asked, is unreadable; the hold ceiling
+still ends a read that never finishes.
 
 The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
 (15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and

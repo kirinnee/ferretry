@@ -1,5 +1,4 @@
 import type { SessionStatus } from '@ferretry/protocol';
-import { ferretryNotice } from '@ferretry/protocol';
 import { isBusyStatus } from '../../migrate/inflight-report.ts';
 import type { AutoResumeCandidate, AutoResumeSubject } from './types.ts';
 
@@ -46,16 +45,13 @@ export function freshCandidates(
  */
 export function bootNotice(status: string, mode: 'auto' | 'interactive'): string | undefined {
   if (isBusyStatus(status as SessionStatus))
-    return ferretryNotice(
-      'The machine restarted mid-turn — what was running could not be checked.\n\n' +
-        'This notice is from Ferretry, not from the owner. Your conversation was resumed as it was. ' +
-        'Before re-running anything, check what state your last commands left behind.',
+    return (
+      'Ferretry resumed you after the machine restarted mid-turn, so what was running could not be checked. ' +
+      'Your conversation was resumed as it was. Before re-running anything, check what state your last ' +
+      'commands left behind.'
     );
   return mode === 'auto'
-    ? ferretryNotice(
-        'The machine restarted — nothing was interrupted.\n\n' +
-          'This notice is from Ferretry, not from the owner. Your conversation was resumed as it was; ' +
-          'there is nothing to re-run.',
-      )
+    ? 'Ferretry resumed you after the machine restarted, and nothing was interrupted. Your conversation was ' +
+        'resumed as it was; there is nothing to re-run.'
     : undefined;
 }

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { QueueAuthorSchema } from './session-queue.ts';
 
 /**
  * How the daemon hands an agent a message through a FILE, and how the app reads that hand-off back.
@@ -169,5 +170,10 @@ export const SessionHandoffSchema = z.strictObject({
   name: SessionHandoffNameSchema,
   message: z.string(),
   attachments: z.array(SessionHandoffAttachmentSchema),
+  /**
+   * Who the turn is from, when Ferretry wrote it — a Warden resume, a restart's notice — so the app shows a
+   * sender chip rather than drawing Ferretry's words as the owner's. Never text in the message.
+   */
+  by: QueueAuthorSchema.optional(),
 });
 export type SessionHandoff = z.infer<typeof SessionHandoffSchema>;

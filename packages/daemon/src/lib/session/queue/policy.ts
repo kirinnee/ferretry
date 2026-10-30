@@ -10,12 +10,10 @@ const SENDER_RANK: Readonly<Record<SendSenderKind, number>> = { human: 0, agent:
 /**
  * A daemon notice to an INTERACTIVE session is never typed into it: that session is the owner's own chat,
  * where a notice lands in the middle of their conversation, or sits unsent in its composer ahead of what
- * they type. It belongs on the session's board, not in its queue's delivery order — unless it was made
- * for the chat (`chat`): the board's news for a lead, sent as a message of its own and marked as
- * Ferretry's, rather than glued onto the owner's words as it once was.
+ * they type. It belongs on the session's board, not in its queue's delivery order.
  */
-export function boardOnly(message: Pick<QueuedMessage, 'sender' | 'chat'>, mode: InteractionMode): boolean {
-  return message.sender === 'daemon' && mode === 'interactive' && message.chat !== true;
+export function boardOnly(message: Pick<QueuedMessage, 'sender'>, mode: InteractionMode): boolean {
+  return message.sender === 'daemon' && mode === 'interactive';
 }
 
 /** The `queued` messages that may be typed into a session of this mode, in the order they are to go. */

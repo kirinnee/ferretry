@@ -1034,97 +1034,6 @@
   }
 }
 
-/* ---- Per-chat card chip and Tasks tab ------------------------------------------------------------- */
-.fy-card-chip {
-  display: inline-flex;
-  min-width: 0;
-  max-width: 100%;
-  align-items: center;
-  gap: 6px;
-  padding: 1px var(--gap-sm);
-  overflow: hidden;
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  background: var(--surface);
-  color: var(--muted);
-  font-size: var(--text-xs);
-  line-height: 1.5;
-  text-decoration: none;
-  white-space: nowrap;
-}
-a.fy-card-chip:hover {
-  border-color: var(--border);
-  color: var(--fg);
-}
-.fy-card-chip[data-tone='warn'] {
-  border-color: var(--warn);
-  background: var(--warn-bg);
-  color: var(--warn);
-}
-.fy-card-chip__ref {
-  flex: none;
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-weight: var(--weight-medium);
-}
-.fy-card-chip__title {
-  min-width: 0;
-  overflow: hidden;
-  color: var(--fg);
-  text-overflow: ellipsis;
-}
-.fy-card-chip__lane,
-.fy-card-chip__activity {
-  flex: none;
-}
-.fy-card-chip__lane::before,
-.fy-card-chip__activity::before {
-  margin-right: 6px;
-  color: var(--faint);
-  content: '·';
-}
-.fy-card-chip__activity {
-  display: inline-flex;
-  align-items: center;
-  gap: 3px;
-}
-.fy-card-chip__dot {
-  font-size: 0.7em;
-}
-.fy-card-chip__activity[data-tone='ok'] {
-  color: var(--ok);
-}
-.fy-card-chip__activity[data-tone='warn'] {
-  color: var(--warn);
-}
-.fy-card-chip__activity[data-tone='err'] {
-  color: var(--err);
-}
-/* ON A PHONE THE CHIP IS ITS REFERENCE ALONE, and it gives way before anything else in the bar does. Its title, lane
-   and activity left it no room: an unshrinkable "&F11 · ● active" ran under Interrupt and ▾, and the bar's one status
-   dot already says how the ferret is doing. "No card" is a nudge for a wide screen, not worth a phone's row. */
-.fy-session-bar[data-compact] .fy-card-chip__title,
-.fy-session-bar[data-compact] .fy-card-chip__lane,
-.fy-session-bar[data-compact] .fy-card-chip__activity,
-.fy-session-bar[data-compact] .fy-card-chip[data-card-chip='none'] {
-  display: none;
-}
-/* A link's 44px touch floor made the pill a fat circle round four characters: on a phone the reference is drawn as
-   the link it is, with no outline, and keeps the whole floor as its target. */
-.fy-session-bar[data-compact] .fy-card-chip {
-  flex: 0 1 auto;
-  align-self: center;
-  justify-content: center;
-  padding: 0 2px;
-  border-color: transparent;
-  background: transparent;
-}
-.fy-session-bar[data-compact] .fy-card-chip__ref {
-  min-width: 0;
-  flex: 0 1 auto;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
 .fy-board-side {
   display: flex;
   min-width: 0;
@@ -1168,4 +1077,276 @@ a.fy-card-chip:hover {
   min-width: 0;
   max-width: none;
   flex: none;
+}
+
+/* The card Info's "Open board" pointed at: an accent edge and wash, so it is found at once in a full lane. */
+.fy-board-card[data-highlighted] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: 0 0 0 var(--focus-width) var(--ring);
+}
+
+/* ---- Table view and the Done control -------------------------------------------------------------- */
+.fy-board-list {
+  max-width: 76rem;
+}
+.fy-board-table__tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-sm);
+}
+.fy-board-table__group-toggle {
+  border: var(--stroke) solid var(--border-soft);
+  background: var(--surface);
+}
+.fy-board-table__group-toggle[aria-pressed='true'] {
+  border-color: var(--accent-border);
+}
+.fy-board-table {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+.fy-board-table__head,
+.fy-board-table__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 9rem 6.5rem 5.5rem 8rem 5.5rem;
+  align-items: start;
+  column-gap: var(--gap-md);
+  padding: var(--gap-sm) var(--gap-md);
+}
+.fy-board-table__head {
+  align-items: center;
+  border-bottom: var(--stroke) solid var(--border-soft);
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+.fy-board-table__head [data-col='status'],
+.fy-board-table__head [data-col='done'] {
+  text-align: right;
+}
+.fy-board-table__rows {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  list-style: none;
+}
+.fy-board-table__row + .fy-board-table__row {
+  border-top: var(--stroke) solid var(--border-soft);
+}
+.fy-board-table__row:hover {
+  background: var(--surface-2);
+}
+.fy-board-table__what {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.fy-board-table__line {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: var(--gap-sm);
+}
+.fy-board-table__title {
+  min-width: 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-decoration: none;
+}
+.fy-board-table__title:hover {
+  text-decoration: underline;
+}
+.fy-board-table__ref {
+  color: var(--faint);
+  font-size: var(--text-xs);
+  font-weight: 400;
+}
+.fy-board-table__extras {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-sm);
+}
+.fy-board-table__summary {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 var(--gap-sm);
+}
+.fy-board-table__summary-text {
+  display: -webkit-box;
+  min-width: 0;
+  max-width: 100%;
+  margin: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.fy-board-table__more {
+  color: var(--accent);
+  font-size: var(--text-xs);
+}
+.fy-board-table__cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  min-height: 22px;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-board-table__cell[data-col='status'],
+.fy-board-table__cell[data-col='done'] {
+  justify-content: flex-end;
+}
+.fy-board-table__none {
+  color: var(--faint);
+}
+.fy-board-table__group + .fy-board-table__group {
+  border-top: var(--stroke) solid var(--border-soft);
+}
+.fy-board-table__group-head {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
+  padding: var(--gap-sm) var(--gap-md);
+  background: var(--surface-2);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.fy-board-table__group-count {
+  color: var(--faint);
+  font-size: var(--text-xs);
+}
+
+.fy-board-pill {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  padding: 1px var(--gap-md);
+  border-radius: var(--radius-pill);
+  background: var(--pend-bg);
+  color: var(--pend);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 1.5;
+  text-align: center;
+  white-space: nowrap;
+}
+.fy-board-pill[data-category='active'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-board-pill[data-category='review'],
+.fy-board-pill[data-category='verify'] {
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.fy-board-pill[data-category='shipped'] {
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+
+.fy-board-done {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: 4px;
+  padding: 0 var(--gap-md);
+  border: var(--stroke) solid var(--ok-border);
+  border-radius: var(--radius-pill);
+  background: var(--ok-bg);
+  color: var(--ok);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-board-done[data-done='reopen'] {
+  border-color: var(--border-soft);
+  background: var(--surface);
+  color: var(--muted);
+}
+.fy-board-done[data-size='primary'] {
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: var(--radius-panel);
+  font-size: var(--text-sm);
+}
+.fy-board-done[data-touch] {
+  min-height: 36px;
+}
+.fy-board-done:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+@media (max-width: 720px) {
+  .fy-board-table__head {
+    display: none;
+  }
+  .fy-board-table__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--gap-sm) var(--gap-md);
+  }
+  .fy-board-table__what {
+    flex: 1 0 100%;
+  }
+  .fy-board-table__cell {
+    flex: 0 1 auto;
+  }
+  .fy-board-table__cell[data-col='status'] {
+    order: 1;
+  }
+  .fy-board-table__cell[data-col='people'] {
+    order: 2;
+  }
+  .fy-board-table__cell[data-col='activity'] {
+    order: 3;
+  }
+  .fy-board-table__cell[data-col='pr'] {
+    order: 4;
+  }
+  .fy-board-table__cell[data-col='done'] {
+    order: 5;
+    margin-left: auto;
+  }
+  .fy-board-table__cell:empty,
+  .fy-board-table__cell:has(> .fy-board-table__none) {
+    display: none;
+  }
+}
+
+/* A touch screen's 44px floor would double a row's height; the tap area is laid over the text instead. */
+@media (pointer: coarse) {
+  :root a.fy-board-table__title[href],
+  :root a.fy-board-table__more[href] {
+    position: relative;
+    min-width: 0;
+    min-height: 0;
+  }
+  .fy-board-table__title::after,
+  .fy-board-table__more::after {
+    content: '';
+    position: absolute;
+    inset: -10px -4px;
+  }
 }

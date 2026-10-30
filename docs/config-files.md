@@ -388,7 +388,7 @@ revive, one that exited 0, a Warden investigator, or a ferret whose lead was sto
   (`fleet.warden_revive_breaker_opened` / `_closed`).
 
 **What the ferret is told.** An automatic ferret is told why in plain words and to re-read its last turn file and
-continue. An interactive one gets only a notice ("Your terminal ended because ... it was started again.") and
+continue. An interactive one gets only a notice ("Ferretry started your terminal again: it ended because ...") and
 its turn, with no instruction to act. Each ferret's own log gets `warden.revive_planned`, `warden.revived` or
 `warden.revive_refused` (`stopped`, `cooldown`, `breaker_open`, `too_old`, `parent_stopped`, `refused:<reason>`);
 each revive is a row under Recent actions and a `fleet.warden_revived` line.

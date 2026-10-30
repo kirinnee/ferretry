@@ -311,7 +311,7 @@ describe('MessageFooter with a lead', () => {
 
 describe('a message the durable queue holds', () => {
   const queued = (
-    state: 'queued' | 'typing' | 'delivered' | 'read' | 'cancelled' | 'failed',
+    state: 'queued' | 'typing' | 'delivered' | 'read' | 'unconfirmed' | 'cancelled' | 'failed',
     extra: Partial<NonNullable<LedgerSendRecord['queue']>> = {},
     overrides: Partial<LedgerSendRecord> = {},
   ): LedgerSendRecord => record({ queue: { state, stateAt: STATE_AT, revision: 1, ...extra }, ...overrides });
@@ -357,6 +357,13 @@ describe('a message the durable queue holds', () => {
       chip: 'failed',
     });
     expect(sendReceipt(queued('failed', {}, { fate: 'timed_out' })).detail).toBe('it could not be delivered');
+  });
+
+  test('a queue message typed and not proven is unconfirmed, never sending and never red; proof still wins', () => {
+    const row = queued('unconfirmed', {}, { fate: 'unaccounted', unaccountedReason: 'transcript_unreadable' });
+    expect(sendReceipt(row)).toMatchObject({ kind: 'unconfirmed', name: 'Unconfirmed', chip: 'unconfirmed' });
+    expect(sendReceipt(queued('unconfirmed', {}, { fate: 'delivered' })).kind).not.toBe('unconfirmed');
+    expect(sendReceipt(queued('unconfirmed', {}, { fate: 'cancelled' })).kind).toBe('cancelled');
   });
 
   test('a queue failure over an unaccounted ledger row is unconfirmed, never failed, with the failure sentence', () => {

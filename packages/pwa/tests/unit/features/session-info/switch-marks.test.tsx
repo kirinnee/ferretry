@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import { SessionTopBar } from '../../../../src/components/session-top-bar.tsx';
+import { InfoAbout } from '../../../../src/features/session-info/info-about.tsx';
 import { useAgendaSessionActions } from '../../../../src/features/agenda/agenda-session-actions.tsx';
 import { useHypermediaSessionActions } from '../../../../src/features/hypermedia/hypermedia-session-actions.tsx';
 import { usePackSessionActions } from '../../../../src/features/pack/pack-session-actions.tsx';
@@ -49,20 +49,18 @@ describe('a ferret’s switch marks', () => {
     expect(root.querySelector('button')).toBeNull();
   });
 
-  it('turns a section off from the header, saying when that takes effect', async () => {
+  it('turns a section off from Info, saying when that takes effect', async () => {
     const taps: Array<[SwitchSection, boolean]> = [];
     mounted = await mount(
-      <SessionTopBar
-        actions={null}
-        compact={false}
-        project={null}
-        session={sessionView('s1', { config: { teammate: 'hadi', mode: 'interactive' } })}
+      <InfoAbout
+        subFerrets={[]}
         switches={{
           learning: false,
           hypermedia: false,
           pack: true,
           onToggle: (section, next) => taps.push([section, next]),
         }}
+        view={sessionView('s1', { config: { teammate: 'hadi', mode: 'interactive' } })}
       />,
     );
     const root = mounted.container;
@@ -75,34 +73,31 @@ describe('a ferret’s switch marks', () => {
     expect(taps).toEqual([['pack', false]]);
   });
 
-  it('reads the header’s marks from the session’s own record when the host hands none', async () => {
+  it('reads the marks from the session’s own record when the host hands none', async () => {
     mounted = await mount(
-      <SessionTopBar
-        actions={null}
-        compact
-        project={null}
-        session={sessionView('s1', { config: { teammate: 'hadi', mode: 'auto', pack: false } })}
+      <InfoAbout
+        subFerrets={[]}
+        view={sessionView('s1', { config: { teammate: 'hadi', mode: 'auto', pack: false } })}
       />,
     );
     // An auto ferret is not told about hypermedia, and this one's Pack mode is switched off.
     expect(mounted.container.querySelector('[data-switch-marks]')).toBeNull();
+    expect(mounted.container.textContent).toContain('None on');
   });
 });
 
 it('draws the Agenda mark from the session’s record when the host hands none', async () => {
   mounted = await mount(
-    <SessionTopBar
-      actions={null}
-      compact={false}
-      project={null}
-      session={sessionView('s1', { config: { teammate: 'hadi', mode: 'auto', pack: false, agenda: true } })}
+    <InfoAbout
+      subFerrets={[]}
+      view={sessionView('s1', { config: { teammate: 'hadi', mode: 'auto', pack: false, agenda: true } })}
     />,
   );
   expect(marks(mounted.container)).toEqual(['agenda']);
 });
 
 describe('switchTapper', () => {
-  it('sends a header tap to that section’s own switch, for this ferret', async () => {
+  it('sends an Info tap to that section’s own switch, for this ferret', async () => {
     const sent: string[] = [];
     const tap = (section: string) => async (sessionId: string, next: boolean) => {
       sent.push(`${section} ${sessionId} ${String(next)}`);
@@ -118,7 +113,7 @@ describe('switchTapper', () => {
   });
 });
 
-/** A host for one switch's header tap, as App wires it, and the status line it reports in. */
+/** A host for one switch's Info tap, as App wires it, and the status line it reports in. */
 function TapHost({ fetcher, section }: { readonly fetcher: DaemonFetch; readonly section: SwitchSection }) {
   const hypermedia = useHypermediaSessionActions({ connection: DAEMON, fetcher });
   const pack = usePackSessionActions({ connection: DAEMON, fetcher });
@@ -134,7 +129,7 @@ function TapHost({ fetcher, section }: { readonly fetcher: DaemonFetch; readonly
   );
 }
 
-describe('a header tap that the daemon refuses', () => {
+describe('an Info tap that the daemon refuses', () => {
   const refusing: DaemonFetch = async () =>
     Response.json({ error: 'operator access is closed', code: 'forbidden' }, { status: 403 });
 

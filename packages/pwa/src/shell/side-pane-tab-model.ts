@@ -223,15 +223,6 @@ export const SIDE_PANE_BUILT_IN_TABS: readonly SidePaneTabDefinition[] = [
   },
   { id: 'files', label: 'Files', shortLabel: 'Files', closeLabel: 'Close files', icon: 'files', order: 90 },
   {
-    id: 'tasks',
-    label: 'Tasks',
-    shortLabel: 'Tasks',
-    closeLabel: 'Close tasks',
-    icon: 'tasks',
-    order: 20,
-    defaultOpen: true,
-  },
-  {
     id: 'terminals',
     label: 'Terminals',
     shortLabel: 'Term',

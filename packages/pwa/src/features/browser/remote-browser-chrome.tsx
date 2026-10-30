@@ -130,7 +130,7 @@ export function RemoteBrowserPageTabs({ status, busy = false, onAction }: Remote
                   title={selected ? `${label} — active shared page` : label}
                   disabled={busy}
                   onClick={() => onAction({ action: 'activate-page', pageId: tab.id })}
-                  className="inline-flex min-h-[44px] min-w-0 flex-1 items-center gap-1 border-l-heavy border-transparent px-2 text-left text-meta text-muted hover:bg-accent-soft hover:text-fg data-[active=true]:border-accent data-[active=true]:font-semibold data-[active=true]:text-fg"
+                  className="inline-flex min-h-[44px] min-w-0 flex-1 items-center gap-1 px-2 text-left text-meta text-muted hover:bg-accent-soft hover:text-fg data-[active=true]:bg-accent-soft data-[active=true]:font-semibold data-[active=true]:text-fg"
                   data-active={selected ? true : undefined}
                 >
                   {tab.id === agentPageId && (

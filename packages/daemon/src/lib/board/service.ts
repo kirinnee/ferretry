@@ -57,6 +57,7 @@ import type {
   BoardStore,
   LaneSetSource,
   ProjectAdopter,
+  DoneNotifier,
   ReopenNotifier,
   SessionFocus,
   SessionParents,
@@ -71,6 +72,8 @@ export interface BoardServiceDependencies {
   readonly parents: SessionParents;
   readonly focus: SessionFocus;
   readonly reopen: ReopenNotifier;
+  /** Tells a card's ferret the owner marked it done. */
+  readonly done: DoneNotifier;
   readonly activity: ActivityDeriver;
   readonly agenda: AgendaLinkSource;
   readonly changes: BoardChangeSink;
@@ -99,9 +102,20 @@ export interface SignalDoneOutcome {
 /** The serial key every dependency write shares. */
 export const DEPENDENCY_SECTION = 'board:dependencies';
 
-/** The line a reopened card's ferret is told (§2.9). */
+/** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
 export const reopenMessage = (task: Pick<BoardTask, 'id'>, by: BoardActor, reason: string): string =>
-  `[reopened ${formatTaskRef(task)} by ${by.kind === 'owner' ? 'owner' : (by.sessionId ?? by.kind)}: ${reason}]`;
+  `${formatTaskRef(task)} was reopened by ${by.kind === 'owner' ? 'the owner' : (by.sessionId ?? `the ${by.kind}`)}: ${reason}`;
+
+/**
+ * The line a card's ferret is told the owner closed it: a plain sentence, with no tag around it. A batch
+ * (one ferret's cards closed together) lists them.
+ */
+export const doneMessage = (tasks: readonly Pick<BoardTask, 'id' | 'title'>[]): string => {
+  const named = tasks.map(task => `${formatTaskRef(task)} “${task.title}”`);
+  return named.length === 1
+    ? `The owner marked ${named[0]} done.`
+    : `The owner marked these cards done: ${named.join(', ')}.`;
+};
 
 /** The board actor a caller is recorded as. */
 export const actorOf = (caller: BoardCaller): BoardActor => {
@@ -365,6 +379,7 @@ export class BoardService {
     if (outcome.task !== null) {
       await this.afterWrite(caller, outcome.task, [...new Set([card.projectId, outcome.task.projectId])]);
       await this.deliverReopen(caller, outcome, outcome.task);
+      await this.deliverDone(caller, request, card, outcome.task);
     }
     return await this.view(await this.ports.store.read(), id);
   }
@@ -643,6 +658,21 @@ export class BoardService {
     await this.ports.reopen
       .reopened({ task, ...reopened, by: actorOf(caller) })
       .catch((error: unknown) => this.warn(`could not deliver the reopen of ${formatTaskRef(task)}`, error));
+  }
+
+  /** Tells the card's ferret the owner closed it: only the owner's move into a closed lane from an open one. */
+  private async deliverDone(
+    caller: BoardCaller,
+    request: BoardTaskActionRequest,
+    before: BoardTask,
+    after: BoardTask,
+  ): Promise<void> {
+    if (caller.kind !== 'owner' || request.action !== 'move') return;
+    const laneSets = await this.laneSetsOf([after.projectId]);
+    if (cardCategory(after, laneSets) !== 'closed' || cardCategory(before, laneSets) === 'closed') return;
+    await this.ports.done
+      .done([{ task: after }])
+      .catch((error: unknown) => this.warn(`could not tell the ferret ${formatTaskRef(after)} is done`, error));
   }
 
   private warn(what: string, error: unknown): void {

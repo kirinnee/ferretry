@@ -8,7 +8,7 @@
  */
 
 import type { BoardActivityFilter, BoardProjectId } from '@ferretry/protocol';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import {
   useBoard,
@@ -20,6 +20,7 @@ import {
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { type BoardFilters, boardFiltersToSearch } from '../../lib/board-model.ts';
+import { boardDone } from '../../lib/board-done.ts';
 import { moveChoices, planMove } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import {
@@ -32,6 +33,7 @@ import {
   type BoardGroupOf,
   type BoardViewId,
   cardPlaces,
+  DEFAULT_LIST_SORT,
   laneNames,
   laneOfCategory,
   parseBoardView,
@@ -48,7 +50,15 @@ import { PhoneKanban } from './board-phone.tsx';
 import { BoardReasonBox } from './board-reason-box.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
 import { BoardNewCard, type NewCardPorts } from './detail/board-new-card.tsx';
-import { ArchiveView, type BoardCardEnv, DependenciesView, KanbanView, ListView, TreeView } from './board-views.tsx';
+import { TableView } from './board-table.tsx';
+import {
+  ArchiveView,
+  type BoardCardEnv,
+  type BoardDoneControl,
+  DependenciesView,
+  KanbanView,
+  TreeView,
+} from './board-views.tsx';
 
 export interface BoardPageProps {
   readonly store: DaemonBoardStore;
@@ -158,6 +168,7 @@ export function BoardPage({
   }, [defaultScoped, scopeFerret, search]);
   const view = parseBoardView(params.get('view'));
   const sort = parseListSort(params.get('sort'));
+  const grouped = params.get('group') === 'lane';
   const archive = view === 'archive';
 
   const writeParams = useCallback(
@@ -169,7 +180,7 @@ export function BoardPage({
   const writeFilters = useCallback(
     (filterSearch: string) => {
       const next = new URLSearchParams(filterSearch);
-      for (const key of ['view', 'sort', 'at']) {
+      for (const key of ['view', 'sort', 'group', 'at']) {
         const kept = params.get(key);
         if (kept !== null) next.set(key, kept);
       }
@@ -197,8 +208,14 @@ export function BoardPage({
   };
   const setSort = (next: string): void => {
     const nextParams = new URLSearchParams(params);
-    if (next === 'stale') nextParams.delete('sort');
+    if (next === DEFAULT_LIST_SORT) nextParams.delete('sort');
     else nextParams.set('sort', next);
+    writeParams(nextParams);
+  };
+  const setGrouped = (next: boolean): void => {
+    const nextParams = new URLSearchParams(params);
+    if (next) nextParams.set('group', 'lane');
+    else nextParams.delete('group');
     writeParams(nextParams);
   };
 
@@ -305,6 +322,18 @@ export function BoardPage({
     [requestMove],
   );
 
+  const doneFor = useCallback(
+    (card: BoardCardOf, place: BoardCardPlace): BoardDoneControl | undefined => {
+      const done = boardDone({
+        laneSet: place.group.laneSet,
+        category: place.category,
+        dropped: card.task.dropped !== null,
+      });
+      return done === null ? undefined : { done, press: () => requestMove(card, place.group, done.laneId) };
+    },
+    [requestMove],
+  );
+
   const onDropCard = useCallback(
     (groupKey: string, laneId: string): void => {
       const air = dragging;
@@ -334,10 +363,11 @@ export function BoardPage({
       hrefFor: card => daemonBoardCardPath(card.daemonId, card.task.id),
       onNavigate,
       movesFor: archive ? () => undefined : movesFor,
+      doneFor,
       places,
       dragging,
     }),
-    [names, now, model.multiMachine, machines.length, onNavigate, archive, movesFor, places, dragging, phone],
+    [names, now, model.multiMachine, machines.length, onNavigate, archive, movesFor, doneFor, places, dragging, phone],
   );
 
   const [archiveQuery, setArchiveQuery] = useState('');
@@ -441,12 +471,29 @@ export function BoardPage({
       </button>
     );
 
+  // `?highlight=F11` (Info's "Open board"): the card is marked and scrolled to, and the mark follows it through refreshes.
+  const highlight = params.get('highlight');
+  const pageRef = useRef<HTMLElement | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `model` is the trigger — a refresh redraws the cards, so the mark is laid again
+  useEffect(() => {
+    const page = pageRef.current;
+    if (page === null || highlight === null || highlight === '') return;
+    const cards = [...page.querySelectorAll<HTMLElement>('[data-task]')].filter(
+      card => card.dataset['task'] === highlight,
+    );
+    for (const card of cards) card.setAttribute('data-highlighted', '');
+    cards[0]?.scrollIntoView?.({ block: 'center', inline: 'nearest' });
+    return () => {
+      for (const card of cards) card.removeAttribute('data-highlighted');
+    };
+  }, [highlight, model]);
+
   const hideClosed = filters.state === 'open';
   const reading = board.status === 'loading' || board.status === 'idle';
   const failed = board.status === 'error';
 
   return (
-    <section aria-label="Board" className="fy-board" data-phone={phone ? '' : undefined} data-view={view}>
+    <section aria-label="Board" className="fy-board" data-phone={phone ? '' : undefined} data-view={view} ref={pageRef}>
       <header className="fy-board__head">
         {phone ? null : <h1 className="fy-board__title">Board</h1>}
         <nav aria-label="Board views" className="fy-board__views">
@@ -566,7 +613,7 @@ export function BoardPage({
           />
         )
       ) : view === 'list' ? (
-        <ListView env={env} model={model} onSort={setSort} sort={sort} />
+        <TableView env={env} grouped={grouped} model={model} onGroup={setGrouped} onSort={setSort} sort={sort} />
       ) : view === 'tree' ? (
         <TreeView env={env} model={model} />
       ) : view === 'dependencies' ? (

@@ -78,12 +78,13 @@ export const useBoard = (
   store: DaemonBoardStore,
   machines: readonly BoardMachine[],
   filters: BoardFilters,
+  options: { readonly beat?: boolean } = {},
 ): BoardView => {
   const connections = useMemo(() => machines.map(machine => machine.connection), [machines]);
   const query = useMemo(() => toServerQuery(filters), [filters]);
   const key = boardViewKey(query, connections);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the view key is the deliberate dependency
-  useEffect(() => store.watch(query, connections).release, [store, key]);
+  useEffect(() => store.watch(query, connections, options).release, [store, key]);
   const view = useSyncExternalStore(
     store.subscribe,
     () => store.view(key),

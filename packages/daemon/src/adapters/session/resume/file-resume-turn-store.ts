@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import type { QueueAuthor } from '@ferretry/protocol';
 import type { ResumeTurnStore } from '../../../lib/session/resume/types.ts';
 import type { SessionId } from '../../../lib/session-id.ts';
 
@@ -24,17 +25,28 @@ export class FileResumeTurnStore implements ResumeTurnStore {
     return join(this.sessionDirectory(id), 'turns', `turn-${String(turn).padStart(3, '0')}.md`);
   }
 
-  async writeTurn(id: SessionId, turn: number, document: string): Promise<string> {
+  async writeTurn(id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<string> {
     const file = this.file(id, turn);
     await mkdir(dirname(file), { recursive: true, mode: 0o700 });
-    const temporary = `${file}.${this.uniqueId()}.tmp`;
-    await writeFile(temporary, document, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, file);
+    // Who the turn is from sits BESIDE it, never in it: the agent reads the document, the app reads this.
+    if (by !== undefined) await this.atomically(authorFile(file), `${JSON.stringify(by)}\n`);
+    await this.atomically(file, document);
     return file;
+  }
+
+  private async atomically(file: string, contents: string): Promise<void> {
+    const temporary = `${file}.${this.uniqueId()}.tmp`;
+    await writeFile(temporary, contents, { encoding: 'utf8', mode: 0o600 });
+    await rename(temporary, file);
   }
 
   async clearMarkers(id: SessionId): Promise<void> {
     const directory = this.sessionDirectory(id);
     for (const marker of MARKERS) await rm(join(directory, `${marker}.marker`), { force: true });
   }
+}
+
+/** Where a turn document's author is kept: `turn-008.md` → `turn-008.by.json`. */
+export function authorFile(turnFile: string): string {
+  return turnFile.replace(/\.md$/u, '.by.json');
 }

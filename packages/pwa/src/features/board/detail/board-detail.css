@@ -112,6 +112,11 @@
   align-items: center;
   gap: var(--gap-xs);
 }
+.fy-board-detail__tools .fy-board-done[data-size='primary'] {
+  min-height: 32px;
+  padding: 0 var(--gap-md);
+  border-radius: var(--radius-pill);
+}
 .fy-board-detail__meta {
   display: flex;
   flex-wrap: wrap;

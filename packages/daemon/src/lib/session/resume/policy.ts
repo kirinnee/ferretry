@@ -1,19 +1,19 @@
 import { resolve } from 'node:path';
-import { turnFileInstruction } from '@ferretry/protocol';
+import { type QueueAuthor, turnFileInstruction } from '@ferretry/protocol';
 import {
   STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
 } from '../question/answer-ledger.ts';
 import type { SessionResumeSettings } from './settings.ts';
 import {
-  ResumeCancelled,
-  ResumeRefused,
-  ReviveDedupeConflict,
-  TERMINAL_RESUME_STATUSES,
   type PaneObservation,
   type ResumeActor,
+  ResumeCancelled,
   type ResumePolicy,
+  ResumeRefused,
   type ResumeTarget,
+  ReviveDedupeConflict,
+  TERMINAL_RESUME_STATUSES,
 } from './types.ts';
 
 /**
@@ -220,4 +220,25 @@ export function resumeTurnDocument(prompt: string, settings: SessionResumeSettin
 /** What is typed into the replacement terminal so the agent picks the new turn up. */
 export function resumeTurnInstruction(turnFile: string): string {
   return turnFileInstruction(turnFile);
+}
+
+/**
+ * Who a relaunch's turn is from, by who asked for it: the Warden's resume is Ferretry's Warden, the daemon's
+ * own restart is Ferretry's, an operator's is the owner's, a peer's is a ferret's. Metadata for the app's
+ * sender chip, so Ferretry's words are never drawn as the owner's — and never a tag in the turn itself.
+ */
+export function resumeTurnAuthor(actor: ResumeActor): QueueAuthor | undefined {
+  switch (actor) {
+    case 'warden':
+      return { kind: 'ferretry', feature: 'Warden' };
+    case 'daemon':
+      return { kind: 'ferretry', feature: 'Restart' };
+    case 'admin-cli':
+    case 'admin-ui':
+      return { kind: 'owner' };
+    case 'peer':
+      return { kind: 'ferret' };
+    case 'unknown':
+      return undefined;
+  }
 }

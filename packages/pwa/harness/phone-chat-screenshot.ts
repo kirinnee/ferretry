@@ -161,7 +161,6 @@ const headerParts = async (page: Page): Promise<{ name: string; box: Box }[]> =>
       ['name', '.fy-session-bar__name'],
       ['agenda badge', '.fy-session-bar__agenda'],
       ['outdated', '[data-outdated-mark]'],
-      ['card chip', '[data-card-chip]'],
       ['status dot', '.fy-session-bar__status'],
       ['actions', '[data-session-actions]'],
       ['info', '[data-session-info-toggle]'],
@@ -177,7 +176,32 @@ const headerParts = async (page: Page): Promise<{ name: string; box: Box }[]> =>
     });
   });
 
-const PHONE_BAR = ['sessions', 'name', 'card chip', 'status dot', 'menu'];
+/** Info › Overview › About this ferret: sub-ferrets, the card and Open board, capabilities, restart, the agenda. */
+const expectAbout = async (page: Page, label: string): Promise<void> => {
+  const about = page.locator('[data-info-about]');
+  check((await about.count()) === 1, `${label}: Info shows "About this ferret"`);
+  check((await about.locator('[data-sub-ferret-pack] li').count()) >= 6, `${label}: it lists the sub-ferrets`);
+  check((await about.locator('[data-info-card="F11"]').count()) === 1, `${label}: it holds the card, &F11`);
+  check((await about.locator('[data-info-open-board]').count()) === 1, `${label}: it has Open board`);
+  check((await about.locator('[data-info-restart]').count()) === 1, `${label}: it has Restart`);
+  check((await about.locator('[data-info-agenda] [data-agenda-row]').count()) >= 1, `${label}: it lists the agenda`);
+  const sheet = page.locator('[data-info-about]').first();
+  const inView = await sheet.evaluate(element => {
+    const rect = element.getBoundingClientRect();
+    return rect.width > 0 && rect.right <= window.innerWidth + 1 && rect.left >= -1;
+  });
+  check(inView, `${label}: the block sits inside the screen`);
+};
+
+const PHONE_BAR = ['sessions', 'name', 'status dot', 'info', 'menu'];
+const GONE_FROM_BAR = [
+  '[data-card-chip]',
+  '[data-outdated-mark]',
+  '[data-sub-ferret-indicator]',
+  '.fy-session-bar__agenda',
+  '[data-agenda-dock]',
+  '[data-switch-marks]',
+];
 
 try {
   for (const theme of ['studio-light', 'studio-dark']) {
@@ -282,15 +306,13 @@ try {
         outside.length === 0,
         `${scheme} ${width}px: all of it sits on the row (${outside.map(part => part.name).join(', ')})`,
       );
-      const chip = await page
-        .locator('[data-card-chip]')
-        .first()
-        .evaluate(element => ({
-          text: (element as HTMLElement).innerText,
-        }));
+      const stillThere = await page.evaluate(
+        gone => gone.filter(selector => document.querySelector(`[data-session-bar] ${selector}`) !== null),
+        GONE_FROM_BAR,
+      );
       check(
-        chip.text.startsWith('&F11') && !chip.text.includes('active'),
-        `${scheme} ${width}px: the chip is the reference alone (${chip.text})`,
+        stillThere.length === 0,
+        `${scheme} ${width}px: the bar carries none of the moved-out info (${stillThere.join(', ')})`,
       );
 
       if (width === 390) {
@@ -319,6 +341,44 @@ try {
         check(radios > 0, `${scheme}: ▾ › Theme… opens the theme controls (${radios} choices)`);
       }
       await page.context().close();
+    }
+
+    // 4. ⓘ opens Info, and "About this ferret" holds everything the bar gave up.
+    {
+      const page = await open(theme, 390);
+      await page.locator('[data-session-info-toggle]').tap();
+      await page.waitForTimeout(600);
+      await shot(page, 'info', scheme);
+      await expectAbout(page, `${scheme} phone`);
+      await page.context().close();
+    }
+
+    // 5. The desktop: the same facts beside the chat, in the right-hand Info panel.
+    {
+      const context = await browser.newContext({
+        viewport: { width: 1440, height: 900 },
+        deviceScaleFactor: 1,
+        colorScheme: theme.endsWith('dark') ? 'dark' : 'light',
+      });
+      const page = await context.newPage();
+      page.on('pageerror', error => process.stderr.write(`⚠️ page error: ${error.message}\n`));
+      await page.goto(`${server.url}?theme=${theme}`);
+      await page.locator('.fy-transcript').waitFor();
+      await page.waitForTimeout(600);
+      await shot(page, 'desktop', scheme);
+      const stillThere = await page.evaluate(
+        gone => gone.filter(selector => document.querySelector(`[data-session-bar] ${selector}`) !== null),
+        GONE_FROM_BAR,
+      );
+      check(
+        stillThere.length === 0,
+        `${scheme} desktop: the bar carries none of the moved-out info (${stillThere.join(', ')})`,
+      );
+      await page.locator('[data-session-info-toggle]').click();
+      await page.waitForTimeout(600);
+      await shot(page, 'desktop-info', scheme);
+      await expectAbout(page, `${scheme} desktop`);
+      await context.close();
     }
   }
 } finally {

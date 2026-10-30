@@ -47,7 +47,7 @@ const notice = (overrides: Partial<ReopenNotice['task']> = {}): ReopenNotice => 
   by: { kind: 'owner' },
 });
 
-const LINE = '[reopened &F412 by owner: not good]';
+const LINE = '&F412 was reopened by the owner: not good';
 
 const ladder = (answers: Readonly<Record<string, ReopenDelivery>>, warnings: string[] = []) => {
   const messenger = new FakeMessenger(answers);
@@ -127,6 +127,21 @@ describe('delivering a reopen', () => {
 
     // Assert
     should(messenger.sent).deepEqual([['lead', LINE, 'board-reopen-F412-2']]);
+  });
+
+  it("should send the owner's reopen through the owner's messenger, and a ferret's through the plain one", async () => {
+    // Arrange
+    const plain = new FakeMessenger({ child: 'delivered' });
+    const owned = new FakeMessenger({ child: 'delivered' });
+    const subject = new ReopenDeliveryLadder(plain, { warn: () => undefined }, owned);
+
+    // Act
+    await subject.reopened(notice());
+    await subject.reopened({ ...notice(), by: { kind: 'ferret', sessionId: 'lead' } });
+
+    // Assert
+    should(owned.sent.map(([to]) => to)).deepEqual(['child']);
+    should(plain.sent.map(([to]) => to)).deepEqual(['child']);
   });
 
   it('should key a reopen by its card and the history event that reopened it', () => {

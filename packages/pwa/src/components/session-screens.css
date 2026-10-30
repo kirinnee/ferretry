@@ -1481,6 +1481,18 @@ button.fy-receipt {
   pointer-events: none;
   position: absolute;
 }
+/* The placeholder is one line, cut with "…" when the field is narrow (a phone's empty one-line composer). */
+.fy-live-editor[data-empty]::before {
+  left: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.fy-composer textarea::placeholder {
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .fy-live-editor[aria-disabled='true'] {
   cursor: not-allowed;
   opacity: 0.6;
@@ -1941,20 +1953,19 @@ button.fy-receipt {
 }
 /* THE PHONE COMPOSER (Composer.tsx `compact`, i.e. the drawer-width layout — the same instance
    `.kt-composer--compact` scopes, never a media query, so a coarse tablet on the desktop layout keeps
-   the desktop composer). It follows kteam's dock, because the owner asked for "a stable box":
-     - attach and the mic stack in a 44px column on the LEFT; Interrupt & send and Send stack in a 44px
-       column on the RIGHT, Send at the bottom, nearest the thumb;
-     - BOTH COLUMNS ARE ALWAYS TWO SLOTS TALL. While the agent is idle the interrupt's slot is held
-       empty (`.fy-composer-slot`), so the field is the same height and the same width whether a turn
-       is running or not — the #539 column grew from three controls to four the moment Interrupt
-       appeared and resized the box under the reader's thumb;
-     - the field rests at four lines (three with the keyboard up) and fills the row between the
-       columns; it grows to the JS ceiling while typing (ten lines, six with the keyboard up);
+   the desktop composer).
+     - EMPTY, IT IS ONE LINE (owner, 2026-10-30: an empty one took about 260px of the screen): attach and
+       the mic inline on the left, Interrupt & send and Send inline on the right, the field one line;
+     - WRITING, IT IS A WRITING SURFACE (owner: "make buttons vertical so there's more space for
+       typing"): as soon as there is a draft the controls stack in their two columns — attach over the
+       mic on the left, Interrupt & send over Send on the right — and the field takes the width between;
+     - the interrupt's place is ALWAYS held: while the agent is idle it is an empty slot
+       (`.fy-composer-slot`), so the field is the same size whether a turn is running or not (#539);
+     - the field grows to the JS ceiling while typing (ten lines, six with the keyboard up);
      - its text is the phone body size, 17px, never below the 16px iOS focus-zoom floor. */
 .fy-composer[data-composer-layout='phone'] .fy-composer-row {
   align-items: stretch;
   gap: var(--flow-1, 4px);
-  padding: calc(var(--gap-md, 10px) + var(--stroke-control, 1px)) var(--composer-inset-x);
 }
 .fy-composer[data-composer-layout='phone'] .fy-composer-dock {
   display: flex;
@@ -1965,6 +1976,13 @@ button.fy-receipt {
 }
 .fy-composer[data-composer-layout='phone'] .fy-composer-dock[data-composer-dock='start'] {
   justify-content: flex-start;
+}
+.fy-composer[data-composer-layout='phone'][data-composer-empty] .fy-composer-row {
+  align-items: flex-end;
+}
+.fy-composer[data-composer-layout='phone'][data-composer-empty] .fy-composer-dock {
+  flex-direction: row;
+  align-items: flex-end;
 }
 .fy-composer-slot {
   display: block;
@@ -1985,16 +2003,10 @@ button.fy-receipt {
   flex: 1 1 auto;
   font-size: inherit;
   line-height: 24px;
-  min-height: calc(4 * 24px);
+  min-height: 24px;
 }
 .fy-composer[data-composer-layout='phone'] .fy-live-editor [data-line] {
   min-height: 24px;
-}
-/* The keyboard is up: three lines is the floor, so the transcript keeps the room #511 gave it. The two
-   control columns (2 × 44px) still fit beside three lines, so nothing wraps and nothing moves. */
-html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-input-layer textarea,
-html[data-keyboard='open'] .fy-composer[data-composer-layout='phone'] .fy-composer-input-layer .fy-live-editor {
-  min-height: calc(3 * 24px);
 }
 /* The status line under the row: model, effort, context, quota and the key hint, small and quiet. */
 .fy-composer-actions {

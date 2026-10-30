@@ -37,12 +37,14 @@ import {
   written,
 } from '../../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
+import { boardDone } from '../../../lib/board-done.ts';
 import { moveChoices, planMove } from '../../../lib/board-move.ts';
 import type { FerretNames } from '../../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../../lib/board-store.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../lib/pages/routes.ts';
 import { BoardIcon } from '../board-icons.tsx';
+import { BoardDoneAction } from '../board-done-action.tsx';
 import { BoardReasonBox } from '../board-reason-box.tsx';
 import {
   AskSection,
@@ -223,6 +225,7 @@ function DetailBody({
   const moveTarget = { ...target, laneId: task.laneId, laneSet };
   const category = laneCategoryOf(laneSet, task.laneId);
   const verdict = verdictLanes(laneSet, task.laneId);
+  const done = verdict === null ? boardDone({ laneSet, category, dropped: task.dropped !== null }) : null;
   const recipient = task.assignee ?? task.owner;
   const asks = collectAsks(task, useBoardAsks(agenda, machine.connection, askSessions(task)));
   const here = siblings.find(card => card.task.id === task.id);
@@ -340,6 +343,15 @@ function DetailBody({
               <span className="fy-board-detail__id">{formatTaskRef({ id: task.id })}</span> {task.title}
             </h2>
             <div className="fy-board-detail__tools">
+              {done === null ? null : (
+                <BoardDoneAction
+                  disabled={busy}
+                  done={done}
+                  onPress={() => requestMove(done.laneId)}
+                  size="primary"
+                  title={task.title}
+                />
+              )}
               <button
                 className="kt-btn"
                 data-variant="ghost"

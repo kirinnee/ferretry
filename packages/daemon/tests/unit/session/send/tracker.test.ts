@@ -407,6 +407,20 @@ describe('a send past its deadline', () => {
     should(world.only).match({ fate: 'timed_out', attempt: 1 });
   });
 
+  it('waits — never settles — while a long transcript is still being read, then proves the send', async () => {
+    const world = new World(record());
+    world.reading = { readable: false, catchingUp: true, inputs: [] };
+
+    await world.checkAt(60_000);
+    should(world.only).match({ fate: 'accepted', attempt: 1 });
+    should(world.events).not.containEql('control.send_unaccounted');
+    should(world.retyped).be.empty();
+
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user('ship it now please', 30_000)]);
+    await world.checkAt(130_000);
+    should(world.only.fate).equal('delivered');
+  });
+
   it('cannot prove absence from an unreadable transcript, a failed pane read, or a failed capture', async () => {
     const unreadable = new World(record());
     unreadable.reading = { readable: false, inputs: [] };

@@ -7,6 +7,7 @@ import {
   planResume,
   type ResumeAction,
   resolveResumePolicy,
+  resumeTurnAuthor,
   resumeTurnDocument,
   resumeTurnInstruction,
 } from './policy.ts';
@@ -226,7 +227,7 @@ export class SessionResumeService {
         clearPendingQuestion: true,
         reason: 'session relaunched before the question was answered',
       });
-    const instruction = action.prompt === undefined ? undefined : await this.writeTurn(target.id, action);
+    const instruction = action.prompt === undefined ? undefined : await this.writeTurn(target.id, action, actor);
     await this.ports.turns.clearMarkers(target.id);
     const starting = await this.ports.repository.transition(target.id, {
       event: 'session.resuming',
@@ -300,9 +301,15 @@ export class SessionResumeService {
   private async writeTurn(
     id: SessionId,
     action: Extract<ResumeAction, { kind: 'relaunch' }>,
+    actor: ResumeActor,
   ): Promise<string | undefined> {
     if (action.prompt === undefined) return undefined;
-    const file = await this.ports.turns.writeTurn(id, action.turn, resumeTurnDocument(action.prompt, this.settings));
+    const file = await this.ports.turns.writeTurn(
+      id,
+      action.turn,
+      resumeTurnDocument(action.prompt, this.settings),
+      resumeTurnAuthor(actor),
+    );
     return resumeTurnInstruction(file);
   }
 
