@@ -214,7 +214,12 @@ fy new --auto --name "Fix Login Redirect" "<complete brief>"   # the decision mo
    and anything else is `probe_failed`; the words themselves are never repeated. The start line shows the
    check: `started claude-work (probe OK 640 ms)`, `(probe OK, cached)`, `refused … (probe failed 3436 ms)`.
 4. **Start**: the same session start every surface uses (callsign, launch, audit), with `parent` recorded and
-   the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`. A
+   the brief followed by a footer telling the sub-ferret to finish with `fy signal done "<result>"`. The
+   sub-ferret gets a **board card** with the session: owned by the lead, assigned to the child, under the
+   lead's focus card (one is made from the lead's session first when it has none, and `fy new` says so), and
+   the footer names it (`Your card is &F413 on the Ferretry board`). The start no longer forces board access
+   `none`: authority on the board is ownership and lineage. A board failure never fails the start; `fy new`
+   prints what it could not do. A
    harness that exits before it is ready fails the start with its exit status **and its last output lines**
    (`the interactive harness exited (2): its last output was "…"`), so the card says why — the wrapper's
    refusal naming a missing secret, or the harness rejecting an argument the one-shot probe does not pass.

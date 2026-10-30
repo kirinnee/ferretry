@@ -5,6 +5,7 @@ import {
   agendaBoardPath,
   agendaRepliesPath,
   attentionBoardPath,
+  DAEMON_HEALTH_PATH,
   ProtocolAttentionGateway,
   repliesPath,
 } from '../../../src/lib/attention/gateway';
@@ -126,5 +127,28 @@ describe('protocol attention gateway send-now', () => {
     should(calls[0]?.init?.method).equal('POST');
     should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({});
     should(calls[0]?.init?.headers).containDeep({ 'x-ferretry-session-id': 'ferret-1' });
+  });
+});
+
+describe('the features the daemon offers', () => {
+  it('should read them from its health report, and none when it reports none or cannot be asked', async () => {
+    // Arrange
+    // The health view's other fields are not this test's: the client hands back what the route said.
+    const paths: string[] = [];
+    const answering = (health: object): AttentionApiClient => ({
+      request: <T>(path: string) => {
+        paths.push(path);
+        return Promise.resolve(health as T);
+      },
+    });
+    const offering = new ProtocolAttentionGateway(answering({ features: ['agenda.task.1'] }));
+    const silent = new ProtocolAttentionGateway(answering({}));
+    const down = new ProtocolAttentionGateway({ request: () => Promise.reject(new Error('refused')) });
+
+    // Act / Assert
+    should(await offering.features()).deepEqual(['agenda.task.1']);
+    should(paths[0]).equal(DAEMON_HEALTH_PATH);
+    should(await silent.features()).deepEqual([]);
+    should(await down.features()).deepEqual([]);
   });
 });

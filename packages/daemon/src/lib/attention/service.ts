@@ -6,6 +6,7 @@ import type {
   AttentionSnapshot,
   AttentionSource,
   ResolvedAttentionItem,
+  TaskRef,
 } from '@ferretry/protocol';
 import {
   type AttentionActor,
@@ -84,6 +85,18 @@ export interface AttentionChangeObserver {
   changed(sessionId: string, change: AttentionBoardChange): Promise<void>;
 }
 
+/**
+ * The card a session works on (`config.focusTask`, board-design.md §3.3). An agenda add that names no card
+ * belongs to the raising session's focus card (§2.6), so an ask is never raised without its work. Total in
+ * spirit: a lookup that fails leaves the item without a card rather than refusing it.
+ */
+export interface AgendaFocusSource {
+  focusOf(sessionId: string): Promise<TaskRef | null>;
+}
+
+/** No session has a focus card: every item keeps only the card it was raised with. */
+export const NO_AGENDA_FOCUS: AgendaFocusSource = { focusOf: async () => null };
+
 export type AttentionQueryResult<T> =
   | { readonly ok: true; readonly value: T }
   | { readonly ok: false; readonly error: AttentionFailure };
@@ -99,6 +112,7 @@ export class AttentionService {
     private readonly sessions: AttentionSessionDirectory,
     private readonly observer: AttentionRaisedObserver,
     private readonly changes: AttentionChangeObserver = { changed: async () => undefined },
+    private readonly focus: AgendaFocusSource = NO_AGENDA_FOCUS,
   ) {}
 
   async list(sessionId: string): Promise<AttentionQueryResult<AttentionSnapshot>> {
@@ -121,7 +135,15 @@ export class AttentionService {
       actor.kind === 'daemon' && request.title === undefined
         ? { ...request, title: DAEMON_TITLES[actor.cause] }
         : request;
-    return this.apply(sessionId, { action: 'raise', actor, request: titled, at: this.clock.now() });
+    const carded = titled.task === undefined ? await this.withFocusCard(sessionId, titled) : titled;
+    return this.apply(sessionId, { action: 'raise', actor, request: carded, at: this.clock.now() });
+  }
+
+  /** An add that names no card takes the raising session's focus card, when it has one (§2.6). */
+  private async withFocusCard(sessionId: string, request: RaiseAttentionRequest): Promise<RaiseAttentionRequest> {
+    if (invalidSession(sessionId) !== null) return request;
+    const task = await this.focus.focusOf(sessionId).catch(() => null);
+    return task === null ? request : { ...request, task };
   }
 
   async answer(

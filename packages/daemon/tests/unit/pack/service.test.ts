@@ -5,7 +5,7 @@ import type {
   PackNewOutcome,
   PackNewRequest,
   SessionView,
-  StartSessionRequest,
+  StartSessionRequestInput,
 } from '@ferretry/protocol';
 import { briefHash, PackInventorySchema, PackViewSchema } from '@ferretry/protocol';
 import should from 'should';
@@ -19,6 +19,7 @@ import {
   PackStartRefused,
   subFerretFooter,
 } from '../../../src/lib/pack/service.ts';
+import type { Delegation } from '../../../src/lib/board/index.ts';
 import { sessionView } from '../runtime/mounts/support.ts';
 import { catalog, choice, entry, facts, packConfig, runtime } from './support.ts';
 
@@ -63,11 +64,17 @@ interface Options {
   spent?: number;
   /** The folders the scratch check calls temporary. */
   scratch?: readonly string[];
+  /** What the lead's side of the card answers; absent: no card (a board that makes none). */
+  delegate?: Awaited<ReturnType<PackPorts['cards']['delegate']>>;
+  /** The child the start answers with, focused on a card or not. */
+  child?: SessionView;
 }
 
 function build(options: Options = {}) {
   const probes: Array<readonly [PackProbeRequest, number]> = [];
-  const starts: StartSessionRequest[] = [];
+  const starts: StartSessionRequestInput[] = [];
+  const delegations: Array<Delegation | undefined> = [];
+  const delegated: Array<readonly [string, string, boolean]> = [];
   const ranks: Array<readonly [string, readonly RankableCandidate[], JevGuidance | undefined]> = [];
   const recorded: number[] = [];
   let spent = options.spent ?? 0;
@@ -89,10 +96,17 @@ function build(options: Options = {}) {
         cached: options.cached?.includes(request.wrapper) === true,
       };
     },
-    start: async request => {
+    start: async (request, delegation) => {
       starts.push(request);
+      delegations.push(delegation);
       if (options.startError !== undefined) throw options.startError;
-      return sessionView('child-1') satisfies SessionView;
+      return options.child ?? (sessionView('child-1') satisfies SessionView);
+    },
+    cards: {
+      delegate: async (lead, brief, inLeadFolder) => {
+        delegated.push([lead, brief, inLeadFolder]);
+        return options.delegate ?? { notes: [] };
+      },
     },
     jev: {
       rank: async (task, candidates, guidance) => {
@@ -110,7 +124,7 @@ function build(options: Options = {}) {
     bin: 'fy',
     now: () => '2026-10-22T12:00:00.000Z',
   };
-  return { subject: new PackService(ports), probes, starts, ranks, recorded };
+  return { subject: new PackService(ports), probes, starts, delegations, delegated, ranks, recorded };
 }
 
 const request = (extra: Partial<PackNewRequest> = {}): PackNewRequest => ({
@@ -354,7 +368,6 @@ describe('PackService.newChild with a named runtime', () => {
         mode: 'interactive',
         agent: 'claude-main-wrapper',
         prompt: `fix the bug${subFerretFooter('fy', 'p1')}`,
-        boardAccess: 'none',
         cwd: '/work/parent',
         parent: 'p1',
         model: 'opus',
@@ -762,5 +775,110 @@ describe('PackService.newChild --auto with Jev deciding', () => {
     // Assert
     should(ranks).be.empty();
     should(outcome.outcome === 'started' && outcome.decidedBy).equal('routing');
+  });
+});
+
+describe("a sub-ferret's card", () => {
+  const delegation = (extra: Partial<Delegation> = {}): Delegation => ({
+    lead: 'p1',
+    brief: 'fix the bug',
+    id: 'F413',
+    parent: { id: 'F412' },
+    project: 'Ferretry',
+    notes: [],
+    ...extra,
+  });
+
+  it('should reserve the card under the lead, name it in the brief and start no board access', async () => {
+    // Arrange
+    const reserved = delegation();
+    const { subject, starts, delegations, delegated } = build({
+      parents: { p1: PARENT },
+      delegate: { delegation: reserved, notes: [] },
+      child: sessionView('child-1', { focusTask: { id: 'F413' } }),
+    });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
+
+    // Assert
+    should(delegated).deepEqual([['p1', 'fix the bug', true]]);
+    should(delegations).deepEqual([reserved]);
+    should(starts[0]?.prompt).containEql(
+      'Your card is &F413 on the Ferretry board; move it as you work (`fy task …`).',
+    );
+    should(starts[0]).not.have.property('boardAccess');
+    should(outcome.outcome === 'started' && outcome.card).deepEqual({ id: 'F413', project: 'Ferretry' });
+  });
+
+  it("should say the lead's card was made for it, and not name a board a named folder may not be on", async () => {
+    // Arrange
+    const notes = ['You had no card, so &F412 was made for you.'];
+    const { subject, starts, delegated } = build({
+      parents: { p1: PARENT },
+      delegate: { delegation: delegation({ leadCard: 'F412', project: undefined, notes }), notes },
+      child: sessionView('child-1', { focusTask: { id: 'F413' } }),
+    });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', cwd: '/work/other' }));
+
+    // Assert
+    should(delegated[0]?.[2]).be.false();
+    should(starts[0]?.prompt).containEql("Your card is &F413 on the project's board");
+    should(outcome.outcome === 'started' && outcome.card).deepEqual({ id: 'F413', leadCard: 'F412', note: notes[0] });
+  });
+
+  it('should say so when the start made no card, and the footer then names none', async () => {
+    // Arrange
+    const missed = build({
+      parents: { p1: PARENT },
+      delegate: { delegation: delegation(), notes: [] },
+    });
+    const refused = build({ parents: { p1: PARENT }, delegate: { notes: ['No card was made: the board is down'] } });
+
+    // Act
+    const unmade = await missed.subject.newChild(request({ runtime: 'claude-main' }));
+    const none = await refused.subject.newChild(request({ runtime: 'claude-main' }));
+
+    // Assert
+    should(unmade.outcome === 'started' && unmade.card).deepEqual({
+      note: '&F413 could not be made, so the sub-ferret started without a card.',
+    });
+    should(refused.starts[0]?.prompt).not.containEql('Your card is');
+    should(none.outcome === 'started' && none.card).deepEqual({ note: 'No card was made: the board is down' });
+  });
+
+  it('should leave a top-level start to make its own card, and report the one it focuses', async () => {
+    // Arrange
+    const { subject, delegated, delegations } = build({
+      child: sessionView('child-1', { focusTask: { id: 'F9' } }),
+    });
+    const plain = build();
+
+    // Act
+    const outcome = await subject.newChild({ task: 'fix', runtime: 'claude-main', cwd: '/w' });
+    const bare = await plain.subject.newChild({ task: 'fix', runtime: 'claude-main', cwd: '/w' });
+
+    // Assert
+    should(delegated).be.empty();
+    should(delegations).deepEqual([undefined]);
+    should(outcome.outcome === 'started' && outcome.card).deepEqual({ id: 'F9' });
+    should(bare.outcome === 'started' && 'card' in bare).be.false();
+  });
+
+  it('should reserve nothing when no candidate gets as far as a start', async () => {
+    // Arrange
+    const { subject, delegated } = build({
+      parents: { p1: PARENT },
+      probes: { 'claude-main-wrapper': { ok: false, ms: 5, reason: 'no answer' } },
+    });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
+
+    // Assert
+    should(outcome.outcome).equal('refused');
+    should(delegated).be.empty();
   });
 });

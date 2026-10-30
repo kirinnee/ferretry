@@ -6,7 +6,12 @@ import type {
   AttentionMutation,
   AttentionRaisedObserver,
 } from '../../../src/lib/attention/index.ts';
-import { AttentionService, isAttentionSessionId } from '../../../src/lib/attention/service.ts';
+import {
+  type AgendaFocusSource,
+  AttentionService,
+  isAttentionSessionId,
+  NO_AGENDA_FOCUS,
+} from '../../../src/lib/attention/service.ts';
 
 const SESSION = 'session-1';
 const NOW = '2026-07-31T10:00:00Z';
@@ -285,5 +290,84 @@ describe('Attention service progress', () => {
     should(again).containDeep({ ok: true, changed: false, change: 'unchanged' });
     should(missing.ok).be.false();
     should(observer.calls).have.length(1);
+  });
+});
+
+describe('an agenda item belongs to a card', () => {
+  const withFocus = (focus: AgendaFocusSource) => {
+    const repository = new MemoryRepository();
+    const service = new AttentionService(
+      repository,
+      { now: () => NOW },
+      { has: async sessionId => sessionId === SESSION },
+      new Observer(),
+      undefined,
+      focus,
+    );
+    return { repository, service };
+  };
+  const taskOf = (mutation: AttentionMutation) => (mutation.ok ? mutation.item?.task : undefined);
+
+  it("should take the raising session's focus card when the add names none", async () => {
+    // Arrange
+    const asked: string[] = [];
+    const { service } = withFocus({
+      focusOf: async sessionId => {
+        asked.push(sessionId);
+        return { id: 'F18' };
+      },
+    });
+
+    // Act
+    const agent = await service.raise(SESSION, request, AGENT);
+    const harness = await service.raise(SESSION, request, { kind: 'daemon', cause: 'harness-prompt' });
+    const warden = await service.raise(SESSION, request, { kind: 'daemon', cause: 'warden-escalation' });
+
+    // Assert
+    should([taskOf(agent), taskOf(harness), taskOf(warden)]).deepEqual([{ id: 'F18' }, { id: 'F18' }, { id: 'F18' }]);
+    should(asked).deepEqual([SESSION, SESSION, SESSION]);
+  });
+
+  it('should keep the card an add names, and leave an item without one when there is no focus to take', async () => {
+    // Arrange
+    const focused = withFocus({ focusOf: async () => ({ id: 'F18' }) });
+    const unfocused = withFocus({ focusOf: async () => null });
+    const broken = withFocus({ focusOf: async () => Promise.reject(new Error('config unreadable')) });
+
+    // Act
+    const named = await focused.service.raise(SESSION, { ...request, task: { id: 'F9' } }, AGENT);
+    const none = await unfocused.service.raise(SESSION, request, AGENT);
+    const failed = await broken.service.raise(SESSION, request, AGENT);
+
+    // Assert
+    should(taskOf(named)).deepEqual({ id: 'F9' });
+    should(taskOf(none)).be.undefined();
+    should(taskOf(failed)).be.undefined();
+  });
+
+  it('should not look up a focus for a session id it would refuse', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const { service } = withFocus({
+      focusOf: async sessionId => {
+        asked.push(sessionId);
+        return null;
+      },
+    });
+
+    // Act
+    await service.raise('../escape', request, AGENT);
+
+    // Assert
+    should(asked).be.empty();
+  });
+
+  it('should take no card at all by default', async () => {
+    // Arrange
+    const { service } = createService();
+
+    // Act / Assert
+    should(taskOf(await service.raise(SESSION, request, AGENT))).be.undefined();
+    should(await NO_AGENDA_FOCUS.focusOf(SESSION)).be.null();
   });
 });

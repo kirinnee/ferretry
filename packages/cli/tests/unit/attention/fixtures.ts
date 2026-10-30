@@ -139,6 +139,13 @@ export class RecordingAttentionGateway implements IAttentionGateway {
     this.flushed.push(sessionId);
     return Promise.resolve(this.result);
   }
+
+  /** What the daemon reports it offers; a test sets it to say the daemon is new enough. */
+  offered: readonly string[] = [];
+
+  features(): Promise<readonly string[]> {
+    return Promise.resolve(this.offered);
+  }
 }
 
 /** Captures what the controller printed. */
