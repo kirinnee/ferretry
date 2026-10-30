@@ -1,3 +1,13 @@
+## [4.111.0](https://github.com/kirinnee/ferretry/compare/v4.110.0...v4.111.0) (2026-10-30)
+
+### Features
+
+* speak the agenda wire, and keep answering older clients ([#923](https://github.com/kirinnee/ferretry/issues/923)) ([3a981f2](https://github.com/kirinnee/ferretry/commit/3a981f2f73e30de35af1d000daad00b9eb88eb75))
+
+### Fixes
+
+* **cli:** wait out a starting daemon in the MCP tools, as fy does ([#928](https://github.com/kirinnee/ferretry/issues/928)) ([478abb4](https://github.com/kirinnee/ferretry/commit/478abb4c188aad4f04b761717b5f5f1c0c521fd7))
+
 ## [4.110.0](https://github.com/kirinnee/ferretry/compare/v4.109.0...v4.110.0) (2026-10-30)
 
 ### Features
