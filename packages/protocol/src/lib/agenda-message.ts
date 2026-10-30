@@ -123,6 +123,46 @@ export function agendaReMessage(items: readonly AgendaMessageItem[], message: st
   return `${heading('re', items)} ${message}`;
 }
 
+/**
+ * `!A3`, bounded exactly as the reference grammar bounds it (`packages/pwa/src/lib/references.ts`,
+ * docs/reference-standard.md): after the start or a space/opening bracket/quote, and before the end,
+ * a space, closing punctuation or a colon. Case-sensitive — `!a3` is prose.
+ */
+const AGENDA_REFERENCE = /(?:^|[\s([{"'`<>=—–])!(A[1-9][0-9]*)(?=$|[\s)\]}"'`,;!?<>:.=—–])/gu;
+
+/** The item ids a message references (`!A3`), each once, in the order first named. */
+export const referencedAgendaIds = (message: string): readonly string[] => [
+  ...new Set([...message.matchAll(AGENDA_REFERENCE)].map(match => match[1] as string)),
+];
+
+/** An open item, as much of it as wording a chat reply about it needs. */
+export interface AgendaReplyItem {
+  readonly id: string;
+  readonly notice?: true | undefined;
+}
+
+/**
+ * THE OWNER'S CHAT MESSAGE AS THE FERRET RECEIVES IT — the one place it is worded, so what the daemon delivers
+ * and what the app shows while it is on its way are the same text. A message naming open items (in `open`'s
+ * order, notices left out) is headed `[re !A5 «title»]`; any other message goes exactly as typed.
+ */
+export function agendaChatReply<T extends AgendaReplyItem>(
+  message: string,
+  open: readonly T[],
+  quote: (item: T) => string,
+): { readonly message: string; readonly referenced: readonly T[] } {
+  const ids = new Set(referencedAgendaIds(message));
+  const referenced = open.filter(item => ids.has(item.id) && item.notice !== true);
+  if (referenced.length === 0) return { message, referenced };
+  return {
+    message: agendaReMessage(
+      referenced.map(item => ({ id: item.id, quote: quote(item) })),
+      message,
+    ),
+    referenced,
+  };
+}
+
 /** Several forms delivered as one message: in the order given, a blank line apart. */
 export const agendaBatchMessage = (forms: readonly string[]): string => forms.join('\n\n');
 

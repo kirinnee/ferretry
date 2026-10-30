@@ -7,9 +7,9 @@ import {
   type FoundationPaths,
   type HomeLockFactory,
   resolveStateHome,
-  type SerialExecutor,
   type SessionIndex,
   type SessionIndexFactory,
+  type YieldingSerialExecutor,
 } from '../../lib/index.ts';
 import { DaemonStorage, type DocumentChanges } from './session-storage.ts';
 import type { LayoutInitialization, StateHomeLayout } from './state-home-layout.ts';
@@ -37,7 +37,7 @@ export class DaemonStorageFactory {
     private readonly locks: HomeLockFactory,
     private readonly indexes: SessionIndexFactory,
     private readonly clock: ClockPort,
-    private readonly serial: () => SerialExecutor,
+    private readonly serial: () => YieldingSerialExecutor,
     /** Where the storage hears its documents change, so an unchanged one costs no `stat` per read. */
     private readonly changes?: DocumentChanges,
   ) {}

@@ -369,6 +369,29 @@ describe('the hosted tunnel carrier', () => {
     should(world.notices.stated).deepEqual([]);
   });
 
+  it('should close the listener before it ends the connector, so a browser socket cannot hold the stop', async () => {
+    // Arrange — the connector is still running when the listener closes, or the stop waits out its grace.
+    const runningAtClose: boolean[] = [];
+    const subject = carrier({
+      openListener: async () => ({
+        port: world.listener.port,
+        close: async () => {
+          runningAtClose.push(!world.processes.latest.terminated);
+        },
+      }),
+    });
+    subject.start();
+    await subject.idle();
+    world.processes.latest.say(registered(0));
+
+    // Act
+    await subject.stop();
+
+    // Assert
+    should(runningAtClose).deepEqual([true]);
+    should(world.processes.latest.terminated).be.true();
+  });
+
   it('should close a listener that finished opening after the stop', async () => {
     // Arrange — the listener opens only once the test lets it.
     let open: () => void = () => undefined;

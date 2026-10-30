@@ -1,5 +1,13 @@
-import type { AgendaId, AgendaSnapshot } from '@ferretry/protocol';
+import {
+  type AgendaActionRequest,
+  type AgendaId,
+  type AgendaSnapshot,
+  DAEMON_FEATURES,
+  formatTaskRef,
+  type TaskRef,
+} from '@ferretry/protocol';
 import { type AnswerFlags, parseAnswer } from './answer.ts';
+import { type CardFlag, resolveCardFlag } from './card-flag.ts';
 import {
   type BriefFile,
   type BriefFlags,
@@ -28,7 +36,7 @@ export interface AgendaCommandOptions {
 }
 
 /** Flags that describe a new agenda item, and where its JSON body is read from. */
-export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags, 'neededBy'> {
+export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags, 'neededBy' | 'task'>, CardFlag {
   /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
   readonly by?: string;
   /** A JSON body with the same fields; `-` reads standard input. */
@@ -119,11 +127,18 @@ export class AgendaController {
 
   async add(words: readonly string[], options: AgendaAddOptions): Promise<void> {
     const [file, body] = await this.#inputs(options.jsonFile, options.bodyFile);
-    const request = composeAddRequest(
-      words,
-      { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
+    const flag = resolveCardFlag(words, options);
+    const composed = composeAddRequest(
+      flag.words,
+      {
+        ...withoutBy(options),
+        task: flag.todo,
+        ...this.#neededBy(options.by),
+        ...(body === undefined ? {} : { body }),
+      },
       file,
     );
+    const request = flag.card === undefined ? composed : await this.#withCard(composed, flag.card);
     const sessionId = this.#target(options);
 
     // The board is read first so the item just raised can be named by identity rather than guessed at
@@ -259,6 +274,21 @@ export class AgendaController {
   #neededBy(by: string | undefined): { neededBy?: string } {
     const typed = text(by);
     return typed === undefined ? {} : { neededBy: parseNeededBy(typed, this.now()) };
+  }
+
+  /**
+   * The add with the card `--task` named, sent only to a daemon that reports `agenda.task.1`: an older one
+   * refuses the whole add over the field, so the item is raised without it there and the person is told.
+   */
+  async #withCard(
+    request: Extract<AgendaActionRequest, { action: 'add' }>,
+    card: TaskRef,
+  ): Promise<Extract<AgendaActionRequest, { action: 'add' }>> {
+    if ((await this.gateway.features()).includes(DAEMON_FEATURES.agendaTask)) return { ...request, task: card };
+    this.out.diagnostic(
+      `this daemon is older than agenda items tied to cards, so the item is raised without ${formatTaskRef(card)}; update the daemon to tie it`,
+    );
+    return request;
   }
 
   /** Which session this invocation acts on. */

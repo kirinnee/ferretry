@@ -2,7 +2,7 @@ import { AttachmentUnlockRequestSchema, AttachmentUploadRequestSchema, type Atta
 import { parseBody } from '../../api/body.ts';
 import { ApiError } from '../../api/error.ts';
 import { type ApiResponse, decodeParameter } from '../../api/http.ts';
-import { jsonResponse } from '../../api/responses.ts';
+import { jsonResponse, jsonTextResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
 import { SessionAttachmentError } from '../../attachments/index.ts';
 
@@ -45,21 +45,40 @@ const attachmentId = (context: RouteContext): string => {
 
 const bytes = (base64: string): Uint8Array => {
   try {
-    const binary = atob(base64);
-    const value = new Uint8Array(binary.length);
-    for (let index = 0; index < binary.length; index += 1) value[index] = binary.charCodeAt(index);
-    return value;
+    // `atob` refuses what is not base64, and the copy into bytes is native rather than a per-character loop —
+    // into an array of its own, never a view of Buffer's shared pool.
+    return new Uint8Array(Buffer.from(atob(base64), 'latin1'));
   } catch {
     throw new ApiError(400, 'attachment bytes are not valid base64', 'invalid_attachment');
   }
 };
 
-const base64 = (value: Uint8Array): string => {
-  let binary = '';
-  for (let offset = 0; offset < value.byteLength; offset += 32_768)
-    binary += String.fromCharCode(...value.subarray(offset, offset + 32_768));
-  return btoa(binary);
-};
+/**
+ * Bytes encoded per slice before the loop is given back. A multiple of three, so the slices join without
+ * padding between them; 768 KiB encodes natively in about a millisecond.
+ */
+const ENCODE_SLICE_BYTES = 3 * 256 * 1024;
+
+const yieldToLoop = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
+
+/**
+ * The download's JSON, `{ attachment, base64 }`, spelled exactly as `JSON.stringify` spells it.
+ *
+ * NEVER ON THE LOOP IN ONE PIECE. An attachment is up to 32 MiB, and encoding it used to be a JavaScript
+ * loop of `String.fromCharCode` over the whole file and then a `btoa` — half a second of a stalled daemon
+ * per download on the EC2 box. It is encoded natively, a slice at a time with the loop handed back between
+ * slices, and appended to the body rather than joined and re-serialised: base64 needs no escaping, so
+ * `JSON.stringify` would only have copied it again.
+ */
+async function downloadBody(attachment: AttachmentView, value: Uint8Array): Promise<string> {
+  let body = `{"attachment":${JSON.stringify(attachment)},"base64":"`;
+  for (let offset = 0; offset < value.byteLength; offset += ENCODE_SLICE_BYTES) {
+    if (offset > 0) await yieldToLoop();
+    const slice = value.subarray(offset, offset + ENCODE_SLICE_BYTES);
+    body += Buffer.from(slice.buffer, slice.byteOffset, slice.byteLength).toString('base64');
+  }
+  return `${body}"}`;
+}
 
 const reraise = (error: unknown): never => {
   if (error instanceof SessionAttachmentError)
@@ -77,7 +96,7 @@ async function upload(subsystem: SessionAttachmentSubsystem, context: RouteConte
 
 async function download(subsystem: SessionAttachmentSubsystem, context: RouteContext): Promise<ApiResponse> {
   const result = await subsystem.download(sessionId(context), attachmentId(context)).catch(reraise);
-  return jsonResponse({ attachment: result.attachment, base64: base64(result.bytes) });
+  return jsonTextResponse(await downloadBody(result.attachment, result.bytes));
 }
 
 async function unlock(subsystem: SessionAttachmentSubsystem, context: RouteContext): Promise<ApiResponse> {

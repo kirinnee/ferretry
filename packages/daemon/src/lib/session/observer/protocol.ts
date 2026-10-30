@@ -34,6 +34,8 @@ export interface SessionBinding {
   };
   /** The transcript proved to be this session's, once one is; absent before. */
   readonly transcript?: { readonly file: string; readonly harness: 'claude' | 'codex' } | undefined;
+  /** Claude only: the file its question hook records an asked question in (`SessionPaths.questionAsked`). */
+  readonly questionAsked?: string | undefined;
 }
 
 /** Which bytes of a transcript a look read: the main thread compares it with a `stat` of its own. */

@@ -8,9 +8,9 @@ import {
   parsePaneSighting,
   provePane,
   stampToRecord,
-  TmuxController,
   type TmuxCommandPort,
   type TmuxCommandResult,
+  TmuxController,
 } from '../../../src/lib/index.ts';
 
 const CREATED = 1_792_626_406;

@@ -1,15 +1,17 @@
 /**
  * A ferret's chat as the agenda sits in it: a header (where the "Agenda" dock button lives), the transcript, and
- * above a composer-shaped box the line, the drawer and the "re:" chips. An opened item is the full-height overlay
- * over the whole chat column. The REAL `useAgenda` drives it; only the data is invented and the answers go
- * nowhere.
+ * above a composer-shaped box the line, the drawer and the "about" chip. An opened item is an overlay over the
+ * message list ONLY: the agenda row and the composer stay visible and typeable. The REAL `useAgenda` drives it;
+ * only the data is invented and the answers go nowhere.
  *
- * The composer is a box of one fixed height, so what the screenshot script measures — that nothing the agenda
- * does ever moves it in the normal chat — is the layout's doing, not the box's.
+ * The composer is a box of one fixed height whose Send adds the message to the list (carrying the item's
+ * reference as the real composer does), so what the screenshot script measures — that nothing the agenda does
+ * ever moves it, and that a send closes the view — is the layout's doing, not the box's.
  */
 
 import type { AgendaId, AgendaSnapshot } from '@ferretry/protocol';
-import { type ReactElement, type ReactNode, useMemo } from 'react';
+import { type ReactElement, type ReactNode, useMemo, useState } from 'react';
+import { AgendaItemsProvider, AgendaMessageOr, useAgendaChatReply } from '../src/components/agenda-message.tsx';
 import { Markdown } from '../src/components/markdown.tsx';
 import { useAgenda } from '../src/features/agenda/agenda.tsx';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
@@ -61,6 +63,8 @@ export function AgendaChatHarness({
   entries,
   live,
 }: AgendaChatHarnessProps): ReactElement {
+  const [draft, setDraft] = useState('');
+  const [sent, setSent] = useState<readonly string[]>([]);
   const scope = useMemo(() => daemonSessionScope(CONNECTION, 'fr'), []);
   const agenda = useAgenda({
     agendaMode,
@@ -74,17 +78,17 @@ export function AgendaChatHarness({
     snapshot: board,
     status: 'ready',
     swipeable: !desktop,
-    send: noop,
     ...(entries === undefined ? {} : { entries }),
     ...(live === undefined ? {} : { live }),
   });
   const chat = (
-    <div
-      className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col"
-      data-agenda-focus={agenda.covered || undefined}
-    >
-      <div className="fy-chat-log" inert={agenda.covered || undefined}>
-        <div className="flex min-h-0 flex-col justify-end gap-sm overflow-y-auto p-panel" style={{ gridArea: '1 / 1' }}>
+    <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col">
+      <div className="fy-chat-log">
+        <div
+          className="flex min-h-0 flex-col justify-end gap-sm overflow-y-auto p-panel"
+          inert={agenda.covered || undefined}
+          style={{ gridArea: '1 / 1' }}
+        >
           {MESSAGES.map(message => (
             <article
               className="rounded-panel border border-border bg-surface p-panel text-cell"
@@ -100,20 +104,54 @@ export function AgendaChatHarness({
               />
             </article>
           ))}
+          {sent.map(text => (
+            <article
+              className="self-end rounded-panel border border-border bg-accent-soft p-panel text-cell"
+              data-chat-line=""
+              data-chat-sent=""
+              key={text}
+            >
+              <AgendaItemsProvider snapshot={board}>
+                <SentWords text={text} />
+              </AgendaItemsProvider>
+            </article>
+          ))}
         </div>
+        {agenda.scrim}
+        {agenda.view}
       </div>
-      <div className="fy-chat-input" data-safe-bottom="" data-session-input="" inert={agenda.covered || undefined}>
+      <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
         <div className="fy-chat-input__column">
           {agenda.above}
           <div
-            className="flex h-14 items-center rounded-panel border border-border bg-surface px-panel text-cell text-faint"
+            className="flex h-14 items-center gap-2 rounded-panel border border-border bg-surface px-panel text-cell"
             data-agenda-harness-composer=""
           >
-            Message {ferret.toLowerCase()}…
+            <input
+              aria-label="Message"
+              className="min-w-0 flex-1 bg-transparent text-fg outline-none"
+              data-agenda-harness-input=""
+              onChange={event => setDraft(event.target.value)}
+              placeholder={`Message ${ferret.toLowerCase()}…`}
+              value={draft}
+            />
+            <button
+              className="kt-btn"
+              data-agenda-harness-send=""
+              disabled={draft.trim() === ''}
+              onClick={() => {
+                const prefix = agenda.references().map(id => `!${id}`);
+                setSent(current => [...current, [...prefix, draft.trim()].join(' ')]);
+                setDraft('');
+                agenda.composer.onSent();
+              }}
+              type="button"
+            >
+              Send
+            </button>
           </div>
         </div>
       </div>
-      {agenda.view}
     </div>
   );
   return (
@@ -136,4 +174,9 @@ export function AgendaChatHarness({
       )}
     </div>
   );
+}
+
+/** A message the harness sent, drawn the way the chat draws one on its way: worded as the ferret receives it. */
+function SentWords({ text }: { readonly text: string }): ReactElement {
+  return <AgendaMessageOr fallback={text} text={useAgendaChatReply(text)} />;
 }

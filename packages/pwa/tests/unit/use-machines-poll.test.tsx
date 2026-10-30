@@ -3,9 +3,9 @@ import {
   BACKGROUND_POLL_MS,
   backgroundPollMs,
   browserFleetPollEnvironment,
+  FLEET_FEED_SAFETY_MS,
   FLEET_POLL_MS,
   type FleetPollEnvironment,
-  FLEET_FEED_SAFETY_MS,
   type MachineFleetFeedOpener,
   PHONE_BACKGROUND_POLL_MS,
   useMachinesPoll,
@@ -32,6 +32,7 @@ function Poller({
   environment,
   openFleetFeed,
   feedEnvironment,
+  onFeedEvent,
 }: {
   readonly fleet: { hydrate: (daemon: DaemonConnection) => Promise<readonly never[]> };
   readonly machines: readonly DaemonConnection[];
@@ -40,8 +41,18 @@ function Poller({
   readonly environment?: FleetPollEnvironment;
   readonly openFleetFeed?: MachineFleetFeedOpener;
   readonly feedEnvironment?: FleetFeedEnvironment;
+  readonly onFeedEvent?: (daemonId: DaemonId, event: { readonly type: string }) => void;
 }) {
-  useMachinesPoll(fleet as never, machines, current, phone, environment, openFleetFeed, feedEnvironment);
+  useMachinesPoll(
+    fleet as never,
+    machines,
+    current,
+    phone,
+    environment,
+    openFleetFeed,
+    feedEnvironment,
+    onFeedEvent as never,
+  );
   return null;
 }
 
@@ -240,6 +251,33 @@ const feeds = () => {
 };
 
 describe('useMachinesPoll with fleet feeds', () => {
+  test('every event a machine’s feed delivers is handed on with the machine it came from', async () => {
+    // Arrange
+    const { fleet } = recorder();
+    const fake = fakeEnvironment();
+    const time = feedTime();
+    const daemons = feeds();
+    const heard: string[] = [];
+    view = await mount(
+      <Poller
+        current={alpha.daemonId}
+        environment={fake.environment}
+        feedEnvironment={time.environment}
+        fleet={fleet}
+        machines={[alpha, beta]}
+        onFeedEvent={(daemonId, event) => heard.push(`${String(daemonId)}:${event.type}`)}
+        openFleetFeed={daemons.open}
+      />,
+    );
+
+    // Act
+    await interact(() => daemons.opened.get('beta')?.event());
+    await interact(() => daemons.opened.get('alpha')?.event());
+
+    // Assert
+    expect(heard).toEqual(['beta:turn.state', 'alpha:turn.state']);
+  });
+
   test('a machine whose feed is live is read on its word, and on the beat only as a safety net', async () => {
     // Arrange — alpha's daemon has the feed; beta's is too old for it.
     const { reads, fleet } = recorder();

@@ -15,8 +15,8 @@ const modulePath = (relative: string): string => JSON.stringify(resolve(import.m
 
 /**
  * The child's whole program. The sleeps in it are the fixture, not a wait: they ARE the slow boot step
- * the journeys observe from outside. `slow` waits four seconds without blocking, as a boot over a large fleet
- * does; `hiccup` blocks the loop for 1.2 seconds after a moment and carries on; `stall` blocks it for a
+ * the journeys observe from outside. `slow` waits a second without blocking, as a boot over a large fleet
+ * does; `hiccup` blocks the loop for 1.2 seconds after half a second and carries on; `stall` blocks it for a
  * minute, which the watchdog must end.
  */
 const program = (mode: 'slow' | 'hiccup' | 'stall'): string => `
@@ -29,7 +29,7 @@ const program = (mode: 'slow' | 'hiccup' | 'stall'): string => `
     ...world,
     relayDirectory: { read: async () => NO_RELAY_DIRECTORY },
     createUsageFeed: async config => {
-      await Bun.sleep(mode === 'slow' ? 4_000 : 1_500);
+      await Bun.sleep(mode === 'slow' ? 1_000 : 500);
       if (mode === 'hiccup') block(1_200);
       if (mode === 'stall') block(60_000);
       return await world.createUsageFeed(config);

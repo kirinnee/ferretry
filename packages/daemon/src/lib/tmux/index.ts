@@ -16,3 +16,4 @@ export * from './queue.ts';
 export * from './retry.ts';
 export * from './server-absent.ts';
 export * from './startup.ts';
+export * from './version.ts';

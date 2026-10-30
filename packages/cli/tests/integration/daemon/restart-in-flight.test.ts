@@ -384,7 +384,12 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
     // Typed, but not yet proven: only a look at the transcript does that, and the first is 2 s away.
     should(SendResultSchema.parse(JSON.parse(sentBody)).fate).not.equal('delivered');
     // A lead's `fy wait` on this ferret, already polling when the daemon goes down.
-    const waiting = fy(daemon, ['wait', session.config.id, '--timeout', '12', '--interval', '1', '--keep'], ferret);
+    const marker = join(daemon.root, 'delivered');
+    const waiting = fy(
+      daemon,
+      ['wait', session.config.id, '--timeout', '12', '--interval', '1', '--until-marker', marker, '--keep'],
+      ferret,
+    );
 
     // Act — the restart, with the ferret's calls made while nothing answers. The daemon comes back only
     // once all three have met the dead one and said they are waiting.
@@ -397,10 +402,11 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
       saidItIsWaiting(mcp, 'the MCP server'),
     ]);
     await daemon.start();
+    await writeFile(marker, '');
 
-    // Assert — the wait rode the restart out and ended on its own deadline, never "daemon lost" (69).
+    // Assert — the wait rode the restart out and polled the NEW daemon through to the marker (0), never "daemon lost" (69).
     const waited = await finished(waiting);
-    should(waited.code).equal(124, waited.stderr);
+    should(waited.code).equal(0, waited.stderr);
     should(waited.stderr.match(NOTE)).have.length(1);
     // The fy call answered, saying once that it waited.
     const status = await finished(call);

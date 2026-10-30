@@ -4,6 +4,7 @@ import {
   AGENDA_QUOTE_CHARS,
   agendaAnswerMessage,
   agendaBatchMessage,
+  agendaChatReply,
   agendaDiscussMessage,
   agendaDismissedMessage,
   agendaDoneMessage,
@@ -11,6 +12,7 @@ import {
   agendaQuote,
   agendaReMessage,
   parseAgendaMessage,
+  referencedAgendaIds,
 } from '../../src/lib/agenda-message.ts';
 
 const ask = { id: 'A45', quote: 'How should outdated ferrets pick up new instructions after an update?' };
@@ -130,5 +132,37 @@ describe('the agenda chat forms — the same words, read back', () => {
     should(parseAgendaMessage('[answer to !A3 «x», !A4 «y»] both')).be.undefined();
     should(parseAgendaMessage('see [re !A3 «x»] later')).be.undefined();
     should(parseAgendaMessage(`a note of mine\n\n${agendaDoneMessage(other)}`)).be.undefined();
+  });
+});
+
+describe('agendaChatReply', () => {
+  const open = [
+    { id: 'A5', title: 'Which storage engine?' },
+    { id: 'A7', title: 'Restart the relay?' },
+    { id: 'A9', title: 'A notice', notice: true as const },
+  ];
+  const quote = (item: (typeof open)[number]): string => item.title;
+
+  it('should head a message naming open items as a reply about them, in the board order', () => {
+    // Act
+    const reply = agendaChatReply('!A7 and !A5: leaning SQLite', open, quote);
+
+    // Assert
+    should(reply.message).equal(
+      '[re !A5 «Which storage engine?», !A7 «Restart the relay?»] !A7 and !A5: leaning SQLite',
+    );
+    should(reply.referenced.map(item => item.id)).deepEqual(['A5', 'A7']);
+  });
+
+  it('should send a message that names nothing open, or only a notice, exactly as typed', () => {
+    // Assert
+    should(agendaChatReply('just chatting', open, quote)).deepEqual({ message: 'just chatting', referenced: [] });
+    should(agendaChatReply('!A9 seen it', open, quote).message).equal('!A9 seen it');
+    should(agendaChatReply('!A2 is closed', open, quote).message).equal('!A2 is closed');
+  });
+
+  it('should read a reference only where the reference grammar does', () => {
+    // Assert
+    should(referencedAgendaIds('see !A5, (!A7) and !A5 again; not a!A9 or !a3')).deepEqual(['A5', 'A7']);
   });
 });

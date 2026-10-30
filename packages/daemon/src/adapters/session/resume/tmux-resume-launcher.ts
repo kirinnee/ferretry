@@ -2,7 +2,7 @@ import { launchInstructions } from '@ferretry/fleet';
 import type { SessionLaunchInstructions } from '@ferretry/protocol';
 import { type AccountLaunchEnvironment, launchEnvironment } from '../../../lib/fleet/launch-environment.ts';
 import type { AccountLaunchRenewal } from '../../../lib/fleet/launch-renewal.ts';
-import { type SessionMediaDirectory, sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
+import { type SessionPaneFolders, sessionPaneEnvironment } from '../../../lib/session/lifecycle/policy.ts';
 import {
   type PaneObservation,
   type ResumeLauncher,
@@ -108,8 +108,8 @@ export class TmuxResumeLauncher implements ResumeLauncher {
      * environment above is resolved here to avoid.
      */
     private readonly accountRenewal?: AccountLaunchRenewal,
-    /** The same media folder the first launch handed the pane, so a revive keeps it. */
-    private readonly media?: SessionMediaDirectory,
+    /** The same media folder and question file the first launch handed the pane, so a revive keeps them. */
+    private readonly files?: SessionPaneFolders,
     /** The CLI's binary name; see the launch path's identical parameter. */
     private readonly clientName?: string,
   ) {}
@@ -155,7 +155,7 @@ export class TmuxResumeLauncher implements ResumeLauncher {
       id,
       launchEnvironment(account, spec.env ?? {}),
       spec.mode,
-      await this.media?.(id),
+      await this.files?.(id),
     );
     await this.tmux.launch({ session: spec.tmuxSession, cwd: spec.cwd, command: [program, ...arguments_], env });
     // The process incarnation changed. Hot apply and terminal reap must address this replacement,

@@ -4,8 +4,8 @@ import {
   launchGuardActive,
   RealHarnessRefusedError,
   realHarnessInstall,
-  TmuxController,
   type TmuxCommandPort,
+  TmuxController,
   type TmuxLaunch,
   type TmuxLaunchGuard,
 } from '../../../src/lib/index.ts';
