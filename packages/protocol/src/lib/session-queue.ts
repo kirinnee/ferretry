@@ -52,6 +52,13 @@ export const QueuedMessageSchema = z.object({
   fromName: z.string().optional(),
   text: z.string(),
   attachmentIds: z.array(z.string()),
+  /** The sender is parked awaiting the reply, so the agent is told how to unblock them. */
+  replyExpected: z.boolean().optional(),
+  /**
+   * A daemon notice that may be typed into the owner's own chat, as a message of its own: the board's
+   * news for a lead. Any other daemon message is never typed into an interactive session.
+   */
+  chat: z.boolean().optional(),
   enqueuedAt: InstantSchema,
   state: QueuedMessageStateSchema,
   /** When it reached `state`. */
@@ -63,6 +70,10 @@ export const QueuedMessageSchema = z.object({
   failure: z.string().optional(),
 });
 export type QueuedMessage = z.infer<typeof QueuedMessageSchema>;
+
+/** `PATCH /v1/sessions/:sessionId/queue/:messageId`: new words for a message that is still waiting. */
+export const QueueEditRequestSchema = z.strictObject({ text: z.string().trim().min(1) });
+export type QueueEditRequest = z.infer<typeof QueueEditRequestSchema>;
 
 /** `GET /v1/sessions/:sessionId/queue`: every message the session's queue holds, oldest first. */
 export const SessionQueueSchema = z.object({ messages: z.array(QueuedMessageSchema) });

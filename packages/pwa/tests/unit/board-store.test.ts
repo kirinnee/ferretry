@@ -366,6 +366,64 @@ describe('DaemonBoardStore writes', () => {
   });
 });
 
+describe('DaemonBoardStore create', () => {
+  const request = { kind: 'feature', title: 'Try it', ask: { text: 'do it', source: 'owner (board)' } } as const;
+
+  it('puts the card the daemon opened into the views showing that machine', async () => {
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => boardOk({ task: card('F9'), laneSet: lanes }),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    const answer = await store.create(laptop, request);
+    expect(answer.ok && answer.value.id).toBe('F9');
+    expect(cardsOf(store, key, laptop.daemonId).sort()).toEqual(['F1:implement', 'F9:implement']);
+  });
+
+  it('changes nothing when the daemon refuses, and hands the refusal back', async () => {
+    const refusal = { status: 403, message: 'owner only', boardCode: 'owner-gate' as const };
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => boardErr(refusal),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    expect(await store.create(laptop, request)).toEqual(boardErr(refusal));
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual(['F1:implement']);
+  });
+
+  it('does not place a card the machine was forgotten before it was opened', async () => {
+    const opened = deferred<ReturnType<typeof boardOk>>();
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => (await opened.promise) as never,
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    await flush();
+    const pending = store.create(laptop, request);
+    store.clearDaemon(laptop.daemonId);
+    opened.resolve(boardOk({ task: card('F9'), laneSet: lanes }));
+    expect((await pending).ok).toBe(true);
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual([]);
+  });
+
+  it('skips views that do not show the machine', async () => {
+    const port = fakePort({
+      board: async () => boardAnswer([card('F1')], { projectId: PROJECT, laneSet: lanes }),
+      create: async () => boardOk({ task: card('F9'), laneSet: lanes }),
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [workstation]);
+    await flush();
+    await store.create(laptop, request);
+    expect(cardsOf(store, key, laptop.daemonId)).toEqual([]);
+  });
+});
+
 describe('DaemonBoardStore one card and projects', () => {
   it('reads one card, says when the machine has none, re-reads on its event and on the beat', async () => {
     let task: ReturnType<typeof card> | null = card('F1');

@@ -74,6 +74,7 @@ describe('attention card', () => {
       should(askForKind('info')).be.undefined();
       should(askForKind('choice', [{ label: 'A' }, { label: 'B' }])).eql(choice('A', 'B'));
       should(askForKind('reply')).eql({ kind: 'open-question' });
+      should(askForKind('input')).be.undefined();
     });
   });
 
@@ -121,6 +122,7 @@ describe('attention card', () => {
     it('gives info one answer, Got it, on the right, and a text-only ask none', () => {
       should(layout(defaultAgendaAnswers('info', undefined))).eql(['right:Got it']);
       should(defaultAgendaAnswers('reply', { kind: 'open-question' })).eql([]);
+      should(defaultAgendaAnswers('input', undefined)).eql([]);
     });
   });
 

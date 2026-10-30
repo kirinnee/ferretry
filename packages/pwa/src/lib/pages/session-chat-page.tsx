@@ -644,6 +644,7 @@ export function SessionChatPage({
           ? {}
           : { skills: composerCatalogs.skills.skills.map(skill => skill.name) }),
         ...(onNavigate === undefined ? {} : { onNavigate }),
+        cardRoute: hasBoard,
         ...(terminals === null ? {} : { terminals }),
         ...(browserPages.status === null ? {} : { browser: browserPages.status }),
         destinations: referenceDestinations,
@@ -663,6 +664,7 @@ export function SessionChatPage({
       composerCatalogs.tasks,
       composerCatalogs.skills,
       onNavigate,
+      hasBoard,
       agendaModel === undefined,
       agendaKey,
       openAgendaReference,

@@ -21,6 +21,7 @@ const IDLE_PORT: BoardPort = {
   task: refuse,
   projects: refuse,
   lanes: refuse,
+  create: refuse,
   version: refuse,
   act: refuse,
 };

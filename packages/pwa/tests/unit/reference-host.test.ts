@@ -4,7 +4,7 @@ import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { sessionReferenceHost } from '../../src/lib/reference-host.ts';
 
 describe('sessionReferenceHost', () => {
-  it('falls back to the session on the daemon that owns every reference, at the Attention item', () => {
+  it("opens a task on that daemon's board and the rest on the session, at the Attention item", () => {
     const destinations: string[] = [];
     const host = sessionReferenceHost(daemonId('daemon-a'), 'same-session', to => destinations.push(to));
 
@@ -12,10 +12,13 @@ describe('sessionReferenceHost', () => {
     host.onCodeReferenceOpen?.({ path: 'src/app.ts', line: 4 });
     host.onAgendaOpen?.('A3');
 
+    host.onTaskOpen?.('f7');
+
     expect(destinations).toEqual([
-      '/d/daemon-a/session/same-session',
+      '/d/daemon-a/board/F12',
       '/d/daemon-a/session/same-session',
       '/d/daemon-a/session/same-session?agenda=A3',
+      '/d/daemon-a/board/F7',
     ]);
   });
 

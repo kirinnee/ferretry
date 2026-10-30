@@ -54,6 +54,12 @@ class World {
   /** What each hand-over answers, in order; then `landed`. */
   readonly answers: Array<HandOver | Error> = [];
   nowMs = T0;
+  /** Each wait the deliverer asked for, resolved at once unless a test holds it. */
+  readonly slept: number[] = [];
+  /** A hand-over that waits until the test releases it. */
+  hold: Promise<void> | undefined;
+  /** A drain bound that never runs out, so only the hand-over finishing can end a stop. */
+  sleepForever = false;
   readonly deliverer: QueueDeliverer;
 
   constructor(...messages: QueuedMessage[]) {
@@ -73,6 +79,7 @@ class World {
       transport: {
         handOver: async (_id: SessionId, entry: QueuedMessage) => {
           this.handed.push(entry.id);
+          if (this.hold !== undefined) await this.hold;
           const answer = this.answers.shift() ?? { kind: 'landed' };
           if (answer instanceof Error) throw answer;
           return answer;
@@ -80,6 +87,10 @@ class World {
         fate: async (_id: SessionId, messageId: string) => this.fates.get(messageId),
       },
       sessions: () => [ID],
+      sleep: async milliseconds => {
+        this.slept.push(milliseconds);
+        if (this.sleepForever) await new Promise<void>(() => undefined);
+      },
     });
   }
 
@@ -290,9 +301,42 @@ describe('handing over a queue', () => {
     await world.deliverer.changed(ID);
     should(world.handed).be.empty();
 
-    const disarm = await world.deliverer.arm();
-    disarm();
+    await world.deliverer.arm();
     should(world.handed).eql(['a']);
+  });
+
+  it('should finish a hand-over in flight when the daemon stops, and start nothing after', async () => {
+    // A send answers once its message is on disk; a daemon stopped a moment later cut the typing in half.
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    let release = (): void => undefined;
+    world.hold = new Promise(resolve => {
+      release = resolve;
+    });
+    world.sleepForever = true;
+    void world.deliverer.enqueued(ID);
+    await Promise.resolve();
+
+    const stopping = world.deliverer.stop();
+    release();
+    await stopping;
+    // The stop returned only once the hand-over in flight had finished.
+    should(world.state('a')?.state).equal('delivered');
+    await world.deliverer.changed(ID);
+    await world.deliverer.look(ID);
+
+    should(world.state('a')?.state).equal('delivered');
+    should(world.handed).eql(['a', 'b']);
+    should(world.slept).eql([defaultQueueDeliverySettings.drainMs]);
+  });
+
+  it('should stop at once when nothing is in flight', async () => {
+    const world = new World(message('a', 'human'));
+
+    await world.deliverer.stop();
+    await world.deliverer.enqueued(ID);
+
+    should(world.handed).be.empty();
+    should(world.slept).be.empty();
   });
 
   it('should keep going when one session cannot be looked at during the restart look', async () => {
@@ -306,6 +350,7 @@ describe('handing over a queue', () => {
       view: async () => ({ target: world.target, pane: pane(), launching: false }),
       transport: { handOver: async () => ({ kind: 'landed' }), fate: async () => undefined },
       sessions: () => [ID],
+      sleep: async () => undefined,
     });
 
     await failing.arm();

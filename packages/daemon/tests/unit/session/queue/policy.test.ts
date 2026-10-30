@@ -71,6 +71,13 @@ describe("the owner's own chat", () => {
     should(boardOnly(queue[1] as QueuedMessage, 'interactive')).be.false();
     should(deliveryOrder(queue, 'interactive').map(entry => entry.id)).eql(['peer']);
   });
+
+  it('should type a daemon notice made for the chat into it, as a message of its own', () => {
+    const board = { ...message('board', 'daemon', 0), chat: true };
+
+    should(boardOnly(board, 'interactive')).be.false();
+    should(deliveryOrder([board], 'interactive').map(entry => entry.id)).eql(['board']);
+  });
 });
 
 describe('one at a time', () => {

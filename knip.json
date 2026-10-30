@@ -45,6 +45,8 @@
         "harness/agenda-cards-page.tsx",
         "harness/board-screenshot.ts",
         "harness/board-page.tsx",
+        "harness/board-detail-screenshot.ts",
+        "harness/board-detail.tsx",
         "harness/lane-editor-screenshot.ts",
         "harness/lane-editor-page.tsx",
         "harness/board-chat-screenshot.ts",

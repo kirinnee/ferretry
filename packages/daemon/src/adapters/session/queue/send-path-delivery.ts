@@ -41,6 +41,7 @@ export class SendPathQueueTransport implements QueueTransport {
         id,
         sendId: message.id,
         message: message.text,
+        ...(message.replyExpected === true ? { replyExpected: true } : {}),
         ...(message.sender === 'agent' && message.from !== undefined ? { senderReference: message.from } : {}),
         ...(message.sender === 'daemon' ? { origin: 'daemon' as const } : {}),
       });

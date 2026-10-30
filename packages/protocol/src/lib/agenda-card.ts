@@ -18,6 +18,7 @@
  * | review     | Needs changes  |                   | Looks good    |
  * | info       |                |                   | Got it        |
  * | reply      |                |                   |               |
+ * | input      |                |                   |               |
  *
  * A choice's recommended answer is always in the MIDDLE (↑): the swipe row reads left · middle · right, and the
  * pick sits where the thumb goes first. A choice with no recommendation recommends its first option. Swipe ↓ is
@@ -129,6 +130,8 @@ export const askForKind = (kind: AgendaKind, options: readonly AgendaAskOption[]
       return undefined;
     case 'reply':
       return { kind: 'open-question' };
+    case 'input':
+      return undefined;
   }
 };
 
@@ -206,6 +209,7 @@ export const defaultAgendaAnswers = (
       case 'info':
         return [answer('right', 'done', GOT_IT_LABEL)];
       case 'reply':
+      case 'input':
         return [];
     }
   })();

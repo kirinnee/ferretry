@@ -10,9 +10,9 @@ decisions are in `packages/daemon/src/lib/tmux/` and `packages/daemon/src/lib/se
 
 ## The durable queue (being built)
 
-Every message to a session is moving onto ONE durable queue per session, owned by one deliverer, in
-slices (owner-approved 2026-10-30). Until delivery rides it, the queue is written and read but nothing
-is typed from it; the rest of this page is still how a message reaches the pane.
+Every message to a session goes through ONE durable queue per session, owned by one deliverer
+(owner-approved 2026-10-30). The deliverer hands each message to the send path described in the rest of
+this page, which is still how a message reaches the pane.
 
 - **Model** — `packages/protocol/src/lib/session-queue.ts` (`QueuedMessageSchema`): ✓ `queued` on accept,
   ✓✓ `delivered` once typed and submitted (pane proof), ✓✓✓ `read` once the transcript shows it as a user
@@ -34,12 +34,38 @@ is typed from it; the rest of this page is still how a message reaches the pane.
   (`movesFrom`): `queued` there is ✓✓, `delivered` there is ✓✓✓. A `typing` message the ledger never saw
   had no key typed and waits again; nothing is ever typed twice on a guess. It looks at a session when a
   message is enqueued, when its state document changes, at boot, and every `lookMs` (5 s) while something
-  in it is still waiting or unproven. Both harnesses follow one rule: Claude Code's own queue shows a
+  in it is still waiting or unproven. It is armed after the bind, like the send tracker, and stopped FIRST
+  on the way down: a send answers once its message is on disk, so one sent just before a stop is still
+  being typed, and the stop waits (up to `drainMs`, 15 s) for that hand-over rather than cutting it in half. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
   shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
+- **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
+  start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
+  structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
+  path says them, and nothing is queued. The person's agenda context and the attachment paths are baked
+  into the text; the board's held events are NOT — they go as a message of their own, Ferretry's
+  (`[ferretry] [board] …`, `chat: true`), never on top of the sender's words. The route then waits, up to
+  `QUEUE_ANSWER_WAIT_MS` (20 s), for the deliverer's first look and answers what the send ledger says the
+  hand-over did (`answerOf`), so a message into an empty box is answered exactly as the direct path
+  answered it; one held for a draft or a question is answered `queued` at once, with the message id as
+  `sendId`. `--now` (stop the running turn first) still goes straight down the send path.
+- **A daemon notice made for the chat** (`chat: true`) is typed into an interactive session as a message of
+  its own: the board's news for a lead. Every other daemon message stays out of the owner's chat.
+- **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
+  re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
+  own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the
+  agenda answers, the owner's. A daemon message to an INTERACTIVE session still takes the direct path:
+  the queue never types into the owner's own chat, and those producers do not post to its board yet. The
+  owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
+  does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
+  failure told back to a ferret, and a held message released after a revive, keep the direct path.
+- **Until the app shows ticks** — a queued message has no send-ledger row until it is handed over, so the
+  app keeps its own "sending" bubble for it until then.
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
-- **Edit or cancel** — only while `queued` (`SessionQueueService.edit` / `.cancel`): once a key has gone to
-  the pane, the words are the agent's.
+- **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
+  `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
+<ferret> <id> <text…>` and `fy queue cancel <ferret> <id>`. Once a key has gone to the pane the words are
+  the agent's, and either answers `409`.
 
 ## The composer is read, never searched for
 
@@ -149,6 +175,18 @@ the tests check every cursor tmux could report).
   shows a `Try "…"` suggestion with the cursor at its first column.
 - **`C-u` erases back to the start of the wrapped ROW the cursor is on**, not the message: a pointer
   wrapped over three rows loses only its last row (`claude-2.1.281-titled-draft-pointer-after-cu`).
+- A queued prompt Claude feeds into the running turn is recorded as an `attachment` › `queued_command`,
+  and its `prompt` is a STRING only for plain text. A drain that carries an image, a paste, or several
+  queued prompts at once records CONTENT BLOCKS, read like a user record's (`claudeUserText`). Read as a
+  string only, that drain proved nothing: on 2026-10-30 a ferret's message the lead had read was called
+  absent, typed three more times, and shown on the owner's phone as "not delivered".
+
+**"Not delivered" is a claim of absence, and only absence earns it.** A typed send whose session ended
+before anything proved it is `unaccounted` (`session_ended`) — a harness queue holding it at a restart
+delivers it all the same — and only a send nothing was ever typed for is `timed_out` there. A `timed_out`
+send stays watched for the repair window (`repairLimitMs`, 3 days), like a cancelled one, so a record
+the transcript holds corrects it to delivered: the rows the old reader got wrong correct themselves the
+next time their ferret's sends are read.
 
 The incident: one `fy send` to a mid-turn Claude ferret was not recognised as held, so at each deadline
 (15 s, 30 s, 60 s) the tracker called it absent and typed it again — **four copies in one queue**, and

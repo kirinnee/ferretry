@@ -33,6 +33,7 @@ import type { ResolvedSurfaceReference } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { createSurfaceReferenceResolver, terminalIdForSurfaceKey } from '../lib/surface-references.ts';
 import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
+import { daemonBoardCardPath } from '../lib/pages/routes.ts';
 import {
   openSidePaneFileTab,
   openSidePaneTab,
@@ -109,6 +110,8 @@ export interface SessionReferenceSurfaceOptions {
    * link whose click is swallowed.
    */
   readonly onNavigate?: (to: string) => void;
+  /** False when this machine has no board route (an older daemon): `&F12` then keeps the Tasks destination. */
+  readonly cardRoute?: boolean;
   /**
    * Where the session page shows what a reference opens — the split workspace's tabs and the context
    * rail. Each one absent falls back to this scope's side pane, which is what a host with no
@@ -153,6 +156,7 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     terminals,
     browser,
     onNavigate,
+    cardRoute = true,
     destinations = {},
   } = options;
   const agenda = agendaIds === undefined ? undefined : new Set<string>(agendaIds);
@@ -187,7 +191,13 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       if (destinations.openFile !== undefined) destinations.openFile(reference.path, selection);
       else openSidePaneFileTab(scope, reference.path, selection);
     },
-    onTaskOpen: destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')),
+    // ONE click behaviour: `&F412` opens the card detail on THIS machine's board, which a link and Back both
+    // reach, in a chat as anywhere. Only a host with no card route (an older daemon, or no router) falls
+    // back to its own Tasks destination, then to the side pane's Tasks sheet.
+    onTaskOpen: id => {
+      if (cardRoute && onNavigate !== undefined) onNavigate(daemonBoardCardPath(scope.daemonId, id.toUpperCase()));
+      else (destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')))();
+    },
     // Attention is deliberately NOT a side-pane tab (handover #35). A proved
     // id opens the Agenda panel at the top of the conversation, at that item;
     // when either the ledger or opener is absent Markdown still leaves `!A3` as

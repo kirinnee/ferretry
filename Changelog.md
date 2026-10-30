@@ -1,3 +1,11 @@
+## [4.129.0](https://github.com/kirinnee/ferretry/compare/v4.128.1...v4.129.0) (2026-10-30)
+
+### Features
+
+* **agenda:** close an item the owner replied to ([#1006](https://github.com/kirinnee/ferretry/issues/1006)) ([50e38ad](https://github.com/kirinnee/ferretry/commit/50e38adda109c575abe0eeca4fca683b1d27d8ad))
+* **daemon:** deliver queued messages to Codex too (S2b) ([#999](https://github.com/kirinnee/ferretry/issues/999)) ([57934b3](https://github.com/kirinnee/ferretry/commit/57934b3d4b12eb28375212262502f09bbdaac866))
+* **daemon:** the queue's deliverer for Claude Code — owner first, input box empty (S2) ([#998](https://github.com/kirinnee/ferretry/issues/998)) ([805eda2](https://github.com/kirinnee/ferretry/commit/805eda2853130fab48939dcdb9bce6b119ceee89)), closes [#992](https://github.com/kirinnee/ferretry/issues/992)
+
 ## [4.128.1](https://github.com/kirinnee/ferretry/compare/v4.128.0...v4.128.1) (2026-10-30)
 
 ### Fixes

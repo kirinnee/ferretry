@@ -809,15 +809,17 @@ describe('BOARD_INSTRUCTION', () => {
     const text = BOARD_INSTRUCTION('zz');
 
     // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
-    should(text).startWith("Board: all work is a card (&F412) on its project's board; agenda items are !A48.");
+    should(text).startWith(
+      "Board: all work is a card (&F412) on its project's board (new repo: `zz project add .`); agenda items are !A48.",
+    );
     should(text).not.containEql('#F');
     should(text).containEql('Before your first edit for a new ask, have one:');
     should(text).containEql(
       '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner\'s words verbatim>"`',
     );
-    should(text).containEql('(zz new and zz start make one)');
+    should(text).containEql('(zz new/start make one)');
     should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
-    should(text).containEql('Blocked on the owner: `zz agenda add --task <id>`');
+    should(text).containEql('Blocked on owner: `zz agenda add --task <id>`');
     should(text).containEql('a card: `zz task depend`');
     should(text).containEql('outside: `zz task block`');
     should(text).containEql('`zz task drop --reason`');

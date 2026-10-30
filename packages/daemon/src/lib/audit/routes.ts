@@ -356,6 +356,22 @@ export const AUDITED_ROUTES: readonly AuditedRouteRule[] = [
     subject: 'sessionId',
     detail: { action: 'send-enter' },
   },
+  // Rewording or taking back a queued message changes what the agent will be told, so both are recorded
+  // as prompting it — never with the text — exactly as a send's own cancel is.
+  {
+    method: 'PATCH',
+    path: '/v1/sessions/:sessionId/queue/:messageId',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'queue-edit' },
+  },
+  {
+    method: 'DELETE',
+    path: '/v1/sessions/:sessionId/queue/:messageId',
+    event: 'agent.prompted',
+    subject: 'sessionId',
+    detail: { action: 'queue-cancel' },
+  },
   {
     method: 'POST',
     path: '/v1/sessions/:sessionId/answer',

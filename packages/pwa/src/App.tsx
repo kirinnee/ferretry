@@ -170,6 +170,7 @@ import { NO_BOARD_FILTERS } from './lib/board-model.ts';
 import { boardBadgeCount } from './lib/board-phone.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
+import { boardPorts } from './lib/board-ports.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
@@ -2029,7 +2030,7 @@ function PhoneTabBar(props: Omit<AppTabBarProps, 'boardCount'>) {
   return <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} />;
 }
 
-function BoardRoute(_props: BoardPageProps) {
+function BoardRoute({ connection, taskId }: BoardPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
   const machines = useBoardMachines();
@@ -2040,6 +2041,7 @@ function BoardRoute(_props: BoardPageProps) {
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
   );
+  const ports = useMemo(() => boardPorts(daemon => store.clients.client(daemon)), [store.clients]);
   return (
     <BoardPage
       agenda={store.attention}
@@ -2048,6 +2050,8 @@ function BoardRoute(_props: BoardPageProps) {
       machines={machines}
       onNavigate={navigate}
       onSearch={onSearch}
+      openCard={taskId === undefined ? null : { daemonId: connection.daemonId, taskId }}
+      ports={ports}
       origin={origin}
       search={window.location.search}
       store={store.board}

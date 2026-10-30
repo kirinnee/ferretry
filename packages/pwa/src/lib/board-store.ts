@@ -32,6 +32,7 @@ import {
   type BoardQuarantinedCard,
   type BoardResult,
   type BoardTaskActionRequestInput,
+  type BoardTaskCreateRequestInput,
   type BoardTaskId,
   type BoardTaskResponse,
   type BoardTaskView,
@@ -600,6 +601,28 @@ export class DaemonBoardStore {
       }
       for (const watch of this.#tasks.values()) {
         if (watch.daemonId === machine.daemonId && watch.id === id) this.#setTask(watch, settled, answer.value);
+      }
+    }
+    return boardOk(answer.value.task);
+  }
+
+  /**
+   * Opens a card the owner wrote on `machine` and, when the daemon accepts it, puts it into every view
+   * and page showing that machine, like an accepted action does.
+   */
+  async create(
+    machine: DaemonConnection,
+    request: BoardTaskCreateRequestInput,
+  ): Promise<BoardResult<BoardTaskView, BoardWriteError>> {
+    const generation = this.#generation(machine.daemonId);
+    const answer = await this.#port.create(machine, request);
+    if (!answer.ok) return boardErr(answer.error);
+    const settled = ++this.#clock;
+    if (this.#generation(machine.daemonId) === generation) {
+      for (const view of this.#views.values()) {
+        if (view.machines.has(machine.daemonId)) {
+          this.#placeCard(view, machine.daemonId, answer.value.task.id, settled, answer.value);
+        }
       }
     }
     return boardOk(answer.value.task);

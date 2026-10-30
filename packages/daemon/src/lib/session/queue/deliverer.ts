@@ -49,6 +49,8 @@ export interface QueueDeliveryPorts {
   readonly transport: QueueTransport;
   /** Every session this daemon holds, for the look a restart owes the messages it left open. */
   sessions(): readonly SessionId[];
+  /** Waiting is a capability, not a decision: the composition root owns how this process sleeps. */
+  sleep(milliseconds: number): Promise<void>;
 }
 
 export interface QueueDeliverySettings {
@@ -58,27 +60,47 @@ export interface QueueDeliverySettings {
   readonly readWatchMs: number;
   /** Messages handed over in one look, so a long queue cannot hold the lock for ever. */
   readonly perLook: number;
+  /** The longest a stopping daemon waits for the hand-overs already in flight. */
+  readonly drainMs: number;
 }
 
 export const defaultQueueDeliverySettings: QueueDeliverySettings = {
   lookMs: 5_000,
   readWatchMs: 60 * 60_000,
   perLook: 8,
+  drainMs: 15_000,
 };
 
 export class QueueDeliverer {
   /** Sessions with something open, the only ones a state change makes this look at. */
   private readonly open = new Set<SessionId>();
+  /** The looks running now, which a stopping daemon waits out. */
+  private readonly running = new Set<Promise<void>>();
+  private stopped = false;
 
   constructor(
     private readonly ports: QueueDeliveryPorts,
     private readonly settings: QueueDeliverySettings = defaultQueueDeliverySettings,
   ) {}
 
-  /** Looks at every session once, so what a restart left open moves again; answers the disarm. */
-  async arm(): Promise<() => void> {
+  /** Looks at every session once, so what a restart left open moves again. */
+  async arm(): Promise<void> {
     for (const id of this.ports.sessions()) await this.look(id).catch(() => undefined);
-    return () => this.ports.scheduler.cancelAll();
+  }
+
+  /**
+   * Starts no look again, and waits — up to `drainMs` — for the ones running to finish.
+   *
+   * A send now answers once its message is on disk and the deliverer types it a moment later, so a
+   * daemon stopped right after a send was cutting the hand-over in half: the send ledger had the message
+   * accepted and the pane never had it. A look that has begun is let finish, so what was being typed is
+   * typed; one scheduled for later is the next daemon's.
+   */
+  async stop(): Promise<void> {
+    this.stopped = true;
+    this.ports.scheduler.cancelAll();
+    if (this.running.size === 0) return;
+    await Promise.race([Promise.allSettled([...this.running]), this.ports.sleep(this.settings.drainMs)]);
   }
 
   /** A message was just enqueued for this session: look now. */
@@ -94,7 +116,14 @@ export class QueueDeliverer {
 
   /** One look at a session's queue: settle what was handed over, then hand over what may go. */
   async look(id: SessionId): Promise<void> {
-    await this.ports.serial.run(id, async () => await this.lookLocked(id));
+    if (this.stopped) return;
+    const running = this.ports.serial.run(id, async () => await this.lookLocked(id));
+    this.running.add(running);
+    try {
+      await running;
+    } finally {
+      this.running.delete(running);
+    }
   }
 
   private async lookLocked(id: SessionId): Promise<void> {

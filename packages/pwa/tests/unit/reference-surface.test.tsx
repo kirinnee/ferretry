@@ -200,6 +200,61 @@ describe('sessionReferenceSurface', () => {
     should([afterTask, readSidePaneTabsState(scope).active]).deepEqual(['tasks', 'skills']);
   });
 
+  test("should open a task on this machine's board when the host can navigate, not the Tasks sheet", () => {
+    // Arrange
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+    });
+
+    // Act
+    surface.onTaskOpen?.('f412');
+
+    // Assert
+    should(visited).deepEqual(['/d/daemon-a/board/F412']);
+    should(readSidePaneTabsState(scope).active).equal(null);
+  });
+
+  test('should open the card even when the host has its own Tasks destination', () => {
+    // Arrange
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+      destinations: { openTasks: () => visited.push('tasks') },
+    });
+
+    // Act
+    surface.onTaskOpen?.('f412');
+
+    // Assert
+    should(visited).deepEqual(['/d/daemon-a/board/F412']);
+  });
+
+  test("should fall back to the host's Tasks destination when the machine has no card route", () => {
+    // Arrange
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+      cardRoute: false,
+      destinations: { openTasks: () => visited.push('tasks') },
+    });
+
+    // Act
+    surface.onTaskOpen?.('f412');
+
+    // Assert
+    should(visited).deepEqual(['tasks']);
+  });
+
   // Attention is deliberately NOT a side-pane tab (handover #35); its home is
   // #17's focused action modal. The opener therefore comes from the host that
   // OWNS that modal, and a host without one must not manufacture a dead link.

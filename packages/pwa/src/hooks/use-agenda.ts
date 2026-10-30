@@ -7,7 +7,7 @@ import { type DaemonSessionScope, daemonSessionKey } from '../lib/daemon-scope.t
 
 /** Hydrates the complete agenda ledger for exactly one paired daemon and session. */
 export const useAgendaSession = (
-  client: DaemonAgendaClient,
+  client: Pick<DaemonAgendaClient, 'hydrate' | 'store'>,
   connection: DaemonConnection,
   scope: DaemonSessionScope | null,
 ): AgendaLoadStatus => {
@@ -22,7 +22,7 @@ export const useAgendaSession = (
 };
 
 export const useAgendaSnapshot = (
-  client: DaemonAgendaClient,
+  client: Pick<DaemonAgendaClient, 'store'>,
   scope: DaemonSessionScope | null,
 ): AgendaSnapshot | null => {
   const store = useSyncExternalStore(

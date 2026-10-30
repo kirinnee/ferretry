@@ -349,6 +349,13 @@ export const DaemonConfigDocumentSchema = z
       .prefault({}),
     usage: UsageFeedConfigSchema.prefault({}),
     /**
+     * THE DURABLE MESSAGE QUEUE (docs/message-delivery.md › "The durable queue"). On (the default), every
+     * message to a ferret — a person's, another ferret's, the daemon's — is written to that ferret's queue
+     * and its deliverer types it, owner first, as soon as the input box is empty. `queue: false` types each
+     * one down the send path directly, as before the queue. Read at start; a change needs a restart.
+     */
+    delivery: z.object({ queue: z.boolean().default(true) }).prefault({}),
+    /**
      * THE HOUSEKEEPING WORKER (docs/design/housekeeping-worker.md, stage 4): the fleet's credential reads,
      * free usage reads and passive usage reads run on their own thread, and only facts come back — a
      * login's token never exists on the main thread. `enabled: false` runs them on the main thread, as

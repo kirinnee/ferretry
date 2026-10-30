@@ -1406,6 +1406,23 @@ export class FakeSessionSend implements SessionSendSubsystem {
     return this.queued;
   }
 
+  async editQueued(sessionId: string, messageId: string, text: string): Promise<QueuedMessage> {
+    const current = this.waiting(sessionId, messageId);
+    return { ...current, text, revision: current.revision + 1 };
+  }
+
+  async cancelQueued(sessionId: string, messageId: string): Promise<QueuedMessage> {
+    return { ...this.waiting(sessionId, messageId), state: 'cancelled' };
+  }
+
+  private waiting(sessionId: string, messageId: string): QueuedMessage {
+    this.refuse(sessionId);
+    const current = this.queued.find(entry => entry.id === messageId);
+    if (current === undefined) throw new SessionSendError('not_found', `no queued message ${messageId}`);
+    if (current.state !== 'queued') throw new SessionSendError('refused', `message ${messageId} is ${current.state}`);
+    return current;
+  }
+
   async sendStatus(sessionId: string, sendId: string): Promise<SendRecord> {
     this.refuse(sessionId);
     const record = this.ledger.find(entry => entry.sendId === sendId);

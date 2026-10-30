@@ -1751,3 +1751,16 @@ describe('a retry while the pane may still be holding the send', () => {
     should(terminal.typed).be.empty();
   });
 });
+
+describe('the refusals a queue asks before it accepts a message', () => {
+  it('should refuse an open structured question, and pass a session that can take input', async () => {
+    const asking = parts(target({ pendingQuestion: { toolUseId: 'tool-1' } }));
+    const ready = parts(target());
+
+    const refused = await asking.service.authorize(ID, []).catch((error: unknown) => error);
+    await ready.service.authorize(ID, []);
+
+    should(refused).be.instanceof(SendUnavailable);
+    should(asking.terminal.typed).be.empty();
+  });
+});
