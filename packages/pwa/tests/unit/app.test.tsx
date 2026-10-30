@@ -269,25 +269,21 @@ let restoreFetch: (() => void) | undefined;
 const requestedUrls: string[] = [];
 
 /**
- * The two reads every session route's search provider makes, answered in the
+ * The file read every session route's search provider makes, answered in the
  * shape the daemon actually sends.
  *
  * `{}` used to be enough because these tests only assert focus and expansion —
  * which is precisely the problem: an unparseable answer settles the provider on
  * `unavailable`, and a shortcut test passes either way. The regression would be
  * a silent state change nothing here could see. `/fs/index` is matched FIRST
- * because it does not end with `/fs`, and a bare `/tasks` is distinguished from
- * a `?q=` narrowing because `pathname` excludes the query string — a ladder that
- * ignores `q` answers every search with the whole board and makes a no-match
- * test pass for the wrong reason.
+ * because it does not end with `/fs`. The cards come from the board, which the
+ * fixture leaves unanswered; the per-session task route is never dialled.
  */
 const sessionSearchFixture = (url: URL): Response | null => {
   const sessionId = decodeURIComponent(url.pathname.split('/v1/sessions/')[1]?.split('/')[0] ?? '');
   if (sessionId === '') return null;
   if (url.pathname.endsWith('/fs/index'))
     return Response.json({ v: 1, sessionId, root: `/work/${sessionId}`, files: [], coverage: 'complete', skipped: [] });
-  if (url.pathname.endsWith('/tasks'))
-    return Response.json({ v: 1, sessionId, tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' });
   return null;
 };
 
@@ -2853,11 +2849,10 @@ describe('the command palette shortcut', () => {
    *
    * The focused provider tests count requests around a provider mounted by hand.
    * This counts them around the app the reader actually loads, which is the only
-   * place a second dial from some other surface would show up: `/v1/sessions/:id/tasks`
-   * is reached from exactly one place in the PWA, so these counts are exact
-   * rather than lower bounds.
+   * place a second dial from some other surface would show up. The old per-session task
+   * routes are reached from nowhere in the PWA, so zero is the assertion.
    */
-  it('reads one board and one file index for the session route, and neither fan-out returns', async () => {
+  it('reads one ferret-scoped board and one file index for the session route, and never the old task routes', async () => {
     const { carrierRequests, view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     // Counted on the CARRIER: these reads used to dial the daemon's address directly.
@@ -2865,10 +2860,14 @@ describe('the command palette shortcut', () => {
       .map(raw => new URL(raw, 'https://fixture.example.test'))
       .filter(url => url.pathname.startsWith('/v1/sessions/s1/'));
 
-    expect(mine.filter(url => url.pathname.endsWith('/tasks') && !url.searchParams.has('q'))).toHaveLength(1);
+    expect(mine.filter(url => url.pathname.endsWith('/tasks'))).toHaveLength(0);
+    const everything = carrierRequests.map(raw => new URL(raw, 'https://fixture.example.test'));
+    expect(everything.filter(url => url.pathname === '/v1/tasks')).toHaveLength(0);
+    expect(
+      everything.filter(url => url.pathname === '/v1/board' && url.searchParams.get('ferret') === 's1'),
+    ).toHaveLength(1);
     expect(mine.filter(url => url.pathname.endsWith('/fs/index'))).toHaveLength(1);
-    // The N+1 detail fan-out and the browser-side breadth-first crawl.
-    expect(mine.filter(url => /\/tasks\/[^/]+$/u.test(url.pathname))).toHaveLength(0);
+    // The browser-side breadth-first crawl.
     expect(mine.filter(url => url.pathname.endsWith('/fs'))).toHaveLength(0);
     // Nothing was typed, so no narrowing was earned.
     expect(mine.filter(url => url.searchParams.has('q'))).toHaveLength(0);

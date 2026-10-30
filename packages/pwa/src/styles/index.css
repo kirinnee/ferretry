@@ -7,7 +7,6 @@
 @import '../components/files.css';
 @import '../components/fy-render.css';
 @import '../components/web-terminals.css';
-@import '../features/tasks/task-dag-graph.css';
 @import '../features/agenda/agenda-board.css';
 @import '../features/agenda/agenda-card.css';
 @import '../features/agenda/agenda.css';

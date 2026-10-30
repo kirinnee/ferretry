@@ -16,6 +16,17 @@ describe('task reference context', () => {
     expect(resolve('I4')).toBeFalse();
   });
 
+  it('proves the old id of an imported task, and nothing for a card without one', () => {
+    const resolve = createTaskReferenceResolver([
+      { id: 'F96', legacyId: 'F12' },
+      { id: 'F97', legacyId: null },
+      { id: 'F98' },
+    ]);
+    expect(resolve('f12')).toBeTrue();
+    expect(resolve('F96')).toBeTrue();
+    expect(resolve('F13')).toBeFalse();
+  });
+
   it('makes the host snapshot available to nested Markdown consumers', () => {
     let resolve: ReturnType<typeof useTaskReferenceResolver> | undefined;
     const Probe = (): null => {

@@ -36,6 +36,7 @@ import type {
 import type { ComposerReferenceTask } from '../../src/lib/composer-reference-catalogs.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { render, run, runAsync } from '../support/react.ts';
+import { sessionCard } from '../support/session-cards.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 
 // The general composer behaviour is one key arbitration for every editor style; these suites drive it
@@ -65,7 +66,9 @@ const CATALOG: ComposerSkillsCatalog = {
   skills: [{ name: 'summary', description: 'Give a fast recap' }],
 };
 const AGENDA: readonly ComposerAgendaItem[] = [{ id: 'A3', subject: 'Pick a window', source: 'question' }];
-const TASKS: readonly ComposerReferenceTask[] = [{ id: 'F12', title: 'Ship the picker', status: 'in_progress' }];
+const TASKS: readonly ComposerReferenceTask[] = [
+  sessionCard('F12', { title: 'Ship the picker', lane: 'In progress', active: true }),
+];
 
 const mounted = (element: Parameters<typeof render>[0]): ReactTestRenderer => {
   const renderer = render(element);

@@ -38,8 +38,6 @@ const route = (input: string | URL | Request): Response => {
     return Response.json({ v: 1, sessionId, root: `/work/${sessionId}`, files: [], coverage: 'complete', skipped: [] });
   if (url.pathname.endsWith('/mcp'))
     return Response.json({ project: { path: `/work/${sessionId}/.mcp.json`, etag: null, servers: [] } });
-  if (url.pathname.includes('/v1/sessions/') && url.pathname.endsWith('/tasks'))
-    return Response.json({ v: 1, sessionId, tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' });
   return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
 };
 
