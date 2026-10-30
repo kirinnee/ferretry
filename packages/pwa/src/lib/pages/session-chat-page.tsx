@@ -44,7 +44,8 @@ import { AGENDA_RESOLVED_ACTION_ID, resolvedActionContribution } from '../../fea
 import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
-import { BoardSideTab } from '../../features/board/board-side-tab.tsx';
+import { ChatTasks } from '../../features/board/chat-tasks.tsx';
+import type { BoardDetailPorts } from '../../features/board/detail/board-detail.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -339,6 +340,12 @@ export interface SessionChatPageProps {
    * Absent: the host has no board, so the chat shows none of the three.
    */
   readonly board?: DaemonBoardStore;
+  /**
+   * What the Tasks tab needs to act on its cards where they are: the agenda client (a card's waiting-on-you
+   * questions) and the port to speak to a ferret. Absent: the tab still draws the cards, but a card cannot
+   * be opened over the chat.
+   */
+  readonly boardTasks?: { readonly agenda: DaemonAgendaClient; readonly ports: BoardDetailPorts };
 }
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */
@@ -463,6 +470,7 @@ export function SessionChatPage({
   switches,
   initialInfo,
   board,
+  boardTasks,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const measuredFormFactor = useWorkspaceFormFactor();
@@ -470,10 +478,11 @@ export function SessionChatPage({
   const formFactor = formFactorOverride ?? (presentation === 'sheet' ? 'phone' : measuredFormFactor);
   const workspace = useSessionWorkspace(workspaceLayouts, scope);
   const info = useInfoPlacement(initialInfo);
+  const machineName = contextDependencies?.machineName ?? connection.daemonName ?? connection.daemonId;
   const cardChat = useChatCard({
     store: board,
     connection,
-    machineName: contextDependencies?.machineName ?? connection.daemonName ?? connection.daemonId,
+    machineName,
     session,
     sessions: daemonSessions,
     reading: session.config.focusTask !== undefined || (info.open && info.tab === 'tasks'),
@@ -1329,7 +1338,7 @@ export function SessionChatPage({
                   : {}),
               }}
               onOpenAnalytics={() => setUtility('analytics')}
-              {...(cardChat === null
+              {...(cardChat === null || board === undefined
                 ? {}
                 : {
                     card: {
@@ -1337,11 +1346,15 @@ export function SessionChatPage({
                       onOpen: () => onNavigate?.(cardHref),
                       ...(onNavigate === undefined ? {} : { onOpenBoard: () => onNavigate(boardHref) }),
                       tasks: (
-                        <BoardSideTab
+                        <ChatTasks
                           callsigns={callsigns}
                           chat={cardChat}
+                          machine={{ connection, name: machineName }}
                           now={Date.now()}
+                          phone={formFactor === 'phone'}
                           scope={scope}
+                          store={board}
+                          {...(boardTasks === undefined ? {} : boardTasks)}
                           {...(onNavigate === undefined ? {} : { onNavigate })}
                         />
                       ),

@@ -32,18 +32,26 @@ export function useInfoPlacement(initial?: InfoTab): InfoPlacement {
   const [tab, setTab] = useState<InfoTab>(initial ?? 'overview');
   const [folderTab, setFolderTab] = useState<ContextRailTab>('files');
   const [sheetSize, setSheetSize] = useState<InfoSheetSize>('half');
+  // The Tasks tab is a board, not a summary: on a phone it opens as a full-height sheet.
+  const selectTab = useCallback((next: InfoTab) => {
+    setTab(next);
+    if (next === 'tasks') setSheetSize('full');
+  }, []);
   const toggle = useCallback(() => {
     setOpen(value => !value);
     setSheetSize('half');
   }, []);
   const close = useCallback(() => setOpen(false), []);
-  const show = useCallback((next: InfoTab, folder?: ContextRailTab) => {
-    setTab(next);
-    if (folder !== undefined) setFolderTab(folder);
-    setOpen(true);
-  }, []);
+  const show = useCallback(
+    (next: InfoTab, folder?: ContextRailTab) => {
+      selectTab(next);
+      if (folder !== undefined) setFolderTab(folder);
+      setOpen(true);
+    },
+    [selectTab],
+  );
   return useMemo(
-    () => ({ open, tab, folderTab, sheetSize, toggle, close, setTab, setFolderTab, setSheetSize, show }),
-    [open, tab, folderTab, sheetSize, toggle, close, show],
+    () => ({ open, tab, folderTab, sheetSize, toggle, close, setTab: selectTab, setFolderTab, setSheetSize, show }),
+    [open, tab, folderTab, sheetSize, toggle, close, selectTab, show],
   );
 }

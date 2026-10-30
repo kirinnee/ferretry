@@ -1044,6 +1044,11 @@ function SessionRoute({
   // The router's fetch, recorded for the Performance report like every other daemon read.
   const daemonFetch = useDaemonFetch();
   useRenderTiming(store.performance, 'session');
+  // What the chat's Tasks tab needs to open a card over the chat, the same two the Board page is given.
+  const boardTasks = useMemo(
+    () => ({ agenda: store.attention, ports: boardPorts(daemon => store.clients.client(daemon)) }),
+    [store.attention, store.clients],
+  );
   // Memoised on the router rather than rebuilt per render: the deck remounts when its dependencies
   // object changes identity, and a remount mid-session tears down a live shell. Every attach is a
   // stream session the router opens on whichever carrier reaches the daemon, so there is no measured
@@ -1590,6 +1595,7 @@ function SessionRoute({
           <SessionChatPage
             accountPicker={store.accountPicker}
             board={store.board}
+            boardTasks={boardTasks}
             actionContributions={sessionActions}
             infoLearning={learningActions.passiveFor(scope.sessionId)}
             switches={{

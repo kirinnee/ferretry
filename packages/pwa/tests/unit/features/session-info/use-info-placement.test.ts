@@ -40,6 +40,25 @@ describe('useInfoPlacement', () => {
     act(() => renderer?.unmount());
   });
 
+  it('opens the Tasks tab as a full-height sheet, from a tab press or from show', () => {
+    let placement: ReturnType<typeof useInfoPlacement> | undefined;
+    let renderer: ReactTestRenderer | undefined;
+    const Probe = () => {
+      placement = useInfoPlacement();
+      return null;
+    };
+    act(() => {
+      renderer = create(createElement(Probe));
+    });
+    act(() => placement?.show('tasks'));
+    expect(placement).toMatchObject({ open: true, tab: 'tasks', sheetSize: 'full' });
+    act(() => placement?.setTab('overview'));
+    act(() => placement?.setSheetSize('half'));
+    act(() => placement?.setTab('tasks'));
+    expect(placement).toMatchObject({ tab: 'tasks', sheetSize: 'full' });
+    act(() => renderer?.unmount());
+  });
+
   it('toggles open and shut, resetting the sheet to half each time', () => {
     let placement: ReturnType<typeof useInfoPlacement> | undefined;
     let renderer: ReactTestRenderer | undefined;

@@ -98,8 +98,8 @@ export function BoardCard({
     category,
     machine: showMachine ? card.machine : null,
   }).filter(segment => density === 'page' || !segment.optional);
-  const toTest = moves !== undefined && density === 'page' && category === 'verify';
-  const released = done !== undefined && done.atRelease && done.done.kind === 'done' && density === 'page';
+  const toTest = moves !== undefined && category === 'verify';
+  const released = done !== undefined && done.atRelease && done.done.kind === 'done';
   return (
     <li
       className="fy-board-card"
@@ -111,11 +111,11 @@ export function BoardCard({
       data-kind={task.kind}
       data-task={task.id}
       data-touch={touch ? '' : undefined}
-      draggable={moves !== undefined && !touch}
+      draggable={moves !== undefined && !touch && density === 'page'}
       style={depth === undefined ? undefined : ({ '--fy-board-depth': depth } as CSSProperties)}
       onDragEnd={moves?.onDragEnd}
       onDragStart={
-        moves === undefined
+        moves === undefined || density !== 'page'
           ? undefined
           : event => {
               event.dataTransfer.effectAllowed = 'move';
