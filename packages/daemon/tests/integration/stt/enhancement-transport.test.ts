@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import type { EnhancementHttpRequest } from '../../../src/lib/index.ts';
 import { FetchEnhancementTransport, PerformanceStopwatch } from '../../../src/adapters/index.ts';
+import type { EnhancementHttpRequest } from '../../../src/lib/index.ts';
 
 const request: EnhancementHttpRequest = {
   method: 'POST',
@@ -106,10 +106,7 @@ describe('fetch enhancement transport', () => {
 
     // Act
     await withServer(
-      async () => {
-        await Bun.sleep(2_000);
-        return Response.json({});
-      },
+      () => new Promise<Response>(() => undefined),
       async url => {
         const actual = await transport.send({ ...request, url, timeoutMs: 50 });
 
@@ -130,7 +127,7 @@ describe('fetch enhancement transport', () => {
           new ReadableStream({
             async pull(controller) {
               controller.enqueue(new TextEncoder().encode('{"choices":'));
-              await Bun.sleep(2_000);
+              await new Promise<never>(() => undefined);
             },
           }),
           { headers: { 'content-type': 'application/json' } },
@@ -326,7 +323,6 @@ describe('performance stopwatch', () => {
 
     // Act
     const first = stopwatch.monotonicMs();
-    await Bun.sleep(2);
     const second = stopwatch.monotonicMs();
 
     // Assert

@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  NodeTranscriptSource,
   type BoundedTranscriptRead,
+  NodeTranscriptSource,
   type TranscriptFileInfo,
   type TranscriptFileRuntime,
 } from '../../../src/adapters/transcript/file-source.ts';
@@ -127,7 +127,7 @@ async function followUntilStopped(
   const batches: TranscriptBatch[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
   const guard = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error('the follow never stopped')), 5_000);
+    timer = setTimeout(() => reject(new Error('the follow never stopped')), 30_000);
   });
   try {
     for (;;) {

@@ -11,8 +11,9 @@ import {
   parseSessionId,
   RELOAD_THE_APP,
 } from '../../../src/lib/index.ts';
-import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor, waitForValue } from '../support/wait-for.ts';
 
 /**
  * The whole answer, over the daemon the product actually ships.
@@ -195,6 +196,19 @@ async function paneSocket(home: string): Promise<string> {
   return socket;
 }
 
+/** Waits until the pane has drawn the question and its first option, the one thing the driver can bind to. */
+async function waitForRenderedQuestion(socket: string): Promise<void> {
+  await waitFor(async () => {
+    const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
+      stdin: 'ignore',
+      stdout: 'pipe',
+      stderr: 'pipe',
+    });
+    const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
+    return text.includes(QUESTION) && text.includes('❯ 1. Yes');
+  }, `the pane to draw "${QUESTION}" with its first option`);
+}
+
 /** A live pane on the daemon's own private socket, rendering the exact question it will be asked. */
 async function livePane(home: string, scratch: string): Promise<string> {
   const socket = await paneSocket(home);
@@ -207,16 +221,7 @@ async function livePane(home: string, scratch: string): Promise<string> {
   should(created).equal(0);
   // The pane must be RENDERING before the daemon is asked about it; a capture of a pane that has not
   // drawn yet is an empty screen, which the driver would correctly refuse as an unbound form.
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    if (text.includes(QUESTION) && text.includes('❯ 1. Yes')) break;
-    await Bun.sleep(25);
-  }
+  await waitForRenderedQuestion(socket);
   return log;
 }
 
@@ -231,16 +236,7 @@ async function gatedPane(home: string, scratch: string): Promise<{ readonly gate
   await writeFile(log, '');
   const created = await tmuxCommand(socket, 'new-session', '-d', '-s', TMUX_SESSION, `bash ${script} ${log} ${gate}`);
   should(created).equal(0);
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    if (text.includes(QUESTION) && text.includes('❯ 1. Yes')) break;
-    await Bun.sleep(25);
-  }
+  await waitForRenderedQuestion(socket);
   return { gate, log };
 }
 
@@ -254,16 +250,7 @@ async function failingPane(home: string, scratch: string): Promise<string> {
   await writeFile(log, '');
   const created = await tmuxCommand(socket, 'new-session', '-d', '-s', TMUX_SESSION, `bash ${script} ${log}`);
   should(created).equal(0);
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    const child = Bun.spawn([TMUX as string, '-S', socket, 'capture-pane', '-p', '-t', `=${TMUX_SESSION}`], {
-      stdin: 'ignore',
-      stdout: 'pipe',
-      stderr: 'pipe',
-    });
-    const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    if (text.includes(QUESTION) && text.includes('❯ 1. Yes')) break;
-    await Bun.sleep(25);
-  }
+  await waitForRenderedQuestion(socket);
   return log;
 }
 
@@ -388,11 +375,10 @@ async function boot(home: string): Promise<Daemon> {
   // Before anything below can fail, so a boot this journey never finished waiting for is stopped too.
   started.set(exit, daemon);
   const port = await recordedPort(home);
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const health = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
-    if (health?.ok === true) break;
-    await Bun.sleep(25);
-  }
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to answer /healthz',
+  );
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
   return {
     ...daemon,
@@ -432,12 +418,10 @@ async function rawState(sessionDirectory: string) {
 
 /** Polls storage itself: no session GET is allowed to be the thing that materializes this question. */
 async function waitForRawPendingQuestion(sessionDirectory: string, toolUseId: string) {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  return await waitForValue(async () => {
     const state = await rawState(sessionDirectory);
-    if (state.pendingQuestion?.toolUseId === toolUseId) return state;
-    await Bun.sleep(25);
-  }
-  throw new Error(`monitor did not materialize structured question ${toolUseId} in raw state`);
+    return state.pendingQuestion?.toolUseId === toolUseId ? state : undefined;
+  }, `the monitor to materialize structured question ${toolUseId} in raw state`);
 }
 
 const answerRequest = (port: number, daemon: Daemon, requestId: string, labels: readonly string[]) =>
@@ -502,15 +486,13 @@ const sendRequest = (port: number, daemon: Daemon, requestId: string, message: s
 
 /** A busy answer/monitor key makes a read return its current view rather than wait; the next poll projects it. */
 async function waitForPendingQuestion(port: number, daemon: Daemon, toolUseId = TOOL_USE_ID) {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
+  return await waitForValue(async () => {
     const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
       headers: daemon.headers,
     });
     const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
-    if (view.state.pendingQuestion?.toolUseId === toolUseId) return view;
-    await Bun.sleep(25);
-  }
-  throw new Error(`structured question ${toolUseId} did not materialize`);
+    return view.state.pendingQuestion?.toolUseId === toolUseId ? view : undefined;
+  }, `structured question ${toolUseId} to materialize`);
 }
 
 describe('the structured answer journey', () => {
@@ -634,8 +616,10 @@ describe('the structured answer journey', () => {
     // selection landed and therefore must not clear its advisory.
     const prose = await sendRequest(port, daemon, `${REQUEST_ID}:prose`, 'continue in prose');
     await statusOf(prose, 200);
-    for (let attempt = 0; attempt < 100 && !(await submits(log)).includes('prose:continue in prose'); attempt += 1)
-      await Bun.sleep(25);
+    await waitFor(
+      async () => (await submits(log)).includes('prose:continue in prose'),
+      'the pane to receive the prose the send route typed',
+    );
     should(await submits(log)).deepEqual(['enter', 'escape', 'prose:continue in prose']);
     for (let read = 0; read < 2; read += 1) {
       const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
@@ -848,12 +832,13 @@ describe('the structured answer journey', () => {
       earlyAnswer = response;
       return response;
     });
-    for (let attempt = 0; attempt < 200 && !(await submits(pane.log)).includes('submit'); attempt += 1)
-      await Bun.sleep(25);
-    if (!(await submits(pane.log)).includes('submit') && earlyAnswer !== undefined)
-      throw new Error(
-        `the gated answer settled before sending its key (${earlyAnswer.status}): ${await earlyAnswer.clone().text()}`,
-      );
+    await waitFor(async () => {
+      if (earlyAnswer !== undefined && !(await submits(pane.log)).includes('submit'))
+        throw new Error(
+          `the gated answer settled before sending its key (${earlyAnswer.status}): ${await earlyAnswer.clone().text()}`,
+        );
+      return (await submits(pane.log)).includes('submit');
+    }, 'the gated answer to send its key to the pane');
     should(await submits(pane.log)).deepEqual(['submit']);
 
     // The answer owns the shared lifecycle/answer key until its visible-advance commit. A stop
@@ -864,6 +849,8 @@ describe('the structured answer journey', () => {
       stopSettled = true;
       return response;
     });
+    // A negative wait that cannot flake: the stop is queued behind a gate only this test opens, so a longer
+    // pause could only hide a bug (false pass), never fail a correct daemon.
     await Bun.sleep(100);
     should(stopSettled).be.false();
     should(await rawState(sessionDirectory)).match({ status: 'running', pendingQuestion: { toolUseId: TOOL_USE_ID } });
@@ -968,24 +955,19 @@ describe('the structured answer journey', () => {
     // The production projector, not a coordinator retry, observes that the exact form advanced.
     // Boot's first monitor reconciliation may still hold the answer key when health begins serving,
     // so poll for the first derived advisory and then prove two further reads keep it durable.
-    let projected: ReturnType<typeof SessionViewSchema.parse> | undefined;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
+    const projected = await waitForValue(async () => {
       const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
         headers: daemon.headers,
       });
       const view = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200)));
-      if (view.state.needsHumanKind === 'structured-answer-released-unconfirmed') {
-        projected = view;
-        break;
-      }
-      await Bun.sleep(25);
-    }
-    should(projected?.state).match({
+      return view.state.needsHumanKind === 'structured-answer-released-unconfirmed' ? view : undefined;
+    }, 'the projector to derive the released-unconfirmed advisory');
+    should(projected.state).match({
       status: 'awaiting_user',
       needsHumanKind: 'structured-answer-released-unconfirmed',
       needsHuman: new RegExp(TOOL_USE_ID, 'u'),
     });
-    should(projected?.state.pendingQuestion ?? undefined).be.undefined();
+    should(projected.state.pendingQuestion ?? undefined).be.undefined();
     for (let read = 0; read < 2; read += 1) {
       const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, {
         headers: daemon.headers,
@@ -1179,10 +1161,10 @@ describe('the structured answer journey', () => {
         },
       })}\n`,
     );
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await advisoryOf(restarted)).pendingQuestion !== undefined) break;
-      await Bun.sleep(25);
-    }
+    await waitFor(
+      async () => (await advisoryOf(restarted)).pendingQuestion !== undefined,
+      'the restarted daemon to materialize the second question',
+    );
     should(await advisoryOf(restarted)).match({ pendingQuestion: { toolUseId: 'tool-ship-2' } });
     const refusedWhileAsking = await resumeRequest(port, restarted, 'admin-cli');
     const refusal = JSON.parse(await statusOf(refusedWhileAsking, 409)) as {
@@ -1248,17 +1230,11 @@ describe('the structured answer journey', () => {
     // Arrange — the daemon's OWN projection mints the advisory from the quarantined row, so the
     // standing sentence is one this daemon really writes rather than one the test invented. The
     // confirmed row renders the same sentence, which is the collision.
-    let advisory: Record<string, unknown> | undefined;
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    await waitForValue(async () => {
       const response = await fetch(`http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}`, { headers: daemon.headers });
       const state = SessionViewSchema.parse(JSON.parse(await statusOf(response, 200))).state as Record<string, unknown>;
-      if (state.needsHumanKind === 'structured-answer-released-unconfirmed') {
-        advisory = state;
-        break;
-      }
-      await Bun.sleep(25);
-    }
-    should(advisory).not.be.undefined();
+      return state.needsHumanKind === 'structured-answer-released-unconfirmed' ? state : undefined;
+    }, 'the daemon to project the released-unconfirmed advisory');
 
     // Act — an operator asks for exactly the dismissal that works when ownership is unambiguous.
     // No pane exists, so this takes the real relaunch path and really reaches the adapter.

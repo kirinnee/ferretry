@@ -30,6 +30,7 @@ import {
   resolveStateHome,
 } from '../../../src/lib/index.ts';
 import { refusedSession, storedSession } from '../support/analytics-fixtures.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const directories = new Set<string>();
 
@@ -74,6 +75,8 @@ const writes = (overrides: Partial<AnalyticsStoreWrites>): AnalyticsStoreWrites 
 /** Records every batch; fails the next `failures` of them, with whatever `failure` is. */
 class RecordingPersister implements AnalyticsStorePersister {
   readonly batches: AnalyticsStoreWrites[] = [];
+  /** How many batches reached `persist`, held or not. */
+  started = 0;
   closed = 0;
   failures = 0;
   failure: unknown = new Error('disk said no');
@@ -81,6 +84,7 @@ class RecordingPersister implements AnalyticsStorePersister {
   #release: (() => void) | undefined;
 
   async persist(batch: AnalyticsStoreWrites): Promise<void> {
+    this.started += 1;
     if (this.hold) await new Promise<void>(resolve => (this.#release = resolve));
     if (this.failures > 0) {
       this.failures -= 1;
@@ -106,8 +110,6 @@ async function memoryStore(): Promise<AnalyticsIndexStore> {
   return opened.store;
 }
 
-const settle = (milliseconds: number): Promise<void> => new Promise(resolve => setTimeout(resolve, milliseconds));
-
 const queueOf = (persister: RecordingPersister, options: ConstructorParameters<typeof WriteBehindQueue>[1]) =>
   new WriteBehindQueue<AnalyticsStoreWrites>(
     {
@@ -129,7 +131,7 @@ describe('WriteBehindQueue', () => {
     queue.push(writes({ upserts: [refusedSession('a')] }));
     queue.push(writes({ forgets: ['b'] }));
     const queued = queue.pending;
-    await settle(40);
+    await waitFor(() => persister.batches.length === 1, 'the queued window to be persisted as one batch');
 
     // Assert
     should(queued).deepEqual(writes({ upserts: [refusedSession('a')], forgets: ['b'] }));
@@ -143,13 +145,19 @@ describe('WriteBehindQueue', () => {
     const persister = new RecordingPersister();
     persister.failures = 1;
     const failures: string[] = [];
-    const queue = queueOf(persister, { batchMs: 5, retryMs: 20, persistFailed: error => failures.push(error.message) });
+    const queue = queueOf(persister, {
+      batchMs: 5,
+      retryMs: 20,
+      // Queued from inside the failure report, so it is behind the failed batch before the retry is scheduled.
+      persistFailed: error => {
+        failures.push(error.message);
+        queue.push(writes({ forgets: ['b'] }));
+      },
+    });
 
     // Act
     queue.push(writes({ upserts: [refusedSession('a')] }));
-    await settle(12);
-    queue.push(writes({ forgets: ['b'] }));
-    await settle(60);
+    await waitFor(() => persister.batches.length === 1, 'the failed batch to be sent again');
 
     // Assert
     should(failures).deepEqual(['disk said no']);
@@ -163,12 +171,12 @@ describe('WriteBehindQueue', () => {
     persister.hold = true;
     const queue = queueOf(persister, { batchMs: 5 });
     queue.push(writes({ upserts: [refusedSession('a')] }));
-    await settle(15);
+    await waitFor(() => persister.started === 1, 'the first batch to be in flight');
 
     // Act
     queue.push(writes({ forgets: ['b'] }));
     persister.release();
-    await settle(40);
+    await waitFor(() => persister.batches.length === 2, 'the writes queued during the batch to be sent');
 
     // Assert
     should(persister.batches).deepEqual([writes({ upserts: [refusedSession('a')] }), writes({ forgets: ['b'] })]);
@@ -181,7 +189,7 @@ describe('WriteBehindQueue', () => {
     persister.hold = true;
     const queue = queueOf(persister, { batchMs: 1 });
     queue.push(writes({ upserts: [refusedSession('a')] }));
-    await settle(10);
+    await waitFor(() => persister.started === 1, 'the first batch to be in flight');
     queue.push(writes({ forgets: ['b'] }));
 
     // Act
@@ -245,7 +253,7 @@ describe('WriteBehindAnalyticsStore', () => {
       pending: subject.pendingWrites,
       persisted: persister.batches.length,
     };
-    await settle(40);
+    await waitFor(() => persister.batches.length === 1, 'the writes to be persisted as one batch');
 
     // Assert
     should(read).deepEqual({

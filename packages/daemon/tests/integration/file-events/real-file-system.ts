@@ -13,6 +13,7 @@ import should from 'should';
 import { unrefFileEventTimers } from '../../../src/adapters/file-events/bun-file-event-source.ts';
 import { FileEventHub } from '../../../src/lib/file-events/hub.ts';
 import type { FileEventSource } from '../../../src/lib/file-events/ports.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const roots: string[] = [];
 const hubs: FileEventHub[] = [];
@@ -43,9 +44,9 @@ async function within(done: () => boolean, ms: number): Promise<boolean> {
   return true;
 }
 
-/** Wait until `done` holds, failing after a generous bound: real events arrive on the kernel's schedule. */
-export async function until(done: () => boolean, what: string, ms = 3_000): Promise<void> {
-  if (!(await within(done, ms))) throw new Error(`timed out waiting for ${what}`);
+/** Wait until `done` holds; the bound is a safety net, because real events arrive on the kernel's schedule. */
+export async function until(done: () => boolean, what: string): Promise<void> {
+  await waitFor(done, what, { every: 5 });
 }
 
 export function hubOver(source: FileEventSource): FileEventHub {

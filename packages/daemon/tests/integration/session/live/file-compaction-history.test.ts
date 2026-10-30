@@ -28,7 +28,7 @@ const portOver = (disk: Disk): FileSystemPort =>
     writeTextAtomic: async (_file: string, text: string) => {
       disk.writes += 1;
       // A slow disk, so two unserialized writers would both read the same old document.
-      await new Promise(resolve => setTimeout(resolve, 2));
+      await new Promise(resolve => setImmediate(resolve));
       disk.text = text;
     },
   }) as unknown as FileSystemPort;

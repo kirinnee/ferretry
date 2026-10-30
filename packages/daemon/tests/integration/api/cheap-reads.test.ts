@@ -14,6 +14,7 @@ import { fleetEventSocketRoutes, sessionRoutes } from '../../../src/lib/runtime/
 import { type FleetEventSource, FleetEventStreamService } from '../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
 import { sessionDirectory, sessionView } from '../../unit/runtime/mounts/support.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * The cheap reads, over a REAL socket: the routes the daemon mounts, behind the real Bun server, read
@@ -109,9 +110,8 @@ function follow(handle: ApiServerHandle, query: string) {
   socket.addEventListener('message', event =>
     frames.push(FyEventStreamFrameSchema.parse(JSON.parse(String(event.data)))),
   );
-  const until = async (count: number): Promise<void> => {
-    for (let attempt = 0; attempt < 300 && frames.length < count; attempt += 1) await Bun.sleep(10);
-  };
+  const until = async (count: number): Promise<void> =>
+    await waitFor(() => frames.length >= count, `${count} frame(s) on the event feed (${query})`);
   return { frames, until, close: () => socket.close() };
 }
 

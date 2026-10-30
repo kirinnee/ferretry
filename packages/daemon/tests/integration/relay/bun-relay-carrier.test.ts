@@ -59,6 +59,7 @@ import type { ApiResponse } from '../../../src/lib/api/http.ts';
 import type { SocketUpgradeDecision } from '../../../src/lib/api/socket.ts';
 import { LiveDeviceConnections, type PairingRedemption } from '../../../src/lib/pairing/index.ts';
 import { DaemonRelayConfigSchema } from '../../../src/lib/runtime/config.ts';
+import { waitFor, waitForValue } from '../support/wait-for.ts';
 
 const relayCrypto = new WebCryptoRelayCrypto();
 const DEVICE_ID = 'fy_device_id_aaaaaaaaaaaaaaaaaaaaaa';
@@ -114,14 +115,10 @@ const session = (): SessionId => {
 const controlFrame = (message: ControlMessage, sessionId: SessionId = RENDEZVOUS_SESSION_ID): Uint8Array =>
   encodeFrame({ kind: FRAME_KINDS.control, sessionId, sequence: 0, payload: encodeControlMessage(message) });
 
-async function until<T>(read: () => T | undefined, what: string): Promise<T> {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
-    const value = read();
-    if (value !== undefined) return value;
-    await Bun.sleep(10);
-  }
-  throw new Error(`timed out waiting for ${what}`);
-}
+const until = async <T>(read: () => T | undefined, what: string): Promise<T> => await waitForValue(read, what);
+
+/** One turn of the event loop, no time: lets promise continuations the carrier already queued run. */
+const nextTurn = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
 
 describe('a daemon reachable through a rendezvous it dialled', () => {
   it('should claim the rendezvous and answer a relayed request the carrier cannot read', async () => {
@@ -477,24 +474,14 @@ function fakeSockets(): { readonly sockets: FakeSocket[]; readonly factory: (url
 describe('what a socket does that a protocol does not', () => {
   it('should redial after a drop, and stop for good when the daemon is going away', async () => {
     // Arrange
-    const fake = fakeSockets();
-    const carrier = new BunRelayCarrier({
-      config: config({ url: 'https://relay.example', reconnectSeconds: 1 }),
-      crypto: relayCrypto,
-      identity,
-      devices,
-      connections: new LiveDeviceConnections(),
-      sockets: relayStreams,
-      pairing: relayPairing,
-      dispatch: async () => ok({}),
-      socketFactory: fake.factory,
-    });
+    const { carrier, fake, clock } = redialingCarrier({ reconnectSeconds: 1 });
 
     // Act
     carrier.start();
     should(carrier.status().phase).equal('dialling');
     fake.sockets[0]?.onopen?.(undefined);
     fake.sockets[0]?.onclose?.(undefined);
+    clock.advance(0);
     const second = await until(() => fake.sockets[1], 'the redial');
 
     // Assert — a fresh socket, and the rendezvous slot it will claim is a fresh one too: there is no
@@ -505,8 +492,9 @@ describe('what a socket does that a protocol does not', () => {
     second.onerror?.(undefined);
     carrier.stop();
     should(carrier.status().phase).equal('stopped');
-    await Bun.sleep(30);
-    should(fake.sockets.length).be.lessThanOrEqual(3);
+    const dialled = fake.sockets.length;
+    clock.advance(60_000);
+    should(fake.sockets.length).equal(dialled);
     // A stopped carrier ignores a late close from the socket it already gave up.
     second.onclose?.(undefined);
     should(carrier.status().phase).equal('stopped');
@@ -516,18 +504,7 @@ describe('what a socket does that a protocol does not', () => {
     // Arrange — capture the close callback because a real socket may already have queued it when
     // stop detaches the handlers. The claimed control is deliberately handed over immediately
     // before stop, leaving its ordered inbox continuation pending across the shutdown boundary.
-    const fake = fakeSockets();
-    const carrier = new BunRelayCarrier({
-      config: config({ url: 'https://relay.example', reconnectSeconds: 1 }),
-      crypto: relayCrypto,
-      identity,
-      devices,
-      connections: new LiveDeviceConnections(),
-      sockets: relayStreams,
-      pairing: relayPairing,
-      dispatch: async () => ok({}),
-      socketFactory: fake.factory,
-    });
+    const { carrier, fake } = redialingCarrier({ reconnectSeconds: 1 });
     carrier.start();
     const socket = fake.sockets[0];
     if (socket === undefined) throw new Error('no socket');
@@ -545,7 +522,7 @@ describe('what a socket does that a protocol does not', () => {
         }),
       });
       carrier.stop();
-      await Bun.sleep(0);
+      await nextTurn();
       closing?.(undefined);
 
       // Assert — stopped is monotonic, every handler is detached, and no queued callback can turn
@@ -591,7 +568,7 @@ describe('what a socket does that a protocol does not', () => {
 
     // Act + Assert — bytes that are not a frame are refused by the link itself.
     socket.onmessage?.({ data: new Uint8Array([0, 1, 2]).buffer });
-    await Bun.sleep(10);
+    await waitFor(() => socket.closes.length > 1, 'the link to refuse bytes that are not a frame');
     should(socket.closes.length).be.greaterThan(1);
     carrier.stop();
   });
@@ -1264,7 +1241,7 @@ describe('a carrier that asks the rendezvous itself whether it still holds the c
       socket.onmessage?.({ data: 'fy-pong' });
       socket.onmessage?.({ data: controlFrame({ t: 'held' }) });
       // Binary frames are handled on the carrier's inbox chain; let it run before the deadline is read.
-      await Bun.sleep(1);
+      await nextTurn();
       clock.advance(1_000);
     }
     clock.advance(10_000);

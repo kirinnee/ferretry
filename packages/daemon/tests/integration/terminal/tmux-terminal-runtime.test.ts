@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import should from 'should';
 import { BunTmuxProcess, TmuxTerminalRuntime } from '../../../src/adapters/index.ts';
 import type { LoginShellPort, TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/index.ts';
+import { waitForValue } from '../support/wait-for.ts';
 
 /** A fixed shell: these cases are about tmux commands, not about which shell is chosen. */
 const plainShell: LoginShellPort = { shell: async () => '/bin/sh' };
@@ -347,16 +348,11 @@ describe('TmuxTerminalRuntime against the real tmux', () => {
       });
       await subject.write(created, new TextEncoder().encode("PS1='$ '; printf '\\033[31mred\\033[0m\\n'\r"));
 
-      // Act — the shell needs a moment to run the line it was given.
-      let captured = await subject.capture(created, 200);
-      for (
-        let attempt = 0;
-        attempt < 100 && !captured.lines.some(line => line.endsWith('red\u001b[39m'));
-        attempt += 1
-      ) {
-        await Bun.sleep(20);
-        captured = await subject.capture(created, 200);
-      }
+      // Act — wait for the shell to run the line it was given.
+      const captured = await waitForValue(async () => {
+        const seen = await subject.capture(created, 200);
+        return seen.lines.some(line => line.endsWith('red\u001b[39m')) ? seen : undefined;
+      }, 'the pane to show the red line');
 
       // Assert
       should(captured.cols).equal(60);
@@ -468,11 +464,10 @@ describe('TmuxTerminalRuntime login shell', () => {
     try {
       // Act
       await subject.create({ ...input, cwd: home, size: { cols: 60, rows: 8 } });
-      let launched = '';
-      for (let attempt = 0; attempt < 100 && launched === ''; attempt += 1) {
-        launched = await readFile(marker, 'utf8').catch(() => '');
-        if (launched === '') await Bun.sleep(20);
-      }
+      const launched = await waitForValue(async () => {
+        const written = await readFile(marker, 'utf8').catch(() => '');
+        return written === '' ? undefined : written;
+      }, 'the stand-in shell to record how it was launched');
 
       // Assert
       should(launched.trim()).equal(`${stand}|-l|${home}`);
@@ -499,11 +494,10 @@ describe('TmuxTerminalRuntime login shell', () => {
         created,
         new TextEncoder().encode("PS1='$ '; shopt -q login_shell && echo login-yes; echo typed-$((6*7))\r"),
       );
-      let text = await subject.text(created, 20);
-      for (let attempt = 0; attempt < 100 && !text.includes('typed-42'); attempt += 1) {
-        await Bun.sleep(20);
-        text = await subject.text(created, 20);
-      }
+      const text = await waitForValue(async () => {
+        const seen = await subject.text(created, 20);
+        return seen.includes('typed-42') ? seen : undefined;
+      }, 'the pane to show typed-42');
 
       // Assert
       should(text).containEql('login-yes');

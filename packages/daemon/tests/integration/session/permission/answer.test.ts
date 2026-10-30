@@ -13,6 +13,7 @@ import {
   SessionPermissionService,
   TmuxController,
 } from '../../../../src/lib/index.ts';
+import { waitForValue } from '../../support/wait-for.ts';
 
 /**
  * ANSWERING A PERMISSION PROMPT, end to end over a real tmux server.
@@ -103,12 +104,14 @@ async function pane(fixture: string) {
   const last = (text: string): string | undefined => text.trimEnd().split('\n').at(-1)?.trimEnd();
   const final = last(await readFile(join(FIXTURES, `${fixture}.txt`), 'utf8'));
   const drawn = async (): Promise<string> => {
-    for (let attempt = 0; attempt < 50; attempt += 1) {
-      const frame = await capture.capture(session);
-      if (last(frame) === final) return frame;
-      await Bun.sleep(100);
-    }
-    throw new Error(`${fixture} was never drawn`);
+    return await waitForValue(
+      async () => {
+        const frame = await capture.capture(session);
+        return last(frame) === final ? frame : undefined;
+      },
+      `${fixture} to be drawn`,
+      { every: 100 },
+    );
   };
   return { session, service, drawn, capture, keys: async () => (await readFile(keys, 'utf8')).trim() };
 }

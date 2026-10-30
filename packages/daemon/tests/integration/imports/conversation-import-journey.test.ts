@@ -19,8 +19,9 @@ import { ConversationAdoptResultSchema, ConversationImportListingSchema } from '
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import { NO_RELAY_DIRECTORY, type RelayAdvertisement } from '../../../src/lib/index.ts';
-import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const ACCOUNT = '00000000-0000-4000-8000-0000000000c1';
 const WRAPPER = 'claude-auto-import';
@@ -47,11 +48,10 @@ function world(): DaemonWorld {
 }
 
 async function waitForHealth(port: number): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('the daemon never answered its health probe');
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to answer its health probe',
+  );
 }
 
 /** A runtime whose history folder is a link into the shared pool, as Ferretry provisions it. */

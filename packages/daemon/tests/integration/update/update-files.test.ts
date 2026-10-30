@@ -9,6 +9,7 @@ import {
   FileUpdateDocuments,
   type UpdateStateFiles,
 } from '../../../src/adapters/index.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /** The four calls over a real directory, as the state home's filesystem would make them. */
 const files: UpdateStateFiles = {
@@ -29,13 +30,9 @@ async function withDirectory(act: (directory: string) => Promise<void>): Promise
   }
 }
 
-async function eventually(check: () => Promise<boolean>): Promise<void> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (await check()) return;
-    await Bun.sleep(20);
-  }
-  throw new Error('the condition never held');
-}
+const eventually = async (check: () => Promise<boolean>): Promise<void> => {
+  await waitFor(check, 'the update child to log its home');
+};
 
 describe('the update documents', () => {
   it('writes each document under its own name and reads it back', async () => {

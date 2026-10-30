@@ -11,6 +11,7 @@ import {
 } from '../../../src/adapters/index.ts';
 import type { TmuxCommandPort, TmuxCommandResult } from '../../../src/lib/tmux/contracts.ts';
 import type { TmuxControlNotification } from '../../../src/lib/tmux/control-protocol.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const TMUX = Bun.which('tmux');
 const cleanups: (() => Promise<void>)[] = [];
@@ -78,7 +79,10 @@ describe('ControlModeTmuxProcess over a real tmux', () => {
     const { direct, spawned, subject } = await server();
     await subject.execute(['new-session', '-d', '-s', 'work', '-x', '80', '-y', '8', HOSTILE]);
     await subject.execute(['new-session', '-d', '-s', 'other', 'sleep', '600']);
-    await Bun.sleep(400);
+    await waitFor(
+      async () => (await direct.execute(['capture-pane', '-p', '-t', 'work'])).stdout.includes('\n3000\n'),
+      'the pane to print its last line',
+    );
     await subject.execute(['has-session', '-t', 'work']);
     const before = spawned.commands.length;
 
@@ -183,10 +187,13 @@ describe('ControlModeTmuxProcess over a real tmux', () => {
     // Act — copy mode in the attached session's pane, a new session elsewhere, then the attached one ends.
     await subject.execute(['copy-mode', '-t', 'aaa']);
     await subject.execute(['new-session', '-d', '-s', 'ccc', 'sleep', '600']);
-    await Bun.sleep(300);
+    await waitFor(() => {
+      const kinds = all.map(notification => notification.kind);
+      return kinds.includes('pane-mode-changed') && kinds.includes('sessions-changed');
+    }, 'the client to hear the copy mode and the new session');
     stop();
     await subject.execute(['kill-session', '-t', 'aaa']);
-    await Bun.sleep(300);
+    await waitFor(() => !subject.connected, 'the client to notice its session ended');
     const listingsBefore = spawned.commands.filter(command => command[0] === 'list-sessions').length;
     const after = await subject.execute(['has-session', '-t', 'bbb']);
 
@@ -362,7 +369,7 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
     // Act
     const first = subject.execute(HAS);
     const second = subject.execute(['display-message', '-p', 'x']);
-    await Bun.sleep(10);
+    await waitFor(() => child.nonces().length >= 2, 'both commands to reach the client');
     const [one, two] = child.nonces();
     child.emit('%begin 9 1 0\n%end 9 1');
     child.emit(' 0\n%session-changed $0 work\n');
@@ -388,14 +395,14 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
     const child = new ScriptedChild();
     const { subject, reads, children } = scripted({ child: () => child });
     const warm = subject.execute(HAS);
-    await Bun.sleep(10);
+    await waitFor(() => child.nonces().length >= 1, 'the warm-up read to reach the client');
     reply(child, 1, child.nonces()[0] as string, []);
     await warm;
     child.written.length = 0;
 
     // Act — a read is in flight when the stream goes wrong.
     const pending = subject.execute(HAS);
-    await Bun.sleep(10);
+    await waitFor(() => child.nonces().length >= 1, 'the in-flight read to reach the client');
     breakIt(child);
     const actual = await pending;
 
@@ -405,7 +412,7 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
     should(child.killed).be.true();
     // It had answered, so the next read dials again at once.
     void subject.execute(HAS);
-    await Bun.sleep(10);
+    await waitFor(() => children.length === 2, 'the next read to dial a second client');
     should(children.length).equal(2);
   });
 
@@ -416,12 +423,12 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
 
     // Act
     const pending = subject.execute(HAS);
-    await Bun.sleep(10);
+    await waitFor(() => child.nonces().length >= 1, 'the read to reach the client');
     child.emit(`%begin 9 1 1\n%end 9 1 1\n%begin 9 2 1\n${child.nonces()[0]}\n%end 9 3 1\n`);
     const actual = await pending;
-    await Bun.sleep(10);
+    await waitFor(() => child.killed, 'the client with the stray line to be dropped');
     void subject.execute(HAS);
-    await Bun.sleep(10);
+    await waitFor(() => children.length === 2, 'the next read to dial a second client');
 
     // Assert — the reply was whole before the stray line, so it stands; the client does not.
     should(actual).deepEqual({ code: 0, stdout: '', stderr: '' });
@@ -433,18 +440,29 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
   it('should time out a read nobody answers, and wait before redialling a client that never answered', async () => {
     // Arrange
     let now = 0;
-    const { subject, reads, children } = scripted({ replyTimeoutMs: 30, nowMs: () => now, retryAfterMs: 1_000 });
+    const readsAtDial: number[] = [];
+    const { subject, reads, children } = scripted({
+      replyTimeoutMs: 30,
+      nowMs: () => now,
+      retryAfterMs: 1_000,
+      // Counted as the client is dialled: the redialled client's own reply timeout is real time, and by the
+      // time a poll saw it the read it dialled for could already have fallen back.
+      child: () => {
+        readsAtDial.push(reads());
+        return new ScriptedChild();
+      },
+    });
 
     // Act
     const actual = await subject.execute(HAS);
     await subject.execute(HAS);
     now = 1_000;
     void subject.execute(HAS);
-    await Bun.sleep(5);
+    await waitFor(() => children.length === 2, 'the read after the wait to dial a second client');
 
     // Assert
     should(actual.stdout).equal('spawned\n');
-    should(reads()).equal(2);
+    should(readsAtDial).deepEqual([0, 2]);
     should(children.length).equal(2);
   });
 
@@ -493,12 +511,12 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
     const sequence = [...stuck];
     const { subject } = scripted({ child: () => sequence.shift() as ScriptedChild, nowMs: () => now });
     const first = subject.execute(HAS);
-    await Bun.sleep(5);
+    await waitFor(() => (stuck[0] as ScriptedChild).nonces().length >= 1, 'the first read to reach its client');
     (stuck[0] as ScriptedChild).emit(null);
     await first;
     now += 20_000;
     void subject.execute(HAS);
-    await Bun.sleep(5);
+    await waitFor(() => (stuck[1] as ScriptedChild).nonces().length >= 1, 'the second read to reach its client');
 
     // Act
     const clean = await subject.stop(20);
@@ -532,7 +550,7 @@ describe('ControlModeTmuxProcess against a scripted client', () => {
     unkillable.killFails = true;
     const { subject } = scripted({ child: () => unkillable });
     void subject.execute(HAS);
-    await Bun.sleep(5);
+    await waitFor(() => unkillable.nonces().length >= 1, 'the read to reach the client');
 
     // Act
     const clean = await subject.stop(10);

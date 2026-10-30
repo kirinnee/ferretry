@@ -16,6 +16,7 @@ import {
 } from '../../../src/adapters/index.ts';
 import { TurnChanges } from '../../../src/lib/attention/index.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /** A ferret's idle period, read from the state document the daemon already keeps. Runs against a temp `FY_HOME`. */
 
@@ -96,7 +97,15 @@ describe('StorageSessionStops', () => {
 });
 
 describe('armSessionTurnChanges', () => {
-  const settle = async () => await new Promise(resolve => setTimeout(resolve, 50));
+  // The state document's listeners are told before `writeState` resolves, so a move is heard by the time the write
+  // returns; only the opening read that primes the fleet's turns runs behind `armSessionTurnChanges`.
+  class PrimeCounting extends TurnChanges {
+    primed = 0;
+    override prime(sessionId: string, signature: string): void {
+      super.prime(sessionId, signature);
+      this.primed += 1;
+    }
+  }
 
   it('should call back when the turn moves, never for another write, and never for a ferret idle before it started', async () => {
     // Arrange
@@ -105,16 +114,14 @@ describe('armSessionTurnChanges', () => {
     const moved: string[] = [];
 
     // Act
-    const stop = armSessionTurnChanges(storage, new TurnChanges(), async id => void moved.push(id));
-    await settle();
+    const changes = new PrimeCounting();
+    const stop = armSessionTurnChanges(storage, changes, async id => void moved.push(id));
+    await waitFor(() => changes.primed === 1, "the fleet's turns to be learned");
     await storage.writeState(ID, state({ turnState: 'your-turn', turnStateAt: '2026-10-23T09:00:00.000Z', turn: 2 }));
-    await settle();
     const beforeMove = [...moved];
     await storage.writeState(ID, state({ turnState: 'working', turnStateAt: '2026-10-23T09:10:00.000Z' }));
-    await settle();
     stop();
     await storage.writeState(ID, state({ turnState: 'your-turn', turnStateAt: '2026-10-23T09:20:00.000Z' }));
-    await settle();
 
     // Assert
     should(beforeMove).deepEqual([]);

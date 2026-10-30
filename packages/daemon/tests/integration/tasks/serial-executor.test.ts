@@ -14,7 +14,7 @@ describe('KeyedSerialExecutor', () => {
     const events: string[] = [];
     const step = (name: string) => async (): Promise<string> => {
       events.push(`enter:${name}`);
-      await new Promise(resolve => setTimeout(resolve, 1));
+      await new Promise(resolve => setImmediate(resolve));
       events.push(`exit:${name}`);
       return name;
     };
@@ -39,7 +39,7 @@ describe('KeyedSerialExecutor', () => {
     const step = async (): Promise<void> => {
       active += 1;
       peak = Math.max(peak, active);
-      await new Promise(resolve => setTimeout(resolve, 2));
+      await new Promise(resolve => setImmediate(resolve));
       active -= 1;
     };
 
@@ -79,7 +79,7 @@ describe('KeyedSerialExecutor', () => {
     const slow = async (): Promise<void> => {
       active += 1;
       peak = Math.max(peak, active);
-      await new Promise(resolve => setTimeout(resolve, 2));
+      await new Promise(resolve => setImmediate(resolve));
       active -= 1;
     };
 

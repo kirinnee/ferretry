@@ -33,6 +33,7 @@ import {
 } from '../../../src/lib/session/events/index.ts';
 import type { StoredSessionEvent } from '../../../src/lib/session/reads/index.ts';
 import { daemonVersion } from '../../../src/lib/version.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * These tests bind a REAL socket, so every one of them asks for port 0 on 127.0.0.1 and stops the
@@ -677,17 +678,15 @@ function connect(url: string): {
     frames.push(typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data));
   });
   socket.addEventListener('close', event => closes.push([event.code, event.reason]));
-  const settle = async (done: () => boolean): Promise<void> => {
-    for (let attempt = 0; attempt < 200 && !done(); attempt += 1) await Bun.sleep(10);
-  };
+
   return {
     frames,
     closes,
     opened,
     send: data => socket.send(data),
     close: (code, reason) => socket.close(code, reason),
-    untilFrames: async count => await settle(() => frames.length >= count),
-    untilClosed: async () => await settle(() => closes.length > 0),
+    untilFrames: async count => await waitFor(() => frames.length >= count, `${count} frame(s) at the viewer`),
+    untilClosed: async () => await waitFor(() => closes.length > 0, 'the viewer socket to close'),
   };
 }
 
@@ -797,7 +796,7 @@ describe('BunApiServer over a live socket', () => {
     await viewer.untilFrames(1);
     viewer.send(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
     viewer.send(Uint8Array.of(13, 10));
-    for (let attempt = 0; attempt < 200 && record.frames.length < 2; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => record.frames.length >= 2, 'both frames at the stream handler');
 
     // Assert: the loopback query-parameter token authenticated it, and both frame kinds arrived
     // intact and in order.
@@ -822,10 +821,12 @@ describe('BunApiServer over a live socket', () => {
     await viewer.opened;
     viewer.send('first');
     viewer.send('second');
+    // A negative with no event to wait for: a held frame is, by definition, not observable before the
+    // release, so a short settle can only let a wrongly delivered frame show — it can never fail a correct run.
     await Bun.sleep(50);
     const beforeRelease = [...record.frames];
     release();
-    for (let attempt = 0; attempt < 200 && record.frames.length < 2; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => record.frames.length >= 2, 'the held frames to be replayed to the stream handler');
 
     // Assert
     should(beforeRelease).be.empty();
@@ -876,9 +877,8 @@ describe('BunApiServer over a live socket', () => {
     await viewer.opened;
     viewer.close();
     await viewer.untilClosed();
-    await Bun.sleep(50);
     release();
-    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => record.closed > 0, 'the stream handler to be told the socket closed');
 
     // Assert: closed without ever being opened.
     should(record.opened).equal(0);
@@ -915,7 +915,7 @@ describe('BunApiServer over a live socket', () => {
     // Act — the reader closes the tab.
     viewer.close();
     await viewer.untilClosed();
-    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => record.closed > 0, 'the stream handler to be told the socket closed');
 
     // Assert — the handler was told exactly once, by the transport, with no write having failed.
     should(record.opened).equal(1);
@@ -933,7 +933,7 @@ describe('BunApiServer over a live socket', () => {
     // Act
     viewer.close(4321, 'the page went to the background');
     await viewer.untilClosed();
-    for (let attempt = 0; attempt < 200 && record.closed === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => record.closed > 0, 'the stream handler to be told the socket closed');
 
     // Assert — the code always arrives; Bun 1.3 hands the server an empty reason for a client's close.
     should(record.endings).have.length(1);
@@ -970,7 +970,7 @@ describe('BunApiServer over a live socket', () => {
     await viewer.opened;
     // The durable replay reached the client, so the socket's write path is healthy.
     await viewer.untilFrames(1);
-    for (let attempt = 0; attempt < 200 && !scheduler.holdsAWindow; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => scheduler.holdsAWindow, 'the scheduler to hold a window');
 
     // A window IS armed before the disconnect — otherwise "unarmed afterwards" would prove nothing.
     should(scheduler.holdsAWindow).be.true();
@@ -979,7 +979,7 @@ describe('BunApiServer over a live socket', () => {
     // Act — an ordinary peer close. No write ever failed and nothing threw.
     viewer.close();
     await viewer.untilClosed();
-    for (let attempt = 0; attempt < 200 && scheduler.holdsAWindow; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => !scheduler.holdsAWindow, 'the scheduler to release its window');
 
     // Assert — the recurring proof does not outlive the socket, and the route is what stopped it.
     // This is the bound on the timer risk the recurring idle change introduced: a lying `send` is
@@ -1016,7 +1016,7 @@ describe('BunApiServer over a live socket', () => {
 
     // Act
     handle.closeSockets();
-    const stopped = await Promise.race([handle.stop().then(() => 'stopped'), Bun.sleep(2_000).then(() => 'hung')]);
+    const stopped = await handle.stop().then(() => 'stopped');
 
     // Assert
     should(stopped).equal('stopped');
@@ -1274,7 +1274,7 @@ describe('toApiRequest body reads', () => {
       duplex: 'half',
     } as RequestInit);
     // The runtime primes the stream on its own; anything past this point would be the daemon reading.
-    await Bun.sleep(5);
+    await waitFor(() => pulls > 0, 'the runtime to prime the request stream');
     const primed = pulls;
 
     // Act

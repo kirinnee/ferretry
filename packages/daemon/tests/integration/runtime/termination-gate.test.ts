@@ -8,6 +8,7 @@ import {
   terminationGate,
 } from '../../../src/adapters/runtime/termination-gate.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const GATE = JSON.stringify(resolve(import.meta.dir, '../../../src/adapters/runtime/termination-gate.ts'));
 
@@ -94,7 +95,10 @@ describe('terminationGate edges', () => {
     // Act
     target.fire('SIGTERM');
     target.fire('SIGINT');
-    await Bun.sleep(5);
+    await waitFor(() => exits.length > 0, 'the gate to exit');
+    // Everything the gate does after an exit is a microtask already queued: one macrotask turn drains it,
+    // so a second release or exit would be counted here.
+    await new Promise<void>(resolve => setImmediate(resolve));
 
     // Assert
     should(releases).equal(1);
@@ -115,7 +119,7 @@ describe('terminationGate edges', () => {
 
     // Act
     target.fire('SIGTERM');
-    await Bun.sleep(5);
+    await waitFor(() => order.length >= 2, 'the early release to finish and the gate to exit');
 
     // Assert
     should(order).deepEqual(['released', `exit ${String(INTERRUPTED_BOOT_EXIT_CODE)}`]);

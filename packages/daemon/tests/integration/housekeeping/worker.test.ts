@@ -11,7 +11,7 @@
  * quiet home opens nothing; and a job sent before the settings is refused with the closed word.
  */
 import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { chmod, mkdir, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, utimes, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ClaudeStoreResolution, CodexStoreResolution } from '@ferretry/fleet';
 import should from 'should';
@@ -96,8 +96,10 @@ async function fleetAt(root: string): Promise<Fleet> {
       },
     })}\n`;
   await writeFile(rollouts[0] as string, tokenCount(3));
-  await Bun.sleep(5);
   await writeFile(rollouts[1] as string, tokenCount(21));
+  // The newer rollout is newer by its stamp, not by the time it took to write: stamps are set, never waited for.
+  await utimes(rollouts[0] as string, new Date(NOW - 20_000), new Date(NOW - 20_000));
+  await utimes(rollouts[1] as string, new Date(NOW - 10_000), new Date(NOW - 10_000));
   const codexHome = join(root, 'codex-home');
   const day = join(codexHome, 'sessions', '2026', '10', '22');
   await mkdir(day, { recursive: true });

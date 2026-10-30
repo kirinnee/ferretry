@@ -11,8 +11,9 @@ import {
 import should from 'should';
 import { buildWorld, type DaemonWorld, start } from '../../../bin/fyd.ts';
 import type { SessionLifecycleLauncher, SessionLifecycleRecord } from '../../../src/lib/index.ts';
-import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * Completing shared live work, driven end to end through the production composition root.
@@ -135,11 +136,10 @@ async function worldAt(home: string, port: number, untilShutdown: () => Promise<
  * would make the suite flaky about the one thing it is not testing.
  */
 async function untilListening(port: number): Promise<void> {
-  for (let attempt = 0; attempt < 600; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) return;
-    await Bun.sleep(50);
-  }
-  throw new Error('the daemon never started listening');
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to start listening',
+  );
 }
 
 const lastStatusActivity = (activity: readonly TaskActivity[]): TaskActivity => {

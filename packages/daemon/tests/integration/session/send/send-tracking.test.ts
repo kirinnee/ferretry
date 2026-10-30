@@ -34,6 +34,7 @@ import {
   ClaudeObservedInputObserver,
   CodexObservedInputObserver,
 } from '../../../../src/lib/transcript/observed-input.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * The whole chain, end to end, against a FAKE HARNESS: the real send service types into a terminal
@@ -565,7 +566,7 @@ describe('a message carried by a revive — a finished sub-ferret sent a peer me
 
     // Act — somebody reads the ledger at 16 s and 60 s, mid-relaunch.
     const sent = subject.service.send({ id: ID, sendId: 'send-1', message, senderReference: SENDER });
-    while ((await subject.ledger.list(ID)).length === 0) await Bun.sleep(1);
+    await waitFor(async () => (await subject.ledger.list(ID)).length > 0, 'the send to be written to the ledger');
     const early = await subject.at(16_000);
     const later = await subject.at(60_000);
     subject.harness.alive = true;
@@ -633,7 +634,10 @@ describe('a daemon restart', () => {
     const restarted = subject.trackerOver(subject.repository, subject.routed, () => subject.service);
     subject.nowMs = T0 + 600_000;
     restarted.arm();
-    await Bun.sleep(10);
+    await waitFor(
+      async () => (await subject.record('send-1'))?.fate === 'delivered',
+      'the restarted tracker to settle the send as delivered',
+    );
 
     should(await subject.record('send-1')).match({ fate: 'delivered', attempt: 1 });
     should(subject.harness.typed).have.length(1);
