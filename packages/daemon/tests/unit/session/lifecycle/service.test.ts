@@ -1287,3 +1287,74 @@ describe('SessionLifecycleService first-turn standing and failure evidence', () 
     should(launcher.calls).containEql('snapshot');
   });
 });
+
+describe('SessionLifecycleService board stamping', () => {
+  const PROJECT_ID = '11111111-1111-4111-8111-111111111111';
+
+  it('should stamp the board the resolver names for the canonical cwd and the parent', async () => {
+    // Arrange
+    const starts: Array<{ readonly cwd: string; readonly parent?: string }> = [];
+    const projects = {
+      projectForStart: async (start: { readonly cwd: string; readonly parent?: string }) => {
+        starts.push(start);
+        return PROJECT_ID;
+      },
+    };
+    const { repository, subject } = harness({ projects });
+
+    // Act
+    const actual = await subject.create(input({ parent: 'ms8-parent01' }));
+
+    // Assert
+    should(actual.config.projectId).equal(PROJECT_ID);
+    should(repository.current().config.projectId).equal(PROJECT_ID);
+    should(starts).deepEqual([{ cwd: '/canonical/project', parent: 'ms8-parent01' }]);
+  });
+
+  it('should ask without a parent when the request has none', async () => {
+    // Arrange
+    const starts: Array<{ readonly cwd: string; readonly parent?: string }> = [];
+    const projects = {
+      projectForStart: async (start: { readonly cwd: string; readonly parent?: string }) => {
+        starts.push(start);
+        return 'unfiled' as const;
+      },
+    };
+    const { subject } = harness({ projects });
+
+    // Act
+    const actual = await subject.create(input());
+
+    // Assert
+    should(actual.config.projectId).equal('unfiled');
+    should(starts).deepEqual([{ cwd: '/canonical/project' }]);
+  });
+
+  it('should create the session without a board when no resolver is wired', async () => {
+    // Arrange
+    const { subject } = harness();
+
+    // Act
+    const actual = await subject.create(input());
+
+    // Assert
+    should(actual.config).not.have.property('projectId');
+  });
+
+  it('should never block a start on a resolver that fails', async () => {
+    // Arrange
+    const projects = {
+      projectForStart: async (): Promise<never> => {
+        throw new Error('registry unreadable');
+      },
+    };
+    const { subject } = harness({ projects });
+
+    // Act
+    const actual = await subject.create(input());
+
+    // Assert
+    should(actual.config).not.have.property('projectId');
+    should(actual.state.status).equal('created');
+  });
+});

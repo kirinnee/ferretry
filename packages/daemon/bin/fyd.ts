@@ -220,6 +220,10 @@ import {
   FileCgroupConfigStore,
   FileDaemonConfig,
   FileModelCatalogCache,
+  AttentionLaneAgenda,
+  FileLaneSetStore,
+  GitRepositoryProbe,
+  StorageSessionFacts,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
   FileRestartQueue,
@@ -602,6 +606,9 @@ import {
   AttentionBoardUndelivered,
   AttentionBuzz,
   AttentionChangeFanout,
+  LaneProposalAcceptance,
+  LaneSetService,
+  SessionProjects,
   AttentionConversation,
   AttentionReplyBatcher,
   AttentionReplyDelivery,
@@ -7610,6 +7617,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   /** One live writer per harness conversation (account model §9.3), over the shared pool's lease files. */
   const conversationLeases = (storage: DaemonStorage): ConversationLeases =>
     new ConversationLeases(new FileConversationLeaseStore(paths.fleet, processIncarnationFor()), storage, process.pid);
+  /** The board a new session works on: its parent's, its repository's, its folder's, else Unfiled. */
+  const sessionBoards = (storage: DaemonStorage): SessionProjects =>
+    new SessionProjects(
+      new StorageSessionFacts(storage),
+      new FileProjectCatalog(join(paths.state, 'projects.json')),
+      new GitRepositoryProbe(),
+      [...COMMON_SCRATCH_ROOTS, tmpdir()],
+    );
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -7620,6 +7635,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         tasks: new FileSessionTaskStore(taskId => createSessionPaths(paths, taskId).directory),
         effects: sessionEffects,
         directories: new NodeWorkingDirectoryResolver(),
+        projects: sessionBoards(storage),
         // EVERY session gets a credential, not only one that asked for board access: the board
         // domain keys `TaskBoardSession` on this hash, so a session minted without one could never
         // be invited to a board later. Holding a credential is identity; a grant is authority, and
@@ -9124,6 +9140,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read lazily: the service is built just below, and this is only called after it commits.
         { raise: async (...parameters) => await attention.raise(...parameters) },
       );
+      // The board's projects and their lanes. A proposal is raised on the proposing ferret's agenda, and the
+      // owner's Accept confirms it (below, in the change fanout). The agenda is read lazily: it is built next.
+      const laneSets = new LaneSetService(
+        new FileLaneSetStore(join(paths.home, 'board', 'lanes')),
+        { projects: async () => await catalogs.projects() },
+        new SessionProjects(
+          new StorageSessionFacts(storage),
+          { projects: async () => await catalogs.projects() },
+          new GitRepositoryProbe(),
+          [...COMMON_SCRATCH_ROOTS, tmpdir()],
+        ),
+        new AttentionLaneAgenda({ raise: async (...parameters) => await attention.raise(...parameters) }),
+        // The board store (U2) takes over moving a deleted lane's cards; until it lands there are none to move.
+        { relocate: async () => undefined },
+      );
       const attention = new AttentionService(
         attentionBoards,
         clock,
@@ -9137,6 +9168,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AttentionChangeFanout([
           // The session list's unread signal, kept true to the board.
           attentionProjection,
+          // The owner's Accept on a lane proposal confirms those lanes; any other answer is ignored.
+          new LaneProposalAcceptance(laneSets),
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
           new AttentionReplyDelivery(attentionReplies, CLIENT_NAME),
@@ -10296,6 +10329,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           candidates: async () => await sessionAddressCandidates(storage),
         },
         catalogs,
+        boardProjects: laneSets,
         // The evidence is read through the SAME collaborators the rest of the daemon serves from —
         // the session directory, the terminal runtime and the project catalog — so a refusal to
         // remove a checkout because a session or a shell is still in it cites the very records the

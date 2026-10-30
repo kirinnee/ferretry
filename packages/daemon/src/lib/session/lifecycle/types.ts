@@ -1,5 +1,7 @@
 import { isAbsolute } from 'node:path';
 import {
+  type BoardProjectId,
+  BoardProjectIdSchema,
   type SessionLaunchInstructions,
   SessionLaunchInstructionsSchema,
   SessionStatusSchema,
@@ -56,6 +58,8 @@ export const SessionLifecycleConfigSchema = z.object({
   mode: z.enum(['auto', 'interactive']),
   prompt: z.string().min(1).max(MAX_ASSIGNED_TASK_LENGTH).optional(),
   parent: SessionIdSchema.optional(),
+  /** The board this session works on, stamped once at creation. Absent on older sessions: a reader resolves it. */
+  projectId: BoardProjectIdSchema.optional(),
   createdAt: z.iso.datetime({ offset: true }),
   updatedAt: z.iso.datetime({ offset: true }),
   tmuxSession: z.string().min(1).max(MAX_TMUX_SESSION_NAME_LENGTH),
@@ -96,6 +100,11 @@ export type SessionLifecycleRecord = z.infer<typeof SessionLifecycleRecordSchema
  * A creation request as a client states it. It carries no id: the daemon mints one, so no client
  * can name — and therefore overwrite — a session that already exists.
  */
+/** Names the board a session about to start works on. */
+export interface SessionProjectResolver {
+  projectForStart(start: { readonly cwd: string; readonly parent?: string }): Promise<BoardProjectId>;
+}
+
 export interface CreateSessionLifecycleRequest {
   readonly name?: string;
   readonly agent: string;
