@@ -356,10 +356,10 @@ describe('BoardDetail — moving', () => {
 describe('BoardDetail — the verdict', () => {
   const tested = { laneId: 'tested', title: 'Try it' };
 
-  it('offers Works → Close and Not good → the last working lane on a card to try', async () => {
+  it("offers Done and Not good → the last working lane on a card to try, in the board's own words", async () => {
     const { root } = await open({ task: card('F1', tested) });
-    expect(text(root, '[data-verdict="works"]')).toBe('Close');
-    expect(root.querySelector('[data-verdict="works"]')?.getAttribute('title')).toBe('Works → Close');
+    expect(text(root, '[data-verdict="works"]')).toBe('Done');
+    expect(root.querySelector('[data-verdict="works"]')?.getAttribute('title')).toBe('Mark Try it done and close it');
     expect(text(root, '[data-verdict="not-good"]')).toBe('Not good');
     expect(root.querySelector('[data-verdict="not-good"]')?.getAttribute('title')).toBe(
       'Not good → back to Implement, with a reason',
@@ -411,7 +411,7 @@ describe('BoardDetail — Mark done', () => {
     expect(actions.calls).toEqual(['moveTask:["closed"]']);
   });
 
-  it('is left to Works → Close on a card to try, and is not offered on a dropped card', async () => {
+  it('is left to the verdict Done on a card to try, and is not offered on a dropped card', async () => {
     const tested = await open({ task: card('F1', { laneId: 'tested', title: 'Try it' }) });
     expect(tested.root.querySelector('.fy-board-done')).toBeNull();
     await view?.unmount();

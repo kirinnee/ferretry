@@ -209,7 +209,7 @@ export const cardPlaces = (model: BoardModel): ReadonlyMap<string, BoardCardPlac
   return places;
 };
 
-/** The first (`closed`) or last (`active`) lane of a category on a board, or `null`: where "Works → Close" and "Not good" go. */
+/** The first (`closed`) or last (`active`) lane of a category on a board, or `null`: where "Done" and "Not good" go. */
 export const laneOfCategory = (
   group: BoardGroupOf,
   category: LaneCategory,

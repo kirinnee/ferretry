@@ -39,7 +39,7 @@ export const laneNameOf = (laneSet: Lanes | null, laneId: string): string =>
 // ---------------------------------------------------------------------------------------------------
 
 export interface VerdictLanes {
-  /** "✓ Works → Close": the Done lane (`doneLaneOf`), a move forward that needs no words. */
+  /** "✓ Done": the Done lane (`doneLaneOf`), a move forward that needs no words. */
   readonly closeLaneId: string | null;
   /** "✗ Not good → Implement": the Not good lane (`notGoodLaneOf`), a move back that asks why. */
   readonly reworkLaneId: string | null;

@@ -1,7 +1,7 @@
 /**
  * "DONE ✓" AND "REOPEN": the owner's two one-tap answers about a card, as a decision before anything is drawn.
  *
- * Done closes the card (the owner's close, through the same move as "Works → Close", which the daemon records
+ * Done closes the card (the owner's close, through the same move as the verdict Done on a card to try, which the daemon records
  * in the card's history and tells the card's ferret about). Reopen sends a closed card back to the last active
  * lane and asks for a reason, because that is a move backward. Both are the OWNER's: a view that is not the
  * owner's (a ferret's own chat scope) simply never asks for one.

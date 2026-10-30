@@ -10,7 +10,7 @@
  * draggable, and a "Move to…" menu does the same job from the keyboard; both end in the same `onMove`.
  *
  * `touch` is the phone: thumb-sized targets, no drag (a finger scrolls, it does not drag), and the two
- * answers on a card waiting to be tried drawn as full-width **✓ Works** and **✗ Not good** buttons.
+ * answers on a card waiting to be tried drawn as full-width **✓ Done** and **✗ Not good** buttons.
  *
  * The owner's "Done ✓" is the shared `BoardDoneAction`: it is the close on a card in To test (next to Not good),
  * its own row on a Released card, and the first item of the ⋯ menu everywhere ("Reopen" on a closed card).
@@ -45,7 +45,7 @@ export interface BoardCardMoves {
   readonly choices: readonly MoveChoice[];
   /** `answer` names the control that asked, so the page spins THAT one and words a move back for it. */
   readonly onMove: (card: BoardCardOf, laneId: string, answer?: BoardAnswer) => void;
-  /** The lane "✓ Works → Close" goes to; `null` when the project has no Closed lane. */
+  /** The lane Done closes into; `null` when the project has no Closed lane. */
   readonly closeLaneId: string | null;
   /** The lane "✗ Not good" goes back to (asks for a reason); `null` when there is none. */
   readonly reworkLaneId: string | null;
@@ -237,17 +237,17 @@ function ToTestActions({
       ) : closeLaneId === null ? null : (
         <button
           aria-busy={answer.pressed === 'works'}
-          aria-label={touch ? `Works: close ${card.task.title}` : undefined}
+          aria-label={doneTitle({ kind: 'done', laneId: closeLaneId }, card.task.title)}
           className="fy-board-verdict"
           data-pending={answer.pressed === 'works' ? '' : undefined}
           data-verdict="works"
           disabled={settling}
           onClick={() => moves.onMove(card, closeLaneId, 'works')}
-          title="Works → Close"
+          title={doneTitle({ kind: 'done', laneId: closeLaneId }, card.task.title)}
           type="button"
         >
           <AnswerIcon icon={Check} pending={answer.pressed === 'works'} size={size} />
-          {touch ? 'Works' : 'Close'}
+          Done
         </button>
       )}
       {reworkLaneId === null ? null : (

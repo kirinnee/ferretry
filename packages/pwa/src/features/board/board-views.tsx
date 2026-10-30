@@ -151,7 +151,7 @@ function KanbanBoard({
           category="closed"
           count={0}
           density="page"
-          name="Works → Close"
+          name="Done"
           onDropCard={() => onDropCard(group.key, closeLane)}
           variant="target"
         />

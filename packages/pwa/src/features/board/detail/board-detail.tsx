@@ -38,7 +38,7 @@ import {
   verdictLanes,
   written,
 } from '../../../lib/board-detail.ts';
-import { type BoardAnswer, boardDone } from '../../../lib/board-done.ts';
+import { type BoardAnswer, boardDone, doneTitle } from '../../../lib/board-done.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../../lib/board-move.ts';
 import type { FerretNames } from '../../../lib/board-present.ts';
@@ -551,12 +551,12 @@ function DetailBody({
                 data-variant="primary"
                 data-verdict="works"
                 disabled={busy}
-                title="Works → Close"
+                title={doneTitle({ kind: 'done', laneId: verdict.closeLaneId }, task.title)}
                 onClick={() => requestMove(verdict.closeLaneId as string, 'works')}
                 type="button"
               >
                 <AnswerIcon icon={Check} pending={pressed === 'works'} size={14} />
-                Close
+                Done
               </button>
             )}
             {verdict.reworkLaneId === null ? null : (

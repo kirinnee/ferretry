@@ -611,7 +611,7 @@ describe('BoardPage — moving cards', () => {
     expect(root.querySelector('[role="dialog"]')?.textContent).toContain('Move Review the thing back to Plan/Design');
   });
 
-  it('closes a card dropped on the "Works → Close" target', async () => {
+  it('closes a card dropped on the "Done" target', async () => {
     const { root, acts } = await open();
     await interact(() => must(root.querySelector('[data-task="F4"]'), 'F4').dispatchEvent(drag('dragstart')));
     await interact(() => must(root.querySelector('[data-variant="target"]'), 'the target').dispatchEvent(drag('drop')));

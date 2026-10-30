@@ -145,7 +145,7 @@ describe('KanbanView', () => {
     expect(view.container.querySelectorAll('[data-drop]').length).toBe(0);
   });
 
-  it('shows a "Works → Close" target while dragging with closed work hidden', async () => {
+  it('shows a "Done" target while dragging with closed work hidden', async () => {
     const model = await boardModelOf(cards);
     const group = must(model.groups[0], 'the group');
     const dropped: string[] = [];
@@ -160,7 +160,7 @@ describe('KanbanView', () => {
       />,
     );
     const target = must(view.container.querySelector<HTMLElement>('[data-variant="target"]'), 'the target');
-    expect(target.getAttribute('aria-label')).toBe('Works → Close, 0 cards');
+    expect(target.getAttribute('aria-label')).toBe('Done, 0 cards');
     const drop = new Event('drop', { bubbles: true, cancelable: true });
     Object.defineProperty(drop, 'dataTransfer', { value: {} });
     await interact(() => target.dispatchEvent(drop));
