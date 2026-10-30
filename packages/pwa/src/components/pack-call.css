@@ -258,53 +258,6 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
   font-size: var(--text-xs);
 }
 
-/* THE SESSION BAR'S INDICATOR: a quiet chip that opens the list under it. */
-.fy-sub-ferret-indicator {
-  align-self: center;
-  flex: 0 0 auto;
-  position: relative;
-}
-.fy-sub-ferret-toggle {
-  align-items: center;
-  background: var(--surface-2);
-  border: var(--stroke-control) solid var(--border-strong);
-  border-radius: var(--radius-control);
-  box-shadow: var(--shadow-control);
-  color: var(--muted);
-  cursor: pointer;
-  display: inline-flex;
-  font-size: var(--text-sm);
-  gap: 4px;
-  padding: 1px 8px;
-  white-space: nowrap;
-}
-.fy-sub-ferret-toggle:hover,
-.fy-sub-ferret-toggle[aria-expanded='true'] {
-  border-color: var(--accent);
-  color: var(--fg);
-}
-.fy-sub-ferret-popover {
-  background: var(--surface);
-  border: var(--stroke-panel) solid var(--border-strong);
-  border-radius: var(--radius-panel);
-  box-shadow: var(--shadow-popover);
-  left: 0;
-  max-height: min(60vh, 420px);
-  max-width: calc(100vw - 32px);
-  overflow: auto;
-  padding: 10px 12px;
-  position: absolute;
-  top: calc(100% + 6px);
-  width: 320px;
-  z-index: 40;
-}
-.fy-sub-ferret-popover-title {
-  color: var(--muted);
-  font-size: 11.5px;
-  font-weight: 600;
-  margin: 0 0 8px;
-}
-
 /* Info's pack: the active list, and the finished ones one quiet toggle away. */
 .fy-sub-ferret-pack {
   display: grid;
@@ -329,7 +282,6 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
 /* The small controls keep their size on a touch screen and get an invisible, centred 44px hit area, as
    the transcript's and Info's do. */
 @media (pointer: coarse) {
-  :root button.fy-sub-ferret-toggle,
   :root button.fy-sub-ferret-link,
   :root button.fy-sub-ferret-finished-toggle,
   :root .fy-pack-fold summary {
@@ -337,7 +289,6 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
     min-width: 0;
     position: relative;
   }
-  :root button.fy-sub-ferret-toggle::after,
   :root button.fy-sub-ferret-link::after,
   :root button.fy-sub-ferret-finished-toggle::after,
   :root .fy-pack-fold summary::after {

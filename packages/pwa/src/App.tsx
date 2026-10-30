@@ -1,5 +1,5 @@
 import { DoctorReportSchema, HealthViewSchema, type QueuedMessage } from '@ferretry/protocol';
-import { QrCode, Sparkles } from 'lucide-react';
+import { KanbanSquare, QrCode, Sparkles } from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -205,6 +205,7 @@ import {
   daemonLearningPath,
   daemonProjectPath,
   daemonSessionsPath,
+  daemonBoardForFerretPath,
   daemonSettingsPath,
   daemonWardenPath,
   type PageRoute,
@@ -266,7 +267,11 @@ import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
-import { pairPhonePaletteCommand, whatsNewPaletteCommand } from './shell/palette-destinations.ts';
+import {
+  boardForFerretPaletteCommand,
+  pairPhonePaletteCommand,
+  whatsNewPaletteCommand,
+} from './shell/palette-destinations.ts';
 import { machinePaletteSessions, paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
@@ -2667,6 +2672,19 @@ export function AppShell() {
       allMachines === undefined
         ? { sessions: paletteSessionEntries(sessions), note: null }
         : machinePaletteSessions(allMachines.sources);
+    // Cmd-K "Board for <ferret>": only on a chat, where there is a ferret to narrow the Board to.
+    const chatFerret =
+      pageRoute.kind === 'session'
+        ? paletteSearch.sessions.find(entry => entry.view.config.id === pageRoute.sessionId)
+        : undefined;
+    const boardForFerret =
+      pageRoute.kind !== 'session'
+        ? null
+        : boardForFerretPaletteCommand(chatFerret?.headline ?? pageRoute.sessionId, KanbanSquare, () =>
+            navigate(
+              daemonBoardForFerretPath(connection.daemonId, pageRoute.sessionId, chatFerret?.view.config.focusTask?.id),
+            ),
+          );
     // Every paired machine, so one that is down is counted whichever machine's page is open.
     const noticeMachines = machineDisplayOrder(connectionSnapshot.connections, savedMachineOrder).map(record => ({
       daemonId: record.daemonId,
@@ -2785,6 +2803,7 @@ export function AppShell() {
                           ]
                         : []),
                       whatsNewPaletteCommand(Sparkles, whatsNew.entry.open),
+                      ...(boardForFerret === null ? [] : [boardForFerret]),
                     ]}
                   />
                   {/* After the finder, so the finder hands focus back to its opener before this captures it. */}

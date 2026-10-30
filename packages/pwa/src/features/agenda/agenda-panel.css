@@ -182,7 +182,7 @@
   text-decoration: underline;
 }
 
-/* THE FOLD (agenda-collapse.ts): a ⌄ at the end of the pinned card's header, and — folded — one slim
+/* THE FOLD: a ⌄ at the end of the pinned card's header, and — folded — one slim
    line above the composer. The line is a real button, so Enter and Space unfold it. */
 .fy-attn-collapse {
   display: inline-flex;

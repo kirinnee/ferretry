@@ -6,7 +6,7 @@
  *   narrow. The row never wraps, and has no left half when nothing is running;
  * - the DRAWER the pill opens: a raised sheet above the chat, over a scrim, with its own header and scroll, one
  *   row (one button) per item;
- * - the DOCKED PANEL a wide screen can keep beside the chat instead of the drawer.
+ * - the same rows as a section of Info (`AgendaPanelBody`): there is no side bar of its own.
  */
 
 import type { AgendaItem } from '@ferretry/protocol';
@@ -28,8 +28,6 @@ export interface AgendaLineProps {
   readonly open: boolean;
   /** The drawer's DOM id, for `aria-controls`. */
   readonly controls: string;
-  /** Docked: the agenda is beside the chat, so the line is a plain summary. */
-  readonly docked: boolean;
   readonly onToggle: () => void;
   readonly sending: AgendaSending;
   /** Drawn on the right instead of "Sending…" while the machine holds answers ("Sending in 8 s… Send now"). */
@@ -38,17 +36,7 @@ export interface AgendaLineProps {
   readonly live?: ReactNode;
 }
 
-export function AgendaLine({
-  ferret,
-  counts,
-  open,
-  controls,
-  docked,
-  onToggle,
-  sending,
-  repliesSlot,
-  live,
-}: AgendaLineProps) {
+export function AgendaLine({ ferret, counts, open, controls, onToggle, sending, repliesSlot, live }: AgendaLineProps) {
   const hasStatus = repliesSlot !== undefined || sending.count > 0;
   if (counts === undefined && !hasStatus) return null;
   const segments = counts === undefined ? [] : agendaSegments(counts, ferret);
@@ -86,11 +74,7 @@ export function AgendaLine({
     >
       <AgendaLineLive live={live} />
       <AgendaLineStatus repliesSlot={repliesSlot} sending={sending} />
-      {counts === undefined ? null : docked ? (
-        <p className="fy-agenda-line__main" data-agenda-line-summary="">
-          {summary}
-        </p>
-      ) : (
+      {counts === undefined ? null : (
         <button
           aria-controls={controls}
           aria-expanded={open}
@@ -140,7 +124,7 @@ function AgendaLineStatus({
   );
 }
 
-interface AgendaRowsProps {
+export interface AgendaRowsProps {
   readonly items: readonly AgendaItem[];
   readonly ferret: string;
   readonly now?: number;
@@ -234,33 +218,8 @@ export function AgendaDrawer({ id, counts, onClose, ...rows }: AgendaDrawerProps
   );
 }
 
-export interface AgendaPanelProps extends AgendaRowsProps {
-  readonly onClose: () => void;
-}
-
-/** The agenda docked beside the chat on a wide screen: the same rows, in a column of their own. */
-export function AgendaPanel({ onClose, ...rows }: AgendaPanelProps) {
-  return (
-    <aside aria-label={`${rows.ferret}’s agenda`} className="fy-agenda-panel" data-agenda-panel="">
-      <header className="fy-agenda-panel__head">
-        <h2 className="fy-agenda-panel__title">Agenda</h2>
-        <button
-          aria-label="Undock the agenda"
-          className="fy-agenda-panel__close"
-          data-agenda-panel-close=""
-          onClick={onClose}
-          type="button"
-        >
-          <X aria-hidden="true" size={16} />
-        </button>
-      </header>
-      <AgendaPanelBody {...rows} />
-    </aside>
-  );
-}
-
-/** The docked panel's rows, or a plain line when there are none. */
-function AgendaPanelBody(rows: AgendaRowsProps) {
+/** The rows as a section of Info, or a plain line when there are none. */
+export function AgendaPanelBody(rows: AgendaRowsProps) {
   if (rows.items.length === 0) return <p className="fy-agenda-panel__empty">Nothing on the agenda.</p>;
   return <AgendaRows {...rows} />;
 }
