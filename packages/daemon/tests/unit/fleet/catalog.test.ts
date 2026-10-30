@@ -1907,3 +1907,68 @@ describe('harness scope (P7)', () => {
     FleetProfileDraftViewSchema.parse(fresh);
   });
 });
+
+describe('runtimeCatalog: a login or runtime switched off', () => {
+  const NOW = Date.parse('2026-10-30T12:00:00Z');
+  const disabledModel = (login: object | undefined, runtime: object | undefined): AccountModel =>
+    parseAccountModel({
+      version: 2,
+      credentials: {
+        work: { harness: 'claude', store: 'ferretry', ...(login === undefined ? {} : { disabled: login }) },
+        home: { harness: 'claude', store: 'host' },
+      },
+      components: { modelSets: { fast: { models: ['claude-sonnet-5'], default: 'claude-sonnet-5' } } },
+      profiles: { base: { layers: ['modelSets/fast'] } },
+      runtimes: {
+        a: {
+          credential: 'work',
+          profile: 'base',
+          agent: true,
+          ...(runtime === undefined ? {} : { disabled: runtime }),
+        },
+        b: { credential: 'home', profile: 'base', agent: true },
+      },
+    });
+  const row = (model: AccountModel, name: string, now: number | undefined = NOW) =>
+    runtimeCatalog(model, factsOf({ ...(now === undefined ? {} : { now }) })).runtimes.find(r => r.name === name);
+
+  it('should refuse to launch a runtime that is off, name the one to use and show the switch', () => {
+    // Act
+    const actual = row(disabledModel(undefined, { reason: 'paused', until: '2026-11-01' }), 'a');
+
+    // Assert
+    should(actual?.launch).match({ available: false });
+    should(actual?.launch.available === false ? actual.launch.reason : '').match(
+      /runtime "a" is disabled \(paused\) until 2026-11-01.*Use "b" instead.*`fy runtime enable a`.*`fy migrate <id> -a b`/u,
+    );
+    should(actual?.disabled).eql({ reason: 'paused', until: '2026-11-01T00:00:00.000Z', source: 'runtime' });
+    FleetRuntimeCatalogSchema.parse({ format: 'version-2', runtimes: [actual] });
+  });
+
+  it('should hold every runtime on a disabled login and say the switch is on the login', () => {
+    // Act
+    const actual = row(disabledModel({ reason: 'org spend limit' }, undefined), 'a');
+
+    // Assert
+    should(actual?.launch.available).be.false();
+    should(actual?.disabled).eql({ reason: 'org spend limit', source: 'login' });
+    should(row(disabledModel({}, undefined), 'b')?.disabled).be.undefined();
+    should(row(disabledModel({}, undefined), 'b')?.launch).eql({ available: true });
+  });
+
+  it('should launch again once the until has passed, and show no switch', () => {
+    // Act
+    const actual = row(disabledModel(undefined, { until: '2026-10-30T11:00:00Z' }), 'a');
+
+    // Assert
+    should(actual?.launch).eql({ available: true });
+    should(actual?.disabled).be.undefined();
+  });
+
+  it('should take the runtime switch over the login switch when both are on', () => {
+    should(row(disabledModel({ reason: 'login' }, { reason: 'runtime' }), 'a')?.disabled).eql({
+      reason: 'runtime',
+      source: 'runtime',
+    });
+  });
+});

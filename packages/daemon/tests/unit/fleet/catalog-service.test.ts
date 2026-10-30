@@ -16,9 +16,9 @@ import {
   type FleetLayout,
   type FleetModelApplyPlan,
   parseAccountModel,
-  type RuntimeIds,
   RETIRED_FLEET_CONFIG_SENTENCE,
   RetiredFleetConfigError,
+  type RuntimeIds,
 } from '@ferretry/fleet';
 import {
   FleetAccountChangeOutcomeSchema,
@@ -1087,6 +1087,28 @@ describe('FleetCatalogService with model catalogs (docs/model-catalog.md)', () =
     should(applied[0]?.documents).deepEqual([]);
     should(second).equal('unchanged');
     should(applied).have.length(1);
+  });
+
+  it('should name the earliest disabled-until still ahead, across logins and runtimes', async () => {
+    // Arrange
+    const withBlocks = parseAccountModel({
+      ...MODEL(),
+      credentials: {
+        'claude-you': { harness: 'claude', store: 'host', disabled: { until: '2099-12-01' } },
+        'codex-slot': { harness: 'codex', store: 'ferretry' },
+      },
+      runtimes: {
+        'claude-default': { credential: 'claude-you', profile: 'default', agent: true },
+        'codex-default': { credential: 'codex-slot', profile: 'default', disabled: { until: '2099-11-01' } },
+      },
+    });
+    const { service, state } = world();
+    state.reading = configReading(withBlocks, 'rev-1', 'version-2');
+
+    // Act / Assert
+    should(await service.nextDisableExpiry()).equal(Date.parse('2099-11-01T00:00:00Z'));
+    state.reading = configReading(MODEL(), 'rev-1', 'version-2');
+    should(await service.nextDisableExpiry()).be.undefined();
   });
 
   it('should skip a machine with no fleet, or one wired without catalogs', async () => {

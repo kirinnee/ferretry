@@ -2555,3 +2555,84 @@ describe('deriveAccountChange: a new environment login is never made the default
     should(others).deepEqual(model.credentials);
   });
 });
+
+describe('deriveAccountChange: disable and enable', () => {
+  it('should disable a login with a reason and an until, and say nothing running is stopped', () => {
+    // Act
+    const edit = derive({
+      kind: 'credential.disable',
+      id: 'work',
+      reason: 'spend limit',
+      until: '2026-11-01T00:00:00.000Z',
+    });
+
+    // Assert
+    should(edit.summary).equal('Disable login work');
+    should(edit.model.credentials.work?.disabled).eql({ reason: 'spend limit', until: '2026-11-01T00:00:00.000Z' });
+    should(edit.consequences.join(' ')).match(/keep going \(move one with `migrate <id> -a <other runtime>`\)/u);
+  });
+
+  it('should disable a login with no reason or until at all', () => {
+    should(derive({ kind: 'credential.disable', id: 'work' }).model.credentials.work?.disabled).eql({});
+  });
+
+  it('should enable a login by taking the block away', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        'my-claude': { harness: 'claude', store: 'host' },
+        work: { harness: 'claude', store: 'ferretry', label: 'Work', disabled: { reason: 'x' } },
+        home: { harness: 'claude', store: 'ferretry', label: 'Home' },
+      },
+    });
+
+    // Act
+    const edit = derive({ kind: 'credential.enable', id: 'work' }, model);
+
+    // Assert
+    should(edit.summary).equal('Enable login work');
+    should(edit.model.credentials.work?.disabled).be.undefined();
+  });
+
+  it('should disable and enable a runtime, keeping the switch through a rewrite of it', () => {
+    // Act
+    const off = derive({ kind: 'runtime.disable', name: 'beta', reason: 'paused' });
+    const again = derive(
+      runtimePut({ name: 'beta', credential: 'home', profile: 'base', agent: true, create: false }),
+      off.model,
+    );
+
+    // Assert
+    should(off.summary).equal('Disable runtime beta');
+    should(off.model.runtimes.beta?.disabled).eql({ reason: 'paused' });
+    should(off.consequences.join(' ')).match(/ferrets already on this runtime keep going/u);
+    should(again.model.runtimes.beta?.disabled).eql({ reason: 'paused' });
+    should(derive({ kind: 'runtime.enable', name: 'beta' }, off.model).model.runtimes.beta?.disabled).be.undefined();
+  });
+
+  it('should warn that an enabled runtime stays off while its login is disabled', () => {
+    // Arrange
+    const model = modelOf({
+      credentials: {
+        'my-claude': { harness: 'claude', store: 'host' },
+        work: { harness: 'claude', store: 'ferretry', label: 'Work', disabled: {} },
+        home: { harness: 'claude', store: 'ferretry', label: 'Home' },
+      },
+    });
+
+    // Act
+    const edit = derive({ kind: 'runtime.enable', name: 'alpha' }, model);
+
+    // Assert
+    should(edit.consequences).containEql(
+      'Its login work is still disabled, so alpha stays off until that is enabled too.',
+    );
+  });
+
+  it('should refuse a login or runtime that does not exist', () => {
+    should(refusalOf({ kind: 'credential.disable', id: 'ghost' })).equal('no login ghost exists on this machine');
+    should(refusalOf({ kind: 'credential.enable', id: 'ghost' })).equal('no login ghost exists on this machine');
+    should(refusalOf({ kind: 'runtime.disable', name: 'ghost' })).equal('no runtime ghost exists on this machine');
+    should(refusalOf({ kind: 'runtime.enable', name: 'ghost' })).equal('no runtime ghost exists on this machine');
+  });
+});

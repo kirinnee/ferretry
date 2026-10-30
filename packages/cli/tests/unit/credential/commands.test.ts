@@ -885,3 +885,55 @@ describe('one-click providers (docs/provider-presets.md)', () => {
     });
   });
 });
+
+describe('login disable and enable', () => {
+  it('should switch a login off with a reason and a wait, without asking', async () => {
+    const world = fakeWorld();
+    await runCommand(registerCredentialCommands, world, [
+      'login',
+      'disable',
+      'claude-you',
+      '--until',
+      '2d',
+      '--reason',
+      'spend limit',
+    ]);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'credential.disable',
+      id: 'claude-you',
+      reason: 'spend limit',
+      until: '2026-10-15T00:00:00.000Z',
+    });
+    should(world.prompt.questions).be.empty();
+  });
+
+  it('should switch it off for good when no end is given, and back on', async () => {
+    const world = fakeWorld();
+    await runCommand(registerCredentialCommands, world, ['login', 'disable', 'claude-you']);
+    await runCommand(registerCredentialCommands, world, ['login', 'enable', 'claude-you']);
+    should(world.gateway.called('stage').map(call => call.args[0])).eql([
+      { kind: 'credential.disable', id: 'claude-you' },
+      { kind: 'credential.enable', id: 'claude-you' },
+    ]);
+  });
+
+  it('should refuse a blank reason and an end already passed', async () => {
+    const world = fakeWorld();
+    await should(
+      runCommand(registerCredentialCommands, world, ['login', 'disable', 'claude-you', '--reason', ' ']),
+    ).be.rejectedWith(/Say why/);
+    await should(
+      runCommand(registerCredentialCommands, world, ['login', 'disable', 'claude-you', '--until', '2020-01-01']),
+    ).be.rejectedWith(/already passed/);
+    should(world.gateway.called('stage')).be.empty();
+  });
+});
+
+describe('renderCredentialList of a switched-off login', () => {
+  it('should show the switch in place of the status, and how to turn it back on', () => {
+    const row = credential({ id: 'liftoff', disabled: { reason: 'spend limit', source: 'login' } });
+    const text = renderCredentialList({ format: 2, machine: 'studio', credentials: [row] }, 'fz');
+    should(text).match(/^liftoff .*— disabled \(spend limit\)/m);
+    should(text).match(/Nothing new starts on it\. Turn it back on with `login enable liftoff`\./);
+  });
+});

@@ -219,7 +219,17 @@ const cases: readonly SchemaCase[] = [
     value: { available: false, reason: 'Nothing to check.' },
   },
   { name: 'FleetCredentialSignOutSchema', schema: credentials.FleetCredentialSignOutSchema, value: view.signOut },
+  {
+    name: 'FleetDisabledSchema',
+    schema: credentials.FleetDisabledSchema,
+    value: { reason: 'spend limit', until: INSTANT, source: 'login' },
+  },
   { name: 'FleetCredentialViewSchema', schema: credentials.FleetCredentialViewSchema, value: view },
+  {
+    name: 'FleetCredentialViewSchema switched off',
+    schema: credentials.FleetCredentialViewSchema,
+    value: { ...view, disabled: { until: INSTANT, source: 'login' } },
+  },
   {
     name: 'FleetCredentialListSchema',
     schema: credentials.FleetCredentialListSchema,

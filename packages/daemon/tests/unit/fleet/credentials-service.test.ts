@@ -552,6 +552,31 @@ describe('the credential list', () => {
     });
   });
 
+  it('should show a login switched off, with the reason and when it comes back, and none once that has passed', async () => {
+    // Arrange
+    const clock = { now: Date.parse('2026-10-30T12:00:00Z') };
+    const service = serviceOf(
+      catalogOf(
+        v2({
+          paused: { ...claudeFerretry, disabled: { reason: 'spend limit', until: '2026-11-01' } },
+          lapsed: { ...claudeFerretry, disabled: { until: '2026-10-01' } },
+          open: claudeFerretry,
+        }),
+      ),
+      new FakeStatus(),
+      { listCache: { now: () => clock.now, freshMs: 0 } },
+    );
+
+    // Act
+    const actual = await service.list();
+
+    // Assert
+    const by = (id: string) => actual.credentials.find(row => row.id === id);
+    should(by('paused')?.disabled).eql({ reason: 'spend limit', until: '2026-11-01T00:00:00.000Z', source: 'login' });
+    should(by('lapsed')?.disabled).be.undefined();
+    should(by('open')?.disabled).be.undefined();
+  });
+
   it('should say why sign-in and Check now are not offered on an environment login or an unnamed store', async () => {
     // Arrange
     const service = serviceOf(

@@ -4,7 +4,7 @@ import type {
   FleetCredentialView,
   FleetProviderPresetCatalog,
 } from '@ferretry/protocol';
-import { HARNESS_LABEL, indent, listOrNone } from '../fleet/account-render.ts';
+import { disabledWords, HARNESS_LABEL, indent, listOrNone } from '../fleet/account-render.ts';
 import { presetScopeChip } from './provider-match.ts';
 
 const window = (name: string, usage: FleetCredentialUsageWindow): string =>
@@ -21,10 +21,14 @@ function whereKept(credential: FleetCredentialView): string {
 /** One login as a row and the facts under it. */
 export function renderCredentialRow(credential: FleetCredentialView): string[] {
   const who = [credential.email, credential.label].filter(Boolean).join(' · ');
-  const head = `${credential.id}  ${HARNESS_LABEL[credential.harness]}${who ? `  ${who}` : ''}  — ${credential.status.label}`;
+  const off = disabledWords(credential.disabled);
+  const head = `${credential.id}  ${HARNESS_LABEL[credential.harness]}${who ? `  ${who}` : ''}  — ${off ?? credential.status.label}`;
   return [
     head,
     ...indent([
+      ...(off === undefined
+        ? []
+        : [`Nothing new starts on it. Turn it back on with \`login enable ${credential.id}\`.`]),
       credential.status.explanation,
       `Usage: ${window('5-hour', credential.usage.fiveHour)} · ${window('weekly', credential.usage.weekly)}`,
       `Used by: ${listOrNone(credential.usedBy, 'no runtime yet')}`,

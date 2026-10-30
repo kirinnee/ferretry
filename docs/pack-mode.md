@@ -242,6 +242,7 @@ refusal (a failure of the command itself is 1).
 | `unknown_runtime` / `not_agent`       | no such runtime / one that cannot run sessions                        |
 | `cli_missing` / `not_logged_in`       | the CLI or its launcher is missing / the login needs signing in       |
 | `out_of_quota` / `model_unavailable`  | quota used up / the runtime does not offer the model                  |
+| `disabled`                            | the runtime or its login is switched off; pick another or `enable` it |
 | `probe_failed`                        | the "reply OK" check did not answer OK in time                        |
 | `no_candidate`                        | no model a runtime here offers can run now                            |
 | `scratch_cwd`                         | the named folder is temporary; leave `--cwd` out or `--allow-scratch` |
