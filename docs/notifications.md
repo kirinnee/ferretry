@@ -149,7 +149,8 @@ went idle), which are what the list shows beside the badge.
   change. It re-reads the board under one lock per session, so an out-of-order notice can never show an
   answered item as open.
 - Notices are not counted: a notice moves the Inbox, not the "needs you" mark.
-- Every board change also journals `attention.changed`. The fleet feed watches that, so lists update
+- Every board change also journals `agenda.changed` (`attention.changed` before `agenda.wire.1`). The fleet feed
+  refetches on any event that is not `surface.*`, so lists update
   without polling.
 - On start, the daemon reconciles every session once, in the background.
 - It clears only when items resolve. Viewing a conversation does not clear it.

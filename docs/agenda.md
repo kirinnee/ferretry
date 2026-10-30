@@ -214,7 +214,10 @@ and keeps using it for that daemon.
 
 Each older route is marked legacy. The daemon records every use of one — route, first and last time, count and the
 caller's `x-fy-version` — in `legacy-wire-use.json` in its home, reports it on `GET /v1/health` as `legacyWire`, and
-`fy doctor` prints it ("older clients still use …" or "no older clients seen for 14 days"). A server cannot see which
+`fy doctor` prints it ("older clients still use …" or "no older clients seen for 14 days"). It counts only requests that
+passed authorization and writes the file at most once a minute (and on shutdown). `GET /v1/health` needs no
+credential, so the report — route patterns, times and client versions, never a session or a body — is public to
+anyone who can reach the daemon, like the rest of health. A server cannot see which
 field a client reads; an app that reads `state.attention` also dials the older routes, so the routes stand in for it.
 
 ### The removal release
