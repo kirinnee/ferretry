@@ -400,6 +400,9 @@ hung inside a test and held its runner for two hours, three runs in a row, befor
 - The integration matrix (`int`) has `timeout-minutes: 20`; its slowest group takes about eight
   minutes.
 - The e2e shards have `timeout-minutes: 20` (`E2E Slow`: 25); see [E2E tier](#e2e-tier).
+- The [realworld workflow](#realworld-workflow) jobs: `realworld` 30, `harness-contract` 30,
+  `darwin-confinement` 20, `safari-sandbox-shell` 20, `report` 10, `changes` 5. A machine-dependent test
+  that hangs is a red realworld job, never a held runner.
 - A new job states its ceiling when it is added, sized from its first green runs.
 
 The ceiling is the last net. The unit and integration tiers stop sooner on their own:
