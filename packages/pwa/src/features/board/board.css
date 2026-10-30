@@ -1087,6 +1087,84 @@
   flex: none;
 }
 
+/* ---- The Tasks tab inside a ferret's chat ------------------------------------------------------------ */
+.fy-board-side__views {
+  display: inline-flex;
+  align-self: flex-start;
+  min-width: 0;
+  margin: 0;
+  gap: 2px;
+  padding: 2px;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.fy-board-side__view {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-md);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-board-side__view:hover {
+  color: var(--fg);
+}
+.fy-board-side__view[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-board-side__notice {
+  margin: 0;
+  padding: var(--gap-xs) var(--gap-sm);
+  border-radius: var(--radius-control);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: var(--text-xs);
+}
+/* The Kanban: one narrow column per lane, scrolling sideways a column at a time; a long column scrolls on its own. */
+.fy-board-side__kanban {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: var(--gap-sm);
+  margin: 0 calc(var(--gap-sm) * -1);
+  padding: 0 var(--gap-sm) var(--gap-xs);
+  overflow-x: auto;
+  scroll-snap-type: x proximity;
+  scroll-padding-inline: var(--gap-sm);
+  overscroll-behavior-x: contain;
+}
+.fy-board-side__kanban .fy-board-lane[data-density='side'] {
+  width: min(16rem, 82%);
+  min-width: min(16rem, 82%);
+  flex: 0 0 min(16rem, 82%);
+  scroll-snap-align: start;
+}
+.fy-board-side__kanban .fy-board-lane__cards {
+  max-height: calc(100dvh - 15rem);
+  overflow-y: auto;
+}
+/* At a side width the owner's Done and Not good wrap instead of cutting a word or pushing the card wider. */
+.fy-board-card[data-density='side'] .fy-board-card__verdict {
+  flex-wrap: wrap;
+}
+.fy-board-card[data-density='side'] .fy-board-verdict,
+.fy-board-card[data-density='side'] .fy-board-card__verdict .fy-board-done {
+  min-width: max-content;
+  flex: 1 1 auto;
+  overflow: visible;
+  white-space: normal;
+  text-align: center;
+}
+
 /* The card Info's "Open board" pointed at: an accent edge and wash, so it is found at once in a full lane. */
 .fy-board-card[data-highlighted] {
   border-color: var(--accent);

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { BoardSideTab } from '../../../src/features/board/board-side-tab.tsx';
+import type { BoardSideView } from '../../../src/lib/board-side-view.ts';
 import { type BoardChat, chatCards, chatChip } from '../../../src/lib/board-chat.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
-import { daemonBoardCardPath } from '../../../src/lib/pages/routes.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { boardModelOf, card, laptop } from '../board-support.ts';
@@ -48,14 +48,23 @@ const chatOf = async (
 
 describe('BoardSideTab', () => {
   const scope = daemonSessionScope(laptop, SELF);
-  const draw = async (chat: BoardChat, onNavigate?: (to: string) => void) => {
+  const draw = async (
+    chat: BoardChat,
+    extra: {
+      readonly view?: BoardSideView;
+      readonly onOpenCard?: (id: string) => void;
+      readonly onView?: (v: BoardSideView) => void;
+    } = {},
+  ) => {
     view = await mount(
       <BoardSideTab
         callsigns={new Map()}
         chat={chat}
         now={NOW}
+        onOpenCard={card => extra.onOpenCard?.(card.task.id)}
+        onView={next => extra.onView?.(next)}
         scope={scope}
-        {...(onNavigate === undefined ? {} : { onNavigate })}
+        view={extra.view ?? 'list'}
       />,
     );
     return view.container;
@@ -104,13 +113,50 @@ describe('BoardSideTab', () => {
     expect(root.textContent).toContain('Review the board');
   });
 
-  it('opens a card’s detail page from the card', async () => {
+  it('hands a clicked card to the host to open over the chat', async () => {
     const opened: string[] = [];
     const { chat } = await chatOf();
-    const root = await draw(chat, to => void opened.push(to));
+    const root = await draw(chat, { onOpenCard: id => void opened.push(id) });
     const link = must(root.querySelector<HTMLAnchorElement>('a[href$="/F20"]'), 'card link');
     await interact(() => link.click());
-    expect(opened).toEqual([daemonBoardCardPath(laptop.daemonId, 'F20')]);
+    expect(opened).toEqual(['F20']);
+  });
+
+  it('draws one column per lane in the Kanban, cards in their column', async () => {
+    const { chat } = await chatOf();
+    const root = await draw(chat, { view: 'kanban' });
+    expect(root.querySelector('[data-board-side-kanban]')).not.toBeNull();
+    expect(lanes(root)).toEqual([
+      ['Plan/Design', ['Board system']],
+      ['Implement', ['Kid card', 'Kid grandchild']],
+      ['Review/CI', ['Review the board']],
+    ]);
+  });
+
+  it('asks the host to switch view from the toggle', async () => {
+    const picked: BoardSideView[] = [];
+    const { chat } = await chatOf();
+    const root = await draw(chat, { onView: next => void picked.push(next) });
+    const on = (id: string) => root.querySelector<HTMLButtonElement>(`button[data-view="${id}"]`);
+    expect(on('list')?.getAttribute('aria-pressed')).toBe('true');
+    expect(on('kanban')?.getAttribute('aria-pressed')).toBe('false');
+    await interact(() => must(on('kanban'), 'Kanban').click());
+    expect(picked).toEqual(['kanban']);
+  });
+
+  it('shows no toggle when there is nothing to arrange', async () => {
+    const { chat } = await chatOf({ focus: null, status: 'loading' });
+    const none: BoardChat = {
+      ...chat,
+      cards: chatCards(await boardModelOf([]), {
+        daemonId: laptop.daemonId,
+        sessionId: SELF,
+        focus: null,
+        relatives: new Set(),
+      }),
+    };
+    const root = await draw(none);
+    expect(root.querySelector('.fy-board-side__views')).toBeNull();
   });
 
   describe('Add to chat', () => {

@@ -4,7 +4,9 @@ import {
   chatCardLabel,
   chatCards,
   chatChip,
+  chatDrawn,
   chatChipSentence,
+  chatSiblings,
   descendantSessionIds,
 } from '../../src/lib/board-chat.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -104,6 +106,59 @@ describe('chatCards', () => {
   it('ignores a card of the same id held on another machine', async () => {
     const cards = chatCards(await board(), who({ daemonId: workstation.daemonId }));
     expect(cards.total).toBe(0);
+  });
+});
+
+describe('chatCards lanes (the Kanban)', () => {
+  const lanesOf = (cards: ReturnType<typeof chatCards>) =>
+    cards.lanes.map(lane => [lane.name, lane.category, lane.cards.map(c => c.task.id).sort()]);
+
+  it('has one column per lane that holds a drawn card, in lane order, each card once', async () => {
+    const cards = chatCards(await board(), who());
+    expect(lanesOf(cards)).toEqual([
+      ['Todo', 'backlog', ['F21', 'F32']],
+      ['Plan/Design', 'active', ['F18']],
+      ['Implement', 'active', ['F30', 'F31']],
+      ['Review/CI', 'review', ['F20']],
+    ]);
+    expect(cards.lanes.reduce((sum, lane) => sum + lane.cards.length, 0)).toBe(cards.total);
+  });
+
+  it('never carries an empty lane or another ferret’s card', async () => {
+    const cards = chatCards(await board(), who());
+    expect(cards.lanes.every(lane => lane.cards.length > 0)).toBe(true);
+    expect(cards.lanes.flatMap(lane => lane.cards.map(c => c.task.id))).not.toContain('F99');
+  });
+
+  it('keeps a card the project has no lanes for in an Unplaced column', async () => {
+    const model = await boardModelOf([card('F40', { owner: SELF, laneId: 'gone-lane' })]);
+    const cards = chatCards(model, who({ focus: null }));
+    expect(lanesOf(cards)).toEqual([['Unplaced', null, ['F40']]]);
+  });
+
+  it('is empty when the ferret has nothing', async () => {
+    const cards = chatCards(await board(), who({ sessionId: 'nobody-here', focus: null, relatives: new Set() }));
+    expect(cards.lanes).toEqual([]);
+  });
+});
+
+describe('chatDrawn and chatSiblings', () => {
+  it('lists the focus, then the owned cards, then the sub-ferrets’ cards, once each', async () => {
+    const cards = chatCards(await board(), who());
+    expect(chatDrawn(cards).map(c => c.task.id)).toEqual(['F18', 'F21', 'F20', 'F30', 'F31', 'F32']);
+  });
+
+  it('gives the drawer each drawn card with its lane’s name', async () => {
+    const cards = chatCards(await board(), who());
+    const siblings = chatSiblings(cards);
+    expect(siblings.map(s => [s.task.id, s.laneName])).toEqual([
+      ['F18', 'Plan/Design'],
+      ['F21', 'Todo'],
+      ['F20', 'Review/CI'],
+      ['F30', 'Implement'],
+      ['F31', 'Implement'],
+      ['F32', 'Todo'],
+    ]);
   });
 });
 
