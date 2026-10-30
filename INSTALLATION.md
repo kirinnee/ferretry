@@ -321,7 +321,10 @@ fyd --version
 ## First run
 
 A few commands take you from a fresh install to a phone watching an agent work. Install `claude`
-(Claude Code) or `codex` first, and `tmux`, which runs each session.
+(Claude Code) or `codex` first, and `tmux`, which runs each session — 3.7 or newer. tmux 3.6 and older
+can crash their whole server, ending every session at once, when one session ends; `fy doctor` says
+which release you run. To move to a newer tmux, install it and let the running server end on its own
+(after the last session, or at the next restart): never kill it to switch.
 
 1. **Start the daemon.**
 

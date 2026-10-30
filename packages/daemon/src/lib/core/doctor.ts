@@ -1,8 +1,9 @@
 import type { DoctorCheck, DoctorReport } from '@ferretry/protocol';
+import { hasSubscriptionCrash, parseTmuxVersion, type TmuxReleaseReading, type TmuxVersion } from '../tmux/version.ts';
 import {
-  harnessAbsenceImpact,
   type HarnessPreflight,
   type HarnessReadiness,
+  harnessAbsenceImpact,
   harnessLocationLine,
 } from './harness-readiness.ts';
 
@@ -17,6 +18,11 @@ export interface DoctorReportInput {
   readonly harnesses: HarnessPreflight;
   /** A real FFI load result, not an assumption based on the operating system. */
   readonly directorySyscalls: boolean;
+  /**
+   * The installed tmux and this daemon's running tmux server, as each printed its release. Absent when
+   * the composition root did not ask — the row is then left out rather than guessed.
+   */
+  readonly tmuxRelease?: TmuxReleaseReading;
 }
 
 const present = (
@@ -102,6 +108,58 @@ function harnessCommand(harness: HarnessReadiness): DoctorCheck {
   return missing(harness.kind, 'alternative', harnessLocationLine(location), impact);
 }
 
+const TMUX_CRASH =
+  'tmux before 3.7 can crash its whole server — ending every session at once — when a session ends while Ferretry is watching it. Ferretry works around it, but only a newer tmux removes it.';
+
+/** How to move without ending anything: the running server keeps its binary until it next starts. */
+const TMUX_MOVE =
+  'Do not kill the tmux server to switch: the new release is used the next time the server starts — once the last session has ended, or the machine restarts.';
+
+/**
+ * WHICH TMUX, AND WHETHER IT HAS THE SUBSCRIPTION CRASH (`lib/tmux/version.ts`).
+ *
+ * The RUNNING server is judged as well as the installed program, because they differ after an
+ * upgrade: a server keeps the binary it was started from, and the server is what crashes. So a host
+ * that installed 3.7 is still told the truth while its 3.6a server is up — and told that nothing has
+ * to be stopped for the new release to take over.
+ *
+ * `capability`, never `required`: tmux 3.6a starts and manages sessions, and this report's
+ * `ready` must not say otherwise.
+ */
+function tmuxRelease(reading: TmuxReleaseReading | undefined): readonly DoctorCheck[] {
+  const read = (text: string | undefined): TmuxVersion | undefined =>
+    text === undefined ? undefined : parseTmuxVersion(text);
+  const program = read(reading?.program);
+  const server = read(reading?.server);
+  if (program === undefined && server === undefined) return [];
+  const parts = [
+    ...(program === undefined ? [] : [`installed ${program.label}`]),
+    ...(server === undefined ? [] : [`running server ${server.label}`]),
+  ];
+  const summary = parts.join(', ');
+  const programCrashes = program !== undefined && hasSubscriptionCrash(program);
+  const serverCrashes = server !== undefined && hasSubscriptionCrash(server);
+  if (!programCrashes && !serverCrashes)
+    return [present('tmux release', 'capability', summary, 'tmux 3.7 or newer: no known whole-server crash.')];
+  if (!programCrashes)
+    return [
+      missing(
+        'tmux release',
+        'capability',
+        `${summary} — the server still runs the old release`,
+        `${TMUX_CRASH} ${program === undefined ? '' : `${program.label} is installed already. `}${TMUX_MOVE}`,
+      ),
+    ];
+  return [
+    missing(
+      'tmux release',
+      'capability',
+      `${summary} — 3.7 or newer is needed`,
+      `${TMUX_CRASH} Install tmux 3.7 or newer. ${TMUX_MOVE}`,
+    ),
+  ];
+}
+
 /**
  * The complete dependency inventory, derived from the direct call sites that spawn a child and the
  * generated Claude wrapper. This performs lookups and stats only; it deliberately never claims a
@@ -157,6 +215,7 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
     // rows per harness, so the general one is the one that survives.
     ...input.harnesses.harnesses.map(harnessCommand),
     binary(input, 'tmux', 'required', 'Sessions cannot start or be managed.'),
+    ...tmuxRelease(input.tmuxRelease),
     binary(input, 'bash', 'required', 'Generated fleet wrappers cannot run.'),
     binary(input, 'git', 'capability', 'Worktrees, project inspection, and repository features are unavailable.'),
     input.platform === 'darwin'
@@ -205,7 +264,7 @@ export function readDoctorReport(input: DoctorReportInput): DoctorReport {
     ready:
       checks.every(check => check.requirement !== 'required' || check.status !== 'missing') && input.harnesses.ready,
     limitation:
-      'Resolving a program and stating that this host could run it is all this report proves — nothing here was launched. It does not prove a harness is signed in, has credit, or can reach its provider.',
+      "Resolving a program and stating that this host could run it is all this report proves — nothing here was launched but `tmux -V` and one version question to this daemon's own tmux server. It does not prove a harness is signed in, has credit, or can reach its provider.",
   };
 }
 
