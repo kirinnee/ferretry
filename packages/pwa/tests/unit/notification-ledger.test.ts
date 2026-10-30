@@ -132,6 +132,20 @@ describe('notification payloads', () => {
     should(buildNotification(scope, view('s1', 'completed'), 'completed').body).equal('Finished its task.');
   });
 
+  it('should treat an agenda push exactly like an attention one: same body, and each turn end is its own event', () => {
+    const scope = daemonSessionScope({ daemonId: daemonA }, 's1');
+    const yours = sessionView('s1', {
+      state: { status: 'running', turn: 4, turnState: 'your-turn', turnStateAt: 't1' },
+    });
+    const later = sessionView('s1', {
+      state: { status: 'running', turn: 4, turnState: 'your-turn', turnStateAt: 't2' },
+    });
+    should(buildNotification(scope, yours, 'agenda').body).equal(buildNotification(scope, yours, 'attention').body);
+    should(notificationEventKey(scope, yours, 'agenda')).not.equal(notificationEventKey(scope, later, 'agenda'));
+    should(notificationEventKey(scope, yours, 'attention')).not.equal(notificationEventKey(scope, later, 'attention'));
+    should(notificationEventKey(scope, yours, 'completed')).equal(notificationEventKey(scope, later, 'completed'));
+  });
+
   it('should reject a scope that names another session', () => {
     const scope = daemonSessionScope({ daemonId: daemonA }, 'expected');
     const actual = view('actual', 'awaiting_user');

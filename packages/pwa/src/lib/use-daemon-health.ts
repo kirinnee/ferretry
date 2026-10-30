@@ -9,7 +9,7 @@ import { HealthViewSchema } from '@ferretry/protocol';
 import { useEffect, useRef, useState } from 'react';
 import type { DaemonConnection } from './daemon-connection.ts';
 import type { DaemonHealthRead } from './daemon-health.ts';
-import { useDaemonClient } from './store.tsx';
+import { useDaemonClient, useOptionalAppStore } from './store.tsx';
 
 /**
  * @param refreshMs Read again on this period while the page is open, for a caller whose answer changes
@@ -18,6 +18,7 @@ import { useDaemonClient } from './store.tsx';
  */
 export function useDaemonHealth(daemon: DaemonConnection | undefined, refreshMs?: number): DaemonHealthRead {
   const createClient = useDaemonClient();
+  const store = useOptionalAppStore();
   const [state, setState] = useState<{ readonly daemonId: string; readonly read: DaemonHealthRead } | null>(null);
   const [reread, setReread] = useState(0);
   const latest = useRef(daemon);
@@ -50,12 +51,14 @@ export function useDaemonHealth(daemon: DaemonConnection | undefined, refreshMs?
         (): DaemonHealthRead => ({ kind: 'failed' }),
       )
       .then(read => {
+        // Every read teaches the agenda wire which spelling this machine speaks, mounted or not.
+        store?.agendaWire.note(daemonId, read);
         if (live) setState({ daemonId, read });
       });
     return () => {
       live = false;
     };
-  }, [createClient, daemonId, reread]);
+  }, [createClient, store, daemonId, reread]);
 
   return daemonId !== undefined && state !== null && state.daemonId === daemonId ? state.read : { kind: 'loading' };
 }

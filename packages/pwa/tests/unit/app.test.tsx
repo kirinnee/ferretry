@@ -3746,6 +3746,15 @@ describe('the settings route composition', () => {
       SET_UP_SHELL,
     );
     await settle();
+    // The app reads every paired machine's health once at startup, to learn which spelling of the agenda
+    // wire each one speaks (`AgendaWireProbes`); that is the ONLY health read before Host checks opens.
+    const startupReads = healthReads.length;
+    expect(
+      healthReads
+        .filter(read => read.path === '/v1/health')
+        .map(read => String(read.daemonId))
+        .sort(),
+    ).toEqual([ALPHA, BETA].sort());
     // The new-device notice reads every paired machine's device list in the background, by design;
     // its own suite proves that is the ONLY thing it reads, so dropping it here hides nothing else.
     // Settings also asks every paired machine once whether it answers (`/v1/fleet/machine`), so the
@@ -3755,15 +3764,17 @@ describe('the settings route composition', () => {
     // machine list asks each machine once whether it — or an agent CLI it runs — has an update, for its dot
     // (`/v1/daemon/update`, `/v1/harnesses/update`), and the Machine tab reads machine.yaml (`/v1/config/file`).
     const probes = () =>
-      healthReads.filter(
-        read =>
-          read.path !== '/v1/pair/devices' &&
-          read.path !== '/v1/grants' &&
-          read.path !== '/v1/daemon/update' &&
-          read.path !== '/v1/harnesses/update' &&
-          !read.path.startsWith('/v1/fleet/') &&
-          !read.path.startsWith('/v1/config/file?'),
-      );
+      healthReads
+        .slice(startupReads)
+        .filter(
+          read =>
+            read.path !== '/v1/pair/devices' &&
+            read.path !== '/v1/grants' &&
+            read.path !== '/v1/daemon/update' &&
+            read.path !== '/v1/harnesses/update' &&
+            !read.path.startsWith('/v1/fleet/') &&
+            !read.path.startsWith('/v1/config/file?'),
+        );
 
     // A daemon tab does not read another daemon merely by being visible. Opening
     // Host checks is the explicit request, and it travels through the same typed

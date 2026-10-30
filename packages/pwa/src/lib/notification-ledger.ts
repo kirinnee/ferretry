@@ -167,7 +167,7 @@ const notificationEventParts = (
     view.state.status,
     view.state.turn,
     // The boundary itself, so each turn end is its own event and never collapsed into the last one.
-    kind === 'attention' ? (view.state.turnStateAt ?? '') : '',
+    kind === 'attention' || kind === 'agenda' ? (view.state.turnStateAt ?? '') : '',
   ];
 };
 

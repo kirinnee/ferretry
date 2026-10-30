@@ -562,3 +562,22 @@ describe('items in discussion', () => {
     expect(attentionSummaryKey(withDiscussing(2, 0))).toBe(attentionSummaryKey(summary(2, 5)));
   });
 });
+
+describe('the session summary under either name', () => {
+  const agendaOnly = sessionView('new', { state: { agenda: summary(2, 7) } });
+  const both = sessionView('both', { state: { attention: summary(1, 3), agenda: summary(4, 9) } });
+
+  test('reads a daemon that writes only agenda, and prefers agenda when both are written', () => {
+    expect(unreadCount(agendaOnly)).toBe(2);
+    expect(unreadCount(both)).toBe(4);
+    expect(unreadCount(waiting('old', summary(3, 1)))).toBe(3);
+    expect(sessionAttention(agendaOnly)?.open).toBe(2);
+    expect(sessionAttention(both)?.open).toBe(4);
+  });
+
+  test('lists those sessions as unread and as ferret sessions', () => {
+    const sourcesBoth = [{ daemonId: STUDIO, name: 'Studio', sessions: [agendaOnly, both] }];
+    expect(unreadSessions(sourcesBoth).map(entry => entry.view.config.id)).toEqual(['both', 'new']);
+    expect(withFerretSessions(sourcesBoth).map(entry => entry.view.config.id)).toEqual(['new', 'both']);
+  });
+});

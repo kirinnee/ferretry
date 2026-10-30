@@ -1,15 +1,18 @@
 import { describe, it } from 'bun:test';
-import type { AttentionResponse } from '@ferretry/protocol';
+import { type AttentionResponse, DAEMON_FEATURES } from '@ferretry/protocol';
 import should from 'should';
 import {
   applyAttentionAction,
   DaemonAttentionClient,
   fetchAttentionCount,
   fetchAttentionSnapshot,
+  sendAttentionReplies,
 } from '../../src/lib/attention-client.ts';
+import { AgendaWireDirectory } from '../../src/lib/agenda-wire.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
+import { healthOf } from '../support/health.ts';
 
 const daemonA = daemonConnection({ daemonId: 'daemon-a', baseUrl: 'https://a.example.test', deviceId: 'token-a' });
 const daemonB = daemonConnection({ daemonId: 'daemon-b', baseUrl: 'https://b.example.test', deviceId: 'token-b' });
@@ -573,5 +576,70 @@ describe('DaemonAttentionClient', () => {
     should(oldRefreshes).equal(0);
     should(client.store.attention(rotatedScope)?.updatedAt).equal('2026-07-31T04:00:00.000Z');
     should(client.store.count(rotatedScope)).equal(2);
+  });
+});
+
+describe('attention transport on the agenda wire', () => {
+  const recorder = () => {
+    const calls: Array<{ url: string; method: string | undefined }> = [];
+    const fetcher = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
+      calls.push({ url: String(input), method: init?.method });
+      return response(snapshot('same/session'));
+    };
+    return { calls, fetcher };
+  };
+
+  it('dials the agenda routes for board, badge, mutation and send-now when told the daemon speaks them', async () => {
+    const { calls, fetcher } = recorder();
+
+    await fetchAttentionSnapshot(daemonA, scopeA, fetcher, 'agenda');
+    await fetchAttentionCount(daemonA, scopeA, fetcher, 'agenda');
+    await applyAttentionAction(daemonA, scopeA, { action: 'dismiss', id: 'A1' }, fetcher, 'agenda');
+    await sendAttentionReplies(daemonA, scopeA, fetcher, 'agenda');
+
+    should(calls).deepEqual([
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda', method: undefined },
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda', method: undefined },
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda', method: 'POST' },
+      { url: 'https://a.example.test/v1/sessions/same%2Fsession/agenda/replies', method: 'POST' },
+    ]);
+  });
+
+  it('dials the older routes by default, send-now included', async () => {
+    const { calls, fetcher } = recorder();
+
+    await fetchAttentionSnapshot(daemonA, scopeA, fetcher);
+    await sendAttentionReplies(daemonA, scopeA, fetcher);
+
+    should(calls.map(call => call.url)).deepEqual([
+      'https://a.example.test/v1/sessions/same%2Fsession/attention',
+      'https://a.example.test/v1/sessions/same%2Fsession/attention/replies',
+    ]);
+  });
+
+  it('speaks to a new and an old daemon at once, each its own way, and starts old until health is read', async () => {
+    const { calls, fetcher } = recorder();
+    const wires = new AgendaWireDirectory();
+    const client = new DaemonAttentionClient(undefined, fetcher, wires);
+
+    await client.hydrate(daemonA, scopeA);
+    wires.note(daemonA.daemonId, { kind: 'read', health: healthOf('4.108.0', [DAEMON_FEATURES.agendaWire]) });
+    wires.note(daemonB.daemonId, { kind: 'read', health: healthOf('4.84.0') });
+    await client.revalidate(daemonA, scopeA);
+    await client.hydrateCount(daemonB, scopeB);
+    await client.dismiss(daemonA, scopeA, 'A1');
+    await client.sendReplies(daemonA, scopeA);
+    await client.dismiss(daemonB, scopeB, 'A1');
+    await client.sendReplies(daemonB, scopeB);
+
+    should(calls.map(call => call.url)).deepEqual([
+      'https://a.example.test/v1/sessions/same%2Fsession/attention',
+      'https://a.example.test/v1/sessions/same%2Fsession/agenda',
+      'https://b.example.test/v1/sessions/same%2Fsession/attention',
+      'https://a.example.test/v1/sessions/same%2Fsession/agenda',
+      'https://a.example.test/v1/sessions/same%2Fsession/agenda/replies',
+      'https://b.example.test/v1/sessions/same%2Fsession/attention',
+      'https://b.example.test/v1/sessions/same%2Fsession/attention/replies',
+    ]);
   });
 });
