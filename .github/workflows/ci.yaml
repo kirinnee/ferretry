@@ -41,6 +41,7 @@ concurrency:
 
 jobs:
   precommit:
+    timeout-minutes: 10
     name: Pre-Commit (${{ matrix.part }})
     permissions:
       contents: read
@@ -82,6 +83,7 @@ jobs:
   # with a one-minute floor and holds a runner and a cache attachment for each, so three 15-second jobs
   # cost three minutes of runner and three cache attachments for 45 seconds of work.
   build-checks:
+    timeout-minutes: 20
     name: Build Checks
     permissions:
       contents: read
@@ -134,6 +136,7 @@ jobs:
         run: ./scripts/ci/nix-store-hygiene.sh
 
   pwa-screenshot:
+    timeout-minutes: 20
     name: PWA ${{ matrix.scope == 'full' && 'Full Gallery' || 'Settings Geometry' }} (${{ matrix.scheme }}${{ matrix.viewport && format(', {0}', matrix.viewport) || '' }})
     permissions:
       contents: read
@@ -205,6 +208,7 @@ jobs:
   # The unit tier in parallel shares (config/test-groups.json), exactly like `int` below. Serially it
   # was ~105s of tests in one process; the slowest group is under a minute.
   test:
+    timeout-minutes: 15
     name: Unit Tests (${{ matrix.group }})
     permissions:
       contents: read
@@ -244,6 +248,7 @@ jobs:
 
   # The unit tier's 100% ledger over every group's, as `int-ledger` does for int; no nix shell.
   unit-ledger:
+    timeout-minutes: 5
     name: Unit Tests
     needs: test
     permissions:
@@ -313,6 +318,7 @@ jobs:
   # merges per file, never per line). Like `smoke`, it enters no nix shell: the gate is bash, awk,
   # grep and jq, all on the runner image, and a nix shell would add ~30s to the critical path.
   int-ledger:
+    timeout-minutes: 5
     name: Integration Tests
     needs: int
     permissions:
@@ -340,6 +346,7 @@ jobs:
           if-no-files-found: warn
 
   compile:
+    timeout-minutes: 15
     name: Compile Binaries
     permissions:
       contents: read
@@ -374,6 +381,7 @@ jobs:
           if-no-files-found: error
 
   sit:
+    timeout-minutes: 10
     name: SIT
     needs: compile
     permissions:
@@ -390,6 +398,7 @@ jobs:
         run: nix develop .#ci -c ./scripts/ci/test.sh sit
 
   smoke:
+    timeout-minutes: 10
     name: Smoke ${{ matrix.target }}
     needs: compile
     permissions:

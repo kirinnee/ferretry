@@ -26,6 +26,7 @@ concurrency:
 # secrets (docs/standards/ci-cd/index.md).
 jobs:
   build:
+    timeout-minutes: 15
     name: Build PWA release
     # Production is main-only: `push` is already filtered to main, and this guard stops a
     # workflow_dispatch on any other ref from deploying it. Every job repeats it.
@@ -58,6 +59,7 @@ jobs:
           retention-days: 1
 
   sign:
+    timeout-minutes: 10
     name: Sign PWA release
     needs: build
     if: github.ref == 'refs/heads/main'
@@ -101,6 +103,7 @@ jobs:
           retention-days: 1
 
   deploy:
+    timeout-minutes: 10
     name: Deploy PWA
     needs: [build, sign]
     if: github.ref == 'refs/heads/main'

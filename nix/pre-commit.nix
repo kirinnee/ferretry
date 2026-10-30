@@ -144,11 +144,33 @@ pre-commit-lib.run {
     # integration test that asserts a wall-clock or memory bound belongs in the realworld tier, which
     # files an issue instead of failing a merge. This also holds config/test-groups.json to the files
     # that exist and counts the unit tier's real-clock escapes.
+    # Every workflow job states `timeout-minutes`, so a wedged job is a red job in minutes instead of a
+    # runner held for GitHub's six-hour default (docs/standards/ci-cd, "Job ceilings").
+    a-job-ceilings = {
+      enable = true;
+      name = "Workflow job ceilings";
+      entry = validator "scripts/validate/job-ceilings.sh";
+      files = "^(\\.github/workflows/.*\\.ya?ml|scripts/validate/job-ceilings\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     a-test-tiers = {
       enable = true;
       name = "Test tiers";
       entry = validator "scripts/validate/test-tiers.sh";
       files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|scripts/validate/test-tiers\\.sh)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # The PWA build and the Pages deployment publish the same directory. Cheap and whole-repo, so it
+    # runs on any change to the files it reads; `Pre-Commit (gates)` runs it on every CI run.
+    a-pages-config = {
+      enable = true;
+      name = "Cloudflare Pages configuration";
+      entry = validator "scripts/validate/pages-config.sh";
+      files = "^(wrangler\\.jsonc|packages/protocol/src/lib/stt-cleanup\\.ts|packages/pwa/(vite\\.config\\.ts|package\\.json|public/_(headers|redirects))|scripts/(ci/build-pwa|validate/pages-config)\\.sh|\\.github/workflows/pwa-pages\\.yaml)$";
       pass_filenames = false;
       language = "system";
     };

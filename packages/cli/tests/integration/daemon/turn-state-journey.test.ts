@@ -21,6 +21,7 @@ import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
 import { TEARDOWN_TIMEOUT_MS, tearDownSupervisedDaemons } from '../support/supervised-daemon-teardown.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * WHOSE TURN IT IS, end to end: a real `fyd`, real tmux, and a fake harness for a Claude AND a Codex
@@ -182,10 +183,11 @@ async function boot(): Promise<BootedDaemon> {
   );
   const handle = await supervisor.start(fyd);
   if (handle.pid !== undefined) daemons.add(handle.pid);
-  for (let attempt = 0; attempt < 400; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-    await Bun.sleep(50);
-  }
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to answer its health probe',
+    { pollMs: 50, evidence: async () => await readFile(layout.logFile, 'utf8').catch(() => '(no log)') },
+  );
   const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();
   return { port, token, logFile: layout.logFile, root };
 }
@@ -220,24 +222,21 @@ async function stateOf(daemon: BootedDaemon, id: string): Promise<SessionView['s
   return SessionViewSchema.parse(await response.json()).state;
 }
 
-/** Waits for `turnState` to read `expected`, and answers how long that took. */
-async function until(
-  daemon: BootedDaemon,
-  id: string,
-  expected: string | undefined,
-  budgetMs = 15_000,
-): Promise<number> {
-  const started = Date.now();
-  let state = await stateOf(daemon, id);
-  while (state.turnState !== expected && Date.now() - started < budgetMs) {
-    await Bun.sleep(150);
-    state = await stateOf(daemon, id);
-  }
-  if (state.turnState !== expected)
-    throw new Error(
-      `turnState is ${String(state.turnState)}, never ${String(expected)}: ${JSON.stringify(state)}\n${await logOf(daemon)}`,
-    );
-  return Date.now() - started;
+/** Waits for `turnState` to read `expected`. */
+async function until(daemon: BootedDaemon, id: string, expected: string | undefined): Promise<void> {
+  const last: { state?: SessionView['state'] } = {};
+  await waitFor(
+    async () => {
+      last.state = await stateOf(daemon, id);
+      return last.state.turnState === expected;
+    },
+    `turnState to read ${String(expected)}`,
+    {
+      pollMs: 150,
+      evidence: async () =>
+        `it read ${String(last.state?.turnState)}: ${JSON.stringify(last.state)}\n${await logOf(daemon)}`,
+    },
+  );
 }
 
 const frameOf = (daemon: BootedDaemon, harness: 'claude' | 'codex') => async (text: string) =>
@@ -270,7 +269,7 @@ describe('whose turn it is, through a real daemon', () => {
       await until(daemon, id, 'your-turn');
       // The harness crashes: the session is over, so it has no turn at all.
       await frame('EXIT');
-      await until(daemon, id, undefined, 30_000);
+      await until(daemon, id, undefined);
       should((await stateOf(daemon, id)).status).equal('failed');
     }, 120_000);
   }

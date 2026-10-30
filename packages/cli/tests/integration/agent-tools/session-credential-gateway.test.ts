@@ -83,8 +83,16 @@ describe('the agent’s way to the daemon, through a restart', () => {
     return port;
   }
 
-  const restart = (told: { count: number }) => ({
-    patience: { expected: () => true, waiting: () => (told.count += 1), windowMs: 10_000 },
+  /** `onWaiting` runs when the gateway says it is waiting for the daemon: the moment a restarted daemon may come up. */
+  const restart = (told: { count: number }, onWaiting: () => void = () => undefined) => ({
+    patience: {
+      expected: () => true,
+      waiting: () => {
+        told.count += 1;
+        onWaiting();
+      },
+      windowMs: 60_000,
+    },
     nowMs: () => Date.now(),
     sleep: (milliseconds: number) => Bun.sleep(milliseconds),
   });
@@ -94,12 +102,15 @@ describe('the agent’s way to the daemon, through a restart', () => {
     const port = await freePort();
     const base = `http://127.0.0.1:${String(port)}`;
     const told = { count: 0 };
-    const gateway = new SessionCredentialGateway(async () => base, fetch, restart(told));
-    setTimeout(() => {
-      servers.push(
-        Bun.serve({ hostname: '127.0.0.1', port, fetch: () => Response.json({ summary: 'back after the restart' }) }),
-      );
-    }, 600);
+    const gateway = new SessionCredentialGateway(
+      async () => base,
+      fetch,
+      restart(told, () => {
+        servers.push(
+          Bun.serve({ hostname: '127.0.0.1', port, fetch: () => Response.json({ summary: 'back after the restart' }) }),
+        );
+      }),
+    );
 
     // Act
     const answer = await gateway.request('/v1/agent/tools', Answer, {

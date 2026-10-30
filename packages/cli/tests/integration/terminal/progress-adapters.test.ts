@@ -4,6 +4,7 @@ import { canRedraw, chooseProgress, processProgressHost } from '../../../src/ada
 import { ProgressAwareIo } from '../../../src/adapters/terminal/progress-io';
 import { TtyProgress, type TtyProgressHost } from '../../../src/adapters/terminal/tty-progress';
 import { RecordingProgress } from '../../unit/progress/fixtures';
+import { waitFor } from '../support/wait-for';
 
 class FakeHost implements TtyProgressHost {
   written = '';
@@ -228,11 +229,16 @@ describe('the process progress host', () => {
     const cancel = host.repeat(() => {
       ticks += 1;
     }, 5);
-    await new Promise(resolve => setTimeout(resolve, 30));
+    await waitFor(() => ticks > 0, 'the timer to tick');
     cancel();
     const seen = ticks;
-    should(seen).be.above(0);
-    await new Promise(resolve => setTimeout(resolve, 20));
+    // A later timer of the same cadence is the clock: once it has ticked twice, the cancelled one had its turn.
+    let later = 0;
+    const stopLater = host.repeat(() => {
+      later += 1;
+    }, 5);
+    await waitFor(() => later >= 2, 'a later timer of the same cadence to tick twice');
+    stopLater();
     should(ticks).equal(seen);
   });
 

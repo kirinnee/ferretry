@@ -46,9 +46,11 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their three teaching files           |
 | `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers                |
 | `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)               |
+| `a-pages-config`             | the PWA build and the Pages deployment publish the same directory             |
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree            |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt     |
 | `a-test-tiers`               | every test lives in a tier; integration asserts no wall-clock or memory bound |
+| `a-job-ceilings`             | every workflow job states `timeout-minutes`, so a wedged job fails in minutes |
 | `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                              |
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and

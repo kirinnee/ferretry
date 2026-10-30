@@ -505,7 +505,7 @@ describe('per-machine push workers', () => {
     // Deadlines, not attempt counts: the whole integration tier shares one machine, and a worker or a
     // notification that lands late under that load is still a pass.
     const idOf = async (path: string): Promise<string> => {
-      const deadline = Date.now() + 15_000;
+      const deadline = Date.now() + 60_000;
       while (!seen.has(`${origin()}${path}`) && Date.now() < deadline) {
         await new Promise(resolveTick => setTimeout(resolveTick, 50));
       }
@@ -525,7 +525,7 @@ describe('per-machine push workers', () => {
     // A DevTools delivery is occasionally dropped (measured: 1 run in 9), so an unseen push is sent again.
     // It carries the same tag, so a late first copy REPLACES the second rather than adding to the list.
     const shown = async (path: string) => {
-      const deadline = Date.now() + 15_000;
+      const deadline = Date.now() + 60_000;
       let resendAt = Date.now() + 3_000;
       while (Date.now() < deadline) {
         const again = sent.get(path);

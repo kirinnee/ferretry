@@ -480,7 +480,9 @@ describe('FileFleetProvisioner rollback', () => {
 
     let applySettled = false;
     const targetWasOpened = async (): Promise<boolean> => {
-      const deadline = Date.now() + 1_000;
+      // Ends on either event: the target was opened, or the apply settled without opening it. The
+      // deadline is only a safety net for an apply wedged on something else.
+      const deadline = Date.now() + 30_000;
       while (!applySettled && Date.now() < deadline) {
         try {
           const writer = await open(elsewhere, constants.O_WRONLY | constants.O_NONBLOCK);
@@ -1757,6 +1759,8 @@ describe('FileFleetProvisioner rollback', () => {
       }),
       materialize: async () => {
         order.push('enter');
+        // A hold, not a wait: the rival is given every chance to interleave. A shorter hold only weakens
+        // the check; it can never turn a serialized pair into a failure.
         await new Promise(resolve => setTimeout(resolve, 10));
         order.push('exit');
         return {

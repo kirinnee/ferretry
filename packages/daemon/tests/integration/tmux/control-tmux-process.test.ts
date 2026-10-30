@@ -577,4 +577,19 @@ describe('ControlModeTmuxProcess construction', () => {
     should(() => new ControlModeTmuxProcess('tmux', '/run/fy/tmux.sock', injected)).throw(/must both be absolute/u);
     should(() => new ControlModeTmuxProcess('/usr/bin/tmux', 'tmux.sock', injected)).throw(/must both be absolute/u);
   });
+
+  it('should refuse to attach read-only, and accept the same attach without it', () => {
+    // Arrange — tmux 3.7+ refuses a send-keys whose target client is read-only, and picks any attached
+    // client as that target: one such client would refuse the daemon's keystrokes into every agent.
+    const injected: TmuxCommandPort = { execute: async () => ({ code: 0, stdout: '', stderr: '' }) };
+    const attach = (flags: string) => () =>
+      new ControlModeTmuxProcess('/usr/bin/tmux', '/run/fy/tmux.sock', injected, {
+        attach: { target: 'agent', flags },
+        mutations: 'refuse',
+      });
+
+    // Act / Assert
+    should(attach('ignore-size,read-only,no-output')).throw(/must not attach read-only/u);
+    should(attach('ignore-size,no-output')).not.throw();
+  });
 });

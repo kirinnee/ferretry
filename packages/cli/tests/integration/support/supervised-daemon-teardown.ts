@@ -30,7 +30,7 @@ export interface TeardownOptions {
 }
 
 /** What a fixture passes as the hook's own timeout, so the bounded waits below can run out first. */
-export const TEARDOWN_TIMEOUT_MS = 20_000;
+export const TEARDOWN_TIMEOUT_MS = 150_000;
 
 const POLL_MS = 20;
 
@@ -120,7 +120,7 @@ async function within(withinMs: number, done: () => boolean): Promise<boolean> {
  */
 export async function tearDownSupervisedDaemons(
   fixture: SupervisedDaemonFixture,
-  { tmux, exitWithinMs = 10_000, settleWithinMs = 5_000 }: TeardownOptions,
+  { tmux, exitWithinMs = 30_000, settleWithinMs = 30_000 }: TeardownOptions,
 ): Promise<void> {
   const failures: string[] = [];
   const daemons = [...fixture.daemons];

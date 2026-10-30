@@ -33,6 +33,7 @@ import type {
 } from '../../../src/lib/daemon/ports.ts';
 import { DirectSupervisor, SystemdSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * `fy daemon reset`, end to end, and then `fy daemon start` on what it left behind.
@@ -483,14 +484,6 @@ afterEach(() => {
   sockets.clear();
 });
 
-async function eventually(check: () => boolean): Promise<boolean> {
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    if (check()) return true;
-    await Bun.sleep(20);
-  }
-  return check();
-}
-
 describe('installing again after a reset, in every order an owner runs it', () => {
   it('should install after install, then reset, even when an agent wrote into the home afterwards', async () => {
     // Arrange — the reported sequence's core: a supervised installation, reset, and a live agent's
@@ -576,13 +569,13 @@ describe('installing again after a reset, in every order an owner runs it', () =
     const out: string[] = [];
     await supervised(layout, systemd, out).install();
     const agent = await aLiveAgent(layout);
-    should(await eventually(() => systemd.alive(agent))).be.true();
+    await waitFor(() => systemd.alive(agent), 'the live agent to be running');
 
     // Act
     await supervised(layout, systemd, out).reset({ yes: true });
 
     // Assert — the agent is gone, the home is claimed, and the next install just works.
-    should(await eventually(() => !systemd.alive(agent))).be.true();
+    await waitFor(() => !systemd.alive(agent), 'reset to have ended the live agent');
     should(out.join('\n')).containEql("ended every fyd session's running agent");
     should(await readFile(join(layout.stateHome, 'layout-version'), 'utf8')).equal('2\n');
     await supervised(layout, systemd, out).install();

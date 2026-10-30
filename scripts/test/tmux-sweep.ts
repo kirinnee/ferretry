@@ -62,7 +62,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 /** Every home and socket no sweep may reach: what this run inherited, and the account's default home. */
 export function protectedPaths(
   environment: Environment = process.env,
-  userHome: string = homedir(),
+  userHome: string = process.env.FY_TEST_REAL_HOME ?? homedir(),
 ): readonly string[] {
   const recorded = (environment.FY_TEST_PROTECTED_PATHS ?? '').split(delimiter);
   const socket = environment.TMUX?.split(',', 1)[0];

@@ -12,6 +12,7 @@ import path from 'node:path';
 import should from 'should';
 import type { FleetBinaryLookup } from '../../src/adapters/wrapper-source.ts';
 import type { FleetTokenRefreshProcess, FleetTokenRefreshSpawn } from '../../src/adapters/process-token-refresh.ts';
+import { waitFor } from './support/wait-for.ts';
 import {
   FLEET_TOKEN_REFRESH_POLL_MS,
   FLEET_TOKEN_REFRESH_TIMEOUT_MS,
@@ -527,7 +528,10 @@ describe('spawnFleetTokenRefreshProcess scanning output', () => {
     );
     await child.close();
     await child.exited;
-    await Bun.sleep(50);
+    await waitFor(() => {
+      const found = child.evidence?.();
+      return found !== undefined && found.codes.length > 0 && found.unauthorized;
+    }, 'the scan of the child output to report both failure words');
 
     // Assert
     should(child.evidence?.()).deepEqual({ codes: ['refresh_token_expired'], unauthorized: true });

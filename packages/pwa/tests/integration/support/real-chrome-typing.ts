@@ -18,6 +18,7 @@ import { BrowserProfileStore } from '../../../../daemon/src/adapters/browser/con
 import { NodeSessionBrowserLauncher } from '../../../../daemon/src/adapters/browser/runtime/index.ts';
 import { BrowserSessionService } from '../../../../daemon/src/lib/index.ts';
 import { type RemoteKeyEvent, remoteKeyInput } from '../../../src/lib/remote-browser.ts';
+import { waitFor } from './wait-for.ts';
 
 const WORKER = join(import.meta.dir, '../../../../daemon/bin/browser-worker.ts');
 
@@ -79,7 +80,10 @@ export async function startTypingPage(sessionId: string = TYPING_SESSION): Promi
     browser,
     value,
     settled: async (id, expected) => {
-      for (let attempt = 0; attempt < 100 && value(id) !== expected; attempt += 1) await Bun.sleep(50);
+      await waitFor(() => value(id) === expected || undefined, `field ${id} to read ${JSON.stringify(expected)}`, {
+        pollMs: 50,
+        evidence: () => `it reads ${JSON.stringify(value(id))}`,
+      });
       return value(id);
     },
     focus: async id => {

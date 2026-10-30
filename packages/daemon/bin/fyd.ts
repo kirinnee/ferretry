@@ -8451,7 +8451,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         observerFold,
       );
       // ONE THREAD PER RUNNING SESSION (docs/design/session-workers.md): every running session is observed on
-      // its own worker, through its own read-only attached tmux client on the daemon's server, and only when
+      // its own worker, through its own attached observe-only tmux client on the daemon's server, and only when
       // something happened; this thread still writes every patch. The inline host above observes a session
       // only while it has no worker — starting, backing off, or after its worker crashed five times.
       const observerTranscripts = createTranscriptFileResolver(storage);

@@ -76,6 +76,7 @@ on:
 # group still serialises its own kind, so two deploys never race and two control writes never race.
 jobs:
   deploy:
+    timeout-minutes: 20
     name: Deploy Worker and Durable Objects
     # Production operations are main-only. `push` is already filtered to main; the guard is what
     # stops a workflow_dispatch on an arbitrary ref from deploying that ref to production.
@@ -237,6 +238,7 @@ jobs:
           echo "hosted relay rendezvous upgrade answered 101"
 
   control:
+    timeout-minutes: 20
     name: Runtime Control
     if: >-
       github.ref == 'refs/heads/main' &&
@@ -405,6 +407,7 @@ jobs:
   # change publishes a new Worker version, which restarts the Worker and drops live sessions exactly as
   # a deploy does, so it shares the deploy job's queue and is something an operator runs on purpose.
   tunnel-accounts:
+    timeout-minutes: 20
     name: Install Tunnel Pool
     if: >-
       github.ref == 'refs/heads/main' &&

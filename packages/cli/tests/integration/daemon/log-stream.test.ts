@@ -9,7 +9,7 @@ const LOG_STREAM_MODULE = JSON.stringify(resolve(import.meta.dir, '../../../src/
 
 /** A log large enough to fill any pipe many times over, each line numbered so order is checkable. */
 const bigLog = (): string =>
-  Array.from({ length: 40_000 }, (_, index) => `${String(index).padStart(6, '0')} ${'x'.repeat(90)}`).join('\n') + '\n';
+  `${Array.from({ length: 40_000 }, (_, index) => `${String(index).padStart(6, '0')} ${'x'.repeat(90)}`).join('\n')}\n`;
 
 describe('tail daemon log', () => {
   let root = '';
@@ -113,6 +113,7 @@ describe('tail daemon log', () => {
     const reader = child.stdout.getReader();
     for (let read = await reader.read(); !read.done; read = await reader.read()) {
       chunks.push(read.value);
+      // Pacing, not a wait: a slow consumer is the scenario, and no assertion depends on how long it takes.
       if (chunks.length % 8 === 0) await Bun.sleep(5);
     }
     const code = await child.exited;
@@ -133,6 +134,7 @@ describe('tail daemon log', () => {
       relayingSpawner({
         write: async chunk => {
           received.push(chunk);
+          // Pacing for the same slow-consumer scenario; nothing waits on it.
           if (received.length % 16 === 0) await Bun.sleep(1);
         },
       }),
