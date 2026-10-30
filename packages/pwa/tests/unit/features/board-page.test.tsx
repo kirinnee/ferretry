@@ -235,6 +235,12 @@ describe('BoardPage — views', () => {
     expect(searches).toEqual(['view=list&sort=stale', 'view=list&group=lane']);
   });
 
+  it('drops the grouping from the URL when it is turned off', async () => {
+    const { root, searches } = await open({ props: { search: 'view=list&group=lane' } });
+    await click(root, '[data-group-by-lane]');
+    expect(searches).toEqual(['view=list']);
+  });
+
   it('drops the sort from the URL when it goes back to status order', async () => {
     const { root, searches } = await open({ props: { search: 'view=list&sort=stale' } });
     await click(root, '[data-sort="status"]');

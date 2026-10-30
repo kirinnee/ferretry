@@ -272,6 +272,44 @@ describe('TableView', () => {
     expect(root.querySelector('.fy-board-table__group-count')?.textContent).toBe('1');
   });
 
+  it('shows the blocked, sub-task and shipped marks under the title', async () => {
+    const model = await boardModelOf([
+      card('F3', {
+        blockedBy: [{ id: 'F9' }],
+        rollup: {
+          children: 2,
+          byCategory: { backlog: 0, active: 1, review: 0, shipped: 0, verify: 0, closed: 1 },
+          active: 1,
+          lastTouchedAt: null,
+        },
+        shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
+      }),
+    ]);
+    view = await mount(table(model));
+    const extras = view.container.querySelectorAll('[data-task="F3"] .fy-board-table__extras [data-seg]');
+    expect([...extras].map(node => node.getAttribute('data-seg'))).toEqual(['blocked', 'subs', 'shipped']);
+  });
+
+  it('offers "more" only when the summary is really cut', async () => {
+    const heights = { scroll: 80, client: 40 };
+    const scroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => heights.scroll });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => heights.client });
+    try {
+      const model = await boardModelOf([card('F4', { summary: 'A summary that runs past two lines' })]);
+      view = await mount(table(model));
+      const more = view.container.querySelector('[data-task="F4"] .fy-board-table__more');
+      expect(more?.textContent).toBe('more');
+      expect(more?.getAttribute('href')).toBe('/d/laptop/board/F4');
+    } finally {
+      if (scroll !== undefined) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scroll);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      if (client !== undefined) Object.defineProperty(HTMLElement.prototype, 'clientHeight', client);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+    }
+  });
+
   it('says so when no card matches', async () => {
     const model = await boardModelOf([]);
     view = await mount(table(model));
