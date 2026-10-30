@@ -124,6 +124,7 @@
         "harness/webrtc-engine-bench.ts",
         "harness/carrier-soak.ts",
         "harness/connection-drops-screenshot.tsx",
+        "harness/surface-fullscreen-screenshot.tsx",
         "harness/parakeet-near-live-smoke.ts",
         "harness/parakeet-near-live-smoke-page.ts",
         "harness/whisper-smoke.ts",

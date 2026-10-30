@@ -50,6 +50,7 @@ import { rememberBrowserEngine } from '../browser/unified-browser-model.ts';
 import { type UnifiedBrowserDependencies, UnifiedBrowserSurface } from '../browser/unified-browser-surface.tsx';
 import { browserPageForKey, type SessionBrowser } from '../browser/use-session-browser.ts';
 import { AgentControlMarker } from './agent-control-marker.tsx';
+import { SurfaceFrame } from './surface-frame.tsx';
 import { ConsoleSurface, type ConsoleTyper } from './console-surface.tsx';
 import type { PhoneTab, WorkspaceFormFactor } from './phone/phone-tab.ts';
 import { PhoneWorkspace } from './phone/phone-workspace.tsx';
@@ -215,12 +216,11 @@ export function SessionWorkspace({
       else ports.current.set(tabId, port);
     };
 
-  const marker = (tab: WorkspaceTab, inline = false): ReactNode => (
+  const marker = (tab: WorkspaceTab): ReactNode => (
     <AgentControlMarker
       driver={driving.driverFor(tab.id)}
       ask={agentSurfaces.askFor(tab.id)}
       onDismissAsk={() => agentSurfaces.dismissAsk(tab.id)}
-      inline={inline}
       takenOver={driving.takenOver(tab.id)}
       onTakeOver={() => driving.takeOver(tab.id)}
       onHandBack={() => driving.handBack(tab.id)}
@@ -248,38 +248,40 @@ export function SessionWorkspace({
     // A page's tab shows that page in the session's real browser, never the preview reader.
     if (page !== undefined) rememberBrowserEngine(scope, 'remote');
     return (
-      <div className="relative flex min-h-0 flex-1 flex-col" data-workspace-browser={tab.key}>
-        {browserPages === undefined ? (
-          marker(tab)
-        ) : (
+      <SurfaceFrame dataBrowser={tab.key} hostsControls={browserPages !== undefined} marker={marker(tab)}>
+        {controls => (
           <>
-            <BrowserSurfaceList
-              driverFor={candidate => driving.driverFor(pageTabId(candidate.id))}
-              onClosePage={candidate => void browserPages.act({ action: 'close-page', pageId: candidate.id })}
-              onNewPage={() => newPage(browserPages)}
-              onOpenPage={openPage}
-              sessionName={agentName}
-              status={status}
-              takenOver={candidate => driving.takenOver(pageTabId(candidate.id))}
-              trailing={marker(tab, true)}
-              {...(page === undefined ? {} : { selectedPageId: page.id })}
+            {browserPages !== undefined && (
+              <>
+                <BrowserSurfaceList
+                  driverFor={candidate => driving.driverFor(pageTabId(candidate.id))}
+                  onClosePage={candidate => void browserPages.act({ action: 'close-page', pageId: candidate.id })}
+                  onNewPage={() => newPage(browserPages)}
+                  onOpenPage={openPage}
+                  sessionName={agentName}
+                  status={status}
+                  takenOver={candidate => driving.takenOver(pageTabId(candidate.id))}
+                  trailing={controls}
+                  {...(page === undefined ? {} : { selectedPageId: page.id })}
+                />
+                <BrowserPageFocus active={active} activate={browserPages.activatePage} pageId={page?.id} />
+              </>
+            )}
+            <UnifiedBrowserSurface
+              daemon={connection}
+              isActive={active}
+              key={page === undefined ? 'browser' : 'page'}
+              onClose={() => undefined}
+              presentation={formFactor === 'phone' ? 'sheet' : 'pane'}
+              scope={scope}
+              showPageTabs={browserPages === undefined}
+              titleId={`${titleId}-${tab.key}`}
+              {...(browser === undefined ? {} : { dependencies: browser })}
+              {...(onOpenLoginWindow === undefined ? {} : { onOpenLoginWindow })}
             />
-            <BrowserPageFocus active={active} activate={browserPages.activatePage} pageId={page?.id} />
           </>
         )}
-        <UnifiedBrowserSurface
-          daemon={connection}
-          isActive={active}
-          key={page === undefined ? 'browser' : 'page'}
-          onClose={() => undefined}
-          presentation={formFactor === 'phone' ? 'sheet' : 'pane'}
-          scope={scope}
-          showPageTabs={browserPages === undefined}
-          titleId={`${titleId}-${tab.key}`}
-          {...(browser === undefined ? {} : { dependencies: browser })}
-          {...(onOpenLoginWindow === undefined ? {} : { onOpenLoginWindow })}
-        />
-      </div>
+      </SurfaceFrame>
     );
   };
 
@@ -328,11 +330,6 @@ export function SessionWorkspace({
         );
       return (
         <div className="relative flex min-h-0 flex-1 flex-col" data-workspace-terminal={tab.key}>
-          {/* A strip of its own over the shell, never floating on it: a pill there would cover the
-              deck's own header and the line it is writing. */}
-          {driving.driverFor(tab.id) !== null || driving.takenOver(tab.id) || agentSurfaces.askFor(tab.id) !== null ? (
-            <div className="fy-ws-marker-row">{marker(tab, true)}</div>
-          ) : null}
           <SessionTerminalDeck
             active={options.active}
             connection={connection}
@@ -341,6 +338,7 @@ export function SessionWorkspace({
             onInputPort={registerPort(tab.id)}
             scope={scope}
             solo
+            surfaceStatus={marker(tab)}
             {...(options.interceptInput === undefined ? {} : { interceptInput: options.interceptInput })}
             {...(session.config.cwd === undefined ? {} : { cwd: session.config.cwd })}
           />

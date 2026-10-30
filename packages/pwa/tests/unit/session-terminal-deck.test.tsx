@@ -97,6 +97,44 @@ describe('SessionTerminalDeck', () => {
     run(() => page.unmount());
   });
 
+  test('puts the surface status in the one toolbar row, beside the actions, not in a bar of its own', async () => {
+    const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
+    const page = mount(
+      <SessionTerminalDeck
+        connection={alpha}
+        dependencies={deck.dependencies}
+        scope={scopeAlpha}
+        surfaceStatus={<i data-status-slot="" />}
+      />,
+    );
+    await settle();
+
+    const toolbar = page.root.findAll(node => node.props.className === 'kt-webterm__toolbar')[0];
+    expect(toolbar?.findAllByProps({ 'data-status-slot': '' })).toHaveLength(1);
+    expect(page.root.findAllByProps({ 'data-status-slot': '' })).toHaveLength(1);
+    run(() => page.unmount());
+  });
+
+  test('keeps the surface status reachable when the shell is gone, so an ask can still be dismissed', async () => {
+    const deck = fakeDeck(async () => terminalListing([]));
+    const page = mount(
+      <SessionTerminalDeck
+        connection={alpha}
+        dependencies={deck.dependencies}
+        scope={scopeAlpha}
+        focusTerminalId={FIRST}
+        surfaceStatus={<i data-status-slot="" />}
+        solo
+      />,
+    );
+    await settle();
+
+    const fallback = page.root.findAll(node => node.props.className === 'kt-webterm__status-fallback');
+    expect(fallback).toHaveLength(1);
+    expect(fallback[0]?.findAllByProps({ 'data-status-slot': '' })).toHaveLength(1);
+    run(() => page.unmount());
+  });
+
   test('refuses a listing about another session instead of showing its shells', async () => {
     // Damaged evidence, not an empty session: rendering it would put another
     // session's shells under this one's tabs, and every reference on them would
@@ -291,9 +329,9 @@ describe('SessionTerminalDeck', () => {
     await settle();
 
     expect(json(page)).not.toContain('"data-expanded"');
-    clickNamed(page, 'Expand the terminal to fill the screen');
+    clickNamed(page, 'Full screen');
     expect(json(page)).toContain('"data-expanded"');
-    clickNamed(page, 'Collapse the terminal back into the pane');
+    clickNamed(page, 'Exit full screen');
     expect(json(page)).not.toContain('"data-expanded"');
     run(() => page.unmount());
   });
@@ -752,13 +790,13 @@ describe('SessionTerminalDeck pane wiring', () => {
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
 
-    clickNamed(page, 'Expand the terminal to fill the screen');
+    clickNamed(page, 'Full screen');
     expect(json(page)).toContain('"data-expanded"');
     run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })));
     expect(json(page)).not.toContain('"data-expanded"');
 
     // A key that is not Escape leaves it alone.
-    clickNamed(page, 'Expand the terminal to fill the screen');
+    clickNamed(page, 'Full screen');
     run(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'a' })));
     expect(json(page)).toContain('"data-expanded"');
     run(() => page.unmount());
@@ -768,7 +806,7 @@ describe('SessionTerminalDeck pane wiring', () => {
     const deck = fakeDeck(async () => terminalListing([terminalView(FIRST)]));
     const page = mount(<SessionTerminalDeck connection={alpha} dependencies={deck.dependencies} scope={scopeAlpha} />);
     await settle();
-    clickNamed(page, 'Expand the terminal to fill the screen');
+    clickNamed(page, 'Full screen');
     const shell = document.createElement('div');
     shell.setAttribute('data-keyboard-capture', '');
     document.body.appendChild(shell);

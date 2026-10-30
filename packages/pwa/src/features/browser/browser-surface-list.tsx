@@ -73,7 +73,7 @@ export interface BrowserSurfaceListProps {
   readonly onClosePage?: (page: BrowserPageSummary) => void;
   /** Opens a new page for the person. Absent: no New page control. */
   readonly onNewPage?: () => void;
-  /** Rendered at the strip's end — the selected page's agent-control marker. */
+  /** Rendered at the end of the strip's first row — the page's agent-control marker and Full screen button. */
   readonly trailing?: ReactNode;
 }
 
@@ -153,6 +153,8 @@ export function BrowserSurfaceList({
   trailing,
 }: BrowserSurfaceListProps) {
   const groups = status === null ? [] : groupBrowserPages(status.pages, sessionName);
+  const controls =
+    trailing === undefined || trailing === null ? null : <div className="fy-ws-pages-controls">{trailing}</div>;
   // New page sits at the end of the first row — beside the first owner, or beside the note that says
   // there are none — so it never takes a column away from the chips below it.
   const newPage =
@@ -177,6 +179,7 @@ export function BrowserSurfaceList({
               : `${browserOwnerLabel(sessionName)} has no pages open${status.state === 'running' ? '' : ' — it is not running'}.`}
           </p>
           {newPage}
+          {controls}
         </div>
       ) : (
         groups.map((group, index) => (
@@ -184,6 +187,7 @@ export function BrowserSurfaceList({
             <div className="fy-ws-pages-head">
               <h3 className="fy-ws-pages-owner">{group.label}</h3>
               {index === 0 ? newPage : null}
+              {index === 0 ? controls : null}
             </div>
             <ul className="fy-ws-pages-list">
               {group.pages.map(page => (
@@ -201,7 +205,6 @@ export function BrowserSurfaceList({
           </section>
         ))
       )}
-      {trailing}
     </nav>
   );
 }
