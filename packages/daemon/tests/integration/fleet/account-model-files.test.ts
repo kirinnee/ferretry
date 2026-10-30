@@ -22,6 +22,7 @@ import {
   readComponentText,
   readConfigAccountDocument,
   readDeclaredAccountModel,
+  sessionStatusOf,
 } from '../../../src/adapters/fleet/account-model-files.ts';
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { FleetCatalogService, type FleetCatalogServiceDeps } from '../../../src/lib/fleet/catalog-service.ts';
@@ -98,7 +99,7 @@ async function machine(
     paths: home.paths,
     userHome,
     hostCodexHome: path.join(userHome, '.codex'),
-    sessionStates: async () => handle.states,
+    sessionStatuses: async () => handle.states.flatMap(raw => sessionStatusOf(raw) ?? []),
     credentials: {
       list: async () => ({ format: 2, machine: 'studio', credentials: [] }),
       signOut: async () => {

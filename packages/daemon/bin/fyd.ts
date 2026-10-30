@@ -162,7 +162,11 @@ import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/co
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
-import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
+import {
+  fileFleetCatalogDeps,
+  readDeclaredAccountModel,
+  sessionStatusOf,
+} from '../src/adapters/fleet/account-model-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
@@ -958,6 +962,7 @@ import {
   runtimeQuarantineState,
   type ScratchReclamation,
   SESSION_ROSTER_MAX_AGE_MS,
+  SESSION_STATUS_TALLY_MAX_AGE_MS,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
   type SecretCloneIdentitySource,
   SecretDirectory,
@@ -1021,6 +1026,7 @@ import {
   type SessionResumeSubsystem,
   type SessionRootPinner,
   SessionRoster,
+  SessionStatusTally,
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
@@ -10015,6 +10021,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the usage feed each asked for it on their own, and each list reads every login's status.
         listCache: { now: () => millisecondClock.now(), freshMs: CREDENTIAL_LIST_FRESH_MS },
       });
+      // Every session's status for the catalogue's running count, read once and then kept current from the
+      // storage's own state feed: read per catalogue, ~600 state documents parsed for every runtimes view and
+      // every Pack routing line held the main thread. A hand edit is read within the tally's age bound.
+      const sessionStatusTally = new SessionStatusTally({
+        read: async () =>
+          new Map(
+            (
+              await Promise.all(
+                storage.listSessions().map(async session => {
+                  const status = sessionStatusOf(await storage.readState(session.id).catch(() => undefined));
+                  return status === undefined ? [] : [[session.id, status] as const];
+                }),
+              )
+            ).flat(),
+          ),
+        now: () => millisecondClock.now(),
+        maxAgeMs: SESSION_STATUS_TALLY_MAX_AGE_MS,
+      });
+      storage.subscribeStates((id, state) => sessionStatusTally.heard(id, sessionStatusOf(state)));
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
       const fleetCatalogDeps = {
@@ -10022,10 +10047,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           paths,
           userHome,
           ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
-          sessionStates: async () =>
-            await Promise.all(
-              storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
-            ),
+          sessionStatuses: async () => await sessionStatusTally.statuses(),
           sessionRecords: new RuntimeSessionRecords(storage),
           credentials: fleetCredentials,
           locate: locateHarness,

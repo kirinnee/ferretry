@@ -29,7 +29,7 @@ import {
   SharedHistoryMigration,
 } from '@ferretry/fleet';
 import { FileFleetProvisioner, FileSharedHistoryFileSystem } from '@ferretry/fleet/adapters';
-import { configFilePath, SessionStateSchema } from '@ferretry/protocol';
+import { configFilePath, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type { AccountDocumentReading, FleetCatalogServiceDeps } from '../../lib/fleet/catalog-service.ts';
 import type { FoundationPaths } from '../../lib/paths.ts';
@@ -141,13 +141,24 @@ export async function documentRevision(path: string): Promise<string> {
   }
 }
 
+/**
+ * The status a raw state document says, or `undefined` when it says none a reader can count. Only the status is
+ * read: the catalogue counts running sessions, and parsing the whole state of every session to count them was
+ * the cost the session status tally exists to remove.
+ */
+export function sessionStatusOf(raw: unknown): SessionStatus | undefined {
+  if (typeof raw !== 'object' || raw === null || !('status' in raw)) return undefined;
+  const status = SessionStatusSchema.safeParse(raw.status);
+  return status.success ? status.data : undefined;
+}
+
 /** What the composition root hands the catalogue: its own collaborators, and nothing it would build twice. */
 export interface FileFleetCatalogOptions {
   readonly paths: Pick<FoundationPaths, 'home' | 'fleet' | 'fleetManifest'>;
   readonly userHome: string;
   readonly hostCodexHome?: string;
-  /** Every session's state document, raw. */
-  sessionStates(): Promise<readonly unknown[]>;
+  /** Every session's status, as its state document says it: {@link sessionStatusOf} reads one. */
+  sessionStatuses(): Promise<readonly SessionStatus[]>;
   /** The session records a runtime removal or rename reads and re-points. Absent: neither is known. */
   readonly sessionRecords?: Required<Pick<FleetCatalogServiceDeps, 'sessionRecords' | 'renameSessions'>>;
   readonly credentials: FleetCatalogServiceDeps['credentials'];
@@ -246,11 +257,7 @@ export function fileFleetCatalogDeps(options: FileFleetCatalogOptions): FleetCat
     locate: options.locate,
     commandExists: command => Bun.which(command) !== null,
     wrappersCurrent: async plan => await wrappersCurrent(layout.binDirectory, plan.operations),
-    sessionStatuses: async () =>
-      (await options.sessionStates()).flatMap(raw => {
-        const state = SessionStateSchema.safeParse(raw);
-        return state.success ? [state.data.status] : [];
-      }),
+    sessionStatuses: async () => await options.sessionStatuses(),
     ...(records === undefined
       ? {}
       : {
