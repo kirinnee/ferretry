@@ -45,6 +45,7 @@ import {
   FleetCredentialStatusWordSchema,
   FleetCredentialStoreSchema,
   FleetCredentialViewSchema,
+  FleetDisabledSchema,
 } from './fleet-credentials.ts';
 import { GrantRefusalSchema } from './grants.ts';
 import { LocalModelsSchema } from './models.ts';
@@ -535,6 +536,8 @@ export const FleetRuntimeViewSchema = z.strictObject({
   fixedLayer: FleetFixedLayerViewSchema.optional(),
   /** Whether it can launch now; when not, `reason` is the button's words ("Sign in to launch"). */
   launch: FleetCatalogActSchema,
+  /** Switched off — by its own switch or its login's. Running ferrets are untouched; new starts refuse. */
+  disabled: FleetDisabledSchema.optional(),
   /** Other runtimes on the same login and profile (R4). */
   sameAs: z.array(NonEmptyStringSchema).readonly(),
 });
@@ -721,6 +724,24 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     defaultRuntime: NonEmptyStringSchema.optional(),
   }),
   z.strictObject({ kind: z.literal('credential.signout'), id: NonEmptyStringSchema }),
+  /**
+   * Switch a login off without deleting it (docs/disabling.md). A tightening: it needs no confirmation.
+   * `until` is an instant; the login switches itself back on then.
+   */
+  z.strictObject({
+    kind: z.literal('credential.disable'),
+    id: NonEmptyStringSchema,
+    reason: NonEmptyStringSchema.max(200).optional(),
+    until: InstantSchema.optional(),
+  }),
+  z.strictObject({ kind: z.literal('credential.enable'), id: NonEmptyStringSchema }),
+  z.strictObject({
+    kind: z.literal('runtime.disable'),
+    name: NonEmptyStringSchema,
+    reason: NonEmptyStringSchema.max(200).optional(),
+    until: InstantSchema.optional(),
+  }),
+  z.strictObject({ kind: z.literal('runtime.enable'), name: NonEmptyStringSchema }),
   z.strictObject({
     kind: z.literal('machine.settings'),
     agentPermissions: z.enum(['auto', 'skip']),

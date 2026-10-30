@@ -120,6 +120,7 @@
         "harness/device-permissions-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",
         "harness/add-login-screenshot.tsx",
+        "harness/disable-switch-screenshot.tsx",
         "harness/app-screenshot.ts",
         "harness/analytics-screenshots.ts",
         "harness/main.tsx",

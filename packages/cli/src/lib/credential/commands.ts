@@ -6,6 +6,7 @@ import { runChange } from '../fleet/account-change.ts';
 import { parseHarness, readOptions, writeFlags, writeOptions } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError, type AccountHarness } from '../fleet/account-ports.ts';
 import { HARNESS_LABEL } from '../fleet/account-render.ts';
+import { parseReason, parseUntil } from '../fleet/disable-until.ts';
 import { runSignIn } from '../fleet/sign-in.ts';
 import { definedEnv, detectionSentence, detectionTable } from './detect-env.ts';
 import {
@@ -68,7 +69,7 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
   const credential = program
     .command('credential')
     .alias('login')
-    .description('add, check, sign in, sign out, label or remove a login');
+    .description('add, check, sign in, sign out, label, disable or remove a login');
 
   writeOptions(
     credential
@@ -172,6 +173,37 @@ export function registerCredentialCommands(program: Command, deps: AccountComman
     await runChange(deps, {
       change: { kind: 'credential.signout', id },
       destructive: true,
+      options: writeFlags(options),
+    });
+  });
+
+  writeOptions(
+    credential
+      .command('disable')
+      .description('switch a login off without deleting it: nothing new starts on it; running ferrets keep going')
+      .argument('<id>', 'the login')
+      .option('--until <when>', 'switch back on by itself: a date (2026-11-01), a time or a wait (3d, 12h)')
+      .option('--reason <text>', 'why, shown beside the switch and in every refusal'),
+  ).action(async (id: string, options: { until?: string; reason?: string } & Record<string, unknown>) => {
+    const reason = parseReason(options.reason);
+    await runChange(deps, {
+      change: {
+        kind: 'credential.disable',
+        id,
+        ...(reason === undefined ? {} : { reason }),
+        ...(options.until === undefined ? {} : { until: parseUntil(options.until, deps.now()) }),
+      },
+      destructive: false,
+      options: writeFlags(options),
+    });
+  });
+
+  writeOptions(
+    credential.command('enable').description('switch a disabled login back on').argument('<id>', 'the login'),
+  ).action(async (id: string, options: Record<string, unknown>) => {
+    await runChange(deps, {
+      change: { kind: 'credential.enable', id },
+      destructive: false,
       options: writeFlags(options),
     });
   });

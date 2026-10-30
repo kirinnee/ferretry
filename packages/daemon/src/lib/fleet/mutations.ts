@@ -451,6 +451,39 @@ function applyAccountChange(
       target.label = change.label;
       return `Label login ${change.id} ${change.label}`;
     }
+    case 'credential.disable': {
+      if (model.credentials[change.id] === undefined) return refuse(`no login ${change.id} exists on this machine`);
+      (draft.credentials[change.id] as Record<string, unknown>).disabled = disabledBlock(change);
+      consequences.push(
+        'Nothing running is stopped: ferrets already on this login keep going (move one with `migrate <id> -a <other runtime>`). New starts on it are refused.',
+      );
+      return `Disable login ${change.id}`;
+    }
+    case 'credential.enable': {
+      if (model.credentials[change.id] === undefined) return refuse(`no login ${change.id} exists on this machine`);
+      delete (draft.credentials[change.id] as Record<string, unknown>).disabled;
+      return `Enable login ${change.id}`;
+    }
+    case 'runtime.disable': {
+      if (model.runtimes[change.name] === undefined) return refuse(`no runtime ${change.name} exists on this machine`);
+      (draft.runtimes[change.name] as Record<string, unknown>).disabled = disabledBlock(change);
+      consequences.push(
+        'Nothing running is stopped: ferrets already on this runtime keep going (move one with `migrate <id> -a <other runtime>`). New starts on it are refused.',
+      );
+      return `Disable runtime ${change.name}`;
+    }
+    case 'runtime.enable': {
+      const runtime = model.runtimes[change.name];
+      if (runtime === undefined) return refuse(`no runtime ${change.name} exists on this machine`);
+      delete (draft.runtimes[change.name] as Record<string, unknown>).disabled;
+      const login = model.credentials[runtime.credential];
+      if (login?.disabled !== undefined) {
+        consequences.push(
+          `Its login ${runtime.credential} is still disabled, so ${change.name} stays off until that is enabled too.`,
+        );
+      }
+      return `Enable runtime ${change.name}`;
+    }
     case 'credential.env':
       return putEnvironmentLogin(model, draft, change, facts, consequences);
     case 'credential.remove':
@@ -831,6 +864,7 @@ function putRuntime(
     profile: change.profile,
     agent: change.agent,
     ...(change.harness === undefined ? {} : { harness: change.harness }),
+    ...(model.runtimes[change.name]?.disabled === undefined ? {} : { disabled: model.runtimes[change.name]?.disabled }),
   };
   // The first agent runtime on a machine becomes its default for new agents (and the Warden's login).
   if (change.create && change.agent && resolveDefaultRuntime(model) === undefined) {
@@ -1142,4 +1176,15 @@ function putEnvironmentLogin(
       : `${listed(users)} ${users.length === 1 ? 'starts' : 'start'} with the new variables next launch. Running sessions keep the old ones until restarted.`,
   );
   return `Change the variables of login ${change.id}`;
+}
+
+/** The `disabled:` block a disable change writes: only what the caller said. */
+function disabledBlock(change: { readonly reason?: string | undefined; readonly until?: string | undefined }): {
+  readonly reason?: string;
+  readonly until?: string;
+} {
+  return {
+    ...(change.reason === undefined ? {} : { reason: change.reason }),
+    ...(change.until === undefined ? {} : { until: change.until }),
+  };
 }

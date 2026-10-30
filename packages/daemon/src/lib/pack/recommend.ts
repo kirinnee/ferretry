@@ -78,6 +78,12 @@ export function runtimeRefusal(
   const unlaunchable = facts.unlaunchable[runtime.wrapper];
   if (unlaunchable !== undefined)
     return refusal('cli_missing', `${name} cannot be launched: ${unlaunchable}`, 'Pick another runtime.');
+  if (runtime.disabled !== undefined)
+    return refusal(
+      'disabled',
+      `${name} cannot launch: ${runtime.launch.available ? 'it is disabled' : runtime.launch.reason}.`,
+      'Pick another model.',
+    );
   const credential = facts.credentials.find(candidate => candidate.id === runtime.credential.id);
   const missing = credential?.environment?.missingSecrets ?? [];
   if (missing.length > 0)

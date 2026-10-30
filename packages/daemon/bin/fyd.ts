@@ -105,7 +105,6 @@ import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { ty
 import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
-import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
@@ -124,6 +123,7 @@ import {
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
+import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
   HttpAnalyticsPricingFeed,
@@ -570,6 +570,7 @@ import {
   createFleetCredentialsSubsystem,
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
+import { DisableExpiryWatch } from '../src/lib/fleet/disable-expiry.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
@@ -1019,7 +1020,6 @@ import {
   type SessionResumeSubsystem,
   type SessionRootPinner,
   SessionRoster,
-  SessionStatusTally,
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
@@ -1028,6 +1028,7 @@ import {
   SessionSignalError,
   SessionSignalService,
   type SessionSignalSubsystem,
+  SessionStatusTally,
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   SessionTranscriptReader,
@@ -1116,10 +1117,10 @@ import {
   WARDEN_ESCALATION_SOURCE,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  type WardenBoardPort,
   WardenCallsignTakenError,
   type WardenFleetSession,
   type WardenJournal,
-  type WardenBoardPort,
   WardenLivenessMonitor,
   type WardenRevivePorts,
   WardenReviveService,
@@ -1152,9 +1153,9 @@ import {
   GuideFileService,
   isScratchPath,
   JevPackRanker,
+  PACK_ROUTING_MAX_AGE_MS,
   type PackParent,
   type PackProbeRequest,
-  PACK_ROUTING_MAX_AGE_MS,
   PackRoutingKeep,
   PackService,
   PackStartRefused,
@@ -10233,6 +10234,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         executors: fleetSetup.executors,
         presets: async () => await providerPresets.presets(),
       });
+      // A login or runtime disabled `until` a time switches itself back on (docs/disabling.md): one timer,
+      // set for the earliest `until`, republishes the fleet when it falls due. A load re-arms it.
+      const disableExpiry = new DisableExpiryWatch({
+        next: async () => await fleetCatalog.nextDisableExpiry(),
+        now: () => Date.now(),
+        republish: async () => {
+          await fleetCatalog.republish();
+        },
+        setTimer: (run, ms) => {
+          const handle = setTimeout(asActivity(activities, 'disable expiry', run), ms);
+          handle.unref();
+          return () => clearTimeout(handle);
+        },
+      });
       /**
        * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
        * the same session start every surface uses — so its limits, its callsigns and its launch are the
@@ -10869,6 +10884,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                   `could not republish the fleet for its model catalogs: ${error instanceof Error ? error.message : String(error)}`,
                 ),
             );
+            await disableExpiry.rearm();
           },
         }),
         names: createNameSubsystem(storage),

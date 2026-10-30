@@ -1,5 +1,5 @@
 import type { FleetRuntimeCatalog, FleetRuntimeView, FleetStackView } from '@ferretry/protocol';
-import { HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
+import { disabledWords, HARNESS_LABEL, indent, listOrNone, unavailable } from '../fleet/account-render.ts';
 
 const kind = (runtime: FleetRuntimeView): string =>
   runtime.agent ? `${HARNESS_LABEL[runtime.harness]}, agent` : HARNESS_LABEL[runtime.harness];
@@ -17,7 +17,7 @@ export function renderRuntimeList(catalog: FleetRuntimeCatalog, binaryName: stri
   const lines: string[] = [];
   for (const runtime of catalog.runtimes) {
     lines.push(
-      `${runtime.name}  ${kind(runtime)}  — ${unavailable(runtime.launch) ?? 'ready to launch'}`,
+      `${runtime.name}  ${kind(runtime)}  — ${disabledWords(runtime.disabled) ?? unavailable(runtime.launch) ?? 'ready to launch'}`,
       ...indent([`Login: ${login(runtime)} · Profile: ${runtime.profile}`]),
     );
   }
@@ -42,6 +42,9 @@ export function renderRuntime(runtime: FleetRuntimeView): string {
     `${runtime.name}  ${kind(runtime)}`,
     ...indent([
       `Launch: ${unavailable(runtime.launch) ?? 'ready'}`,
+      ...(runtime.disabled === undefined
+        ? []
+        : [`Switch: ${disabledWords(runtime.disabled)} (on its ${runtime.disabled.source})`]),
       `Login: ${login(runtime)}`,
       `Profile: ${runtime.profile}`,
       ...renderStack(runtime.stack).map(line => `  ${line}`),

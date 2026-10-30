@@ -322,6 +322,17 @@ export const FleetCredentialTestResultSchema = z.strictObject({
 });
 export type FleetCredentialTestResult = z.infer<typeof FleetCredentialTestResultSchema>;
 
+/**
+ * A login or runtime that is switched off, as a surface shows it (docs/disabling.md). `until` is the instant it
+ * switches itself back on; `source` says which switch is holding a RUNTIME off — its own, or its login's.
+ */
+export const FleetDisabledSchema = z.strictObject({
+  reason: NonEmptyStringSchema.max(200).optional(),
+  until: InstantSchema.optional(),
+  source: z.enum(['login', 'runtime']),
+});
+export type FleetDisabled = z.infer<typeof FleetDisabledSchema>;
+
 /** One credential, as the Credentials tab shows it. */
 export const FleetCredentialViewSchema = z.strictObject({
   id: FleetCredentialIdSchema,
@@ -342,6 +353,8 @@ export const FleetCredentialViewSchema = z.strictObject({
    * labels (E26). A surface asks for a label rather than showing two identical rows.
    */
   needsLabel: z.boolean(),
+  /** Switched off without deleting it: a start on any runtime of this login refuses, ferrets already on it keep going. */
+  disabled: FleetDisabledSchema.optional(),
   /** Set by Clone on an empty slot: the machine it was copied from, by the name it gave itself. */
   clonedFrom: NonEmptyStringSchema.optional(),
   /** That machine's daemon id as the copying browser reported it, so a surface can name it by its own label. */

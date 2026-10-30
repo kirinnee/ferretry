@@ -32,6 +32,7 @@ import {
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
+import { DisabledSchema } from './disabled.ts';
 import {
   CloudCredentialSchema,
   CodexProviderSchema,
@@ -276,6 +277,8 @@ export const CredentialSchema = z
     /** Display only (C9): what tells two logins with one email apart. */
     label: NonEmptyString.optional(),
     ...CLONE_ORIGIN_SHAPE,
+    /** Switched off without deleting it (`./disabled.ts`): every runtime on it refuses to start, ferrets already on it keep going. */
+    disabled: DisabledSchema.optional(),
     /** `store: environment` only. A secret travels as a `${secret:NAME}` reference, never a value. */
     env: EnvSchema.optional(),
     /** `store: environment` only: the provider preset it was made from. Display, Test and quota. */
@@ -695,6 +698,8 @@ export const RuntimeSchema = z.strictObject({
   harness: HarnessKindSchema.optional(),
   /** "Ferretry launches this as an agent" (R3): only these get the fixed layer and start unattended. */
   agent: z.boolean().default(false),
+  /** Switched off without deleting it (`./disabled.ts`). */
+  disabled: DisabledSchema.optional(),
 });
 export type Runtime = z.infer<typeof RuntimeSchema>;
 

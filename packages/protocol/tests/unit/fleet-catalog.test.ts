@@ -242,6 +242,11 @@ const cases: readonly SchemaCase[] = [
   { name: 'FleetFixedLayerViewSchema', schema: catalog.FleetFixedLayerViewSchema, value: runtime.fixedLayer },
   { name: 'FleetRuntimeViewSchema', schema: catalog.FleetRuntimeViewSchema, value: runtime },
   {
+    name: 'FleetRuntimeViewSchema switched off',
+    schema: catalog.FleetRuntimeViewSchema,
+    value: { ...runtime, disabled: { reason: 'resting it', source: 'runtime' } },
+  },
+  {
     name: 'FleetRuntimeCatalogSchema',
     schema: catalog.FleetRuntimeCatalogSchema,
     value: { format: 'version-2', runtimes: [runtime] },
@@ -394,6 +399,11 @@ describe('the account-model catalogue wire contract', () => {
       },
       { kind: 'credential.env', id: 'glm', env: { ANTHROPIC_AUTH_TOKEN: { keep: true } }, cloudCredential: null },
       { kind: 'credential.label', id: 'codex-work', label: null },
+      { kind: 'credential.disable', id: 'codex-work', reason: 'spend limit', until: '2026-11-01T00:00:00.000Z' },
+      { kind: 'credential.disable', id: 'codex-work' },
+      { kind: 'credential.enable', id: 'codex-work' },
+      { kind: 'runtime.disable', name: 'claude-review', reason: 'resting it' },
+      { kind: 'runtime.enable', name: 'claude-review' },
       { kind: 'credential.remove', id: 'codex-work' },
       {
         kind: 'credential.remove',

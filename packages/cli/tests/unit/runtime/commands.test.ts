@@ -193,3 +193,68 @@ describe('registerRuntimeCommands', () => {
     should(world.gateway.called('apply')).have.length(0);
   });
 });
+
+describe('runtime disable and enable', () => {
+  const known = { gateway: { runtimes: () => ({ format: 'version-2' as const, runtimes: [runtime()] }) } };
+
+  it('should switch a runtime off with a reason and a date, without asking', async () => {
+    const world = fakeWorld(known);
+    await runCommand(registerRuntimeCommands, world, [
+      'runtime',
+      'disable',
+      'claude-default',
+      '--until',
+      '2026-11-01',
+      '--reason',
+      'spend limit',
+    ]);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'runtime.disable',
+      name: 'claude-default',
+      reason: 'spend limit',
+      until: '2026-11-01T00:00:00.000Z',
+    });
+    should(world.prompt.questions).be.empty();
+  });
+
+  it('should switch it off for good when no end is given', async () => {
+    const world = fakeWorld(known);
+    await runCommand(registerRuntimeCommands, world, ['runtime', 'disable', 'claude-default']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'runtime.disable', name: 'claude-default' });
+  });
+
+  it('should switch it back on', async () => {
+    const world = fakeWorld(known);
+    await runCommand(registerRuntimeCommands, world, ['runtime', 'enable', 'claude-default']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({ kind: 'runtime.enable', name: 'claude-default' });
+    should(world.prompt.questions).be.empty();
+  });
+
+  it('should refuse a runtime it does not have, and an end already passed', async () => {
+    const world = fakeWorld(known);
+    await should(runCommand(registerRuntimeCommands, world, ['runtime', 'disable', 'nope'])).be.rejectedWith(
+      /fz runtimes/,
+    );
+    await should(runCommand(registerRuntimeCommands, world, ['runtime', 'enable', 'nope'])).be.rejectedWith(
+      /fz runtimes/,
+    );
+    await should(
+      runCommand(registerRuntimeCommands, world, ['runtime', 'disable', 'claude-default', '--until', '2020-01-01']),
+    ).be.rejectedWith(/already passed/);
+    should(world.gateway.called('stage')).be.empty();
+  });
+});
+
+describe('runtime renderings of a switched-off runtime', () => {
+  const off = runtime({
+    launch: { available: false, reason: 'runtime "claude-default" is disabled.' },
+    disabled: { reason: 'spend limit', until: '2026-11-01T00:00:00.000Z', source: 'login' },
+  });
+
+  it('should say it is disabled, why and until when, in the list and on the page', () => {
+    should(renderRuntimeList({ format: 'version-2', runtimes: [off] }, 'fz')).match(
+      /claude-default {2}Claude Code {2}— disabled \(spend limit\) until 2026-11-01\n/,
+    );
+    should(renderRuntime(off)).match(/Switch: disabled \(spend limit\) until 2026-11-01 \(on its login\)/);
+  });
+});
