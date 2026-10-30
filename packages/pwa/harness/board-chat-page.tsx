@@ -37,11 +37,17 @@ const CALLSIGNS = new Map([
   [MARGOT, 'margot'],
 ]);
 
+const NAMES: Readonly<Record<string, string>> = {
+  [LEAD]: 'Board System Design',
+  [OTTILIE]: 'Per-chat card tab',
+  [MARGOT]: 'Header chip states',
+};
+
 const session = (id: string, extra: Record<string, unknown> = {}): SessionView =>
   ({
     config: {
       id,
-      name: `Session ${id}`,
+      name: NAMES[id] ?? id,
       agent: 'claude-work',
       harness: 'claude',
       modelHint: 'claude-opus-5-5',

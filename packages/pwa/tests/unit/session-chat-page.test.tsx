@@ -1514,6 +1514,7 @@ describe('SessionChatPage', () => {
   });
 
   test('a board gives the header its card chip, and a task reference opens the Tasks tab on this ferret’s cards', async () => {
+    const navigated: string[] = [];
     const current = sessionView('shared', { config: { focusTask: { id: 'F18' } } });
     const board = new DaemonBoardStore(
       fakePort({
@@ -1533,6 +1534,7 @@ describe('SessionChatPage', () => {
         context={contextDependencies()}
         entries={[]}
         initialInfo="overview"
+        onNavigate={to => void navigated.push(to)}
         onSessionChange={() => undefined}
         presentation="pane"
         session={current}
@@ -1544,6 +1546,10 @@ describe('SessionChatPage', () => {
       const chip = page.root.findByType(ChatCardChip);
       expect(chip.props.chip).toMatchObject({ kind: 'card', ref: '&F18', title: 'Card F18' });
       expect(chip.props.href).toBe('/d/alpha/board/F18');
+      const link = chip.findByType('a');
+      expect(link.props.href).toBe('/d/alpha/board/F18');
+      run(() => link.props.onClick({ button: 0, preventDefault: () => undefined }));
+      expect(navigated).toEqual(['/d/alpha/board/F18']);
       expect(page.root.findAllByType(BoardSideTab)).toHaveLength(0);
       run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F18'));
       await flush();
