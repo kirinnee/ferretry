@@ -390,6 +390,23 @@ describe('a session started with a brief', () => {
     });
   });
 
+  it('should start without a card, and say why, when the card cannot be read', async () => {
+    // Arrange
+    const store = new MemoryBoardStore([card({ id: 'F9', owner: 'lead' })]);
+    store.read = async () => {
+      throw new TypeError('the board is unreadable');
+    };
+    const { subject } = build({ world: { store } });
+
+    // Act
+    const outcome = await subject.delegate('lead', { brief: 'x', card: 'F9' }, true);
+
+    // Assert
+    should(outcome.delegation).be.undefined();
+    should(outcome.refusal).be.undefined();
+    should(outcome.notes).deepEqual(['No card was made for the sub-ferret: the board is unreadable']);
+  });
+
   it('should say where the card really is when the child runs on another board than the brief said', async () => {
     // Arrange
     const { subject, focus } = build({

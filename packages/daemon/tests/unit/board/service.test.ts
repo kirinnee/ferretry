@@ -1028,6 +1028,33 @@ describe('everything else on a card', () => {
   });
 });
 
+describe('handing a card to a sub-ferret', () => {
+  it('should refuse a card dropped after the lead chose it', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead', dropped: { at: NOW, reason: 'x' } })]);
+
+    // Act
+    const error = await refusal(service.handOver('F1', 'lead', 'child'));
+
+    // Assert
+    should(error.code).equal('invalid');
+    should(error.message).containEql('is dropped');
+    should(ports.store.writes).be.empty();
+  });
+
+  it('should still hand the card over, with a warning, when the sub-ferret cannot be focused', async () => {
+    // Arrange
+    const { service, ports } = serviceWith([card({ id: 'F1', owner: 'lead' })], { focus: new FakeFocus(new Set()) });
+
+    // Act
+    const handed = await service.handOver('F1', 'lead', 'child');
+
+    // Assert
+    should(handed).match({ id: 'F1', assignee: 'child' });
+    should(ports.warnings.some(warning => warning.includes('could not focus child'))).be.true();
+  });
+});
+
 describe('refiling a card', () => {
   it("should land it in the same category's lane on the other board and tell both boards", async () => {
     // Arrange
