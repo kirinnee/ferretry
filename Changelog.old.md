@@ -1,3 +1,9 @@
+## [4.112.0](https://github.com/kirinnee/ferretry/compare/v4.111.0...v4.112.0) (2026-10-30)
+
+### Features
+
+* **daemon:** move the agenda's files to agenda names, never losing an item ([#926](https://github.com/kirinnee/ferretry/issues/926)) ([b989630](https://github.com/kirinnee/ferretry/commit/b9896306cdb451d820f07bd9c0c23da7acb362fd))
+
 ## [4.111.0](https://github.com/kirinnee/ferretry/compare/v4.110.0...v4.111.0) (2026-10-30)
 
 ### Features
