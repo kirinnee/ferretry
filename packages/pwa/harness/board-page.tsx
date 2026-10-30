@@ -6,6 +6,7 @@
  * `?view=kanban|list|tree|dependencies|archive` picks the view; nothing leaves the page.
  */
 
+import type { BoardTaskView } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { BoardPage } from '../src/features/board/board-page.tsx';
@@ -360,8 +361,19 @@ const BIG = Array.from({ length: 40 }, (_, index) => {
         : links([]),
     activity: index % 6 === 0 ? 'stale' : index % 3 === 0 ? 'idle' : 'active',
     lastTouchedAt: ago(10 + index * 55),
+    shippedIn:
+      lane === 'released' || lane === 'tested'
+        ? { version: `4.141.${index % 4}`, tag: `v4.141.${index % 4}`, at: ago(90 + index * 35) }
+        : null,
   });
 });
+/** What a newer daemon says about each card: every fourth big card was made by a ferret for the one before it. */
+const withOrigin = (cards: readonly BoardTaskView[], firstId: number): BoardTaskView[] =>
+  cards.map((item, index) =>
+    index % 4 === 1 && firstId >= 300
+      ? Object.assign(item, { origin: 'agent', humanParent: { id: `F${firstId + index - 1}` } })
+      : Object.assign(item, { origin: 'human', humanParent: null }),
+  );
 const BIG_ON = new URLSearchParams(window.location.search).get('big') !== null;
 
 const closed = (id: string, title: string, minutes: number, extra: Record<string, unknown> = {}) =>
@@ -404,7 +416,7 @@ const store = new DaemonBoardStore(
           : query.state === 'dropped'
             ? DROPPED
             : BIG_ON
-              ? [...OPEN, ...BIG]
+              ? [...withOrigin(OPEN, 0), ...withOrigin(BIG, 300)]
               : OPEN
         ).filter(item => query.ferret === null || item.owner === query.ferret || item.assignee === query.ferret),
         {
@@ -431,8 +443,11 @@ function Harness() {
   const [search, setSearch] = useState(() => {
     const view = params.get('view');
     const start = view === null || view === 'kanban' ? [] : [`view=${view}`];
-    const at = params.get('at');
-    return (at === null ? start : [...start, `at=${at}`]).join('&');
+    const passed = ['at', 'agents', 'window'].flatMap(key => {
+      const value = params.get(key);
+      return value === null ? [] : [`${key}=${value}`];
+    });
+    return [...start, ...passed].join('&');
   });
   const phone = window.innerWidth < 640;
   return (

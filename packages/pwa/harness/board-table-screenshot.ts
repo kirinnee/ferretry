@@ -86,7 +86,7 @@ const open = async (context: BrowserContext, theme: string, view: string, extra 
   page.on('pageerror', error => process.stderr.write(`page error: ${error.message}\n`));
   await page.goto(`${server.url}?theme=${theme}&view=${view}&big=1${extra}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
-  await page.locator('.fy-board-table__row').first().waitFor({ state: 'visible' });
+  await page.locator('.fy-board-summary__row, .fy-board-table__row').first().waitFor({ state: 'visible' });
   await page.waitForTimeout(300);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (wide > 0) fail(`${view} scrolls sideways by ${wide}px`);
@@ -101,9 +101,7 @@ const shot = async (page: Page, name: string): Promise<void> => {
 
 /** Centres the first To test row, so the shot shows the owner's Done on it. */
 const showDone = async (page: Page): Promise<void> => {
-  const row = page
-    .locator('.fy-board-table__row', { has: page.locator('[data-col="status"]', { hasText: 'To test' }) })
-    .first();
+  const row = page.locator('[data-section="to-test"]').first();
   await row.evaluate(node => node.scrollIntoView({ block: 'center' }));
   await page.waitForTimeout(150);
 };
@@ -124,6 +122,20 @@ try {
           await shot(page, `board-done-${label}`);
         }
         await page.close();
+        const agents = await open(context, theme, 'list', '&agents=1');
+        await shot(agents, `board-table-agents-${scheme}-${label}`);
+        await agents
+          .locator('[data-section="merged"]')
+          .first()
+          .evaluate(node => node.scrollIntoView({ block: 'start' }));
+        await agents.waitForTimeout(150);
+        await shot(agents, `board-table-info-${scheme}-${label}`);
+        await agents.close();
+        if (scheme === 'light') {
+          const today = await open(context, theme, 'list', '&window=today');
+          await shot(today, `board-table-today-${label}`);
+          await today.close();
+        }
         if (scheme === 'light' && label === 'desktop') {
           const archive = await open(context, theme, 'archive');
           await shot(archive, 'board-table-archive-desktop');

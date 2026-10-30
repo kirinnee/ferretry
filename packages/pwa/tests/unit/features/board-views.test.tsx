@@ -401,6 +401,24 @@ describe('ArchiveView', () => {
     expect(view.container.querySelector('.fy-board-archive__more')).toBeNull();
   });
 
+  it('shows the blocked, sub-task and released marks beside a closed card’s title', async () => {
+    const model = await boardModelOf([
+      card('F3', {
+        blockedBy: [{ id: 'F9' }],
+        rollup: {
+          children: 2,
+          byCategory: { backlog: 0, active: 1, review: 0, shipped: 0, verify: 0, closed: 1 },
+          active: 1,
+          lastTouchedAt: null,
+        },
+        shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
+      }),
+    ]);
+    view = await mount(<ArchiveView {...await props({ shown: model.cards, total: 1, env: envOf(model) })} />);
+    const extras = view.container.querySelectorAll('[data-task="F3"] .fy-board-table__extras [data-seg]');
+    expect([...extras].map(node => node.getAttribute('data-seg'))).toEqual(['blocked', 'subs', 'shipped']);
+  });
+
   it('searches, and pages with the number left', async () => {
     const seen: string[] = [];
     let more = 0;
