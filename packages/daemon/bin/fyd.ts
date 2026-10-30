@@ -551,7 +551,11 @@ import { FILE_EVENT_POLL_MS, FileEventHub } from '../src/lib/file-events/index.t
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
-import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/lib/fleet/credentials-service.ts';
+import {
+  CREDENTIAL_LIST_FRESH_MS,
+  createFleetCredentialsSubsystem,
+  FleetCredentialCatalog,
+} from '../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
@@ -937,6 +941,7 @@ import {
   retireOperatorPassword,
   runtimeQuarantineState,
   type ScratchReclamation,
+  SESSION_ROSTER_MAX_AGE_MS,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
   type SecretCloneIdentitySource,
   SecretDirectory,
@@ -999,6 +1004,7 @@ import {
   SessionResumeService,
   type SessionResumeSubsystem,
   type SessionRootPinner,
+  SessionRoster,
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
@@ -9686,18 +9692,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ? []
               : [{ id: entry.id, resolution: entry.resolution, usedBy: entry.usedBy }],
           ),
-        sessions: async () =>
-          (
-            await Promise.all(
-              storage.listSessions().map(async session => {
-                const config = SessionConfigSchema.safeParse(
-                  // Every session's config, on every reading: as fresh as the last file event.
-                  await storage.readConfig(session.id, 'heard').catch(() => undefined),
-                );
-                return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
-              }),
-            )
-          ).flat(),
+        // Every session's (runtime, transcript), read ONCE per change and shared by every login that asks:
+        // read per login per look, ~600 configs × 7 Codex logins held the main thread. The stamp moves on
+        // every config this daemon writes and on a session added or removed; an edit made by hand is
+        // read within the roster's age bound.
+        roster: new SessionRoster({
+          stamp: () => `${String(storage.configWrites())}:${String(storage.listSessions().length)}`,
+          read: async () =>
+            (
+              await Promise.all(
+                storage.listSessions().map(async session => {
+                  const config = SessionConfigSchema.safeParse(
+                    // As fresh as the last file event.
+                    await storage.readConfig(session.id, 'heard').catch(() => undefined),
+                  );
+                  return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
+                }),
+              )
+            ).flat(),
+          now: () => millisecondClock.now(),
+          maxAgeMs: SESSION_ROSTER_MAX_AGE_MS,
+        }),
         jobs: housekeepingJobs,
         watch: (path, listener) => fileEvents.subscribe(path, () => listener()),
         passiveFile: id => passiveUsageFiles.path(id),
@@ -9856,6 +9871,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           test: async (subject, consent) => await providerProbe.test(subject, consent),
         },
         providerQuota: quotaReader,
+        // One list answers every reader for a moment: the runtime catalogue, a start's readiness check and
+        // the usage feed each asked for it on their own, and each list reads every login's status.
+        listCache: { now: () => millisecondClock.now(), freshMs: CREDENTIAL_LIST_FRESH_MS },
       });
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
