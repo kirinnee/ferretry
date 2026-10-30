@@ -93,6 +93,44 @@ describe('AgendaWireDirectory', () => {
   });
 });
 
+describe('whether a machine takes offerClose (agenda.offer-close.1)', () => {
+  const OFFERS: DaemonHealthRead = {
+    kind: 'read',
+    health: healthOf('4.120.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOfferClose]),
+  };
+
+  it('offers nothing until a machine’s health has been read, then follows its feature list', () => {
+    const wires = new AgendaWireDirectory();
+    expect(wires.offerCloseOf(A)).toBeUndefined();
+    wires.note(A, { kind: 'loading' });
+    expect(wires.offerCloseOf(A)).toBeUndefined();
+    wires.note(A, OFFERS);
+    wires.note(B, NEW);
+    expect(wires.offerCloseOf(A)).toBe(true);
+    expect(wires.offerCloseOf(B)).toBe(false);
+  });
+
+  it('tells listeners when only that answer changes, and forgets it with the machine', () => {
+    const wires = new AgendaWireDirectory();
+    let heard = 0;
+    wires.subscribe(() => {
+      heard += 1;
+    });
+    wires.note(A, NEW);
+    expect(heard).toBe(1);
+    wires.note(A, {
+      kind: 'read',
+      health: healthOf('4.120.0', [DAEMON_FEATURES.agendaWire, DAEMON_FEATURES.agendaOfferClose]),
+    });
+    expect(heard).toBe(2);
+    wires.note(A, OFFERS);
+    expect(heard).toBe(2);
+    wires.clearDaemon(A);
+    expect(wires.offerCloseOf(A)).toBeUndefined();
+    expect(heard).toBe(3);
+  });
+});
+
 describe('the session summary', () => {
   const summary = (first: string): SessionAgendaSummary => ({
     open: 1,

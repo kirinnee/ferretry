@@ -11,6 +11,8 @@
  *
  * On touch the row swipes (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ SKIPS: on to the next
  * item, or back to the chat when there is none.
+ * An item linked to a card the owner may close also draws "Done · closes &F12": one more answer, in the → slot
+ * when it is free and in the full-width row otherwise, tap only — a swipe never closes a card.
  * An item answered one answer per question draws its chips beside each question; this row then holds the one
  * compact "Send answers" (and "All recommended" when every question has a pick to agree with).
  */
@@ -22,6 +24,8 @@ import { type AnswerDirection, answerAction, CLEAR_ACTION, optionAction } from '
 import type { CardModel } from '../../lib/agenda-card-model.ts';
 import { DISMISS_ACTION, type InboxAction, SWIPE_SLOP_PX, type SwipeMap, swipeIntent } from '../../lib/agenda-inbox.ts';
 import { letterOf, rowLettered, shortLabel } from '../../lib/agenda-options.ts';
+import { DoneCloseChip, DoneCloseConfirm, DoneCloseError } from './agenda-done-close.tsx';
+import type { DoneCloseView } from './use-done-close-flow.ts';
 import { isDownSwipe } from './use-down-swipe.ts';
 
 const SWIPE_WORD: Readonly<Record<AnswerDirection, string>> = {
@@ -56,6 +60,8 @@ export interface AgendaQuickRepliesProps {
   /** The primary pointer is touch: chips swipe and say their direction. */
   readonly swipeable: boolean;
   readonly sending?: QuestionSending;
+  /** "Done · closes &F12": absent when the item offers no card to close. */
+  readonly doneClose?: DoneCloseView;
   /** One answer; the host adds the composer's text as its note. */
   readonly onAct: (action: InboxAction) => void;
   /** The ↓ swipe: skip to the next item, or back to the chat when there is none. */
@@ -171,6 +177,7 @@ export function AgendaQuickReplies({
   waitingOn,
   swipeable,
   sending,
+  doneClose,
   onAct,
   onSkip,
 }: AgendaQuickRepliesProps) {
@@ -229,7 +236,9 @@ export function AgendaQuickReplies({
   const slotted = replies.length > 0 && sending === undefined && !model.notice;
   // Every row reads one way: one long label letters the swipe row AND the rows under it.
   const lettered = rowLettered([...replies, ...extras]);
-  if (!hasReplies(model, sending) && error === null && waitingOn === undefined) return null;
+  // The → slot is free when the card gave fewer than three answers and the row is not the per-question one.
+  const closeInRow = doneClose !== undefined && replies.length < 3 && sending === undefined;
+  if (!hasReplies(model, sending) && doneClose === undefined && error === null && waitingOn === undefined) return null;
   return (
     <div
       className="fy-qr"
@@ -251,12 +260,19 @@ export function AgendaQuickReplies({
           Not sent: {error}
         </p>
       )}
+      {doneClose === undefined ? null : <DoneCloseError view={doneClose} />}
+      {doneClose === undefined ? null : <DoneCloseConfirm view={doneClose} />}
       {waitingOn === undefined ? null : (
         <p className="fy-qr__note m-0" data-agenda-waiting="" role="status">
           With {waitingOn} — it will update this.
         </p>
       )}
-      <fieldset aria-label="Quick replies" className="fy-qr__row" data-slots={slotted || undefined}>
+      <fieldset
+        aria-label="Quick replies"
+        className="fy-qr__row"
+        data-slots={slotted || undefined}
+        data-wraps={closeInRow || undefined}
+      >
         {model.notice ? (
           <button
             className="kt-btn fy-qr__chip"
@@ -282,10 +298,17 @@ export function AgendaQuickReplies({
             swipeable={swipeable}
           />
         ))}
+        {closeInRow ? <DoneCloseChip disabled={busy} view={doneClose} /> : null}
         {sending === undefined ? null : <QuestionChips busy={busy} sending={sending} />}
         {canDismiss ? <NotNeeded busy={busy} give={give} /> : null}
       </fieldset>
-      <MoreChoices busy={busy} extras={extras} give={give} lettered={lettered} />
+      <MoreChoices
+        busy={busy}
+        close={closeInRow ? undefined : doneClose}
+        extras={extras}
+        give={give}
+        lettered={lettered}
+      />
     </div>
   );
 }
@@ -311,7 +334,9 @@ function MoreChoices({
   busy,
   lettered,
   give,
+  close,
 }: {
+  readonly close?: DoneCloseView | undefined;
   readonly extras: readonly {
     readonly option: AgendaAskOption;
     readonly label: string;
@@ -321,9 +346,10 @@ function MoreChoices({
   readonly lettered: boolean;
   readonly give: (action: InboxAction) => void;
 }) {
-  if (extras.length === 0) return null;
+  if (extras.length === 0 && close === undefined) return null;
   return (
     <fieldset aria-label="More choices" className="fy-qr__row fy-qr__more" data-agenda-more-row="">
+      {close === undefined ? null : <DoneCloseChip disabled={busy} view={close} />}
       {extras.map(extra => (
         <Chip
           busy={busy}

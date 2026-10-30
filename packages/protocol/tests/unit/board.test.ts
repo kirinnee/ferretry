@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AgendaActionRequestSchema, AgendaItemSchema } from '../../src/lib/agenda.ts';
+import { AgendaActionRequestSchema, AgendaItemSchema, agendaOfferCloseProblems } from '../../src/lib/agenda.ts';
 import * as boardModule from '../../src/lib/board.ts';
 import {
   AgendaRefSchema,
@@ -782,5 +782,22 @@ describe('agenda seam', () => {
   it('should gate an add that names a card on a daemon feature', () => {
     should(DAEMON_FEATURES.agendaTask).equal('agenda.task.1');
     should(daemonFeatureList()).containEql('agenda.task.1');
+  });
+
+  it('should let an add offer to close its card, store it on the item, and refuse it on a notice', () => {
+    const offered = { ...add, task: { id: 'F18' }, offerClose: true } as const;
+    should(AgendaActionRequestSchema.parse(offered)).containDeep({ offerClose: true });
+    should(AgendaActionRequestSchema.parse(add)).not.have.property('offerClose');
+    should(AgendaActionRequestSchema.safeParse({ ...offered, offerClose: false }).success).be.false();
+    should(AgendaActionRequestSchema.safeParse({ ...offered, notice: true }).success).be.false();
+    should(AgendaItemSchema.parse({ ...item, task: { id: 'F18' }, offerClose: true }).offerClose).be.true();
+    should(AgendaItemSchema.parse(item).offerClose).be.undefined();
+    should(agendaOfferCloseProblems({ offerClose: true, notice: true })).have.length(1);
+    should(agendaOfferCloseProblems({ offerClose: true })).be.empty();
+  });
+
+  it('should gate an offer to close on a daemon feature', () => {
+    should(DAEMON_FEATURES.agendaOfferClose).equal('agenda.offer-close.1');
+    should(daemonFeatureList()).containEql('agenda.offer-close.1');
   });
 });

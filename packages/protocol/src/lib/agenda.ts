@@ -753,6 +753,11 @@ const AgendaItemBaseShape = {
    * that named none. An older app reading a newer board drops the field.
    */
   task: TaskRefSchema.nullable().optional(),
+  /**
+   * The owner's one tap may close the linked card too: the answer row offers "Done · closes &F12". Set by
+   * `fy agenda add --offer-close`, and by the daemon for a to-do or review on a card in the to-test lane.
+   */
+  offerClose: z.literal(true).optional(),
   /** The input request an `input` card presents; present exactly on that kind (`agendaInputProblems`). */
   input: AgendaInputRefSchema.optional(),
 };
@@ -967,8 +972,22 @@ const AddAgendaRequestSchema = z.strictObject({
    * `DAEMON_FEATURES.agendaTask`.
    */
   task: TaskRefSchema.optional(),
+  /**
+   * Offer the owner a "Done · closes &F12" answer that also closes the item's card (`--offer-close`). A daemon
+   * without `DAEMON_FEATURES.agendaOfferClose` refuses the whole add, so a client sends it only to one that has it.
+   */
+  offerClose: z.literal(true).optional(),
   ...AgendaBriefShape,
 });
+
+/** What an offer to close may not be: a notice has no answers to carry it. */
+export const agendaOfferCloseProblems = (value: {
+  readonly offerClose?: true | undefined;
+  readonly notice?: true | undefined;
+}): string[] =>
+  value.offerClose !== undefined && value.notice !== undefined
+    ? ['a notice is read, not closed: no --offer-close']
+    : [];
 
 /**
  * What a raise may not say when it CONFIRMS a held configuration change: its answers are fixed (Allow, Deny,
@@ -1094,7 +1113,11 @@ export const AgendaActionRequestSchema = z
         path: ['kind'],
       });
     }
-    for (const problem of [...agendaNoticeProblems(value), ...agendaConfirmsProblems(value)]) {
+    for (const problem of [
+      ...agendaNoticeProblems(value),
+      ...agendaConfirmsProblems(value),
+      ...agendaOfferCloseProblems(value),
+    ]) {
       context.addIssue({ code: 'custom', message: problem });
     }
   });

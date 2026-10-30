@@ -355,6 +355,7 @@ export const useAgenda = ({
       <AgendaDeliveryContext.Provider value={deliveryState}>
         <AgendaItemView
           busy={busyIds.has(cardItem.id)}
+          daemonId={connection.daemonId}
           error={typeof cardError === 'string' ? cardError : null}
           ferret={ferret}
           history={history}

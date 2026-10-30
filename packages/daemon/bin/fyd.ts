@@ -549,6 +549,7 @@ import {
 } from '../src/lib/analytics/pricing-service.ts';
 import {
   AgendaCardLinks,
+  AgendaToTestLanes,
   BOARD_SWEEP_INTERVAL_MS,
   BoardService,
   BoardSweep,
@@ -9565,6 +9566,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the CLI's, a harness question's and a Warden escalation's alike.
         new StorageSessionFocus(storage),
         new StorageSubFerretDirectory(storage),
+        // A to-do or review on a card waiting to be tried offers the owner to close it with the answer.
+        new AgendaToTestLanes(
+          async id => {
+            const found = await boardWorld.board.task(id);
+            return { task: found.task, laneSet: found.laneSet };
+          },
+          () => attachmentDaemonId,
+        ),
       );
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
       if (agendaConfig.resurfaceAfterMinutes !== undefined) {

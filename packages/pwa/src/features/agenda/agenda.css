@@ -356,6 +356,14 @@
   border: 0;
   padding: 0;
 }
+/* "Done · closes &F12" is a long label that never shrinks: when the row cannot hold it beside the answers, it wraps
+   onto a line of its own instead of pushing "Not needed" off the screen. */
+.fy-qr__row[data-wraps] {
+  flex-wrap: wrap;
+}
+.fy-qr__row[data-wraps] .fy-qr__dismiss {
+  margin-inline-start: auto;
+}
 /* The options past the swiped three: as many rows as they need, each filling the width; tap only. */
 .fy-qr__more {
   display: grid;
@@ -427,6 +435,43 @@
 }
 .fy-qr__note {
   color: var(--muted);
+}
+/* "Close these cards too?": the checklist an item linked to several cards asks, all ticked, above the row. */
+.fy-qr__confirm {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  max-width: var(--chat-column, 720px);
+  flex-direction: column;
+  gap: var(--gap-xs);
+  margin: 0 auto;
+  border: var(--stroke) solid var(--divider-color);
+  border-radius: var(--radius-md, 8px);
+  padding: var(--gap-sm);
+  background: var(--surface-2, var(--surface));
+}
+.fy-qr__confirm-title {
+  float: left;
+  width: 100%;
+  padding: 0;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.fy-qr__confirm-card {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--gap-sm);
+  min-height: 36px;
+  color: var(--fg);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+.fy-qr__confirm-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
 }
 
 /* ---- inside the view: quieter section labels, compact option chips ---------------------------------------- */
