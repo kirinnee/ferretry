@@ -1,3 +1,14 @@
+## [4.132.0](https://github.com/kirinnee/ferretry/compare/v4.131.0...v4.132.0) (2026-10-30)
+
+### Features
+
+* **board:** parent fy new cards from intent; add fy task reparent ([#1021](https://github.com/kirinnee/ferretry/issues/1021)) ([0cae998](https://github.com/kirinnee/ferretry/commit/0cae998af659a21f3a4056f88db31a6a4c5d8670))
+* Inbox v2 — full item view with composer, swipe deck, who+what, mandatory premise/context ([#1002](https://github.com/kirinnee/ferretry/issues/1002)) ([ccee241](https://github.com/kirinnee/ferretry/commit/ccee241e0aadf87ef27be0356a4ad52c4bc9a0f8)), closes [#1001](https://github.com/kirinnee/ferretry/issues/1001)
+
+### Performance
+
+* **pwa:** load each session-layout scenario once and flip the theme family in place ([#1019](https://github.com/kirinnee/ferretry/issues/1019)) ([2eba12c](https://github.com/kirinnee/ferretry/commit/2eba12cf4e3e6098ecb173fc52521cba64cc36f8))
+
 ## [4.131.0](https://github.com/kirinnee/ferretry/compare/v4.130.0...v4.131.0) (2026-10-30)
 
 ### Features

@@ -1,3 +1,14 @@
+## [4.133.0](https://github.com/kirinnee/ferretry/compare/v4.132.0...v4.133.0) (2026-10-30)
+
+### Features
+
+* **pwa:** ClickUp-dense Board cards on a phone ([#1012](https://github.com/kirinnee/ferretry/issues/1012)) ([6714f5f](https://github.com/kirinnee/ferretry/commit/6714f5f968afa2b7e043e01b7943d31cc8704855))
+
+### Fixes
+
+* **daemon:** read a multi-paragraph Codex draft down to the cursor; a may-have-landed message is unconfirmed, not failed ([#1024](https://github.com/kirinnee/ferretry/issues/1024)) ([78be655](https://github.com/kirinnee/ferretry/commit/78be6553bd9138ebc2d35a561ac09fd95efab9f7))
+* **pwa:** withdraw the recovery chip once a page renders again ([#1027](https://github.com/kirinnee/ferretry/issues/1027)) ([9512b42](https://github.com/kirinnee/ferretry/commit/9512b42baab9d421508413fdf50889ccac7f29bb))
+
 ## [4.132.0](https://github.com/kirinnee/ferretry/compare/v4.131.0...v4.132.0) (2026-10-30)
 
 ### Features
