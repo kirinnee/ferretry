@@ -66,6 +66,8 @@ import type {
   WardenGuardConfig,
   WardenInvestigateView,
   WardenInvestigationOrigin,
+  WardenJevCheck,
+  WardenLayerStatus,
   WardenLeaveDuration,
   WardenLeaveView,
   WardenRunView,
@@ -143,7 +145,22 @@ import {
   type WardenFailoverState,
 } from './failover.ts';
 import { blessingViews, investigationList, retainRecords, WARDEN_STATUS_LIST_LIMIT } from './feed.ts';
-import { recordWardenAsk, recordWardenOutcome, wardenAskActor, wardenHistory, withDailyRollup } from './daily.ts';
+import {
+  recordWardenAsk,
+  recordWardenJevCheck,
+  recordWardenOutcome,
+  wardenAskActor,
+  wardenHistory,
+  withDailyRollup,
+} from './daily.ts';
+import {
+  capSkipKey,
+  JEV_CHECKS_SHOWN,
+  jevCapSkipOf,
+  jevCheckOf,
+  pruneCapSkips,
+  type WardenJevCheckLog,
+} from './jev-checks.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
 import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
@@ -386,6 +403,8 @@ export interface WardenSweepPorts {
   /** Written AFTER detection, for the escalation reconciliation only. */
   readonly attention: WardenAttentionPort;
   readonly journal: WardenJournal;
+  /** Jev's checks, one record each, kept beside the reports (`jev-checks.ts`). */
+  readonly jevChecks: WardenJevCheckLog;
   /** Wall-clock milliseconds. */
   readonly nowMs: () => number;
   /** Unguessable per-assignment capabilities. */
@@ -671,6 +690,7 @@ export class WardenSweepService {
     ]);
     const resolved = await this.resolveLogin(stored.config);
     const budget = this.budget(stored.config, state, nowMs, resolved.usable);
+    const jevChecks = await this.ports.jevChecks.recent(JEV_CHECKS_SHOWN).catch(() => undefined);
     const investigators = new Map(
       (state.investigations ?? []).flatMap(record =>
         record.wardenName === undefined ? [] : [[record.id, record.wardenName] as const],
@@ -704,6 +724,8 @@ export class WardenSweepService {
       actions: (state.actions ?? []).slice(0, WARDEN_STATUS_LIST_LIMIT).map(action => ({ ...action })),
       blessings: [...blessingViews(state.blessings ?? {}, nowMs)],
       history: [...wardenHistory(state, nowMs)],
+      // A record that cannot be read is left out — unknown, as from an older daemon — never shown as none.
+      ...(jevChecks === undefined ? {} : { jevChecks: [...jevChecks] }),
     };
   }
 
@@ -1122,6 +1144,7 @@ export class WardenSweepService {
       blessings: pruned.store,
       clearStreaks: reconcileClearStreaks(state.clearStreaks ?? {}, statuses, anomalies, pruned.store, nowMs),
       passedOn: prunePassedOn(state.passedOn ?? [], anomalies),
+      jevCapSkips: pruneCapSkips(state.jevCapSkips ?? [], anomalies, nowMs),
       backoff: reconcileBackoff(state.backoff ?? {}, live, nowMs),
     };
   }
@@ -1263,6 +1286,13 @@ export class WardenSweepService {
       guarding && !queuedIds.has(anomaly.sessionId) && isStillSuspect(anomaly.sessionId);
     const jev = await this.passThroughJev(unblessed.filter(askable), input.config, state, byId, investigating);
     state = jev.state;
+    // Jev switched off by its cap is still a check the owner should see was skipped, once per flag.
+    if (!input.force && jevCapped(budget.layers.jev)) {
+      const unasked = unblessed.filter(
+        anomaly => !queuedIds.has(anomaly.sessionId) && isStillSuspect(anomaly.sessionId),
+      );
+      state = await this.noteCapSkips(state, unasked, input.config, investigating, nowMs);
+    }
     const passed = new Set(jev.passed);
     const viaJev = new Set(jev.passed.map(anomaly => anomaly.sessionId));
     const candidates = investigating ? unblessed.filter(anomaly => !askable(anomaly) || passed.has(anomaly)) : [];
@@ -1448,7 +1478,7 @@ export class WardenSweepService {
         if (!(next.passedOn ?? []).includes(key)) next = this.handOnAfterAct(next, anomaly, key, nowMs);
         continue;
       }
-      if (capped || (next.passedOn ?? []).includes(key)) {
+      if ((next.passedOn ?? []).includes(key)) {
         passed.push(anomaly);
         continue;
       }
@@ -1468,11 +1498,17 @@ export class WardenSweepService {
         );
         continue;
       }
+      if (capped) {
+        passed.push(anomaly);
+        next = await this.noteCapSkip(next, anomaly, config, investigating, nowMs);
+        continue;
+      }
       const guarded = await this.askGuard(anomaly, config, next, byId, investigating);
       next = guarded.state;
       if (guarded.outcome === undefined) {
         capped = true;
         passed.push(anomaly);
+        next = await this.noteCapSkip(next, anomaly, config, investigating, nowMs);
         continue;
       }
       if (guarded.settled) continue;
@@ -1593,6 +1629,15 @@ export class WardenSweepService {
     });
     const decided = decision.failure === undefined;
     const target = byId.get(anomaly.sessionId);
+    const check = (took?: boolean) =>
+      jevCheckOf({
+        anomaly,
+        decision,
+        outcome,
+        route: investigating ? 'investigation' : 'owner',
+        nowMs,
+        ...(took === undefined ? {} : { took }),
+      });
     const base = {
       at,
       sessionId: anomaly.sessionId,
@@ -1617,7 +1662,7 @@ export class WardenSweepService {
         outcome: 'done',
         detail: `Jev was ${Math.round(outcome.confidence * 100)}% sure it is healthy, so this flag is left alone ${leftAloneNote(anomaly.subject, cleared.ttlMs, cleared.streak)}.`,
       });
-      return { state: next, outcome, decided, settled: true };
+      return { state: await this.noteJevCheck(next, check()), outcome, decided, settled: true };
     }
     if (outcome.kind === 'act') {
       const act: WardenVerdictAct = { action: outcome.act, reason: outcome.reason };
@@ -1633,7 +1678,7 @@ export class WardenSweepService {
           stopReason: `${sure}: ${act.reason}`,
         },
       );
-      next = done.state;
+      next = await this.noteJevCheck(done.state, check(done.done));
       if (!done.done) return { state: next, outcome, decided, settled: false };
       next = {
         ...next,
@@ -1657,7 +1702,60 @@ export class WardenSweepService {
         detail: jevActDetail(outcome.recommends, decision.reason ?? outcome.recommends, outcome.confidence, 'held'),
       });
     }
-    return { state: next, outcome, decided, settled: false };
+    return { state: await this.noteJevCheck(next, check()), outcome, decided, settled: false };
+  }
+
+  /**
+   * Write one of Jev's checks beside the reports and count it into its day. A record that cannot be
+   * written costs that record — said in the journal — and never the sweep: the flag is already decided.
+   */
+  private async noteJevCheck(state: WardenRuntimeState, check: WardenJevCheck): Promise<WardenRuntimeState> {
+    await this.ports.jevChecks.append(check).catch((error: unknown) => {
+      this.ports.journal.record('fleet.warden_jev_check_unwritten', {
+        sessionId: check.sessionId,
+        kind: check.anomalyKind,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+    return recordWardenJevCheck(state, check);
+  }
+
+  /**
+   * Note every flag the sweep hands on without asking Jev because its cap is spent: those Jev would have
+   * been asked about — not one it already answered while it stands, nor one it never judges.
+   */
+  private async noteCapSkips(
+    state: WardenRuntimeState,
+    anomalies: readonly WardenAnomaly[],
+    config: WardenConfig,
+    investigating: boolean,
+    nowMs: number,
+  ): Promise<WardenRuntimeState> {
+    let next = state;
+    for (const anomaly of anomalies) {
+      if ((next.passedOn ?? []).includes(passedOnKey(anomaly)) || !jevJudges(anomaly)) continue;
+      next = await this.noteCapSkip(next, anomaly, config, investigating, nowMs);
+    }
+    return next;
+  }
+
+  /**
+   * Note, once while it stands, a flag handed on without asking Jev because its cap — the day's, or this
+   * hour's share of it — is spent. Handed on again every sweep, it is written down only the first time.
+   */
+  private async noteCapSkip(
+    state: WardenRuntimeState,
+    anomaly: WardenAnomaly,
+    config: WardenConfig,
+    investigating: boolean,
+    nowMs: number,
+  ): Promise<WardenRuntimeState> {
+    const today = triageDayFor(state.triageDay, nowMs);
+    const key = capSkipKey(anomaly, today.day);
+    if ((state.jevCapSkips ?? []).includes(key)) return state;
+    const why = today.jevUsd >= config.caps.jevUsdPerDay ? 'jev_cap' : 'jev_paced';
+    const skip = jevCapSkipOf(anomaly, why, investigating ? 'investigation' : 'owner', nowMs);
+    return this.noteJevCheck({ ...state, jevCapSkips: [...(state.jevCapSkips ?? []), key] }, skip);
   }
 
   /**
@@ -2031,6 +2129,10 @@ export class WardenSweepService {
       anomalies = [...unblessed.filter(anomaly => investigated.has(anomaly.sessionId)), ...jev.passed];
       if (anomalies.length === 0)
         return { state, outcome: { message: 'Jev settled every flag; nothing to investigate' } };
+    } else if (!force && jevCapped(budget.layers.jev)) {
+      const investigated = new Set(Object.keys(state.assignments ?? {}));
+      const skipped = unblessed.filter(anomaly => !investigated.has(anomaly.sessionId));
+      state = await this.noteCapSkips(state, skipped, config, investigating, nowMs);
     }
     // Only then the free gates on the investigation itself: a flag they hold back is not paid for.
     const held = investigating ? this.spawnHeldBack(config, state, input.fleet, budget, nowMs, force) : undefined;
@@ -2647,6 +2749,11 @@ export class WardenSweepService {
       ...(state.exhaustedSince === undefined ? {} : { exhaustedSince: state.exhaustedSince }),
     };
   }
+}
+
+/** Whether the owner switched Jev on and its cap — the day's, or this hour's share — has switched it off. */
+function jevCapped(layer: WardenLayerStatus): boolean {
+  return layer.configured && layer.reason === 'jev_cap';
 }
 
 /** Remember why Jev handed one flag on (`state.ts` {@link recordJevHandoff}): an escalation, or one it never judges. */
