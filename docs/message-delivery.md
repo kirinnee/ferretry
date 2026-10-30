@@ -16,7 +16,9 @@ this page, which is still how a message reaches the pane.
 
 - **Model** — `packages/protocol/src/lib/session-queue.ts` (`QueuedMessageSchema`): ✓ `queued` on accept,
   ✓✓ `delivered` once typed and submitted (pane proof), ✓✓✓ `read` once the transcript shows it as a user
-  turn; `cancelled` and `failed` are final. A waiting message carries a `waitReason` a person can act on.
+  turn; `cancelled` and `failed` are final. `unconfirmed` is a message typed and not proven — the send ledger
+  says `unaccounted` — which may have landed: never a failure, it holds nothing behind it, and a later proof
+  still moves it to delivered or read. A waiting message carries a `waitReason` a person can act on.
 - **Log** — `channel/queue.jsonl` beside the session, append-only and flushed to disk before an accept
   answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
   move that is legal from where the message stands, so a replayed or stale line changes nothing.
@@ -72,7 +74,10 @@ this page, which is still how a message reaches the pane.
 Every proof reads **the composer itself** — the last prompt-glyph line (`›`, `❯`, `>`) and the indented
 lines a multi-line draft wraps onto, up to the first blank row — together with the cursor tmux reports
 beside the capture (`lib/tmux/composer-screen.ts`). It never asks whether the message's words appear
-somewhere on screen. A Claude composer (`❯`/`>`) that its rule closes runs to that rule, blank rows
+somewhere on screen. A composer the CURSOR reaches past a blank row runs down to the cursor, blank rows and indented rows
+included: Codex draws no rule under its composer, and a ferret's message (an envelope line, a blank row,
+paragraphs) typed into a busy Codex 0.156.1 pane was read as its first line only, so nothing pressed Tab
+and it sat under "tab to queue message". A Claude composer (`❯`/`>`) that its rule closes runs to that rule, blank rows
 included: a multi-paragraph draft (a Warden notice is three paragraphs) draws its blank lines inside the
 composer, and ending it at the first one put the cursor below it, read the composer `unreadable`, and
 refused every later send — the owner's included — while the notice itself was never proven landed, so

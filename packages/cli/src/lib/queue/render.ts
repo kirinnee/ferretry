@@ -6,6 +6,7 @@ const MARK: Readonly<Record<QueuedMessage['state'], string>> = {
   typing: '✓ typing',
   delivered: '✓✓',
   read: '✓✓✓',
+  unconfirmed: '? unconfirmed',
   cancelled: '✗ cancelled',
   failed: '✗ failed',
 };

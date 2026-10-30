@@ -58,8 +58,9 @@ export type QueueEvent = z.infer<typeof QueueEventSchema>;
  */
 const NEXT: Readonly<Record<QueuedMessageState, ReadonlySet<QueuedMessageState>>> = {
   queued: new Set(['typing', 'cancelled', 'failed']),
-  typing: new Set(['queued', 'delivered', 'failed']),
+  typing: new Set(['queued', 'delivered', 'unconfirmed', 'failed']),
   delivered: new Set(['read']),
+  unconfirmed: new Set(['delivered', 'read']),
   read: new Set(),
   cancelled: new Set(),
   failed: new Set(),

@@ -230,6 +230,21 @@ describe('handing over a queue', () => {
     should(absent.state('a')).containEql({ state: 'failed', failure: 'tmux went away' });
   });
 
+  it('should not hold the next message behind an unconfirmed one, and still watch it for proof', async () => {
+    const world = new World(message('a', 'human'), message('b', 'human', 1));
+    world.answers.push({ kind: 'unproven' });
+    await world.deliverer.enqueued(ID);
+    world.fates.set('a', 'unaccounted');
+
+    await world.deliverer.changed(ID);
+    should(world.state('a')?.state).equal('unconfirmed');
+    should(world.handed).eql(['a', 'b']);
+
+    world.fates.set('a', 'delivered');
+    await world.deliverer.changed(ID);
+    should(world.state('a')?.state).equal('read');
+  });
+
   it('should read the read tick from the ledger, and stop looking once nothing can move', async () => {
     const world = new World(message('a', 'human'));
     await world.deliverer.enqueued(ID);
@@ -391,9 +406,17 @@ describe('settling a hand-over from the send ledger', () => {
     should(movesFrom(message('a', 'human'), 'delivered')).eql([]);
   });
 
-  it('should fail what the ledger could not deliver, saying when it may still have landed', () => {
+  it('should fail what the ledger proved absent, and call one that may have landed unconfirmed, never failed', () => {
+    // The owner read "✗ failed, may have reached" for a message the agent had (2026-10-30).
     should(movesFrom(typing, 'timed_out')[0]?.failure).equal('it never reached the agent');
-    should(movesFrom(typing, 'unaccounted')[0]?.failure).match(/may have/u);
+    should(movesFrom(typing, 'unaccounted')).eql([{ state: 'unconfirmed' }]);
     should(movesFrom(typing, 'cancelled')[0]?.failure).equal('its send was cancelled');
+  });
+
+  it('should move an unconfirmed message on when proof turns up later', () => {
+    const unconfirmed = { ...message('a', 'human'), state: 'unconfirmed' as const };
+    should(movesFrom(unconfirmed, 'delivered')).eql([{ state: 'read' }]);
+    should(movesFrom(unconfirmed, 'queued')).eql([{ state: 'delivered' }]);
+    should(movesFrom(unconfirmed, 'unaccounted')).eql([]);
   });
 });

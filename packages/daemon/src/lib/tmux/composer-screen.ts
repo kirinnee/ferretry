@@ -169,6 +169,30 @@ function ruledEnd(lines: readonly string[], at: number): number | undefined {
 }
 
 /**
+ * The composer's last row, carried down to the cursor when the cursor proves the draft runs further.
+ *
+ * Codex draws no rule under its composer, so a draft with blank lines in it — a ferret's message is an
+ * envelope line, a blank row and its paragraphs — ended at its first blank row there, and the cursor,
+ * parked at the end of the last paragraph, sat outside it. The landing proof could not see the message,
+ * nothing pressed Enter or Tab, and it sat in the box under "tab to queue message" while every later
+ * send waited behind it as a draft (measured on Codex 0.156.1, 2026-10-30). The cursor is in the
+ * composer, so every row up to it that is blank or an indented continuation is the composer too; a
+ * row that is neither, or a rule, means the cursor is somewhere else and nothing is carried.
+ */
+function reachingCursor(lines: readonly string[], at: number, end: number, cursor: ComposerCursor): number {
+  const row = cursor.y;
+  if (row === undefined || row <= end + 1 || row >= lines.length) return end;
+  for (let index = end + 1; index <= row; index += 1) {
+    const line = lines[index] as string;
+    if (CLOSER.test(line)) return end;
+    if (line.trim() !== '' && !CLAUDE_QUEUE_CONTINUATION.test(line)) return end;
+  }
+  let last = row;
+  while (last > at && (lines[last] as string).trim() === '') last -= 1;
+  return last;
+}
+
+/**
  * The rows the composer occupies, or `undefined` when the frame has no prompt line at all — the rows
  * an attributed capture must cover for `composerInk` to describe them.
  */
@@ -190,7 +214,7 @@ export function readComposer(visible: string, cursor: ComposerCursor = {}): Comp
   if (at === undefined) return undefined;
   const prompt = lines[at] as string;
   const match = PROMPT_LINE.exec(prompt) as RegExpExecArray;
-  const end = lastLineOfComposer(lines, at);
+  const end = reachingCursor(lines, at, lastLineOfComposer(lines, at), cursor);
   const parts = [(match[2] ?? '').replace(BORDER, '').trim()];
   for (let index = at + 1; index <= end; index += 1)
     parts.push(

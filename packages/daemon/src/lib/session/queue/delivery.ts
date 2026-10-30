@@ -56,7 +56,7 @@ export interface QueueMove {
  * harness's queue) is delivered, `delivered` (a user record in the transcript) is read. A message
  * `typing` with no ledger record, or a withdrawn one, never had a key typed — a daemon that stopped
  * between the two writes — and simply waits again. Nothing here ever types it again: a fate that cannot
- * say whether it landed fails, in words that say it may have.
+ * say whether it landed is `unconfirmed`, never a failure, and a later proof still moves it on.
  */
 export function movesFrom(message: QueuedMessage, fate: SendFate | undefined): readonly QueueMove[] {
   if (message.state === 'typing') {
@@ -73,10 +73,13 @@ export function movesFrom(message: QueuedMessage, fate: SendFate | undefined): r
       case 'timed_out':
         return [{ state: 'failed', failure: 'it never reached the agent' }];
       case 'unaccounted':
-        return [{ state: 'failed', failure: 'nothing proves it reached the agent, though it may have' }];
+        // May have landed: the owner read "✗ failed, may have reached" for a message the agent had.
+        return [{ state: 'unconfirmed' }];
       case 'cancelled':
         return [{ state: 'failed', failure: 'its send was cancelled' }];
     }
   }
+  if (message.state === 'unconfirmed')
+    return fate === 'delivered' ? [{ state: 'read' }] : fate === 'queued' ? [{ state: 'delivered' }] : [];
   return message.state === 'delivered' && fate === 'delivered' ? [{ state: 'read' }] : [];
 }

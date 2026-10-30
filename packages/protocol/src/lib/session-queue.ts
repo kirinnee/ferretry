@@ -12,8 +12,20 @@ import { SendSenderKindSchema } from './session.ts';
  * and submitted into the agent, proven by its pane), ✓✓✓ `read` (its transcript shows it as a user turn).
  */
 
-/** Where one message is. `typing` is the one moment a key is going to the pane; at most one is, per session. */
-export const QueuedMessageStateSchema = z.enum(['queued', 'typing', 'delivered', 'read', 'cancelled', 'failed']);
+/**
+ * Where one message is. `typing` is the one moment a key is going to the pane; at most one is, per session.
+ * `unconfirmed` was typed and nothing proves it reached the agent, though it may have: never shown as a
+ * failure, and moved on to delivered or read if proof turns up later.
+ */
+export const QueuedMessageStateSchema = z.enum([
+  'queued',
+  'typing',
+  'delivered',
+  'read',
+  'unconfirmed',
+  'cancelled',
+  'failed',
+]);
 export type QueuedMessageState = z.infer<typeof QueuedMessageStateSchema>;
 
 /**

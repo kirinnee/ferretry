@@ -103,6 +103,7 @@ describe('a queue as lines', () => {
       '✗ failed  q-1  you: ship it — the session ended',
     ]);
     should(renderQueue([message({ state: 'failed' })])).eql(['✗ failed  q-1  you: ship it']);
+    should(renderQueue([message({ state: 'unconfirmed' })])).eql(['? unconfirmed  q-1  you: ship it']);
     // A reason is only shown while the message waits.
     should(renderQueue([message({ state: 'typing', waitReason: 'busy' })])).eql(['✓ typing  q-1  you: ship it']);
   });
