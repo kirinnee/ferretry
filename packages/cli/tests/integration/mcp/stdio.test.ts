@@ -11,10 +11,32 @@ const echo = {
   handle: async (message: unknown) => {
     const { id, method } = message as { id?: number; method: string };
     if (id === undefined) return undefined;
-    if (method === 'slow') await Bun.sleep(30);
     return { jsonrpc: '2.0' as const, id, result: { method } };
   },
 };
+
+/** A handler whose `slow` request stays open until `release()`, so "still running" is a fact and not a timer. */
+function gatedEcho() {
+  let release: () => void = () => undefined;
+  const gate = new Promise<void>(resolve => {
+    release = resolve;
+  });
+  return {
+    release,
+    handle: async (message: unknown) => {
+      if ((message as { method: string }).method === 'slow') {
+        let giveUp: ReturnType<typeof setTimeout> | undefined;
+        const neverReleased = new Promise<never>((_, reject) => {
+          giveUp = setTimeout(() => {
+            reject(new Error('the quick request was never answered while the slow one was still running'));
+          }, 30_000);
+        });
+        await Promise.race([gate, neverReleased]).finally(() => clearTimeout(giveUp));
+      }
+      return echo.handle(message);
+    },
+  };
+}
 
 describe('the MCP stdio transport', () => {
   it('should read one message per line, across chunk boundaries, and answer each on its own line', async () => {
@@ -41,10 +63,14 @@ describe('the MCP stdio transport', () => {
 
   it('should answer a quick request while a slow one is still running', async () => {
     const written: string[] = [];
+    const handler = gatedEcho();
     await serveMcpOverStdio(
-      echo,
+      handler,
       chunks('{"jsonrpc":"2.0","id":1,"method":"slow"}\n{"jsonrpc":"2.0","id":2,"method":"ping"}\n'),
-      line => written.push(line),
+      line => {
+        written.push(line);
+        if ((JSON.parse(line) as { id: number }).id === 2) handler.release();
+      },
     );
     should(written.map(line => (JSON.parse(line) as { id: number }).id)).deepEqual([2, 1]);
   });

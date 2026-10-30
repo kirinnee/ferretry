@@ -23,6 +23,7 @@ import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
 import { TEARDOWN_TIMEOUT_MS, tearDownSupervisedDaemons } from '../support/supervised-daemon-teardown.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * A BRAND-NEW SESSION, IDLE AT ITS PROMPT, through a real `fyd`, real tmux and a fake harness.
@@ -199,10 +200,11 @@ async function boot(claudeScreen: readonly string[]): Promise<BootedDaemon> {
   );
   const handle = await supervisor.start(fyd);
   if (handle.pid !== undefined) daemons.add(handle.pid);
-  for (let attempt = 0; attempt < 400; attempt += 1) {
-    if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-    await Bun.sleep(50);
-  }
+  await waitFor(
+    async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
+    'the daemon to answer its health probe',
+    { pollMs: 50, evidence: async () => await readFile(layout.logFile, 'utf8').catch(() => '(no log)') },
+  );
   const token = (await readFile(join(stateHome, 'api-token'), 'utf8')).trim();
   return { port, token, logFile: layout.logFile };
 }
@@ -238,12 +240,17 @@ async function startIdle(daemon: BootedDaemon, wrapper: string): Promise<Session
 async function liveFrame(daemon: BootedDaemon, view: SessionView, marker: string): Promise<string> {
   const url = `http://127.0.0.1:${daemon.port}/v1/sessions/${encodeURIComponent(view.config.id)}/snapshot?live=true`;
   let frame = '';
-  for (let attempt = 0; attempt < 200 && !frame.includes(marker); attempt += 1) {
-    const response = await fetch(url, { headers: headers(daemon, `snap-${attempt}`) });
-    frame = response.ok ? await response.text() : '';
-    if (!frame.includes(marker)) await Bun.sleep(50);
-  }
-  if (!frame.includes(marker)) throw new Error(`the pane never showed ${marker}:\n${frame}\n${await logOf(daemon)}`);
+  let attempt = 0;
+  await waitFor(
+    async () => {
+      attempt += 1;
+      const response = await fetch(url, { headers: headers(daemon, `snap-${attempt}`) });
+      frame = response.ok ? await response.text() : '';
+      return frame.includes(marker);
+    },
+    `the pane to show ${marker}`,
+    { pollMs: 50, evidence: async () => `${frame}\n${await logOf(daemon)}` },
+  );
   return frame;
 }
 

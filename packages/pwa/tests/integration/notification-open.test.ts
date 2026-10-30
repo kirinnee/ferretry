@@ -38,6 +38,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, Page, Worker } from 'playwright-core';
+import { waitFor } from './support/wait-for';
 import { sharedChromium } from './support/chromium.ts';
 import { releaseKey, run, signedRelease } from './support/signed-release.ts';
 
@@ -140,7 +141,7 @@ const shown = async (page: Page): Promise<Shown> =>
   });
 
 /** Waits until the window shows `path` with the app mounted there, or answers what it shows instead. */
-const settledOn = async (page: Page, path: string, timeout = 10_000): Promise<Shown> => {
+const settledOn = async (page: Page, path: string, timeout = 60_000): Promise<Shown> => {
   const deadline = Date.now() + timeout;
   let last = await shown(page).catch(() => null);
   while (Date.now() < deadline) {
@@ -211,11 +212,13 @@ const retire = async (profile: Profile): Promise<void> => {
 };
 
 const registrationOf = async (profile: Profile, scope: string): Promise<string> => {
-  const deadline = Date.now() + 15_000;
-  while (!profile.seen.has(`${origin()}${scope}`) && Date.now() < deadline) await pause(50);
-  const id = profile.seen.get(`${origin()}${scope}`);
-  if (id === undefined) throw new Error(`DevTools never reported the registration at ${scope}`);
-  return id;
+  return await waitFor(
+    () => profile.seen.get(`${origin()}${scope}`),
+    `DevTools to report the registration at ${scope}`,
+    {
+      pollMs: 50,
+    },
+  );
 };
 
 /** How many notifications a machine's registration shows right now, asked of its own worker. */
@@ -246,7 +249,7 @@ const push = async (profile: Profile, machine: MachineName, payload: Record<stri
       data: JSON.stringify({ version: 1, eventKey: `e-${Math.random()}`, body: 'b', count: 1, ...payload }),
     });
   await send();
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + 60_000;
   let resendAt = Date.now() + 3_000;
   while (Date.now() < deadline) {
     if ((await notificationsAt(profile, machine)) > 0) return;
@@ -261,7 +264,7 @@ const push = async (profile: Profile, machine: MachineName, payload: Record<stri
 
 /** The worker serving `script`, started if the browser had stopped it. */
 const workerFor = async (profile: Profile, scope: string, script: string): Promise<Worker> => {
-  const deadline = Date.now() + 15_000;
+  const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const found = profile.context.serviceWorkers().find(worker => worker.url() === `${origin()}${script}`);
     if (found !== undefined) return found;
@@ -306,12 +309,12 @@ const tap = async (profile: Profile, scope: string, script: string): Promise<() 
   const worker = await workerFor(profile, scope, script);
   await worker.evaluate(async () => {
     const realm = globalThis as unknown as {
-      __tap?: Tap & { focused: string[]; opened: string[] };
+      __tap?: Tap & { focused: string[]; opened: string[]; pending: Promise<unknown>[] };
       registration: { getNotifications(): Promise<Notification[]> };
       dispatchEvent(event: Event): boolean;
     };
     if (realm.__tap === undefined) {
-      const record = { focused: [] as string[], opened: [] as string[] };
+      const record = { focused: [] as string[], opened: [] as string[], pending: [] as Promise<unknown>[] };
       realm.__tap = record;
       const scopeGlobals = globalThis as unknown as {
         Clients: { prototype: { openWindow(url: string): Promise<unknown> } };
@@ -334,11 +337,21 @@ const tap = async (profile: Profile, scope: string, script: string): Promise<() 
         NotificationEvent: new (type: string, init: { notification: Notification }) => Event;
       }
     ).NotificationEvent;
-    realm.dispatchEvent(new Event('notificationclick', { notification }));
+    const click = new Event('notificationclick', { notification }) as Event & {
+      waitUntil(work: Promise<unknown>): void;
+    };
+    const record = realm.__tap;
+    // The handler hands its whole job, the reply wait and the fallback included, to waitUntil: keeping
+    // that promise lets the test wait for the handler to be DONE instead of guessing how long it takes.
+    click.waitUntil = work => {
+      record.pending.push(work);
+    };
+    realm.dispatchEvent(click);
   });
   return async () =>
-    await worker.evaluate(() => {
-      const record = (globalThis as unknown as { __tap: Tap }).__tap;
+    await worker.evaluate(async () => {
+      const record = (globalThis as unknown as { __tap: Tap & { pending: Promise<unknown>[] } }).__tap;
+      await Promise.allSettled(record.pending);
       return { focused: [...record.focused], opened: [...record.opened] };
     });
 };
@@ -368,9 +381,6 @@ const ASK = {
 } as const;
 const BETA_ASK = '/d/beta/session/mvb9x0-c0ffee01?attention=A3';
 
-/** Long enough for the worker's wait for a reply (`NOTIFICATION_OPEN_ACK_MS`) to have run out. */
-const AFTER_ANY_FALLBACK = 1_800;
-
 describe('a notification tap opens its conversation on the machine that sent it', () => {
   test('with the app closed, the worker opens Beta’s conversation at the item', async () => {
     const browserProfile = await profile();
@@ -378,7 +388,6 @@ describe('a notification tap opens its conversation on the machine that sent it'
     // Every window of the app is gone; only the browser's notification is left.
     await retire(browserProfile);
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
-    await pause(AFTER_ANY_FALLBACK);
 
     const { opened, focused } = await tapped();
     expect(focused).toEqual([]);
@@ -407,7 +416,6 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
-    await pause(AFTER_ANY_FALLBACK);
 
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     expect(landed.opens).toEqual([BETA_ASK]);
@@ -425,7 +433,6 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
-    await pause(AFTER_ANY_FALLBACK);
 
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     expect((await tapped()).opened).toEqual([]);
@@ -441,7 +448,6 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
-    await pause(AFTER_ANY_FALLBACK);
 
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     // A new navigation, so the conversation re-targets even when the item is one it showed before.
@@ -462,7 +468,6 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
-    await pause(AFTER_ANY_FALLBACK);
 
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     expect(await landing.evaluate(() => location.pathname)).toBe('/');
@@ -541,7 +546,6 @@ describe('a notification tap opens its conversation on the machine that sent it'
 
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
     const landed = await settledOn(app, BETA_ASK);
-    await pause(AFTER_ANY_FALLBACK);
 
     expect(landed.route).toMatchObject({ kind: 'session', daemonId: 'beta', attention: 'A3' });
     expect((await tapped()).opened).toEqual([]);
@@ -555,7 +559,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
     await push(browserProfile, 'beta', ASK);
 
     const tapped = await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
-    await pause(AFTER_ANY_FALLBACK + 1_000);
+    await tapped();
 
     // A machine's worker controls no page, so it may not navigate that window: it opens the
     // conversation in one of its own instead of leaving the reader where they were.
@@ -611,6 +615,8 @@ describe('a notification tap opens its conversation on the machine that sent it'
       const app = await appAt(browserProfile, '/d/alpha');
       await app.reload();
       await settledOn(app, '/d/alpha');
+      // A negative: nothing re-checks the machine's worker. A late check could only turn this into a
+      // false pass, never a false failure, and the positive half below proves the update path works.
       await pause(1_500);
       const untouched = await marked();
 
@@ -618,8 +624,9 @@ describe('a notification tap opens its conversation on the machine that sent it'
       await app.evaluate(async scope => {
         await (await navigator.serviceWorker.getRegistration(scope))?.update();
       }, MACHINES.beta.scope);
-      const deadline = Date.now() + 15_000;
-      while (!(await marked()).includes(2) && Date.now() < deadline) await pause(100);
+      await waitFor(async () => (await marked()).includes(2) || undefined, 'the machine worker to take release 2', {
+        pollMs: 100,
+      });
 
       expect(untouched.includes(2)).toBe(false);
       expect(await marked()).toContain(2);

@@ -20,6 +20,7 @@ import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
 import { TEARDOWN_TIMEOUT_MS, tearDownSupervisedDaemons } from '../support/supervised-daemon-teardown.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * Where a daemon `fy daemon start` launched looks for this host's harness logins — the way it hid.
@@ -109,15 +110,17 @@ async function arrange(
   return { bin, userHome, stateHome, fyd, probe };
 }
 
-/** The daemon log once the boot says it is serving, or whatever it holds when time runs out. */
+/** The daemon log once the boot says it is serving; a boot that never does fails with the log it wrote. */
 async function logAfterReady(logFile: string): Promise<string> {
-  let log = '';
-  for (let attempt = 0; attempt < 300; attempt += 1) {
-    log = await readFile(logFile, 'utf8').catch(() => '');
-    if (log.includes('serving http')) return log;
-    await Bun.sleep(50);
-  }
-  return log;
+  const read = () => readFile(logFile, 'utf8').catch(() => '');
+  return waitFor(
+    async () => {
+      const log = await read();
+      return log.includes('serving http') ? log : undefined;
+    },
+    'the daemon to say it is serving http',
+    { pollMs: 50, evidence: read },
+  );
 }
 
 describe('the user home of a daemon `fy daemon start` launched', () => {

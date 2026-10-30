@@ -13,6 +13,7 @@ import type {
   ProcessScope,
 } from '../../../src/adapters/daemon/process-incarnation.ts';
 import type { CommandOutcome, IDaemonProcessPort } from '../../../src/lib/daemon/ports.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * The claim that serializes one daemon's mutating lifecycle commands.
@@ -275,7 +276,7 @@ describe('daemon lifecycle claim', () => {
       waiting: holder => notices.push(holder),
       reclaimed: neverReclaims,
     });
-    await Bun.sleep(20);
+    await waitFor(() => notices.length > 0, 'the successor to queue behind the holder');
     const residue = await held.release();
     const second = await successor;
 
@@ -681,8 +682,10 @@ describe('a claim whose holder has exited', () => {
       stdout: 'ignore',
       stderr: 'ignore',
     });
-    const deadline = Date.now() + 20_000;
-    while (!(await readFile(journal, 'utf8')).includes('enter killed') && Date.now() < deadline) await Bun.sleep(10);
+    await waitFor(
+      async () => (await readFile(journal, 'utf8')).includes('enter killed'),
+      'the holder to enter the claim',
+    );
     holder.kill('SIGKILL');
     await holder.exited;
     const processes = new BunDaemonProcess();
