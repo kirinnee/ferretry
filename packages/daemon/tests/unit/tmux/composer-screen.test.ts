@@ -546,3 +546,56 @@ describe('a Claude queue that runs past the top of a short pane', () => {
     should(paneHoldOf(frame, cursor, 'End.', false)).equal('unknown');
   });
 });
+
+/**
+ * A Warden notice is three paragraphs. Typed into a busy Claude pane and never submitted, it sat in the
+ * composer with its blank rows drawn INSIDE the composer and the cursor at the end of the last
+ * paragraph. The composer ended at the first blank row, so the cursor sat below it and the reading was
+ * `unreadable`: every later send — the owner's own message among them — was withdrawn as "could not
+ * be read" and never retried. Captured from the live pane that was stuck that way.
+ */
+describe('a multi-paragraph Claude draft closed by its rule', () => {
+  const visible = readFileSync(join(FIXTURES, 'claude-2.1.281-warden-notice-draft.txt'), 'utf8');
+  const [x, y] = readFileSync(join(FIXTURES, 'claude-2.1.281-warden-notice-draft.cursor'), 'utf8').trim().split('|');
+  const frame: DeliveryFrame = {
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible,
+    cursorX: Number(x),
+    cursorY: Number(y),
+  };
+  const NOTICE =
+    '[ferretry] The Warden: your card &F91 “U6 GitHub watcher” has nobody on it. It is in Doing, but its ' +
+    'ferret :joziah is completed and nothing under it is alive.\n\n' +
+    'This notice is from Ferretry, not from the owner. You own the card, so pick it up: Resume its ferret ' +
+    '(`fy resume mvurrvhm-6973f733`), hand the card to another ferret (`fy task assign F91 <ferret>`), or ' +
+    'drop it (`fy task drop F91 --reason "<why>"`).';
+
+  it('should read every paragraph as the composer, up to the rule that closes it', () => {
+    const rows = composerRows(visible);
+    should(rows).deepEqual({ first: 9, last: 16 });
+    const composer = readComposer(visible, cursorOf(frame));
+    should(composer?.placeholder).be.false();
+    should(composer?.text).endWith('F91 --reason "<why>"`).');
+  });
+
+  it('should call the composer occupied, never unreadable, so a send is refused over a draft it can name', () => {
+    should(composerState(frame).kind).equal('input');
+    should(occupiedComposer(frame)).startWith('[ferretry] The Warden');
+  });
+
+  it('should prove the notice landed in the composer, so the fill that typed it presses Enter', () => {
+    should(composerLanding(frame, NOTICE, true)).equal('chars');
+  });
+
+  it('should still end a Codex composer at its first blank row, where its footer begins', () => {
+    const codex = '› fix the flaky test\n\n  gpt-5 default · ~/work\n────────\n';
+    should(composerRows(codex)).deepEqual({ first: 0, last: 0 });
+  });
+
+  it('should not swallow rows that are not an indented draft before a rule', () => {
+    const claude = '❯ hello\n\n⏺ assistant output\n────────\n';
+    should(composerRows(claude)).deepEqual({ first: 0, last: 0 });
+  });
+});
