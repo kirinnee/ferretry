@@ -2203,8 +2203,18 @@ if (process.argv.includes('--landing-only')) {
   process.exit(0);
 }
 
+// Whitespace and syntax only: names stay, so a failure still reads. Every cold page load parses this bundle.
 process.stdout.write('📦 bundling the harness page…\n');
-run('bun', ['build', 'harness/main.tsx', '--outdir', 'harness/out', '--target', 'browser']);
+run('bun', [
+  'build',
+  'harness/main.tsx',
+  '--outdir',
+  'harness/out',
+  '--target',
+  'browser',
+  '--minify-whitespace',
+  '--minify-syntax',
+]);
 
 process.stdout.write('🎨 compiling the design system…\n');
 run('./node_modules/.bin/tailwindcss', [
