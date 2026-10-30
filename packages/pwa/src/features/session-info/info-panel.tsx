@@ -8,7 +8,7 @@ import { Maximize2, Minimize2, X } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef } from 'react';
 import { Badge } from '../../shell/primitives.tsx';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
-import { INFO_TAB_LABEL, INFO_TABS_WITHOUT_BOARD, type InfoTab } from './info-model.ts';
+import { INFO_TAB_LABEL, INFO_TABS_WITHOUT_BOARD, type InfoTab, scrollToShow } from './info-model.ts';
 
 export type InfoSheetSize = 'half' | 'full';
 
@@ -49,10 +49,7 @@ export function InfoPanel({
     const row = strip.current;
     const active = row?.querySelector<HTMLElement>(`[role="tab"][id$="-tab-${tab}"]`);
     if (row === null || row === undefined || active === null || active === undefined) return;
-    const left = active.offsetLeft;
-    if (left < row.scrollLeft) row.scrollLeft = left;
-    else if (left + active.offsetWidth > row.scrollLeft + row.clientWidth)
-      row.scrollLeft = left + active.offsetWidth - row.clientWidth;
+    row.scrollLeft = scrollToShow(row.scrollLeft, active.offsetLeft, active.offsetWidth, row.clientWidth);
   }, [tab]);
   return (
     <div className="fy-info" data-info-panel="" data-info-tab={tab}>

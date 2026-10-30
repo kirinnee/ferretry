@@ -15,9 +15,7 @@ import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { type BoardMachine, useBoard } from './use-board.ts';
 
 /** The store a host without a board is given: with no machine to read it never reaches its port. */
-const refuse = async (): Promise<never> => {
-  throw new Error('this host has no board');
-};
+const refuse = (): Promise<never> => Promise.reject(new Error('this host has no board'));
 const IDLE_PORT: BoardPort = { board: refuse, task: refuse, projects: refuse, version: refuse, act: refuse };
 const IDLE_STORE = new DaemonBoardStore(IDLE_PORT);
 const NO_MACHINES: readonly BoardMachine[] = [];

@@ -21,6 +21,7 @@ import {
   packLabel,
   packOn,
   remoteControlLabel,
+  scrollToShow,
   worktreeFact,
 } from '../../../../src/features/session-info/info-model.ts';
 import { sessionView } from '../../../support/sessions.ts';
@@ -328,5 +329,13 @@ describe('launchInstructionFacts', () => {
       'agenda',
       'learning',
     ]);
+  });
+});
+
+describe('scrollToShow', () => {
+  it('leaves a tab that is already in view, and scrolls to the nearer edge otherwise', () => {
+    expect(scrollToShow(50, 60, 40, 100)).toBe(50);
+    expect(scrollToShow(100, 20, 40, 100)).toBe(20);
+    expect(scrollToShow(0, 260, 60, 100)).toBe(220);
   });
 });

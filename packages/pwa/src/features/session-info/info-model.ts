@@ -225,3 +225,10 @@ export const remoteControlLabel = (view: SessionView): string => {
   if (view.config.harness === 'codex') return 'Not available on Codex';
   return view.config.remoteControl ? 'On · another device can drive this session' : 'Off';
 };
+
+/** Where a sideways-scrolling tab row should sit so the tab at `[left, left + width)` is fully shown. */
+export const scrollToShow = (scrollLeft: number, left: number, width: number, view: number): number => {
+  if (left < scrollLeft) return left;
+  if (left + width > scrollLeft + view) return left + width - view;
+  return scrollLeft;
+};
