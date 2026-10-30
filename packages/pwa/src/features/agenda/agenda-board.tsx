@@ -123,6 +123,13 @@ export function resolutionBadge({
   response,
 }: AgendaResolution): { label: string; className: string; icon: typeof Check } {
   const agent = agentLabel(resolvedByName, resolvedBySession);
+  if (disposition === 'replied') {
+    return {
+      label: 'replied by you',
+      className: 'border-border bg-surface-2 text-muted',
+      icon: UserRoundCheck,
+    };
+  }
   if (disposition === 'dismissed') {
     if (resolvedBy === 'agent') {
       return {

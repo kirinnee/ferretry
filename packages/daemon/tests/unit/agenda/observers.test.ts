@@ -302,7 +302,7 @@ describe('Agenda board observers', () => {
     should(messenger.sent).deepEqual([]);
   });
 
-  it('should make the items a person’s message references the ferret’s turn only after it is accepted, and resolve nothing', async () => {
+  it('should close the items a person’s message references as replied only after it is accepted, keeping their words', async () => {
     // Arrange
     const repository = new MemoryRepository();
     const changes = new RecordingChanges();
@@ -316,7 +316,7 @@ describe('Agenda board observers', () => {
     // Act
     const turn = await conversation.prepare(SESSION, message);
     const before = await agenda.list(SESSION);
-    await conversation.settle(SESSION, turn);
+    await conversation.settle(SESSION, turn, message);
     const after = await agenda.list(SESSION);
 
     // Assert
@@ -324,13 +324,16 @@ describe('Agenda board observers', () => {
     should(turn.referenced.map(each => each.id)).deepEqual(['A1', 'A2']);
     if (!before.ok || !after.ok) throw new Error('board unreadable');
     should(before.value.items.map(each => each.waitingOn ?? null)).deepEqual([null, null, null]);
-    should(after.value.count).equal(3);
-    should(after.value.resolved).have.length(0);
-    should(after.value.items.map(each => [each.id, each.waitingOn ?? null, each.waitingFor ?? null])).deepEqual([
-      ['A1', 'ferret', 'discussion'],
-      ['A2', 'ferret', 'discussion'],
-      ['A3', null, null],
+    should(after.value.count).equal(1);
+    should(after.value.items.map(each => each.id)).deepEqual(['A3']);
+    should(after.value.resolved.map(each => [each.id, each.disposition]).sort()).deepEqual([
+      ['A1', 'replied'],
+      ['A2', 'replied'],
     ]);
+    should(after.value.resolved.find(each => each.id === 'A1')?.history?.at(-1)).containDeep({
+      kind: 'replied',
+      note: message,
+    });
     should(changes.seen.slice(-2).map(each => [each.change.change, each.change.via, each.change.actor.kind])).deepEqual(
       [
         ['replied', 'conversation', 'human'],

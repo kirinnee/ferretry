@@ -111,6 +111,7 @@ export const signalAuthor = (item: AgendaItem, agentName: string): string =>
 /** How an answered item ended, in a few words: “Start over”, "Approved", "dismissed". */
 export const signalOutcome = (item: ResolvedAgendaItem): string => {
   if (item.response !== undefined) return describeResponse(item.response);
+  if (item.disposition === 'replied') return 'Replied';
   return item.disposition === 'dismissed' ? 'Dismissed' : 'Done';
 };
 

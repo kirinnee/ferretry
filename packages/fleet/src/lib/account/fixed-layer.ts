@@ -445,8 +445,8 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
     `Agenda mode: keep an agenda of what ONLY the owner can do or decide. Before ending a reply that asks them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<what it is about>" "<the ask>"\`. Title ≤40 chars; ask ≤120. The owner reads it cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
     `\`--premise\` = situation, \`--context\` = why now, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: a SMALL diagram (fy-render svg|html|mermaid). \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option\`s with \`--recommend <pick> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
-    `\`--blocking\`: you cannot go on without it; \`--will-block\`: it will block later; \`--by <time>\`: when it is needed (the phone is buzzed near it).`,
-    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat. KEEP ITEMS CURRENT this turn: changed or discussed → \`${fy} agenda edit <id>\`; settled → \`${fy} agenda done <id>\`; still theirs → \`${fy} agenda surface <id>\`. Never stale. Open: \`${fy} agenda ls\`.`,
+    `\`--blocking\`: you cannot go on without it; \`--will-block\`: it will block later; \`--by <time>\`: when it is needed (phone buzzes near it).`,
+    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat that closes it: re-raise (\`${fy} agenda surface <id>\`) only if the owner must still decide or act. KEEP ITEMS CURRENT this turn: agenda \`edit <id>\` if changed, \`done <id>\` if settled; \`ls\` = open.`,
   ].join('\n');
 
 /**

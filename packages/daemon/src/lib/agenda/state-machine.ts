@@ -5,6 +5,7 @@ import {
   type AgendaClearableField,
   type AgendaConfirms,
   type AgendaCardAnswer,
+  type AgendaDisposition,
   type AgendaErrorCode,
   type AgendaHistoryEntry,
   type AgendaId,
@@ -19,6 +20,7 @@ import {
   type AgendaUndelivered,
   agendaBriefOf,
   agendaNoticeProblems,
+  MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_REVISIONS,
@@ -159,12 +161,15 @@ export type AgendaCommand =
     }
   | {
       /**
-       * The owner's chat message named this open item (`[re !A5 «title»] …`): it is now the FERRET's turn. Nothing
-       * resolves and nobody is pushed — the message itself is the delivery. Only the owner replies.
+       * The owner's chat message named this open item (`[re !A5 «title»] …`): the item is closed as `replied`,
+       * their words kept in its history. Nobody is pushed — the message itself is the delivery. The ferret
+       * reopens the item (`surface`, `edit`) only if the owner still has to decide or do something. Only the
+       * owner replies.
        */
       readonly action: 'reply';
       readonly actor: AgendaActor;
       readonly id: AgendaId;
+      readonly note?: string | null;
       readonly at: string;
     }
   | {
@@ -344,7 +349,55 @@ export function parseAgendaLedger(value: unknown, sessionId: string): AgendaLedg
   ) {
     return null;
   }
-  return { sessionId, nextId: raw.nextId as number, entries, updatedAt: raw.updatedAt };
+  return closeOwnerReplies({ sessionId, nextId: raw.nextId as number, entries, updatedAt: raw.updatedAt });
+}
+
+/** Whether an open item sits on the ferret's turn only because the owner wrote about it (not asked for more or to discuss). */
+function waitsOnOwnerReply(item: AgendaItem): boolean {
+  return (
+    item.waitingOn === 'ferret' &&
+    item.waitingFor === 'discussion' &&
+    item.notice !== true &&
+    item.askedAt !== undefined &&
+    Date.parse(item.askedAt) > Date.parse(item.waitingSince) &&
+    !(item.history ?? []).some(entry => entry.kind === 'discuss' && entry.at === item.askedAt)
+  );
+}
+
+/**
+ * THE MIGRATION (docs/agenda.md § Replying closes the item): an item an earlier daemon left on the ferret's
+ * turn after an owner reply is closed as `replied` the moment its board is read, at the instant of the reply.
+ * A request to discuss or for more information is not a reply and is left as it is. Pure and idempotent: the
+ * next write persists it, and a board with nothing to close is returned as it came.
+ */
+export function closeOwnerReplies(ledger: AgendaLedger): AgendaLedger {
+  if (!ledger.entries.some(entry => entry.lifecycle === 'active' && waitsOnOwnerReply(entry.item))) return ledger;
+  const closed: Extract<AgendaEntry, { lifecycle: 'addressed' }>[] = [];
+  const kept: AgendaEntry[] = [];
+  for (const entry of ledger.entries) {
+    if (entry.lifecycle !== 'active' || !waitsOnOwnerReply(entry.item) || entry.item.askedAt === undefined) {
+      kept.push(entry);
+      continue;
+    }
+    const { waitingOn: _w, askedAt, waitingFor: _f, undelivered: _u, ...open } = entry.item;
+    const parsed = ResolvedAgendaItemSchema.safeParse({
+      ...open,
+      history: withHistory(open.history, { at: askedAt, kind: 'replied' }),
+      resolvedAt: askedAt,
+      resolutionNote: null,
+      disposition: 'replied',
+      resolvedBy: 'human',
+      resolvedBySession: null,
+      resolvedByName: null,
+    });
+    if (parsed.success) closed.push({ lifecycle: 'addressed', origin: entry.origin, item: parsed.data });
+    else kept.push(entry);
+  }
+  const addressedBefore = kept.filter(entry => entry.lifecycle === 'addressed');
+  const addressedAll = [...addressedBefore, ...closed]
+    .sort((left, right) => compareAddressed(left.item as ResolvedAgendaItem, right.item as ResolvedAgendaItem))
+    .slice(0, MAX_AGENDA_RESOLUTIONS);
+  return { ...ledger, entries: [...kept.filter(entry => entry.lifecycle === 'active'), ...addressedAll] };
 }
 
 function applyToLedger(ledger: AgendaLedger, command: AgendaCommand): AgendaMutation {
@@ -648,9 +701,10 @@ function addressed(
   actor: AgendaActor,
   note: string | null,
   at: string,
-  disposition: 'done' | 'dismissed',
-  change: Extract<AgendaChange, 'answered' | 'resolved' | 'dismissed'>,
+  disposition: AgendaDisposition,
+  change: Extract<AgendaChange, 'answered' | 'resolved' | 'dismissed' | 'replied'>,
   response?: AgendaResponse,
+  entry?: AgendaHistoryEntry,
 ): AgendaMutation {
   const {
     waitingOn: _waitingOn,
@@ -662,6 +716,7 @@ function addressed(
   const item = withResolvedBy(
     {
       ...open,
+      ...(entry === undefined ? {} : { history: withHistory(open.history, entry) }),
       resolvedAt: at,
       resolutionNote: note,
       disposition,
@@ -841,7 +896,14 @@ function sameField(left: unknown, right: unknown): boolean {
  */
 function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (target === undefined) {
+    // An edit of an item the owner replied to is the ferret asking again, in new words: it reopens, then edits.
+    const reopened = reopenReplied(ledger, command.id, command.actor, command.at, { at: command.at, kind: 'updated' });
+    if (reopened === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+    if (!reopened.ok) return reopened;
+    const edited = edit(reopened.ledger, command);
+    return !edited.ok || edited.change === 'unchanged' ? (edited.ok ? reopened : edited) : edited;
+  }
   if (!canAddressAgenda(command.actor, target)) {
     return failure('forbidden', 'an agent or daemon may edit only an agenda item it raised');
   }
@@ -899,10 +961,7 @@ function replaceItem(
   ledger: AgendaLedger,
   item: AgendaItem,
   at: string,
-  change: Extract<
-    AgendaChange,
-    'refreshed' | 'needs-info' | 'discussing' | 'replied' | 'surfaced' | 'info-added' | 'reopened'
-  >,
+  change: Extract<AgendaChange, 'refreshed' | 'needs-info' | 'discussing' | 'surfaced' | 'info-added' | 'reopened'>,
 ): AgendaMutation {
   const next: AgendaLedger = {
     ...ledger,
@@ -987,27 +1046,78 @@ function discuss(ledger: AgendaLedger, command: DiscussCommand): AgendaMutation 
 }
 
 /**
- * The owner's chat message named an open item: the item is now the FERRET's turn (internally
- * `waitingOn: 'ferret'`, `waitingFor: 'discussion'`). Nothing resolves, `infoRequests` does not move and
- * nobody is pushed or messaged by this change — the owner's message is itself what the ferret reads. The
- * ferret's `edit`, a `surface`, or any closing hands it back. A reply to an item already on the ferret's
- * turn is no change; one that finds the ferret owing more information turns that wait into a discussion.
- * Only the owner replies, and only an open item is replied to.
+ * The owner's chat message named an open item (`[re !A5 «title»] …`): the item CLOSES for the owner at once, as
+ * `replied` — "the owner replied; nothing more is needed unless the ferret asks again" — and their words stay in
+ * its history. It leaves every open list, badge and count, so an item the ferret never acts on cannot hang
+ * around. Nothing is pushed and `infoRequests` does not move: the owner's message is itself what the ferret reads.
+ * The ferret brings it back with `surface` or `edit` (see {@link reopenReplied}) when it needs more.
+ * Whatever the item waited on (a discussion, more information) ends with it. Only the owner replies, only an
+ * open item is replied to, and a notice is read, not replied to.
  */
 function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
   if (command.actor.kind !== 'human') return failure('forbidden', 'only the owner replies to an item');
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
-  if (target === undefined) return failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  if (target === undefined) {
+    return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
+      ? unchanged(ledger)
+      : failure('not-found', `no unresolved agenda item ${command.id} in this session`);
+  }
   if (target.item.notice === true) return failure('invalid', 'a notice is read, not replied to');
-  if (target.item.waitingOn !== undefined && target.item.waitingFor === 'discussion') return unchanged(ledger);
-  const { undelivered: _undelivered, ...current } = target.item;
-  const item: AgendaItem = {
-    ...current,
-    waitingOn: 'ferret',
-    askedAt: command.at,
-    waitingFor: 'discussion',
+  const words = command.note?.trim() ?? '';
+  const note = words === '' ? null : words.slice(0, MAX_AGENDA_DETAIL_LENGTH);
+  return addressed(ledger, target, command.actor, note, command.at, 'replied', 'replied', undefined, {
+    at: command.at,
+    kind: 'replied',
+    ...(note === null ? {} : { note }),
+  });
+}
+
+/**
+ * The ferret needs more from the owner after a reply closed the item: it is open again, on the OWNER's turn,
+ * with its id, history and edits kept. Called by `surface` (as it stands) and by the ferret's `edit` (with the
+ * new wording). Only whoever may close the item may reopen it, and a full board cannot take it back.
+ * Returns `undefined` when the item is not a replied one.
+ */
+function reopenReplied(
+  ledger: AgendaLedger,
+  id: AgendaId,
+  actor: AgendaActor,
+  at: string,
+  entry: AgendaHistoryEntry,
+): AgendaMutation | undefined {
+  const closed = ledger.entries.find(
+    (candidate): candidate is Extract<AgendaEntry, { lifecycle: 'addressed' }> =>
+      candidate.lifecycle === 'addressed' && candidate.item.id === id && candidate.item.disposition === 'replied',
+  );
+  if (closed === undefined) return undefined;
+  const allowed = actor.kind === 'daemon' && actor.cause === 'system' ? true : canAddressAgenda(actor, closed);
+  if (!allowed) return failure('forbidden', 'only the owner or the ferret that raised an item may bring it back');
+  const active = ledger.entries.filter(isActiveAgenda);
+  if (active.length >= MAX_AGENDA_PER_SESSION) {
+    return failure('full', `${id} cannot reopen: this board already holds ${MAX_AGENDA_PER_SESSION} open items`);
+  }
+  const {
+    resolvedAt: _resolvedAt,
+    resolutionNote: _resolutionNote,
+    response: _response,
+    disposition: _disposition,
+    resolvedBy: _resolvedBy,
+    resolvedBySession: _resolvedBySession,
+    resolvedByName: _resolvedByName,
+    ...rest
+  } = closed.item;
+  const parsed = AgendaItemSchema.safeParse({ ...rest, history: withHistory(rest.history, entry) });
+  if (!parsed.success) return unchanged(ledger);
+  const next: AgendaLedger = {
+    ...ledger,
+    entries: [
+      ...active,
+      { lifecycle: 'active', origin: closed.origin, item: parsed.data },
+      ...ledger.entries.filter(candidate => candidate !== closed && candidate.lifecycle === 'addressed'),
+    ],
+    updatedAt: at,
   };
-  return replaceItem(ledger, item, command.at, 'replied');
+  return success(next, true, 'reopened', parsed.data);
 }
 
 /**
@@ -1019,6 +1129,13 @@ function reply(ledger: AgendaLedger, command: ReplyCommand): AgendaMutation {
 function surface(ledger: AgendaLedger, command: SurfaceCommand): AgendaMutation {
   const target = ledger.entries.filter(isActiveAgenda).find(entry => entry.item.id === command.id);
   if (target === undefined) {
+    const why = command.why?.trim() ?? '';
+    const reopened = reopenReplied(ledger, command.id, command.actor, command.at, {
+      at: command.at,
+      kind: 'surfaced',
+      ...(why === '' ? {} : { note: why }),
+    });
+    if (reopened !== undefined) return reopened;
     return ledger.entries.some(entry => entry.lifecycle === 'addressed' && entry.item.id === command.id)
       ? unchanged(ledger)
       : failure('not-found', `no unresolved agenda item ${command.id} in this session`);

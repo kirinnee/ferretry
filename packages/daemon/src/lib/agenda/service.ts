@@ -179,9 +179,9 @@ export class AgendaService {
     return this.apply(sessionId, { action: 'discuss', actor, id, note, at: this.clock.now() });
   }
 
-  /** The owner's chat message named this item: it is the ferret's turn now. Nothing resolves; nobody is pushed. */
-  async reply(sessionId: string, id: AgendaId, actor: AgendaActor): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'reply', actor, id, at: this.clock.now() }, 'conversation');
+  /** The owner's chat message named this item: it closes as `replied`, their words kept; nobody is pushed. */
+  async reply(sessionId: string, id: AgendaId, actor: AgendaActor, note?: string | null): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'reply', actor, id, note, at: this.clock.now() }, 'conversation');
   }
 
   /**

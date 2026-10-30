@@ -154,7 +154,8 @@ export class AgendaBoardUndelivered implements AgendaUndeliveredSink {
 
 /**
  * A person's chat message, read against the ferret's open items (`conversationTurn`): the words to
- * deliver, and — once they are accepted — each item they named made the ferret's turn. Nothing resolves.
+ * deliver, and — once they are accepted — each item they named closed as `replied` (their words kept in its
+ * history). It is no answer; the ferret reopens it if it still needs the owner.
  *
  * Total on the way in: a board that cannot be read leaves the message exactly as written, because a
  * person's words must never be refused for the sake of a decoration.
@@ -168,10 +169,10 @@ export class AgendaConversation {
     return conversationTurn(message, listed.value.items);
   }
 
-  /** Makes every item the accepted message named the ferret's turn; each on its own, none able to fail the send. */
-  async settle(sessionId: string, turn: ReturnType<typeof conversationTurn>): Promise<void> {
+  /** Closes every item the accepted message named, `words` kept; each on its own, none able to fail the send. */
+  async settle(sessionId: string, turn: ReturnType<typeof conversationTurn>, words?: string): Promise<void> {
     for (const item of turn.referenced) {
-      await this.agenda.reply(sessionId, item.id, { kind: 'human' }).catch(() => undefined);
+      await this.agenda.reply(sessionId, item.id, { kind: 'human' }, words).catch(() => undefined);
     }
   }
 }
