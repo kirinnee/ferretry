@@ -1,3 +1,4 @@
+export * from './agent-tools/index.ts';
 export * from './api/index.ts';
 export * from './attachments/index.ts';
 export * from './audit/index.ts';
@@ -63,7 +64,6 @@ export * from './stt/index.ts';
 export * from './system/keyed-serial-executor.ts';
 export * from './system/runtime-environment.ts';
 export * from './system/system-clock.ts';
-export * from './task-boards/index.ts';
 export * from './terminal/index.ts';
 export * from './tmux/index.ts';
 export * from './tunnel/index.ts';

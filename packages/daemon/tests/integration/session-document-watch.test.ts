@@ -161,6 +161,22 @@ describe('a watched session document', () => {
     should(requested.status).equal('stopped');
   });
 
+  it('should count every config it writes, and nothing else, for a reader that derives from every config', async () => {
+    // Arrange
+    const { storage } = await seeded(scriptedChanges().changes);
+    const seededWrites = storage.configWrites();
+
+    // Act
+    await storage.writeConfig(ID, { id: 'watched-1', status: 'running', turn: 2 });
+    await storage.updateConfig(ID, current => ({ ...(current as Record<string, unknown>), turn: 3 }));
+    await storage.writeState(ID, { id: 'watched-1', status: 'running', turn: 3 });
+    await storage.updateState(ID, current => ({ ...(current as Record<string, unknown>), turn: 4 }));
+
+    // Assert — the seed's one config write, then one per config write; a state write is not a config.
+    should(seededWrites).equal(1);
+    should(storage.configWrites()).equal(3);
+  });
+
   it('should open no watch for reads that must be proved', async () => {
     // Arrange
     const watch = scriptedChanges();

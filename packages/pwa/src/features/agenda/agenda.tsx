@@ -34,6 +34,8 @@ import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
+import { useOptionalRouter } from '../../lib/router.tsx';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
@@ -177,6 +179,7 @@ export const useAgenda = ({
   now,
 }: UseAgendaInput): Agenda => {
   const domId = useId();
+  const router = useOptionalRouter();
   const drawerId = `${domId}-drawer`;
   const scopeKey = daemonSessionKey(scope);
   const board = snapshot?.items ?? NO_ITEMS;
@@ -234,6 +237,9 @@ export const useAgenda = ({
         // The answer is a message in the conversation: the view closes and the chat returns to it.
         update(current => (current.card === item.id ? { card: null, plain: false } : {}));
         onAnswered?.();
+        // Edit on a lane proposal: the answer is sent, now the editor opens.
+        const editor = laneEditDestination(connection.daemonId, item, action);
+        if (editor !== undefined) router?.navigate(editor);
       },
       (reason: unknown) => setCard(item.id, failure(reason)),
     );

@@ -7,6 +7,7 @@ export * from './lifecycle-controllers.ts';
 export * from './name-controller.ts';
 export * from './ports.ts';
 export * from './presenter.ts';
+export * from './ps-cards.ts';
 export * from './ps-controller.ts';
 export * from './registration.ts';
 export * from './rename-controller.ts';

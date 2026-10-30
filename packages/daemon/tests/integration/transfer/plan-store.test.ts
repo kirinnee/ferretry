@@ -143,7 +143,6 @@ function makePlan(overrides: {
       cwd: overrides.durableCwd ?? '/work',
       mode: 'auto',
       parentSessionId: null,
-      boardAccess: 'none',
       label: null,
       harnessFlags: [],
       remoteControl: false,

@@ -46,7 +46,6 @@ function created(id: string, overrides: Record<string, unknown> = {}): Record<st
     runtimeGeneration: 1,
     name: 'Forked',
     parent: '20260806-someone-else',
-    boardAccess: 'worker',
     agent: 'claude-auto-zelda',
     harness: 'claude',
     modelHint: 'claude-opus-5',
@@ -97,7 +96,6 @@ describe('StorageTransferEnvelopeWriter', () => {
     // Assert
     const document = (await storage.readConfig(target)) as Record<string, unknown>;
     should(document.cwd).equal('/work/forked');
-    should(document.boardAccess).equal('none');
     // The source label remains inventoried in the plan, but warden descent forces the target's
     // operational label so the label and provenance shields agree from the first durable write.
     should(document.label).equal('fleet-warden');

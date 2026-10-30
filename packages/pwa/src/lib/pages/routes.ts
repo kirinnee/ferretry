@@ -1,4 +1,4 @@
-import { ProjectInfoSchema } from '@ferretry/protocol';
+import { BoardProjectIdSchema, ProjectInfoSchema } from '@ferretry/protocol';
 
 import { type DaemonId, daemonId } from '../daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../daemon-scope.ts';
@@ -14,6 +14,9 @@ import { daemonSessionKey, daemonSessionScope } from '../daemon-scope.ts';
 const ProjectIdSchema = ProjectInfoSchema.shape.id;
 
 const isProjectId = (value: string): boolean => ProjectIdSchema.safeParse(value).success;
+
+/** A board's project is a registered UUID or the Unfiled board; the lane editor serves both. */
+const isBoardProjectId = (value: string): boolean => BoardProjectIdSchema.safeParse(value).success;
 
 /** The route shown before a browser has selected one of its paired daemons. */
 export interface ConnectionPickerRoute {
@@ -54,6 +57,13 @@ export interface DaemonProjectDetailRoute {
   readonly projectId: string;
 }
 
+/** One project's lane editor: the Board's lanes, edited, proposed or picked from a template. */
+export interface DaemonProjectLanesRoute {
+  readonly kind: 'project-lanes';
+  readonly daemonId: DaemonId;
+  readonly projectId: string;
+}
+
 export interface DaemonSessionRoute {
   readonly kind: 'session';
   readonly daemonId: DaemonId;
@@ -67,6 +77,16 @@ export interface DaemonSessionRoute {
 export interface DaemonAgendaRoute {
   readonly kind: 'attention';
   readonly daemonId: DaemonId;
+}
+
+/**
+ * The Board: every card on every paired machine, as lanes. `taskId` is the card the address names; the Board
+ * page stays the same page when it changes (the card detail opens over it), so it is not part of the page key.
+ */
+export interface DaemonBoardRoute {
+  readonly kind: 'board';
+  readonly daemonId: DaemonId;
+  readonly taskId?: string;
 }
 
 export interface DaemonSettingsRoute {
@@ -113,8 +133,10 @@ export type DaemonPageRoute =
   | DaemonNewSessionRoute
   | DaemonProjectsRoute
   | DaemonProjectDetailRoute
+  | DaemonProjectLanesRoute
   | DaemonSessionRoute
   | DaemonAgendaRoute
+  | DaemonBoardRoute
   | DaemonSettingsRoute
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
@@ -127,7 +149,7 @@ export type PageRoute = ConnectionPickerRoute | SetupRoute | DaemonPageRoute;
 /** A compatibility result that callers can replace with its canonical target. */
 export interface LegacyTasksRedirectRoute {
   readonly kind: 'legacy-tasks-redirect';
-  readonly to: DaemonSessionsRoute;
+  readonly to: DaemonBoardRoute;
 }
 
 /** The Inbox's old `/attention` address, which now redirects to `/inbox` keeping its query. */
@@ -192,6 +214,13 @@ export const daemonProjectPath = (id: DaemonId, projectId: string): string => {
   return `${daemonProjectsPath(id)}/${encodeURIComponent(value)}`;
 };
 
+/** Builds the lane editor pathname for one board project: `/d/<id>/projects/<uuid | unfiled>/lanes`. */
+export const daemonProjectLanesPath = (id: DaemonId, projectId: string): string => {
+  const value = projectId.trim();
+  if (!isBoardProjectId(value)) throw new Error('projectId must be a board project id');
+  return `${daemonProjectsPath(id)}/${encodeURIComponent(value)}/lanes`;
+};
+
 /** Builds the canonical session pathname for one daemon and session. */
 export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
   const scope = daemonSessionScope({ daemonId: id }, sessionId);
@@ -200,6 +229,13 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
 
 /** Builds the Inbox pathname, under the machine on screen. `/attention` is the old spelling and redirects here. */
 export const daemonAgendaPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/inbox`;
+
+/** Builds the Board pathname, under the machine on screen. */
+export const daemonBoardPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/board`;
+
+/** Builds one card's address on the Board: `/d/<id>/board/<taskId>`. */
+export const daemonBoardCardPath = (id: DaemonId, taskId: string): string =>
+  `${daemonBoardPath(id)}/${encodeURIComponent(taskId)}`;
 
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
@@ -247,11 +283,28 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'learning') return { kind: 'learning', daemonId: id };
     if (destination === 'history') return { kind: 'imported-history', daemonId: id };
     if (destination === 'setup') return { kind: 'machine-setup', daemonId: id };
-    if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'sessions', daemonId: id } };
+    if (destination === 'board') return { kind: 'board', daemonId: id };
+    if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'board', daemonId: id } };
+  }
+
+  if (destination === 'board' && sessionSegment !== undefined && remainder.length === 0) {
+    const taskId = decodeRouteSegment(sessionSegment);
+    return { kind: 'board', daemonId: id, taskId };
   }
 
   if (destination === 'analytics' && sessionSegment === 'query' && remainder.length === 0)
     return { kind: 'analytics', daemonId: id, view: 'query' };
+
+  if (
+    destination === 'projects' &&
+    sessionSegment !== undefined &&
+    remainder.length === 1 &&
+    remainder[0] === 'lanes'
+  ) {
+    const candidate = decodeRouteSegment(sessionSegment);
+    if (isBoardProjectId(candidate)) return { kind: 'project-lanes', daemonId: id, projectId: candidate };
+    return { kind: 'projects', daemonId: id };
+  }
 
   if (destination === 'projects' && sessionSegment !== undefined && remainder.length === 0) {
     const candidate = decodeRouteSegment(sessionSegment);
@@ -287,10 +340,16 @@ export const routePath = (route: Route): string => {
       return daemonProjectsPath(route.daemonId);
     case 'project-detail':
       return daemonProjectPath(route.daemonId, route.projectId);
+    case 'project-lanes':
+      return daemonProjectLanesPath(route.daemonId, route.projectId);
     case 'session':
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'attention':
       return daemonAgendaPath(route.daemonId);
+    case 'board':
+      return route.taskId === undefined
+        ? daemonBoardPath(route.daemonId)
+        : daemonBoardCardPath(route.daemonId, route.taskId);
     case 'settings':
       return daemonSettingsPath(route.daemonId);
     case 'warden':
@@ -321,5 +380,6 @@ export const routePageKey = (route: Route): string => {
   // The two Analytics pages are kept apart, so each keeps its own state while the other is on screen.
   if (route.kind === 'analytics' && route.view === 'query') return `analytics-query:${JSON.stringify(route.daemonId)}`;
   if (route.kind === 'project-detail') return `project-detail:${JSON.stringify([route.daemonId, route.projectId])}`;
+  if (route.kind === 'project-lanes') return `project-lanes:${JSON.stringify([route.daemonId, route.projectId])}`;
   return `${route.kind}:${JSON.stringify(route.daemonId)}`;
 };

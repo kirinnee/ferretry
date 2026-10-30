@@ -67,7 +67,7 @@ Restart to apply", with the reason, and a one-tap Restart. It compares two thing
   the process was launched (a permission-mode, profile or fixed-layer change since).
 
 **Info › Runtime › Instructions** says what the running process was told: which Ferretry sections of its
-appended system prompt it carries (the tools, the settings rules, the Notify rule, and each of Hypermedia, Pack mode, Agenda mode and
+appended system prompt it carries (the tools, the settings rules, the Notify rule, the Board rules, and each of Hypermedia, Pack mode, Agenda mode and
 Learning whose switch was on) with each one's size, its mode, and whether it may ask the owner a question.
 It reads `state.launchInstructions` (`SessionLaunchInstructionsSchema`), which the daemon records from the
 environment each pane is launched with — at every start, restart and revive — so a switch flipped since
@@ -79,8 +79,8 @@ next launch".
 
 A harness reads its appended system prompt once, at launch, and neither Claude Code nor Codex can re-read
 it mid-conversation. So a rule Ferretry tightens would otherwise reach a long-running ferret only when it
-restarted. The three sections every agent gets (the tools, the settings rules and the Notify rule,
-`ALWAYS_ON_SECTIONS` in `@ferretry/fleet`) depend on nothing but the binary's name. Each launch now records
+restarted. The four sections every agent gets (the tools, the settings rules, the Notify rule and the Board rules
+([board.md](board.md#the-board-rules)), `ALWAYS_ON_SECTIONS` in `@ferretry/fleet`) depend on nothing but the binary's name. Each launch now records
 a fingerprint of each one (`digest`, `instructionDigest`) beside its size.
 
 When the owner next writes to a ferret, the daemon compares those fingerprints with the words every agent
@@ -104,7 +104,7 @@ so the next message queues nothing. The Instructions row then shows the new size
 
 ## Restarting ferrets whose instructions are out of date
 
-The live note above reaches only the three always-on sections. Everything else a launch hands a ferret
+The live note above reaches only the four always-on sections. Everything else a launch hands a ferret
 (Hypermedia, Pack mode, Agenda mode, Learning, and the wrapper around them) changes only at a restart. A
 ferret that has not had one is **outdated**: the instructions it would get if it were launched now differ
 from those it launched with, and the live note has not already delivered the difference.
@@ -115,7 +115,7 @@ The daemon asks the very renderer a launch uses (`launchInstructions` in `@ferre
 relaunch would hand this ferret now, with the environment a relaunch would build, and compares that with
 the ferret's launch record (`packages/daemon/src/lib/session/launch/outdated.ts`). A section differs when
 it is on in one and not the other, or its fingerprint changed. A section the live note already told is
-re-recorded, so it does not count. Every section carries a fingerprint, not only the always-on three; a
+re-recorded, so it does not count. Every section carries a fingerprint, not only the always-on four; a
 record made before fingerprints compares sizes, and a ferret with no record is never outdated, because
 nothing says what it has.
 

@@ -18,7 +18,6 @@ const show = async (overrides: Partial<InfoOverviewProps> = {}) => {
   const written: string[] = [];
   const renamed: boolean[] = [];
   const opened: string[] = [];
-  const tasksOpened: boolean[] = [];
   mounted = await mount(
     <InfoOverview
       name="Hadi"
@@ -33,15 +32,15 @@ const show = async (overrides: Partial<InfoOverviewProps> = {}) => {
       {...overrides}
     />,
   );
-  return { root: mounted.container, written, renamed, opened, tasksOpened };
+  return { root: mounted.container, written, renamed, opened };
 };
 
 describe('InfoOverview', () => {
-  it('shows the name, task, cwd and session id, with no rename or tasks control when the host offers none', async () => {
+  it('shows the name, task, cwd and session id, with no rename or card control when the host offers none', async () => {
     const { root, written } = await show({ project: 'ferretry' });
     expect(root.querySelector('[data-info-row="Name"] strong')?.textContent).toBe('Hadi');
     expect(root.querySelector('[data-info-rename]')).toBeNull();
-    expect(root.querySelector('[data-info-open-tasks]')).toBeNull();
+    expect(root.querySelector('[data-info-row="Card"]')).toBeNull();
     expect(root.textContent).toContain('ferretry');
     expect(root.textContent).toContain('/work/session-a');
     expect(root.textContent).toContain('session-a');
@@ -52,22 +51,63 @@ describe('InfoOverview', () => {
     expect(written).toEqual(['session-a']);
   });
 
+  it("shows the task by its name and a batch label on its own row, never in the name's place", async () => {
+    const labelled = sessionView('session-b', { config: { name: 'CyanPrint', label: 'diene-cyan' } });
+    const { root } = await show({ view: labelled });
+    expect(root.querySelector('[data-info-row="Task"]')?.textContent).toContain('CyanPrint');
+    expect(root.querySelector('[data-info-row="Label"]')?.textContent).toContain('diene-cyan');
+    await mounted?.unmount();
+
+    const plain = await show({ view: sessionView('session-c', { config: { name: 'CyanPrint' } }) });
+    expect(plain.root.querySelector('[data-info-row="Label"]')).toBeNull();
+  });
+
   it('says a ferret has no project with a muted note', async () => {
     const { root } = await show({ project: null });
     expect(root.textContent).toContain('Not in a project');
   });
 
-  it('offers Rename and Open tasks when the host hands them in, and calls back', async () => {
+  it('offers Rename when the host hands it in, and calls back', async () => {
     const renamed: boolean[] = [];
-    const tasksOpened: boolean[] = [];
-    const { root } = await show({
-      onRename: () => renamed.push(true),
-      onOpenTasks: () => tasksOpened.push(true),
-    });
+    const { root } = await show({ onRename: () => renamed.push(true) });
     await interact(() => must(root.querySelector<HTMLButtonElement>('[data-info-rename]'), 'rename').click());
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-info-open-tasks]'), 'tasks').click());
     expect(renamed).toEqual([true]);
-    expect(tasksOpened).toEqual([true]);
+  });
+
+  describe('the Card row', () => {
+    const chip = {
+      kind: 'card',
+      id: 'F18',
+      ref: '&F18',
+      title: 'Board system',
+      lane: 'Plan/Design',
+      activity: 'active',
+      tone: 'ok',
+    } as const;
+
+    it('reads `&F18 (Plan/Design)` and opens the card when tapped', async () => {
+      const opened: boolean[] = [];
+      const { root } = await show({ card: { chip, onOpen: () => opened.push(true) } });
+      const button = must(root.querySelector<HTMLButtonElement>('[data-info-card="F18"]'), 'card');
+      expect(root.querySelector('[data-info-row="Card"]')?.textContent).toContain('&F18 (Plan/Design)');
+      expect(root.querySelector('[data-info-row="Tasks"]')).toBeNull();
+      await interact(() => button.click());
+      expect(opened).toEqual([true]);
+    });
+
+    it('reads just the id while the card’s lane is not known', async () => {
+      const { root } = await show({ card: { chip: { ...chip, lane: null }, onOpen: () => undefined } });
+      expect(root.querySelector('[data-info-row="Card"]')?.textContent).toContain('&F18');
+      expect(root.querySelector('[data-info-row="Card"]')?.textContent).not.toContain('(');
+    });
+
+    it('says No card, in amber and without a link, when the session has none', async () => {
+      const { root } = await show({ card: { chip: { kind: 'none' }, onOpen: () => undefined } });
+      const none = must(root.querySelector('[data-info-card="none"]'), 'none');
+      expect(none.textContent).toBe('No card');
+      expect(none.className).toContain('fy-info-warn');
+      expect(root.querySelector('button[data-info-card]')).toBeNull();
+    });
   });
 
   it('reads the main checkout as "Main checkout" when the folder is in no managed worktree', async () => {
@@ -125,9 +165,9 @@ describe('InfoOverview', () => {
   });
 
   it('links to a resolved parent and to every child, and falls back to plain text with no onOpenSession', async () => {
-    const parent = sessionView('parent-a', { config: { label: 'Parent one' } });
+    const parent = sessionView('parent-a', { config: { name: 'Parent one', label: 'diene-cyan' } });
     const child = sessionView('child-a', { config: { parent: 'parent-a' } });
-    const kid = sessionView('kid-a', { config: { parent: 'child-a', label: 'Kid one' } });
+    const kid = sessionView('kid-a', { config: { parent: 'child-a', name: 'Kid one' } });
     const opened: string[] = [];
     const { root } = await show({
       view: child,

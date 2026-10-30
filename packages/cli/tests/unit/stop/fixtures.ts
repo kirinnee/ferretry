@@ -20,7 +20,6 @@ export function session(seed: SessionSeed): SessionView {
       ...(seed.teammate ? { teammate: seed.teammate } : {}),
       ...(seed.label === undefined ? {} : { label: seed.label }),
       ...(seed.parent === undefined ? {} : { parent: seed.parent }),
-      boardAccess: 'none',
       agent: 'claude-test',
       harness: 'claude',
       modelHint: 'default',

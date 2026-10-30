@@ -23,7 +23,7 @@ describe('the markdown board', () => {
     // Assert
     should(actual).startWith('# Tasks');
     should(actual.indexOf('## What I need from you')).be.below(actual.indexOf('## ⚪ NOT STARTED'));
-    should(actual).containEql('- **#F2** Pick a name — needs a decision');
+    should(actual).containEql('- **&F2** Pick a name — needs a decision');
   });
 
   it('should not repeat a blocked task in its lane', () => {
@@ -34,7 +34,7 @@ describe('the markdown board', () => {
     const actual = renderTaskBoardMarkdown(board(tasks));
 
     // Assert
-    should(actual.split('#F2')).have.length(2);
+    should(actual.split('&F2')).have.length(2);
     should(actual).not.containEql('NOT STARTED');
   });
 
@@ -89,7 +89,7 @@ describe('one task as markdown', () => {
     const actual = renderTaskDetailMarkdown({ task: view({ id: 'F7', statusReason: 'in review' }), activity: [] });
 
     // Assert
-    should(actual).startWith('# #F7 · Rename the widget');
+    should(actual).startWith('# &F7 · Rename the widget');
     should(actual).containEql('- status: **⚪ NOT STARTED** — in review');
     should(actual).containEql('- workflow: quick');
   });
@@ -118,7 +118,7 @@ describe('one task as markdown', () => {
     });
 
     // Assert
-    should(actual).containEql('🚧 blocked since 2026-02-02T00:00:00.000Z: waits (#F2)');
+    should(actual).containEql('🚧 blocked since 2026-02-02T00:00:00.000Z: waits (&F2)');
   });
 
   it('should fall back rather than print null for an unexplained block', () => {
@@ -154,7 +154,7 @@ describe('one task as markdown', () => {
     should(actual).containEql('Source: chat://1');
     should(actual).containEql('- 2026-01-03T00:00:00.000Z (human): make it blue — chat://4');
     should(actual).containEql('- files (advisory): `src/a.ts`');
-    should(actual).containEql('- depends on: #F2');
+    should(actual).containEql('- depends on: &F2');
     should(actual).containEql('the long brief');
   });
 

@@ -122,7 +122,6 @@ async function seedSession(storage: DaemonStorage, sessionId: string = SESSION):
       runtimeGeneration: 1,
       name: 'Removal Journey',
       teammate: 'Ada',
-      boardAccess: 'none',
       agent: 'claude-auto',
       harness: 'claude',
       modelHint: 'opus',

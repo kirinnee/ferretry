@@ -8,6 +8,7 @@
  */
 
 import type { PushNotificationKind, SessionStatus, SessionView } from '@ferretry/protocol';
+import { parseTaskName } from '../shell/task-name.ts';
 import { displayCallsign } from './callsign.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from './daemon-scope.ts';
@@ -172,10 +173,10 @@ const notificationEventParts = (
 };
 
 export const notificationTitle = (view: SessionView): string => {
-  const task = view.config.name?.trim() || view.config.id;
-  if (task.startsWith('[')) return task;
-  const callsign = displayCallsign(view.config.teammate);
-  return callsign ? `[${callsign}] ${task}` : task;
+  const { prefix, task } = parseTaskName(view.config.name);
+  const title = task || view.config.id;
+  const callsign = displayCallsign(view.config.teammate) || prefix || '';
+  return callsign ? `${title} · ${callsign}` : title;
 };
 
 /** Builds a daemon-qualified OS payload for one session transition. */

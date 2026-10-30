@@ -79,7 +79,7 @@ async function machine(name: string, options: { readonly claude: boolean }): Pro
     userHome,
     config: home.service,
     configDirectory: home.paths.config,
-    sessionStates: async () => [],
+    sessionStatuses: async () => [],
     credentials,
     locate: harness => (harness === 'claude' && options.claude ? '/bin/sh' : undefined),
     machineName: () => name,

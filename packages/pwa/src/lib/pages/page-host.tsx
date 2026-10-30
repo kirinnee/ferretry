@@ -12,6 +12,11 @@ export interface SessionChatPageProps extends DaemonPageProps {
   readonly scope: DaemonSessionScope;
 }
 
+export interface BoardPageProps extends DaemonPageProps {
+  /** The card the address names (`/board/<taskId>`); `undefined` on the Board itself. */
+  readonly taskId: string | undefined;
+}
+
 export interface ProjectDetailPageProps extends DaemonPageProps {
   /** The protocol UUID of the registered project, taken from the route. */
   readonly projectId: string;
@@ -25,6 +30,7 @@ export interface PageHostSlots {
   readonly NewSession: ComponentType<DaemonPageProps>;
   readonly Projects?: ComponentType<DaemonPageProps>;
   readonly ProjectDetail?: ComponentType<ProjectDetailPageProps>;
+  readonly ProjectLanes?: ComponentType<ProjectDetailPageProps>;
   readonly SessionChat: ComponentType<SessionChatPageProps>;
   readonly Settings: ComponentType<DaemonPageProps>;
   readonly Warden: ComponentType<DaemonPageProps>;
@@ -32,6 +38,8 @@ export interface PageHostSlots {
   readonly Learning: ComponentType<DaemonPageProps>;
   /** The Inbox: every open item across every paired machine. */
   readonly Attention?: ComponentType<DaemonPageProps>;
+  /** The Board: every card across every paired machine, as lanes. */
+  readonly Board?: ComponentType<BoardPageProps>;
   readonly ImportedHistory?: ComponentType<DaemonPageProps>;
   /** One machine's full-screen first run. */
   readonly MachineSetup?: ComponentType<DaemonPageProps>;
@@ -73,6 +81,9 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
     case 'project-detail':
       if (slots.ProjectDetail === undefined) throw new Error('the project detail route is not mounted');
       return <slots.ProjectDetail connection={matchedConnection} projectId={route.projectId} />;
+    case 'project-lanes':
+      if (slots.ProjectLanes === undefined) throw new Error('the project lanes route is not mounted');
+      return <slots.ProjectLanes connection={matchedConnection} projectId={route.projectId} />;
     case 'session':
       return (
         <slots.SessionChat
@@ -91,6 +102,9 @@ export function PageHost({ route, connection, slots }: PageHostProps) {
     case 'attention':
       if (slots.Attention === undefined) throw new Error('the agenda route is not mounted');
       return <slots.Attention connection={matchedConnection} />;
+    case 'board':
+      if (slots.Board === undefined) throw new Error('the board route is not mounted');
+      return <slots.Board connection={matchedConnection} taskId={route.taskId} />;
     case 'imported-history':
       if (slots.ImportedHistory === undefined) throw new Error('the imported-history route is not mounted');
       return <slots.ImportedHistory connection={matchedConnection} />;

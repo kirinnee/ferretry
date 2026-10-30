@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { AgendaId, AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
+import {
+  LANE_PROPOSAL_ANSWERS,
+  laneProposalReference,
+  type AgendaId,
+  type AgendaItem,
+  type AgendaSnapshot,
+} from '@ferretry/protocol';
 import type { ReactElement } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
 import {
@@ -20,6 +26,7 @@ import { useAgendaDock } from '../../../src/features/agenda/agenda-collapse.ts';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { RouterProvider } from '../../../src/lib/router.tsx';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import '../../support/dom.ts';
@@ -764,5 +771,56 @@ describe('the layout choice when the browser hides its storage', () => {
       if (original) Object.defineProperty(globalThis, 'localStorage', original);
       else delete (globalThis as { localStorage?: unknown }).localStorage;
     }
+  });
+});
+
+describe('Edit on a lane-proposal card in the conversation', () => {
+  const PROJECT_ID = '00000000-0000-4000-8000-000000000001';
+  const proposal = item('L1', {
+    ask: {
+      kind: 'multiple-choice',
+      options: [{ label: LANE_PROPOSAL_ANSWERS.accept }, { label: LANE_PROPOSAL_ANSWERS.edit }],
+    },
+    sourceRef: laneProposalReference(PROJECT_ID, 2),
+  });
+  const choose = (label: string) => ({ kind: 'respond', response: { kind: 'multiple-choice', choice: label } });
+
+  const mountInRouter = () => {
+    const view = render(
+      <RouterProvider>
+        <Host focus={{ target: 'L1' as AgendaId, seq: 1 }} snapshot={board([proposal])} />
+      </RouterProvider>,
+    );
+    mounted.push(view);
+    return view;
+  };
+
+  afterEach(() => window.history.replaceState({}, '', '/'));
+
+  test('sends the answer, then opens the lane editor', async () => {
+    const view = mountInRouter();
+    await runAsync(async () => {
+      view.root.findByType(AgendaItemView).props.onAct(choose(LANE_PROPOSAL_ANSWERS.edit));
+    });
+    expect(calls).toEqual(['respond:L1']);
+    expect(window.location.pathname).toBe(`/d/agenda/projects/${PROJECT_ID}/lanes`);
+  });
+
+  test('leaves the page alone on Accept', async () => {
+    const view = mountInRouter();
+    await runAsync(async () => {
+      view.root.findByType(AgendaItemView).props.onAct(choose(LANE_PROPOSAL_ANSWERS.accept));
+    });
+    expect(calls).toEqual(['respond:L1']);
+    expect(window.location.pathname).toBe('/');
+  });
+
+  test('answers without a router in the tree, and does not go anywhere', async () => {
+    const view = mount({ snapshot: board([proposal]), focus: { target: 'L1' as AgendaId, seq: 1 } });
+    await runAsync(async () => {
+      view.root.findByType(AgendaItemView).props.onAct(choose(LANE_PROPOSAL_ANSWERS.edit));
+    });
+    expect(calls).toEqual(['respond:L1']);
+    expect(window.location.pathname).toBe('/');
   });
 });

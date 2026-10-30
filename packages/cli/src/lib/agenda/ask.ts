@@ -8,8 +8,13 @@ import {
   MAX_AGENDA_CARD_ANSWERS,
 } from '@ferretry/protocol';
 
-/** The kinds a card is raised as, keyed by the names `--kind` accepts — the older spellings included. */
+/**
+ * The kinds a card is raised as, keyed by the names `--kind` accepts — the older spellings included. A to-do is
+ * `todo`, because "task" means a board card (`fy task`, `--task <card>`); `task` is still read, and stays the
+ * wire value so a released daemon's strict add schema keeps accepting it.
+ */
 const KINDS = new Map<string, AgendaKind>([
+  ['todo', 'task'],
   ['task', 'task'],
   ['yesno', 'yesno'],
   ['permission', 'permission'],
@@ -24,7 +29,7 @@ const KINDS = new Map<string, AgendaKind>([
 ]);
 
 /** The names `--kind` is documented with, for help text and error messages. */
-export const ASK_KIND_NAMES = ['task', 'yesno', 'permission', 'choice', 'review', 'info', 'reply'] as const;
+export const ASK_KIND_NAMES = ['todo', 'yesno', 'permission', 'choice', 'review', 'info', 'reply'] as const;
 
 /** Why a card cannot offer more than three answers, and what to do instead. */
 export const TOO_MANY_ANSWERS = `a card offers at most ${MAX_AGENDA_CARD_ANSWERS} answers (swipe left, up, right). Split this into several items, or use --kind reply and let the owner answer in words.`;

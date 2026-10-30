@@ -1344,6 +1344,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('mounts a project’s lane editor from its lanes route', async () => {
+    // Arrange
+    const projectId = '11111111-1111-4111-8111-111111111111';
+
+    // Act
+    const { view } = await renderShell(`/d/${ALPHA}/projects/${projectId}/lanes`, [alpha.daemonId], {});
+    await settle();
+
+    // Assert
+    expect(view.container.querySelector(`[data-lane-page="${projectId}"]`)).not.toBeNull();
+    await view.unmount();
+  });
+
   it('walks from the registry to one project without leaving the app', async () => {
     // Arrange
     const projectId = '11111111-1111-4111-8111-111111111111';
@@ -2365,6 +2378,22 @@ describe('AppShell', () => {
     }
   });
 
+  it('draws the Board for a machine and keeps the view in the address, replacing the entry', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/board`, [alpha.daemonId], { sessions: ['shared'] });
+    try {
+      for (let turn = 0; turn < 6; turn += 1) await settle();
+      const list = must(view.container.querySelector<HTMLButtonElement>('[data-view-tab="list"]'), 'the List view tab');
+      const depth = window.history.length;
+      await interact(() => list.click());
+      for (let turn = 0; turn < 3; turn += 1) await settle();
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/board`);
+      expect(window.location.search).toContain('view=list');
+      expect(window.history.length).toBe(depth);
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('reads the ferret’s last messages for the phone deck through the machine the item came from', async () => {
     const restore = patchGlobal(window, 'innerWidth', 390);
     const { view } = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId], {
@@ -2434,6 +2463,7 @@ describe('AppShell', () => {
       [`/d/${ALPHA}/analytics`, 'Sessions, Analytics'],
       [`/d/${ALPHA}/learning`, 'Sessions, Learning'],
       [`/d/${ALPHA}/inbox`, 'Sessions, Inbox'],
+      [`/d/${ALPHA}/board`, 'Sessions, Board'],
       [`/d/${ALPHA}/history`, 'Sessions, Imported history'],
       [`/d/${ALPHA}/session/one`, 'Sessions, one'],
     ] as const) {
@@ -2681,6 +2711,7 @@ describe('route change accessibility', () => {
         { kind: 'new-session', daemonId: id },
         { kind: 'projects', daemonId: id },
         { kind: 'project-detail', daemonId: id, projectId: '11111111-1111-4111-8111-111111111111' },
+        { kind: 'project-lanes', daemonId: id, projectId: '11111111-1111-4111-8111-111111111111' },
         { kind: 'session', daemonId: id, sessionId: 'shared' },
         { kind: 'settings', daemonId: id },
         { kind: 'warden', daemonId: id },
@@ -2696,6 +2727,7 @@ describe('route change accessibility', () => {
       'Sessions, New',
       'Sessions, Projects',
       'Sessions, Projects, Project',
+      'Sessions, Projects, Project, Lanes',
       'Sessions, shared',
       'Sessions, Settings',
       'Sessions, Warden',
@@ -4670,6 +4702,53 @@ describe('the phone tab bar', () => {
       }
     } finally {
       restore();
+    }
+  });
+
+  it('clips the page area at the bar, so no page can be drawn under it, and only where the bar is', async () => {
+    const restore = patchGlobal(window, 'innerWidth', PHONE_WIDTH);
+    try {
+      const inbox = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId]);
+      try {
+        await settle();
+        expect(inbox.view.container.querySelector('[data-app-tab-bar]')).not.toBeNull();
+        const region = must(
+          inbox.view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'),
+          'the page area',
+        );
+        expect(region.classList.contains('overflow-clip')).toBe(true);
+        // The bar is the page area's next sibling in the one column, so the area ends where the bar begins.
+        expect(region.nextElementSibling?.matches('[data-app-tab-bar]')).toBe(true);
+      } finally {
+        await inbox.view.unmount();
+      }
+
+      const session = await renderShell(`/d/${ALPHA}/session/shared`, [alpha.daemonId]);
+      try {
+        await settle();
+        expect(
+          must(
+            session.view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'),
+            'the page area',
+          ).classList.contains('overflow-clip'),
+        ).toBe(false);
+      } finally {
+        await session.view.unmount();
+      }
+    } finally {
+      restore();
+    }
+    const desktop = await renderShell(`/d/${ALPHA}/inbox`, [alpha.daemonId]);
+    try {
+      await settle();
+      expect(
+        must(
+          desktop.view.container.querySelector<HTMLElement>('[data-pull-to-palette-region]'),
+          'the page area',
+        ).classList.contains('overflow-clip'),
+      ).toBe(false);
+    } finally {
+      await desktop.view.unmount();
     }
   });
 

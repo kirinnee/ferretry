@@ -3,12 +3,11 @@ import { ArrowLeft, Bot, FolderTree, LayoutList } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { daemonProjectsPath, daemonSessionPath } from '../../lib/pages/routes.ts';
+import { daemonProjectLanesPath, daemonProjectsPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { useRouter } from '../../lib/router.tsx';
 import { useAppStore } from '../../lib/store.tsx';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
-import { ProjectBoards } from './project-boards.tsx';
-import { activeProjectSessions, projectBoardSessions, projectSessions } from './project-detail-model.ts';
+import { activeProjectSessions, projectSessions } from './project-detail-model.ts';
 import { ProjectFiles } from './project-files.tsx';
 import { ProjectLaunch } from './project-launch.tsx';
 import { ProjectProvenance } from './project-provenance.tsx';
@@ -64,7 +63,6 @@ function ProjectDetailView({
     sessions === null ? (fleetStatus === 'error' ? 'failed' : 'unread') : fleetStatus === 'error' ? 'stale' : 'ready';
   const set = useMemo(() => (sessions === null ? [] : projectSessions(project, sessions)), [project, sessions]);
   const active = useMemo(() => activeProjectSessions(set), [set]);
-  const boards = useMemo(() => projectBoardSessions(set), [set]);
   return (
     <main
       className="grid h-full min-h-0 content-start gap-panel overflow-y-auto p-panel"
@@ -83,6 +81,14 @@ function ProjectDetailView({
           <h1 className="m-0 font-display text-display font-bold tracking-display">{project.name}</h1>
         </div>
         <div className="flex flex-wrap items-start gap-md">
+          <button
+            className="kt-btn kt-btn--sm"
+            type="button"
+            data-project-lanes-link={project.id}
+            onClick={() => navigate(daemonProjectLanesPath(connection.daemonId, project.id))}
+          >
+            Lanes ✎
+          </button>
           <ProjectLaunch project={project} onLaunch={onLaunch} />
           <PageThemeSwitch />
         </div>
@@ -168,23 +174,6 @@ function ProjectDetailView({
               </p>
             ) : (
               <ProjectFiles connection={connection} session={set[0] ?? null} />
-            )}
-          </Section>
-          <Section
-            icon={<LayoutList className="text-muted" size={16} aria-hidden="true" />}
-            title="Boards of this project’s sessions"
-          >
-            {reading === 'unread' ? (
-              <p className="m-0 text-meta text-muted" aria-busy="true" data-project-boards="unread">
-                Boards are unknown until this daemon’s session list is read.
-              </p>
-            ) : reading === 'failed' ? (
-              <p className="m-0 text-meta text-warn" role="status" data-project-boards="failed">
-                Could not read this daemon’s sessions, so this project’s boards are unknown:{' '}
-                {fleetError ?? 'the read failed'}.
-              </p>
-            ) : (
-              <ProjectBoards sessions={boards} />
             )}
           </Section>
         </div>

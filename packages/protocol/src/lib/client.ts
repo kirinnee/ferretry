@@ -60,7 +60,6 @@ import type {
 
 export const FY_VERSION_HEADER = 'x-fy-version';
 export const FY_REQUEST_ID_HEADER = 'x-fy-request-id';
-export const FY_BOARD_CAPABILITY_HEADER = 'x-fy-board-capability';
 
 export interface IFyHttpTransport {
   send(url: string, init: RequestInit): Promise<Response>;
@@ -136,7 +135,7 @@ export interface IFyApiClient {
   list(): Promise<SessionView[]>;
   suggestNames(count?: number): Promise<string[]>;
   get(id: string, signal?: AbortSignal): Promise<SessionView>;
-  start(input: StartSessionRequestInput, requestId?: string, boardCapability?: string): Promise<SessionView>;
+  start(input: StartSessionRequestInput, requestId?: string): Promise<SessionView>;
   /**
    * `requestId` is the LOGICAL identity of one message — the daemon's send id. Supply the same one to
    * retry a send whose answer was lost and it is applied once. Omitted, the client reuses the id of

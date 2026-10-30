@@ -15,12 +15,15 @@ import {
   type BoardProjectId,
   type BoardQuery,
   type BoardResponse,
+  type BoardSkipRequest,
+  type BoardSkipResponse,
   type BoardTask,
   type BoardTaskActionRequest,
   type BoardTaskCreateRequest,
   type BoardTaskId,
   type BoardTaskResponse,
   BoardTaskSchema,
+  type BoardTaskView,
   formatTaskRef,
   type Lane,
   type LaneSet,
@@ -56,6 +59,7 @@ import type {
   SessionFocus,
   SessionParents,
 } from './ports.ts';
+import { applyPrUpdate, type PrUpdate, type PrUpdateOutcome } from './pr-cache.ts';
 import { countsOf, inScope, pageOf, passesFilters } from './query.ts';
 import { doneLane, doneMove, doneNote } from './signal-done.ts';
 
@@ -147,9 +151,35 @@ export class BoardService {
     };
   }
 
+  /**
+   * Every readable card, as stored, with the lanes of each board they are on: what the daemon's own
+   * automation reasons over. Nothing is derived, so it costs one store read and one lane read per board.
+   */
+  async snapshot(): Promise<{ readonly cards: readonly BoardTask[]; readonly laneSets: LaneSets }> {
+    const { cards } = await this.ports.store.read();
+    return { cards, laneSets: await this.laneSetsOf(cards.map(card => card.projectId)) };
+  }
+
+  /** Every card's view, closed and dropped included, with every board's lanes: the board sweep's one read. */
+  async sweepBoard(): Promise<{ readonly views: readonly BoardTaskView[]; readonly laneSets: LaneSets }> {
+    const snapshot = await this.ports.store.read();
+    const laneSets = await this.laneSetsOf(snapshot.cards.map(card => card.projectId));
+    const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
+    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
+    return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
+  }
+
   /** One card, in full, with its board's lanes. */
   async task(id: BoardTaskId): Promise<BoardTaskResponse> {
     return await this.view(await this.ports.store.read(), id);
+  }
+
+  /** The card an old task became: `<session>:<old id>`, as `legacyRef` records it. */
+  async taskByLegacyRef(legacyRef: string): Promise<BoardTaskResponse> {
+    const snapshot = await this.ports.store.read();
+    const card = snapshot.cards.find(candidate => candidate.legacyRef === legacyRef);
+    if (card === undefined) throw new BoardError('not-found', `no card came from the old task ${legacyRef}`);
+    return await this.view(snapshot, card.id);
   }
 
   // -------------------------------------------------------------------------------------------------
@@ -283,6 +313,22 @@ export class BoardService {
   }
 
   /**
+   * `fy task skip "<why>"` (§3.4): the calling ferret records why its work needs no card — chit-chat, or the
+   * owner said not to track it — so the turn-end check stays quiet until it takes one. It is a decision about
+   * the ferret's own session, so only a ferret makes it, and only for itself.
+   */
+  async skip(request: BoardSkipRequest, caller: BoardCaller): Promise<BoardSkipResponse> {
+    if (caller.kind !== 'ferret') {
+      throw new BoardError('invalid', 'skip is for a ferret: it records why its own session has no card');
+    }
+    const skip = { reason: request.reason, at: this.ports.clock.now() };
+    if (!(await this.ports.focus.skip(caller.sessionId, skip))) {
+      throw new BoardError('not-found', 'there is no session to record the skip on');
+    }
+    return { sessionId: caller.sessionId, skip };
+  }
+
+  /**
    * A daemon move on a real signal (work started, PR opened, merged, released; §3.1). Lands in the lane
    * the trigger names for the card's workflow, never backwards. `null` when the card did not move.
    */
@@ -302,6 +348,23 @@ export class BoardService {
     if (moved === null) return null;
     await this.afterWrite(caller, moved, [moved.projectId]);
     return await this.view(await this.ports.store.read(), id);
+  }
+
+  /**
+   * What the GitHub watcher learned of a card's PRs (`pr-cache.ts`): the cache, the automatic links, the
+   * notes and the moves they trigger, as ONE daemon write. The nudges are handed back for the watcher to
+   * send, because who hears them is not the board's to decide.
+   */
+  async recordPullRequests(id: BoardTaskId, update: PrUpdate): Promise<PrUpdateOutcome> {
+    const caller: BoardCaller = { kind: 'daemon' };
+    const outcome = await this.ports.store.write(id, async current => {
+      const card = this.requireCard(current, id);
+      const applied = applyPrUpdate(card, update, await this.context(card, caller));
+      const task = applied.task === null ? null : requireValidCard(applied.task);
+      return { task, result: { ...applied, task } };
+    });
+    if (outcome.task !== null) await this.afterWrite(caller, outcome.task, [outcome.task.projectId]);
+    return outcome;
   }
 
   /**

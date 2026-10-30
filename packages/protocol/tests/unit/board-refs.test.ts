@@ -4,6 +4,7 @@ import * as refs from '../../src/lib/board-refs.ts';
 import {
   BOARD_TASK_ID_PATTERN,
   BoardProjectIdSchema,
+  BoardSkipSchema,
   BoardTaskIdSchema,
   boardErr,
   boardOk,
@@ -14,8 +15,8 @@ import {
   UNFILED_PROJECT_ID,
 } from '../../src/lib/board-refs.ts';
 import { SessionConfigSchema } from '../../src/lib/session.ts';
-import { sessionView } from '../fixtures.ts';
 import { TaskIdSchema } from '../../src/lib/tasks.ts';
+import { sessionView } from '../fixtures.ts';
 import { assertCoversEverySchema, assertRejects, assertRoundTrips, type SchemaCase } from './schema-cases.ts';
 
 const VALID: readonly SchemaCase[] = [
@@ -25,6 +26,7 @@ const VALID: readonly SchemaCase[] = [
   { name: 'remote ref', schema: TaskRefSchema, value: { machineId: 'kirin-box', id: 'C999999999' } },
   { name: 'project id', schema: BoardProjectIdSchema, value: '00000000-0000-4000-8000-000000000001' },
   { name: 'unfiled', schema: BoardProjectIdSchema, value: UNFILED_PROJECT_ID },
+  { name: 'skip', schema: BoardSkipSchema, value: { reason: 'chit-chat', at: '2026-10-30T10:00:00.000Z' } },
 ];
 
 const INVALID: readonly SchemaCase[] = [
@@ -36,6 +38,13 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'blank machine', schema: MachineIdSchema, value: '  ' },
   { name: 'stray field', schema: TaskRefSchema, value: { id: 'F1', session: 's' } },
   { name: 'not a project', schema: BoardProjectIdSchema, value: 'ferretry' },
+  { name: 'blank skip reason', schema: BoardSkipSchema, value: { reason: '  ', at: '2026-10-30T10:00:00.000Z' } },
+  { name: 'skip with no instant', schema: BoardSkipSchema, value: { reason: 'chat' } },
+  {
+    name: 'skip with a stray field',
+    schema: BoardSkipSchema,
+    value: { reason: 'chat', at: '2026-10-30T10:00:00.000Z', by: 'x' },
+  },
 ];
 
 describe('board task refs', () => {

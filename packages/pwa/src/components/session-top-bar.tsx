@@ -31,6 +31,7 @@ import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-mo
 import { OutdatedMark } from '../features/restart-outdated/outdated-mark.tsx';
 import { SwitchMarks, type SwitchMarksProps } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
+import { parseTaskName } from '../shell/task-name.ts';
 import { harnessWord } from '../lib/harness-dialogs.ts';
 import { permissionPhrase } from '../lib/permission-requests.ts';
 import type { SessionTurn } from '../lib/session-activity.ts';
@@ -39,13 +40,22 @@ import { StatusMark } from '../shell/status-mark.tsx';
 import { UnreadBadge } from '../shell/unread-badge.tsx';
 
 /**
- * The name a person calls this session by: its callsign, else whatever the session was labelled,
- * else its id. The callsign leads because it is how teammates are referred to everywhere else.
+ * WHO is working on this session: its callsign, else the name it was given, else its id. This is the
+ * speaker in the transcript and the secondary line of a header — never the session's title (see
+ * `sessionTitle`).
  */
 export const sessionDisplayName = (session: SessionView): string => {
   const { config } = session;
-  return displaySystemCallsign(displayCallsign(config.teammate) || config.label || config.name || config.id);
+  return displaySystemCallsign(displayCallsign(config.teammate) || config.name || config.id);
 };
+
+/**
+ * WHAT this session is for: the task it was named, never the callsign. A name with a leading `[Teammate]`
+ * prefix is shown without it — the callsign is already said beside the title. Falls back to the callsign
+ * only when the session has no name at all.
+ */
+export const sessionTitle = (session: SessionView): string =>
+  parseTaskName(session.config.name).task || sessionDisplayName(session);
 
 /** The status word for each turn: the person's words, not the daemon's. */
 const TURN_WORD: Readonly<Record<SessionTurn, string>> = {
@@ -67,6 +77,8 @@ export interface SessionTopBarProps {
    * any, nothing when there are none — the pinned block above the composer is the item itself.
    */
   readonly agendaOpen?: number;
+  /** The ferret's card chip (`ChatCardChip`), drawn beside the name at every width. Absent: this host has no board. */
+  readonly cardChip?: ReactNode;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
   /**
@@ -102,6 +114,7 @@ export function SessionTopBar({
   compact,
   actions,
   agendaOpen = 0,
+  cardChip,
   status,
   turn = null,
   infoOpen = false,
@@ -114,7 +127,7 @@ export function SessionTopBar({
   switches,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
-  const task = session.config.label ?? session.config.name;
+  const title = sessionTitle(session);
   // What a needs-input session is parked on: the one thing it is waiting for. A permission prompt is said
   // as the request itself and a harness dialog as its own title — what the person is being asked to decide.
   const permission = turn === 'needs-input' ? session.state.permissionRequest : undefined;
@@ -140,8 +153,13 @@ export function SessionTopBar({
           <Menu aria-hidden="true" size={18} />
         </button>
       )}
-      <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
-        <h1 className="fy-session-bar__name">{name}</h1>
+      <div className="fy-session-bar__who" title={title === name ? name : `${title} — ${name}`}>
+        <h1 className="fy-session-bar__name">{title}</h1>
+        {title === name || compact ? null : (
+          <span className="fy-session-bar__callsign" data-session-callsign="">
+            {name}
+          </span>
+        )}
         {agendaOpen > 0 ? <UnreadBadge className="fy-session-bar__agenda" count={agendaOpen} /> : null}
         <OutdatedMark view={session} />
         {compact ? null : (
@@ -165,6 +183,7 @@ export function SessionTopBar({
           </button>
         )}
         {compact ? null : subFerrets}
+        {cardChip}
         <span
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}

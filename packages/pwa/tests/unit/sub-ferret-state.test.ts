@@ -61,7 +61,7 @@ describe('subFerretState', () => {
 describe('a sub-ferret as the parent lists it', () => {
   test('is named by callsign, task or short id, and shows its observed model and effort first', () => {
     expect(subFerretName(child('c', {}, { teammate: 'nadia' }))).toBe('Nadia');
-    expect(subFerretName(child('c', {}, { label: 'Review it' }))).toBe('Review it');
+    expect(subFerretName(child('c', {}, { label: 'Review it' }))).toBe('Session c');
     expect(subFerretName(child('c'))).toBe('Session c');
     expect(subFerretName(child('mvabcdefghij', {}, { name: '' }))).toBe('mvabcdef…');
     expect(subFerretModel(child('c', { observedModel: 'opus[1m]' }, { model: 'opus' }))).toBe('opus[1m]');

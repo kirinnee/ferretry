@@ -19,6 +19,8 @@ import {
   BoardQuarantinedCardSchema,
   BoardQuerySchema,
   BoardResponseSchema,
+  BoardSkipRequestSchema,
+  BoardSkipResponseSchema,
   BoardStateFilterSchema,
   type BoardTask,
   BoardTaskActionRequestSchema,
@@ -37,11 +39,11 @@ import {
   formatAgendaRef,
   isInBoardState,
   LaneSetActionRequestSchema,
-  laneEditProblems,
   LegacyTaskRefSchema,
+  laneEditProblems,
   moveReasonProblem,
-  type PrLink,
   PrChecksSchema,
+  type PrLink,
   PrLinkSchema,
   PrStateSchema,
   prUrlParts,
@@ -205,6 +207,12 @@ const COUNTS = { closedHidden: 214, stale: 2, orphaned: 1, active: 6, toTest: 2,
 const BOARD = { projectId: PROJECT, laneSet: LANES, cards: [VIEW], counts: COUNTS, nextCursor: null, quarantined: [] };
 
 const VALID: readonly SchemaCase[] = [
+  { name: 'skip request', schema: BoardSkipRequestSchema, value: { reason: 'the owner said not to track this' } },
+  {
+    name: 'skip response',
+    schema: BoardSkipResponseSchema,
+    value: { sessionId: 'lead', skip: { reason: 'chat', at: '2026-10-30T10:00:00.000Z' } },
+  },
   { name: 'agenda ref', schema: AgendaRefSchema, value: { sessionId: CHILD, id: 'A48' } },
   { name: 'ferret actor', schema: BoardActorSchema, value: FERRET },
   { name: 'owner actor in a chat', schema: BoardActorSchema, value: { kind: 'owner', sessionId: LEAD } },
@@ -270,6 +278,8 @@ const VALID: readonly SchemaCase[] = [
 ];
 
 const INVALID: readonly SchemaCase[] = [
+  { name: 'skip with no reason', schema: BoardSkipRequestSchema, value: { reason: '' } },
+  { name: 'skip naming a session', schema: BoardSkipRequestSchema, value: { reason: 'chat', sessionId: 'child' } },
   { name: 'agenda ref without session', schema: AgendaRefSchema, value: { id: 'A1' } },
   { name: 'ferret actor without session', schema: BoardActorSchema, value: { kind: 'ferret' } },
   { name: 'unknown actor', schema: BoardActorSchema, value: { kind: 'human' } },

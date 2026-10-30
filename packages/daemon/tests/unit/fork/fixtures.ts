@@ -65,7 +65,6 @@ export function plan(
       cwd: '/work/repo',
       mode: 'auto',
       parentSessionId: null,
-      boardAccess: 'none',
       label: 'teammate',
       harnessFlags: [],
       remoteControl: true,

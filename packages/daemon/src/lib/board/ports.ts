@@ -6,7 +6,6 @@
  * that is honest about what it does not know, and the unit named on it replaces the stub:
  *
  * - {@link LaneSetSource} — U3 (projects and lanes)
- * - {@link ActivityDeriver} — U5 (activity and staleness)
  * - {@link LaneProposer} — U3 (lane proposals; U7 calls it for a start in a project with no lanes)
  */
 import type {
@@ -15,6 +14,7 @@ import type {
   BoardChangedEvent,
   BoardProjectId,
   BoardQuarantinedCard,
+  BoardSkip,
   BoardTask,
   BoardTaskActivity,
   BoardTaskId,
@@ -22,6 +22,7 @@ import type {
   TaskKind,
   TaskRef,
 } from '@ferretry/protocol';
+import type { BoardIndex, LaneSets } from './graph.ts';
 
 // ---------------------------------------------------------------------------------------------------
 // Storage
@@ -80,9 +81,16 @@ export interface SessionParents {
  * writes it; U5 (activity) and U7 (agenda inference) read it.
  */
 export interface SessionFocus {
-  /** `false` when there is no such session to focus. */
+  /** `false` when there is no such session to focus. Taking a card clears the session's {@link skip}. */
   setFocus(sessionId: string, task: TaskRef): Promise<boolean>;
   focusOf(sessionId: string): Promise<TaskRef | null>;
+  /**
+   * Records why the session's work has no card (`fy task skip`, `config.boardSkip`), replacing any earlier one.
+   * `false` when there is no such session.
+   */
+  skip(sessionId: string, skip: BoardSkip): Promise<boolean>;
+  /** The standing skip, or `null` when there is none (or the session took a card since). */
+  skipOf(sessionId: string): Promise<BoardSkip | null>;
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -96,9 +104,20 @@ export interface CardActivity {
   readonly activity: BoardTaskActivity;
 }
 
-/** Liveness, from session state. U5 implements it; until then a stub reads only the card's own history. */
+/**
+ * What the activity deriver judges a board by: every card (a parent's roll-up needs its children), the
+ * lanes (staleness is per lane) and the agenda's answer (a blocking ask makes a card `waiting`).
+ */
+export interface ActivityInputs {
+  readonly cards: readonly BoardTask[];
+  readonly index: BoardIndex;
+  readonly laneSets: LaneSets;
+  readonly asks: ReadonlyMap<BoardTaskId, CardAsks>;
+}
+
+/** Liveness, from session state (`LivenessActivityDeriver`). */
 export interface ActivityDeriver {
-  derive(cards: readonly BoardTask[]): Promise<ReadonlyMap<BoardTaskId, CardActivity>>;
+  derive(inputs: ActivityInputs): Promise<ReadonlyMap<BoardTaskId, CardActivity>>;
 }
 
 /** The agenda items raised against a card. */

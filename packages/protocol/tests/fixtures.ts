@@ -12,7 +12,6 @@ import type {
   SendResult,
   SessionAttachTarget,
   SessionView,
-  TaskBoardGrantRequestView,
   UsageFeedView,
   WardenAgendaView,
   WardenConfig,
@@ -32,7 +31,6 @@ export const sessionView = {
     incarnation: 'incarnation-1',
     runtimeGeneration: 1,
     name: 'Session One',
-    boardAccess: 'none',
     agent: 'codex-auto-loge',
     harness: 'codex',
     modelHint: 'gpt-5.6-sol',
@@ -82,15 +80,6 @@ export const sendRecord = {
   unaccountedReason: 'not_delivered',
   retryable: true,
 } satisfies SendRecord;
-
-export const taskBoardGrantRequestView = {
-  requestId: 'grant-1',
-  targetSessionId: 'session-2',
-  requestedRole: 'worker',
-  createdAt: INSTANT,
-  expiresAt: LATER_INSTANT,
-  status: 'pending',
-} satisfies TaskBoardGrantRequestView;
 
 export const fyEvent = {
   sequence: 1,

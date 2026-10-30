@@ -34,6 +34,6 @@ describe('task ids', () => {
     const actual = taskReference('F21');
 
     // Assert
-    should(actual).equal('#F21');
+    should(actual).equal('&F21');
   });
 });

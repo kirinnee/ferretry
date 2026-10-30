@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { HarnessDialog, PermissionRequest } from '@ferretry/protocol';
-import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
+import { SessionTopBar, sessionDisplayName, sessionTitle } from '../../src/components/session-top-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -12,11 +12,34 @@ afterEach(async () => {
 });
 
 describe('what the session bar calls a session', () => {
-  test('the callsign first, then the label, the name and finally the id', () => {
+  test('the callsign first, then the name, never the label, and finally the id', () => {
     expect(sessionDisplayName(sessionView('a', { config: { teammate: 'hadi', label: 'Fix it' } }))).toBe('Hadi');
-    expect(sessionDisplayName(sessionView('b', { config: { label: 'Fix it' } }))).toBe('Fix it');
+    expect(sessionDisplayName(sessionView('b', { config: { name: 'Renamed', label: 'diene-cyan' } }))).toBe('Renamed');
     expect(sessionDisplayName(sessionView('c'))).toBe('Session c');
     expect(sessionDisplayName(sessionView('d', { config: { name: undefined as never } }))).toBe('d');
+  });
+});
+
+describe('what titles a chat', () => {
+  test('the task it was named, without a callsign prefix, and only then the callsign', () => {
+    expect(sessionTitle(sessionView('a', { config: { teammate: 'hadi', name: '[Hadi] Fix it' } }))).toBe('Fix it');
+    expect(sessionTitle(sessionView('b', { config: { teammate: 'hadi', name: '' } }))).toBe('Hadi');
+  });
+
+  test('the callsign is a secondary line on a desktop, absent on a phone and when it would repeat the title', async () => {
+    const draw = async (compact: boolean, config: object) => {
+      view = await mount(
+        <SessionTopBar actions={null} compact={compact} project={null} session={sessionView('s1', { config })} />,
+      );
+      const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
+      const out = [bar.querySelector('h1')?.textContent, bar.querySelector('[data-session-callsign]')?.textContent];
+      await view.unmount();
+      view = null;
+      return out;
+    };
+    expect(await draw(false, { teammate: 'hadi', name: 'Fix it' })).toEqual(['Fix it', 'Hadi']);
+    expect(await draw(true, { teammate: 'hadi', name: 'Fix it' })).toEqual(['Fix it', undefined]);
+    expect(await draw(false, { teammate: 'hadi', name: '' })).toEqual(['Hadi', undefined]);
   });
 });
 
@@ -35,13 +58,14 @@ describe('SessionTopBar', () => {
         }
         onToggleInfo={() => (toggled += 1)}
         project="ferretry"
-        session={sessionView('s1', { config: { teammate: 'hadi', label: 'Fix the sign-in' } })}
+        session={sessionView('s1', { config: { teammate: 'hadi', name: 'Fix the sign-in', label: 'diene-cyan' } })}
         status={<span data-extra="">needs you</span>}
       />,
     );
     const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
-    expect(bar.querySelector('h1')?.textContent).toBe('Hadi');
-    expect(bar.querySelector('.fy-session-bar__who')?.getAttribute('title')).toBe('Hadi — Fix the sign-in');
+    expect(bar.querySelector('h1')?.textContent).toBe('Fix the sign-in');
+    expect(bar.querySelector('[data-session-callsign]')?.textContent).toBe('Hadi');
+    expect(bar.querySelector('.fy-session-bar__who')?.getAttribute('title')).toBe('Fix the sign-in — Hadi');
     expect(bar.querySelector('.fy-session-bar__project')?.textContent).toBe('ferretry');
     expect(bar.querySelector('.fy-session-bar__word')?.textContent).toBe('running');
     expect(bar.querySelector('[data-extra]')).not.toBeNull();

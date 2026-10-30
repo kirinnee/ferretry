@@ -19,6 +19,7 @@ import {
   capturedPresenter,
   FakeFiles,
   RecordingApi,
+  RecordingBoard,
   WAIT_CLOCK,
 } from './controller-doubles.ts';
 import { sessionView } from './session-fixtures.ts';
@@ -62,7 +63,7 @@ function harness(
   registerSessionCommands(program, {
     presenter,
     start: new StartSessionController(api, files, presenter, environment, 'fy'),
-    list: new ListSessionsController(api, presenter),
+    list: new ListSessionsController(api, presenter, new RecordingBoard(), { amber: cell => cell }),
     status: new SessionStatusController(api, presenter),
     send: new SendMessageController(api, files, presenter, environment, WAIT_CLOCK),
     answer: new AnswerQuestionController(api, presenter),
@@ -140,7 +141,6 @@ describe('registerSessionCommands · start', () => {
       mode: 'auto',
       prompt: 'do the thing\n\nfrom the file',
       agent: 'claude-alpha',
-      boardAccess: 'none',
       cwd: '/elsewhere',
       harnessFlags: ['--verbose', '--trace'],
       name: 'Fix Transcript Scrolling',
@@ -212,16 +212,15 @@ describe('registerSessionCommands · start', () => {
     should(unset.api.calls[0]?.args[0]).not.have.property('fast');
   });
 
-  it('should pass an explicit parent and a board grant with its capability', async () => {
+  it('should pass an explicit parent', async () => {
     // Arrange
-    const subject = harness({}, { cwd: '/work/repo', boardCapability: 'cap-1' });
+    const subject = harness({}, { cwd: '/work/repo' });
 
     // Act
-    await subject.run(['start', 'go', '--agent', 'claude-alpha', '--parent', 'ses-lead', '--board-access', 'worker']);
+    await subject.run(['start', 'go', '--agent', 'claude-alpha', '--parent', 'ses-lead']);
 
     // Assert
-    should(subject.api.calls[0]?.args[0]).containDeep({ parent: 'ses-lead', boardAccess: 'worker' });
-    should(subject.api.calls[0]?.args[2]).equal('cap-1');
+    should(subject.api.calls[0]?.args[0]).containDeep({ parent: 'ses-lead' });
   });
 
   it('should reject an unknown --mode at parse time', async () => {

@@ -5,10 +5,10 @@
  */
 
 import { Maximize2, Minimize2, X } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
+import { type ReactNode, useEffect, useId, useRef } from 'react';
 import { Badge } from '../../shell/primitives.tsx';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
-import { INFO_TAB_LABEL, INFO_TABS, type InfoTab } from './info-model.ts';
+import { INFO_TAB_LABEL, INFO_TABS_WITHOUT_BOARD, type InfoTab, scrollToShow } from './info-model.ts';
 
 export type InfoSheetSize = 'half' | 'full';
 
@@ -21,6 +21,8 @@ export interface InfoPanelProps {
   readonly render: Readonly<Record<InfoTab, () => ReactNode>>;
   /** Open signals, as a count on the Signals tab. */
   readonly openSignals?: number;
+  /** The tabs offered, in order. Absent: every tab but Tasks (the host has no board). */
+  readonly tabs?: readonly InfoTab[];
   /** Phone: the sheet's height, and the control that switches it. */
   readonly sheetSize?: InfoSheetSize;
   readonly onSheetSizeChange?: (size: InfoSheetSize) => void;
@@ -34,11 +36,21 @@ export function InfoPanel({
   onClose,
   render,
   openSignals = 0,
+  tabs = INFO_TABS_WITHOUT_BOARD,
   sheetSize,
   onSheetSizeChange,
   titleId,
 }: InfoPanelProps) {
   const id = useId().replace(/:/gu, '');
+  const strip = useRef<HTMLDivElement>(null);
+
+  // The strip scrolls sideways on a narrow screen; keep the shown tab inside it.
+  useEffect(() => {
+    const row = strip.current;
+    const active = row?.querySelector<HTMLElement>(`[role="tab"][id$="-tab-${tab}"]`);
+    if (row === null || row === undefined || active === null || active === undefined) return;
+    row.scrollLeft = scrollToShow(row.scrollLeft, active.offsetLeft, active.offsetWidth, row.clientWidth);
+  }, [tab]);
   return (
     <div className="fy-info" data-info-panel="" data-info-tab={tab}>
       <div className="fy-info__head">
@@ -65,14 +77,14 @@ export function InfoPanel({
           <X aria-hidden="true" size={16} />
         </button>
       </div>
-      <div className="fy-info__tabs">
+      <div className="fy-info__tabs" ref={strip}>
         <SheetTabs
           current={tab}
           label="Info sections"
           onChange={onTabChange}
-          order={INFO_TABS}
+          order={tabs}
           sheetId={id}
-          tabs={INFO_TABS.map(key => ({
+          tabs={tabs.map(key => ({
             key,
             label: INFO_TAB_LABEL[key],
             ...(key === 'signals' && openSignals > 0

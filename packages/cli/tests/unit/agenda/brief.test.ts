@@ -353,7 +353,7 @@ describe('agenda brief to-do asks', () => {
 
   it('should refuse a task that also asks a question', () => {
     // Act + Assert
-    should(() => add(['Log in'], { task: true, question: ['Which?'] })).throw(/a task asks nothing/u);
+    should(() => add(['Log in'], { task: true, question: ['Which?'] })).throw(/a todo asks nothing/u);
   });
 });
 
@@ -527,7 +527,7 @@ describe('agenda brief card kinds and answers', () => {
 
   it('should refuse a kind it does not know, listing the ones it does', () => {
     // Act + Assert
-    should(() => add(['x'], { kind: 'maybe' })).throw(/unknown --kind "maybe" — use task, yesno, permission/u);
+    should(() => add(['x'], { kind: 'maybe' })).throw(/unknown --kind "maybe" — use todo, yesno, permission/u);
   });
 
   it('should refuse a question on an info card', () => {
@@ -578,7 +578,7 @@ describe('agenda brief up answer', () => {
   it('should refuse --up on a kind that cannot take it, and --up-why alone', () => {
     // Act + Assert
     should(() => add(['x'], { kind: 'choice', option: ['A', 'B'], up: 'Maybe' })).throw(
-      /--up only fits --kind task .* or --kind permission .*, not choice/u,
+      /--up only fits --kind todo .* or --kind permission .*, not choice/u,
     );
     should(() => add(['x'], { kind: 'review', up: 'Maybe' })).throw(/--up only fits/u);
     should(() => add(['x'], { kind: 'task', upWhy: 'because' })).throw(/--up-why describes --up/u);

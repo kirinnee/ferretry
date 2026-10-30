@@ -39,6 +39,7 @@ import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
+import { BoardPage } from './features/board/board-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
 import { useLocalComputer } from './features/browser/use-local-computer.ts';
 import { tunnelSwitchOffer } from './features/carrier/carrier-preference-selector.tsx';
@@ -81,6 +82,7 @@ import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
+import { LaneEditorPage } from './features/projects/lane-editor.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
@@ -122,6 +124,7 @@ import { WhatsNewSheet } from './features/whats-new/whats-new-sheet.tsx';
 import { useAccountPickerSlice } from './hooks/use-account-picker.ts';
 import { useActiveCarrier, useDeviceRefused } from './hooks/use-active-carrier.ts';
 import { useAppViewport } from './hooks/use-app-viewport.ts';
+import { type BoardMachine, useBoard } from './hooks/use-board.ts';
 import { useAgendaSession, useAgendaSnapshot } from './hooks/use-agenda.ts';
 import { AgendaInboxContext, useAgendaInbox, useAgendaInboxModel, useInboxMachines } from './hooks/use-agenda-inbox.ts';
 import { useAgendaReplies } from './hooks/use-agenda-replies.ts';
@@ -162,6 +165,8 @@ import { useTheme } from './hooks/use-theme.ts';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
+import { NO_BOARD_FILTERS } from './lib/board-model.ts';
+import { boardBadgeCount } from './lib/board-phone.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
 import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
@@ -184,6 +189,7 @@ import type {
 } from './lib/notify.ts';
 import { installPortraitLock } from './lib/orientation-lock.ts';
 import {
+  type BoardPageProps,
   type DaemonPageProps,
   PageHost,
   type PageHostSlots,
@@ -194,6 +200,7 @@ import {
   connectionPickerPath,
   daemonAgendaPath,
   daemonLearningPath,
+  daemonProjectPath,
   daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
@@ -226,6 +233,7 @@ import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
+  type AppStore,
   createAppStore,
   StoreProvider,
   useAppStore,
@@ -240,6 +248,7 @@ import { tunnelNote } from './lib/tunnel-service.ts';
 import {
   AppBar,
   AppTabBar,
+  type AppTabBarProps,
   appBarDestinationForRoute,
   type Crumb,
   showsTabBar,
@@ -460,10 +469,19 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
         { href: `${sessions}/projects`, label: 'Projects' },
         { label: 'Project' },
       ];
+    case 'project-lanes':
+      return [
+        { href: sessions, label: 'Sessions' },
+        { href: `${sessions}/projects`, label: 'Projects' },
+        { href: daemonProjectPath(route.daemonId, route.projectId), label: 'Project' },
+        { label: 'Lanes' },
+      ];
     case 'session':
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
     case 'attention':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Inbox' }];
+    case 'board':
+      return [{ href: sessions, label: 'Sessions' }, { label: 'Board' }];
     case 'settings':
       return [{ href: sessions, label: 'Sessions' }, { label: 'Settings' }];
     case 'warden':
@@ -847,6 +865,7 @@ export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
   switch (route.kind) {
     case 'projects':
     case 'project-detail':
+    case 'project-lanes':
       return 'projects';
     case 'analytics':
     case 'warden':
@@ -1545,6 +1564,7 @@ function SessionRoute({
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
+          board={store.board}
           actionContributions={sessionActions}
           infoLearning={learningActions.passiveFor(scope.sessionId)}
           switches={{
@@ -1978,6 +1998,76 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** Every ferret's callsign by session id, from the sessions every paired machine reports. */
+function useFerretCallsigns(store: AppStore): ReadonlyMap<string, string> {
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  return useMemo(() => {
+    const names = new Map<string, string>();
+    for (const slice of fleet.daemons.values()) {
+      for (const session of slice.sessions ?? []) {
+        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
+      }
+    }
+    return names;
+  }, [fleet]);
+}
+
+/**
+ * The Board across every paired machine. The query string carries the filters and the view, so a view is a
+ * link; a change replaces the entry (the back button leaves the board, it does not walk every filter).
+ */
+function useBoardMachines(): readonly BoardMachine[] {
+  const store = useAppStore();
+  const { connections } = useConnectionSnapshot();
+  const savedOrder = useMachineOrder(store.controls).saved;
+  return useMemo(
+    () =>
+      machineDisplayOrder(connections, savedOrder).map(record => ({
+        connection: record,
+        name: distinctDaemonName(record, connections),
+      })),
+    [connections, savedOrder],
+  );
+}
+
+/**
+ * The phone's bottom bar with the Board tab's number on it. It shares the Board page's own unfiltered read
+ * (the same store key), so the badge costs no request of its own; only this subtree renders when it moves.
+ */
+function PhoneTabBar(props: Omit<AppTabBarProps, 'boardCount'>) {
+  const store = useAppStore();
+  const machines = useBoardMachines();
+  const { model } = useBoard(store.board, machines, NO_BOARD_FILTERS);
+  return <AppTabBar {...props} boardCount={boardBadgeCount(model.counts)} />;
+}
+
+function BoardRoute(_props: BoardPageProps) {
+  const store = useAppStore();
+  const { navigate } = useRouter();
+  const machines = useBoardMachines();
+  const callsigns = useFerretCallsigns(store);
+  const phone = useLayoutMode() === 'drawer';
+  const onSearch = useCallback(
+    (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
+    [navigate],
+  );
+  return (
+    <BoardPage
+      agenda={store.attention}
+      callsigns={callsigns}
+      phone={phone}
+      machines={machines}
+      onNavigate={navigate}
+      onSearch={onSearch}
+      search={window.location.search}
+      store={store.board}
+    />
+  );
+}
+
 function ImportedHistoryRoute({ connection }: DaemonPageProps) {
   const store = useAppStore();
   return (
@@ -2028,6 +2118,11 @@ function ProjectDetailRoute({ connection, projectId }: ProjectDetailPageProps) {
   return <ProjectDetailPage connection={connection} projectId={projectId} />;
 }
 
+function ProjectLanesRoute({ connection, projectId }: ProjectDetailPageProps) {
+  const callsigns = useFerretCallsigns(useAppStore());
+  return <LaneEditorPage callsigns={callsigns} connection={connection} projectId={projectId} />;
+}
+
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
   Setup: SetupGuide,
@@ -2035,12 +2130,14 @@ const PAGE_SLOTS: PageHostSlots = {
   NewSession: NewSessionRoute,
   Projects: ProjectsRoute,
   ProjectDetail: ProjectDetailRoute,
+  ProjectLanes: ProjectLanesRoute,
   SessionChat: SessionRoute,
   Settings: SettingsRoute,
   Warden: WardenRoute,
   Analytics: AnalyticsRoute,
   Learning: LearningRoute,
   Attention: AgendaRoute,
+  Board: BoardRoute,
   ImportedHistory: ImportedHistoryRoute,
   MachineSetup: MachineSetupRoute,
 };
@@ -2589,7 +2686,7 @@ export function AppShell() {
                 — can explicitly decline it.
               */}
                   <PullToPaletteRegion
-                    className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3"
+                    className={`relative min-h-0 min-w-0 flex-1 px-1 sm:px-3${phone && showsTabBar(pageRoute) ? ' overflow-clip' : ''}`}
                     enabled={touchAffected}
                     onOpen={openPalette}
                   >
@@ -2603,7 +2700,7 @@ export function AppShell() {
                   </PullToPaletteRegion>
                   {/* The phone's level one sits under the page, above the home indicator. */}
                   {phone && showsTabBar(pageRoute) ? (
-                    <AppTabBar
+                    <PhoneTabBar
                       daemon={connection.daemonId}
                       agendaCount={agendaInbox.total}
                       active={appBarDestinationForRoute(pageRoute)}

@@ -92,7 +92,6 @@ export function plan(overrides: Partial<SessionTransferPlan> = {}): SessionTrans
       cwd: '/work/repo',
       mode: 'auto',
       parentSessionId: null,
-      boardAccess: 'none',
       label: 'teammate',
       harnessFlags: [],
       remoteControl: true,

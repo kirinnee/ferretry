@@ -38,6 +38,7 @@ import {
   type ReviveSubject,
   reviveMessage,
 } from './revive.ts';
+import type { WardenFocusCard } from './focus-card.ts';
 import { instantMs, isoFromMs } from './time.ts';
 import { WARDEN_LABEL, type WardenSessionView } from './types.ts';
 
@@ -67,6 +68,11 @@ export interface WardenRevivePorts {
   sleep(ms: number): Promise<void>;
   /** One notice to the owner. Total. */
   notifyOwner(notice: WardenReviveNotice): Promise<void>;
+  /**
+   * The card a session's work is attributed to, so a revived auto ferret is told to carry on with it
+   * (`focus-card.ts`). Total: no card, or one that cannot be read, is `undefined`. Absent: no board.
+   */
+  focusCard?(sessionId: string): Promise<WardenFocusCard | undefined>;
   journal: { record(type: string, data: Readonly<Record<string, unknown>>): void };
 }
 
@@ -264,7 +270,12 @@ export class WardenReviveService {
       actor: 'auto' as const,
     };
     await this.ports.events.emit(planned.id, 'warden.revive_planned', { cause, wave: planned.wave });
-    const outcome = await this.ports.resume(planned.id, reviveMessage(planned.cause, planned.diedAt, planned.mode));
+    // Only an auto ferret is told what to carry on with: an interactive one gets the notice alone.
+    const card = planned.mode === 'auto' ? await this.ports.focusCard?.(planned.id).catch(() => undefined) : undefined;
+    const outcome = await this.ports.resume(
+      planned.id,
+      reviveMessage(planned.cause, planned.diedAt, planned.mode, card),
+    );
     const key = deathKey(planned);
     if (!outcome.ok) {
       const why: ReviveRefusal = `refused:${outcome.reason}`;

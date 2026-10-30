@@ -14,6 +14,7 @@ import {
   type BoardErrorCode,
   BoardErrorCodeSchema,
   type BoardProject,
+  type BoardProjectId,
   BoardProjectsResponseSchema,
   type BoardResponse,
   BoardResponseSchema,
@@ -27,6 +28,10 @@ import {
   boardOk,
   FY_REQUEST_ID_HEADER,
   HealthViewSchema,
+  type LaneSetActionRequestInput,
+  LaneSetActionRequestSchema,
+  type LaneSetChangeResponse,
+  LaneSetChangeResponseSchema,
 } from '@ferretry/protocol';
 import { type BoardServerQuery, boardQueryParams } from './board-model.ts';
 import type { DaemonConnection } from './daemon-connection.ts';
@@ -54,6 +59,14 @@ export interface BoardWriteError {
   readonly boardCode: BoardErrorCode | null;
 }
 
+/** Why a lane-set change was not applied: the daemon's own `code` (`version-conflict`, `owner-only`, …) rides along. */
+export interface LaneWriteError {
+  /** HTTP status, or `0` when the request never got an answer. */
+  readonly status: number;
+  readonly message: string;
+  readonly code: string | null;
+}
+
 /** The daemon reads and writes the board needs, injected rather than imported. */
 export interface BoardPort {
   /** One page of a board; `cursor` continues the one before, `limit` shrinks the page. */
@@ -69,6 +82,12 @@ export interface BoardPort {
     id: BoardTaskId,
     request: BoardTaskActionRequestInput,
   ): Promise<BoardResult<BoardTaskResponse, BoardWriteError>>;
+  /** Proposes, edits or confirms one project's lanes. */
+  lanes(
+    daemon: DaemonConnection,
+    projectId: BoardProjectId,
+    request: LaneSetActionRequestInput,
+  ): Promise<BoardResult<LaneSetChangeResponse, LaneWriteError>>;
 }
 
 const failure = async (response: Response): Promise<DaemonResponseError> => {
@@ -190,6 +209,43 @@ export const postBoardAction = async (
     : boardErr(writeError(response.status, 'the daemon answered with a card this app cannot read', undefined));
 };
 
+/**
+ * `POST /v1/board/projects/:projectId/lanes`. As with a card action the request is parsed with the
+ * protocol's schema BEFORE it is sent; a refusal comes back as a value carrying the daemon's `code`.
+ */
+export const postLaneSetAction = async (
+  daemon: DaemonConnection,
+  projectId: BoardProjectId,
+  request: LaneSetActionRequestInput,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<BoardResult<LaneSetChangeResponse, LaneWriteError>> => {
+  const parsed = LaneSetActionRequestSchema.safeParse(request);
+  if (!parsed.success) return boardErr({ status: 0, message: parsed.error.message, code: 'invalid' });
+  let response: Response;
+  try {
+    response = await send(
+      daemon,
+      `/v1/board/projects/${encodeURIComponent(projectId)}/lanes`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
+        body: JSON.stringify(parsed.data),
+      },
+      fetcher,
+    );
+  } catch (reason) {
+    return boardErr({ status: 0, message: reason instanceof Error ? reason.message : String(reason), code: null });
+  }
+  if (!response.ok) {
+    const refused = await failure(response);
+    return boardErr({ status: refused.status, message: refused.message, code: refused.code ?? null });
+  }
+  const answer = LaneSetChangeResponseSchema.safeParse(await response.json().catch(() => null));
+  return answer.success
+    ? boardOk(answer.data)
+    : boardErr({ status: response.status, message: 'the daemon answered with lanes this app cannot read', code: null });
+};
+
 /** The browser port over the functions above. */
 export const daemonBoardPort = (fetcher: DaemonFetch = browserFetch): BoardPort => ({
   board: (daemon, query, cursor, limit) => fetchBoardPage(daemon, query, cursor, fetcher, limit),
@@ -197,6 +253,7 @@ export const daemonBoardPort = (fetcher: DaemonFetch = browserFetch): BoardPort 
   projects: daemon => fetchBoardProjects(daemon, fetcher),
   version: daemon => fetchDaemonVersion(daemon, fetcher),
   act: (daemon, id, request) => postBoardAction(daemon, id, request, fetcher),
+  lanes: (daemon, projectId, request) => postLaneSetAction(daemon, projectId, request, fetcher),
 });
 
 /**

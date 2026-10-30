@@ -14,8 +14,8 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
-  agendaNudgeEnabled,
   ALWAYS_ON_SECTIONS,
+  agendaNudgeEnabled,
   CredentialStatusService,
   configJsonSchemaFiles,
   FleetIdentityService,
@@ -52,7 +52,7 @@ import {
 } from '@ferretry/fleet/adapters';
 import {
   type Advertisement,
-  DORMANT_AGENT_STATUSES,
+  type AgendaItem,
   type AnalyticsPricingRate,
   type AutoResumeSummary,
   CONFIG_ACCEPTED_FILE,
@@ -60,6 +60,7 @@ import {
   type ConversionSummary as ConversionSummaryView,
   commandLabel,
   configFilePath,
+  DORMANT_AGENT_STATUSES,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
   type Harness,
@@ -81,13 +82,11 @@ import {
   SessionStateSchema,
   type SessionView,
   type SessionWorkerPool,
-  type AgendaItem,
   type SignalSessionRequest,
   type StartSessionRequest,
   StartSessionRequestSchema,
   sessionAgendaEnabled,
   sessionHypermediaEnabled,
-  type TaskBoardChildAccess,
   TERMINAL_MAX_GLOBAL,
   TERMINAL_MAX_PER_SESSION,
   type TranscriptProvenance,
@@ -104,25 +103,11 @@ import type { z } from 'zod';
 // model catalog the list vouches for (docs/model-catalog.md). Compiled in as text, from its one file.
 import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { type: 'text' };
 import pkg from '../package.json' with { type: 'json' };
-import {
-  BunSqliteAnalyticsStoreFactory,
-  HttpAnalyticsPricingFeed,
-  InlineAnalyticsPersister,
-  readAnalyticsTranscriptEvidence,
-  WorkerAnalyticsPersister,
-  WorkerTranscriptFolds,
-} from '../src/adapters/analytics/index.ts';
-import {
-  decryptPdfInMemory,
-  FileAttachmentOriginals,
-  FileSessionAttachmentStore,
-  NodeRawDeflate,
-  probePdfDecryptWorker,
-} from '../src/adapters/attachments/index.ts';
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
-import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
+import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
 import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
 import {
@@ -139,28 +124,48 @@ import {
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
+import {
+  BunSqliteAnalyticsStoreFactory,
+  HttpAnalyticsPricingFeed,
+  InlineAnalyticsPersister,
+  readAnalyticsTranscriptEvidence,
+  WorkerAnalyticsPersister,
+  WorkerTranscriptFolds,
+} from '../src/adapters/analytics/index.ts';
+import {
+  decryptPdfInMemory,
+  FileAttachmentOriginals,
+  FileSessionAttachmentStore,
+  NodeRawDeflate,
+  probePdfDecryptWorker,
+} from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import { FilePendingContext, FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
+import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
+  JournalBoardChecks,
   StorageSessionFocus,
   StorageSessionParents,
 } from '../src/adapters/board/session-board-adapters.ts';
-import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
+import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
 import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
+import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
-  AgendaCardLinks,
-  BoardService,
-  HistoryActivityDeriver,
-  NoLaneProposals,
-  NoPendingContext,
-  ReopenDeliveryLadder,
-  SessionCards,
-} from '../src/lib/board/index.ts';
+  AgendaImportAgenda,
+  FileBoardImportMarker,
+  FileLegacyTaskSource,
+  StorageImportSessions,
+} from '../src/adapters/board-import/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
-import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
+import {
+  fileFleetCatalogDeps,
+  readDeclaredAccountModel,
+  sessionStatusOf,
+} from '../src/adapters/fleet/account-model-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
@@ -191,6 +196,7 @@ import {
   WorkerHousekeepingJobs,
 } from '../src/adapters/housekeeping/index.ts';
 import {
+  AgendaLaneAgenda,
   AnalyticsTranscriptSpend,
   AsyncActivityScope,
   AuthorizedProviderProbe,
@@ -199,8 +205,6 @@ import {
   BrowserProfileStore,
   BrowserWorkerClient,
   BunApiServer,
-  FileLegacyWireUseStore,
-  systemLegacyWireTimers,
   BunConnectorProcesses,
   BunProcessProbe,
   BunRelayCarrier,
@@ -225,15 +229,13 @@ import {
   FileCgroupApplyStatusStore,
   FileCgroupConfigStore,
   FileDaemonConfig,
-  FileModelCatalogCache,
-  AgendaLaneAgenda,
   FileLaneSetStore,
-  GitRepositoryProbe,
-  StorageSessionFacts,
+  FileLegacyWireUseStore,
+  FileModelCatalogCache,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
-  FileRestartQueue,
   FileQuotaFailoverStateStore,
+  FileRestartQueue,
   FileRoutingCatalog,
   FileScratchCollector,
   FileSecretDocumentStore,
@@ -244,6 +246,8 @@ import {
   FileUpdateDocuments,
   foreignHistoryRoots,
   GitHubLatestRelease,
+  GitProjectFacts,
+  GitRepositoryProbe,
   HostedModelCatalog,
   HostedRelayDirectory,
   HostedTunnelProvisioner,
@@ -295,10 +299,12 @@ import {
   StateUnlockLedger,
   StateVapidKeys,
   StorageConversationOwners,
+  StorageSessionFacts,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
   stackSamplerEnabled,
+  systemLegacyWireTimers,
   TmuxPaneSnapshot,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
@@ -335,7 +341,6 @@ import {
 } from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
-import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import {
@@ -469,13 +474,6 @@ import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import {
-  FileTaskBoardRepository,
-  NodeTaskBoardCredentialIssuer,
-  StateBoardAdminCapability,
-  StateTaskBoardCoordinatorReplacementCapability,
-  StorageTaskBoardSessionDirectory,
-} from '../src/adapters/task-boards/index.ts';
-import {
   FileTaskStore,
   KeyedSerialExecutor as TaskBoardSerialExecutor,
   TaskRecordService,
@@ -542,6 +540,21 @@ import {
   AnalyticsPricingService,
 } from '../src/lib/analytics/pricing-service.ts';
 import {
+  AgendaCardLinks,
+  BOARD_SWEEP_INTERVAL_MS,
+  BoardService,
+  BoardSweep,
+  BoardTurnCheck,
+  LivenessActivityDeriver,
+  type PendingContext,
+  PendingContextDelivery,
+  ReopenDeliveryLadder,
+  SessionCards,
+  type SessionLivenessSource,
+} from '../src/lib/board/index.ts';
+import { GitHubWatcher } from '../src/lib/board-github/index.ts';
+import { BoardImporter, LaneSetImportProjects } from '../src/lib/board-import/index.ts';
+import {
   ConfigChangeLedger,
   ConfigChangeStreamService,
   ConfigFilesService,
@@ -552,10 +565,15 @@ import { FILE_EVENT_POLL_MS, FileEventHub } from '../src/lib/file-events/index.t
 import { AccountModelAgentControlPolicy, type AgentControlPolicy } from '../src/lib/fleet/agent-control.ts';
 import { FleetCatalogService } from '../src/lib/fleet/catalog-service.ts';
 import { CodexAppServerSupervisor } from '../src/lib/fleet/codex-runtime.ts';
-import { createFleetCredentialsSubsystem, FleetCredentialCatalog } from '../src/lib/fleet/credentials-service.ts';
+import {
+  CREDENTIAL_LIST_FRESH_MS,
+  createFleetCredentialsSubsystem,
+  FleetCredentialCatalog,
+} from '../src/lib/fleet/credentials-service.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
+import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
@@ -591,6 +609,16 @@ import {
   type AccountInventoryPort,
   AccountModelConversationListPolicy,
   ActivityLedger,
+  type AgendaActor,
+  AgendaBoardUndelivered,
+  AgendaBuzz,
+  AgendaChangeFanout,
+  AgendaConversation,
+  AgendaReplyBatcher,
+  AgendaReplyDelivery,
+  AgendaResurfacer,
+  AgendaService,
+  AgendaTurnNudge,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -614,25 +642,14 @@ import {
   type ApiServerPort,
   type ArgumentAnswer,
   type AssigneeObservation,
-  type AgendaActor,
-  AgendaBoardUndelivered,
-  AgendaBuzz,
-  AgendaChangeFanout,
-  LaneProposalAcceptance,
-  LaneSetService,
-  SessionProjects,
-  AgendaConversation,
-  AgendaReplyBatcher,
-  AgendaReplyDelivery,
-  AgendaResurfacer,
-  AgendaService,
-  AgendaTurnNudge,
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
   AutoResumeService,
+  adoptAgendaDefault,
   adoptedTranscriptProvenance,
   advertisesForeignAddress,
+  agendaBlockNotice,
   agentSpokenName,
   answerArguments,
   answerPaused,
@@ -655,7 +672,6 @@ import {
   CgroupLaunchPlanner,
   CgroupService,
   ChallengeLedger,
-  type ChildGrantRequester,
   ClaudeTranscriptParser,
   type ClockPort,
   type CloudflaredLocatorPort,
@@ -676,9 +692,8 @@ import {
   CredentialAgentIdentities,
   CredentialUsageSource,
   canServeModel,
-  childGrantRequester,
-  choosesPortAtBind,
   chooseRelayCarrierSources,
+  choosesPortAtBind,
   claimStartName,
   classifyPaneProcesses,
   codexModelProvider,
@@ -692,8 +707,8 @@ import {
   createFoundationPaths,
   createMountedDispatcher,
   createMountedSocketDispatcher,
-  createSessionPaths,
   createSessionDirectory,
+  createSessionPaths,
   createWardenPaths,
   currentLaunchEffort,
   currentLaunchModel,
@@ -736,7 +751,11 @@ import {
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
   exactWorkerAssignee,
+  FileConversationDescriber,
+  FileForeignTranscriptReader,
+  type FileSystemPort,
   FixedSettingsUnreadableError,
+  type FleetEventSource,
   FleetEventStreamService,
   FleetLaunchEnvironment,
   FleetLaunchRenewal,
@@ -745,10 +764,7 @@ import {
   FleetRefreshService,
   FleetSecretReferences,
   FleetWardenAgents,
-  FileConversationDescriber,
-  FileForeignTranscriptReader,
   ForeignHistoryImporter,
-  type FileSystemPort,
   type FoundationPaths,
   fastStartRefusal,
   findAccountByAgent,
@@ -763,8 +779,8 @@ import {
   HandoverReconcileLoop,
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
-  HarnessPromptAnswerDelivery,
   HarnessPromptAgenda,
+  HarnessPromptAnswerDelivery,
   HarnessQuirkService,
   HarnessUpdateService,
   type HarnessVersionPort,
@@ -782,26 +798,27 @@ import {
   harnessOverrideFailures,
   harnessPreflightSummary,
   harnessQuirks,
+  InferredLaneProposer,
   InitialAttachmentError,
   InstructionRefresh,
+  type InterruptedLaunchOutcome,
+  InterruptedLaunchReconciler,
   InvalidDeadlineRefused,
-  outdatedSections,
-  RestartBusy,
-  RestartService,
-  type RestartSubject,
-  withContext,
-  withOutdated,
   type IoPressurePort,
   type IoPressureSourcePort,
   instructionsReplyKey,
   isControlAttachable,
   isQuestionScopedRequestId,
   isReapTerminalStatus,
-  isTaskBoardError,
+  isTmuxServerAbsent,
   JevTriageGuard,
+  type JsonValue,
   jsonObject,
   KnownAndFerretFolders,
+  LaneProposalAcceptance,
+  LaneSetService,
   type LearningSubsystem,
+  LegacyWireUseCounter,
   LessonsService,
   LiveDeviceConnections,
   type LivenessSample,
@@ -839,7 +856,6 @@ import {
   type NameAllocationRequest,
   type NameAllocationResult,
   NameAllocator,
-  SystemCallsignIssuer,
   type NameClaim,
   type NameSubsystem,
   NO_IO_PRESSURE,
@@ -852,6 +868,7 @@ import {
   type OperatorMessageSource,
   OperatorReadService,
   OutboundProviderAuthorizer,
+  outdatedSections,
   overriddenBy,
   PacedTranscriptParser,
   PairedPushDevices,
@@ -893,7 +910,6 @@ import {
   RELAY_DIRECTORY_NOT_ASKED,
   RELOAD_THE_APP,
   RETIRED_ACCOUNT_MODEL_NOTICE,
-  agendaBlockNotice,
   RETIRED_FLEET_BLOCK_NOTICE,
   RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   RecommendError,
@@ -905,6 +921,9 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
+  RestartBusy,
+  RestartService,
+  type RestartSubject,
   type ResumeAnswerAgenda,
   ResumeCancelled,
   type ResumeLauncher,
@@ -934,6 +953,8 @@ import {
   retireOperatorPassword,
   runtimeQuarantineState,
   type ScratchReclamation,
+  SESSION_ROSTER_MAX_AGE_MS,
+  SESSION_STATUS_TALLY_MAX_AGE_MS,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
   type SecretCloneIdentitySource,
   SecretDirectory,
@@ -952,15 +973,14 @@ import {
   SendTracker,
   SendUnconfirmed,
   type SerialExecutor,
-  adoptAgendaDefault,
   SessionAgendaModeService,
   type SessionAgendaModeSubsystem,
+  SessionAgendaProjection,
   type SessionAncestor,
   SessionAnswerError,
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
   SessionAttachService,
-  SessionAgendaProjection,
   SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
@@ -987,6 +1007,7 @@ import {
   SessionObserver,
   SessionPermissionService,
   SessionPlanner,
+  SessionProjects,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
   SessionRenameError,
@@ -996,6 +1017,8 @@ import {
   SessionResumeService,
   type SessionResumeSubsystem,
   type SessionRootPinner,
+  SessionRoster,
+  SessionStatusTally,
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
@@ -1004,10 +1027,12 @@ import {
   SessionSignalError,
   SessionSignalService,
   type SessionSignalSubsystem,
+  SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   SessionTranscriptReader,
   SessionTranscriptResolver,
   type SessionTranscriptTail,
+  SharedFleetBacklog,
   SignalRefused,
   type SkillRuntimeHome,
   SkillsInventoryService,
@@ -1026,6 +1051,7 @@ import {
   SttEnhancementService,
   type SttEnhancementSubsystem,
   SurfaceControl,
+  SystemCallsignIssuer,
   searchTranscript,
   secretsMatch,
   selectBrowserWorker,
@@ -1036,8 +1062,6 @@ import {
   suggestedOllamaModel,
   supersededCarrierKeys,
   type TaskAssigneeCandidate,
-  type TaskBoardSubsystem,
-  type TaskBoardTaskActionAuthorizer,
   TaskError,
   type TaskSubsystem,
   TERMINAL_ANALYTICS_STATUSES,
@@ -1050,19 +1074,17 @@ import {
   type TerminalSessionResolver,
   type TerminalSubsystem,
   TmuxController,
-  isTmuxServerAbsent,
-  type JsonValue,
   type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
+  type TranscriptImageLocator,
+  TranscriptImageReader,
+  type TranscriptImages,
   TranscriptProvenanceCapture,
   type TranscriptSearchMatch,
   type TranscriptSearchOptions,
   TranscriptSendEvidence,
   type TranscriptSource,
-  type TranscriptImageLocator,
-  TranscriptImageReader,
-  type TranscriptImages,
   TranscriptTailCache,
   type TriageGuardPort,
   TunnelCarrier,
@@ -1073,7 +1095,6 @@ import {
   type TunnelSwitchPort,
   TurnChanges,
   tailTranscriptEvents,
-  taskBoardTaskActionAuthorizer,
   temporaryFilePath,
   transcriptKey,
   transcriptLaunchArguments,
@@ -1091,16 +1112,18 @@ import {
   usageProbeUrls,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
+  WARDEN_ESCALATION_SOURCE,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
   WardenCallsignTakenError,
   type WardenFleetSession,
+  type WardenJournal,
+  type WardenBoardPort,
   WardenLivenessMonitor,
+  type WardenRevivePorts,
+  WardenReviveService,
   type WardenSubsystem,
   WardenSweepLoop,
-  WardenReviveService,
-  type WardenJournal,
-  type WardenRevivePorts,
   WardenSweepService,
   WatchedDocument,
   WatchedPanes,
@@ -1112,11 +1135,12 @@ import {
   type WebRtcPeerEngine,
   type WebRtcSessionFactory,
   type WebRtcSignallingSubsystem,
-  LegacyWireUseCounter,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
+  withContext,
   withLivenessLedger,
+  withOutdated,
   xvfbMissingMessage,
 } from '../src/lib/index.ts';
 import {
@@ -1129,12 +1153,15 @@ import {
   JevPackRanker,
   type PackParent,
   type PackProbeRequest,
+  PACK_ROUTING_MAX_AGE_MS,
+  PackRoutingKeep,
   PackService,
   PackStartRefused,
   ProbeCache,
   packInstructed,
   packLaunchDefault,
   RoutingMigration,
+  runningChildCount,
 } from '../src/lib/pack/index.ts';
 import { IDLE_DAEMON_BUDGETS } from '../src/lib/performance/budgets.ts';
 import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/profiler.ts';
@@ -1433,6 +1460,18 @@ export interface DaemonWorld {
    * terminal is gone, and those are the ones that were running when the host went down.
    */
   readonly createAutoResume: (storage: DaemonStorage, resume: AutoResumeRevive) => AutoResumeBoot;
+  /**
+   * Settles every launch the previous daemon process left in flight (`InterruptedLaunchReconciler`).
+   *
+   * Run ONCE per boot, BEFORE the daemon serves: nothing in this process can be launching yet, so a
+   * record still saying `created` or `starting` with no live pane is a launch that died with the
+   * old process. Without it such a session is stuck for good — it holds a Pack slot, holds its
+   * conversation lease, and no exit settle will ever move it on.
+   */
+  readonly reconcileInterruptedLaunches: (
+    storage: DaemonStorage,
+    panes: Pick<ResumeLauncher, 'observe'>,
+  ) => Promise<InterruptedLaunchOutcome>;
   /**
    * The terminal a revive replaces: tmux panes on the daemon's own private socket, never the host's
    * default one.
@@ -1840,22 +1879,28 @@ export interface BrowserTransportWorld {
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
 }
 
+/** Where the project boards report what they could not do: the daemon's log. */
+const boardDiagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+
 /** The board, and the cards a start makes on it. */
 interface BoardWorld {
+  readonly store: FileBoardStore;
   readonly board: BoardService;
   readonly cards: SessionCards;
+  /** Which card each session works on (`config.focusTask`): what the Warden tells a ferret it starts again. */
+  readonly focus: StorageSessionFocus;
 }
 
 /**
  * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage,
  * and the cards every start with a brief gets (`SessionCards`, board-design.md §3.1).
  *
- * Lanes and projects are U3's `LaneSetService`. Some ports are STUBS until their units land, and each is
- * named so: lane proposals for a project with none (`NoLaneProposals`, until the template inference lands, so
- * such a card is filed on Unfiled with a hint), and activity and the lead's pending context
- * (`HistoryActivityDeriver` and `NoPendingContext`, U5). The agenda link reads each ferret's agenda through
- * the agenda service, and a reopen is delivered through the ordinary send path. The machine id is the
- * pairing identity's daemon id, which a write waits for rather than inventing one.
+ * Lanes and projects are U3's `LaneSetService`; a start in a project with no lanes is proposed the template its
+ * folder suggests (`InferredLaneProposer`).
+ * Activity is derived from the session roster with the Warden's liveness ledger laid over it, and the
+ * lead's quiet lines wait in its pending context for its next turn. The agenda link reads each ferret's
+ * agenda through the agenda service, and a reopen is delivered through the ordinary send path. The
+ * machine id is the pairing identity's daemon id, which a write waits for rather than inventing one.
  */
 function createBoardWorld(
   paths: FoundationPaths,
@@ -1864,44 +1909,50 @@ function createBoardWorld(
   clock: SystemClock,
   machineId: () => string | undefined,
   /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
-  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project'>,
+  lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project' | 'apply'>,
   sends: Pick<SessionSendService, 'send'>,
   /** One ferret's open agenda items; read lazily, because the agenda service is built after the board. */
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
   bin: string,
+  /** Every session's life-signs, with the Warden's liveness ledger laid over them, for "last touched". */
+  sessions: SessionLivenessSource,
+  /** Where a lead's quiet lines wait for its next turn (`lib/board/pending-context.ts`). */
+  pending: PendingContext,
 ): BoardWorld {
-  const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+  const diagnostics = boardDiagnostics;
   const parents = new StorageSessionParents(storage);
   const focus = new StorageSessionFocus(storage);
+  // ONE store per daemon: the service and the legacy import share its id counter.
+  const store = new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics);
   const board = new BoardService({
-    store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics),
+    store,
     lanes,
     parents,
     focus,
     reopen: new ReopenDeliveryLadder(new SendReopenMessenger(sends), diagnostics),
-    activity: new HistoryActivityDeriver(),
+    activity: new LivenessActivityDeriver({ sessions, clock }),
     agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
     changes: new JournalBoardChanges(storage),
     clock,
-    diagnostics,
+    diagnostics: boardDiagnostics,
     machineId,
     serial: new KeyedSerialExecutor(),
   });
   const cards = new SessionCards({
     board,
     lanes,
-    proposer: new NoLaneProposals(),
+    proposer: new InferredLaneProposer(lanes, new GitProjectFacts()),
     // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
     projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
     focus,
     parents,
     sessions: new StorageSessionCardFacts(storage, id => createSessionPaths(paths, id).directory),
-    pending: new NoPendingContext(),
+    pending,
     clock,
     diagnostics,
     bin,
   });
-  return { board, cards };
+  return { store, board, cards, focus };
 }
 
 /**
@@ -1920,7 +1971,6 @@ function createTaskSubsystem(
   storage: DaemonStorage,
   clock: SystemClock,
   boards: TaskBoardSerialExecutor,
-  boardActions: TaskBoardTaskActionAuthorizer,
 ): TaskSubsystem {
   /** The document a session's own state directory holds, parsed, or `undefined` when unusable. */
   const observed = async (id: SessionId): Promise<AssigneeObservation | undefined> => {
@@ -1986,7 +2036,6 @@ function createTaskSubsystem(
       return resolved;
     },
     now: () => clock.now(),
-    boardActions,
   };
 }
 
@@ -2293,7 +2342,6 @@ function createSessionControlSubsystem(
   callsigns: CallsignClaims,
   digests: PayloadDigestPort,
   attachments: InitialAttachments,
-  boardGrants: ChildGrantRequester,
   /**
    * The evidence a session's transcript is identified from, taken here because here is the only
    * place it exists: the wrapper about to be launched, the directory it will run in, and — for
@@ -2371,7 +2419,7 @@ function createSessionControlSubsystem(
   };
 
   return {
-    start: async (request, requestId, payload, boardCapability, delegation) => {
+    start: async (request, requestId, payload, delegation) => {
       const already = spent.get(requestId);
       if (already !== undefined) {
         if (already.payload !== payload)
@@ -2385,20 +2433,6 @@ function createSessionControlSubsystem(
       // which is never what a caller meant; the resolver refuses a relative one for the same reason.
       if (request.cwd === undefined)
         throw new SessionControlError('invalid', 'a start must name the absolute working directory to run in');
-      // The board ask, resolved BEFORE anything is written and as one value rather than two loose
-      // ones: the role and the secret that authorizes it are only ever meaningful together, and a
-      // start that carried the role without the secret would otherwise be startable with the grant
-      // silently skipped — a session whose document claims board access nothing asked the board for.
-      // The mount refuses this case already; this is the fail-closed answer for any other caller.
-      const boardAsk = ((): { readonly role: TaskBoardChildAccess; readonly capability: string } | undefined => {
-        if (request.boardAccess === 'none') return undefined;
-        if (boardCapability === undefined || boardCapability === '')
-          throw new SessionControlError(
-            'invalid',
-            `a start asking for ${request.boardAccess} board access must present the requesting session's own board capability`,
-          );
-        return { role: request.boardAccess, capability: boardCapability };
-      })();
       const { account, executable } = await resolveStartAccount(
         accounts,
         request.agent,
@@ -2569,10 +2603,6 @@ function createSessionControlSubsystem(
         // the next. The generation is the daemon-side counter of those relaunches.
         incarnation: `${id}-1`,
         runtimeGeneration: 1,
-        // What the caller asked for, on the document the API projects. Recording `none` for a start
-        // that asked for `worker` would make every surface reading this session disagree with the
-        // grant intent the board is holding for it.
-        boardAccess: request.boardAccess,
         // What the caller asked for, kept beside the model that was actually resolved for it: the
         // hint is evidence about the request and the model is the decision.
         modelHint: request.model ?? account.defaultModel ?? '',
@@ -2644,10 +2674,6 @@ function createSessionControlSubsystem(
         await pack
           .adopt(id, ordinaryFerret(stamped.label, stamped.provenance.wardenLineage), request.parent)
           .catch(() => undefined);
-        // AFTER the record and BEFORE the launch, which is the only window in which both halves are
-        // true: the board's session directory reads the session's own documents, so the target must
-        // exist for the grant to name it, and a refusal must not have cost an agent.
-        if (boardAsk !== undefined) await boardGrants(boardAsk.capability, id, boardAsk.role);
         // THE CARD, after the record and before the launch (board-design.md §3.1): the agent's first turn
         // already has its focus card, and a start refused before here leaves none. A miner, a guide builder
         // or a warden is not work on a board. `open` never rejects: a board failure never fails a start.
@@ -2668,14 +2694,6 @@ function createSessionControlSubsystem(
               },
         );
       } catch (error) {
-        // A BOARD refusal is not a launch failure and must not be answered as one: nothing launched,
-        // and the caller asked for a session WITH board access. The record is retired with the
-        // board's own reason so the refusal leaves no session that will never run, and the error
-        // travels on for the mount to restate in the board's own vocabulary.
-        if (isTaskBoardError(error)) {
-          await lifecycle.stop(id, `board access refused: ${error.message}`).catch(() => undefined);
-          throw error;
-        }
         // The record survives a failed launch with the reason in it, so the failure is answered with
         // the session that holds the evidence rather than an error the caller cannot follow up.
         const failed = storage.findSession(id) === undefined ? undefined : await view(id).catch(() => undefined);
@@ -2717,7 +2735,10 @@ function createSessionControlSubsystem(
       try {
         await lifecycle.stop(id, reason);
       } catch (error) {
-        throw new SessionControlError('failed', error instanceof Error ? error.message : String(error));
+        throw new SessionControlError(
+          error instanceof SessionStopPending ? 'pending' : 'failed',
+          error instanceof Error ? error.message : String(error),
+        );
       }
       return await view(id);
     },
@@ -2908,7 +2929,6 @@ function createConversationAdopter(
         hypermedia: true,
         incarnation: `${id}-1`,
         runtimeGeneration: 1,
-        boardAccess: 'none',
         modelHint: conversation.model ?? account.defaultModel ?? '',
         model: plan.model,
         remoteControl: false,
@@ -3184,6 +3204,12 @@ function createSessionSendSubsystem(
    * triggers it, and the person's words are never changed.
    */
   instructions: Pick<InstructionRefresh, 'queueIfStale'>,
+  /**
+   * The quiet board events held for the ferret (`lib/board/pending-context.ts`), put on top of the next
+   * message it receives here — the owner's or a teammate's — so they reach it with a turn it was going
+   * to take anyway and never start one.
+   */
+  pending: PendingContextDelivery,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -3216,16 +3242,22 @@ function createSessionSendSubsystem(
       const turn = person
         ? await conversation.prepare(id, request.message)
         : { message: request.message, referenced: [] };
-      const outcome = await service
-        .send({
+      const outcome = await pending
+        .send(
           id,
-          sendId: request.sendId,
-          message: messageWithAttachments(turn.message, delivered),
-          ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
-          ...(request.now === undefined ? {} : { now: request.now }),
-          ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
-          ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
-        })
+          turn.message,
+          async message =>
+            await service.send({
+              id,
+              sendId: request.sendId,
+              message: messageWithAttachments(message, delivered),
+              ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+              ...(request.now === undefined ? {} : { now: request.now }),
+              ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+              ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
+            }),
+          (sent, line) => sent.record.message.includes(line),
+        )
         .catch((error: unknown) => sendRefusal(error));
       // Only once the words were accepted: an item must never read as the ferret's turn for a message the
       // ferret was not given.
@@ -3867,9 +3899,10 @@ function createPackTree(sessions: SessionDirectorySubsystem): PackTree {
         id: view.config.id,
         interactive: view.config.mode === 'interactive',
         depth: await depth(view.config.id),
-        runningChildren: all.filter(
-          child => child.config.parent === view.config.id && !HYPERMEDIA_NOT_RUNNING.has(child.state.status),
-        ).length,
+        runningChildren: runningChildCount(
+          view.config.id,
+          all.map(child => ({ parent: child.config.parent, status: child.state.status })),
+        ),
         cwd: view.config.cwd,
         pack: view.config.pack,
       };
@@ -4077,8 +4110,15 @@ interface WardenParts {
   readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
   /** This machine's name, as pairing gave it: every Warden notification says which machine it is about. */
   readonly machineName: () => string | undefined;
+  /**
+   * Where the liveness monitor's ledger is published for the board, which judges "last touched" from the
+   * same evidence. Filled in here because the monitor is built here; until then it reads nothing.
+   */
+  readonly ledgers: { read: LivenessLedgerReader };
   /** What auto-revive reaches the rest of the daemon through: the journal, the resume, the tmux probe, the clock. */
   readonly revive: Pick<WardenRevivePorts, 'events' | 'resume' | 'tmuxReady' | 'sleep'>;
+  /** The project boards: the cards the Warden reports orphaned, and the card a ferret it starts again carries on. */
+  readonly board: WardenBoardPort;
 }
 
 /**
@@ -4128,6 +4168,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     },
     WARDEN_LIVENESS_TICK_SECONDS,
   );
+  parts.ledgers.read = sessionId => liveness.ledger(sessionId);
   const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
   const wardenJournal: WardenJournal = {
     record: (type, data) => process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`),
@@ -4135,6 +4176,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const revive = new WardenReviveService({
     ...parts.revive,
     journal: wardenJournal,
+    focusCard: async sessionId => await parts.board.focusCard(sessionId),
     // The breaker's one notice lands on the session that tripped it, as a plain notification that buzzes.
     notifyOwner: async notice => {
       await parts.attention
@@ -4163,6 +4205,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const service = new WardenSweepService(
     {
       revive,
+      board: parts.board,
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
       // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
@@ -4186,17 +4229,24 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         nudge: async (sessionId, message) => {
           await parts.sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
         },
-        resume: async sessionId => {
-          await parts.resume.resume({ id: parseSessionId(sessionId), actor: 'warden' });
+        // A message is the turn the ferret is handed (its focus card, `focus-card.ts`); without one the resume
+        // domain hands its own default turn.
+        resume: async (sessionId, message) => {
+          await parts.resume.resume({
+            id: parseSessionId(sessionId),
+            actor: 'warden',
+            ...(message === undefined ? {} : { message }),
+          });
         },
         // A restart is the resume path told to replace the pane even when it looks alive: a frozen process
         // is still "alive", and typing into it would hand the turn to the very thing that is stuck. The
         // conversation is resumed in the new process, and the warden policy keeps every automatic guard.
-        restart: async sessionId => {
+        restart: async (sessionId, message) => {
           await parts.resume.resume({
             id: parseSessionId(sessionId),
             actor: 'warden',
             policy: { ...resolveResumePolicy('warden'), replaceLiveTerminal: true },
+            ...(message === undefined ? {} : { message }),
           });
         },
         stop: async (sessionId, reason) => {
@@ -4257,7 +4307,6 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
             prompt: request.prompt,
             cwd: request.cwd,
             ...(request.effort === undefined ? {} : { effort: request.effort }),
-            boardAccess: 'none' as const,
           };
           const payload = JSON.stringify(start);
           const view = await parts.control.start(start, crypto.randomUUID(), payload).catch((error: unknown) => {
@@ -4323,6 +4372,31 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
                 kind: 'info',
                 premise: request.premise,
                 ...(request.terms === undefined ? {} : { terms: [...request.terms] }),
+              },
+              WARDEN_ESCALATION_ACTOR,
+            )
+            .catch(() => undefined);
+          if (mutation === undefined || !mutation.ok) return 'rejected';
+          return mutation.change === 'created' || mutation.change === 'refreshed' ? mutation.change : 'unchanged';
+        },
+        // A plain notice about a CARD (an orphaned one): tied to it, so the card and the Inbox name each other.
+        notice: async (sessionId, notice) => {
+          const mutation = await parts.attention
+            .raise(
+              sessionId,
+              {
+                source: WARDEN_ESCALATION_SOURCE,
+                sourceRef: notice.sourceRef,
+                subject: notice.subject,
+                why: notice.why,
+                context: notice.context,
+                waitingSince: notice.waitingSince,
+                howToResolve: notice.howToResolve,
+                notice: true,
+                title: notice.title,
+                kind: 'info',
+                premise: notice.premise,
+                task: notice.task,
               },
               WARDEN_ESCALATION_ACTOR,
             )
@@ -5897,7 +5971,7 @@ function createAgentToolsSubsystem(input: {
 /** Who an agent is, from the session credential it presents — the one resolver every agent route uses. */
 function agentIdentities(storage: DaemonStorage): CredentialAgentIdentities {
   return new CredentialAgentIdentities(
-    new StorageTaskBoardSessionDirectory({
+    new StorageCredentialedSessions({
       sessionIds: () => storage.listSessions().map(session => session.id),
       readConfig: async id => await storage.readConfig(id as SessionId),
       readState: async id => await storage.readState(id as SessionId),
@@ -6109,54 +6183,6 @@ const TERMINAL_IDLE_TIMEOUT_MS = 60 * 60_000;
  * single JSON snapshot, so two landing together would otherwise lose one. The key is a constant
  * because there is exactly one board per state home — unlike the task boards, which are per session.
  */
-/**
- * The task-board membership lifecycle, over the state home and the opened session index.
- *
- * ONE document for the whole fleet, at the state home's root beside the credential files, because the
- * reducers reason ACROSS boards: an invitation acceptance searches every board for the one that names
- * the accepting session, and a binding is what proves a session is not already a member elsewhere.
- * Sharding by board would make each of those a fan-out read no per-file lock could keep consistent.
- *
- * DELIVERY MERGES rather than replaces. The session environment store holds one document per session
- * and `FY_SESSION_BOARD_CAPABILITY` already lives in it, so writing a board capability by replacing
- * that document would take away the session's own identity — the credential the invitation-accept path
- * needs — in the act of granting it board access. The read-modify-write runs inside the SAME executor
- * every session mutation uses, so it cannot interleave with a start writing the same file.
- */
-function createTaskBoardSubsystem(
-  paths: FoundationPaths,
-  files: StateFileSystem,
-  storage: DaemonStorage,
-  clock: SystemClock,
-  environments: FileSessionEnvironmentStore,
-  serial: KeyedSerialExecutor,
-): TaskBoardSubsystem {
-  const operator = new StateBoardAdminCapability(paths, files);
-  return {
-    repository: new FileTaskBoardRepository(join(paths.home, 'task-boards.json')),
-    sessions: new StorageTaskBoardSessionDirectory({
-      sessionIds: () => storage.listSessions().map(session => session.id),
-      readConfig: async id => await storage.readConfig(id as SessionId),
-      readState: async id => await storage.readState(id as SessionId),
-    }),
-    issuer: new NodeTaskBoardCredentialIssuer(),
-    coordinatorReplacementCapabilities: new StateTaskBoardCoordinatorReplacementCapability(paths, files),
-    now: () => clock.now(),
-    operatorCapabilityHash: async () => await operator.hash(),
-    deliver: async (sessionId, variables) => {
-      const id = tryParseSessionId(sessionId);
-      // A capability minted for an id the layout would refuse has nowhere to be written. The board
-      // that granted it is already committed, so this refuses loudly rather than writing outside the
-      // session tree.
-      if (id === undefined) throw new TaskError('invalid', `${JSON.stringify(sessionId)} is not a usable session id`);
-      await serial.run(`session:${id}`, async () => {
-        const current = await environments.read(id);
-        await environments.write(id, { ...current, ...variables });
-      });
-    },
-  };
-}
-
 /**
  * The human browser-login window, over the daemon's own private profile and a private X display.
  *
@@ -7701,6 +7727,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new GitRepositoryProbe(),
       [...COMMON_SCRATCH_ROOTS, tmpdir()],
     );
+  /**
+   * ONE launch gate and ONE turn store for every path that relaunches or hands over a turn.
+   *
+   * The gate is a process-wide ledger of launches in flight, and its whole value is that a caller
+   * arriving mid-bootstrap WAITS instead of fighting for the same terminal name — which a second gate
+   * would not know to do, because it would see no launches at all. The turn store owns the numbered
+   * turn document and the exact set of markers a relaunch clears; a second one is how the revive and
+   * the send drift until a marker one writes is one the other does not clear.
+   */
+  const launchGate = new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds));
+  const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -7727,6 +7764,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // and a retried start of the SAME session interleave, and the loser's write would overwrite a
         // live session's record. The service is per request; the serialization is not.
         serial: sessionMutations,
+        // The SAME gate a revive registers in, so a stop waits boundedly for a relaunch in flight
+        // instead of queueing forever behind one that never settles.
+        launches: launchGate,
       },
       defaultSessionLifecycleSettings,
     );
@@ -7896,17 +7936,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const codexRuntimeModels = new CodexRuntimeCatalogCache((binary, cwd) =>
     new CodexAppServerCatalog({ clientName: DAEMON_NAME, clientVersion: daemonVersion }).models(binary, cwd),
   );
-  /**
-   * ONE launch gate and ONE turn store for every path that relaunches or hands over a turn.
-   *
-   * The gate is a process-wide ledger of launches in flight, and its whole value is that a caller
-   * arriving mid-bootstrap WAITS instead of fighting for the same terminal name — which a second gate
-   * would not know to do, because it would see no launches at all. The turn store owns the numbered
-   * turn document and the exact set of markers a relaunch clears; a second one is how the revive and
-   * the send drift until a marker one writes is one the other does not clear.
-   */
-  const launchGate = new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds));
-  const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** Set by `createSessionHealth`; read by `createAutoResume` — the two halves of one boot-time observation. */
   let bootExits: BootExitRecorder | undefined;
   /**
@@ -8116,6 +8145,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         run: async () => await service.run(),
       };
     },
+    reconcileInterruptedLaunches: async (storage, panes) =>
+      await new InterruptedLaunchReconciler({
+        repository: new StorageResumeRepository(storage),
+        // The same gate, queue and leases a start, a revive and a stop use, so the settle can never
+        // overwrite a launch this process did begin, nor interleave with a stop or a revive.
+        gate: launchGate,
+        panes,
+        serial: sessionMutations,
+        leases: conversationLeases(storage),
+        clock,
+      }).reconcile(),
     createSessionHealth: (storage, settings, loop) =>
       new SessionHealthService(
         {
@@ -8889,11 +8929,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return scratchGc.totals().reclaimedBytes;
         },
       };
-      // ONE board world for both callers that reach the board domain: the eight `/v1/task-boards`
-      // routes, and the child grant a `--board-access` start requests. Two worlds would give a start
-      // its own repository handle over the same document, and the atomicity of `transaction` is what
-      // the whole authorization model rests on.
-      const boards = createTaskBoardSubsystem(paths, stateFiles, storage, clock, sessionEnvironments, sessionMutations);
       // The board's projects and their lanes (U3), built before the board that reads them. A proposal is raised
       // on the proposing ferret's agenda, and the owner's Accept confirms it (in the agenda's change fanout).
       // The agenda and the board are read lazily: both are built after this.
@@ -8916,6 +8951,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // BEFORE session control and Pack, which make a card with every start that has a brief. The agenda link
       // reads the agenda service lazily: it is built further down, and a board is only read once requests flow.
+      // "Last touched" is judged from the session roster with the Warden's liveness ledger laid over it; the
+      // ledger is published when the Warden builds its monitor, further down, and reads nothing until then.
+      const wardenLedgers: { read: LivenessLedgerReader } = { read: () => undefined };
+      const boardSessions = new StorageSessionRoster(storage, sessionId => wardenLedgers.read(sessionId));
+      const boardPending = new FilePendingContext(
+        join(paths.state, 'board'),
+        stateFiles,
+        new KeyedSerialExecutor(),
+        boardDiagnostics,
+      );
       const boardWorld = createBoardWorld(
         paths,
         stateFiles,
@@ -8930,7 +8975,39 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           return listed.value.items;
         },
         CLIENT_NAME,
+        boardSessions,
+        boardPending,
       );
+      // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
+      // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
+      // the bind with the other loops, and stopped with the daemon.
+      const boardSessionFacts = new StorageSessionFacts(storage);
+      const boardNudgeDelivery = new PendingContextDelivery(boardPending);
+      const boardGitHub = new GitHubWatcher({
+        board: boardWorld.board,
+        gh: new GhCliRunner(),
+        copies: new GitWorkingCopies(),
+        sessions: { cwdOf: async sessionId => (await boardSessionFacts.read(sessionId))?.cwd ?? null },
+        projects: { projects: async () => await catalogs.projects() },
+        transcripts: createSessionTranscriptTail(storage),
+        // The board's nudge path (U5): the recipient's pending board context rides on top of the nudge.
+        nudges: {
+          send: async (sessionId, message) => {
+            await boardNudgeDelivery.send(sessionId, message, async composed => {
+              await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
+            });
+          },
+        },
+        timers: {
+          after: (ms, run) => {
+            const handle = setTimeout(asActivity(activities, 'board github watch', run), ms);
+            return () => clearTimeout(handle);
+          },
+        },
+        clock: { now: () => clock.now(), random: () => Math.random() },
+        diagnostics: boardDiagnostics,
+        version: daemonVersion,
+      });
       // The warden spawns wardens through the SAME start every other caller uses, so a warden is an
       // ordinary managed session that happens to carry the warden label — which is exactly what the
       // detector's lineage shield reads. A private launch path would produce a session the fleet
@@ -9000,8 +9077,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
       // A new ferret's agenda-mode default (docs/agenda.md), assigned once the agenda switch below exists.
       let adoptAgenda: (sessionId: SessionId, eligible: boolean) => Promise<void> = async () => undefined;
-      // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
-      const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
+      // Pack mode (docs/pack-mode.md): the load in effect, which the watcher replaces the moment a file changes
+      // and a write through the daemon replaces before it answers — so a saved pack.yaml applies to the next
+      // start. Never a load of its own: every running ferret's view builds a relaunch environment, which reads
+      // this, and a load rescans and reparses the whole configuration tree.
+      const packConfig = async (): Promise<PackConfig> => (await configFiles.inEffect()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
       // The routing line comes from Pack's service, composed further down; until then a launch carries none.
       let packRouting = async (): Promise<string | undefined> => undefined;
@@ -9059,9 +9139,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 ),
               write: async files => await new FileSessionAttachmentStore(() => crypto.randomUUID()).write(files),
             },
-            // The board grant a `--board-access` start asks for, over the same world and the same
-            // derived request id the standalone `/v1/task-boards/child-grants/request` route uses.
-            childGrantRequester(boards),
             transcriptProvenance,
             new NodeWorkingDirectoryResolver(),
             id => createSessionPaths(paths, id).directory,
@@ -9184,6 +9261,40 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // The one-time import of the old per-session task files onto the project boards. It shares the board's
+      // store with the board service (one id counter), proposes lanes through the lane service above, and
+      // points the open agenda items at their cards. Total: a bad file is reported, never a failed start.
+      const boardImporter = new BoardImporter({
+        tasks: new FileLegacyTaskSource(
+          () => storage.listSessions().map(session => session.id),
+          id => join(createSessionPaths(paths, parseSessionId(id)).directory, 'tasks.json'),
+        ),
+        store: boardWorld.store,
+        projects: new LaneSetImportProjects(laneSets, new GitProjectFacts()),
+        sessions: new StorageImportSessions(
+          () => storage.listSessions().map(session => session.id),
+          async () => await assigneeCandidates(storage),
+        ),
+        agenda: new AgendaImportAgenda(agendaBoards, () => new Date(clock.now()).toISOString()),
+        marker: new FileBoardImportMarker(join(paths.home, 'board-import.json')),
+        clock: { now: () => new Date(clock.now()).toISOString() },
+        machineId: () => attachmentDaemonId,
+      });
+      unrefTimer(2000, () => {
+        void boardImporter
+          .run()
+          .then(summary => {
+            if (summary.skipped) return;
+            const said = `board import: ${summary.imported} imported, ${summary.alreadyImported} already there, ${summary.linkedAsks} asks linked, ${summary.problems.length} problems`;
+            process.stderr.write(`${said}\n`);
+            for (const problem of summary.problems) {
+              process.stderr.write(
+                `board import: ${problem.sessionId ?? '-'} ${problem.taskId ?? ''} ${problem.detail}\n`,
+              );
+            }
+          })
+          .catch(() => undefined);
+      });
       // Each ferret's held answers (docs/agenda.md § Delivery). The send is awaited by the batcher, outside
       // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
       // must not wait on that. The send ledger keeps one message per batch send id, and is the one witness of
@@ -9320,6 +9431,26 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       setInterval(sweepDeadlines, AGENDA_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
+      // The board's own sweep (`lib/board/sweep.ts`): each minute a stale card's ferret is nudged through the
+      // ordinary send path, and a lead's quiet events wait in its pending context for its next turn.
+      const boardSweep = new BoardSweep({
+        board: boardWorld.board,
+        sessions: boardSessions,
+        memory: new FileSweepMemory(join(paths.state, 'board'), stateFiles, boardDiagnostics),
+        quiet: boardPending,
+        context: boardPending,
+        nudges: {
+          send: async (sessionId, message) => {
+            await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+          },
+        },
+        clock,
+        diagnostics: boardDiagnostics,
+      });
+      setInterval(
+        asActivity(activities, 'board sweep', async () => await boardSweep.tick()),
+        BOARD_SWEEP_INTERVAL_MS,
+      ).unref();
       // Agenda mode: the switch (the session document and its launch variable, written together like Pack's and
       // hypermedia's) and the one-time migration that turns it on for every ferret that already had open items —
       // they ARE its agenda.
@@ -9423,6 +9554,34 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         CLIENT_NAME,
       );
       armAgendaNudge(storage, attentionNudge, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
+        setTimeout(run, delayMs).unref();
+      });
+      // The board's turn-end check (board-design.md §3.4): a turn that edited, committed, pushed, started a
+      // sub-ferret or opened a PR while the session had no open card gets one nudge an hour. Armed on the same
+      // settled turn end as the agenda check, through the same one-check-per-session listener.
+      const boardFocus = new StorageSessionFocus(storage);
+      const boardChecks = new JournalBoardChecks(storage);
+      const boardTurnCheck = new BoardTurnCheck(
+        {
+          readable: async sessionId => (await nudgeSessions.subject(sessionId)) !== undefined,
+          tail: async (sessionId, limit) => {
+            const subject = await nudgeSessions.subject(sessionId);
+            return subject === undefined
+              ? []
+              : await sendTranscripts.tail({ sessionId, harness: subject.harness }, limit);
+          },
+          focus: boardFocus,
+          card: async ref => await boardWorld.board.task(ref.id),
+          send: async (sessionId, sendId, message) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await sends.send({ id, sendId, message });
+          },
+          record: async (sessionId, seen) => await boardChecks.record(sessionId, seen),
+          now: () => Date.parse(clock.now()),
+        },
+        CLIENT_NAME,
+      );
+      armAgendaNudge(storage, boardTurnCheck, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
         setTimeout(run, delayMs).unref();
       });
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
@@ -9650,18 +9809,27 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ? []
               : [{ id: entry.id, resolution: entry.resolution, usedBy: entry.usedBy }],
           ),
-        sessions: async () =>
-          (
-            await Promise.all(
-              storage.listSessions().map(async session => {
-                const config = SessionConfigSchema.safeParse(
-                  // Every session's config, on every reading: as fresh as the last file event.
-                  await storage.readConfig(session.id, 'heard').catch(() => undefined),
-                );
-                return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
-              }),
-            )
-          ).flat(),
+        // Every session's (runtime, transcript), read ONCE per change and shared by every login that asks:
+        // read per login per look, ~600 configs × 7 Codex logins held the main thread. The stamp moves on
+        // every config this daemon writes and on a session added or removed; an edit made by hand is
+        // read within the roster's age bound.
+        roster: new SessionRoster({
+          stamp: () => `${String(storage.configWrites())}:${String(storage.listSessions().length)}`,
+          read: async () =>
+            (
+              await Promise.all(
+                storage.listSessions().map(async session => {
+                  const config = SessionConfigSchema.safeParse(
+                    // As fresh as the last file event.
+                    await storage.readConfig(session.id, 'heard').catch(() => undefined),
+                  );
+                  return config.success ? [{ agent: config.data.agent, transcript: config.data.transcript }] : [];
+                }),
+              )
+            ).flat(),
+          now: () => millisecondClock.now(),
+          maxAgeMs: SESSION_ROSTER_MAX_AGE_MS,
+        }),
         jobs: housekeepingJobs,
         watch: (path, listener) => fileEvents.subscribe(path, () => listener()),
         passiveFile: id => passiveUsageFiles.path(id),
@@ -9820,7 +9988,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           test: async (subject, consent) => await providerProbe.test(subject, consent),
         },
         providerQuota: quotaReader,
+        // One list answers every reader for a moment: the runtime catalogue, a start's readiness check and
+        // the usage feed each asked for it on their own, and each list reads every login's status.
+        listCache: { now: () => millisecondClock.now(), freshMs: CREDENTIAL_LIST_FRESH_MS },
       });
+      // Every session's status for the catalogue's running count, read once and then kept current from the
+      // storage's own state feed: read per catalogue, ~600 state documents parsed for every runtimes view and
+      // every Pack routing line held the main thread. A hand edit is read within the tally's age bound.
+      const sessionStatusTally = new SessionStatusTally({
+        read: async () =>
+          new Map(
+            (
+              await Promise.all(
+                storage.listSessions().map(async session => {
+                  const status = sessionStatusOf(await storage.readState(session.id).catch(() => undefined));
+                  return status === undefined ? [] : [[session.id, status] as const];
+                }),
+              )
+            ).flat(),
+          ),
+        now: () => millisecondClock.now(),
+        maxAgeMs: SESSION_STATUS_TALLY_MAX_AGE_MS,
+      });
+      storage.subscribeStates((id, state) => sessionStatusTally.heard(id, sessionStatusOf(state)));
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
       const fleetCatalogDeps = {
@@ -9828,10 +10018,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           paths,
           userHome,
           ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
-          sessionStates: async () =>
-            await Promise.all(
-              storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
-            ),
+          sessionStatuses: async () => await sessionStatusTally.statuses(),
           sessionRecords: new RuntimeSessionRecords(storage),
           credentials: fleetCredentials,
           locate: locateHarness,
@@ -10075,7 +10262,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }).catalogs;
       const packService = new PackService({
         settings: async () => {
-          const effective = (await configFiles.load()).evaluation.effective;
+          const effective = (await configFiles.inEffect()).evaluation.effective;
           return {
             config: effective.pack,
             guideFile: effective.modelsGuide,
@@ -10129,18 +10316,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         probe: packProbe,
         cards: boardWorld.cards,
-        // Parsed here, so a field Pack leaves out takes the start schema's own default (board access `none`)
-        // rather than Pack forcing one.
+        // Parsed here, so a field Pack leaves out takes the start schema's own default
         start: async (input, delegation) => {
           const request = StartSessionRequestSchema.parse(input);
           try {
-            return await sessionControl.start(
-              request,
-              crypto.randomUUID(),
-              JSON.stringify(request),
-              undefined,
-              delegation,
-            );
+            return await sessionControl.start(request, crypto.randomUUID(), JSON.stringify(request), delegation);
           } catch (error) {
             if (
               error instanceof SessionControlError &&
@@ -10160,7 +10340,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         bin: CLIENT_NAME,
         now: () => clock.now(),
       });
-      packRouting = async () => await packService.routingLine();
+      // Derived once per configuration load and shared by every ferret: each running ferret's "outdated" mark
+      // builds the environment a relaunch would, routing line included, and deriving it reads the fleet's
+      // runtime catalogue, which reads every session's state (see `PackRoutingKeep`).
+      const packRoutingKeep = new PackRoutingKeep({
+        generation: async () => await configFiles.inEffect(),
+        derive: async () => await packService.routingLine(),
+        now: () => millisecondClock.now(),
+        maxAgeMs: PACK_ROUTING_MAX_AGE_MS,
+      });
+      packRouting = async () => await packRoutingKeep.line();
       /**
        * Clean up (docs/pack-mode.md § Clean up): the routing prompt's ONE generator, a short-lived hidden ferret
        * started through the session start every surface uses and probed like any sub-ferret, and the writes of
@@ -10175,7 +10364,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ? undefined
             : { wrapper: runtime.wrapper, harness: runtime.harness, defaultModel: runtime.models?.default };
         },
-        probeSettings: async () => (await configFiles.load()).evaluation.effective.pack.probe,
+        probeSettings: async () => (await configFiles.inEffect()).evaluation.effective.pack.probe,
         probe: packProbe,
         start: async request =>
           await withSystemCallsign(sessionControl, systemCallsigns, 'pack').start(
@@ -10578,6 +10767,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               });
             },
           }),
+          new PendingContextDelivery(boardPending),
         ),
         sessionAnswer,
         sessionAttachments,
@@ -10620,9 +10810,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             return () => clearInterval(handle);
           },
         }),
-        tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
-        board: boardWorld.board,
-        taskBoards: boards,
+        tasks: createTaskSubsystem(paths, storage, clock, taskBoards),
+        board: {
+          board: async query => await boardWorld.board.board(query),
+          task: async id => await boardWorld.board.task(id),
+          taskByLegacyRef: async legacyRef => await boardWorld.board.taskByLegacyRef(legacyRef),
+          create: async (request, caller) => await boardWorld.board.create(request, caller),
+          act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
+          skip: async (request, caller) => await boardWorld.board.skip(request, caller),
+          importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
+        },
+        boardGitHub,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
         analyticsIngest: analyticsIngestion,
@@ -10768,6 +10966,19 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         secrets,
         warden: createWardenSubsystem({
           machineName: () => analyticsMachineName ?? hostname(),
+          ledgers: wardenLedgers,
+          // The board as the Warden reads it: every card with its derived activity (the orphans), and the card
+          // a session works on (what a ferret it starts again carries on). Each read is total.
+          board: {
+            read: async () => await boardWorld.board.sweepBoard().catch(() => undefined),
+            focusCard: async sessionId => {
+              const ref = await boardWorld.focus.focusOf(sessionId).catch(() => null);
+              if (ref === null || (ref.machineId !== undefined && ref.machineId !== attachmentDaemonId))
+                return undefined;
+              const found = await boardWorld.board.task(ref.id).catch(() => undefined);
+              return found === undefined ? undefined : { task: found.task, laneSet: found.laneSet };
+            },
+          },
           activities,
           sessions,
           documents: createSessionDirectorySubsystem(paths, storage),
@@ -10917,25 +11128,22 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         // ONE feed over ONE opened storage: live listeners cannot see another daemon's appends, and
         // the fleet backfill refuses if any indexed session has lost the journal its marker owes.
+        // Feeds opening together share ONE queued backlog pass, a feed that closes stops waiting, and
+        // the pass yields to session writes until it runs (`SharedFleetBacklog`, `fleetBacklog`).
         fleetEvents: new FleetEventStreamService(
-          {
-            replay: async (sessionId, afterSequence, limit, signal) => {
-              signal.throwIfAborted();
-              const page = await storage.replay(parseSessionId(sessionId), afterSequence, limit);
-              signal.throwIfAborted();
-              return page.events;
-            },
-            fleetBacklog: async (limit, signal) => {
-              signal.throwIfAborted();
-              const sessionIds = await storage.fleetSessionIds();
-              signal.throwIfAborted();
-              // `?tail=0` replays nothing, so it skips the tail's index proof as well as its read.
-              const events = limit === 0 ? [] : await storage.tailEvents(limit);
-              signal.throwIfAborted();
-              return { sessionIds, events };
-            },
-            subscribe: listener => storage.subscribeEvents(listener),
-          },
+          ((): FleetEventSource => {
+            const backlogs = new SharedFleetBacklog(storage);
+            return {
+              replay: async (sessionId, afterSequence, limit, signal) => {
+                signal.throwIfAborted();
+                const page = await storage.replay(parseSessionId(sessionId), afterSequence, limit);
+                signal.throwIfAborted();
+                return page.events;
+              },
+              fleetBacklog: async (limit, signal) => await backlogs.backlog(limit, signal),
+              subscribe: listener => storage.subscribeEvents(listener),
+            };
+          })(),
           {
             after: (milliseconds, action) => {
               const timer = setTimeout(action, milliseconds);
@@ -11484,19 +11692,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // whether the boot completes or not.
   cleanups.push(async () => await tunnel.stop());
   progress.enter('mounting subsystems');
+  // Built here rather than inside `createSubsystems` because it needs the storage this boot opened,
+  // and threading it through the same seam as the other host adapters is what lets a test replace
+  // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane. The
+  // boot's interrupted-launch pass asks the same launcher whether a pane is there.
+  const reviver = world.createResumeLauncher(
+    opened.storage,
+    async id => await world.createSessionLaunch(opened.storage).relaunch(id),
+  );
   const createdSubsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
     usage,
     health,
     world.sessionLauncher,
-    // Built here rather than inside `createSubsystems` because it needs the storage this boot opened,
-    // and threading it through the same seam as the other host adapters is what lets a test replace
-    // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane.
-    world.createResumeLauncher(
-      opened.storage,
-      async id => await world.createSessionLaunch(opened.storage).relaunch(id),
-    ),
+    reviver,
     world.migratePreflight,
     world.browserLogin.window,
     world.sttEnhancement,
@@ -11580,6 +11790,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     );
   progress.enter('first self-check (reconciling the session index)');
   await health.selfCheck().catch(() => undefined);
+  // Launches the previous process had in flight died with it. Settled here, before anything serves and
+  // so before anything in this process can be launching: a record left `starting` is otherwise stuck
+  // for good. A pass that cannot run leaves them as they were, which the next boot looks at again.
+  progress.enter('settling launches a restart interrupted');
+  const interrupted = await world.reconcileInterruptedLaunches(opened.storage, reviver).catch(() => undefined);
+  if (interrupted !== undefined && interrupted.failed.length > 0)
+    world.notices.state(
+      `${String(interrupted.failed.length)} launch${interrupted.failed.length === 1 ? '' : 'es'} interrupted by the restart ` +
+        `recorded as failed — resume or stop: ${interrupted.failed.join(', ')}`,
+    );
   // Written down BEFORE anything is attempted: the host can go down again mid-pass, and what is owed
   // must survive that. Nothing is resumed yet — the daemon is not serving.
   const autoResume = world.createAutoResume(opened.storage, async (id, message) => {
@@ -12014,6 +12234,9 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
    * reported as a receipt that did not advance.
    */
   cleanups.push(subsystems.handoverReconcile.arm());
+  // The board's GitHub watcher: its first look comes shortly after the bind, then about every half
+  // minute; a host without `gh`, or signed out of it, is told once and looked at again later.
+  cleanups.push(subsystems.boardGitHub.arm());
   /**
    * The update check, armed after the bind: it asks GitHub once now and then at most every six hours,
    * and moves an update waiting for idle (or an opted-in automatic one) on. A failed check never fails

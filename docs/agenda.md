@@ -32,7 +32,9 @@ you" until the item is answered — nothing is written to the card. A notice is 
 
 The CLI sends `task` only to a daemon that reports `agenda.task.1`; an older one refuses the whole add over the
 field, so the item is raised without it and the CLI says so. For one release a bare `--task` (or a value that
-is not a card reference) still means a to-do; `--todo` is its name now.
+is not a card reference) still means a to-do; `--todo` is its name now. The kind is named `--kind todo` for the same
+reason — "task" means a board card — and `--kind task` is still read as its older spelling. The wire value stays
+`task`, so a released daemon keeps accepting the add.
 
 ## Turns
 

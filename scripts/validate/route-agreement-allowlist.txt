@@ -58,13 +58,6 @@ unserved DELETE /v1/sessions/* # DEFECT: IFyApiClient.remove() deletes a session
 # Verb disagreements — finding #5's shape, where the path exists and the method does not.
 unserved PATCH /v1/sessions/*/terminals/* # DEFECT: the PWA renames a terminal with PATCH; mounts/terminals.ts serves GET, POST and DELETE
 
-# `FyTaskBoardGateway` now dials each of its twelve switch arms directly with a literal path and method.
-# These are the two exact suffixes nothing serves — not one aggregate `/v1/task-boards*` line standing
-# in for twelve addresses. The old aggregate also absorbed the arms that DO have a route, so any of them
-# could be renamed with this gate green, and a thirteenth arm would have been absorbed on the day it landed.
-unserved POST /v1/task-boards/mark-done # DEFECT: the CLI dials it; packages/daemon serves no such route
-unserved POST /v1/task-boards/grants/revoke # DEFECT: the CLI dials it; packages/daemon serves no such route
-
 # `FyApiClient.#post` builds `/v1/sessions/${id}/${action}` and nine sites in its own file pass `action`
 # as a string literal. Those nine addresses are now READ, instead of one wildcard that hid them. The
 # wildcard line that used to sit here claimed the concrete call sites were checked separately; they were
@@ -98,7 +91,7 @@ unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes T
 unreached POST /v1/sessions/:sessionId/terminals/:terminalId # DEFECT: the daemon serves rename as POST while the only client uses PATCH
 unreached POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
 unreached DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
-unreached POST /v1/board/tasks # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
+unreached GET /v1/board/tasks # the old-reference lookup (board U16) lands daemon-first; the PWA reference code (board U12) dials it next
 
 # ── verb-unproven: the address agrees, the method is not proved ────────────────────────────────
 

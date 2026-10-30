@@ -18,6 +18,7 @@ import {
   type FleetReadingPorts,
   type FleetReadingSubject,
 } from '../../../src/lib/fleet-reading/service.ts';
+import { SESSION_ROSTER_MAX_AGE_MS, SessionRoster } from '../../../src/lib/fleet-reading/session-roster.ts';
 import type { HousekeepingJob } from '../../../src/lib/housekeeping/protocol.ts';
 
 const MINUTE = 60_000;
@@ -53,9 +54,21 @@ const reading = (at: number, usedPercent = 12): PassiveUsageRecord => ({
 class World {
   now = NOW;
   subjects: readonly FleetReadingSubject[] = [claude('work'), codex('cx')];
-  sessions: readonly CredentialSessionRecord[] = [
+  #sessions: readonly CredentialSessionRecord[] = [
     { agent: 'codex-runtime', transcript: { home: '/codex', file: '/codex/rollout-1.jsonl' } },
   ];
+  /** What moves the roster's stamp: every change to the sessions, as a config write would. */
+  sessionChanges = 0;
+  /** How many times the roster was read. */
+  rosterReads = 0;
+  failRoster = false;
+  get sessions(): readonly CredentialSessionRecord[] {
+    return this.#sessions;
+  }
+  set sessions(sessions: readonly CredentialSessionRecord[]) {
+    this.#sessions = sessions;
+    this.sessionChanges += 1;
+  }
   configFails = false;
   readonly jobs: HousekeepingJob[] = [];
   readonly passive = new Map<string, PassiveUsageRecord | null>();
@@ -78,7 +91,16 @@ class World {
         if (this.configFails) throw new Error('unreadable');
         return this.subjects;
       },
-      sessions: async () => this.sessions,
+      roster: new SessionRoster({
+        stamp: () => String(this.sessionChanges),
+        read: async () => {
+          this.rosterReads += 1;
+          if (this.failRoster) throw new Error('the index is closed');
+          return this.sessions;
+        },
+        now: () => this.now,
+        maxAgeMs: SESSION_ROSTER_MAX_AGE_MS,
+      }),
       jobs: {
         run: async job => {
           this.jobs.push(job);
@@ -297,6 +319,116 @@ describe('FleetReading', () => {
     should(watchedTwo).equal(2);
     should(world.closed).containDeep(['/codex/rollout-1.jsonl', '/codex/rollout-2.jsonl']);
     should(none).be.undefined();
+  });
+
+  it('should read the session roster ONCE per generation for seven Codex logins over 500 sessions, not once per login', async () => {
+    // Arrange — seven Codex logins, each on its own runtime, and 500 sessions spread across them.
+    const logins = Array.from({ length: 7 }, (_, index) => ({ ...codex(`cx${index}`), usedBy: [`runtime-${index}`] }));
+    world.subjects = logins;
+    world.sessions = Array.from({ length: 500 }, (_, index) => ({
+      agent: `runtime-${index % 7}`,
+      transcript: { home: '/codex', file: `/codex/rollout-${index}.jsonl` },
+    }));
+    const subject = new FleetReading(world.ports());
+    await subject.start(() => undefined);
+    await settle();
+    const bootReads = world.rosterReads;
+    const watches = world.listeners.size;
+    world.jobs.length = 0;
+
+    // Act — three credentials lists in a row, each asking every login in turn.
+    for (let list = 0; list < 3; list += 1)
+      for (const login of logins) await subject.passiveUsage({ id: login.id, resolution: login.resolution });
+    await settle();
+    const quietReads = world.rosterReads;
+    // A config changes: one more read for the next list, however many logins ask.
+    world.sessions = [
+      ...world.sessions,
+      { agent: 'runtime-3', transcript: { home: '/codex', file: '/codex/rollout-new.jsonl' } },
+    ];
+    for (const login of logins) await subject.passiveUsage({ id: login.id, resolution: login.resolution });
+    await settle();
+
+    // Assert — the boot read is shared by all seven, the quiet lists read nothing and open nothing, and the
+    // change is one read that re-derives only the login whose rollouts moved.
+    should(bootReads).equal(1);
+    should(quietReads).equal(1);
+    should(world.listeners.size).equal(watches + 1);
+    should(world.rosterReads).equal(2);
+    should(world.listeners.has('/codex/rollout-new.jsonl')).be.true();
+    should(world.jobs.length).be.above(0);
+    should(
+      world.jobs.every(job => job.kind === 'usage.passive.codex' && job.files.includes('/codex/rollout-new.jsonl')),
+    ).be.true();
+  });
+
+  it('should read the roster again once it is too old, even though no config changed', async () => {
+    // Arrange
+    const subject = new FleetReading(world.ports());
+    await subject.start(() => undefined);
+    await settle();
+    const resolution = codex('cx').resolution;
+
+    // Act
+    world.now = NOW + SESSION_ROSTER_MAX_AGE_MS - 1;
+    await subject.passiveUsage({ id: 'cx', resolution });
+    const young = world.rosterReads;
+    world.now = NOW + SESSION_ROSTER_MAX_AGE_MS;
+    await subject.passiveUsage({ id: 'cx', resolution });
+
+    // Assert — a change no stamp sees (an edit by hand) is read within the bound.
+    should(young).equal(1);
+    should(world.rosterReads).equal(2);
+  });
+
+  it('should attribute no rollouts while the roster cannot be read, and not keep the failure', async () => {
+    // Arrange
+    world.failRoster = true;
+    world.passive.set('cx', { ...reading(NOW), source: 'codex-rollout' });
+    const subject = new FleetReading(world.ports());
+    await subject.start(() => undefined);
+    await settle();
+    const resolution = codex('cx').resolution;
+
+    // Act
+    const failed = await subject.passiveUsage({ id: 'cx', resolution });
+    const watchedWhileFailing = world.listeners.has('/codex/rollout-1.jsonl');
+    world.failRoster = false;
+    await subject.passiveUsage({ id: 'cx', resolution });
+    await settle();
+    const recovered = await subject.passiveUsage({ id: 'cx', resolution });
+
+    // Assert — the next ask reads again with no change to prompt it, and the rollout is followed.
+    should(failed).be.undefined();
+    should(watchedWhileFailing).be.false();
+    should(world.listeners.has('/codex/rollout-1.jsonl')).be.true();
+    should(recovered).deepEqual({ ...reading(NOW), source: 'codex-rollout' });
+  });
+
+  it('should re-derive a login’s rollouts when its runtimes change, and forget a removed login', async () => {
+    // Arrange
+    world.sessions = [
+      { agent: 'codex-runtime', transcript: { home: '/codex', file: '/codex/rollout-1.jsonl' } },
+      { agent: 'other-runtime', transcript: { home: '/codex', file: '/codex/rollout-9.jsonl' } },
+    ];
+    const subject = new FleetReading(world.ports());
+    await subject.start(() => undefined);
+    await settle();
+
+    // Act — the configuration moves `cx` onto the other runtime, then drops it.
+    world.subjects = [claude('work'), { ...codex('cx'), usedBy: ['other-runtime'] }];
+    await subject.configLoaded();
+    await settle();
+    const moved = world.listeners.get('/codex/rollout-9.jsonl')?.size;
+    world.subjects = [claude('work')];
+    await subject.configLoaded();
+    const gone = await subject.passiveUsage({ id: 'cx', resolution: codex('cx').resolution });
+
+    // Assert — one roster read served all of it.
+    should(moved).equal(1);
+    should(world.closed).containDeep(['/codex/rollout-1.jsonl', '/codex/rollout-9.jsonl']);
+    should(gone).be.undefined();
+    should(world.rosterReads).equal(1);
   });
 
   it('should answer a watched store’s stamp from its change count, and re-read its facts on each change', async () => {

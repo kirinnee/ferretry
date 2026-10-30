@@ -1,14 +1,14 @@
 import { describe, it } from 'bun:test';
-import { LANE_TEMPLATES, type LaneSet, type ResolvedAgendaItem } from '@ferretry/protocol';
+import {
+  LANE_PROPOSAL_ANSWERS,
+  LANE_TEMPLATES,
+  type LaneSet,
+  laneProposalReference,
+  type ResolvedAgendaItem,
+} from '@ferretry/protocol';
 import should from 'should';
 import type { AgendaBoardChange } from '../../../src/lib/agenda/service.ts';
-import {
-  acceptedProposal,
-  LANE_PROPOSAL_ANSWERS,
-  LaneProposalAcceptance,
-  laneProposalCard,
-  laneProposalReference,
-} from '../../../src/lib/board-projects/index.ts';
+import { acceptedProposal, LaneProposalAcceptance, laneProposalCard } from '../../../src/lib/board-projects/index.ts';
 import { FERRETRY_ID } from './support.ts';
 
 const LANES: LaneSet = {

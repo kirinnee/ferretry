@@ -291,7 +291,7 @@ export const PASSIVE_LEARNING_ENV = 'FY_LEARNING_PASSIVE';
 
 /** The teaching a ferret that is instructed to learn carries. Short on purpose — it is in every prompt. */
 export const LESSONS_INSTRUCTION = (fy: string): string =>
-  `Lessons: when the owner corrects you, or you learn a durable fact about how they want work done, file it as one short imperative rule with \`${fy} lesson suggest "<rule>" --scope global|repo\` (or the lessons_suggest tool). Use --scope repo for a fact about this project and --scope global for one every ferret should follow. File each lesson once; the owner reviews every lesson before it reaches an instruction file.`;
+  `Lessons: when the owner corrects you or you learn a lasting preference of theirs, file one imperative rule: \`${fy} lesson suggest "<rule>" --scope global|repo\` (or lessons_suggest); global = every ferret, repo = this project. File each once; the owner reviews them.`;
 
 /**
  * HYPERMEDIA — a per-FERRET section of the appended system prompt, carried exactly like passive learning
@@ -303,28 +303,31 @@ export const LESSONS_INSTRUCTION = (fy: string): string =>
  */
 export const HYPERMEDIA_ENV = 'FY_HYPERMEDIA';
 
-/** The hypermedia teaching. Short on purpose — it is in every prompt. docs/hypermedia.md quotes it. */
-export const HYPERMEDIA_INSTRUCTION = [
-  'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.',
-  'Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.',
-  'Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.',
-  'Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
-  '- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.',
-  '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
-  '- html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.',
-  '- map: JSON/YAML {center: [lat, lng], zoom, markers: [{at, label, popup}], lines: [{points}], polygons, geojson}; real places.',
-  '- chart: JSON/YAML {kind: bar, x: [Mon, Tue], y: {format: money}, series: [{name: Cost, data: [2, 3]}]}; kind line|bar|area|pie|doughnut|scatter|radar; format number|percent|money|duration|bytes; stacked; frames: [{label, series}] steps. No colours: tone accent|good|warn|bad|muted|1-8.',
-  '- image, video, audio, pdf: save files you make into $FY_MEDIA_DIR and put `src: media:<file name>` before `---`, with no payload; `src: @workspace/path` and `src: https://…` also work.',
-  'Example:',
-  '```fy-render',
-  'type: mermaid',
-  'alt: How a request reaches the daemon',
-  '---',
-  'flowchart TB',
-  '  Phone --> Relay --> Daemon',
-  '```',
-  "It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.",
-].join('\n');
+/**
+ * The hypermedia teaching. Short on purpose — it is in every prompt, so only mermaid, svg and html are taught
+ * whole; chart keeps one line and every other type is one `render guide <type>` away. docs/hypermedia.md quotes it.
+ */
+export const HYPERMEDIA_INSTRUCTION = (fy: string): string =>
+  [
+    'Hypermedia: when you teach, explain, compare or walk through anything not straightforward — a flow, architecture, state machine, layout or change over time — show it in your reply as well as saying it. Do not overdo it: a simple answer stays plain text; one picture beats several.',
+    'Always inline: never publish an artifact, page, gist or link to explain something unless the owner asks for one.',
+    'Tell it as a short story the reader can drive: step-through Next buttons, sliders, toggles, tap to reveal, animated diagrams. One idea per step, short labels, gentle motion that honours prefers-reduced-motion.',
+    'Write a fenced block whose info string is exactly fy-render: line 1 `type: <type>`, line 2 `alt: <one-line description>`, then a line `---`, then the payload.',
+    '- mermaid: Mermaid source (flowchart TB, sequenceDiagram, …): top-down, short labels; auto-themed, so no %%{init}%% or colours.',
+    '- svg: one self-contained <svg>…</svg> (CSS animation welcome); no script, foreignObject or external links.',
+    '- html: a fragment with inline CSS and <script> for interaction (runs isolated); load nothing from the network.',
+    `- chart: JSON/YAML {kind: bar|line|area|pie|…, x: […], series: [{name, data}]}; full spec: \`${fy} render guide chart\`.`,
+    `- map, image, video, audio, pdf: \`${fy} render guide <type>\`.`,
+    'Example:',
+    '```fy-render',
+    'type: mermaid',
+    'alt: How a request flows',
+    '---',
+    'flowchart TB',
+    '  Phone --> Relay --> Daemon',
+    '```',
+    "It renders inline in the reader's chat. Chat only: never write fy-render into files, docs, commits or PRs.",
+  ].join('\n');
 
 /**
  * PACK MODE — a per-FERRET section of the appended system prompt (docs/pack-mode.md): this ferret may
@@ -363,7 +366,7 @@ export interface FerretSection {
 
 /** The per-ferret sections, in the order the wrapper appends them, each with the variable that turns it on. */
 export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
-  { id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION },
+  { id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION(fy) },
   { id: 'pack', env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
   { id: 'agenda', env: AGENDA_ENV, text: AGENDA_INSTRUCTION(fy) },
   { id: 'learning', env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
@@ -371,7 +374,7 @@ export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
 
 /** The built-in instruction: the tools exist, and how names work. Short on purpose — it is in every prompt. */
 export const AGENT_TOOLS_INSTRUCTION =
-  'Ferretry tools: you can open and drive terminals and browser pages the person watches live, with the ferretry MCP tools (terminal_open, terminal_send, terminal_read, terminal_wait, terminal_close, terminal_list, terminal_ask_owner, browser_open, browser_navigate, browser_click, browser_type, browser_read, browser_screenshot, browser_close, browser_list, browser_ask_owner). Give each a short lowercase name such as dev or app; you and the person both write %terminal:dev or %browser:app, and each opens as a tab for them. Whenever you need the person to act (a sudo or password prompt, an OAuth or device-code login, gh auth login, 2FA, "press Enter", a TUI wizard, a web login, a captcha, a payment or consent screen), do not just describe it: open the terminal or page, drive it as far as you can, then call ask_owner (or pass askOwner to open) saying exactly what to do there, and wait. Never put a secret in chat or in a tool call. If a tool says a person has taken a tab over, wait or ask them.';
+  'Ferretry tools: you can open and drive terminals and browser pages the person watches live, with the ferretry MCP tools (terminal_* and browser_*). Give each a short lowercase name such as dev or app; you and the person both write %terminal:dev or %browser:app, and each opens as a tab for them. Whenever you need the person to act (a sudo or password prompt, an OAuth or device-code login, gh auth login, 2FA, "press Enter", a TUI wizard, a web login, a captcha, a payment or consent screen), do not just describe it: open the terminal or page, drive it as far as you can, then call terminal_ask_owner or browser_ask_owner (or pass askOwner to open) saying exactly what to do there, and wait. Never put a secret in chat or in a tool call. If a tool says a person has taken a tab over, wait or ask them.';
 
 /** Claude's `--mcp-config` document for the tools server: a JSON string, so no file has to exist. */
 export const claudeToolsConfig = (fyCommand: string): SettingsObject => ({
@@ -441,7 +444,7 @@ export const AGENDA_ENV = 'FY_AGENDA';
 export const AGENDA_INSTRUCTION = (fy: string): string =>
   [
     `Agenda mode: keep an agenda of what ONLY the owner can do or decide. Before ending a reply that asks them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<what it is about>" "<the ask>"\`. Title ≤40 chars; ask ≤120. The owner reads it cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
-    `\`--premise\` = situation, \`--context\` = why now, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: a SMALL diagram (fy-render svg|html|mermaid). \`--kind task|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option\`s with \`--recommend <pick> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
+    `\`--premise\` = situation, \`--context\` = why now, \`--decided\` = settled, \`--still-open\` = left; \`--body\`: a SMALL diagram (fy-render svg|html|mermaid). \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option\`s with \`--recommend <pick> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
     `\`--blocking\`: you cannot go on without it; \`--will-block\`: it will block later; \`--by <time>\`: when it is needed (the phone is buzzed near it).`,
     `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat. KEEP ITEMS CURRENT this turn: changed or discussed → \`${fy} agenda edit <id>\`; settled → \`${fy} agenda done <id>\`; still theirs → \`${fy} agenda surface <id>\`. Never stale. Open: \`${fy} agenda ls\`.`,
   ].join('\n');
@@ -455,16 +458,25 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
   `Notify: the owner reads the Inbox, not your replies. To tell them something worth their time (a result, a blocker, a decision you made for them) run \`${fy} notify "<summary>" [--body "<detail>"]\`: a quiet Inbox notice. Add \`--ping\` only when it must reach their phone now. Never notify progress or chatter.`;
 
 /**
+ * BOARD — when a ferret must make, move or leave a card on its project's board (`board-design.md` §3.2),
+ * in every agent runtime's prompt. The board moves what a signal moves (a start, a PR, a release); this is
+ * the rest, which only the ferret knows. The daemon's turn-end check backs it up (`board/turn-check.ts` in
+ * the daemon). docs/board.md quotes this text verbatim.
+ */
+export const BOARD_INSTRUCTION = (fy: string): string =>
+  `Board: all work is a card (&F412) on its project's board; agenda items are !A48. Before your first edit for a new ask, have one: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"\` (${fy} new and ${fy} start make one). Move it as work changes: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked on the owner: \`${fy} agenda add --task <id>\`; a card: \`${fy} task depend\`; outside: \`${fy} task block\`. Abandoned: \`${fy} task drop --reason\`; switched: \`${fy} task focus <id>\`. Owner reports a problem: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Never move what a PR or release moves; only the owner closes.`;
+
+/**
  * Everything every agent runtime is told, as ONE appended system prompt section: the tools, the
- * settings rules, then the notify rule. A ferret's own sections follow it (`FERRET_SECTIONS`),
- * added by its wrapper.
+ * settings rules, the notify rule, then the board rules. A ferret's own sections follow it
+ * (`FERRET_SECTIONS`), added by its wrapper.
  */
 export const AGENT_INSTRUCTION = (fy: string): string =>
-  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${NOTIFY_INSTRUCTION(fy)}`;
+  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${NOTIFY_INSTRUCTION(fy)}\n\n${BOARD_INSTRUCTION(fy)}`;
 
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
-  readonly id: 'tools' | 'settings' | 'notify';
+  readonly id: 'tools' | 'settings' | 'notify' | 'board';
   readonly text: string;
 }
 
@@ -476,6 +488,7 @@ export const ALWAYS_ON_SECTIONS = (fy: string): readonly AlwaysOnSection[] => [
   { id: 'tools', text: AGENT_TOOLS_INSTRUCTION },
   { id: 'settings', text: SET_UP_FERRETRY_INSTRUCTION(fy) },
   { id: 'notify', text: NOTIFY_INSTRUCTION(fy) },
+  { id: 'board', text: BOARD_INSTRUCTION(fy) },
 ];
 
 /**
@@ -501,7 +514,7 @@ export function instructionDigest(text: string): string {
  * tool is left in.
  *
  * Read off the same constants the wrapper renders (`../wrappers.ts`), so it cannot describe a prompt
- * the wrapper would not build: the tools, settings and notify sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
+ * the wrapper would not build: the tools, settings, notify and board sections always (each with its {@link instructionDigest}), each {@link FERRET_SECTIONS}
  * entry whose variable is exactly `1`, and the question tool only for a launch whose
  * {@link SESSION_MODE_ENV} is `interactive` (O3) — the same rule for Claude and Codex. It describes an
  * AGENT runtime's wrapper, the only kind a session can be started on.

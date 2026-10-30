@@ -71,7 +71,7 @@ export function recordTold(
   const kept = recorded.sections.filter(
     section => !ids.has(section.id as AlwaysOnSection['id']) && section.id !== 'attention',
   );
-  const order = ['tools', 'settings', 'notify'];
+  const order = ['tools', 'settings', 'notify', 'board'];
   const always = [...kept.filter(section => order.includes(section.id)), ...fresh].toSorted(
     (left, right) => order.indexOf(left.id) - order.indexOf(right.id),
   );

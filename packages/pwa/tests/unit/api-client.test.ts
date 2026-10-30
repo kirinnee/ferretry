@@ -34,7 +34,6 @@ const migratedView = {
     incarnation: 'incarnation-1',
     runtimeGeneration: 2,
     name: 'Same session',
-    boardAccess: 'none',
     agent: 'codex-auto-atomi',
     harness: 'codex',
     modelHint: 'gpt-5.6-terra',

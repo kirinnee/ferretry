@@ -54,9 +54,17 @@
   overflow-x: auto;
   scrollbar-width: none;
 }
-.fy-info__tabs .kt-tab {
+.fy-info__tabs .kt-sheet-tabs {
+  position: relative;
+  width: max-content;
+  min-width: 100%;
+}
+.fy-info__tabs .kt-sheet-tabs .kt-tab {
+  flex: 1 0 auto;
   min-width: max-content;
-  padding-inline: 8px;
+  padding-inline: 12px;
+  gap: 4px;
+  white-space: nowrap;
   font-size: var(--text-xs);
 }
 .fy-info__body {
@@ -153,6 +161,10 @@
   background: var(--accent-soft);
   color: var(--fg);
   font-size: var(--text-xs);
+}
+.fy-info-warn {
+  color: var(--warn);
+  font-weight: 600;
 }
 .fy-info-muted {
   color: var(--muted);

@@ -48,6 +48,9 @@ memory. The gate's `access` pass is what holds the transport half.
 
 ## Boards — the reading, from the source
 
+> **Retired.** The task-board grant ACL described below was deleted; board authority is ownership + lineage
+> (`packages/daemon/src/lib/board/authority.ts`, design: the project-board doc). Kept as history only.
+
 The owner said boards should be daemon **and session** scoped. A shared board exists so that several
 sessions collaborate on it, so it cannot simply be partitioned per session or it stops being shared.
 Read against `modules/kteam-ts/src/task-boards.ts` and `packages/daemon/src/lib/task-boards/`, the

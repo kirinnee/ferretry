@@ -170,7 +170,6 @@ describe('CleanUpService.start', () => {
       label: PACK_CLEAN_UP_LABEL,
       name: CLEAN_UP_NAME,
       cwd: '/fy',
-      boardAccess: 'none',
       model: 'opus',
     });
     should(starts[0]?.prompt).containEql('/fy/state/pack-cleanup/run-1/rough.txt');
@@ -309,7 +308,7 @@ describe('CleanUpService.start in generate mode', () => {
     const started = await service.start({ mode: 'generate', idea: 'cheap models for chores' });
 
     // Assert
-    should(starts[0]).containEql({ name: GENERATE_NAME, label: PACK_CLEAN_UP_LABEL, boardAccess: 'none' });
+    should(starts[0]).containEql({ name: GENERATE_NAME, label: PACK_CLEAN_UP_LABEL });
     should(starts[0]?.prompt).containEql('/fy/state/pack-cleanup/run-1/idea.txt');
     should(starts[0]?.prompt).containEql("You write the routing prompt for Ferretry's Pack mode");
     should(runs.files.get('/fy/state/pack-cleanup/run-1/idea.txt')).equal('cheap models for chores\n');

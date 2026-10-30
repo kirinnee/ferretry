@@ -1,3 +1,90 @@
+## [4.126.0](https://github.com/kirinnee/ferretry/compare/v4.125.0...v4.126.0) (2026-10-30)
+
+### Features
+
+* **pwa:** lane editor, template picker and lane-proposal Edit deep link (U15) ([#986](https://github.com/kirinnee/ferretry/issues/986)) ([5862c18](https://github.com/kirinnee/ferretry/commit/5862c188c1d5922291b033c748852f59bdfe5d65))
+
+## [4.125.0](https://github.com/kirinnee/ferretry/compare/v4.124.0...v4.125.0) (2026-10-30)
+
+### Features
+
+* **board:** enforce the board — Board prompt section, turn-end check, fy task skip, fy ps CARD (U8) ([#985](https://github.com/kirinnee/ferretry/issues/985)) ([f558009](https://github.com/kirinnee/ferretry/commit/f558009733df41ce31ca126f814028ed8208e9b2))
+* **pwa:** per-chat card chip, Tasks side tab and Info card row (U14) ([#984](https://github.com/kirinnee/ferretry/issues/984)) ([8dce512](https://github.com/kirinnee/ferretry/commit/8dce512f8d40fc031a1eaeb3525e07fc5ff32827))
+
+## [4.124.0](https://github.com/kirinnee/ferretry/compare/v4.123.0...v4.124.0) (2026-10-30)
+
+### Features
+
+* **pwa:** board on the phone (U13) ([#981](https://github.com/kirinnee/ferretry/issues/981)) ([a41a6a8](https://github.com/kirinnee/ferretry/commit/a41a6a8ab5768431e48a503a0458051050f71eac))
+* **warden:** report orphaned cards and hand a resumed ferret its focus card (U9) ([#983](https://github.com/kirinnee/ferretry/issues/983)) ([4d23982](https://github.com/kirinnee/ferretry/commit/4d2398269c11859154963636aaee0fb4508400bc))
+
+### Performance
+
+* **cli:** fy wait asks less often while the session it waits on is still ([#979](https://github.com/kirinnee/ferretry/issues/979)) ([42ddaa3](https://github.com/kirinnee/ferretry/commit/42ddaa3266ea9d8b130d578c49562956affc7d3d))
+* **daemon:** count running sessions from a tally the state feed keeps, not a read per catalogue ([#978](https://github.com/kirinnee/ferretry/issues/978)) ([24b22f1](https://github.com/kirinnee/ferretry/commit/24b22f14d900382ccfca8e9427d3a70cef1cecdc)), closes [#runningSessions](https://github.com/kirinnee/ferretry/issues/runningSessions)
+* **daemon:** derive Pack's routing line once per configuration, not per ferret view ([#977](https://github.com/kirinnee/ferretry/issues/977)) ([4c929cb](https://github.com/kirinnee/ferretry/commit/4c929cbdd588d2ad5a37b1bce869223b41eaeee8)), closes [#load](https://github.com/kirinnee/ferretry/issues/load) [facts/#runningSessions](https://github.com/facts/ferretry/issues/runningSessions)
+* **daemon:** read the fleet manifest once per file, not once per ask ([#980](https://github.com/kirinnee/ferretry/issues/980)) ([145efc2](https://github.com/kirinnee/ferretry/commit/145efc27bc4eb1752ceac2f4b4acdaa8d7d8d25f))
+
+## [4.123.0](https://github.com/kirinnee/ferretry/compare/v4.122.0...v4.123.0) (2026-10-30)
+
+### Features
+
+* **board:** GitHub watcher — PR auto-link, lane triggers, CI, releases, refiling (U6) ([#956](https://github.com/kirinnee/ferretry/issues/956)) ([24a5251](https://github.com/kirinnee/ferretry/commit/24a52510ba5c733b9033a469f9abb7653f3b7612))
+* **daemon:** propose inferred lanes when a start lands in a project with none ([#975](https://github.com/kirinnee/ferretry/issues/975)) ([b940527](https://github.com/kirinnee/ferretry/commit/b9405272c6304230fcbfee998e93cc9a17c00aa5))
+
+## [4.122.0](https://github.com/kirinnee/ferretry/compare/v4.121.0...v4.122.0) (2026-10-30)
+
+### Features
+
+* **daemon:** board activity, staleness nudges and quiet events to the lead ([#945](https://github.com/kirinnee/ferretry/issues/945)) ([89bdc97](https://github.com/kirinnee/ferretry/commit/89bdc97530271613d1be81c88b021a9f56ecab7e))
+
+## [4.121.0](https://github.com/kirinnee/ferretry/compare/v4.120.2...v4.121.0) (2026-10-30)
+
+### Features
+
+* **daemon:** import per-session tasks.json and open agenda items into the project board ([#957](https://github.com/kirinnee/ferretry/issues/957)) ([3da9d6a](https://github.com/kirinnee/ferretry/commit/3da9d6a75d8ae4e3f8ba42a3f43ed7c75f0f39e3))
+* **pwa:** Board page with shared compact task cards (U11) ([#972](https://github.com/kirinnee/ferretry/issues/972)) ([a7413c4](https://github.com/kirinnee/ferretry/commit/a7413c40805eb3f5c9ad76fe449b95b2f05dcbf6))
+
+### Fixes
+
+* **daemon:** never re-send a message the agent already took a turn on ([#974](https://github.com/kirinnee/ferretry/issues/974)) ([59b43e9](https://github.com/kirinnee/ferretry/commit/59b43e9e76975c168a4d8b365694efb302fd17a8)), closes [#N](https://github.com/kirinnee/ferretry/issues/N) [#N](https://github.com/kirinnee/ferretry/issues/N)
+
+## [4.120.2](https://github.com/kirinnee/ferretry/compare/v4.120.1...v4.120.2) (2026-10-30)
+
+### Performance
+
+* **daemon:** stop the login status scan re-reading every session per login ([#973](https://github.com/kirinnee/ferretry/issues/973)) ([aeff479](https://github.com/kirinnee/ferretry/commit/aeff4799a769fe12b4d715f774e7c9107a928952))
+
+## [4.120.1](https://github.com/kirinnee/ferretry/compare/v4.120.0...v4.120.1) (2026-10-30)
+
+### Fixes
+
+* **daemon:** settle launches a restart interrupted, and bound stop behind a live launch ([#969](https://github.com/kirinnee/ferretry/issues/969)) ([7cc382d](https://github.com/kirinnee/ferretry/commit/7cc382d67b040217dd8e3128ab266af2bae9c53b))
+* **pwa:** session rows always show the session name; outdated becomes an icon ([#949](https://github.com/kirinnee/ferretry/issues/949)) ([978f205](https://github.com/kirinnee/ferretry/commit/978f205b7b23bb0f545937b7913a0f9726f13c8a))
+
+## [4.120.0](https://github.com/kirinnee/ferretry/compare/v4.119.1...v4.120.0) (2026-10-30)
+
+### Features
+
+* **cli:** fy task and fy board speak the project board (U4) ([#955](https://github.com/kirinnee/ferretry/issues/955)) ([6f6f571](https://github.com/kirinnee/ferretry/commit/6f6f571f9163052bd74b82e53a26582f2f0f8b67))
+
+### Fixes
+
+* **pwa:** keep the Inbox above the phone tab bar ([#967](https://github.com/kirinnee/ferretry/issues/967)) ([b732c83](https://github.com/kirinnee/ferretry/commit/b732c83219316509aa6c27874f3ce2ef8f29b9d9))
+
+## [4.119.1](https://github.com/kirinnee/ferretry/compare/v4.119.0...v4.119.1) (2026-10-30)
+
+### Fixes
+
+* **daemon:** stop live-feed backlog scans from starving session writes ([#964](https://github.com/kirinnee/ferretry/issues/964)) ([3b406f6](https://github.com/kirinnee/ferretry/commit/3b406f665798014570abc4b840c93d851d2d19c2))
+* **pwa:** do not repeat a reply card's own reference in its body ([#963](https://github.com/kirinnee/ferretry/issues/963)) ([9cc4ec0](https://github.com/kirinnee/ferretry/commit/9cc4ec07545e7d6c6058c74d62579b05d99ca173))
+
+## [4.119.0](https://github.com/kirinnee/ferretry/compare/v4.118.0...v4.119.0) (2026-10-30)
+
+### Features
+
+* **pwa:** agenda item view v3 — the real composer below, quick replies above it ([#962](https://github.com/kirinnee/ferretry/issues/962)) ([d4ad45f](https://github.com/kirinnee/ferretry/commit/d4ad45feefc48fab323dd15eaf7cb1fcdfff06c2))
+
 ## [4.118.0](https://github.com/kirinnee/ferretry/compare/v4.117.0...v4.118.0) (2026-10-30)
 
 ### Features

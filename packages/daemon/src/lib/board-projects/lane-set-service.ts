@@ -11,6 +11,7 @@ import {
   type BoardResult,
   boardErr,
   boardOk,
+  laneProposalReference,
   type LaneSet,
   type LaneSetActionRequest,
   type LaneSetChangeResponse,
@@ -25,7 +26,7 @@ import {
   proposeLaneSet,
   unfiledLaneSet,
 } from './lane-set-policy.ts';
-import { laneProposalCard, laneProposalReference } from './lane-proposal-card.ts';
+import { laneProposalCard } from './lane-proposal-card.ts';
 import type { CardRelocator, LaneProposalAgenda, LaneSetSource, LaneSetStore } from './ports.ts';
 import type { ProjectRegistry, SessionProjects } from './session-projects.ts';
 

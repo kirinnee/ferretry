@@ -5,6 +5,8 @@ import {
   defaultWardenConfig,
   type WardenAnomalyKind,
   type WardenAgendaWrite,
+  type WardenBoardPort,
+  type WardenCardNotice,
   type WardenConfig,
   type WardenEscalationBoardItem,
   type WardenEscalationRaise,
@@ -93,6 +95,8 @@ export interface Harness {
   /** Every escalation write the sweep attempted, in order. */
   readonly raises: { readonly sessionId: string; readonly request: WardenEscalationRaise }[];
   readonly resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[];
+  /** Every card notice the sweep attempted, in order. */
+  readonly notices: { readonly sessionId: string; readonly notice: WardenCardNotice }[];
   /** Every snapshot the Jev guard was shown, after redaction. */
   readonly guarded: readonly TriageSnapshot[];
   readonly guardSettings: readonly unknown[];
@@ -136,6 +140,10 @@ export function harness(
     readonly unreadableBoards?: readonly string[];
     /** Auto-revive, when a test is about it. */
     readonly revive?: WardenReviveService;
+    /** The project boards, when a test is about cards. */
+    readonly board?: WardenBoardPort;
+    /** Force every card notice to one outcome. */
+    readonly noticeWrite?: WardenAgendaWrite;
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
     readonly raiseWrite?: WardenAgendaWrite;
     /** The Jev guard's answer to each snapshot, in order; the last one repeats. */
@@ -169,6 +177,7 @@ export function harness(
   /** The newest card text raised per `[sessionId, sourceRef]`. */
   const cards = new Map<string, WardenEscalationRaise>();
   const resolved: { readonly sessionId: string; readonly sourceRef: string; readonly note: string }[] = [];
+  const notices: { readonly sessionId: string; readonly notice: WardenCardNotice }[] = [];
   let spawnCall = 0;
   let capability = 0;
   const guarded: TriageSnapshot[] = [];
@@ -202,8 +211,8 @@ export function harness(
     redactor: { batch: async work => work({ text: options.redact ?? (text => text) }) },
     remedies: {
       nudge: async (sessionId, message) => remedy('nudge', sessionId, message),
-      resume: async sessionId => remedy('resume', sessionId, ''),
-      restart: async sessionId => remedy('restart', sessionId, ''),
+      resume: async (sessionId, message) => remedy('resume', sessionId, message ?? ''),
+      restart: async (sessionId, message) => remedy('restart', sessionId, message ?? ''),
       stop: async (sessionId, reason) => remedy('stop', sessionId, reason),
       failover: async (sessionId, agent) => remedy('failover', sessionId, agent),
       closeLeftoverBrowsers: async sessionId => {
@@ -303,6 +312,17 @@ export function harness(
         ]);
         return 'created';
       },
+      notice: async (sessionId, notice) => {
+        notices.push({ sessionId, notice });
+        if (options.noticeWrite !== undefined) return options.noticeWrite;
+        const existing = boards.get(sessionId) ?? [];
+        if (existing.some(item => item.sourceRef === notice.sourceRef)) return 'unchanged';
+        boards.set(sessionId, [
+          ...existing,
+          { source: 'agent-raised' as const, sourceRef: notice.sourceRef, raisedBy: 'daemon' as const },
+        ]);
+        return 'created';
+      },
       resolveSource: async (sessionId, _source, sourceRef, note) => {
         resolved.push({ sessionId, sourceRef, note });
         const existing = boards.get(sessionId) ?? [];
@@ -313,6 +333,7 @@ export function harness(
     },
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
     ...(options.revive === undefined ? {} : { revive: options.revive }),
+    ...(options.board === undefined ? {} : { board: options.board }),
     jevChecks: {
       append: async check => {
         if (options.jevChecksFail === 'append') throw new Error('disk full');
@@ -337,6 +358,7 @@ export function harness(
     provenance,
     raises,
     resolved,
+    notices,
     guarded,
     guardSettings,
     jevChecks,

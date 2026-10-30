@@ -11,6 +11,7 @@ import {
   INFO_HINT,
   INFO_TAB_LABEL,
   INFO_TABS,
+  INFO_TABS_WITHOUT_BOARD,
   LAUNCH_SECTION_LABEL,
   launchInstructionFacts,
   learningLabel,
@@ -20,13 +21,16 @@ import {
   packLabel,
   packOn,
   remoteControlLabel,
+  scrollToShow,
   worktreeFact,
 } from '../../../../src/features/session-info/info-model.ts';
 import { sessionView } from '../../../support/sessions.ts';
 
 describe('INFO_TABS', () => {
-  it('orders the six tabs and names each one', () => {
-    expect(INFO_TABS).toEqual(['overview', 'runtime', 'usage', 'folder', 'signals', 'surfaces']);
+  it('orders the seven tabs, names each one, and drops Tasks for a host with no board', () => {
+    expect(INFO_TABS).toEqual(['overview', 'tasks', 'runtime', 'usage', 'folder', 'signals', 'surfaces']);
+    expect(INFO_TABS_WITHOUT_BOARD).toEqual(['overview', 'runtime', 'usage', 'folder', 'signals', 'surfaces']);
+    expect(INFO_TAB_LABEL.tasks).toBe('Tasks');
     expect(INFO_TAB_LABEL.overview).toBe('Overview');
     expect(INFO_TAB_LABEL.folder).toBe('Context');
     expect(Object.keys(INFO_HINT)).toContain('worktree');
@@ -320,10 +324,19 @@ describe('launchInstructionFacts', () => {
       'settings',
       'attention',
       'notify',
+      'board',
       'hypermedia',
       'pack',
       'agenda',
       'learning',
     ]);
+  });
+});
+
+describe('scrollToShow', () => {
+  it('leaves a tab that is already in view, and scrolls to the nearer edge otherwise', () => {
+    expect(scrollToShow(50, 60, 40, 100)).toBe(50);
+    expect(scrollToShow(100, 20, 40, 100)).toBe(20);
+    expect(scrollToShow(0, 260, 60, 100)).toBe(220);
   });
 });

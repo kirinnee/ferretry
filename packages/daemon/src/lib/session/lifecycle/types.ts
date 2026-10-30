@@ -10,6 +10,25 @@ import { z } from 'zod';
 import { MAX_SESSION_TITLE_LENGTH } from '../../names/types.ts';
 import { type SessionId, SessionIdSchema } from '../../session-id.ts';
 
+/**
+ * A stop that did not run because a launch of the same session is still in flight in this daemon.
+ *
+ * Distinct from a stop that failed: nothing was attempted and nothing was written, so the session is
+ * exactly as it was and the stop can simply be asked again once the launch settles.
+ */
+export class SessionStopPending extends Error {
+  constructor(
+    readonly sessionId: string,
+    waitedMs: number,
+  ) {
+    super(
+      `session ${sessionId} is still launching after ${Math.round(waitedMs / 1_000)}s; nothing was stopped — ` +
+        'stop it again once the launch settles',
+    );
+    this.name = 'SessionStopPending';
+  }
+}
+
 export const LifecycleSessionStatusSchema = z.enum([
   'created',
   'starting',
@@ -203,9 +222,8 @@ export interface SessionEnvironmentStore {
 }
 
 /**
- * The environment variable the fleet wrappers read their own session credential from. It is the
- * name `packages/cli/src/lib/task-boards/board-credentials.ts` demands before it will send an
- * `invite-accept`, so it is a wire contract with the CLI rather than a local choice.
+ * The environment variable the fleet wrappers read their own session credential from. The agent
+ * tools present it, so its name is a wire contract with the wrappers rather than a local choice.
  */
 export const SESSION_BOARD_CAPABILITY_VARIABLE = 'FY_SESSION_BOARD_CAPABILITY';
 

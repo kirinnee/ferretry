@@ -44,14 +44,20 @@ const noGroups = { destinations: [], commands: [], settings: [] };
 // `baseName` moved to `lib/fleet-grouping.ts`, where grouping, scoping and the
 // palette now share one folder-naming rule; its tests moved with it.
 describe('paletteSessionEntries', () => {
-  it('keeps the searchable callsign RAW and the rendered headline title-cased', () => {
-    const [entry] = paletteSessionEntries([sessionView('s1', { config: { teammate: 'ms-98' } })]);
+  it('keeps the searchable callsign RAW, the title the task and the callsign Title-cased beside it', () => {
+    const [entry] = paletteSessionEntries([
+      sessionView('s1', { config: { teammate: 'ms-98', name: 'Fix the scroller' } }),
+    ]);
 
     expect(entry?.teammate).toBe('ms-98');
-    expect(entry?.headline).toBe('Ms-98');
+    expect(entry?.headline).toBe('Fix the scroller');
+    expect(entry?.callsign).toBe('Ms-98');
+    const [bare] = paletteSessionEntries([sessionView('s2', { config: { teammate: 'ms-98', name: '' } })]);
+    expect(bare?.headline).toBe('Ms-98');
+    expect(bare?.callsign).toBe('');
   });
 
-  it('falls back to the session name, then to a short id, when there is no callsign', () => {
+  it('falls back to the callsign, then to a short id, when there is no name', () => {
     const [named] = paletteSessionEntries([sessionView('s1', { config: { name: 'Fix the scroller' } })]);
     const [anonymous] = paletteSessionEntries([
       sessionView('ms9hi4ts-b22751c4', { config: { name: '', teammate: '' } }),

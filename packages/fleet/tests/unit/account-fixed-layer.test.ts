@@ -7,6 +7,7 @@ import {
   AGENT_TOOLS_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
   applyFixedLayer,
+  BOARD_INSTRUCTION,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
   CLAUDE_QUESTION_HOOK_COMMAND,
@@ -626,6 +627,10 @@ describe('passive learning teaching', () => {
     should(FERRET_SECTIONS(binary).find(section => section.env === PASSIVE_LEARNING_ENV)?.text).equal(teaching);
     should(PASSIVE_LEARNING_ENV).equal('FY_LEARNING_PASSIVE');
     should(teaching).containEql('`fy lesson suggest "<rule>" --scope global|repo`');
+    should(teaching).containEql('global = every ferret, repo = this project');
+    should(teaching).containEql('File each once; the owner reviews them.');
+    // Compressed to make room for the Board section (cap 7,400 for the whole prompt).
+    should(teaching.length).be.below(270);
     should(teaching).containEql('lessons_suggest');
   });
 });
@@ -633,34 +638,40 @@ describe('passive learning teaching', () => {
 describe('hypermedia teaching', () => {
   it('should be a per-ferret system prompt section and teach every form with one fenced example', () => {
     // Arrange
-    const forms = ['mermaid', 'svg', 'html', 'map', 'chart', 'image, video, audio, pdf'];
+    const forms = ['mermaid', 'svg', 'html', 'chart', 'map, image, video, audio, pdf'];
+    const teaching = HYPERMEDIA_INSTRUCTION('zz');
 
     // Act
-    const lines = HYPERMEDIA_INSTRUCTION.split('\n');
+    const lines = teaching.split('\n');
 
     // Assert
     should(FERRETRY_MCP_ENV_VARS).not.containEql(HYPERMEDIA_ENV);
-    should(FERRET_SECTIONS('fy')[0]).deepEqual({ id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION });
+    should(FERRET_SECTIONS('zz')[0]).deepEqual({ id: 'hypermedia', env: HYPERMEDIA_ENV, text: teaching });
     should(HYPERMEDIA_ENV).equal('FY_HYPERMEDIA');
     for (const form of forms) should(lines.some(line => line.startsWith(`- ${form}:`))).be.true();
     should(lines).containDeepOrdered(['```fy-render', 'type: mermaid', '---', '```']);
-    should(HYPERMEDIA_INSTRUCTION).containEql('Do not overdo it');
+    should(teaching).containEql('Do not overdo it');
     // The owner's three asks: reach for it when teaching, keep it inline, and tell it interactively.
-    should(HYPERMEDIA_INSTRUCTION).startWith('Hypermedia: when you teach, explain, compare or walk through');
-    should(HYPERMEDIA_INSTRUCTION).containEql(
+    should(teaching).startWith('Hypermedia: when you teach, explain, compare or walk through');
+    should(teaching).containEql(
       'never publish an artifact, page, gist or link to explain something unless the owner asks',
     );
-    should(HYPERMEDIA_INSTRUCTION).containEql('step-through Next buttons');
-    should(HYPERMEDIA_INSTRUCTION).containEql('prefers-reduced-motion');
+    should(teaching).containEql('step-through Next buttons');
+    should(teaching).containEql('prefers-reduced-motion');
     // The theme is the reader's: a ferret never paints a chart or a diagram.
-    should(HYPERMEDIA_INSTRUCTION).containEql('No colours: tone');
-    should(HYPERMEDIA_INSTRUCTION).containEql('auto-themed, so no %%{init}%% or colours');
+    should(teaching).containEql('{kind: bar|line|area|pie|…, x: […], series: [{name, data}]}');
+    // Map, media and chart's full spec are one command away, named with the binary.
+    should(teaching).containEql('full spec: `zz render guide chart`');
+    should(teaching).containEql('- map, image, video, audio, pdf: `zz render guide <type>`');
+    should(teaching).not.containEql('`fy ');
+    should(teaching).containEql('auto-themed, so no %%{init}%% or colours');
     // A phone column is narrow: a ferret is taught to draw top-down with short labels.
-    should(HYPERMEDIA_INSTRUCTION).containEql('flowchart TB');
-    should(HYPERMEDIA_INSTRUCTION).containEql('top-down, short labels');
-    should(HYPERMEDIA_INSTRUCTION).not.containEql('flowchart LR');
-    // In every prompt, so it is capped; raised from 1,200 for the three asks above, then from 1,600 for `chart`; 1,970 with the top-down hint.
-    should(HYPERMEDIA_INSTRUCTION.length).be.below(2000);
+    should(teaching).containEql('flowchart TB');
+    should(teaching).containEql('top-down, short labels');
+    should(teaching).not.containEql('flowchart LR');
+    // In every prompt, so it is capped: 1,970 with the top-down hint, then cut to ~1,500 by moving map, media and
+    // chart's full spec behind `render guide` to make room for the Board section.
+    should(teaching.length).be.below(1_550);
   });
 });
 
@@ -729,7 +740,7 @@ describe('NOTIFY_INSTRUCTION', () => {
 
   it('should ride in the always-on instruction after the settings rules, not behind a switch', () => {
     // Assert
-    should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}`);
+    should(AGENT_INSTRUCTION('fy')).containEql(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n`);
     should(AGENT_INSTRUCTION('fy').indexOf(SET_UP_FERRETRY_INSTRUCTION('fy'))).be.below(
       AGENT_INSTRUCTION('fy').indexOf(NOTIFY_INSTRUCTION('fy')),
     );
@@ -753,7 +764,7 @@ describe('AGENDA_INSTRUCTION', () => {
       '`--premise` = situation, `--context` = why now, `--decided` = settled, `--still-open` = left',
     );
     should(text).containEql('`--body`: a SMALL diagram (fy-render svg|html|mermaid)');
-    should(text).containEql('`--kind task|yesno|permission|choice|review|info`');
+    should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
     should(text).containEql('Choice: 2–3 `--option`s with `--recommend <pick> --recommend-why <line>`');
     should(text).containEql('To-do: `--step "<md>"`');
     // When it is needed: it blocks now, will block later, or by a time.
@@ -790,13 +801,45 @@ describe('AGENDA_INSTRUCTION', () => {
   });
 });
 
+describe('BOARD_INSTRUCTION', () => {
+  it('should teach every card rule of the design, with the real verbs and the binary name given', () => {
+    // Act
+    const text = BOARD_INSTRUCTION('zz');
+
+    // Assert — tasks are `&`, agenda items are `!`, and nothing prints the retired `#F`.
+    should(text).startWith("Board: all work is a card (&F412) on its project's board; agenda items are !A48.");
+    should(text).not.containEql('#F');
+    should(text).containEql('Before your first edit for a new ask, have one:');
+    should(text).containEql(
+      '`zz task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner\'s words verbatim>"`',
+    );
+    should(text).containEql('(zz new and zz start make one)');
+    should(text).containEql('`zz task move <id> <lane> --reason "<why>"`');
+    should(text).containEql('Blocked on the owner: `zz agenda add --task <id>`');
+    should(text).containEql('a card: `zz task depend`');
+    should(text).containEql('outside: `zz task block`');
+    should(text).containEql('`zz task drop --reason`');
+    should(text).containEql('switched: `zz task focus <id>`');
+    should(text).containEql('`zz task reopen <id> --to <lane> --ask "<their words>"`');
+    should(text).containEql('Never move what a PR or release moves; only the owner closes.');
+    should(text).not.containEql('`fy ');
+  });
+
+  it('should ride last in the always-on instruction, after the notify rule, not behind a switch', () => {
+    // Assert
+    should(AGENT_INSTRUCTION('fy')).endWith(`\n\n${NOTIFY_INSTRUCTION('fy')}\n\n${BOARD_INSTRUCTION('fy')}`);
+    should(FERRET_SECTIONS('fy').map(section => section.id)).not.containEql('board');
+    should(BOARD_INSTRUCTION('fy').length).be.below(660);
+  });
+});
+
 describe('ALWAYS_ON_SECTIONS', () => {
   it('should be exactly the always-on instruction, section by section, in order', () => {
     // Act
     const sections = ALWAYS_ON_SECTIONS('zz');
 
     // Assert
-    should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify']);
+    should(sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'board']);
     should(sections.map(section => section.text).join('\n\n')).equal(AGENT_INSTRUCTION('zz'));
   });
 });
@@ -849,7 +892,16 @@ describe('launchInstructions', () => {
           chars: NOTIFY_INSTRUCTION(binary).length,
           digest: instructionDigest(NOTIFY_INSTRUCTION(binary)),
         },
-        { id: 'hypermedia', chars: HYPERMEDIA_INSTRUCTION.length, digest: instructionDigest(HYPERMEDIA_INSTRUCTION) },
+        {
+          id: 'board',
+          chars: BOARD_INSTRUCTION(binary).length,
+          digest: instructionDigest(BOARD_INSTRUCTION(binary)),
+        },
+        {
+          id: 'hypermedia',
+          chars: HYPERMEDIA_INSTRUCTION(binary).length,
+          digest: instructionDigest(HYPERMEDIA_INSTRUCTION(binary)),
+        },
         { id: 'pack', chars: PACK_INSTRUCTION(binary).length, digest: instructionDigest(PACK_INSTRUCTION(binary)) },
         {
           id: 'agenda',
@@ -880,7 +932,7 @@ describe('launchInstructions', () => {
     should(pack?.chars).equal(PACK_INSTRUCTION('fy').length + 1 + line.length);
     should(pack?.digest).equal(instructionDigest(`${PACK_INSTRUCTION('fy')}\n${line}`));
     should(pack?.digest).not.equal(instructionDigest(PACK_INSTRUCTION('fy')));
-    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify']);
+    should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'board']);
   });
 
   it.each([
@@ -909,7 +961,7 @@ describe('launchInstructions', () => {
     const launched = launchInstructions('fy', env);
 
     // Assert
-    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify']);
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify', 'board']);
     should(launched.mode).equal('auto');
     should(launched.questions).be.false();
   });
@@ -934,6 +986,7 @@ describe('launchInstructions', () => {
       'tools',
       'settings',
       'notify',
+      'board',
       'hypermedia',
       'pack',
       'agenda',
@@ -953,6 +1006,6 @@ describe('launchInstructions', () => {
     const on = launchInstructions('fy', { [AGENDA_ENV]: '1' });
 
     // Assert
-    should(on.sections.slice(0, 3)).deepEqual(off.sections.slice(0, 3));
+    should(on.sections.slice(0, 4)).deepEqual(off.sections.slice(0, 4));
   });
 });

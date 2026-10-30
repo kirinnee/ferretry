@@ -12,6 +12,7 @@ import {
   type SessionView,
 } from '@ferretry/protocol';
 import { FyApiClient } from '@ferretry/protocol/client';
+import chalk from 'chalk';
 import { Command } from 'commander';
 import type { z } from 'zod';
 // The root manifest is the single source for the PRODUCT name; this package's own name is the BINARY.
@@ -19,8 +20,14 @@ import root from '../../../package.json' with { type: 'json' };
 // The daemon package names the daemon binary, exactly as this package names the client one.
 import daemonPkg from '../../daemon/package.json' with { type: 'json' };
 import pkg from '../package.json' with { type: 'json' };
-import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
 import { AgendaBriefInput } from '../src/adapters/agenda/brief-input';
+import { SessionCredentialGateway } from '../src/adapters/agent-tools/session-credential-gateway';
+import { registerBoardCommands } from '../src/adapters/board/board-commands';
+import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
+import { registerBoardImportCommand } from '../src/adapters/board-import/board-import-command';
+import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
+import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
+import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
 import { FileScreenshotWriter } from '../src/adapters/browser/screenshot-writer';
 import { FileConfigFiles } from '../src/adapters/config/files';
 import { StdinConfigText } from '../src/adapters/config/stdin';
@@ -54,13 +61,9 @@ import { createFyClientConnector, FySessionApi, SessionFiles, SystemClock } from
 import { FileStateHomeClaim } from '../src/adapters/state-home/claim-files';
 import { createStatuslineController } from '../src/adapters/statusline/index.ts';
 import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
-import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
-import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
-import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
-import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
-import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
+import { environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
 import { chooseProgress, processProgressHost } from '../src/adapters/terminal/progress-factory';
 import { ProgressAwareIo } from '../src/adapters/terminal/progress-io';
@@ -71,6 +74,9 @@ import { GitHubLatestRelease } from '../src/adapters/update/latest-release';
 import { CommandPackageManagers } from '../src/adapters/update/package-managers';
 import { StandaloneRelease } from '../src/adapters/update/standalone-release';
 import { ProtocolDaemonUpdateView } from '../src/adapters/update/update-view';
+import { registerAgendaCommands } from '../src/lib/agenda/commands';
+import { AgendaController } from '../src/lib/agenda/controller';
+import { ProtocolAgendaGateway } from '../src/lib/agenda/gateway';
 import {
   AgentToolsClient,
   AgentToolsController,
@@ -80,12 +86,10 @@ import {
 } from '../src/lib/agent-tools';
 import { registerAnalyticsCommands } from '../src/lib/analytics/commands';
 import { AnalyticsController } from '../src/lib/analytics/controller';
-import { registerAgendaCommands } from '../src/lib/agenda/commands';
-import { AgendaController } from '../src/lib/agenda/controller';
-import { ProtocolAgendaGateway } from '../src/lib/agenda/gateway';
 import { registerAuditCommands } from '../src/lib/audit/commands';
 import { AuditController } from '../src/lib/audit/controller';
 import { ProtocolAuditGateway } from '../src/lib/audit/gateway';
+import { BoardController } from '../src/lib/board/board-controllers';
 import { BrowserController, registerBrowserCommands } from '../src/lib/browser';
 import { registerConfigCommands } from '../src/lib/config/commands';
 import { ConfigController } from '../src/lib/config/controller';
@@ -137,8 +141,6 @@ import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, McpServersController, ProtocolMcpServersGateway, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
-import { registerRestartCommands } from '../src/lib/restart/commands';
-import { RestartController } from '../src/lib/restart/controller';
 import { registerModelsCommands } from '../src/lib/models/commands';
 import { ModelsController } from '../src/lib/models/controller';
 import { registerNotifyCommands, runNotify } from '../src/lib/notify/commands';
@@ -165,6 +167,11 @@ import { ProtocolPinGateway } from '../src/lib/pins/gateway';
 import type { IProgress } from '../src/lib/progress/index';
 import { registerReadsCommands } from '../src/lib/reads/commands';
 import { ReadsController } from '../src/lib/reads/controller';
+import { registerRenderCommands } from '../src/lib/render/commands';
+import { RenderController } from '../src/lib/render/controller';
+import { RENDER_GUIDE_SECTION } from '../src/lib/render/guide-text';
+import { registerRestartCommands } from '../src/lib/restart/commands';
+import { RestartController } from '../src/lib/restart/controller';
 import { registerScratchCommands } from '../src/lib/scratch/commands';
 import { ScratchController } from '../src/lib/scratch/controller';
 import { registerSecretCommands } from '../src/lib/secrets/commands';
@@ -175,7 +182,10 @@ import { SecurityController } from '../src/lib/security/controller';
 import { ProtocolSecurityGateway } from '../src/lib/security/gateway';
 import {
   AnswerQuestionController,
+  boardLaneNames,
+  type ICellColour,
   InterruptSessionController,
+  type ISessionBoard,
   ListSessionsController,
   RenameSessionController,
   ResumeSessionController,
@@ -893,21 +903,26 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     ),
   ({ program, world, ownSessionId, restartPatience: patience }) =>
     registerSessionCommands(program, sessionCommands(world, ownSessionId, patience)),
-  ({ program, world, client, ownSessionId }) =>
-    registerTaskCommands(program, {
-      gateway: new FyTaskGateway(client),
-      io: world.io,
+  ({ program, world, client, ownSessionId }) => {
+    const board = new BoardController({
+      gateway: new FyBoardGateway(client),
+      output: world.io,
       files: new BunTextFileReader(),
+      binary: BINARY_NAME,
       environmentSessionId: ownSessionId,
-    }),
+    });
+    registerTaskCommands(program, {
+      board,
+      legacyGateway: new FyTaskGateway(client),
+      io: world.io,
+      environmentSessionId: ownSessionId,
+    });
+    registerBoardCommands(program, board);
+  },
   ({ program, world, client }) =>
     registerLaneCommands(program, { gateway: new FyLaneGateway(client), io: world.io, binaryName: BINARY_NAME }),
   ({ program, world, client }) =>
-    registerTaskBoardCommands(program, {
-      gateway: new FyTaskBoardGateway(client),
-      io: world.io,
-      credentials: environmentBoardCredentials(world.environment),
-    }),
+    registerBoardImportCommand(program, { gateway: new FyBoardImportGateway(client), io: world.io }),
   ({ program, world, client, ownSessionId }) =>
     registerStopCommands(
       program,
@@ -992,6 +1007,10 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
       ),
     );
   },
+  // `fy render guide` (docs/fy-render.md § Guide for agents): the authoring guide the hypermedia
+  // prompt's per-type lines point at. No daemon — the text ships in the binary.
+  ({ program, world }) =>
+    registerRenderCommands(program, new RenderController(world.io, BINARY_NAME, RENDER_GUIDE_SECTION)),
   ({ program, world, client }) =>
     registerWorktreeCommands(
       program,
@@ -1279,28 +1298,31 @@ function sessionCommands(
   const environment: SessionEnvironment = {
     cwd: world.cwd,
     ...(ownSessionId === undefined ? {} : { callerSessionId: ownSessionId }),
-    ...(cliEnvironment.FY_BOARD_CAPABILITY === undefined
-      ? {}
-      : { boardCapability: cliEnvironment.FY_BOARD_CAPABILITY }),
   };
-  const api = new FySessionApi(
-    createFyClientConnector({
-      version: assertSemver(pkg.version),
-      ...(cliEnvironment.FY_URL === undefined ? {} : { url: cliEnvironment.FY_URL }),
-      ...(cliEnvironment.FY_TOKEN === undefined ? {} : { token: cliEnvironment.FY_TOKEN }),
-      resolveLocalToken: () =>
-        daemonConnection(cliEnvironment, world.homeDirectory).then(connection => connection.token),
-      ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
-      restartPatience,
-    }),
-  );
+  const connect = createFyClientConnector({
+    version: assertSemver(pkg.version),
+    ...(cliEnvironment.FY_URL === undefined ? {} : { url: cliEnvironment.FY_URL }),
+    ...(cliEnvironment.FY_TOKEN === undefined ? {} : { token: cliEnvironment.FY_TOKEN }),
+    resolveLocalToken: () => daemonConnection(cliEnvironment, world.homeDirectory).then(connection => connection.token),
+    ...(ownSessionId === undefined ? {} : { sessionId: ownSessionId }),
+    restartPatience,
+  });
+  const api = new FySessionApi(connect);
+  // The CARD column reads the board over the same lazy, memoised connector — `ps` never opens a
+  // second connection for its lane names.
+  const board: ISessionBoard = {
+    laneNames: async () => boardLaneNames(new FyBoardGateway(await connect())),
+  };
+  // Chalk is the terminal's attention colour; it is the identity when colour is off (NO_COLOR, a
+  // non-TTY stdout), which is exactly the deal the renderer measures widths under.
+  const colour: ICellColour = { amber: cell => chalk.yellow(cell) };
   const files = new SessionFiles();
   const presenter = new SessionPresenter(world.io, new SystemClock());
 
   return {
     presenter,
     start: new StartSessionController(api, files, presenter, environment, BINARY_NAME),
-    list: new ListSessionsController(api, presenter),
+    list: new ListSessionsController(api, presenter, board, colour),
     status: new SessionStatusController(api, presenter),
     send: new SendMessageController(api, files, presenter, environment, {
       nowMs: () => Date.now(),

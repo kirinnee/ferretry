@@ -257,7 +257,6 @@ const CORS_REQUEST_HEADERS = new Set([
   'if-none-match',
   'range',
   'x-ferretry-session-id',
-  'x-fy-board-capability',
   'x-fy-request-id',
   'x-fy-version',
 ]);
