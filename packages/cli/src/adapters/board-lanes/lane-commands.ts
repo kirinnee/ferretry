@@ -31,18 +31,24 @@ export function registerLaneCommands(program: Command, dependencies: LaneCommand
     program.command('board').description('the project board');
   const group = board.command('lanes').description("a project's lanes: propose, show and edit");
 
+  // `fy board` declares `--project` and `--json` too, and commander hands a flag the parent knows to the
+  // parent wherever it is written: `fy board lanes show --project x` reaches `board`, not `show`. So every
+  // verb reads the flags of the whole chain, its own winning.
+  const merged = <T>(command: Command): T => ({ ...board.opts(), ...group.opts(), ...command.opts() }) as T;
+
   targeted(group.command('propose'))
     .description('propose a lane set from a template; it is live at once and the owner is asked to accept it')
     .requiredOption('--template <template>', 'pr-release-verify | pr-release | pr | ops | writing | quick')
     .option('--rename <old=new>', 'give a template lane another name, by lane id (repeatable)', collect, [])
-    .action(async (options: LaneProposeOptions & TargetOptions) => {
+    .action(async (_options: unknown, command: Command) => {
+      const options = merged<LaneProposeOptions & TargetOptions>(command);
       await controller.propose(target(options), options);
     });
 
   targeted(group.command('show'))
     .description("a project's lanes, in order, with each lane's id")
-    .action(async (options: TargetOptions) => {
-      await controller.show(target(options));
+    .action(async (_options: unknown, command: Command) => {
+      await controller.show(target(merged<TargetOptions>(command)));
     });
 
   targeted(group.command('edit'))
@@ -50,7 +56,8 @@ export function registerLaneCommands(program: Command, dependencies: LaneCommand
     .option('--rename <old=new>', 'give a lane another name, by lane id (repeatable)', collect, [])
     .option('--remove <lane>', 'remove a lane by id (repeatable)', collect, [])
     .option('--into <lane>', 'the lane that receives the cards of every removed lane')
-    .action(async (options: LaneEditOptions & TargetOptions) => {
+    .action(async (_options: unknown, command: Command) => {
+      const options = merged<LaneEditOptions & TargetOptions>(command);
       await controller.edit(target(options), options);
     });
 

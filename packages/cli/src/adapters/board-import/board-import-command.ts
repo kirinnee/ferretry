@@ -7,6 +7,11 @@ export interface BoardImportCommandDependencies {
   readonly io: IBoardImportOutput;
 }
 
+interface BoardImportOptions {
+  readonly dryRun?: boolean;
+  readonly json?: boolean;
+}
+
 /** Adds `import` to the `board` group, creating the group when this registers first. */
 export function registerBoardImportCommand(program: Command, dependencies: BoardImportCommandDependencies): Command {
   const controller = new BoardImportController(dependencies.gateway, dependencies.io);
@@ -20,7 +25,9 @@ export function registerBoardImportCommand(program: Command, dependencies: Board
     )
     .option('--dry-run', 'say what would happen and change nothing')
     .option('--json', 'print the daemon response as JSON')
-    .action(async (options: { readonly dryRun?: boolean; readonly json?: boolean }) => {
+    .action(async (_options: unknown, command: Command) => {
+      // `fy board` owns `--json` as well, so commander gives it the flag: read both, this verb's winning.
+      const options: BoardImportOptions = { ...board.opts(), ...command.opts() };
       await controller.run({ dryRun: options.dryRun === true, json: options.json === true });
     });
 }
