@@ -27,6 +27,7 @@ import {
   BOARD_EVENT_TYPES,
   BoardChangedEventSchema,
   type BoardCounts,
+  type BoardProject,
   type BoardProjectId,
   type BoardQuarantinedCard,
   type BoardResult,
@@ -39,13 +40,7 @@ import {
   type FyEvent,
   type LaneSet,
 } from '@ferretry/protocol';
-import {
-  type BoardPort,
-  type BoardProjectEntry,
-  type BoardRead,
-  type BoardWriteError,
-  readWholeBoard,
-} from './board-client.ts';
+import { type BoardPort, type BoardRead, type BoardWriteError, readWholeBoard } from './board-client.ts';
 import { type BoardServerQuery, cardMatchesQuery, serverQueryKey } from './board-model.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 
@@ -88,7 +83,7 @@ export interface BoardProjectsState {
   readonly status: BoardLoadStatus;
   readonly error: string | null;
   /** `null` until read, and when the machine does not serve projects. */
-  readonly projects: readonly BoardProjectEntry[] | null;
+  readonly projects: readonly BoardProject[] | null;
   /** The machine answered `404`: it predates `/v1/board/projects`. */
   readonly served: boolean;
 }
@@ -307,7 +302,7 @@ export class DaemonBoardStore {
     machine: DaemonConnection,
     query: BoardServerQuery,
     read: BoardRead,
-    listed: readonly BoardProjectEntry[] | null,
+    listed: readonly BoardProject[] | null,
   ): Promise<ReadonlyMap<BoardProjectId, LaneSet | null>> {
     const laneSets = new Map<BoardProjectId, LaneSet | null>();
     for (const project of listed ?? []) laneSets.set(project.id, project.laneSet);

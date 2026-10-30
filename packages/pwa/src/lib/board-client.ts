@@ -13,7 +13,8 @@
 import {
   type BoardErrorCode,
   BoardErrorCodeSchema,
-  BoardProjectIdSchema,
+  type BoardProject,
+  BoardProjectsResponseSchema,
   type BoardResponse,
   BoardResponseSchema,
   type BoardResult,
@@ -26,9 +27,7 @@ import {
   boardOk,
   FY_REQUEST_ID_HEADER,
   HealthViewSchema,
-  LaneSetSchema,
 } from '@ferretry/protocol';
-import { z } from 'zod';
 import { type BoardServerQuery, boardQueryParams } from './board-model.ts';
 import type { DaemonConnection } from './daemon-connection.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -38,23 +37,6 @@ import { browserFetch, type DaemonFetch, DaemonResponseError } from './runtime-m
 const BOARD_PAGE_SIZE = 500;
 /** How many pages one read follows before it reports the board as partial. */
 export const BOARD_MAX_PAGES = 4;
-
-/**
- * A project and its lanes, as `GET /v1/board/projects` serves them. Stated here until the protocol's
- * `BoardProjectsResponseSchema` is on the branch this package builds against; the shape is the same.
- */
-const BoardProjectEntrySchema = z.object({
-  id: BoardProjectIdSchema,
-  name: z.string().min(1),
-  path: z.string().nullable(),
-  laneSet: LaneSetSchema.nullable(),
-});
-export type BoardProjectEntry = z.infer<typeof BoardProjectEntrySchema>;
-
-const BoardProjectsAnswerSchema = z.object({
-  projects: z.array(BoardProjectEntrySchema),
-  current: BoardProjectIdSchema.nullable().optional(),
-});
 
 /** One board read, every page followed: the cards and the numbers of the first page. */
 export interface BoardRead {
@@ -79,7 +61,7 @@ export interface BoardPort {
   /** One card in full, or `null` when the daemon has no such card. */
   task(daemon: DaemonConnection, id: BoardTaskId): Promise<BoardTaskResponse | null>;
   /** The projects with their lane sets, or `null` when the daemon does not serve them. */
-  projects(daemon: DaemonConnection): Promise<readonly BoardProjectEntry[] | null>;
+  projects(daemon: DaemonConnection): Promise<readonly BoardProject[] | null>;
   /** The daemon's own version, or `null` when it cannot be read. */
   version(daemon: DaemonConnection): Promise<string | null>;
   act(
@@ -147,11 +129,11 @@ export const fetchBoardTask = async (
 export const fetchBoardProjects = async (
   daemon: DaemonConnection,
   fetcher: DaemonFetch = browserFetch,
-): Promise<readonly BoardProjectEntry[] | null> => {
+): Promise<readonly BoardProject[] | null> => {
   const response = await send(daemon, '/v1/board/projects', { method: 'GET' }, fetcher);
   if (response.status === 404 || response.status === 405) return null;
   if (!response.ok) throw await failure(response);
-  return BoardProjectsAnswerSchema.parse(await response.json()).projects;
+  return BoardProjectsResponseSchema.parse(await response.json()).projects;
 };
 
 /** The daemon's version from `GET /v1/health`; `null` when it cannot be read, never a throw. */

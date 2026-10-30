@@ -159,7 +159,8 @@ describe('daemonBoardPort', () => {
       const path = new URL(String(asked)).pathname;
       if (path === '/v1/board') return json(boardAnswer([]));
       if (path === '/v1/health') return json(healthOf('1.0.0'));
-      if (path === '/v1/board/projects') return json({ projects: [] });
+      if (path === '/v1/board/projects')
+        return json({ projects: [{ id: PROJECT, name: 'p', path: null, laneSet: null }], current: null });
       if (path.startsWith('/v1/board/tasks/')) return json({ task: card('F1'), laneSet: null });
       return json({}, 404);
     });

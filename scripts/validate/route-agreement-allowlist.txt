@@ -74,7 +74,6 @@ unserved POST /v1/task-boards/grants/revoke # DEFECT: the CLI dials it; packages
 # Correct as written: not the daemon.
 unserved GET /v1/default-relay # CORRECT: dialled against the relay DISCOVERY ORIGIN, a Ferretry service, never a daemon
 unserved GET /v1/tunnel-service # CORRECT: dialled against the same relay DISCOVERY ORIGIN for the hosted tunnel service's advertisement (relay-protocol §15), never a daemon
-unserved GET /v1/board/projects # the PWA tolerates a 404 until the daemon route (board U3, #932) lands; delete this line in the rebase that brings it in
 
 # ── unreached: the daemon serves, nothing in this repository dials ────────────────────────────
 
