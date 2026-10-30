@@ -1,5 +1,5 @@
 import { describe, it } from 'bun:test';
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { QueueAuthor, SessionLaunchInstructions } from '@ferretry/protocol';
 import should from 'should';
 import { KeyedSerialExecutor } from '../../../../src/adapters/system/keyed-serial-executor.ts';
 import {
@@ -144,10 +144,12 @@ class FakeLauncher implements ResumeLauncher {
 
 class FakeTurns implements ResumeTurnStore {
   readonly written: Array<{ turn: number; document: string }> = [];
+  readonly authors: Array<QueueAuthor | undefined> = [];
   cleared = 0;
 
-  async writeTurn(_id: SessionId, turn: number, document: string): Promise<string> {
+  async writeTurn(_id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<string> {
     this.written.push({ turn, document });
+    this.authors.push(by);
     return `/state/session-1/turns/turn-${turn}.md`;
   }
 
@@ -259,6 +261,19 @@ describe('session resume service', () => {
     should(world.turns.written).deepEqual([{ turn: 4, document: `carry on\n\n${SETTINGS.turnProtocolReminder}\n` }]);
     should(world.launcher.calls).deepEqual(['relaunch', 'deliver']);
     should(world.repository.events).deepEqual(['session.resuming', 'session.resumed']);
+  });
+
+  it('should keep who a relaunch turn is from beside it, never in it', async () => {
+    // The owner: "there should not be any append or prepend on any feature".
+    const warden = build(target(), NO_PANE);
+    const owner = build(target(), NO_PANE);
+
+    await warden.service.resume({ id: ID, message: 'carry on', actor: 'warden' });
+    await owner.service.resume({ id: ID, message: 'carry on', actor: 'admin-cli' });
+
+    should(warden.turns.authors).deepEqual([{ kind: 'ferretry', feature: 'Warden' }]);
+    should(owner.turns.authors).deepEqual([{ kind: 'owner' }]);
+    should(warden.turns.written[0]?.document).startWith('carry on');
   });
 
   it('should report the pointer it typed, which is what the transcript will record', async () => {

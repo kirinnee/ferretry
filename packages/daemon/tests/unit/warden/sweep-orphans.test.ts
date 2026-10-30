@@ -252,7 +252,7 @@ describe('a ferret the Warden starts again', () => {
 
     // Assert
     should(subject.remedies.map(remedy => remedy.action)).eql(['resume']);
-    should(subject.remedies[0]?.detail).containEql('The Warden resumed you:');
+    should(subject.remedies[0]?.detail).containEql("Ferretry's Warden resumed you:");
     should(subject.remedies[0]?.detail).containEql('Your card: &F1 — Ship the thing');
   });
 
@@ -282,7 +282,7 @@ describe('a ferret the Warden starts again', () => {
 
     // Assert
     should(subject.remedies.map(remedy => remedy.action)).eql(['restart']);
-    should(subject.remedies[0]?.detail).containEql('The Warden restarted you with your conversation intact:');
+    should(subject.remedies[0]?.detail).containEql("Ferretry's Warden restarted you with your conversation intact:");
     should(subject.remedies[0]?.detail).containEql('Your card: &F1 — Ship the thing');
   });
 

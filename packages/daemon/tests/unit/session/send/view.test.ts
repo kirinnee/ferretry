@@ -267,13 +267,13 @@ describe('transcript evidence for the tracker', () => {
 describe('telling an agent its message did not arrive', () => {
   it('says why, how many attempts, and that the decision is theirs', () => {
     should(sendFailureNotice('hadi', record({ fate: 'timed_out', attempt: 4 }), 'fy')).match(
-      /Your message to hadi \(send send-1\) did not reach it: it was not delivered \(not delivered\) after 4 attempt\(s\)\. Decide whether to send it again with `fy send hadi …`\./,
+      /^Ferretry could not deliver your message to hadi \(send send-1\): it was not delivered \(not delivered\) after 4 attempt\(s\)\. Decide whether to send it again with `fy send hadi …`\.$/,
     );
     should(sendFailureNotice('hadi', record({ fate: 'timed_out', unaccountedReason: 'session_ended' }), 'fy')).match(
       /\(session ended\) after 1 attempt/,
     );
     should(sendFailureNotice('hadi', record({ fate: 'unaccounted' }), 'fy')).match(
-      /could not be confirmed \(timeout\) — it may still have landed/,
+      /^Ferretry could not confirm your message to hadi \(send send-1\) \(timeout\) — it may still have landed/,
     );
     // Unconfirmed is not "did not reach it": it may be in the recipient's queue right now.
     should(sendFailureNotice('hadi', record({ fate: 'unaccounted' }), 'fy')).not.match(/did not reach it/);
@@ -289,8 +289,8 @@ describe('telling an agent its message did not arrive', () => {
       'fy',
     );
 
-    should(notice).match(/was typed into zarah’s terminal/);
-    should(notice).match(/no transcript Ferretry can prove is zarah’s/);
+    should(notice).match(/^Ferretry typed your message to zarah \(send send-1\) into zarah’s terminal/);
+    should(notice).match(/no transcript it can prove is zarah’s/);
     should(notice).match(/Do not send it again/);
     should(notice).not.match(/did not reach it/);
   });
@@ -302,7 +302,9 @@ describe('telling an agent its message did not arrive', () => {
       'fy',
     );
 
-    should(notice).match(/was handed to hank as the first turn of its relaunch/);
+    should(notice).match(
+      /^Ferretry handed your message to hank \(send send-1\) to hank as the first turn of its relaunch/,
+    );
     should(notice).match(/delivery cannot be confirmed/);
     should(notice).match(/do not send it again unless hank stays silent/);
     should(notice).not.match(/did not reach it/);

@@ -1,6 +1,6 @@
 import { afterEach, describe, it } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { appendFile, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { appendFile, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
@@ -443,6 +443,26 @@ describe('the file send turn store', () => {
     should(first).equal(join(home, 'channel', 'queued-send-1.md'));
     should(again).equal(first);
     should(await readFile(first, 'utf8')).equal('a long payload\n');
+  });
+
+  it('should keep who a turn is from beside it, never in it, and read it back for the app', async () => {
+    // The owner: "there should not be any append or prepend on any feature".
+    const home = await directory('ferretry-send-turns-');
+    const subject = new FileSendTurnStore(new FileResumeTurnStore(() => home), () => home);
+    await subject.writeTurn(ID, 8, 'carry on\n', { kind: 'ferretry', feature: 'Warden' });
+    await subject.writeTurn(ID, 9, 'the person said this\n');
+    await writeFile(join(home, 'turns', 'turn-010.by.json'), '{"kind":"nobody"}\n');
+
+    const warden = await subject.readHandoffAuthor(ID, 'turn-008');
+    const person = await subject.readHandoffAuthor(ID, 'turn-009');
+    const damaged = await subject.readHandoffAuthor(ID, 'turn-010');
+    const queued = await subject.readHandoffAuthor(ID, 'queued-send-1');
+
+    should(await readFile(join(home, 'turns', 'turn-008.md'), 'utf8')).equal('carry on\n');
+    should(warden).deepEqual({ kind: 'ferretry', feature: 'Warden' });
+    should(person).be.undefined();
+    should(damaged).be.undefined();
+    should(queued).be.undefined();
   });
 
   it('should read a hand-off back by its stem, from the folder each kind is written to', async () => {

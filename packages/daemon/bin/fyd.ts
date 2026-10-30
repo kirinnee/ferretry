@@ -10844,10 +10844,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             const document = await sendTurns.readHandoff(sessionId, name);
             return document === undefined
               ? undefined
-              : handoffView(name, document, {
-                  reminder: defaultSessionResumeSettings.turnProtocolReminder,
-                  attachmentRoot: attachmentOriginals(sessionId),
-                });
+              : handoffView(
+                  name,
+                  document,
+                  {
+                    reminder: defaultSessionResumeSettings.turnProtocolReminder,
+                    attachmentRoot: attachmentOriginals(sessionId),
+                  },
+                  await sendTurns.readHandoffAuthor(sessionId, name),
+                );
           },
           new AgendaConversation(agenda),
           new InstructionRefresh({

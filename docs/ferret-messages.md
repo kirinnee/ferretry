@@ -90,14 +90,19 @@ send stays an ordinary tool call. The parsing lives in `packages/pwa/src/lib/pee
 
 ## Notices from Ferretry itself
 
-A message Ferretry types into a session on its own account opens with `[ferretry] ` (written and parsed
-in `packages/protocol/src/lib/agent-messages.ts`). Both Chats draw it as a compact **system row**, never
-as the owner's bubble. Its first paragraph is the headline; anything after the first blank line is
-addressed to the agent and sits behind a **details** control.
+**No tag and no footer, on anything** (the owner, 2026-10-30: "there should not be any append or prepend on
+any feature"). A message Ferretry types into a session on its own account is plain sentences with Ferretry
+— or its Warden — as their subject ("Ferretry restarted you mid-turn…", "Ferretry's Warden resumed you…",
+"Ferretry could not confirm your message to…"), so the agent reads whose it is from the words themselves.
+Who it is from is METADATA the app reads, never text: a queued message's `by` (`QueuedMessage.by`), and a
+relaunch turn's author kept beside its document (`turns/turn-NNN.by.json`, `SessionHandoff.by`, from
+`resumeTurnAuthor`: the Warden, a restart, the owner or a ferret). Both Chats draw it as Ferretry's, never as
+the owner's bubble. Older history that still opens with `[ferretry] ` (`agent-messages.ts`) is stripped for
+display. A contract test (`tests/unit/no-prepend-notices.test.ts`) holds every notice to this.
 
 A **restart or same-harness migrate** resumes the same conversation, so it sends a notice only when the
 session was mid-turn AND the in-flight inventory held something not classified safe (re-armable,
-destructive or unknown, or a blind spot). Otherwise it sends nothing. An auto session is the exception: its resume would otherwise type the default "continue the assigned task" prompt, so it is told `Restarted — nothing was interrupted.` instead. When sent it reads
+destructive or unknown, or a blind spot). Otherwise it sends nothing. An auto session is the exception: its resume would otherwise type the default "continue the assigned task" prompt, so it is told `Ferretry restarted you, and nothing was interrupted.` instead. When sent it reads
 `Restarted mid-turn — 1 command was interrupted · details`, and the agent is told it came from Ferretry,
 not the owner, and where `migration-inflight.md` is (`packages/daemon/src/lib/migrate/restart-notice.ts`).
 A notice that travelled as a turn file is recognised by the document it holds, so it is a system row once
