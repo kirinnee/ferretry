@@ -616,6 +616,87 @@ describe('SharedHistoryMigration', () => {
     should(otherConflicts.has(`${HOME_A}/history.jsonl`)).be.true();
   });
 
+  it('should judge a rename by directory devices, since an overlay reports a file on its underlying layer', async () => {
+    // Arrange — overlayfs: every directory reports the overlay (device 1), every non-directory the
+    // layer beneath it (device 5). Both sides of each rename are one filesystem, so none may refuse.
+    const layer = 5;
+    const overlayLink = (target: string): SharedHistoryNode => ({
+      kind: 'symbolic-link',
+      modifiedAtMs: 1,
+      deviceId: layer,
+      target,
+    });
+    const files = new MemorySharedHistoryFileSystem();
+    files.seed(
+      HOME_A,
+      directory({
+        projects: directory({
+          fresh: file('a-fresh', 1, layer),
+          loses: file('a-older', 1, layer),
+          wins: file('a-newer', 9, layer),
+        }),
+        'history.jsonl': file('{"display":"a","timestamp":1}\n', 1, layer),
+      }),
+    );
+    files.seed(
+      `${POOL}/projects`,
+      directory({ loses: file('pooled-newer', 5, layer), wins: file('pooled-older', 2, layer) }),
+    );
+    files.seed(`${POOL}/history.jsonl`, file('{"display":"pooled","timestamp":2}\n', 2, layer));
+    files.seed(HOME_B, directory({ projects: overlayLink('/foreign/projects') }));
+    const subject = new SharedHistoryMigration(files);
+
+    // Act
+    const actual = await subject.materialize(request());
+
+    // Assert
+    should(actual.conflicts).equal(3);
+    should(files.has(`${POOL}/projects/fresh`)).be.true();
+    should(files.has(`${CONFLICTS}/account-b/projects`)).be.true();
+    should(files.has(`${CONFLICTS}/account-a/history.jsonl`)).be.true();
+  });
+
+  it('should refuse each kind of rename whose source directory is on another device than its destination', async () => {
+    // Arrange — a real mount boundary: the home (or a directory inside it) is on device 3, the pool on 1.
+    const cases = {
+      'a whole entry': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(HOME_A, directory({ projects: directory({ session: file('evidence', 1) }) }, 1, 3));
+      },
+      'a child of a merged directory': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(`${POOL}/projects`, directory());
+        files.seed(HOME_A, directory({ projects: directory({ session: file('evidence', 1) }, 1, 3) }));
+      },
+      'the loser of a collision': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(`${POOL}/projects`, directory({ same: file('pooled', 9) }));
+        files.seed(HOME_A, directory({ projects: directory({ same: file('incoming', 1) }, 1, 3) }));
+      },
+      'the winner of a collision': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(`${POOL}/projects`, directory({ same: file('pooled', 1) }));
+        files.seed(HOME_A, directory({ projects: directory({ same: file('incoming', 9) }, 1, 3) }));
+      },
+      'a prompt history file': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(`${POOL}/history.jsonl`, file('{"display":"pooled","timestamp":1}\n', 1));
+        files.seed(HOME_A, directory({ 'history.jsonl': file('{"display":"a","timestamp":2}\n', 2) }, 1, 3));
+      },
+      'a foreign link': (files: MemorySharedHistoryFileSystem): void => {
+        files.seed(`${POOL}/projects`, directory());
+        files.seed(HOME_A, directory({ projects: link('/foreign/projects') }, 1, 3));
+      },
+    };
+
+    for (const [label, seed] of Object.entries(cases)) {
+      const files = new MemorySharedHistoryFileSystem();
+      seed(files);
+
+      // Act
+      const promise = new SharedHistoryMigration(files).preview(onlyA());
+
+      // Assert
+      await should(promise).be.rejectedWith(/refusing a cross-device shared-history rename/u, label);
+      await should(promise).be.rejectedWith(/is on device 3 and .* is on device 1/u, label);
+    }
+  });
+
   it('should refuse a planted non-directory ancestor beneath the conflict root', async () => {
     // Arrange — writing beneath this link would escape in a merely lexical filesystem adapter.
     const files = new MemorySharedHistoryFileSystem();
