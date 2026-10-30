@@ -26,6 +26,7 @@ concurrency:
 
 jobs:
   relevance:
+    timeout-minutes: 5
     name: E2E Relevance
     permissions:
       contents: read
@@ -114,6 +115,7 @@ jobs:
 
   # THE status: one name for branch protection and merge tooling however many shards there are.
   summary:
+    timeout-minutes: 5
     name: E2E Journeys
     needs: [relevance, journeys]
     if: ${{ !cancelled() }}

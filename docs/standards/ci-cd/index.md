@@ -403,7 +403,13 @@ hung inside a test and held its runner for two hours, three runs in a row, befor
 - The [realworld workflow](#realworld-workflow) jobs: `realworld` 30, `harness-contract` 30,
   `darwin-confinement` 20, `safari-sandbox-shell` 20, `report` 10, `changes` 5. A machine-dependent test
   that hangs is a red realworld job, never a held runner.
+- Every other job, sized at two to three times its p95 over the week to 2026-10-29: `CI` —
+  `precommit` 10, `build-checks` 20, `pwa-screenshot` 20, `test` (unit) 15, `compile` 15, `sit` 10,
+  `smoke` 10, the two ledgers 5; `E2E`/`E2E Slow` relevance and summary 5; `Harness Contract (latest)`
+  20 and its report 10; `CD` `goreleaser` 30 and `sign` 15; `Deploy PWA to Pages` build 15, sign 10,
+  deploy 10; `Deploy Hosted Relay` jobs 20; `Release` 20.
 - A new job states its ceiling when it is added, sized from its first green runs.
+  `scripts/validate/job-ceilings.sh` refuses a workflow job without one.
 
 The ceiling is the last net. The unit and integration tiers stop sooner on their own:
 `scripts/test/stall-watch.ts` kills a `bun test` run that has printed nothing for

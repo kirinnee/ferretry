@@ -22,6 +22,7 @@ on:
 
 jobs:
   latest:
+    timeout-minutes: 20
     name: Harness Contract latest (${{ matrix.os }})
     permissions:
       contents: read
@@ -51,6 +52,7 @@ jobs:
   # A red night nobody reads is a night nobody acts on, so a failed scheduled run files (or adds to) one
   # issue per claude/codex version pair. Pull-request runs measure the guard itself and stay quiet.
   report:
+    timeout-minutes: 10
     name: Report a failed harness contract
     needs: latest
     if: ${{ always() && needs.latest.result == 'failure' && github.event_name != 'pull_request' }}
