@@ -69,6 +69,12 @@ const client = (fail = false): AgendaActionClient => ({
   },
   needsInfo: async () => undefined,
   discuss: async () => undefined,
+  snooze: async (_c, _s, id, until) => {
+    calls.push(`snooze:${id}:${until}`);
+  },
+  unsnooze: async (_c, _s, id) => {
+    calls.push(`unsnooze:${id}`);
+  },
   progress: async (_c, _s, id, step, done) => {
     calls.push(`progress:${id}:${step}:${done}`);
   },

@@ -1022,3 +1022,28 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   color: var(--color-muted, inherit);
   font-size: var(--text-meta);
 }
+.fy-attn-card__snooze {
+  display: inline-flex;
+  min-width: 36px;
+  min-height: 36px;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  border: var(--stroke-control, var(--stroke)) solid transparent;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-attn-card__snooze:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--fg);
+}
+.fy-attn-card__snooze:focus-visible {
+  outline: var(--focus-width, 2px) solid var(--focus-color, var(--accent));
+  outline-offset: -2px;
+}
+.fy-attn-card__snooze:disabled {
+  opacity: 0.35;
+  cursor: default;
+}

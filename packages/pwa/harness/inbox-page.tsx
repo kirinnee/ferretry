@@ -218,6 +218,29 @@ const FERRET: readonly InboxCard[] = [
   card(WITH('A10', 4, 'Which cache to drop?'), NIGHTLY, 'studio'),
 ];
 
+const PARKED_SNOOZED = (id: string, title: string, until: number): AgendaItem =>
+  item(id, 90, 'hadi', {
+    title,
+    subject: title,
+    ask: { kind: 'permission' },
+    parked: { reason: 'snoozed', at: ago(60), until: new Date(until).toISOString() },
+  } as Partial<AgendaItem>);
+/** Parked items come from the boards the page read, not the daemon summary: snoozed, then replied. */
+const PARKED: readonly InboxCard[] = [
+  card(PARKED_SNOOZED('A50', 'Waiting for the deploy approval', NOW + 5 * 3_600_000), RELEASE, 'studio'),
+  card(PARKED_SNOOZED('A51', 'Check the nightly benchmark', NOW + 27 * 3_600_000), NIGHTLY, 'studio'),
+  card(
+    item('A52', 120, 'ottilie', {
+      title: 'Which storage engine for the ledger?',
+      subject: 'Which storage engine should keep the ledger: SQLite or Postgres?',
+      ask: { kind: 'open-question' },
+      parked: { reason: 'replied', at: ago(18) },
+    } as Partial<AgendaItem>),
+    LEDGER,
+    'studio',
+  ),
+];
+
 const memory = new ScrollMemory(null);
 
 /** The open item's composer talks to this machine: a fake one, whose sends go nowhere. */
@@ -252,6 +275,7 @@ function Inbox({
     reading: false,
     resolved: [],
     resolvedReading: false,
+    parked: PARKED,
     loadResolved: () => undefined,
     deferred,
     deferredState: state,

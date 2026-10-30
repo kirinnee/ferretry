@@ -29,8 +29,9 @@ import { ChatProse } from '../../components/chat-prose.tsx';
 import type { InboxAction } from '../../lib/agenda-answers.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
+import { sendAgendaAction } from '../../lib/agenda-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
-import { actionSentence } from '../../lib/agenda-inbox.ts';
+import { actionSentence, snoozeAction } from '../../lib/agenda-inbox.ts';
 import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
@@ -50,7 +51,7 @@ import { AgendaDrawer, AgendaLine, AgendaPanel } from './agenda-line.tsx';
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
   DaemonAgendaClient,
-  'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'discuss' | 'progress'
+  'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'discuss' | 'progress' | 'snooze' | 'unsnooze'
 >;
 
 /** A request to show one item. `seq` makes a repeated request a new one. */
@@ -86,21 +87,6 @@ const stepTicker =
   (client: AgendaActionClient, connection: DaemonConnection, scope: DaemonSessionScope, id: AgendaId) =>
   (step: number, done: boolean): Promise<void> =>
     client.progress(connection, scope, id, step, done);
-
-/** Sends one answer, as the daemon is asked for it, to this session on this machine. */
-const runAgendaAction = async (
-  client: AgendaActionClient,
-  connection: DaemonConnection,
-  scope: DaemonSessionScope,
-  id: AgendaId,
-  action: InboxAction,
-): Promise<void> => {
-  if (action.kind === 'respond') await client.respond(connection, scope, id, action.response, action.note);
-  else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note);
-  else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);
-  else if (action.kind === 'discuss') await client.discuss(connection, scope, id, action.note);
-  else await client.resolve(connection, scope, id, action.note);
-};
 
 const NO_ITEMS: readonly AgendaItem[] = [];
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
@@ -234,7 +220,7 @@ export const useAgenda = ({
     const sent = withComposerNote(action, note);
     setCard(item.id, null);
     setAnnouncement('');
-    runAgendaAction(client, connection, scope, item.id, sent).then(
+    sendAgendaAction(client, connection, scope, item.id, sent).then(
       () => {
         setCard(item.id, undefined);
         setAnnouncement(actionSentence(sent, item.id));
@@ -357,6 +343,7 @@ export const useAgenda = ({
           key={cardItem.id}
           onAct={action => act(cardItem, action, composerDraft(scope))}
           onClose={() => update(() => ({ card: null }))}
+          onSnooze={until => act(cardItem, snoozeAction(until), '')}
           position={{ index: at, total: agenda.length }}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
           swipeable={swipeable}

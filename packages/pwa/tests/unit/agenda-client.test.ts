@@ -201,6 +201,22 @@ describe('DaemonAgendaClient', () => {
     should(client.store.status(scopeA)).equal('ready');
   });
 
+  it('sends a snooze with its instant and an unsnooze alone', async () => {
+    const actions: unknown[] = [];
+    const client = new DaemonAgendaClient(undefined, async (_input, init) => {
+      actions.push(JSON.parse(String(init?.body)));
+      return response(snapshot('same/session'));
+    });
+
+    await client.snooze(daemonA, scopeA, 'A1', '2026-10-30T15:00:00.000Z');
+    await client.unsnooze(daemonA, scopeA, 'A1');
+
+    should(actions).deepEqual([
+      { action: 'snooze', id: 'A1', until: '2026-10-30T15:00:00.000Z' },
+      { action: 'unsnooze', id: 'A1' },
+    ]);
+  });
+
   it('marks a current full load or mutation as errored when its daemon request fails', async () => {
     const client = new DaemonAgendaClient(undefined, async () => response({ error: 'down' }, 503));
 

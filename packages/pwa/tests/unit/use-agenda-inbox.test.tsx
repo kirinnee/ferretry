@@ -56,7 +56,7 @@ const board = (sessionId: string, items: readonly AgendaItem[]): AgendaSnapshot 
 });
 
 interface Call {
-  readonly method: 'revalidate' | 'respond' | 'resolve' | 'dismiss' | 'discuss';
+  readonly method: 'revalidate' | 'respond' | 'resolve' | 'dismiss' | 'discuss' | 'snooze' | 'unsnooze';
   readonly daemonId: string;
   readonly sessionId: string;
   readonly detail?: unknown;
@@ -82,6 +82,8 @@ const fakeClient = (boards: Map<string, AgendaSnapshot>) => {
     resolve: record('resolve'),
     dismiss: record('dismiss'),
     discuss: record('discuss'),
+    snooze: record('snooze'),
+    unsnooze: record('unsnooze'),
   } as unknown as DaemonAgendaClient;
   return { client, calls };
 };
@@ -241,6 +243,49 @@ describe('useAgendaInboxModel', () => {
       ['dismiss', ['A2', undefined]],
       ['resolve', ['A3', 'shipped']],
       ['discuss', ['A4', 'why?']],
+    ]);
+  });
+
+  test('keeps parked items out of the cards and deals them to parked, and sends a snooze and an unsnooze by kind', async () => {
+    const parkedItem = (id: string, minutes: number, parked: AgendaItem['parked']): AgendaItem =>
+      ({ ...item(id, minutes), parked }) as AgendaItem;
+    const boards = new Map([
+      [
+        'studio/a',
+        board('a', [
+          item('A1', 1),
+          parkedItem('A2', 2, { reason: 'snoozed', at: at(5), until: at(50) }),
+          parkedItem('A3', 3, { reason: 'replied', at: at(9) }),
+        ]),
+      ],
+    ]);
+    const { client, calls } = fakeClient(boards);
+    const { timers, fire } = manualTimers();
+    let inbox: AgendaInbox | null = null;
+    const machines: readonly AgendaInboxMachine[] = [
+      { connection: studio, name: 'Studio', sessions: [waiting('a', summary(1, 3))] },
+    ];
+    view = await mount(
+      <Probe client={client} machines={machines} onInbox={value => (inbox = value)} timers={timers} />,
+    );
+    await settle();
+    const read = (): AgendaInbox => inbox as unknown as AgendaInbox;
+    expect(read().cards.map(card => card.item.id)).toEqual(['A1']);
+    expect(read().parked.map(card => card.item.id)).toEqual(['A3', 'A2']);
+
+    const [replied] = read().parked;
+    const snoozing = read().cards[0];
+    await interact(() => {
+      if (snoozing !== undefined)
+        read().deferred.schedule(snoozing, { kind: 'snooze', label: 'Snooze', until: at(40) });
+      if (replied !== undefined) read().deferred.schedule(replied, { kind: 'unsnooze', label: 'Back to my list' });
+    });
+    expect(read().parked.map(card => card.item.id)).toEqual(['A2']);
+    await interact(() => fire());
+    await settle();
+    expect(calls.filter(call => call.method !== 'revalidate').map(call => [call.method, call.detail])).toEqual([
+      ['snooze', ['A1', at(40)]],
+      ['unsnooze', ['A3']],
     ]);
   });
 
