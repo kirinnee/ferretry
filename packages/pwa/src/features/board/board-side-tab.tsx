@@ -23,16 +23,16 @@ import { Columns3, List, Maximize2, Minimize2 } from 'lucide-react';
 import { type ReactElement, useCallback, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
-import { NO_BOARD_FILTERS } from '../../lib/board-model.ts';
 import type { BoardAnswerState } from '../../lib/board-done.ts';
+import { NO_BOARD_FILTERS } from '../../lib/board-model.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import type { BoardSideView } from '../../lib/board-side-view.ts';
 import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
 import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
-import { AgentsToggle } from './board-filters.tsx';
 import { BoardCard, type BoardCardMoves, type BoardDensity } from './board-card.tsx';
+import { AgentsToggle } from './board-filters.tsx';
 import { BoardLane } from './board-lane.tsx';
 import type { BoardDoneControl } from './board-views.tsx';
 
