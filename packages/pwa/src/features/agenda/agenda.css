@@ -537,14 +537,6 @@
   color: var(--muted);
   font-size: var(--text-sm);
 }
-.fy-item-history__was {
-  color: var(--muted);
-  font-size: var(--text-sm);
-  overflow-wrap: anywhere;
-}
-.fy-item-history__was dt {
-  font-weight: var(--weight-strong);
-}
 
 /* ---- the snooze control: a clock button and its menu --------------------------------------------------------- */
 .fy-snooze {
@@ -641,4 +633,209 @@
   .fy-snooze__go {
     min-height: 36px;
   }
+}
+
+/* ---- the history's dividers: the item's own events between the bubbles ------------------------------------ */
+.fy-item-history__divider {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-item-history__divider::before,
+.fy-item-history__divider::after {
+  height: var(--stroke);
+  flex: 1 1 0;
+  background: var(--divider-color);
+  content: '';
+}
+.fy-item-history__divider-text {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 85%;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 var(--gap-xs);
+  text-align: center;
+}
+
+/* ---- the type badge and its line, at the top of the body ------------------------------------------------- */
+.fy-item-type {
+  display: flex;
+  margin: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs) var(--gap-sm);
+  font-size: var(--text-sm);
+}
+.fy-item-type__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: var(--stroke) solid var(--accent-border);
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+}
+.fy-item-type[data-tone='approval'] .fy-item-type__badge {
+  border-color: var(--warn-border);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.fy-item-type[data-tone='todo'] .fy-item-type__badge {
+  border-color: var(--ok-border);
+  background: var(--ok-bg);
+  color: var(--ok);
+}
+.fy-item-type[data-tone='review'] .fy-item-type__badge {
+  border-color: var(--err-border);
+  background: var(--err-bg);
+  color: var(--err);
+}
+.fy-item-type[data-tone='note'] .fy-item-type__badge {
+  border-color: var(--pend-border);
+  background: var(--pend-bg);
+  color: var(--pend);
+}
+.fy-item-type[data-tone='reply'] .fy-item-type__badge {
+  border-color: var(--accent-border);
+  background: transparent;
+  color: var(--accent-strong, var(--accent));
+}
+.fy-item-type__hint {
+  color: var(--muted);
+}
+
+/* ---- premise and context: ONE tinted block on top of the body --------------------------------------------- */
+.fy-attn-situation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-md);
+  padding: var(--gap-md);
+  border: var(--stroke) solid var(--accent-border);
+  border-radius: var(--radius-panel);
+  background: var(--accent-soft);
+}
+.fy-attn-situation__part {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-attn-situation__heading {
+  margin: 0;
+  color: var(--accent-strong, var(--accent));
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+  line-height: var(--leading-base);
+}
+
+/* ---- a decision's options as cards ------------------------------------------------------------------------- */
+.fy-item-view .fy-attn-secs[data-layout='open'] .fy-attn-options {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+  gap: var(--gap-sm);
+}
+.fy-item-view .fy-attn-secs[data-layout='open'] .fy-attn-options__row {
+  padding: var(--gap-sm) var(--gap-md);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+.fy-item-view .fy-attn-secs[data-layout='open'] .fy-attn-options__row:has([data-agenda-recommended]) {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+/* ---- the revisions: each version before → after ---------------------------------------------------------- */
+.fy-item-revisions {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding-top: var(--gap-md);
+  border-top: var(--stroke) solid var(--divider-color);
+}
+.fy-item-revisions__title {
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-item-revisions__list {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+  list-style: none;
+}
+.fy-item-revisions__version {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-item-revisions__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--gap-xs) var(--gap-sm);
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-item-revisions__head > strong {
+  color: var(--fg);
+}
+.fy-item-revisions__current {
+  padding: 0 6px;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+}
+.fy-item-revisions__change {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-item-revisions__field {
+  font-size: var(--text-sm);
+  font-weight: var(--weight-strong);
+}
+.fy-item-revisions__pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+  gap: var(--gap-sm);
+}
+.fy-item-revisions__side {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--gap-sm);
+  border-radius: var(--radius-control);
+  font-size: var(--text-sm);
+  line-height: var(--leading-base);
+  overflow-wrap: anywhere;
+}
+.fy-item-revisions__side[data-side='before'] {
+  background: var(--err-bg);
+}
+.fy-item-revisions__side[data-side='after'] {
+  background: var(--ok-bg);
+}
+.fy-item-revisions__word {
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-strong);
+  text-transform: uppercase;
+}
+.fy-item-revisions__empty {
+  color: var(--muted);
+  font-style: italic;
 }

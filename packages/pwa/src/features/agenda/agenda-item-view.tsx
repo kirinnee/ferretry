@@ -5,9 +5,10 @@
  *
  *   top     STICKY   the title, the one-line ask, where the item stands, ‹ n of N › and ✕ — on a PHONE one line:
  *                    the title cut to fit, and the ask is the body's first paragraph unless ⓘ pins it here
- *   body    SCROLLS  the ONE scroller (`overscroll-behavior: contain`, no nested scroller): the questions, what's
- *                    going on, why it matters, decided, still open, options, terms as a Term | Meaning table, steps,
- *                    mock-ups, then the history — what the owner said and what changed
+ *   body    SCROLLS  the ONE scroller (`overscroll-behavior: contain`, no nested scroller): the type badge, ONE
+ *                    tinted block of what's going on and why now, the questions, decided, still open, options, terms as a
+ *                    Term | Meaning table, steps (a to-do and a review lead with theirs), mock-ups, then the History — the
+ *                    conversation about the item as chat bubbles — and the Revisions, v1 to now, before → after
  *   bottom  STICKY   the QUICK REPLIES (`agenda-quick-replies.tsx`), directly above the composer
  *
  * Top and bottom are flex items outside the scroller, so scrolling the body moves neither. Every section is drawn
@@ -32,9 +33,11 @@ import { AgendaDelivery, agendaHeading } from './agenda-delivery.tsx';
 import { AgendaDetail } from './agenda-detail.tsx';
 import { AgendaItemHistory } from './agenda-item-history.tsx';
 import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
+import { AgendaRevisions } from './agenda-revisions-view.tsx';
 import { agendaAsk } from './agenda-row.tsx';
 import { AgendaSnoozeMenu } from './agenda-snooze-menu.tsx';
 import { AgendaStatusPill } from './agenda-status-pill.tsx';
+import { AgendaTypeBadge } from './agenda-type.tsx';
 import { useDownSwipe } from './use-down-swipe.ts';
 
 export interface AgendaItemViewProps {
@@ -250,6 +253,7 @@ export function AgendaItemView({
               {renderProse(ask)}
             </div>
           )}
+          <AgendaTypeBadge item={item} />
           <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} />
           <AgendaConfigChange item={item} />
           <AgendaDetail
@@ -266,6 +270,7 @@ export function AgendaItemView({
             {...(onProgress === undefined ? {} : { onProgress })}
           />
           <AgendaItemHistory events={history} ferret={ferret} now={now} />
+          <AgendaRevisions ferret={ferret} item={item} now={now} />
         </div>
       </div>
       {settled !== undefined ? (

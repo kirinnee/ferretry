@@ -50,9 +50,11 @@ describe('the history of an item', () => {
     expect(root.querySelector('[data-agenda-history]')).toBeNull();
   });
 
-  test('says what a revision changed and what it was, or that it was empty', async () => {
+  test('says who edited what as a small divider, with the time, and who raised the item', async () => {
     const at = NOW - 3_600_000;
     const root = await draw([
+      { kind: 'raised', key: 'raised', at: NOW - 7_200_000, by: 'agent' },
+      { kind: 'raised', key: 'raised-you', at: 0, by: 'human' },
       {
         kind: 'revision',
         key: 'r1',
@@ -62,17 +64,31 @@ describe('the history of an item', () => {
           by: 'agent',
           changed: [
             { field: 'subject', label: 'Question', before: '- the old ask' },
-            { field: 'context', label: 'Context', before: null },
+            { field: 'context', label: 'Why now', before: null },
           ],
         },
       } as HistoryEvent,
+      {
+        kind: 'revision',
+        key: 'r2',
+        at,
+        entry: {
+          at: new Date(at).toISOString(),
+          by: 'human',
+          changed: [{ field: 'subject', label: 'Question', before: null }],
+        },
+      } as HistoryEvent,
     ]);
-    const row = must(root.querySelector('[data-history="revision"]'), 'the revision');
-    expect(row.textContent).toContain('changed Question, Context');
-    expect(row.textContent).toContain('Question was');
-    expect(row.textContent).toContain('the old ask');
-    expect(row.textContent).toContain('Context was empty');
-    expect(row.querySelector('time')).not.toBeNull();
+    const [raised, raisedYou, edited, ownerEdited] = [...root.querySelectorAll('li.fy-item-history__divider')];
+    expect(raised?.getAttribute('data-history')).toBe('raised');
+    expect(raised?.textContent).toContain('Raised by Zoe');
+    expect(raised?.querySelector('time')).not.toBeNull();
+    expect(raisedYou?.textContent).toBe('Raised by you');
+    expect(edited?.getAttribute('data-history')).toBe('revision');
+    expect(edited?.textContent).toContain('Zoe edited question, why now');
+    expect(edited?.querySelector('time')).not.toBeNull();
+    expect(ownerEdited?.textContent).toContain('You edited question');
+    expect(root.textContent).not.toContain('the old ask');
   });
 
   test('draws what the ferret said and what the owner typed as the chat’s own message rows', async () => {

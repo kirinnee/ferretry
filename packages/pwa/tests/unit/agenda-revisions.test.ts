@@ -4,11 +4,13 @@ import {
   decidedSummary,
   describePrevious,
   hasHighlight,
+  itemVersions,
   lastRevision,
   revisionHighlight,
   revisionList,
   revisionStamp,
   updatedAgo,
+  versionText,
 } from '../../src/lib/agenda-revisions.ts';
 import { agendaItem } from '../support/agenda-inbox.tsx';
 
@@ -162,5 +164,61 @@ describe('revisionStamp', () => {
     expect(revisionStamp(local(9, 26, 8, 4), now)).toBe('Mon 8:04');
     expect(revisionStamp(local(9, 1, 8, 54), now)).toBe('Oct 1');
     expect(revisionStamp('nonsense', now)).toBe('nonsense');
+  });
+});
+
+describe('versionText', () => {
+  it('reads an ask as its options, terms and details as "Term — meaning" bullets, a recommendation as decision — why', () => {
+    expect(versionText('ask', { kind: 'multiple-choice', options: [{ label: 'SQLite' }, { label: 'Postgres' }] })).toBe(
+      '- SQLite\n- Postgres',
+    );
+    expect(versionText('terms', [{ term: 'WAL', meaning: 'x'.repeat(120) }])).toBe(`- WAL — ${'x'.repeat(90)}…`);
+    expect(versionText('optionDetails', [{ label: 'SQLite', detail: 'one file' }, { label: 'Postgres' }])).toBe(
+      '- SQLite — one file\n- Postgres — ',
+    );
+    expect(versionText('recommendation', { decision: 'SQLite', why: 'No server.' })).toBe('SQLite — No server.');
+    expect(versionText('recommendation', { decision: 'SQLite' })).toBe('SQLite');
+  });
+
+  it('falls back to the plain reading for everything else, an ask without options included', () => {
+    expect(versionText('premise', 'The board outgrew its file.')).toBe('The board outgrew its file.');
+    expect(versionText('premise', undefined)).toBeNull();
+    expect(versionText('ask', { kind: 'open-question' })).toBe(describePrevious('ask', { kind: 'open-question' }));
+    expect(versionText('ask', { kind: 'multiple-choice', options: [{ label: 7 }] })).toBe(
+      describePrevious('ask', { kind: 'multiple-choice', options: [{ label: 7 }] }),
+    );
+    expect(versionText('terms', [])).toBe(describePrevious('terms', []));
+    expect(versionText('optionDetails', [])).toBe(describePrevious('optionDetails', []));
+  });
+});
+
+describe('itemVersions', () => {
+  it('is only v1 for an item never edited', () => {
+    expect(itemVersions(agendaItem('A5'))).toEqual([{ number: 1, at: null, by: null, changes: [] }]);
+  });
+
+  it('lists v1, then one version per edit newest first, each field before → after', () => {
+    const item = withRevisions(
+      [
+        revision({
+          at: '2026-08-01T10:00:00.000Z',
+          changed: ['premise', 'context'],
+          previous: { premise: 'one', context: 'old' },
+        }),
+        revision({ at: '2026-08-01T11:00:00.000Z', by: 'human', changed: ['premise'], previous: { premise: 'two' } }),
+      ],
+      { premise: 'three', context: 'newer' },
+    );
+    const versions = itemVersions(item);
+    expect(versions.map(version => version.number)).toEqual([3, 2, 1]);
+    expect(versions[0]).toMatchObject({ by: 'human', at: '2026-08-01T11:00:00.000Z' });
+    expect(versions[0]?.changes).toEqual([
+      { field: 'premise', label: "What's going on", before: 'two', after: 'three' },
+    ]);
+    expect(versions[1]?.changes).toEqual([
+      { field: 'premise', label: "What's going on", before: 'one', after: 'two' },
+      { field: 'context', label: 'Why now', before: 'old', after: 'newer' },
+    ]);
+    expect(versions[2]).toEqual({ number: 1, at: null, by: null, changes: [] });
   });
 });

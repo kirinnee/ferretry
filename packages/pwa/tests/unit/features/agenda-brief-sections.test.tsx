@@ -218,13 +218,14 @@ describe('the open layout asks first', () => {
   const order = (root: ParentNode): string[] =>
     [...root.querySelectorAll('[data-agenda-section]')].map(node => node.getAttribute('data-agenda-section') ?? '');
 
-  test('puts the questions before what is going on, with each reason under its question', async () => {
+  test('puts what is going on on top, then the questions, with each reason under its question', async () => {
     const picker = { answers: ['', '', ''], disabled: false, onAnswer: () => undefined };
     view = await mount(
       <AgendaBriefSections askShown collapsible={false} item={asked} picker={picker} renderProse={text => text} />,
     );
     const root = must(view.container, 'view');
-    expect(order(root).indexOf('questions')).toBeLessThan(order(root).indexOf('premise'));
+    expect(order(root)[0]).toBe('premise');
+    expect(order(root).indexOf('premise')).toBeLessThan(order(root).indexOf('questions'));
     const reasons = [...root.querySelectorAll('[data-agenda-question-why]')].map(node => node.textContent);
     expect(reasons).toEqual(['The team is in.', 'Suggested: Zoe — She knows the users.', 'Suggested: Newsletter']);
     expect(root.textContent).not.toContain('message box');
@@ -236,6 +237,102 @@ describe('the open layout asks first', () => {
     const root = must(view.container, 'view');
     expect(order(root).indexOf('premise')).toBeLessThan(order(root).indexOf('questions'));
     expect(root.querySelectorAll('[aria-label="answered"]')).toHaveLength(1);
+  });
+});
+
+describe('the situation block and the typed layouts', () => {
+  const base = {
+    title: 'Plan',
+    subject: 'Which database?',
+    premise: '- The board outgrew its file',
+    context: '- The release is Monday',
+    steps: undefined,
+  };
+  const draw = async (extra: Record<string, unknown>, props: Record<string, unknown> = {}) => {
+    view = await mount(
+      <AgendaBriefSections
+        collapsible={false}
+        item={agendaItem('A5', { ...base, ...extra } as never)}
+        renderProse={text => text}
+        {...props}
+      />,
+    );
+    return must(view.container, 'view');
+  };
+  const sections = (root: ParentNode): string[] =>
+    [...root.querySelectorAll('[data-agenda-section]')].map(node => node.getAttribute('data-agenda-section') ?? '');
+
+  test('puts the premise and the context in ONE block that comes first, and nowhere else', async () => {
+    const root = await draw({ ask: choices('SQLite', 'Postgres') });
+    const block = must(root.querySelector('[data-agenda-situation]'), 'the situation block');
+    expect([...block.querySelectorAll('h4')].map(h => h.textContent)).toEqual(['What’s going on', 'Why now']);
+    expect(sections(root).slice(0, 2)).toEqual(['premise', 'context']);
+    expect(root.querySelectorAll('[data-agenda-section="premise"]')).toHaveLength(1);
+    expect(root.querySelectorAll('[data-agenda-section="context"]')).toHaveLength(1);
+    expect(root.textContent).not.toContain('Why it matters');
+  });
+
+  test('draws only the half it has, names a list of picks as suggested answers, and marks what changed', async () => {
+    const onlyPremise = await draw({ context: undefined });
+    expect(onlyPremise.querySelectorAll('[data-agenda-situation] h4')).toHaveLength(1);
+    await view?.unmount();
+    const onlyContext = await draw({ premise: undefined, context: '- My picks: Monday' });
+    expect(onlyContext.querySelector('[data-agenda-situation] h4')?.textContent).toBe('Suggested answers');
+    await view?.unmount();
+    const item = agendaItem('A5', {
+      ...base,
+      premise: 'The board outgrew its file.',
+      context: 'The release is Monday.',
+      revisions: [
+        {
+          at: '2026-08-01T10:00:00.000Z',
+          by: 'agent',
+          changed: ['premise', 'context'],
+          previous: { premise: 'old', context: 'old' },
+        },
+      ],
+    } as never);
+    view = await mount(
+      <AgendaBriefSections
+        collapsible={false}
+        highlight={revisionHighlight(item)}
+        item={item}
+        renderProse={text => text}
+      />,
+    );
+    const root = must(view.container, 'view');
+    expect(root.querySelectorAll('[data-agenda-situation] [data-agenda-changed="changed"]')).toHaveLength(2);
+  });
+
+  test('keeps the plain sections where the layout folds, and draws no block without a premise or a context', async () => {
+    view = await mount(<AgendaBriefSections item={agendaItem('A5', base as never)} renderProse={text => text} />);
+    const root = must(view.container, 'view');
+    expect(root.querySelector('[data-agenda-situation]')).toBeNull();
+    expect(sections(root)).toContain('premise');
+    await view.unmount();
+    const bare = await draw({ premise: undefined, context: undefined });
+    expect(bare.querySelector('[data-agenda-situation]')).toBeNull();
+  });
+
+  test('a to-do leads with its steps, a review with its reasoning, an approval says what it allows', async () => {
+    const todo = await draw(
+      { ask: { kind: 'task', done: 'Done' } },
+      { steps: <p>the checklist</p>, detail: <p>the notes</p> },
+    );
+    expect(sections(todo).filter(name => name === 'steps' || name === 'more' || name === 'premise')).toEqual([
+      'premise',
+      'steps',
+      'more',
+    ]);
+    await view?.unmount();
+    const review = await draw({ kind: 'review' }, { steps: <p>the checklist</p>, detail: <p>the reasoning</p> });
+    expect(sections(review).filter(name => name === 'steps' || name === 'more')).toEqual(['more', 'steps']);
+    expect(
+      review.querySelector('[data-agenda-section="more"] h4, [data-agenda-section="more"] summary')?.textContent,
+    ).toContain('Reasoning');
+    await view?.unmount();
+    const approval = await draw({ ask: { kind: 'permission' }, impact: '- it can push to main' });
+    expect(approval.querySelector('[data-agenda-section="impact"]')?.textContent).toContain('What it allows');
   });
 });
 
