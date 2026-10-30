@@ -1,0 +1,650 @@
+/**
+ * THE CARD RULES: what each request does to one card, as pure functions of the card, the request and the
+ * facts the service gathered first (lanes, the board graph, the caller's standing).
+ *
+ * Every rule that refuses throws a {@link BoardError} whose message says what to do instead. The rules
+ * that matter most, from `board-design.md`:
+ *
+ * - **Authority** (§2.5) is checked first, by {@link requireStanding}.
+ * - **A move back needs a reason**, and **a move back by the owner is a reopen** (§2.9): one write records
+ *   the `reopened` event and appends the owner's words to the clarifications, and the service then
+ *   delivers it to the card's ferret.
+ * - **Gates** (§2.3): only the owner passes an owner-gated lane (`needsOwner`), so only the owner closes.
+ * - **Dependencies** (§2.7): a card with unfinished blockers cannot move to a later CATEGORY; only the
+ *   owner overrides a dependency, and the override is recorded. Cycles are refused.
+ */
+import {
+  type BoardActor,
+  type BoardClarification,
+  type BoardEditableField,
+  BoardEditableFieldSchema,
+  type BoardProjectId,
+  type BoardTask,
+  type BoardTaskActionRequest,
+  type BoardTaskCreateRequest,
+  type BoardTaskEvent,
+  type BoardTaskId,
+  categoryOf,
+  firstLaneOfCategory,
+  formatTaskRef,
+  isBackwardMove,
+  LANE_CATEGORIES,
+  type Lane,
+  type LaneSet,
+  type LaneTrigger,
+  laneForTrigger,
+  laneOf,
+  moveReasonProblem,
+  needsOwner,
+  type PrLink,
+  prUrlParts,
+  type TaskRef,
+} from '@ferretry/protocol';
+import { type BoardOperation, type BoardStanding, mayDo, OPERATION_STANDINGS, refusalMessage } from './authority.ts';
+import { BoardError } from './errors.ts';
+import { type BoardIndex, blockedBy, dependencyCycle, type LaneSets } from './graph.ts';
+
+/** The facts every rule may consult, gathered by the service before it calls one. */
+export interface CardContext {
+  readonly now: string;
+  readonly actor: BoardActor;
+  readonly standing: BoardStanding;
+  /** The lanes of the card's own board. */
+  readonly laneSet: LaneSet;
+  readonly index: BoardIndex;
+  readonly laneSets: LaneSets;
+}
+
+/** What a rule decided. `task: null` changes nothing on the card. */
+export interface CardOutcome {
+  readonly task: BoardTask | null;
+  /** Set when the card was sent back with someone's words: the service delivers it to its ferret. */
+  readonly reopened?: { readonly from: string; readonly to: string; readonly reason: string };
+}
+
+/** The source recorded with an owner's words when they arrived as a move on the board. */
+export const OWNER_MOVE_SOURCE = 'owner (board move)';
+
+type NewEvent = BoardTaskEvent extends infer E
+  ? E extends BoardTaskEvent
+    ? Omit<E, 'seq' | 'at' | 'actor'>
+    : never
+  : never;
+
+/** The card with one more history event: next seq, this instant, this actor. */
+export const withEvent = (
+  card: BoardTask,
+  event: NewEvent,
+  context: Pick<CardContext, 'now' | 'actor'>,
+): BoardTask => ({
+  ...card,
+  history: [
+    ...card.history,
+    { ...event, seq: card.history.length + 1, at: context.now, actor: context.actor } as BoardTaskEvent,
+  ],
+});
+
+export const requireStanding = (
+  operation: BoardOperation,
+  standing: BoardStanding,
+  card: Pick<BoardTask, 'id' | 'owner' | 'assignee'>,
+): void => {
+  if (!mayDo(operation, standing)) {
+    throw new BoardError('forbidden', refusalMessage(operation, card), OPERATION_STANDINGS[operation]);
+  }
+};
+
+const laneNames = (laneSet: LaneSet): string => laneSet.lanes.map(lane => lane.id).join(', ');
+
+/** A lane of this board, or the refusal that lists the lanes it has. */
+const requireLane = (laneSet: LaneSet, laneId: string): Lane => {
+  const lane = laneOf(laneSet, laneId);
+  if (!lane.ok) {
+    throw new BoardError(
+      'unknown-lane',
+      `there is no lane "${laneId}" on this board; its lanes are ${laneNames(laneSet)}`,
+    );
+  }
+  return lane.value;
+};
+
+const rank = (laneSet: LaneSet, laneId: string): number => {
+  const category = categoryOf(laneSet, laneId);
+  return category.ok ? LANE_CATEGORIES.indexOf(category.value) : -1;
+};
+
+const requireOpen = (card: BoardTask, doing: string): void => {
+  if (card.dropped !== null) {
+    throw new BoardError('invalid', `${formatTaskRef(card)} is dropped; reopen it before you ${doing} it`);
+  }
+};
+
+/** Only the owner enters an owner-gated closed lane: the refusal for anyone else. */
+const requireOwnerForClosed = (lane: Lane, standing: BoardStanding, card: Pick<BoardTask, 'id'>): void => {
+  if (lane.category === 'closed' && lane.ownerGate === true && standing !== 'owner-human') {
+    throw new BoardError(
+      'owner-gate',
+      `only the owner closes a card; move ${formatTaskRef(card)} to the lane before ${lane.name} and the owner closes it`,
+      ['owner-human'],
+    );
+  }
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Moves
+// ---------------------------------------------------------------------------------------------------
+
+const move = (card: BoardTask, to: string, reason: string | undefined, context: CardContext): CardOutcome => {
+  requireStanding('move', context.standing, card);
+  requireOpen(card, 'move');
+  const ref = formatTaskRef(card);
+  if (to === card.laneId) throw new BoardError('invalid', `${ref} is already in ${to}`);
+  const target = requireLane(context.laneSet, to);
+  const from = requireLane(context.laneSet, card.laneId);
+  if (!moveReasonProblem(context.laneSet, card.laneId, to, reason).ok) {
+    throw new BoardError('reason-required', `moving ${ref} back from ${from.name} to ${target.name} needs a reason`);
+  }
+  const gated = needsOwner(context.laneSet, card.laneId, to);
+  if (gated.ok && gated.value && context.standing !== 'owner-human') {
+    requireOwnerForClosed(target, context.standing, card);
+    throw new BoardError(
+      'owner-gate',
+      `only the owner moves ${ref} on from ${from.name}; raise the ask with \`fy agenda add --task ${card.id}\``,
+      ['owner-human'],
+    );
+  }
+  if (rank(context.laneSet, to) > rank(context.laneSet, card.laneId)) {
+    const blockers = blockedBy(card, context.index, context.laneSets);
+    if (blockers.length > 0) {
+      throw new BoardError(
+        'blocked-by',
+        `${ref} is blocked by ${blockers.map(formatTaskRef).join(', ')}: it can move sideways or back, but not on to ${target.name} until they ship (only the owner may override a dependency)`,
+      );
+    }
+  }
+  const backward = isBackwardMove(context.laneSet, card.laneId, to);
+  const isBack = backward.ok && backward.value;
+  if (isBack && context.standing === 'owner-human') {
+    return reopenTo(card, to, reason ?? '', { text: reason ?? '', source: OWNER_MOVE_SOURCE }, context);
+  }
+  return {
+    task: {
+      ...withEvent(card, { type: 'moved', from: card.laneId, to, backward: isBack, reason: reason ?? null }, context),
+      laneId: to,
+    },
+  };
+};
+
+/** The reopen itself: the owner's words become a clarification, then the card goes to `to` (§2.9). */
+const reopenTo = (
+  card: BoardTask,
+  to: string,
+  reason: string,
+  ask: { readonly text: string; readonly source: string },
+  context: CardContext,
+): CardOutcome => {
+  const clarification: BoardClarification = { text: ask.text, source: ask.source, at: context.now, by: context.actor };
+  const reopened = withEvent(card, { type: 'reopened', from: card.laneId, to, reason, ask }, context);
+  return {
+    task: { ...reopened, laneId: to, dropped: null, clarifications: [...card.clarifications, clarification] },
+    reopened: { from: card.laneId, to, reason },
+  };
+};
+
+const reopen = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'reopen' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('reopen', context.standing, card);
+  const ref = formatTaskRef(card);
+  const target = requireLane(context.laneSet, action.to);
+  if (target.category === 'closed') {
+    throw new BoardError('invalid', `a reopen opens a card; to close ${ref}, move it to ${target.name}`);
+  }
+  if (card.dropped === null) {
+    const backward = isBackwardMove(context.laneSet, card.laneId, action.to);
+    if (!(backward.ok && backward.value)) {
+      throw new BoardError(
+        'invalid',
+        `a reopen goes back to an earlier lane; ${ref} is in ${card.laneId}, so move it on instead`,
+      );
+    }
+  }
+  return reopenTo(card, action.to, action.reason, action.ask, context);
+};
+
+/**
+ * A daemon move on a real signal (§3.1): into the lane the trigger names for the card's workflow. It
+ * never goes backwards and never moves a dropped card, and it is NOT stopped by dependencies, because
+ * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
+ */
+export const triggerMove = (
+  card: BoardTask,
+  trigger: LaneTrigger,
+  reason: string | undefined,
+  context: CardContext,
+): BoardTask | null => {
+  requireStanding('trigger', context.standing, card);
+  if (card.dropped !== null) return null;
+  const lane = laneForTrigger(context.laneSet, card.workflow, trigger);
+  if (!lane.ok || lane.value === null || lane.value.id === card.laneId) return null;
+  const backward = isBackwardMove(context.laneSet, card.laneId, lane.value.id);
+  if (!backward.ok || backward.value) return null;
+  const blockers = blockedBy(card, context.index, context.laneSets);
+  const note = blockers.length === 0 ? null : `${trigger} while blocked by ${blockers.map(formatTaskRef).join(', ')}`;
+  const said = [reason, note].filter(part => part !== undefined && part !== null).join('; ');
+  return {
+    ...withEvent(
+      card,
+      {
+        type: 'moved',
+        from: card.laneId,
+        to: lane.value.id,
+        backward: false,
+        reason: said === '' ? null : said,
+        auto: true,
+        trigger,
+      },
+      context,
+    ),
+    laneId: lane.value.id,
+  };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Dependencies
+// ---------------------------------------------------------------------------------------------------
+
+/** A dependency target on this machine, or the refusal that says why it cannot be one. */
+export const requireLocalCard = (index: BoardIndex, ref: TaskRef, role: string): BoardTask => {
+  if (!index.isLocal(ref)) {
+    throw new BoardError(
+      'invalid',
+      `${formatTaskRef(ref)} is on another machine; a ${role} must be a card on this machine for now`,
+    );
+  }
+  const found = index.get(ref);
+  if (found === undefined) throw new BoardError('not-found', `there is no card ${formatTaskRef(ref)} on this machine`);
+  return found;
+};
+
+const sameRef = (left: TaskRef, right: TaskRef): boolean => left.id === right.id;
+
+const depend = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'depend' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('depend', context.standing, card);
+  if (action.override !== undefined) requireStanding('override', context.standing, card);
+  const ref = formatTaskRef(card);
+  const blocker = requireLocalCard(context.index, action.task, 'dependency');
+  if (blocker.id === card.id) throw new BoardError('invalid', `${ref} cannot depend on itself`);
+  const override =
+    action.override === undefined
+      ? undefined
+      : { by: 'owner' as const, reason: action.override.reason, at: context.now };
+  const task = { id: blocker.id };
+  const existing = card.dependsOn.find(dependency => sameRef(dependency.task, task));
+  if (existing !== undefined && override === undefined && existing.until === action.until) {
+    throw new BoardError('invalid', `${ref} already depends on ${formatTaskRef(task)}`);
+  }
+  if (existing === undefined) {
+    const cycle = dependencyCycle(context.index, card.id, task);
+    if (cycle !== null) throw new BoardError('cycle', `that dependency would close a cycle: ${cycle}`);
+  }
+  const kept = override ?? existing?.override;
+  const entry = { task, until: action.until, ...(kept === undefined ? {} : { override: kept }) };
+  const dependsOn =
+    existing === undefined
+      ? [...card.dependsOn, entry]
+      : card.dependsOn.map(dependency => (sameRef(dependency.task, task) ? entry : dependency));
+  return {
+    task: {
+      ...withEvent(
+        card,
+        { type: 'depended', task, until: action.until, ...(override === undefined ? {} : { override }) },
+        context,
+      ),
+      dependsOn,
+    },
+  };
+};
+
+const undepend = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'undepend' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('undepend', context.standing, card);
+  if (!card.dependsOn.some(dependency => sameRef(dependency.task, action.task))) {
+    throw new BoardError('invalid', `${formatTaskRef(card)} does not depend on ${formatTaskRef(action.task)}`);
+  }
+  return {
+    task: {
+      ...withEvent(card, { type: 'undepended', task: action.task, reason: action.reason }, context),
+      dependsOn: card.dependsOn.filter(dependency => !sameRef(dependency.task, action.task)),
+    },
+  };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Links
+// ---------------------------------------------------------------------------------------------------
+
+/** A newly linked PR: the URL, and nothing GitHub has said yet (the watcher fills the rest). */
+const unpolledPr = (url: string): PrLink => {
+  const parts = prUrlParts(url);
+  if (parts === null) throw new BoardError('invalid', `${url} is not a GitHub pull request URL`);
+  return {
+    url,
+    number: parts.number,
+    repo: parts.repo,
+    state: 'unknown',
+    draft: false,
+    checks: 'none',
+    mergedAt: null,
+    mergeSha: null,
+    releasedIn: null,
+    polledAt: null,
+  };
+};
+
+const link = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'link' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('link', context.standing, card);
+  const ref = formatTaskRef(card);
+  const already = (value: string): never => {
+    throw new BoardError('invalid', `${ref} already links ${value}`);
+  };
+  const { links } = card;
+  if (action.pr !== undefined) {
+    if (links.prs.some(pr => pr.url === action.pr)) already(action.pr);
+    return {
+      task: {
+        ...withEvent(card, { type: 'linked', field: 'pr', value: action.pr }, context),
+        links: { ...links, prs: [...links.prs, unpolledPr(action.pr)] },
+      },
+    };
+  }
+  if (action.branch !== undefined) {
+    if (links.branch === action.branch) already(action.branch);
+    return {
+      task: {
+        ...withEvent(card, { type: 'linked', field: 'branch', value: action.branch }, context),
+        links: { ...links, branch: action.branch },
+      },
+    };
+  }
+  if (action.commit !== undefined) {
+    if (links.commits.includes(action.commit)) already(action.commit);
+    return {
+      task: {
+        ...withEvent(card, { type: 'linked', field: 'commit', value: action.commit }, context),
+        links: { ...links, commits: [...links.commits, action.commit] },
+      },
+    };
+  }
+  const doc = action.doc as string;
+  if (links.docs.includes(doc)) already(doc);
+  return {
+    task: {
+      ...withEvent(card, { type: 'linked', field: 'doc', value: doc }, context),
+      links: { ...links, docs: [...links.docs, doc] },
+    },
+  };
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Re-plan and the rest
+// ---------------------------------------------------------------------------------------------------
+
+/** The fields only the owner side may rewrite: they change what the work IS. */
+const PLAN_FIELDS: readonly BoardEditableField[] = ['title', 'brief'];
+
+const edit = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'edit' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('edit', context.standing, card);
+  const changed = BoardEditableFieldSchema.options.filter(
+    field => action[field] !== undefined && JSON.stringify(action[field]) !== JSON.stringify(card[field]),
+  );
+  if (changed.some(field => PLAN_FIELDS.includes(field))) requireStanding('replan', context.standing, card);
+  if (changed.length === 0) throw new BoardError('invalid', `that edit changes nothing on ${formatTaskRef(card)}`);
+  let next = card;
+  for (const field of changed)
+    next = { ...withEvent(next, { type: 'field-edited', field }, context), [field]: action[field] };
+  return { task: next };
+};
+
+const file = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'file' }>,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('file', context.standing, card);
+  const ref = formatTaskRef(card);
+  const held = card.files.includes(action.path);
+  if (action.release === true) {
+    if (!held) throw new BoardError('invalid', `${ref} has not claimed ${action.path}`);
+    return {
+      task: {
+        ...withEvent(card, { type: 'file-released', path: action.path, reason: action.reason ?? null }, context),
+        files: card.files.filter(path => path !== action.path),
+      },
+    };
+  }
+  if (held) throw new BoardError('invalid', `${ref} already claims ${action.path}`);
+  return {
+    task: {
+      ...withEvent(card, { type: 'file-claimed', path: action.path }, context),
+      files: [...card.files, action.path],
+    },
+  };
+};
+
+/**
+ * Where a refiled card lands on the other board: the named lane, else the first lane there of the
+ * category it is in now, else that board's first backlog lane.
+ */
+const refileLane = (card: BoardTask, from: LaneSet, target: LaneSet, laneId: string | undefined): Lane => {
+  if (laneId !== undefined) return requireLane(target, laneId);
+  const category = categoryOf(from, card.laneId);
+  const same = category.ok ? firstLaneOfCategory(target, card.workflow, category.value) : undefined;
+  if (same?.ok === true) return same.value;
+  return entryLane(target, card.workflow);
+};
+
+/** The first backlog lane a workflow walks, else its first lane: where a new card goes. */
+const entryLane = (laneSet: LaneSet, workflow: BoardTask['workflow']): Lane => {
+  const backlog = firstLaneOfCategory(laneSet, workflow, 'backlog');
+  return backlog.ok ? backlog.value : (laneSet.lanes[0] as Lane);
+};
+
+const refile = (
+  card: BoardTask,
+  action: Extract<BoardTaskActionRequest, { action: 'refile' }>,
+  target: LaneSet | null,
+  context: CardContext,
+): CardOutcome => {
+  requireStanding('refile', context.standing, card);
+  const ref = formatTaskRef(card);
+  if (action.projectId === card.projectId) throw new BoardError('invalid', `${ref} is already on that board`);
+  if (target === null) {
+    throw new BoardError(
+      'no-lane-set',
+      `that project has no lanes yet; propose them with \`fy board lanes propose\` first`,
+    );
+  }
+  const lane = refileLane(card, context.laneSet, target, action.laneId);
+  requireOwnerForClosed(lane, context.standing, card);
+  const fromProject: BoardProjectId = card.projectId;
+  return {
+    task: {
+      ...withEvent(
+        card,
+        { type: 'refiled', fromProject, toProject: action.projectId, toLane: lane.id, reason: action.reason ?? null },
+        context,
+      ),
+      projectId: action.projectId,
+      laneId: lane.id,
+    },
+  };
+};
+
+/**
+ * Applies one action request to one card. `focus` changes nothing on the card (the service records it
+ * on the session), so it answers `task: null` once its authority is proved. `refile` needs the target
+ * board's lanes, which the service reads first.
+ */
+export const applyAction = (
+  card: BoardTask,
+  action: BoardTaskActionRequest,
+  context: CardContext,
+  refileTarget: LaneSet | null = null,
+): CardOutcome => {
+  const ref = formatTaskRef(card);
+  switch (action.action) {
+    case 'move':
+      return move(card, action.to, action.reason, context);
+    case 'focus':
+      requireStanding('focus', context.standing, card);
+      return { task: null };
+    case 'block':
+      requireStanding('block', context.standing, card);
+      requireOpen(card, 'block');
+      return {
+        task: {
+          ...withEvent(card, { type: 'blocked', reason: action.reason }, context),
+          blocked: { on: 'external', reason: action.reason, since: context.now },
+        },
+      };
+    case 'unblock':
+      requireStanding('unblock', context.standing, card);
+      if (card.blocked === null) throw new BoardError('invalid', `${ref} is not blocked`);
+      return {
+        task: { ...withEvent(card, { type: 'unblocked', reason: action.reason ?? null }, context), blocked: null },
+      };
+    case 'depend':
+      return depend(card, action, context);
+    case 'undepend':
+      return undepend(card, action, context);
+    case 'drop':
+      requireStanding('drop', context.standing, card);
+      requireOpen(card, 'drop');
+      return {
+        task: {
+          ...withEvent(card, { type: 'dropped', reason: action.reason }, context),
+          dropped: { reason: action.reason, at: context.now },
+        },
+      };
+    case 'reopen':
+      return reopen(card, action, context);
+    case 'clarify': {
+      requireStanding('clarify', context.standing, card);
+      const clarification: BoardClarification = {
+        text: action.text,
+        source: action.source,
+        at: context.now,
+        by: context.actor,
+      };
+      return {
+        task: {
+          ...withEvent(card, { type: 'clarified', text: action.text, source: action.source }, context),
+          clarifications: [...card.clarifications, clarification],
+        },
+      };
+    }
+    case 'link':
+      return link(card, action, context);
+    case 'assign':
+      requireStanding('assign', context.standing, card);
+      if (action.assignee === card.assignee) throw new BoardError('invalid', `${ref} is already assigned that way`);
+      return {
+        task: {
+          ...withEvent(card, { type: 'assigned', from: card.assignee, to: action.assignee }, context),
+          assignee: action.assignee,
+        },
+      };
+    case 'note':
+      requireStanding('note', context.standing, card);
+      return { task: withEvent(card, { type: 'note', text: action.text }, context) };
+    case 'edit':
+      return edit(card, action, context);
+    case 'file':
+      return file(card, action, context);
+    case 'order':
+      requireStanding('order', context.standing, card);
+      if (action.order === card.order) throw new BoardError('invalid', `${ref} already has that order`);
+      return {
+        task: {
+          ...withEvent(card, { type: 'ordered', from: card.order, to: action.order }, context),
+          order: action.order,
+        },
+      };
+    case 'refile':
+      return refile(card, action, refileTarget, context);
+  }
+};
+
+// ---------------------------------------------------------------------------------------------------
+// Create
+// ---------------------------------------------------------------------------------------------------
+
+export interface NewCardContext {
+  readonly id: BoardTaskId;
+  readonly machineId: string;
+  readonly now: string;
+  readonly actor: BoardActor;
+  readonly standing: BoardStanding;
+  /** The accountable ferret: the creating session, or the assignee the owner named. */
+  readonly owner: string;
+  readonly projectId: BoardProjectId;
+  readonly laneSet: LaneSet;
+  readonly index: BoardIndex;
+}
+
+/** A new card, before the store has it: in its variant's first backlog lane unless one is named. */
+export const newCard = (request: BoardTaskCreateRequest, context: NewCardContext): BoardTask => {
+  const lane =
+    request.laneId === undefined
+      ? entryLane(context.laneSet, request.workflow)
+      : requireLane(context.laneSet, request.laneId);
+  requireOwnerForClosed(lane, context.standing, { id: context.id });
+  for (const dependency of request.dependsOn) requireLocalCard(context.index, dependency.task, 'dependency');
+  return {
+    v: 1,
+    id: context.id,
+    machineId: context.machineId,
+    projectId: context.projectId,
+    laneId: lane.id,
+    kind: request.kind,
+    title: request.title,
+    summary: request.summary,
+    ask: request.ask,
+    clarifications: [],
+    premise: request.premise,
+    context: request.context,
+    terms: request.terms,
+    brief: request.brief,
+    owner: context.owner,
+    assignee: request.assignee,
+    parent: request.parent,
+    dependsOn: request.dependsOn.map(dependency => ({ task: { id: dependency.task.id }, until: dependency.until })),
+    blocked: null,
+    dropped: null,
+    workflow: request.workflow,
+    links: { prs: [], branch: request.branch ?? null, commits: [], docs: request.docs },
+    files: request.files,
+    order: null,
+    createdAt: context.now,
+    createdBy: context.actor,
+    history: [{ seq: 1, at: context.now, actor: context.actor, type: 'created', laneId: lane.id }],
+  };
+};

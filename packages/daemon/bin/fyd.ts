@@ -137,6 +137,19 @@ import {
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/attention/storage-harness-prompt.ts';
 import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
+import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import {
+  JournalBoardChanges,
+  StorageSessionFocus,
+  StorageSessionParents,
+} from '../src/adapters/board/session-board-adapters.ts';
+import {
+  BoardService,
+  HistoryActivityDeriver,
+  NoAgendaLinks,
+  NoopReopenNotifier,
+  StubLaneSetSource,
+} from '../src/lib/board/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -715,6 +728,7 @@ import {
   FileConversationDescriber,
   FileForeignTranscriptReader,
   ForeignHistoryImporter,
+  type FileSystemPort,
   type FoundationPaths,
   fastStartRefusal,
   findAccountByAgent,
@@ -1798,6 +1812,38 @@ export interface BrowserLoginWorld {
 export interface BrowserTransportWorld {
   connectWorker(options: WorkerClientOptions): Promise<BrowserWorkerClient>;
   openViewerStream(host: BrowserViewerHost, sessionId: string, socket: ViewerSocket): Promise<BrowserViewerStream>;
+}
+
+/**
+ * The project boards (v2): one file per card under `<state>/board`, written under ownership and lineage.
+ *
+ * Three of its ports are STUBS until their units land, and each is named so: lanes and projects
+ * (`StubLaneSetSource`, U3), activity (`HistoryActivityDeriver`, U5), and the agenda link and reopen
+ * delivery (`NoAgendaLinks`, `NoopReopenNotifier`, U7). The machine id is the pairing identity's daemon
+ * id, which a write waits for rather than inventing one.
+ */
+function createBoardService(
+  paths: FoundationPaths,
+  stateFiles: FileSystemPort,
+  storage: DaemonStorage,
+  clock: SystemClock,
+  machineId: () => string | undefined,
+): BoardService {
+  const diagnostics = { warn: (message: string) => void process.stderr.write(`board: ${message}\n`) };
+  return new BoardService({
+    store: new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics),
+    lanes: new StubLaneSetSource(),
+    parents: new StorageSessionParents(storage),
+    focus: new StorageSessionFocus(storage),
+    reopen: new NoopReopenNotifier(),
+    activity: new HistoryActivityDeriver(),
+    agenda: new NoAgendaLinks(),
+    changes: new JournalBoardChanges(storage),
+    clock,
+    diagnostics,
+    machineId,
+    serial: new KeyedSerialExecutor(),
+  });
 }
 
 /**
@@ -10383,6 +10429,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         }),
         tasks: createTaskSubsystem(paths, storage, clock, taskBoards, taskBoardTaskActionAuthorizer(boards)),
+        board: createBoardService(paths, stateFiles, storage, clock, () => attachmentDaemonId),
         taskBoards: boards,
         analytics: createAnalyticsSubsystem(analyticsIngestion, () => analyticsMachineName ?? hostname()),
         analyticsPricing,
