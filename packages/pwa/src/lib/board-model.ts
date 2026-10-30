@@ -91,9 +91,26 @@ export const runningOn = (
 // Filters
 // ---------------------------------------------------------------------------------------------------
 
+/** A rolling window ending now: `today` is since local midnight, `7d` and `30d` the last 7 or 30 days. */
+const BOARD_DATE_PRESETS = ['today', '7d', '30d'] as const;
+type BoardDatePreset = (typeof BOARD_DATE_PRESETS)[number];
+
 /**
- * What the Board's header narrows to. `machine` and `mine` are the browser's own to apply; the rest are
- * the daemon's query (`toServerQuery`).
+ * A date range filter: a `preset`, or a custom `from`/`to` of calendar dates (`YYYY-MM-DD`, both days
+ * included, read in the viewer's own timezone). A preset and a custom range never coexist; an open end is
+ * `null`.
+ */
+export interface BoardDateRange {
+  readonly preset: BoardDatePreset | null;
+  readonly from: string | null;
+  readonly to: string | null;
+}
+
+export const NO_DATE_RANGE: BoardDateRange = Object.freeze({ preset: null, from: null, to: null });
+
+/**
+ * What the Board's header narrows to. `machine`, `mine`, `lane`, `created` and `touched` are the browser's
+ * own to apply; the rest are the daemon's query (`toServerQuery`).
  */
 export interface BoardFilters {
   readonly project: BoardProjectId | null;
@@ -106,6 +123,12 @@ export interface BoardFilters {
   readonly activity: BoardActivityFilter | null;
   /** The cards the owner created or that wait on the owner. */
   readonly mine: boolean;
+  /** A lane id, or a lane name in the card's own project (case does not matter). */
+  readonly lane: string | null;
+  /** When the card was created (`createdAt`). */
+  readonly created: BoardDateRange;
+  /** When the card was last touched (the daemon's derived `lastTouchedAt`). */
+  readonly touched: BoardDateRange;
 }
 
 export const NO_BOARD_FILTERS: BoardFilters = Object.freeze({
@@ -117,9 +140,38 @@ export const NO_BOARD_FILTERS: BoardFilters = Object.freeze({
   state: 'open',
   activity: null,
   mine: false,
+  lane: null,
+  created: NO_DATE_RANGE,
+  touched: NO_DATE_RANGE,
 });
 
 const nonEmpty = (value: string | null): string | null => (value === null || value.trim() === '' ? null : value.trim());
+
+const calendarDate = (value: string | null): string | null => {
+  const text = nonEmpty(value);
+  if (text === null || !/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+  const parsed = new Date(`${text}T00:00:00.000Z`);
+  return Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== text ? null : text;
+};
+
+const parseDateRange = (params: URLSearchParams, name: string): BoardDateRange => {
+  const preset = params.get(name);
+  if ((BOARD_DATE_PRESETS as readonly string[]).includes(preset ?? '')) {
+    return { preset: preset as BoardDatePreset, from: null, to: null };
+  }
+  const from = calendarDate(params.get(`${name}From`));
+  const to = calendarDate(params.get(`${name}To`));
+  return from === null && to === null ? NO_DATE_RANGE : { preset: null, from, to };
+};
+
+const writeDateRange = (params: URLSearchParams, name: string, range: BoardDateRange): void => {
+  if (range.preset !== null) {
+    params.set(name, range.preset);
+    return;
+  }
+  if (range.from !== null) params.set(`${name}From`, range.from);
+  if (range.to !== null) params.set(`${name}To`, range.to);
+};
 
 /**
  * Reads the filters out of a URL's search string. Total: a value this app does not know is dropped, so
@@ -142,6 +194,9 @@ export const parseBoardFilters = (search: string | URLSearchParams): BoardFilter
     state: state.success ? state.data : NO_BOARD_FILTERS.state,
     activity: activity.success ? activity.data : null,
     mine: mine === '1' || mine === 'true',
+    lane: nonEmpty(params.get('lane')),
+    created: parseDateRange(params, 'created'),
+    touched: parseDateRange(params, 'touched'),
   };
 };
 
@@ -159,6 +214,9 @@ export const boardFiltersToSearch = (filters: BoardFilters): URLSearchParams => 
   if (filters.state !== NO_BOARD_FILTERS.state) params.set('state', filters.state);
   if (filters.activity !== null) params.set('activity', filters.activity);
   if (filters.mine) params.set('mine', '1');
+  if (filters.lane !== null) params.set('lane', filters.lane);
+  writeDateRange(params, 'created', filters.created);
+  writeDateRange(params, 'touched', filters.touched);
   return params;
 };
 
@@ -256,6 +314,41 @@ export const cardMatchesQuery = (task: BoardTaskView, laneSet: LaneSet | null, q
   return query.activity === null || matchesActivity(query.activity, task, category);
 };
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const localDay = (date: string, dayOffset: number): number => {
+  const [year = 0, month = 1, day = 1] = date.split('-').map(Number);
+  return new Date(year, month - 1, day + dayOffset).getTime();
+};
+
+/**
+ * Whether an instant falls inside a date range as of `now`. An empty range holds everything; a card with
+ * no such instant (a card never touched) is outside any range that is set.
+ */
+export const inDateRange = (range: BoardDateRange, instant: string | null, now: number): boolean => {
+  if (range.preset === null && range.from === null && range.to === null) return true;
+  const at = instant === null ? Number.NaN : Date.parse(instant);
+  if (Number.isNaN(at)) return false;
+  if (range.preset === 'today') {
+    const midnight = new Date(now);
+    midnight.setHours(0, 0, 0, 0);
+    return at >= midnight.getTime() && at <= now;
+  }
+  if (range.preset !== null) return at >= now - (range.preset === '7d' ? 7 : 30) * DAY_MS && at <= now;
+  if (range.from !== null && at < localDay(range.from, 0)) return false;
+  return range.to === null || at < localDay(range.to, 1);
+};
+
+/**
+ * Whether a card sits in the lane a filter names: by lane id, or by the lane's name in the card's own
+ * project on its own machine (so `Review` means that project's Review lane, whatever its id).
+ */
+export const inLane = (lane: string, task: Pick<BoardTaskView, 'laneId'>, laneSet: LaneSet | null): boolean => {
+  if (task.laneId === lane) return true;
+  const wanted = lane.toLowerCase();
+  return laneSet?.lanes.some(l => l.id === task.laneId && l.name.toLowerCase() === wanted) ?? false;
+};
+
 // ---------------------------------------------------------------------------------------------------
 // The merged board
 // ---------------------------------------------------------------------------------------------------
@@ -344,9 +437,14 @@ const compareCards = (left: BoardCard, right: BoardCard): number => {
 /**
  * Merges every machine's read into one board: cards keyed `(daemonId, taskId)`, grouped project → lane
  * with each machine's own lane set, counts summed, and `runningOn` set from every machine's version.
- * `machine` and `mine` are applied here; the rest of the filters were the daemon's.
+ * `machine`, `mine`, `lane` and the date ranges are applied here (`now` is what a preset counts back
+ * from); the rest of the filters were the daemon's.
  */
-export const mergeBoard = (machines: readonly BoardMachineData[], filters: BoardFilters): BoardModel => {
+export const mergeBoard = (
+  machines: readonly BoardMachineData[],
+  filters: BoardFilters,
+  now: number = Date.now(),
+): BoardModel => {
   const versions = machines.map(({ daemonId, machine, version }) => ({ daemonId, machine, version }));
   const kept = machines.filter(data => filters.machine === null || data.daemonId === filters.machine);
   const groups: BoardGroup[] = [];
@@ -362,6 +460,9 @@ export const mergeBoard = (machines: readonly BoardMachineData[], filters: Board
     const byProject = new Map<BoardProjectId, BoardCard[]>();
     for (const task of data.cards) {
       if (filters.mine && !isMine(task)) continue;
+      if (filters.lane !== null && !inLane(filters.lane, task, data.laneSets.get(task.projectId) ?? null)) continue;
+      if (!inDateRange(filters.created, task.createdAt, now)) continue;
+      if (!inDateRange(filters.touched, task.lastTouchedAt, now)) continue;
       const card: BoardCard = {
         key: boardCardKey(data.daemonId, task.id),
         daemonId: data.daemonId,

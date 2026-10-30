@@ -8,9 +8,12 @@ import {
   boardQueryParams,
   cardMatchesQuery,
   checkMove,
+  inDateRange,
+  inLane,
   isMine,
   mergeBoard,
   NO_BOARD_FILTERS,
+  NO_DATE_RANGE,
   parseBoardFilters,
   runningOn,
   serverQueryKey,
@@ -180,6 +183,9 @@ describe('filters and the URL', () => {
     state: 'all',
     activity: 'waiting_on_you',
     mine: true,
+    lane: 'Review/CI',
+    created: { preset: '7d', from: null, to: null },
+    touched: { preset: null, from: '2026-10-01', to: '2026-10-30' },
   };
 
   it('round-trips every filter through the query string', () => {
@@ -190,6 +196,30 @@ describe('filters and the URL', () => {
   it('leaves the defaults out, so the plain board has a plain URL', () => {
     expect(boardFiltersToSearch(NO_BOARD_FILTERS).toString()).toBe('');
     expect(boardFiltersToSearch({ ...NO_BOARD_FILTERS, mine: true }).toString()).toBe('mine=1');
+  });
+
+  it('writes a lane and each date range in the URL, a preset or a custom range but never both', () => {
+    const search = boardFiltersToSearch({
+      ...NO_BOARD_FILTERS,
+      lane: 'review',
+      created: { preset: 'today', from: null, to: null },
+      touched: { preset: null, from: '2026-10-01', to: null },
+    });
+    expect(search.toString()).toBe('lane=review&created=today&touchedFrom=2026-10-01');
+    expect(parseBoardFilters(search)).toMatchObject({
+      lane: 'review',
+      created: { preset: 'today', from: null, to: null },
+      touched: { preset: null, from: '2026-10-01', to: null },
+    });
+  });
+
+  it('reads a preset over a custom range, and drops a date it cannot read', () => {
+    const preset = parseBoardFilters('created=30d&createdFrom=2026-10-01');
+    expect(preset.created).toEqual({ preset: '30d', from: null, to: null });
+    const bad = parseBoardFilters('createdFrom=2026-02-31&createdTo=yesterday&touched=1y&touchedTo=2026-10-30');
+    expect(bad.created).toEqual(NO_DATE_RANGE);
+    expect(bad.touched).toEqual({ preset: null, from: null, to: '2026-10-30' });
+    expect(parseBoardFilters('lane=%20').lane).toBeNull();
   });
 
   it('drops a value it does not know instead of failing', () => {
@@ -314,5 +344,63 @@ describe('cardMatchesQuery on every pr and activity filter', () => {
     expect(cardMatchesQuery(card('F1'), lanes, { ...open, activity: 'waiting_on_you' })).toBe(false);
     const blocked = card('F1', { blockedBy: [{ id: 'F2' }] });
     expect(cardMatchesQuery(blocked, lanes, { ...open, activity: 'blocked' })).toBe(true);
+  });
+});
+
+describe('lane and date filters', () => {
+  const at = (month: number, day: number, hour = 12) => new Date(2026, month - 1, day, hour);
+  const NOW = at(10, 30).getTime();
+  const range = (extra: Partial<typeof NO_DATE_RANGE>) => ({ ...NO_DATE_RANGE, ...extra });
+
+  it('holds everything for an empty range and nothing without an instant for a set one', () => {
+    expect(inDateRange(NO_DATE_RANGE, null, NOW)).toBe(true);
+    expect(inDateRange(range({ preset: '7d' }), null, NOW)).toBe(false);
+    expect(inDateRange(range({ preset: '7d' }), 'not a date', NOW)).toBe(false);
+  });
+
+  it('counts a preset back from now: today since local midnight, 7d and 30d as rolling windows', () => {
+    const today = range({ preset: 'today' });
+    expect(inDateRange(today, at(10, 30, 0).toISOString(), NOW)).toBe(true);
+    expect(inDateRange(today, at(10, 29, 23).toISOString(), NOW)).toBe(false);
+    expect(inDateRange(today, at(10, 30, 13).toISOString(), NOW)).toBe(false);
+    expect(inDateRange(range({ preset: '7d' }), at(10, 24, 0).toISOString(), NOW)).toBe(true);
+    expect(inDateRange(range({ preset: '7d' }), at(10, 22, 0).toISOString(), NOW)).toBe(false);
+    expect(inDateRange(range({ preset: '30d' }), at(10, 5, 0).toISOString(), NOW)).toBe(true);
+    expect(inDateRange(range({ preset: '30d' }), at(9, 20, 0).toISOString(), NOW)).toBe(false);
+  });
+
+  it('takes a custom range as whole local days, both ends included, either end open', () => {
+    const custom = range({ from: '2026-10-10', to: '2026-10-12' });
+    expect(inDateRange(custom, at(10, 9, 23).toISOString(), NOW)).toBe(false);
+    expect(inDateRange(custom, at(10, 10, 0).toISOString(), NOW)).toBe(true);
+    expect(inDateRange(custom, at(10, 12, 23).toISOString(), NOW)).toBe(true);
+    expect(inDateRange(custom, at(10, 13, 0).toISOString(), NOW)).toBe(false);
+    expect(inDateRange(range({ from: '2026-10-10' }), at(12, 1).toISOString(), NOW)).toBe(true);
+    expect(inDateRange(range({ to: '2026-10-10' }), at(10, 11).toISOString(), NOW)).toBe(false);
+    expect(inDateRange(range({ to: '2026-10-10' }), at(1, 1).toISOString(), NOW)).toBe(true);
+  });
+
+  it('finds a lane by id, or by its name in the card’s own project, whatever the case', () => {
+    const laneSet = laneSetFor();
+    expect(inLane('review', { laneId: 'review' }, laneSet)).toBe(true);
+    expect(inLane('review/ci', { laneId: 'review' }, laneSet)).toBe(true);
+    expect(inLane('Review/CI', { laneId: 'implement' }, laneSet)).toBe(false);
+    expect(inLane('Review/CI', { laneId: 'review' }, null)).toBe(false);
+    expect(inLane('review', { laneId: 'review' }, null)).toBe(true);
+  });
+
+  it('narrows the merged board by lane, created and touched, in the Archive as on the board', () => {
+    const cards = [
+      card('F1', { laneId: 'review', createdAt: at(10, 29).toISOString(), lastTouchedAt: at(10, 30, 9).toISOString() }),
+      card('F2', { laneId: 'review', createdAt: at(8, 1).toISOString(), lastTouchedAt: at(8, 2).toISOString() }),
+      card('F3', { laneId: 'implement', createdAt: at(10, 29).toISOString(), lastTouchedAt: null }),
+    ];
+    const ids = (filters: Partial<BoardFilters>) =>
+      mergeBoard([data(laptop, 'laptop', cards)], { ...NO_BOARD_FILTERS, ...filters }, NOW).cards.map(c => c.task.id);
+    expect(ids({ lane: 'Review/CI' })).toEqual(['F1', 'F2']);
+    expect(ids({ created: range({ preset: '7d' }) })).toEqual(['F1', 'F3']);
+    expect(ids({ touched: range({ preset: 'today' }) })).toEqual(['F1']);
+    expect(ids({ touched: range({ from: '2026-08-02', to: '2026-08-02' }) })).toEqual(['F2']);
+    expect(ids({ state: 'closed', lane: 'review', created: range({ preset: '30d' }) })).toEqual(['F1']);
   });
 });

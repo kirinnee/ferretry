@@ -9,7 +9,7 @@
  *   useBoardFilters(...)                 the filter set read from, and written to, the URL query
  *
  * They take the store and the machines as arguments, like `useProjects`: the page that mounts them says
- * where they read. The filters are the URL's (`project, machine, ferret, kind, pr, state, activity, mine`),
+ * where they read. The filters are the URL's (`project, machine, ferret, kind, pr, state, activity, mine, lane, created, touched`),
  * so a link to a filtered board is the board.
  */
 
