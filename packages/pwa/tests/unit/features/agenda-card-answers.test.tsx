@@ -273,13 +273,16 @@ describe('a card answered one answer per question', () => {
     expect(root.querySelector('textarea, input[type="text"]')).toBeNull();
   });
 
-  test('an open question among them is answered in the message box, and says so', async () => {
+  test('an open question among them is asked once, with no picker and no boilerplate about the message box', async () => {
     const item = agendaItem('M2', {
       ask: { kind: 'open-question' },
       questions: [{ question: 'Which engine?', options: [{ label: 'SQLite' }] }, { question: 'Who announces it?' }],
     });
     const { root } = await card(item);
-    expect(root.querySelector('[data-agenda-composer-hint]')?.textContent).toContain('message box');
+    expect(root.querySelector('[data-agenda-composer-hint]')).toBeNull();
+    expect(root.textContent).not.toContain('message box');
+    expect(root.textContent?.split('Who announces it?').length).toBe(2);
+    expect(root.querySelectorAll('[data-agenda-pick]')).toHaveLength(1);
   });
 
   test('Send answers is ready only once at least one answer is picked, then sends them together', async () => {

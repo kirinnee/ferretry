@@ -234,6 +234,48 @@ const A5_LONG = {
   })),
 } as AgendaItem;
 
+// A MULTI-QUESTION ITEM, as a ferret really wrote it: three questions with no options, its picks in the context.
+const JAEDA_QUESTIONS = [
+  { question: 'The duplicate `retry` line in relay.ts: delete it or keep it?' },
+  { question: "The reviewer's rename of `carrier` to `route`: accept it?" },
+  { question: 'May I apply the same cleanup to the other two relay files?' },
+];
+const A47 = item('A47', 6, {
+  title: 'Three leftovers from the review',
+  subject: 'Three leftovers from the review of the relay change — how should I close them?',
+  why: 'The review is otherwise done; these three are the only open threads.',
+  ask: { kind: 'open-question' },
+  questions: JAEDA_QUESTIONS,
+  context: 'My picks: A delete the line · B accept · C yes to all',
+} as Partial<AgendaItem>);
+
+// …and the same item written the structured way: options on each question and a recommended pick.
+const A48 = item('A48', 5, {
+  title: 'Three leftovers, with choices',
+  subject: 'Three leftovers from the review of the relay change — pick one answer for each',
+  why: 'The review is otherwise done; these three are the only open threads.',
+  ask: { kind: 'open-question' },
+  questions: [
+    {
+      question: 'The duplicate `retry` line in relay.ts?',
+      options: [{ label: 'Delete the line' }, { label: 'Keep it' }],
+      recommended: 'Delete the line',
+      why: 'Nothing reads it; the other retry covers the same case',
+    },
+    {
+      question: "The reviewer's rename of `carrier` to `route`?",
+      options: [{ label: 'Accept' }, { label: 'Decline' }],
+      recommended: 'Accept',
+    },
+    {
+      question: 'The same cleanup in the other two relay files?',
+      options: [{ label: 'Yes to all' }, { label: 'Only this file' }],
+      recommended: 'Yes to all',
+      why: 'Same pattern, same risk',
+    },
+  ],
+} as Partial<AgendaItem>);
+
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
 const HISTORY_ENTRIES = [
@@ -250,8 +292,9 @@ const withHistory = params.get('history') === '1';
 const long = params.get('long') === '1';
 const fakeKeyboard = params.get('kb') === '1';
 const configChange = params.get('config') === '1';
+const jaeda = params.get('jaeda') === '1';
 
-const items = AGENDA.map(entry =>
+const items = [...AGENDA, ...(jaeda ? [A47, A48] : [])].map(entry =>
   entry.id === 'A5'
     ? long
       ? A5_LONG
