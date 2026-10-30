@@ -98,6 +98,7 @@
         "harness/mobile-ui3-screenshot.tsx",
         "harness/pack-mode-screenshot.tsx",
         "harness/agenda-switch-screenshot.tsx",
+        "harness/needs-you-sidebar-screenshot.tsx",
         "harness/voice-cleanup-screenshot.tsx",
         "harness/device-permissions-screenshot.tsx",
         "harness/setup-import-screenshot.tsx",
