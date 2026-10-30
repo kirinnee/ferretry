@@ -128,6 +128,25 @@ describe('focusCardBrief', () => {
     should(text).containEql('Lane: implement');
     should(text).containEql('created in implement');
   });
+
+  it('should name a ferret in its history by its session id', () => {
+    // Arrange
+    const base = cardView();
+    const assigned: BoardTaskEvent = {
+      seq: 2,
+      at: '2026-10-30T10:02:00.000Z',
+      actor: { kind: 'ferret', sessionId: 'lead' },
+      type: 'assigned',
+      from: 'lead',
+      to: 'worker',
+    };
+
+    // Act
+    const text = focusCardBrief(focus({ ...base, history: [...base.history, assigned] }));
+
+    // Assert
+    should(text).containEql('- 2026-10-30T10:02:00.000Z  assigned lead → worker');
+  });
 });
 
 describe('wardenResumeMessage', () => {
