@@ -16,6 +16,8 @@ export interface QueueRequest {
   readonly text: string;
   readonly attachmentIds?: readonly string[] | undefined;
   readonly replyExpected?: boolean | undefined;
+  /** Stop the running turn first, when this message's turn comes. */
+  readonly interrupt?: boolean | undefined;
 }
 
 /** What an enqueue did: made the message, or found the one a first request already made. */
@@ -78,6 +80,7 @@ export class SessionQueueService {
         text: request.text,
         attachmentIds: [...(request.attachmentIds ?? [])],
         ...(request.replyExpected === true ? { replyExpected: true } : {}),
+        ...(request.interrupt === true ? { interrupt: true } : {}),
         enqueuedAt: at,
         state: 'queued',
         stateAt: at,

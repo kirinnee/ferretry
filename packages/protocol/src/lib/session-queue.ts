@@ -82,6 +82,12 @@ export const QueuedMessageSchema = z.object({
   attachmentIds: z.array(z.string()),
   /** The sender is parked awaiting the reply, so the agent is told how to unblock them. */
   replyExpected: z.boolean().optional(),
+  /**
+   * Stop the agent's running turn first. Not a separate path: the message keeps its place in the queue,
+   * and when its turn comes AND the input box is empty the deliverer stops the turn, then types and
+   * submits it, in one step (`fy send --now`).
+   */
+  interrupt: z.boolean().optional(),
   enqueuedAt: InstantSchema,
   state: QueuedMessageStateSchema,
   /** When it reached `state`. */
