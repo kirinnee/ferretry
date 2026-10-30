@@ -1203,13 +1203,6 @@
   flex-direction: column;
   gap: var(--gap-xs);
 }
-/* The swipe hint: one quiet line, never louder than the item. */
-.fy-inbox-swipe-hint {
-  margin: 0;
-  color: var(--faint);
-  font-size: var(--text-xs, var(--text-sm));
-  text-align: center;
-}
 .fy-inbox-composer {
   min-width: 0;
 }

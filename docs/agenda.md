@@ -252,7 +252,7 @@ its card, `&F12`), and the machine. A row whose item is about a different card t
   - **←** and **→** send the others (→ takes what ↑ gave on the card, else it is the primary again);
   - **↓ skips** to the next item: nothing is sent and the item stays open.
 
-  A held drag is stamped with what letting go would do; a quiet line under the item names every swipe. Every answer
+  A held drag is stamped with what letting go would do (there is no hint line under the card). Every answer
   goes into the same undo window as a tap. Reduced motion (the OS preference or Settings › Appearance › Motion) drops
   the fly-off and the spring.
 

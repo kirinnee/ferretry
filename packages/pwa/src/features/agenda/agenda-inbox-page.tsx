@@ -17,7 +17,7 @@
  * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) ↑ for the primary answer — "to
  *   the top" — ← and → for the others, and ↓ to SKIP to the next without answering; the item stays open. A swipe
  *   starts on the item's head, its who-and-what line or its quick replies (the body scrolls), is stamped with what
- *   it would do, and goes into the same undo window as a tap. Reduced motion drops the fly-off. A phone also gets
+ *   it would do (no hint line: the stamp and the row say it), and goes into the same undo window as a tap. Reduced motion drops the fly-off. A phone also gets
  *   "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter opens one.
  * - FILTERS: Open / Resolved, a machine filter (once there is more than one machine), Find, and — from
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
@@ -55,7 +55,6 @@ import {
   inboxRowAsk,
   inboxRowTitle,
   inboxSections,
-  inboxSwipeHint,
   inboxSwipeTargets,
   inboxWho,
   nextSelection,
@@ -998,10 +997,6 @@ export function AgendaInboxPage({
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
-              <p className="fy-attn-inbox__hint fy-inbox-swipe-hint" data-inbox-swipe-hint="">
-                {deck.length > 1 ? `${deck.length - 1} more after this one · ` : ''}
-                {deck[0] === undefined ? '' : inboxSwipeHint(openItemTargets(deck[0]), true)}
-              </p>
               {deck[0] === undefined || readRecent === undefined ? null : (
                 // What led up to it, a fold away, beside where the reply is written.
                 <AgendaRecentMessages

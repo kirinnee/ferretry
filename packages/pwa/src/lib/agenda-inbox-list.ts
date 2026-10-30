@@ -90,21 +90,6 @@ export const inboxSwipeTargets = (targets: SwipeTargets): SwipeTargets => {
   return { ...(left === undefined ? {} : { left }), up: right, right: up ?? right };
 };
 
-/**
- * What each swipe does on the open item, in a line: "↑ Yes · ← No · ↓ Skip". A → that repeats ↑ is not said twice;
- * ↓ is said when the deck can skip.
- */
-export const inboxSwipeHint = (targets: SwipeTargets, skip: boolean): string => {
-  const said = new Set<string>();
-  const parts = (['up', 'left', 'right'] as const).flatMap(direction => {
-    const target = targets[direction];
-    if (target === undefined || target.action === null || said.has(target.label)) return [];
-    said.add(target.label);
-    return [`${{ up: '↑', left: '←', right: '→' }[direction]} ${target.label}`];
-  });
-  return [...parts, ...(skip ? ['↓ Skip'] : [])].join(' · ');
-};
-
 /** The cards grouped by ferret. Each group's items are in the agenda's order; its notices keep their (newest-first) order. */
 const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {
   const grouped = new Map<string, InboxCard[]>();

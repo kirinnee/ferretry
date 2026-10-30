@@ -8,7 +8,7 @@
  * It bundles `inbox-page.tsx` (the real `AgendaInboxPage` and `Composer`, invented data), serves it on an ephemeral
  * loopback port, drives it with a real pointer, and FAILS (after writing every picture) when: a page scrolls
  * sideways; a group head lacks its task or card; the open item is not the full item view; its who-and-what line or
- * its composer is missing or off screen; the hint does not put the primary on ↑ and Skip on ↓; or a held drag is not
+ * its composer is missing or off screen; a hint line is drawn under the card (the owner removed it); or a held drag is not
  * stamped with what it would do. Nothing is sent: the drag is put back before it is let go.
  */
 
@@ -159,8 +159,7 @@ for (const form of ['phone', 'desktop'] as const) {
       ['Ottilie', 'Ledger storage', '&F41', 'studio'].every(part => who.includes(part)),
       `${form} ${theme}: the who-and-what line says "${who}"`,
     );
-    const hint = (await item.locator('[data-inbox-swipe-hint]').textContent()) ?? '';
-    check(/↑ SQLite/u.test(hint) && /↓ Skip/u.test(hint), `${form} ${theme}: the hint says "${hint}"`);
+    check((await item.locator('[data-inbox-swipe-hint]').count()) === 0, `${form} ${theme}: the hint line is back`);
     const composer = item.locator('[data-inbox-composer] textarea, [data-inbox-composer] [contenteditable]').first();
     await composer.waitFor({ state: 'visible' });
     const composerBox = await composer.boundingBox();

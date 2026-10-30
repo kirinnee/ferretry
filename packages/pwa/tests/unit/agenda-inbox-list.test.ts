@@ -11,7 +11,6 @@ import {
   inboxRowTitle,
   inboxSections,
   inboxSourceFromSearch,
-  inboxSwipeHint,
   inboxSwipeTargets,
   inboxWho,
   isFromWarden,
@@ -308,16 +307,6 @@ describe('the open item’s swipes', () => {
     expect(labels(inboxSwipeTargets(two))).toEqual({ left: 'Hold', up: 'Ship', right: 'Ship' });
     const none = swipeTargets(agendaItem('A3', { answers: [] } as never));
     expect(inboxSwipeTargets(none)).toBe(none);
-  });
-
-  it('says each swipe once, ↑ first, and ↓ Skip when the deck can skip', () => {
-    const two = inboxSwipeTargets(swipeTargets(agendaItem('A2', { ask: choices('Ship', 'Hold') })));
-    expect(inboxSwipeHint(two, true)).toBe('↑ Ship · ← Hold · ↓ Skip');
-    expect(inboxSwipeHint(two, false)).toBe('↑ Ship · ← Hold');
-    expect(inboxSwipeHint({}, true)).toBe('↓ Skip');
-    const review = swipeTargets(agendaItem('A4', { ask: { kind: 'answer-review' } } as never));
-    // "Needs changes" is written, not swiped: a target with no action is not offered.
-    expect(inboxSwipeHint(inboxSwipeTargets(review), false)).not.toContain('Needs changes');
   });
 });
 

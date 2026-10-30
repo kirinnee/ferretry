@@ -198,7 +198,6 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     const peeks = [...mounted.container.querySelectorAll('.fy-attn-deck__peek')];
     expect(peeks).toHaveLength(2);
     expect(peeks.every(peek => peek.getAttribute('aria-hidden') === 'true' && peek.hasAttribute('inert'))).toBe(true);
-    expect(mounted.container.textContent).toContain('2 more after this one');
     await mounted.unmount();
   });
 
