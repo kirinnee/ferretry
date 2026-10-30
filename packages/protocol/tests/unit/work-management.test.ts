@@ -440,6 +440,16 @@ const attentionCases: SchemaCase[] = [
     value: { action: 'discuss', note: 'The premise is wrong' },
   },
   {
+    name: 'a held configuration change an item confirms',
+    schema: attention.AttentionConfirmsSchema,
+    value: {
+      path: 'warden.yaml',
+      etag: 'a'.repeat(64),
+      changes: ['the Jev price the cap counts with goes down from 2 to 0.042'],
+      restated: true,
+    },
+  },
+  {
     name: 'an undelivered answer',
     schema: attention.AttentionUndeliveredSchema,
     value: {

@@ -93,6 +93,50 @@ A notice is a plain notification: `notice: true` on the raise request. No ask, n
 reference it. `ping: true` asks for the phone to buzz and is only valid on a notice. `fy notify` raises one
 (the older `fy attention notify` still works, deprecated).
 
+## Confirming a configuration change
+
+An edit that loosens what the machine may spend or do is **held** until the owner confirms it
+([config-files.md](config-files.md#how-a-file-is-read)). A ferret must not confirm, so it raises a card whose
+**Allow is the confirmation** — the owner answers it and nothing else has to be run:
+
+```
+fy agenda add "Allow the Jev price correction?" --title "Jev price correction" --confirms warden.yaml
+```
+
+- **Raising.** `--confirms <file>` names the file; the daemon looks up its held edit and records on the item
+  (`confirms`) the edit's digest — its etag, the same one `fy config confirm` confirms by — and each loosening
+  in the daemon's words. The caller never supplies either. A file with no held change is refused and nothing
+  is raised. The daemon writes the card: a choice of **Allow** (swipe right), **Deny** (left) and **Discard
+  change** (up), and a premise that is the change itself followed by "Allow applies this change to
+  warden.yaml." (the raiser's own `--premise` follows, when it fits). `--kind`, `--option`, `--question` and
+  `--up` are refused beside `--confirms`.
+- **Allow** puts the held edit into effect **only if it still has the recorded digest**. If the file was edited
+  after the card was raised, nothing is confirmed: the card is restated with the change as it is now
+  (`confirms.restated`, the new premise kept as a daemon revision, the owner's turn again) and the answer is
+  refused `409 config_changed` so the owner reads it again. If no change waits any more (confirmed elsewhere,
+  reverted), the card is closed and the answer refused `409` saying so.
+- **Deny** closes the card and touches nothing: the held edit stays held, the tighter version in effect.
+- **Discard change** drops the held edit — the file goes back to the version in effect (a new file that was
+  never in effect is removed) — under the same digest rule.
+- The ferret reads the outcome with the owner's answer: `confirmed warden.yaml: the change is in effect`,
+  `denied: …`, `discarded …`, then the owner's own note.
+
+**Who may answer.** Only the owner, enforced in the daemon, never in the app:
+
+| Caller                                                       | Allow / Discard change                                                                                                         |
+| ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
+| `fy` at the machine (admin token, ungoverned)                | yes, as `fy config confirm` is                                                                                                 |
+| a paired device (the app), relayed or not                    | the file's grant on `configure`; Allow also a passkey proved for the act (`loosen-config`), which the app asks for and resends |
+| a ferret's own `fy agenda done --choice Allow` (its session) | refused `403`, before the file or the card is touched                                                                          |
+| an agent token (a warden, any `peer:`/`warden:` caller)      | refused `403`                                                                                                                  |
+| a caller nothing can say the grants of                       | refused `403`                                                                                                                  |
+
+The rule is the config files' own (`heldEditRefusal`, shared with `POST /v1/config/confirm`), and the state
+machine refuses any non-owner answer to such an item a second time. A ferret may still close its own card
+unanswered (`fy agenda dismiss`). As for every admin-token caller, telling the owner's shell from a ferret's
+rests on the session header the CLI sends ([grants.md](grants.md)): an honest-client boundary, not a
+cryptographic one — the same boundary `fy config confirm` has.
+
 ## Verbs
 
 `fy agenda add | edit | step | show | ls | history | surface | done | dismiss | needs-info | discuss | send-now`

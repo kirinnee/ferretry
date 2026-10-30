@@ -70,6 +70,7 @@ export * from './session-live.ts';
 export * from './session-mcp.ts';
 export * from './session-permission.ts';
 export * from './session-processes.ts';
+export * from './session-restart.ts';
 export * from './session-search.ts';
 export * from './session-transcript.ts';
 export * from './session-transfer.ts';
