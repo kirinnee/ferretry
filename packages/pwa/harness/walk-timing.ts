@@ -3,6 +3,8 @@ import type { Page } from 'playwright-core';
 type Bucket = { count: number; ms: number; worst: number };
 
 const buckets = new Map<string, Bucket>();
+const lastLap = new WeakMap<Page, number>();
+const laps: { label: string; ms: number }[] = [];
 let mark = performance.now();
 
 /** Run `work`, charging its wall clock to `label` whether it returns or throws. */
@@ -31,6 +33,14 @@ export const timePage = (page: Page): void => {
   }
 };
 
+/** Charge the time since this page's previous lap (or since the call that made the page) to `label`, so the log can name the slowest steps. */
+export const lapPage = (page: Page, label: string): void => {
+  const now = performance.now();
+  const before = lastLap.get(page);
+  lastLap.set(page, now);
+  if (before !== undefined) laps.push({ label, ms: now - before });
+};
+
 /** The stage's wall clock, then one line per bucket, slowest first, so the log says where the walk's time went. */
 export const reportWalkTiming = (stage: string): void => {
   const now = performance.now();
@@ -42,4 +52,7 @@ export const reportWalkTiming = (stage: string): void => {
       `⏱   ${label.padEnd(28)} ${(bucket.ms / 1_000).toFixed(1).padStart(6)}s over ${String(bucket.count).padStart(4)} calls, worst ${(bucket.worst / 1_000).toFixed(2)}s\n`,
     );
   buckets.clear();
+  for (const lap of laps.sort((a, b) => b.ms - a.ms).slice(0, 25))
+    process.stdout.write(`⏱ step ${(lap.ms / 1_000).toFixed(2).padStart(6)}s  ${lap.label}\n`);
+  laps.length = 0;
 };

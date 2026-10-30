@@ -58,7 +58,7 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { planSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
-import { reportWalkTiming, timePage, timed } from './walk-timing.ts';
+import { lapPage, reportWalkTiming, timePage, timed } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -1095,6 +1095,7 @@ const assertNoSidewaysScroll = async (page: Page, where: string): Promise<void> 
           ? '   no descendant sticks out, so the box itself is sized wrong rather than holding something too wide'
           : box.culprits.map(culprit => `   sticking out: ${culprit}`).join('\n')),
     );
+  lapPage(page, where);
   sidewaysChecks += 1;
   process.stdout.write(`🧭 no sideways scroll: ${where}\n`);
 };
