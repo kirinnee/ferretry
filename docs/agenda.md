@@ -207,6 +207,13 @@ cryptographic one — the same boundary `fy config confirm` has.
 | `ls` / `show`           | Open items with turn and blocking fields / one item in full.            |
 | `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn. |
 
+**Sub-ferrets raise nothing.** A session another ferret started (`config.parent`) is refused `add`, `edit`,
+`surface`, `done` and `dismiss` (and `fy notify`, the same owner-facing channel) with `forbidden`: `Sub-ferrets don't
+raise agenda items or notify the owner; tell your lead: fy send <lead-callsign> "…"`. They report to the lead with
+`fy send`; the lead decides what the owner must see. `AgendaService.apply` is the one choke point; reads stay open.
+Their prompt carries no Agenda mode section even when the switch is on
+([pack-mode.md](pack-mode.md#sub-ferret-limits)).
+
 `fy attention …` runs the same handlers and prints one line to stderr first
 (its text says `fy attention` is now `fy agenda`). It is hidden from help and will be removed.
 

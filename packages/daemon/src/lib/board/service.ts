@@ -33,6 +33,7 @@ import {
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
+import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
 import { type BoardCaller, effectiveAssignee, standingOf } from './authority.ts';
 import {
   applyAction,
@@ -87,6 +88,8 @@ export interface BoardServiceDependencies {
   readonly serial: Pick<SerialExecutor, 'run'>;
   /** Moves a ferret on the Unfiled board onto the board of the repository it stands in, at its first card. */
   readonly adoption?: ProjectAdopter;
+  /** Who started whom: a sub-ferret may only note and link PRs on its own card. Absent, every caller is a lead. */
+  readonly subFerrets?: SubFerretDirectory;
 }
 
 /** What `fy signal done` did to the ferret's focus card. */
@@ -137,6 +140,36 @@ const requireValidCard = (task: BoardTask): BoardTask => {
     `that would leave ${formatTaskRef(task)} invalid (${where}${issue?.message ?? 'unknown problem'})`,
   );
 };
+
+/**
+ * What a sub-ferret may still write: a note on its own card, and a PR or branch link, so the PR's facts move
+ * the card on their own. Authority still decides WHICH card; everything else is its lead's to do.
+ */
+const subFerretMay = (request: BoardTaskActionRequest): boolean =>
+  request.action === 'note' ||
+  (request.action === 'link' && (request.pr !== undefined || request.branch !== undefined));
+
+const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string>> = {
+  move: 'move cards',
+  focus: 'change which card they work on',
+  block: 'block cards',
+  unblock: 'unblock cards',
+  depend: 'add dependencies to cards',
+  undepend: 'remove dependencies from cards',
+  drop: 'drop cards',
+  reopen: 'reopen cards',
+  clarify: 'clarify cards',
+  link: 'link a commit or doc to cards',
+  assign: 'reassign cards',
+  note: 'note on cards',
+  edit: 'edit cards',
+  file: 'claim files on cards',
+  order: 'reorder cards',
+  reparent: 'move cards under another card',
+  refile: 'refile cards',
+};
+
+const subFerretDoing = (request: BoardTaskActionRequest): string => SUB_FERRET_DOING[request.action];
 
 export class BoardService {
   constructor(private readonly ports: BoardServiceDependencies) {}
@@ -211,6 +244,7 @@ export class BoardService {
    * the caller's project unless one is named, and the variant's first backlog lane unless one is named.
    */
   async create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
+    await this.refuseSubFerret(caller, 'create cards');
     const machineId = this.requireMachine();
     const owner = sessionOf(caller) ?? request.assignee;
     if (owner === undefined || owner === null) {
@@ -356,6 +390,7 @@ export class BoardService {
 
   /** One action on one card. */
   async act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
+    if (!subFerretMay(request)) await this.refuseSubFerret(caller, subFerretDoing(request));
     if (request.action === 'focus' && caller.kind !== 'ferret') {
       throw new BoardError('invalid', 'focus is for a ferret: it names the card its session works on');
     }
@@ -563,6 +598,13 @@ export class BoardService {
   private requireCard(current: BoardTask | undefined, id: BoardTaskId): BoardTask {
     if (current === undefined) throw new BoardError('not-found', `there is no card &${id} on this machine`);
     return current;
+  }
+
+  /** A sub-ferret reports to its lead instead of writing the board: the refusal says whom to tell. */
+  private async refuseSubFerret(caller: BoardCaller, doing: string): Promise<void> {
+    if (caller.kind !== 'ferret') return;
+    const refusal = await subFerretRefusal(this.ports.subFerrets ?? NO_SUB_FERRETS, caller.sessionId, doing);
+    if (refusal !== null) throw new BoardError('forbidden', refusal);
   }
 
   private requireMachine(): string {

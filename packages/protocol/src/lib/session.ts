@@ -684,6 +684,7 @@ export const LaunchInstructionSectionIdSchema = z.enum([
   'attention',
   'notify',
   'board',
+  'sub-ferret',
   'hypermedia',
   'pack',
   'agenda',
