@@ -20,8 +20,8 @@
 import type { SessionView } from '@ferretry/protocol';
 import { useCallback, useRef } from 'react';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
-import { displayCallsign } from '../lib/callsign.ts';
 import { activeSessionAncestorIds, type BulkStopRequest } from './agent-sidebar-model.ts';
+import { sessionLabel } from './session-title.ts';
 import { stopScopeLabel } from './stop-actions.ts';
 
 /**
@@ -30,8 +30,7 @@ import { stopScopeLabel } from './stop-actions.ts';
  * because two teammates can share a display name and only one of them is being
  * stopped.
  */
-export const stopTargetName = (view: SessionView): string =>
-  view.config.name || displayCallsign(view.config.teammate) || view.config.id;
+export const stopTargetName = (view: SessionView): string => sessionLabel(view.config);
 
 export interface BulkStopConfirmationProps {
   readonly request: BulkStopRequest | null;

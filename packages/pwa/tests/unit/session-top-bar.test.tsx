@@ -24,6 +24,7 @@ describe('what titles a chat', () => {
   test('the task it was named, without a callsign prefix, and only then the callsign', () => {
     expect(sessionTitle(sessionView('a', { config: { teammate: 'hadi', name: '[Hadi] Fix it' } }))).toBe('Fix it');
     expect(sessionTitle(sessionView('b', { config: { teammate: 'hadi', name: '' } }))).toBe('Hadi');
+    expect(sessionTitle(sessionView('c', { config: { teammate: 'hadi', name: 'interactive' } }))).toBe('Hadi');
   });
 
   test('the callsign is a secondary line on a desktop, absent on a phone and when it would repeat the title', async () => {

@@ -341,7 +341,7 @@ import {
 } from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
-import { FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
+import { AutoTitlingSendChannel, FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import {
   bunProbeSpawn,
@@ -428,6 +428,7 @@ import {
   readAskedQuestion,
   TmuxStructuredQuestionDriver,
 } from '../src/adapters/session/question/index.ts';
+import { FileSessionQueueStore } from '../src/adapters/session/queue/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -441,7 +442,6 @@ import {
   TmuxResumeLauncher,
   UnmountedSupervisionRepair,
 } from '../src/adapters/session/resume/index.ts';
-import { FileSessionQueueStore } from '../src/adapters/session/queue/index.ts';
 import {
   FileSendChannel,
   FileSendLedger,
@@ -665,7 +665,6 @@ import {
   type BrowserLoginLifecycle,
   type BrowserSessionLauncher,
   BrowserSessionService,
-  resolveBrowserProxy,
   type BrowserViewerHost,
   BrowserViewerStream,
   type BrowserWorkerProgram,
@@ -694,8 +693,6 @@ import {
   type ConversionSummary as ConvertedConversationSummary,
   CredentialAgentIdentities,
   CredentialUsageSource,
-  limitedCredentials,
-  type PaneLimit,
   canServeModel,
   chooseRelayCarrierSources,
   choosesPortAtBind,
@@ -834,6 +831,7 @@ import {
   type LoopWatchdogPort,
   launchGuardActive,
   launchReasoningEffort,
+  limitedCredentials,
   locateHarnessCommand,
   lookBeforeReading,
   type ManagedWorktreeOperations,
@@ -879,6 +877,7 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  type PaneLimit,
   PassTrigger,
   type PassTriggerTimers,
   PinService,
@@ -953,6 +952,7 @@ import {
   renderDoctorReport,
   renderHarnessPreflight,
   renderInitialAttachmentSection,
+  resolveBrowserProxy,
   resolveResumePolicy,
   resolveStateHome,
   retireOperatorPassword,
@@ -1015,6 +1015,7 @@ import {
   SessionProjects,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
+  SessionQueueService,
   SessionRenameError,
   SessionRenameService,
   type SessionRenameSubsystem,
@@ -1026,7 +1027,6 @@ import {
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
-  SessionQueueService,
   SessionSendService,
   type SessionSendSubsystem,
   SessionSignalError,
@@ -3791,6 +3791,7 @@ function createSessionRenameSubsystem(
         const { teammate: _replaced, ...retained } = jsonObject(current) ?? {};
         return {
           ...retained,
+          ...(next.name === retained.name ? {} : { nameSource: 'owner' }),
           ...(next.teammate === undefined ? {} : { teammate: next.teammate }),
           name: next.name,
           updatedAt: at,
@@ -8891,7 +8892,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ledger: sendLedger,
           terminal: sendTerminal,
           turns: sendTurns,
-          channel: new FileSendChannel(id => createSessionPaths(paths, id).directory),
+          channel: new AutoTitlingSendChannel(
+            new FileSendChannel(id => createSessionPaths(paths, id).directory),
+            storage,
+          ),
           gate: launchGate,
           reviver: new ResumeSendReviver(resume),
           peerWaits: signals,

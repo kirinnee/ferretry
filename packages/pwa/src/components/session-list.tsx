@@ -1,6 +1,7 @@
 import type { SessionView } from '@ferretry/protocol';
 import type { PickerAccount } from '../lib/account-picker-catalog.ts';
 import { relativeTime, sessionNavigation, sessionStatusLabel } from '../lib/session-screens.ts';
+import { sessionLabel } from '../shell/session-title.ts';
 import { StatusMark } from '../shell/status-mark.tsx';
 import { sessionAccountLabel } from './daemon-picker-model.ts';
 import { ModeBadge } from './mode-badge.tsx';
@@ -61,7 +62,7 @@ export function SessionList({
                   type="button"
                 >
                   <span className="fy-session-identity">
-                    <strong>{config.name}</strong>
+                    <strong>{sessionLabel(config)}</strong>
                     <small title={config.id}>{config.teammate ?? config.id}</small>
                   </span>
                   <span className="fy-session-task">{config.label ?? config.cwd}</span>

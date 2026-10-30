@@ -1,3 +1,9 @@
+## [4.128.1](https://github.com/kirinnee/ferretry/compare/v4.128.0...v4.128.1) (2026-10-30)
+
+### Fixes
+
+* **sessions:** never title a session with the mode word ([#1001](https://github.com/kirinnee/ferretry/issues/1001)) ([f87e7e1](https://github.com/kirinnee/ferretry/commit/f87e7e16614804edb313cafd3376ab265390b03d))
+
 ## [4.128.0](https://github.com/kirinnee/ferretry/compare/v4.127.0...v4.128.0) (2026-10-30)
 
 ### Features

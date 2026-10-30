@@ -37,11 +37,11 @@
 
 import { PACK_CLEAN_UP_LABEL, type SessionView } from '@ferretry/protocol';
 import { agendaConversationPath, agendaFirst, sessionAgenda } from '../lib/agenda-inbox.ts';
-import { displayCallsign } from '../lib/callsign.ts';
 import type { Density, ModeFilter } from '../lib/controls.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import { type FleetProject, groupByProject, type ModeCounts, type SessionGroup } from '../lib/fleet-grouping.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
+import { sessionTask, sessionTitles } from './session-title.ts';
 import { TERMINAL_STATUSES } from './status-mark.tsx';
 
 /**
@@ -201,19 +201,14 @@ export const sessionsBarView = (
 /**
  * A row's two names. The TITLE is the task — what the session is for ("Home Manager", "Diene Work") — because
  * that is what a person scans a list by; the ferret that is doing it is the secondary line. With no task the
- * ferret's name is the title and there is no second name to show. A task that only repeats the ferret's name
- * is no task.
+ * folder it works in is the title (`session-title.ts`), then the ferret. Never the mode word the daemon
+ * names an unnamed interactive session with.
  */
-export const sessionsBarNames = (view: SessionView): { readonly title: string; readonly ferret: string | null } => {
-  const callsign = displayCallsign(view.config.teammate);
-  const task = (view.config.name ?? '').trim();
-  const ferret = callsign || view.config.id;
-  if (task === '' || task === callsign) return { title: ferret, ferret: null };
-  return { title: task, ferret: callsign === '' ? null : callsign };
-};
+export const sessionsBarNames = (view: SessionView): { readonly title: string; readonly ferret: string | null } =>
+  sessionTitles(view.config);
 
 /** The second line under a session's name: what it is working on, else where. */
-export const sessionsBarSubline = (view: SessionView): string => view.config.name ?? view.config.cwd;
+export const sessionsBarSubline = (view: SessionView): string => sessionTask(view.config.name) || view.config.cwd;
 
 /** A home directory, written the way a shell prompt writes it. */
 const HOME_PREFIX = /^\/(?:home|Users)\/[^/]+(?=\/|$)/u;

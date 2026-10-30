@@ -31,9 +31,9 @@
 import type { SessionView } from '@ferretry/protocol';
 import { Pause, Pencil, Play, ServerCog, StopCircle } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { displayCallsign } from '../lib/callsign.ts';
 import { bulkStopMenuActions, type RowMenuAction, rowMenuActionSpecs } from './agent-sidebar-model.ts';
 import { ContextMenu, type ContextMenuItem } from './context-menu.tsx';
+import { sessionLabel } from './session-title.ts';
 import type { StopScope } from './stop-actions.ts';
 
 /** Where the sidebar's menu is currently open, and for whom. */
@@ -51,8 +51,7 @@ const ACTION_ICON: Record<RowMenuAction, ReactNode> = {
 };
 
 /** A session named by its title, for the menu's accessible name. */
-export const sessionMenuLabel = (view: SessionView): string =>
-  `Actions for ${view.config.name || displayCallsign(view.config.teammate) || view.config.id}`;
+export const sessionMenuLabel = (view: SessionView): string => `Actions for ${sessionLabel(view.config)}`;
 
 export interface SessionRowMenuCallbacks {
   /** A per-session action other than a stop — the owner runs or opens it. */

@@ -248,7 +248,7 @@ export class BoardService {
       index,
     });
     await this.afterWrite(caller, card, [card.projectId]);
-    if (!(await this.ports.focus.setFocus(spawn.focus, { id: card.id }).catch(() => false))) {
+    if (!(await this.ports.focus.setFocus(spawn.focus, { id: card.id }, card.title).catch(() => false))) {
       this.ports.diagnostics.warn(`could not focus ${spawn.focus} on ${formatTaskRef(card)}`);
     }
     return card;
@@ -301,7 +301,9 @@ export class BoardService {
     const { card, outcome } =
       request.action === 'depend' ? await this.ports.serial.run(DEPENDENCY_SECTION, write) : await write();
     if (request.action === 'focus') {
-      if (!(await this.ports.focus.setFocus((caller as { sessionId: string }).sessionId, { id: card.id }))) {
+      if (
+        !(await this.ports.focus.setFocus((caller as { sessionId: string }).sessionId, { id: card.id }, card.title))
+      ) {
         throw new BoardError('not-found', 'there is no session to focus');
       }
     }
@@ -537,7 +539,7 @@ export class BoardService {
   private async afterWrite(caller: BoardCaller, task: BoardTask, projects: readonly BoardProjectId[]): Promise<void> {
     if (caller.kind === 'ferret') {
       await this.ports.focus
-        .setFocus(caller.sessionId, { id: task.id })
+        .setFocus(caller.sessionId, { id: task.id }, task.title)
         .catch((error: unknown) => this.warn(`could not focus ${caller.sessionId} on ${formatTaskRef(task)}`, error));
     }
     const session = sessionOf(caller) ?? task.owner;

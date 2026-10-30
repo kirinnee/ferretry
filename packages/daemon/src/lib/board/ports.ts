@@ -81,8 +81,11 @@ export interface SessionParents {
  * writes it; U5 (activity) and U7 (agenda inference) read it.
  */
 export interface SessionFocus {
-  /** `false` when there is no such session to focus. Taking a card clears the session's {@link skip}. */
-  setFocus(sessionId: string, task: TaskRef): Promise<boolean>;
+  /**
+   * `false` when there is no such session to focus. Taking a card clears the session's {@link skip}. The card's
+   * `title` also becomes the name of a session the daemon titled itself, so an unnamed one is called by its work.
+   */
+  setFocus(sessionId: string, task: TaskRef, title?: string): Promise<boolean>;
   focusOf(sessionId: string): Promise<TaskRef | null>;
   /**
    * Records why the session's work has no card (`fy task skip`, `config.boardSkip`), replacing any earlier one.

@@ -11,13 +11,13 @@ import {
   defaultSessionLifecycleSettings,
   firstTurnInstruction,
   isAgentAccount,
+  lifecyclePhase,
   lifecycleSessionId,
   MAX_ASSIGNED_TASK_LENGTH,
   SESSION_ID_VARIABLE,
   type SessionRecordContext,
   sessionPaneEnvironment,
   sessionTmuxName,
-  lifecyclePhase,
   transitionSessionRecord,
   unrunnableAccountRefusal,
 } from '../../../../src/lib/session/lifecycle/index.ts';
@@ -59,6 +59,7 @@ describe('session lifecycle policy', () => {
       config: {
         id: 'session-1',
         name: 'Lifecycle run',
+        nameSource: 'owner',
         agent: AGENT,
         command: [AGENT, '--model', 'fast'],
         cwd: '/workspace/project',
@@ -96,7 +97,13 @@ describe('session lifecycle policy', () => {
 
     // Assert
     should(named.record.config.name).equal('Implement the Lifecycle Service');
-    should(interactive.record.config).containDeep({ name: 'interactive', mode: 'interactive' });
+    should(interactive.record.config).containDeep({
+      name: 'interactive',
+      nameSource: 'auto',
+      mode: 'interactive',
+    });
+    should(named.record.config.nameSource).equal('auto');
+    should(createSessionRecord(request({ name: 'Mine' }), context()).record.config.nameSource).equal('owner');
     should(interactive.record.config).not.have.property('prompt');
   });
 
