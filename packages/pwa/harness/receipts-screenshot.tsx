@@ -36,6 +36,7 @@ const PAGE_ENTRY = `
 import { createRoot } from 'react-dom/client';
 ${BEFORE ? '' : "import { MessageMarksLegend } from '../../src/features/settings/message-marks-legend.tsx';"}
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
+import { QueueActionsContext } from '../../src/components/queue-actions-context.tsx';
 import { withAgentName } from '../../src/components/transcript.tsx';
 import { transcriptEntriesFromLog } from '../../src/components/session-workspace-model.ts';
 import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
@@ -101,25 +102,37 @@ Object.assign(FATES, QUEUED_FATES);
 const ANSWERED = new Set([0]);
 
 const now = Date.UTC(2026, 9, 18, 2, 0, 0);
+// A message still waiting in the queue is not in the conversation yet: the app draws it as a ledger row,
+// which is the row that carries the "⋯" menu (Edit / Cancel). These three are drawn exactly that way.
+const WAITING = new Set([9, 10, 11]);
 const entries: TranscriptEntry[] = transcriptEntriesFromLog(LOG, now).map((entry, index) => {
   const fate = FATES[index];
   const named = withAgentName(entry, 'Janella');
-  return fate === undefined ? named : ({ ...named, send: { ...base, sendId: 's' + index, message: entry.text, ...fate } } as TranscriptEntry);
+  if (fate === undefined) return named;
+  const record = { ...base, sendId: 's' + index, message: entry.text, ...fate };
+  return (WAITING.has(index)
+    ? { id: 'send:s' + index, kind: 'ledger', text: entry.text, ledger: record, placement: 'chronological' }
+    : { ...named, send: record }) as TranscriptEntry;
 });
 
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
+// Inert handlers: the menu shows what a person can do; nothing here talks to a daemon.
+const QUEUE_ACTIONS = { edit: async () => true, cancel: async () => true };
+const inert = async () => true;
 createRoot(root).render(
+  <QueueActionsContext.Provider value={QUEUE_ACTIONS}>
   <main style={{ margin: '0 auto', maxWidth: 560, padding: '12px 16px' }}>
     <div className="fy-transcript-shell" style={{ height: 'auto', overflow: 'visible' }}>
       <div className="fy-transcript-content" data-marks="">
         {entries.map((entry, index) => (
-          <TranscriptRow answered={ANSWERED.has(index)} entry={entry} key={entry.id} previous={entries[index - 1]} />
+          <TranscriptRow answered={ANSWERED.has(index)} entry={entry} key={entry.id} onCancel={inert} onRetry={inert} onSubmit={inert} previous={entries[index - 1]} />
         ))}
       </div>
     </div>
     ${BEFORE ? '' : '<section data-legend="" style={{ marginTop: 16 }}><h2 className="text-ui font-semibold text-fg">Message marks</h2><MessageMarksLegend /></section>'}
-  </main>,
+  </main>
+  </QueueActionsContext.Provider>,
 );
 `;
 
@@ -214,6 +227,61 @@ try {
           await page.locator('[data-legend]').screenshot({ path: legend });
           process.stdout.write(`📸 ${legend}\n`);
         }
+      } finally {
+        await context.close();
+      }
+    }
+  }
+
+  // The same rows at desktop width, and — after — a queued bubble's menu (Edit / Cancel) and its inline editor.
+  for (const scheme of ['light', 'dark'] as const) {
+    for (const device of [
+      { name: 'desktop', viewport: { width: 1280, height: 900 }, isMobile: false },
+      { name: 'phone', viewport: { width: 390, height: 844 }, isMobile: true },
+    ] as const) {
+      const context = await browser.newContext({
+        viewport: device.viewport,
+        deviceScaleFactor: 2,
+        isMobile: device.isMobile,
+        hasTouch: device.isMobile,
+        timezoneId: 'Asia/Tokyo',
+        colorScheme: scheme,
+        reducedMotion: 'reduce',
+      });
+      try {
+        await context.route('**/*', async route => {
+          if (new URL(route.request().url()).origin !== server.url.origin) return await route.abort();
+          return await route.continue();
+        });
+        const page = await context.newPage();
+        await page.goto(`${server.url}?theme=studio-${scheme}`);
+        await page.locator('[data-marks]').waitFor({ state: 'visible' });
+        if (device.name === 'desktop') {
+          const target = join(outDir, `receipts-${tag}-desktop-${scheme}.png`);
+          await page.screenshot({ path: target, fullPage: true });
+          process.stdout.write(`📸 ${target}\n`);
+        }
+        if (BEFORE) continue;
+        // The "⋯" of the bubble waiting for a draft: the nearest box around its words that holds one.
+        const more = page
+          .getByText('Queued while its box holds a draft')
+          .first()
+          .locator('xpath=ancestor::*[.//*[@data-ledger-more]][1]')
+          .locator('[data-ledger-more]')
+          .first();
+        await more.scrollIntoViewIfNeeded();
+        await more.click();
+        // The menu draws its items a frame after it opens: the shot waits for them, then for paint.
+        await page.getByRole('menuitem', { name: 'Edit' }).waitFor({ state: 'visible' });
+        await page.getByRole('menuitem', { name: 'Cancel' }).first().waitFor({ state: 'visible' });
+        await page.waitForTimeout(250);
+        const menu = join(outDir, `receipts-menu-${device.name}-${scheme}.png`);
+        await page.screenshot({ path: menu });
+        process.stdout.write(`📸 ${menu}\n`);
+        await page.getByRole('menuitem', { name: 'Edit' }).click();
+        const editor = join(outDir, `receipts-edit-${device.name}-${scheme}.png`);
+        await page.screenshot({ path: editor });
+        process.stdout.write(`📸 ${editor}\n`);
       } finally {
         await context.close();
       }
