@@ -1,8 +1,9 @@
 import { dirname } from 'node:path';
 import type {
   BrowserElementTarget,
+  BrowserPageLifecycleReply,
+  BrowserPageLifecycleRequest,
   BrowserInputEvent,
-  BrowserPageActionSnapshot,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
   BrowserScreenshotFormat,
@@ -11,6 +12,7 @@ import type {
 } from '@ferretry/protocol';
 import {
   type BrowserAutomation,
+  type BrowserPageActed,
   BrowserFrameGovernor,
   BrowserTransportError,
   type BrowserClickOptions,
@@ -23,11 +25,20 @@ import {
   boundedReadText,
   boundedScreenshot,
   encodeWorkerRequest,
+  normalizeLifecycleReply,
   normalizeWorkerActionSnapshot,
+  normalizeWorkerDialog,
   normalizeWorkerSnapshot,
   parseWorkerLine,
 } from '../../../lib/index.ts';
 import { SystemFrameClock } from './system-frame-clock.ts';
+
+/** A worker answer as a snapshot, with the dialog the acted page is waiting on beside it. */
+function acted(raw: unknown): BrowserPageActed {
+  const snapshot = unwrap(normalizeWorkerActionSnapshot(raw));
+  const dialog = normalizeWorkerDialog(raw);
+  return dialog === undefined ? snapshot : { ...snapshot, dialog };
+}
 
 export const READY_TIMEOUT_MS = 15_000;
 export const REQUEST_TIMEOUT_MS = 60_000;
@@ -189,11 +200,11 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   }
 
-  navigate(pageId: string, url: string): Promise<BrowserPageActionSnapshot> {
+  navigate(pageId: string, url: string): Promise<BrowserPageActed> {
     return this.action('navigate', { pageId, url });
   }
 
-  click(pageId: string, target: BrowserTarget, options: BrowserClickOptions = {}): Promise<BrowserPageActionSnapshot> {
+  click(pageId: string, target: BrowserTarget, options: BrowserClickOptions = {}): Promise<BrowserPageActed> {
     return this.action('click', { pageId, target, ...options });
   }
 
@@ -202,45 +213,42 @@ export class BrowserWorkerClient implements BrowserAutomation {
     target: BrowserElementTarget,
     text: string,
     options: BrowserTypeOptions = {},
-  ): Promise<BrowserPageActionSnapshot> {
+  ): Promise<BrowserPageActed> {
     return this.action('type', { pageId, target, text, ...options });
   }
 
-  async read(
-    pageId: string,
-    options: BrowserReadOptions = {},
-  ): Promise<BrowserPageActionSnapshot & { readonly text: string }> {
+  async read(pageId: string, options: BrowserReadOptions = {}): Promise<BrowserPageActed & { readonly text: string }> {
     const raw = await this.request('read', { pageId, ...options });
-    return { ...unwrap(normalizeWorkerActionSnapshot(raw)), text: boundedReadText(raw) };
+    return { ...acted(raw), text: boundedReadText(raw) };
   }
 
   async screenshot(
     pageId: string,
     options: BrowserScreenshotOptions = {},
   ): Promise<
-    BrowserPageActionSnapshot & {
+    BrowserPageActed & {
       readonly screenshotBase64: string;
       readonly screenshotFormat: BrowserScreenshotFormat;
     }
   > {
     const raw = await this.request('screenshot', { pageId, ...options });
     return {
-      ...unwrap(normalizeWorkerActionSnapshot(raw)),
+      ...acted(raw),
       screenshotBase64: boundedScreenshot(raw),
       // An older worker sends no format; its screenshots were always PNG.
       screenshotFormat: (raw as { screenshotFormat?: unknown }).screenshotFormat === 'jpeg' ? 'jpeg' : 'png',
     };
   }
 
-  back(pageId: string): Promise<BrowserPageActionSnapshot> {
+  back(pageId: string): Promise<BrowserPageActed> {
     return this.action('back', { pageId });
   }
 
-  forward(pageId: string): Promise<BrowserPageActionSnapshot> {
+  forward(pageId: string): Promise<BrowserPageActed> {
     return this.action('forward', { pageId });
   }
 
-  reload(pageId: string): Promise<BrowserPageActionSnapshot> {
+  reload(pageId: string): Promise<BrowserPageActed> {
     return this.action('reload', { pageId });
   }
 
@@ -248,20 +256,20 @@ export class BrowserWorkerClient implements BrowserAutomation {
     return unwrap(normalizeWorkerSnapshot(await this.request('location', pageId === undefined ? {} : { pageId })));
   }
 
-  newPage(options: { readonly url?: string; readonly incognito?: boolean }): Promise<BrowserPageActionSnapshot> {
+  newPage(options: { readonly url?: string; readonly incognito?: boolean }): Promise<BrowserPageActed> {
     return this.action('newPage', {
       ...(options.url === undefined ? {} : { url: options.url }),
       ...(options.incognito === true ? { incognito: true } : {}),
     });
   }
 
-  closePage(pageId: string): Promise<BrowserPageActionSnapshot> {
+  closePage(pageId: string): Promise<BrowserPageActed> {
     this.casts.get(pageId)?.governor.dispose();
     this.casts.delete(pageId);
     return this.action('closePage', { pageId });
   }
 
-  resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActionSnapshot> {
+  resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActed> {
     return this.action('resize', { pageId, width: viewport.width, height: viewport.height });
   }
 
@@ -366,8 +374,16 @@ export class BrowserWorkerClient implements BrowserAutomation {
     }
   }
 
-  private async action(method: string, params: Readonly<Record<string, unknown>>): Promise<BrowserPageActionSnapshot> {
-    return unwrap(normalizeWorkerActionSnapshot(await this.request(method, params)));
+  async lifecycle(
+    pageId: string,
+    request: BrowserPageLifecycleRequest,
+  ): Promise<BrowserPageActed & { readonly lifecycle: BrowserPageLifecycleReply }> {
+    const raw = await this.request('lifecycle', { pageId, request });
+    return { ...acted(raw), lifecycle: normalizeLifecycleReply(raw) };
+  }
+
+  private async action(method: string, params: Readonly<Record<string, unknown>>): Promise<BrowserPageActed> {
+    return acted(await this.request(method, params));
   }
 
   private async request(method: string, params: Readonly<Record<string, unknown>>): Promise<unknown> {

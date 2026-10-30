@@ -337,5 +337,6 @@ describe('browser page acts — the worker’s own check of a target', () => {
     should(browserElementParam({ kind: 'ref', ref: 'e1' })).deepEqual({ kind: 'ref', ref: 'e1' });
     should(browserElementParam(undefined)).be.undefined();
     should(() => browserElementParam({ kind: 'point', x: 1, y: 1 })).throw(/not a point/u);
+    should(browserElementParam({ kind: 'ref', ref: 'e1' })).deepEqual({ kind: 'ref', ref: 'e1' });
   });
 });

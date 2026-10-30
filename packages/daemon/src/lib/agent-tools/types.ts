@@ -63,4 +63,6 @@ export interface ResolvedSurface {
   readonly openedBy?: SurfaceOpener;
   /** A browser page in its own throwaway context. */
   readonly incognito?: true;
+  /** A popup: the page that opened it. */
+  readonly openerId?: string;
 }

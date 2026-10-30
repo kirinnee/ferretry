@@ -43,6 +43,44 @@ function elementArgument(word: string): { readonly ref: string } | { readonly se
   return target;
 }
 
+/** `1280x800` as a viewport. */
+function viewportArgument(value: string): { readonly width: number; readonly height: number } {
+  const match = /^(\d+)x(\d+)$/iu.exec(value.trim());
+  if (match === null) throw new AgentToolsCommandError(`--viewport must be WIDTHxHEIGHT, like 390x844, not "${value}"`);
+  return { width: Number(match[1]), height: Number(match[2]) };
+}
+
+/** `52.5,13.4` or `52.5,13.4,50` (latitude, longitude, accuracy in metres) as a position. */
+function geolocationArgument(value: string): {
+  readonly latitude: number;
+  readonly longitude: number;
+  readonly accuracy?: number;
+} {
+  const parts = value.split(',').map(part => part.trim());
+  const numbers = parts.map(part => (part === '' ? Number.NaN : Number(part)));
+  if ((numbers.length !== 2 && numbers.length !== 3) || numbers.some(number => !Number.isFinite(number)))
+    throw new AgentToolsCommandError(`--geolocation must be LAT,LON or LAT,LON,ACCURACY, not "${value}"`);
+  const [latitude, longitude, accuracy] = numbers as [number, number, number | undefined];
+  return { latitude, longitude, ...(accuracy === undefined ? {} : { accuracy }) };
+}
+
+/** A decimal number from the command line, or a plain refusal naming the option. */
+function decimal(value: string, option: string): number {
+  const parsed = Number(value);
+  if (value.trim() === '' || !Number.isFinite(parsed))
+    throw new AgentToolsCommandError(`${option} must be a number, not "${value}"`);
+  return parsed;
+}
+
+/** A repeatable option that also takes a comma list: `--type xhr,fetch --type script`. */
+const collect = (value: string, previous: string[] = []): string[] => [
+  ...previous,
+  ...value
+    .split(',')
+    .map(part => part.trim())
+    .filter(part => part !== ''),
+];
+
 const HISTORY_STEPS: ReadonlySet<string> = new Set(['back', 'forward', 'reload']);
 
 /** Text given as several words on the command line, as one string; absent when none was given. */
@@ -320,6 +358,191 @@ export function registerBrowserPageCommands(program: Command, runner: IAgentTool
           },
           options,
           { screenshotTo: file },
+        );
+      },
+    );
+
+  verb('dialog', 'answer the dialog a page is waiting on (alert, confirm, prompt)')
+    .argument('<name>', 'the page’s name or id')
+    .argument('<action>', 'accept or dismiss')
+    .option('--text <answer>', 'a prompt’s answer; only with accept')
+    .action(async (name: string, action: string, options: SessionOption & { text?: string }) => {
+      await call(
+        { tool: 'browser.dialog', name, action, ...(options.text === undefined ? {} : { promptText: options.text }) },
+        options,
+      );
+    });
+
+  verb('tabs', 'list the pages and their popups, or adopt a popup under a name')
+    .argument('[action]', 'list (the default) or adopt', 'list')
+    .argument('[id]', 'adopt: the popup’s id from the list')
+    .argument('[as]', 'adopt: the name to give it')
+    .action(async (action: string, id: string | undefined, as: string | undefined, options: SessionOption) => {
+      await call(
+        { tool: 'browser.tabs', action, ...(id === undefined ? {} : { id }), ...(as === undefined ? {} : { as }) },
+        options,
+      );
+    });
+
+  verb('wait', 'wait for an element, text, an address, a load state or a time; exits 1 on timeout')
+    .argument('<name>', 'the page’s name or id')
+    .option('--ref <ref>', 'an element ref from read --snapshot')
+    .option('--selector <selector>', 'an element selector')
+    .option('--state <state>', 'with --ref or --selector: visible (the default), hidden, attached or detached')
+    .option('--text <text>', 'wait until this text is on the page')
+    .option('--text-gone <text>', 'wait until this text is gone')
+    .option('--url <part>', 'wait until the address contains this')
+    .option('--load <state>', 'wait for load, domcontentloaded or networkidle')
+    .option('--time <ms>', 'just wait this many milliseconds (up to 25000)')
+    .option('-t, --timeout <ms>', 'how long to wait in all', String(AGENT_TOOL_DEFAULT_WAIT_MS))
+    .action(
+      async (
+        name: string,
+        options: SessionOption & {
+          ref?: string;
+          selector?: string;
+          state?: string;
+          text?: string;
+          textGone?: string;
+          url?: string;
+          load?: string;
+          time?: string;
+          timeout: string;
+        },
+      ) => {
+        await run({
+          kind: 'browser-wait',
+          call: {
+            name,
+            ...(options.ref === undefined ? {} : { ref: options.ref }),
+            ...(options.selector === undefined ? {} : { selector: options.selector }),
+            ...(options.state === undefined ? {} : { state: options.state }),
+            ...(options.text === undefined ? {} : { text: options.text }),
+            ...(options.textGone === undefined ? {} : { textGone: options.textGone }),
+            ...(options.url === undefined ? {} : { url: options.url }),
+            ...(options.load === undefined ? {} : { load: options.load }),
+            ...(options.time === undefined ? {} : { time: wholeNumber(options.time, '--time') }),
+          },
+          totalMs: wholeNumber(options.timeout, '--timeout'),
+          ...sessionOf(options),
+        });
+      },
+    );
+
+  verb('console', 'print a page’s recent console messages and errors, numbered')
+    .argument('<name>', 'the page’s name or id')
+    .option('--level <level>', 'this level and worse: error, warning, info, log or debug')
+    .option('--since <n>', 'only entries after this number')
+    .option('--limit <n>', 'at most this many, newest kept (100 by default)')
+    .action(async (name: string, options: SessionOption & { level?: string; since?: string; limit?: string }) => {
+      await call(
+        {
+          tool: 'browser.console',
+          name,
+          ...(options.level === undefined ? {} : { level: options.level }),
+          ...(options.since === undefined ? {} : { since: wholeNumber(options.since, '--since') }),
+          ...(options.limit === undefined ? {} : { limit: wholeNumber(options.limit, '--limit') }),
+        },
+        options,
+      );
+    });
+
+  verb('network', 'list a page’s recent requests, or show one by its id (r12)')
+    .argument('<name>', 'the page’s name or id')
+    .argument('[request]', 'a request id from the list: show it, with its response body if it is text')
+    .option('--filter <text>', 'list: only URLs containing this')
+    .option(
+      '--type <kind>',
+      'list: only these kinds (xhr, fetch, document, script, …); repeat or comma-separate',
+      collect,
+    )
+    .action(
+      async (
+        name: string,
+        request: string | undefined,
+        options: SessionOption & { filter?: string; type?: string[] },
+      ) => {
+        await call(
+          {
+            tool: 'browser.network',
+            name,
+            action: request === undefined ? 'list' : 'get',
+            ...(request === undefined ? {} : { id: request }),
+            ...(options.filter === undefined ? {} : { filter: options.filter }),
+            ...(options.type === undefined ? {} : { types: options.type }),
+          },
+          options,
+        );
+      },
+    );
+
+  verb('emulate', 'make a page look like another device or setting; --reset puts it back')
+    .argument('<name>', 'the page’s name or id')
+    .option('--viewport <WxH>', 'the viewport in CSS pixels, like 390x844')
+    .option('--color-scheme <scheme>', 'light, dark or no-preference')
+    .option('--reduced-motion <value>', 'reduce or no-preference')
+    .option('--forced-colors <value>', 'active or none')
+    .option('--contrast <value>', 'more, less, custom or no-preference')
+    .option('--print', 'lay the page out as for print')
+    .option('--geolocation <lat,lon[,accuracy]>', 'a position, accuracy in metres')
+    .option('--locale <tag>', 'a language tag, like en-US')
+    .option('--timezone <name>', 'an IANA timezone, like Europe/Berlin')
+    .option('--cpu-throttle <rate>', 'slow the CPU down this many times (1 is none)')
+    .option('--offline', 'cut the network')
+    .option('--latency <ms>', 'add this much network delay')
+    .option('--throughput <kbps>', 'limit the network to this many kilobits per second')
+    .option('--permission <name>', 'grant a permission to the page’s site; repeat or comma-separate', collect)
+    .option('--reset', 'put everything back as it was')
+    .action(
+      async (
+        name: string,
+        options: SessionOption & {
+          viewport?: string;
+          colorScheme?: string;
+          reducedMotion?: string;
+          forcedColors?: string;
+          contrast?: string;
+          print?: boolean;
+          geolocation?: string;
+          locale?: string;
+          timezone?: string;
+          cpuThrottle?: string;
+          offline?: boolean;
+          latency?: string;
+          throughput?: string;
+          permission?: string[];
+          reset?: boolean;
+        },
+      ) => {
+        const media = {
+          ...(options.colorScheme === undefined ? {} : { colorScheme: options.colorScheme }),
+          ...(options.reducedMotion === undefined ? {} : { reducedMotion: options.reducedMotion }),
+          ...(options.forcedColors === undefined ? {} : { forcedColors: options.forcedColors }),
+          ...(options.contrast === undefined ? {} : { contrast: options.contrast }),
+          ...(options.print === true ? { print: true } : {}),
+        };
+        const network = {
+          ...(options.offline === true ? { offline: true } : {}),
+          ...(options.latency === undefined ? {} : { latency: wholeNumber(options.latency, '--latency') }),
+          ...(options.throughput === undefined ? {} : { throughput: wholeNumber(options.throughput, '--throughput') }),
+        };
+        await call(
+          {
+            tool: 'browser.emulate',
+            name,
+            ...(options.viewport === undefined ? {} : { viewport: viewportArgument(options.viewport) }),
+            ...(Object.keys(media).length === 0 ? {} : { media }),
+            ...(options.geolocation === undefined ? {} : { geolocation: geolocationArgument(options.geolocation) }),
+            ...(options.locale === undefined ? {} : { locale: options.locale }),
+            ...(options.timezone === undefined ? {} : { timezone: options.timezone }),
+            ...(options.cpuThrottle === undefined
+              ? {}
+              : { cpuThrottle: decimal(options.cpuThrottle, '--cpu-throttle') }),
+            ...(Object.keys(network).length === 0 ? {} : { network }),
+            ...(options.permission === undefined ? {} : { permissions: options.permission }),
+            ...(options.reset === true ? { reset: true } : {}),
+          },
+          options,
         );
       },
     );

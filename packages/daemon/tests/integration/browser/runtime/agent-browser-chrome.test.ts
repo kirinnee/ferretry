@@ -75,6 +75,16 @@ beforeAll(async () => {
             '<p id="o">idle</p></body></html>',
           { headers: { 'content-type': 'text/html' } },
         );
+      if (url.pathname === '/lifecycle')
+        return new Response(
+          "<html><body><button id=\"ask\" onclick=\"console.log('logged-by-page');fetch('/ping?token=abc');" +
+            "document.getElementById('o').textContent='answer:'+prompt('Name?')\">Ask</button>" +
+            '<a id="pop" target="_blank" href="/read">popup</a><p id="o">idle</p>' +
+            "<script>setTimeout(()=>document.body.append('late-text'),1500)</script></body></html>",
+          { headers: { 'content-type': 'text/html' } },
+        );
+      if (url.pathname === '/ping')
+        return new Response('pong', { headers: { 'x-api-key': 'k', 'content-type': 'text/plain' } });
       return page(url.pathname === '/set' ? 'set' : `cookie:${request.headers.get('cookie') ?? ''}`);
     },
   });
@@ -260,5 +270,39 @@ describe('the machine agent browser, in a real Chrome', () => {
     should(afterSession).equal('cookie:');
     should(sharedStill).equal('cookie:who=shared');
     should(listing.pages.filter(page => page.incognito === true).map(page => page.name)).deepEqual(['after-session']);
+  }, 90_000);
+  it('should hold a dialog for the agent, wait on the page, log the console and requests, adopt a popup and emulate a phone', async () => {
+    // Arrange
+    const call = async (tool: object) => await tools.call(agent('s1'), tool as never);
+    await call({ tool: 'browser.open', name: 'life', url: `${base}/lifecycle` });
+
+    // Act
+    const waited = await call({ tool: 'browser.wait_for', name: 'life', text: 'late-text', timeoutMs: 10_000 });
+    const button = await refOf('life', 'button "Ask"');
+    const clicked = await call({ tool: 'browser.click', name: 'life', ref: button });
+    const answered = await call({ tool: 'browser.dialog', name: 'life', action: 'accept', promptText: 'hadi' });
+    const after = await call({ tool: 'browser.read', name: 'life', selector: '#o' });
+    const consoleLog = await call({ tool: 'browser.console', name: 'life' });
+    const listed = await call({ tool: 'browser.network', name: 'life', action: 'list', filter: '/ping' });
+    const id = /^(r\d+)/mu.exec(listed.output ?? '')?.[1] ?? '';
+    const shown = await call({ tool: 'browser.network', name: 'life', action: 'get', id });
+    await call({ tool: 'browser.click', name: 'life', selector: '#pop' });
+    const tabs = await call({ tool: 'browser.tabs', action: 'list' });
+    const emulated = await call({ tool: 'browser.emulate', name: 'life', viewport: { width: 390, height: 844 } });
+    const reset = await call({ tool: 'browser.emulate', name: 'life', reset: true });
+
+    // Assert
+    should(waited.matched).be.true();
+    should(clicked.summary).containEql('prompt dialog is waiting');
+    should(answered.summary).containEql('prompt');
+    should(after.output).equal('answer:hadi');
+    should(consoleLog.output).containEql('logged-by-page');
+    should(listed.output).containEql('/ping');
+    should(shown.output).containEql('pong');
+    should(shown.output?.toLowerCase()).not.containEql('x-api-key');
+    should(tabs.summary).containEql('Popups with no name yet');
+    should(emulated.summary).containEql('viewport 390x844');
+    should(reset.summary).not.be.empty();
+    await call({ tool: 'browser.close', name: 'life' });
   }, 90_000);
 });

@@ -6,9 +6,16 @@ import {
   type AgentToolResult,
   type AuditDetail,
   type AuditOutcome,
+  BROWSER_WAIT_DEFAULT_MS,
+  BROWSER_WAIT_SLICE_MS,
   type BrowserActionResult,
+  type BrowserDialogInfo,
+  type BrowserEmulation,
+  type BrowserPageLifecycleRequest,
   type BrowserTargetFields,
+  type BrowserWaitCondition,
   browserReadModeOf,
+  browserTargetOf,
   type SurfaceControlRequest,
   type SurfaceController,
   type SurfaceControlView,
@@ -16,7 +23,13 @@ import {
   type SurfaceOpener,
 } from '@ferretry/protocol';
 import type { AuditSink } from '../audit/types.ts';
-import { BrowserSessionError, type BrowserPageAction, type BrowserSubsystem } from '../browser/runtime/index.ts';
+import {
+  BrowserSessionError,
+  type BrowserLifecycleOutcome,
+  type BrowserPageAction,
+  type BrowserSubsystem,
+  pendingDialogOf,
+} from '../browser/runtime/index.ts';
 import { BrowserTransportError } from '../browser/transport/worker-protocol.ts';
 import type { AgentControlPolicy } from '../fleet/agent-control.ts';
 import type { TextRedactor } from '../secrets/redaction.ts';
@@ -66,7 +79,10 @@ const WAIT_TAIL_LINES = 40;
 
 export interface AgentToolPorts {
   readonly terminals: Pick<TerminalSubsystem, 'list' | 'create' | 'write' | 'text' | 'foreground' | 'close'>;
-  readonly browser: Pick<BrowserSubsystem, 'status' | 'openPage' | 'actOnPage' | 'closePage'>;
+  readonly browser: Pick<
+    BrowserSubsystem,
+    'status' | 'openPage' | 'actOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+  >;
   readonly control: SurfaceControl;
   readonly policy: AgentControlPolicy;
   readonly audit: AuditSink;
@@ -91,11 +107,31 @@ const DRIVING_TOOLS: ReadonlySet<AgentToolCall['tool']> = new Set([
   'browser.type',
 ]);
 
-/** A page's text as it came back, before redaction: what was read, and where the page is now. */
+/** A page's text as it came back, before redaction: what was read, where the page is now, and what its dialog says. */
 interface PageReading {
   readonly url?: string;
   readonly text?: string;
+  readonly dialog?: string;
 }
+
+/** What a call learned that the audit should keep, beside what the call itself said. */
+interface CallFacts {
+  surface?: ResolvedSurface;
+  detail?: AuditDetail;
+}
+
+type PageRows = Awaited<ReturnType<AgentToolPorts['browser']['status']>>['pages'];
+
+/** The tools that read or change a page's life — a dialog, a wait, its logs, its device. */
+type LifecycleCall = Extract<
+  AgentToolCall,
+  {
+    readonly tool: 'browser.dialog' | 'browser.wait_for' | 'browser.console' | 'browser.network' | 'browser.emulate';
+  }
+>;
+
+/** How far up a popup's opener chain ownership is followed. */
+const MAX_OPENER_DEPTH = 8;
 
 const kindOf = (call: AgentToolCall): SurfaceKind => (call.tool.startsWith('terminal.') ? 'terminal' : 'browser');
 
@@ -126,17 +162,17 @@ export class AgentToolService {
   constructor(private readonly ports: AgentToolPorts) {}
 
   async call(caller: AgentToolCaller, call: AgentToolCall): Promise<AgentToolResult> {
-    const facts: { surface?: ResolvedSurface } = {};
+    const facts: CallFacts = {};
     try {
       if (caller.kind === 'agent' && !(await this.ports.policy.allows(kindOf(call))))
         throw new AgentToolError('forbidden', controlRefusal(kindOf(call)));
       const result = await this.dispatch(caller, call, facts);
-      await this.record(caller, call, facts.surface, 'succeeded');
+      await this.record(caller, call, facts, 'succeeded');
       return result;
     } catch (error) {
       const refusal = translate(error);
       const failed = refusal === undefined || refusal.code === 'upstream_failed';
-      await this.record(caller, call, facts.surface, failed ? 'failed' : 'refused');
+      await this.record(caller, call, facts, failed ? 'failed' : 'refused');
       throw refusal ?? error;
     }
   }
@@ -192,17 +228,15 @@ export class AgentToolService {
     }
   }
 
-  private async dispatch(
-    caller: AgentToolCaller,
-    call: AgentToolCall,
-    facts: { surface?: ResolvedSurface },
-  ): Promise<AgentToolResult> {
+  private async dispatch(caller: AgentToolCaller, call: AgentToolCall, facts: CallFacts): Promise<AgentToolResult> {
     const { sessionId } = caller;
     switch (call.tool) {
       case 'terminal.list':
         return await this.listTerminals(caller);
       case 'browser.list':
         return await this.listPages(caller);
+      case 'browser.tabs':
+        return await this.tabs(caller, call, facts);
       case 'terminal.open': {
         const opened = await this.ports.terminals.create(
           sessionId,
@@ -243,7 +277,7 @@ export class AgentToolService {
         const surface = await this.resolve(sessionId, kindOf(call), call.name);
         facts.surface = surface;
         if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
-        const result = await this.act(caller, call, surface);
+        const result = await this.act(caller, call, surface, facts);
         await this.drove(caller, call, surface);
         return result;
       }
@@ -255,9 +289,10 @@ export class AgentToolService {
     caller: AgentToolCaller,
     call: Exclude<
       AgentToolCall,
-      { readonly tool: 'terminal.list' | 'browser.list' | 'terminal.open' | 'browser.open' }
+      { readonly tool: 'terminal.list' | 'browser.list' | 'browser.tabs' | 'terminal.open' | 'browser.open' }
     >,
     surface: ResolvedSurface,
+    facts: CallFacts,
   ): Promise<AgentToolResult> {
     const { sessionId } = caller;
     const reference = surfaceReference(surface.surface, surface.name ?? surface.id);
@@ -293,8 +328,149 @@ export class AgentToolService {
         await this.ports.browser.closePage(sessionId, surface.id, this.browserGuard(caller, surface));
         this.ports.control.forget(sessionId, surface);
         return { summary: `Closed ${reference}.` };
+      case 'browser.dialog':
+      case 'browser.wait_for':
+      case 'browser.console':
+      case 'browser.network':
+      case 'browser.emulate':
+        return await this.lifecycle(caller, call, surface, reference, facts);
       default:
         return await this.browse(caller, call, surface, reference);
+    }
+  }
+
+  /** `browser.tabs`: the session's pages with their popups, or take on a popup under a name. */
+  private async tabs(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'browser.tabs' }>,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    if (call.action === 'list') return await this.listPages(caller, true);
+    const { sessionId } = caller;
+    const surface = await this.resolve(sessionId, 'browser', call.id ?? '');
+    facts.surface = surface;
+    if (caller.kind === 'agent') await this.assertAgentMay(sessionId, surface);
+    const reference = surfaceReference('browser', surface.name ?? surface.id);
+    if (surface.openerId === undefined)
+      throw new AgentToolError(
+        'bad_request',
+        `${reference} is not a popup: only a page another page opened can be adopted.`,
+      );
+    if (surface.name !== undefined) throw new AgentToolError('conflict', `${reference} already has a name; use it.`);
+    const name = call.as ?? '';
+    const opener: SurfaceOpener | undefined = caller.kind === 'agent' ? { by: 'agent', sessionId } : caller.openedBy;
+    await this.ports.browser.adoptPage(sessionId, surface.id, name, opener);
+    facts.surface = { ...surface, name, ...(opener === undefined ? {} : { openedBy: opener }) };
+    await this.announce(caller, facts.surface, undefined);
+    return {
+      summary: `Adopted the popup ${surface.id} (opened by ${surface.openerId}) as ${surfaceReference('browser', name)}. Use it by that name.`,
+    };
+  }
+
+  /** The page-lifecycle tools, each as one call to the page's lifecycle port. */
+  private async lifecycle(
+    caller: AgentToolCaller,
+    call: LifecycleCall,
+    surface: ResolvedSurface,
+    reference: string,
+    facts: CallFacts,
+  ): Promise<AgentToolResult> {
+    const guard = this.browserGuard(caller, surface);
+    const send = async (request: BrowserPageLifecycleRequest): Promise<BrowserLifecycleOutcome> =>
+      await this.ports.browser.lifecycleOnPage(caller.sessionId, surface.id, request, guard);
+    switch (call.tool) {
+      case 'browser.dialog': {
+        const out = await send({
+          op: 'dialog',
+          action: call.action,
+          ...(call.promptText === undefined ? {} : { promptText: call.promptText }),
+        });
+        if (out.reply.dialogType !== undefined)
+          facts.detail = { dialogType: out.reply.dialogType, accepted: call.action === 'accept' };
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        return { summary: `On ${reference}: ${read.text ?? ''}.${dialogNote(out.dialog, read.dialog)}` };
+      }
+      case 'browser.wait_for':
+        return await this.waitFor(caller, call, surface, reference, send);
+      case 'browser.console': {
+        const out = await send({
+          op: 'console',
+          ...(call.level === undefined ? {} : { level: call.level }),
+          ...(call.since === undefined ? {} : { since: call.since }),
+          ...(call.limit === undefined ? {} : { limit: call.limit }),
+        });
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        return {
+          summary: `The console of ${reference}.${dialogNote(out.dialog, read.dialog)}`,
+          output: clipOutput(read.text ?? ''),
+        };
+      }
+      case 'browser.network': {
+        const out = await send({
+          op: 'network',
+          action: call.action,
+          ...(call.id === undefined ? {} : { id: call.id }),
+          ...(call.filter === undefined ? {} : { filter: call.filter }),
+          ...(call.types === undefined ? {} : { types: call.types }),
+        });
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        const what = call.action === 'get' ? `Request ${call.id ?? ''} of` : 'The requests of';
+        return {
+          summary: `${what} ${reference}.${dialogNote(out.dialog, read.dialog)}`,
+          output: call.action === 'get' ? clipReading(read.text ?? '') : clipOutput(read.text ?? ''),
+        };
+      }
+      case 'browser.emulate': {
+        const { tool: _tool, name: _name, ...emulation } = call;
+        const out = await send({ op: 'emulate', emulation: emulation as BrowserEmulation });
+        const read = await this.scrubbed({ text: out.reply.text, ...dialogOf(out.dialog) });
+        return {
+          summary: `${read.text ?? 'Emulation applied'} on ${reference}.${dialogNote(out.dialog, read.dialog)}`,
+        };
+      }
+    }
+  }
+
+  /**
+   * `browser.wait_for`: ONE SECOND AT A TIME, with the takeover guard between slices, so a wait ends the
+   * moment a person takes the page over — the way `terminal.wait` does. A dialog that opens ends it too,
+   * since it blocks the page: the result says so.
+   */
+  private async waitFor(
+    caller: AgentToolCaller,
+    call: Extract<AgentToolCall, { readonly tool: 'browser.wait_for' }>,
+    surface: ResolvedSurface,
+    reference: string,
+    send: (request: BrowserPageLifecycleRequest) => Promise<BrowserLifecycleOutcome>,
+  ): Promise<AgentToolResult> {
+    const condition = waitConditionOf(call);
+    if (condition.kind === 'time') {
+      for (let left = condition.ms; left > 0; left -= BROWSER_WAIT_SLICE_MS) {
+        await this.ports.sleep(Math.min(BROWSER_WAIT_SLICE_MS, left));
+        if (caller.kind === 'agent') await this.assertFree(caller.sessionId, surface);
+      }
+      return { summary: `Waited ${String(condition.ms)} ms on ${reference}.`, matched: true };
+    }
+    const timeoutMs = call.timeoutMs ?? BROWSER_WAIT_DEFAULT_MS;
+    const deadline = this.ports.clock.now() + timeoutMs;
+    for (let waited = 0; ; ) {
+      const slice = Math.max(1, Math.min(BROWSER_WAIT_SLICE_MS, timeoutMs - waited));
+      const out = await send({ op: 'wait', condition, timeoutMs: slice });
+      waited += slice;
+      if (out.reply.matched === true)
+        return { summary: `The wait on ${reference} is over: it happened.`, matched: true };
+      if (out.dialog !== undefined) {
+        const read = await this.scrubbed(dialogOf(out.dialog));
+        return {
+          summary: `The wait on ${reference} stopped: the page is blocked by a dialog.${dialogNote(out.dialog, read.dialog)}`,
+          matched: false,
+        };
+      }
+      if (waited >= timeoutMs || this.ports.clock.now() >= deadline)
+        return {
+          summary: `Still waiting on ${reference}: the wait timed out after ${String(timeoutMs)} ms.`,
+          matched: false,
+        };
     }
   }
 
@@ -319,12 +495,14 @@ export class AgentToolService {
       readonly screenshotBase64?: unknown;
       readonly screenshotFormat?: unknown;
     } = 'result' in answer ? answer.result : {};
+    const dialog = pendingDialogOf(page);
     const read = await this.scrubbed({
       ...(page.url === undefined ? {} : { url: page.url }),
       ...(typeof page.text === 'string' ? { text: page.text } : {}),
+      ...dialogOf(dialog),
     });
     const at = read.url === undefined ? '' : ` (now at ${read.url})`;
-    const check = humanCheckNote(answer, surface.id);
+    const check = humanCheckNote(answer, surface.id) + dialogNote(dialog, read.dialog);
     if (read.text !== undefined && call.tool === 'browser.read') {
       const mode = browserReadModeOf(call);
       if (call.find !== undefined && read.text === '')
@@ -345,11 +523,12 @@ export class AgentToolService {
 
   /** A page's reading with every vault secret masked, under one vault open — or refused, never served raw. */
   private async scrubbed(reading: PageReading): Promise<PageReading> {
-    if (reading.url === undefined && reading.text === undefined) return reading;
+    if (reading.url === undefined && reading.text === undefined && reading.dialog === undefined) return reading;
     try {
       return await this.ports.redactor.batch(scrub => ({
         ...(reading.url === undefined ? {} : { url: scrub.text(reading.url) }),
         ...(reading.text === undefined ? {} : { text: scrub.text(reading.text) }),
+        ...(reading.dialog === undefined ? {} : { dialog: scrub.text(reading.dialog) }),
       }));
     } catch {
       throw new AgentToolError(
@@ -428,22 +607,33 @@ export class AgentToolService {
     return shown('terminal', surfaces);
   }
 
-  private async listPages(caller: AgentToolCaller): Promise<AgentToolResult> {
+  private async listPages(caller: AgentToolCaller, tabs = false): Promise<AgentToolResult> {
     const status = await this.ports.browser.status(caller.sessionId);
     const surfaces = await Promise.all(
       status.pages.map(async page =>
-        this.listed(caller, {
-          surface: 'browser',
-          id: page.id,
-          title: page.title,
-          url: page.url,
-          ...(page.name === undefined ? {} : { name: page.name }),
-          ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
-          ...(page.incognito === true ? { incognito: true } : {}),
-        }),
+        this.listed(
+          caller,
+          {
+            surface: 'browser',
+            id: page.id,
+            title: page.title,
+            url: page.url,
+            ...(page.name === undefined ? {} : { name: page.name }),
+            ...(page.openedBy === undefined ? {} : { openedBy: page.openedBy }),
+            ...(page.openerId === undefined ? {} : { openerId: page.openerId }),
+            ...(page.incognito === true ? { incognito: true } : {}),
+          },
+          status.pages,
+        ),
       ),
     );
-    return shown('browser', surfaces);
+    const listing = shown('browser', surfaces);
+    const popups = (listing.surfaces ?? []).filter(row => row.openerId !== undefined && row.name === undefined);
+    if (!tabs || popups.length === 0) return listing;
+    return {
+      ...listing,
+      summary: `${listing.summary} Popups with no name yet: ${popups.map(row => row.id).join(', ')}; give one a name with browser.tabs (action "adopt", id, as).`,
+    };
   }
 
   /**
@@ -453,6 +643,7 @@ export class AgentToolService {
   private async listed(
     caller: AgentToolCaller,
     row: ResolvedSurface & { readonly title: string; readonly url?: string },
+    pages?: PageRows,
   ): Promise<AgentSurface | undefined> {
     const base: AgentSurface = {
       id: row.id,
@@ -460,9 +651,10 @@ export class AgentToolService {
       title: row.title,
       ...(row.incognito === true ? { incognito: true } : {}),
       ...(row.url === undefined ? {} : { url: row.url }),
+      ...(row.openerId === undefined ? {} : { openerId: row.openerId }),
     };
     if (caller.kind !== 'agent') return base;
-    const available = await this.assertAgentMay(caller.sessionId, row).then(
+    const available = await this.assertAgentMay(caller.sessionId, row, pages).then(
       () => true,
       () => false,
     );
@@ -476,6 +668,7 @@ export class AgentToolService {
       readonly name?: string;
       readonly openedBy?: SurfaceOpener;
       readonly incognito?: true;
+      readonly openerId?: string;
     }[] =
       surface === 'terminal'
         ? (await this.ports.terminals.list(sessionId)).terminals
@@ -494,17 +687,46 @@ export class AgentToolService {
       ...(found.name === undefined ? {} : { name: found.name }),
       ...(found.openedBy === undefined ? {} : { openedBy: found.openedBy }),
       ...(found.incognito === true ? { incognito: true } : {}),
+      ...(found.openerId === undefined ? {} : { openerId: found.openerId }),
     };
   }
 
   /** Whether an agent may act on this surface now: it is the agent's, and nobody is holding it. */
-  private async assertAgentMay(sessionId: string, surface: ResolvedSurface): Promise<void> {
-    if (!openedByAgent(surface.openedBy, sessionId) && !(await this.ports.control.isHanded(sessionId, surface)))
+  private async assertAgentMay(sessionId: string, surface: ResolvedSurface, pages?: PageRows): Promise<void> {
+    const mine =
+      openedByAgent(surface.openedBy, sessionId) ||
+      (await this.ports.control.isHanded(sessionId, surface)) ||
+      (await this.popupOfMine(sessionId, surface, pages));
+    if (!mine)
       throw new AgentToolError(
         'forbidden',
         `${surfaceReference(surface.surface, surface.name ?? surface.id)} is a person's, not yours: you may use it only if they hand it to you. Ask them, or open your own.`,
       );
     await this.assertFree(sessionId, surface);
+  }
+
+  /**
+   * Whether a page is a popup of one of the agent's own: its opener chain — the opener records the
+   * daemon keeps, never a claim — ends at a page this agent opened or was handed.
+   */
+  private async popupOfMine(sessionId: string, surface: ResolvedSurface, known?: PageRows): Promise<boolean> {
+    if (surface.surface !== 'browser' || surface.openerId === undefined) return false;
+    const pages = known ?? (await this.ports.browser.status(sessionId)).pages;
+    let openerId: string | undefined = surface.openerId;
+    for (let depth = 0; depth < MAX_OPENER_DEPTH && openerId !== undefined; depth += 1) {
+      const opener = pages.find(page => page.id === openerId);
+      if (opener === undefined) return false;
+      const resolved: ResolvedSurface = {
+        surface: 'browser',
+        id: opener.id,
+        ...(opener.name === undefined ? {} : { name: opener.name }),
+        ...(opener.openedBy === undefined ? {} : { openedBy: opener.openedBy }),
+      };
+      if (openedByAgent(opener.openedBy, sessionId) || (await this.ports.control.isHanded(sessionId, resolved)))
+        return true;
+      openerId = opener.openerId;
+    }
+    return false;
   }
 
   /** Whether a person holds THIS surface. Holding one tab or terminal holds nothing else. */
@@ -568,15 +790,17 @@ export class AgentToolService {
   private async record(
     caller: AgentToolCaller,
     call: AgentToolCall,
-    surface: ResolvedSurface | undefined,
+    facts: CallFacts,
     outcome: AuditOutcome,
   ): Promise<void> {
+    const surface = facts.surface;
     const key = surface === undefined ? ('name' in call ? call.name : undefined) : (surface.name ?? surface.id);
     const detail: AuditDetail = {
       tool: call.tool,
       by: caller.kind,
       ...(key === undefined ? {} : { surface: surfaceReference(kindOf(call), key) }),
       ...callFacts(call),
+      ...facts.detail,
     };
     await this.ports.audit.record({
       event: 'agent.tool',
@@ -647,9 +871,58 @@ function callFacts(call: AgentToolCall): AuditDetail {
         ...(call.fullPage === true ? { fullPage: true } : {}),
         ...(call.format === undefined ? {} : { format: call.format }),
       };
+    case 'browser.dialog':
+      return {
+        action: call.action,
+        ...(call.promptText === undefined ? {} : { promptTextLength: call.promptText.length }),
+      };
+    case 'browser.tabs':
+      return { action: call.action };
+    case 'browser.wait_for':
+      return { waitKind: waitConditionOf(call).kind, timeoutMs: call.timeoutMs ?? BROWSER_WAIT_DEFAULT_MS };
+    case 'browser.console':
+      return {
+        ...(call.level === undefined ? {} : { level: call.level }),
+        ...(call.since === undefined ? {} : { since: call.since }),
+        ...(call.limit === undefined ? {} : { limit: call.limit }),
+      };
+    case 'browser.network':
+      return {
+        action: call.action,
+        ...(call.filter === undefined ? {} : { filterLength: call.filter.length }),
+        ...(call.types === undefined ? {} : { types: call.types.length }),
+      };
+    case 'browser.emulate':
+      return {
+        fields: Object.entries(call)
+          .filter(([key, value]) => key !== 'tool' && key !== 'name' && value !== undefined)
+          .map(([key]) => key)
+          .join(','),
+      };
     default:
       return {};
   }
+}
+
+/** The one thing a `browser.wait_for` waits for. The call schema already holds it to exactly one. */
+function waitConditionOf(call: Extract<AgentToolCall, { readonly tool: 'browser.wait_for' }>): BrowserWaitCondition {
+  const target = browserTargetOf(call);
+  if (target !== undefined && target.kind !== 'point')
+    return { kind: 'element', target, state: call.state ?? 'visible' };
+  if (call.text !== undefined) return { kind: 'text', text: call.text };
+  if (call.textGone !== undefined) return { kind: 'textGone', text: call.textGone };
+  if (call.url !== undefined) return { kind: 'url', url: call.url };
+  if (call.load !== undefined) return { kind: 'load', state: call.load };
+  return { kind: 'time', ms: call.time ?? 1 };
+}
+
+const dialogOf = (dialog: BrowserDialogInfo | undefined): { readonly dialog?: string } =>
+  dialog === undefined ? {} : { dialog: dialog.message };
+
+/** Told after any act on a page that has a dialog waiting: what it says, and what to do. */
+function dialogNote(dialog: BrowserDialogInfo | undefined, scrubbedMessage: string | undefined): string {
+  if (dialog === undefined) return '';
+  return ` A ${dialog.type} dialog is waiting on this page: "${scrubbedMessage ?? ''}". The page can do nothing until it is answered: use browser.dialog with accept or dismiss (it is dismissed on its own after 30 seconds).`;
 }
 
 /** What an act pointed at, for the audit: a ref, a short selector, or only that it was a point. */

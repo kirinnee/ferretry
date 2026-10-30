@@ -242,3 +242,123 @@ describe('wholeNumber', () => {
     should(() => wholeNumber('9'.repeat(20), '--lines')).throw(/whole number/u);
   });
 });
+
+describe('fy browser page — the page lifecycle', () => {
+  it('should turn every verb into the matching tool call', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'dialog', 'app', 'accept', '--text', 'yes');
+    await run('browser', 'page', 'dialog', 'app', 'dismiss');
+    await run('browser', 'page', 'tabs');
+    await run('browser', 'page', 'tabs', 'adopt', 'page-7', 'popup');
+    await run('browser', 'page', 'console', 'app', '--level', 'error', '--since', '12', '--limit', '30');
+    await run('browser', 'page', 'network', 'app', '--filter', '/api', '--type', 'xhr,fetch', '--type', 'script');
+    await run('browser', 'page', 'network', 'app', 'r12');
+    await run(
+      'browser',
+      'page',
+      'emulate',
+      'app',
+      '--viewport',
+      '390x844',
+      '--color-scheme',
+      'dark',
+      '--print',
+      '--geolocation',
+      '52.5,13.4,50',
+      '--locale',
+      'de-DE',
+      '--timezone',
+      'Europe/Berlin',
+      '--cpu-throttle',
+      '4',
+      '--offline',
+      '--latency',
+      '300',
+      '--throughput',
+      '500',
+      '--permission',
+      'geolocation',
+    );
+    await run('browser', 'page', 'emulate', 'app', '--reset');
+
+    // Assert
+    should(calls).deepEqual([
+      { kind: 'call', call: { tool: 'browser.dialog', name: 'app', action: 'accept', promptText: 'yes' } },
+      { kind: 'call', call: { tool: 'browser.dialog', name: 'app', action: 'dismiss' } },
+      { kind: 'call', call: { tool: 'browser.tabs', action: 'list' } },
+      { kind: 'call', call: { tool: 'browser.tabs', action: 'adopt', id: 'page-7', as: 'popup' } },
+      {
+        kind: 'call',
+        call: { tool: 'browser.console', name: 'app', level: 'error', since: 12, limit: 30 },
+      },
+      {
+        kind: 'call',
+        call: {
+          tool: 'browser.network',
+          name: 'app',
+          action: 'list',
+          filter: '/api',
+          types: ['xhr', 'fetch', 'script'],
+        },
+      },
+      { kind: 'call', call: { tool: 'browser.network', name: 'app', action: 'get', id: 'r12' } },
+      {
+        kind: 'call',
+        call: {
+          tool: 'browser.emulate',
+          name: 'app',
+          viewport: { width: 390, height: 844 },
+          media: { colorScheme: 'dark', print: true },
+          geolocation: { latitude: 52.5, longitude: 13.4, accuracy: 50 },
+          locale: 'de-DE',
+          timezone: 'Europe/Berlin',
+          cpuThrottle: 4,
+          network: { offline: true, latency: 300, throughput: 500 },
+          permissions: ['geolocation'],
+        },
+      },
+      { kind: 'call', call: { tool: 'browser.emulate', name: 'app', reset: true } },
+    ]);
+  });
+
+  it('should hand wait to the looping browser wait with its total budget', async () => {
+    // Arrange
+    const { calls, run } = harness();
+
+    // Act
+    await run('browser', 'page', 'wait', 'app', '--text', 'Welcome', '--timeout', '90000');
+    await run('browser', 'page', 'wait', 'app', '--selector', '#done', '--state', 'hidden', '-s', 's1');
+    await run('browser', 'page', 'wait', 'app', '--time', '1500');
+
+    // Assert
+    should(calls).deepEqual([
+      { kind: 'browser-wait', call: { name: 'app', text: 'Welcome' }, totalMs: 90_000 },
+      {
+        kind: 'browser-wait',
+        call: { name: 'app', selector: '#done', state: 'hidden' },
+        totalMs: 10_000,
+        session: 's1',
+      },
+      { kind: 'browser-wait', call: { name: 'app', time: 1_500 }, totalMs: 10_000 },
+    ]);
+  });
+
+  it('should refuse a viewport or a position it cannot read', async () => {
+    const { run } = harness();
+    const viewport = await run('browser', 'page', 'emulate', 'app', '--viewport', 'wide').catch(
+      (error: unknown) => error,
+    );
+    const position = await run('browser', 'page', 'emulate', 'app', '--geolocation', '52.5').catch(
+      (error: unknown) => error,
+    );
+    should((viewport as Error).message).match(/--viewport must be WIDTHxHEIGHT/u);
+    should((position as Error).message).match(/--geolocation must be LAT,LON/u);
+    const throttle = await run('browser', 'page', 'emulate', 'app', '--cpu-throttle', 'fast').catch(
+      (error: unknown) => error,
+    );
+    should((throttle as Error).message).match(/--cpu-throttle must be a number/u);
+  });
+});

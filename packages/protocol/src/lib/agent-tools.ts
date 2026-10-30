@@ -12,6 +12,21 @@ import {
   refineBrowserScreenshot,
   refineBrowserTarget,
 } from './browser-target.ts';
+import {
+  BROWSER_CONSOLE_MAX_LIMIT,
+  BROWSER_DIALOG_PROMPT_MAX_CHARS,
+  BROWSER_NETWORK_FILTER_MAX_CHARS,
+  BROWSER_RESOURCE_TYPES,
+  BROWSER_WAIT_MAX_MS,
+  BROWSER_WAIT_TEXT_MAX_CHARS,
+  BrowserConsoleLevelSchema,
+  BrowserDialogActionSchema,
+  BrowserElementStateSchema,
+  BrowserEmulationShape,
+  BrowserLoadStateSchema,
+  BrowserRequestIdSchema,
+  BrowserResourceTypeSchema,
+} from './browser-page-lifecycle.ts';
 import { InstantSchema } from './common.ts';
 import type { AgentConfigToolName } from './config-files.ts';
 
@@ -269,6 +284,99 @@ export const AgentToolCallSchema = z.discriminatedUnion('tool', [
     })
     .superRefine(refineBrowserTarget({ point: false, required: false }))
     .superRefine(refineBrowserScreenshot),
+  z
+    .strictObject({
+      tool: z.literal('browser.dialog'),
+      name: SurfaceKeySchema,
+      /** Answer the dialog the page is waiting on: accept it (OK) or dismiss it (Cancel). */
+      action: BrowserDialogActionSchema,
+      /** A `prompt` dialog's answer. */
+      promptText: z.string().max(BROWSER_DIALOG_PROMPT_MAX_CHARS).optional(),
+    })
+    .refine(
+      call => call.promptText === undefined || call.action === 'accept',
+      'promptText answers a prompt, so it goes with accept',
+    ),
+  z
+    .strictObject({
+      tool: z.literal('browser.tabs'),
+      action: z.enum(['list', 'adopt']),
+      /** `adopt`: the popup to take on, by the id a list showed. */
+      id: SurfaceKeySchema.optional(),
+      /** `adopt`: the name to give it. */
+      as: SurfaceNameSchema.optional(),
+    })
+    .refine(
+      call =>
+        call.action === 'adopt'
+          ? call.id !== undefined && call.as !== undefined
+          : call.id === undefined && call.as === undefined,
+      'adopt needs the popup id and the name to give it; list takes neither',
+    ),
+  z
+    .strictObject({
+      tool: z.literal('browser.wait_for'),
+      name: SurfaceKeySchema,
+      ...ElementTargetShape,
+      /** With a ref or selector: what the element should be. Defaults to visible. */
+      state: BrowserElementStateSchema.optional(),
+      text: z.string().min(1).max(BROWSER_WAIT_TEXT_MAX_CHARS).optional(),
+      textGone: z.string().min(1).max(BROWSER_WAIT_TEXT_MAX_CHARS).optional(),
+      /** A part of the page's address. */
+      url: z.string().min(1).max(BROWSER_WAIT_TEXT_MAX_CHARS).optional(),
+      load: BrowserLoadStateSchema.optional(),
+      /** Just wait this many milliseconds. */
+      time: z.number().int().min(1).max(BROWSER_WAIT_MAX_MS).optional(),
+      timeoutMs: z.number().int().min(100).max(BROWSER_WAIT_MAX_MS).optional(),
+    })
+    .superRefine(refineBrowserTarget({ point: false, required: false }))
+    .superRefine((call, context) => {
+      const named = [call.selector ?? call.ref, call.text, call.textGone, call.url, call.load, call.time].filter(
+        value => value !== undefined,
+      ).length;
+      if (named !== 1)
+        context.addIssue({
+          code: 'custom',
+          message: 'wait for exactly one thing: a ref or selector, text, textGone, url, load or time',
+        });
+      if (call.state !== undefined && call.selector === undefined && call.ref === undefined)
+        context.addIssue({ code: 'custom', message: 'state goes with a ref or selector' });
+    }),
+  z.strictObject({
+    tool: z.literal('browser.console'),
+    name: SurfaceKeySchema,
+    /** This level and worse. */
+    level: BrowserConsoleLevelSchema.optional(),
+    /** Only entries after this number, as a previous call reported it. */
+    since: z.number().int().min(0).optional(),
+    limit: z.number().int().min(1).max(BROWSER_CONSOLE_MAX_LIMIT).optional(),
+  }),
+  z
+    .strictObject({
+      tool: z.literal('browser.network'),
+      name: SurfaceKeySchema,
+      action: z.enum(['list', 'get']),
+      /** `get`: the request to show, by the id a list named. */
+      id: BrowserRequestIdSchema.optional(),
+      /** `list`: only URLs containing this text. */
+      filter: z.string().min(1).max(BROWSER_NETWORK_FILTER_MAX_CHARS).optional(),
+      /** `list`: only these kinds of request. */
+      types: z.array(BrowserResourceTypeSchema).min(1).max(BROWSER_RESOURCE_TYPES.length).optional(),
+    })
+    .superRefine((call, context) => {
+      if (call.action === 'get' && call.id === undefined)
+        context.addIssue({ code: 'custom', message: 'get needs the id of a request from a list' });
+      if (call.action === 'list' && call.id !== undefined)
+        context.addIssue({ code: 'custom', message: 'list takes a filter, not an id' });
+      if (call.action === 'get' && (call.filter !== undefined || call.types !== undefined))
+        context.addIssue({ code: 'custom', message: 'get takes an id, not a filter' });
+    }),
+  z
+    .strictObject({ tool: z.literal('browser.emulate'), name: SurfaceKeySchema, ...BrowserEmulationShape })
+    .refine(
+      call => Object.entries(call).some(([key, value]) => key !== 'tool' && key !== 'name' && value !== undefined),
+      'name something to emulate, or reset: true',
+    ),
   z.strictObject({ tool: z.literal('browser.close'), name: SurfaceKeySchema }),
   z.strictObject({
     tool: z.literal('browser.ask_owner'),
@@ -293,6 +401,9 @@ const REPEATABLE_AGENT_TOOLS: ReadonlySet<string> = new Set<AgentToolName | Agen
   'browser.list',
   'browser.read',
   'browser.screenshot',
+  'browser.tabs',
+  'browser.wait_for',
+  'browser.console',
   'config.read',
   'config.validate',
 ]);
@@ -317,6 +428,12 @@ export const AGENT_TOOL_NAMES: readonly AgentToolName[] = [
   'browser.type',
   'browser.read',
   'browser.screenshot',
+  'browser.dialog',
+  'browser.tabs',
+  'browser.wait_for',
+  'browser.console',
+  'browser.network',
+  'browser.emulate',
   'browser.close',
   'browser.ask_owner',
 ];
@@ -338,6 +455,8 @@ export const AgentSurfaceSchema = z.strictObject({
    * nor on anything a person has taken over.
    */
   available: z.boolean().optional(),
+  /** A popup: the page that opened it. Listed so an agent can tell which tabs are its own pages' popups. */
+  openerId: z.string().min(1).max(128).optional(),
 });
 export type AgentSurface = z.infer<typeof AgentSurfaceSchema>;
 

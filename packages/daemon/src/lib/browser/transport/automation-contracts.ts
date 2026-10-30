@@ -1,8 +1,11 @@
 import type {
+  BrowserDialogInfo,
   BrowserElementTarget,
   BrowserInputEvent,
   BrowserProxyStatus,
   BrowserPageActionSnapshot,
+  BrowserPageLifecycleReply,
+  BrowserPageLifecycleRequest,
   BrowserPageSnapshot,
   BrowserScreencastFrame,
   BrowserScreenshotFormat,
@@ -15,6 +18,9 @@ import type {
   BrowserScreenshotOptions,
   BrowserTypeOptions,
 } from './page-acts.ts';
+
+/** What an act answers: the page list, and the dialog the acted page is waiting on, if it has one. */
+export type BrowserPageActed = BrowserPageActionSnapshot & { readonly dialog?: BrowserDialogInfo };
 
 /**
  * The machine's agent browser, seen from the daemon. One implementation drives a real browser worker;
@@ -30,38 +36,47 @@ export interface BrowserAutomation {
   readonly unexpectedExit: Promise<number>;
   /** Where this browser sends its traffic, when the owner chose a proxy: the address, never a credential. */
   readonly proxy?: BrowserProxyStatus;
-  navigate(pageId: string, url: string): Promise<BrowserPageActionSnapshot>;
+  navigate(pageId: string, url: string): Promise<BrowserPageActed>;
   /** Clicks an element (a ref or a selector) or a point in the viewport. */
-  click(pageId: string, target: BrowserTarget, options?: BrowserClickOptions): Promise<BrowserPageActionSnapshot>;
+  click(pageId: string, target: BrowserTarget, options?: BrowserClickOptions): Promise<BrowserPageActed>;
   type(
     pageId: string,
     target: BrowserElementTarget,
     text: string,
     options?: BrowserTypeOptions,
-  ): Promise<BrowserPageActionSnapshot>;
+  ): Promise<BrowserPageActed>;
   /**
    * The visible text (the default), the accessibility tree (`a11y`, YAML), or a `snapshot`: that tree
    * with a ref beside every element — of the page, or of one element of it.
    */
-  read(pageId: string, options?: BrowserReadOptions): Promise<BrowserPageActionSnapshot & { readonly text: string }>;
+  read(pageId: string, options?: BrowserReadOptions): Promise<BrowserPageActed & { readonly text: string }>;
   screenshot(
     pageId: string,
     options?: BrowserScreenshotOptions,
   ): Promise<
-    BrowserPageActionSnapshot & {
+    BrowserPageActed & {
       readonly screenshotBase64: string;
       readonly screenshotFormat?: BrowserScreenshotFormat;
     }
   >;
-  back(pageId: string): Promise<BrowserPageActionSnapshot>;
-  forward(pageId: string): Promise<BrowserPageActionSnapshot>;
-  reload(pageId: string): Promise<BrowserPageActionSnapshot>;
+  back(pageId: string): Promise<BrowserPageActed>;
+  forward(pageId: string): Promise<BrowserPageActed>;
+  reload(pageId: string): Promise<BrowserPageActed>;
   /** Every page, described from this one (or any page, when none is named). Acts on nothing. */
   location(pageId?: string): Promise<BrowserPageSnapshot>;
   /** A new page in its own window — in the shared agent profile, or in a throwaway incognito context. */
-  newPage(options: { readonly url?: string; readonly incognito?: boolean }): Promise<BrowserPageActionSnapshot>;
-  closePage(pageId: string): Promise<BrowserPageActionSnapshot>;
-  resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActionSnapshot>;
+  newPage(options: { readonly url?: string; readonly incognito?: boolean }): Promise<BrowserPageActed>;
+  closePage(pageId: string): Promise<BrowserPageActed>;
+  resize(pageId: string, viewport: BrowserViewport): Promise<BrowserPageActed>;
+  /**
+   * Answers a dialog, waits a moment for a condition, reads the console or network log, or emulates a
+   * device — one request, one page. A dialog answer, a log read and an emulation never wait behind a
+   * slow act on the page: a dialog is what such an act may be stuck on.
+   */
+  lifecycle(
+    pageId: string,
+    request: BrowserPageLifecycleRequest,
+  ): Promise<BrowserPageActed & { readonly lifecycle: BrowserPageLifecycleReply }>;
   /** Streams ONE page. Each page has its own stream; listeners of one never see another's frames. */
   startScreencast(
     pageId: string,

@@ -1,4 +1,12 @@
-import type { BrowserActionResult, BrowserPageSnapshot, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
+import type {
+  BrowserActionResult,
+  BrowserDialogInfo,
+  BrowserPageLifecycleRequest,
+  BrowserPageSnapshot,
+  BrowserPageSummary,
+  BrowserStatus,
+  SurfaceOpener,
+} from '@ferretry/protocol';
 import type { AgentControlKind, AgentControlPolicy } from '../../../src/lib/fleet/agent-control.ts';
 import {
   type AgentIdentity,
@@ -7,6 +15,7 @@ import {
   type AuditEntry,
   type AuditSink,
   type BrowserActGuard,
+  type BrowserLifecycleOutcome,
   type BrowserOpenOptions,
   type BrowserPageAction,
   BrowserSessionError,
@@ -106,7 +115,19 @@ type FakePage = BrowserPageSummary & { readonly sessionId: string };
  * service raises. It records every act (by the page that was active when it ran), runs a guard where
  * the real one does, and can be told to fail the next call with any error.
  */
-class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' | 'actOnPage' | 'closePage'> {
+class FakeBrowserPages implements Pick<
+  BrowserSubsystem,
+  'status' | 'openPage' | 'actOnPage' | 'closePage' | 'lifecycleOnPage' | 'adoptPage'
+> {
+  /** Every lifecycle request, exactly as the agent-tools service built it. */
+  readonly lifecycles: BrowserPageLifecycleRequest[] = [];
+  /** What the next lifecycle requests answer, oldest first; once spent, a plain "done". */
+  readonly lifecycleReplies: BrowserLifecycleOutcome[] = [];
+  /** Run, oldest first, just before each lifecycle request reaches its guard: a person acting mid-wait. */
+  readonly beforeLifecycle: (() => void | Promise<void>)[] = [];
+  /** The dialog every act reports as waiting on the page, when a case wants one. */
+  pendingDialog: BrowserDialogInfo | undefined;
+  readonly adopted: { readonly id: string; readonly name: string; readonly openedBy?: SurfaceOpener }[] = [];
   readonly pages = new Map<string, FakePage[]>();
   readonly active = new Map<string, string>();
   readonly acts: string[] = [];
@@ -177,6 +198,7 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
       ...this.snapshot(sessionId),
       ...(this.actedUrl === undefined ? {} : { url: this.actedUrl }),
       actedPageId: page.id,
+      ...(this.pendingDialog === undefined ? {} : { dialog: this.pendingDialog }),
     };
     if (action.action === 'read') {
       const text =
@@ -203,6 +225,40 @@ class FakeBrowserPages implements Pick<BrowserSubsystem, 'status' | 'openPage' |
         },
       };
     return { status, result: snapshot };
+  }
+
+  /** A popup the page `openerId` opened: listed with its opener, and with no name. */
+  popup(sessionId: string, openerId: string, id = 'popup-1'): void {
+    const pages = this.pages.get(sessionId) ?? [];
+    this.pages.set(sessionId, [...pages, { id, url: 'https://popup.test/', title: 'A popup', openerId, sessionId }]);
+  }
+
+  async lifecycleOnPage(
+    sessionId: string,
+    key: string,
+    request: BrowserPageLifecycleRequest,
+    guard?: BrowserActGuard,
+  ): Promise<BrowserLifecycleOutcome> {
+    this.fail();
+    await this.beforeLifecycle.shift()?.();
+    await guard?.();
+    const page = this.page(sessionId, key);
+    this.lifecycles.push(request);
+    this.acts.push(`${sessionId}:${page.id}:lifecycle-${request.op}`);
+    return this.lifecycleReplies.shift() ?? { reply: { text: 'done' } };
+  }
+
+  async adoptPage(sessionId: string, key: string, name: string, openedBy?: SurfaceOpener): Promise<BrowserPageSummary> {
+    this.fail();
+    const page = this.page(sessionId, key);
+    this.adopted.push({ id: page.id, name, ...(openedBy === undefined ? {} : { openedBy }) });
+    this.pages.set(
+      sessionId,
+      (this.pages.get(sessionId) ?? []).map(candidate =>
+        candidate.id === page.id ? { ...candidate, name, ...(openedBy === undefined ? {} : { openedBy }) } : candidate,
+      ),
+    );
+    return { ...page, name, ...(openedBy === undefined ? {} : { openedBy }) };
   }
 
   async closePage(sessionId: string, key: string, guard?: BrowserActGuard): Promise<void> {

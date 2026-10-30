@@ -2,9 +2,14 @@ import {
   AGENT_TOOL_DEFAULT_WAIT_MS,
   AGENT_TOOL_MAX_READ_LINES,
   AGENT_TOOL_MAX_TOTAL_WAIT_MS,
+  AGENT_TOOL_MAX_WAIT_MS,
   type AgentConfigToolName,
   type AgentLessonToolName,
   type AgentToolName,
+  BROWSER_CONSOLE_LEVELS,
+  BROWSER_CPU_THROTTLE_MAX,
+  BROWSER_EMULATED_PERMISSIONS,
+  BROWSER_RESOURCE_TYPES,
   LESSON_RULE_MAX_CHARS,
   TERMINAL_KEYS,
 } from '@ferretry/protocol';
@@ -241,6 +246,132 @@ export const MCP_TOOLS: readonly (McpToolDefinition & { readonly tool: AgentTool
         selector: SELECTOR,
         fullPage: { type: 'boolean' },
         format: { type: 'string', enum: ['png', 'jpeg'] },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_dialog',
+    tool: 'browser.dialog',
+    description:
+      'Answer the dialog (alert, confirm, prompt, beforeunload) a page is waiting on; any browser result tells you when one is open. Unanswered, it is dismissed after 30 s. promptText answers a prompt.',
+    inputSchema: object(
+      { name: NAME, action: { type: 'string', enum: ['accept', 'dismiss'] }, promptText: { type: 'string' } },
+      ['name', 'action'],
+    ),
+  },
+  {
+    name: 'browser_tabs',
+    tool: 'browser.tabs',
+    description:
+      'list: your pages and the popups they opened (available: false means not yours). adopt: give a popup (id from the list) a name so you can use it. Never switches the person’s tab.',
+    inputSchema: object(
+      {
+        action: { type: 'string', enum: ['list', 'adopt'] },
+        id: { type: 'string', description: 'adopt: the popup’s id from the list.' },
+        as: NEW_NAME,
+      },
+      ['action'],
+    ),
+  },
+  {
+    name: 'browser_wait_for',
+    tool: 'browser.wait_for',
+    description:
+      'Wait for exactly one thing: an element (ref or selector, with state), text, textGone, url (part of the address), load, or time (ms). Answers whether it happened within timeoutMs.',
+    inputSchema: object(
+      {
+        name: NAME,
+        ref: REF,
+        selector: SELECTOR,
+        state: {
+          type: 'string',
+          enum: ['visible', 'hidden', 'attached', 'detached'],
+          description: 'visible by default.',
+        },
+        text: { type: 'string' },
+        textGone: { type: 'string' },
+        url: { type: 'string' },
+        load: { type: 'string', enum: ['load', 'domcontentloaded', 'networkidle'] },
+        time: { type: 'integer', minimum: 1, maximum: AGENT_TOOL_MAX_WAIT_MS, description: 'Just wait this many ms.' },
+        timeoutMs: {
+          type: 'integer',
+          minimum: 100,
+          maximum: AGENT_TOOL_MAX_TOTAL_WAIT_MS,
+          description: `How long to wait; ${String(AGENT_TOOL_DEFAULT_WAIT_MS)} by default.`,
+        },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_console',
+    tool: 'browser.console',
+    description:
+      'The page’s recent console messages and errors, numbered. level: this level and worse. since: only entries after that number.',
+    inputSchema: object(
+      {
+        name: NAME,
+        level: { type: 'string', enum: BROWSER_CONSOLE_LEVELS },
+        since: { type: 'integer', minimum: 0 },
+        limit: { type: 'integer', minimum: 1, maximum: 500, description: '100 by default.' },
+      },
+      ['name'],
+    ),
+  },
+  {
+    name: 'browser_network',
+    tool: 'browser.network',
+    description:
+      'list: the page’s recent requests (method, url, status, type, size, time), each with an id. get: one request by id, with safe response headers and a text body. Cookies and credentials are never shown.',
+    inputSchema: object(
+      {
+        name: NAME,
+        action: { type: 'string', enum: ['list', 'get'] },
+        id: { type: 'string', pattern: '^r\\d{1,9}$', description: 'get: a request id, e.g. "r12".' },
+        filter: { type: 'string', description: 'list: only URLs containing this.' },
+        types: {
+          type: 'array',
+          items: { type: 'string', enum: BROWSER_RESOURCE_TYPES },
+          description: 'list: only these kinds.',
+        },
+      },
+      ['name', 'action'],
+    ),
+  },
+  {
+    name: 'browser_emulate',
+    tool: 'browser.emulate',
+    description:
+      'Make a page look like another device or setting: viewport, media, geolocation, locale, timezone, cpuThrottle, network, permissions. reset puts it all back. Never the user agent.',
+    inputSchema: object(
+      {
+        name: NAME,
+        viewport: object({ width: { type: 'integer', minimum: 320 }, height: { type: 'integer', minimum: 240 } }, [
+          'width',
+          'height',
+        ]),
+        media: object({
+          colorScheme: { type: 'string', enum: ['light', 'dark', 'no-preference'] },
+          reducedMotion: { type: 'string', enum: ['reduce', 'no-preference'] },
+          forcedColors: { type: 'string', enum: ['active', 'none'] },
+          contrast: { type: 'string', enum: ['more', 'less', 'custom', 'no-preference'] },
+          print: { type: 'boolean', description: 'Lay out as for print.' },
+        }),
+        geolocation: object(
+          { latitude: { type: 'number' }, longitude: { type: 'number' }, accuracy: { type: 'number' } },
+          ['latitude', 'longitude'],
+        ),
+        locale: { type: 'string', description: 'e.g. "en-US".' },
+        timezone: { type: 'string', description: 'e.g. "Europe/Berlin".' },
+        cpuThrottle: { type: 'number', minimum: 1, maximum: BROWSER_CPU_THROTTLE_MAX, description: '1 is none.' },
+        network: object({
+          offline: { type: 'boolean' },
+          latency: { type: 'integer', minimum: 0, description: 'Added ms.' },
+          throughput: { type: 'integer', minimum: 1, description: 'Kilobits per second.' },
+        }),
+        permissions: { type: 'array', items: { type: 'string', enum: BROWSER_EMULATED_PERMISSIONS } },
+        reset: { type: 'boolean', description: 'Put everything back as it was.' },
       },
       ['name'],
     ),

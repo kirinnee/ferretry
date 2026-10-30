@@ -171,6 +171,7 @@ class FakeBrowser {
       return { ...this.state(), actedPageId: pageId };
     },
     resize: async pageId => this.state(pageId),
+    lifecycle: async pageId => ({ ...this.state(pageId), lifecycle: { text: 'ok' } }),
     startScreencast: async () => undefined,
     stopScreencast: async () => undefined,
     dispatchInput: async pageId => {

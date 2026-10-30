@@ -10,7 +10,9 @@ import {
   boundedScreenshot,
   coarseWorkerError,
   encodeWorkerRequest,
+  normalizeLifecycleReply,
   normalizeWorkerActionSnapshot,
+  normalizeWorkerDialog,
   normalizeWorkerSnapshot,
   parseWorkerLine,
 } from '../../../../src/lib/index.ts';
@@ -383,5 +385,42 @@ describe('browser transport errors', () => {
     should(error.code).equal('launch_failed');
     should(error.status).equal(503);
     should(error.message).equal('browser worker did not become ready');
+  });
+});
+
+describe('lifecycle replies from a worker', () => {
+  it('should read a dialog the wire knows, bounded, and ignore one it does not', () => {
+    // Act
+    const known = normalizeWorkerDialog({ dialog: { type: 'prompt', message: 'x'.repeat(5_000) } });
+    const unknown = normalizeWorkerDialog({ dialog: { type: 'modal', message: 'hi' } });
+    const absent = normalizeWorkerDialog({});
+
+    // Assert
+    should(known?.type).equal('prompt');
+    should(known?.message.length).equal(1_024);
+    should(unknown).be.undefined();
+    should(absent).be.undefined();
+  });
+
+  it('should read the text, whether a wait matched, and which dialog was answered', () => {
+    // Act
+    const reply = normalizeLifecycleReply({
+      lifecycle: { text: 'accepted the confirm dialog: ok', matched: true, dialogType: 'confirm' },
+    });
+    const bare = normalizeLifecycleReply({ lifecycle: { text: 'hi', matched: 'yes', dialogType: 'modal' } });
+    const empty = normalizeLifecycleReply({});
+
+    // Assert
+    should(reply).deepEqual({ text: 'accepted the confirm dialog: ok', matched: true, dialogType: 'confirm' });
+    should(bare).deepEqual({ text: 'hi' });
+    should(empty).deepEqual({ text: '' });
+  });
+
+  it('should bound a lifecycle text so a page cannot grow the daemon without limit', () => {
+    // Act
+    const reply = normalizeLifecycleReply({ lifecycle: { text: 'q'.repeat(5_000_000) } });
+
+    // Assert
+    should(reply.text.length).be.below(5_000_000);
   });
 });

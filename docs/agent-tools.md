@@ -21,7 +21,11 @@ the page and end with it. The reference grammar is unchanged — see
 `browser.list` · `browser.open(name, url?, incognito?, askOwner?)` · `browser.navigate(name, url | history)` ·
 `browser.click(name, target, button?, double?, modifiers?)` · `browser.type(name, target, text, submit?, slowly?)` ·
 `browser.read(name, mode: text | a11y | snapshot, target?, find?, depth?, boxes?)` ·
-`browser.screenshot(name, target?, fullPage?, format?)` · `browser.close(name)` · `browser.ask_owner(name, message?)`.
+`browser.screenshot(name, target?, fullPage?, format?)` · `browser.dialog(name, action, promptText?)` ·
+`browser.tabs(action: list | adopt, id?, as?)` · `browser.wait_for(name, condition, timeoutMs?)` ·
+`browser.console(name, level?, since?, limit?)` · `browser.network(name, action: list | get, id?, filter?, types?)` ·
+`browser.emulate(name, viewport?, media?, geolocation?, locale?, timezone?, cpuThrottle?, network?, permissions?, reset?)` ·
+`browser.close(name)` · `browser.ask_owner(name, message?)`.
 
 A **target** is exactly one of a `ref`, a `selector`, or — for a click only — a point `x`, `y`; see
 [Refs and targets](#refs-and-targets). `history` is `back`, `forward` or `reload`.
@@ -59,7 +63,49 @@ element takes `ref: "e4"` in place of a selector, so an agent reads once and act
 - The CLI reads the same shapes from one word: `fy browser page click app e12`, `… click app 120,340`,
   `… read app --snapshot --find "Sign in"`, `… navigate app back`.
 - An MCP client that sends `false` for an on-only flag (`double`, `submit`, `slowly`, `boxes`, `fullPage`,
-  `incognito`) is read as having left it out.
+  `incognito`, and `reset`, `print` and `offline` in `browser.emulate`) is read as having left it out.
+
+## Page lifecycle
+
+Six tools for what happens around a page rather than on it. Each is `fy browser page <verb>` and
+`browser_<verb>` over MCP (`browser_wait_for` for `wait`).
+
+- **`browser.dialog`** answers an `alert`, `confirm`, `prompt` or `beforeunload` the page is blocked on:
+  `action: "accept" | "dismiss"`, and `promptText` with an accept. An unanswered dialog is held **up to 30 s per
+  page**, then dismissed. While one is pending, **every act result on that page reports its type and its
+  scrubbed message**, so the agent knows why the page is not answering. The audit records the type, whether it
+  was accepted and the length of `promptText` — never the text.
+- **`browser.tabs`** is `list` or `adopt`. A popup whose opener chain ends at a page this agent opened or was
+  handed is the agent's; `list` shows it with its `openerId` and whether it is `available` to the agent, and
+  `adopt` (`id`, `as`) gives it a name so the other tools can reach it. It never selects a tab and never
+  brings one to the front — there is no active tab ([above](#the-browser-one-shared-agent-profile-per-machine)).
+- **`browser.wait_for`** waits for **exactly one** condition: an element (`ref` or `selector`, `state` =
+  `visible` (the default), `hidden`, `attached` or `detached`), `text`, `textGone`, a `url` fragment, a
+  `load` state, or a `time`. `timeoutMs` is **at most 25 s per call** on the wire. The page is checked in
+  **slices of at most 1 s**, and the takeover check runs between slices, so a person taking the page back stops
+  the wait. The MCP server and the CLI repeat the call, as `terminal.wait` does, until it matches or
+  **120 s** are spent (`timeoutMs` default 25 s, `fy browser page wait --timeout`); a `time` wait is not
+  repeated. A miss answers `matched: false`, never an error. The audit records the condition's **kind and the
+  timeout only**, never the text or the url.
+- **`browser.console`** reads the page's console: a ring of **500 entries per page**, each numbered.
+  `level` means that level **and worse** (`error` > `warning` > `info` > `log` > `debug`); `since` is an
+  entry number and returns only later ones; `limit` is 100 by default and 500 at most. Messages are scrubbed
+  and clipped.
+- **`browser.network`** is `list` or `get`. A ring of **300 requests per page**; `list` gives each an id
+  (`r12`), method, address, status, kind and timing, narrowed by `filter` (address contains) and `types`.
+  `get` takes an `id` and adds the response headers and, for text, the body — **at most 64 KiB**. `Cookie`,
+  `Set-Cookie`, `Authorization`, `Proxy-Authorization` and **any header whose name contains `token`,
+  `api-key` or `secret`** are always stripped. This version shows **no request bodies and no full headers**.
+  Everything is scrubbed like any other page text.
+- **`browser.emulate`** changes how one page presents itself, **per page, over CDP**: `viewport` (the same
+  bounds and the same resize as the page-size control), `media` (`colorScheme`, `reducedMotion`,
+  `forcedColors`, `contrast`, `print`), `geolocation`, `locale`, `timezone`, `cpuThrottle`, `network`
+  (`offline`, `latency`, `throughput` in kbit/s) and `permissions`. **Never the user agent or client hints, and
+  never clipboard-read.** `permissions` is a closed list, and `reset: true` puts everything back.
+
+On the command line: `fy browser page dialog app accept --text hi`, `… tabs`, `… tabs adopt p7 popup`,
+`… wait app --text "Welcome" --timeout 60000`, `… console app --level warning --since 40`, `… network app`,
+`… network app r12`, `… emulate app --viewport 390x844 --color-scheme dark`, `… emulate app --reset`.
 
 ## Routes
 
