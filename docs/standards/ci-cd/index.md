@@ -440,10 +440,16 @@ A new push makes the run for the old SHA worthless, so `CI` cancels it rather th
 runner. Its top-level `concurrency` block keys the group on the PR number for `pull_request`
 events, with `cancel-in-progress` true for exactly that case.
 
-Every other run — a push to `main`, a manual dispatch — falls into a group of its own
-`run_id`, so nothing can cancel it. Setting `cancel-in-progress: false` on a shared group would not
-be enough: GitHub still cancels a _pending_ run in a group when a newer one queues, and `Release`
-needs every `main` CI run to complete. The deploying workflows (`CD`, `Release`, `PWA Pages`,
+A push to `main` falls into ONE shared group, `CI-main`, without `cancel-in-progress`: at most one
+`main` run is in progress and one waits, and a newer push replaces the waiting one. Until 2026-10-30
+each `main` run had a group of its own `run_id`, so every merge queued a full run on GitHub's runners;
+a burst of merges left twelve of them queued for over an hour behind pull-request jobs, the integration
+ledger gate of each waiting for a runner, and no release went out. Replacing a waiting run loses
+nothing: `Release` releases `main`'s head (it checks out the default branch, not the run's SHA, and
+semantic-release reads every commit since the last tag), and the newer run proves every commit the
+replaced one held. A run in progress is never cancelled, so a steady stream of merges cannot starve
+`Release` either. A manual dispatch keeps a group of its own `run_id`.
+The deploying workflows (`CD`, `Release`, `PWA Pages`,
 `Hosted Relay`) never cancel an in-progress run: they have no group, or a fixed one without
 `cancel-in-progress`. A new `pull_request` workflow copies the `CI` block; a deploy never
 does.

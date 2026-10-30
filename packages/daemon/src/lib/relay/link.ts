@@ -462,7 +462,25 @@ export const UNKNOWN_DEVICE_KEY = toBase64Url(
 interface PendingRecord {
   readonly plaintext: Uint8Array;
   readonly payload: boolean;
+  /**
+   * A later part of an answer (`res-more`). It leaves behind its head and is not counted on its own:
+   * the answer that owns it was bounded by `MAX_TUNNEL_BODY_BYTES` when it was cut into parts.
+   */
+  readonly part?: true;
 }
+
+/**
+ * How many waiting records the answer bound is asked of: everything but a large answer's later parts and
+ * a stream's payload.
+ *
+ * COUNTING PARTS ENDED THE SESSION FOR A LARGE ANSWER, the mirror of the browser's photo case: one answer
+ * of more parts than the window, the browser not yet having returned credit for them, and any other
+ * request finishing behind it was refused as "this session cannot carry its own answer" — failing every
+ * request on the session at once. Its parts were bounded when the answer was cut, so they drain as credit
+ * returns and say nothing about whether the peer is reading.
+ */
+const wholeRecords = (waiting: readonly PendingRecord[]): number =>
+  waiting.reduce((count, record) => (record.payload || record.part === true ? count : count + 1), 0);
 
 /** A whole request waiting for one of its session's {@link MAX_CONCURRENT_REQUESTS} slots. */
 interface WaitingRequest {
@@ -1666,7 +1684,7 @@ export class RelayLink {
 
   #sendRecord(session: LinkSession, message: RelayTunnelDaemonMessage): void {
     const plaintext = encodeTunnelMessage(message);
-    if (plaintext.byteLength > MAX_PLAINTEXT_BYTES || session.waiting.length >= CREDIT_WINDOW_FRAMES) {
+    if (plaintext.byteLength > MAX_PLAINTEXT_BYTES || wholeRecords(session.waiting) >= CREDIT_WINDOW_FRAMES) {
       // Neither is reachable through a peer that honours the protocol — `tunnelResponseMessage`
       // refuses an oversized answer and the carrier bounds how many requests can be outstanding —
       // and both would otherwise become an unbounded buffer or a record the carrier drops. Ending
@@ -1693,7 +1711,11 @@ export class RelayLink {
    * knows it.
    */
   #queue(session: LinkSession, message: RelayTunnelDaemonMessage, payload = false): void {
-    session.waiting.push({ plaintext: encodeTunnelMessage(message), payload });
+    session.waiting.push({
+      plaintext: encodeTunnelMessage(message),
+      payload,
+      ...(message.t === 'res-more' ? { part: true as const } : {}),
+    });
     this.#flush(session);
   }
 

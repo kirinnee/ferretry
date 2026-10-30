@@ -9,6 +9,7 @@ import {
 } from '@ferretry/protocol';
 import { type AgendaWire, AgendaWireDirectory, sessionAgendaPath, sessionAgendaRepliesPath } from './agenda-wire.ts';
 import { DaemonAttentionStore } from './attention-store.ts';
+import { ConcurrencyLimit } from './concurrency-limit.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from './daemon-scope.ts';
 import { daemonRequest } from './daemon-transport.ts';
@@ -115,6 +116,18 @@ export const sendAttentionReplies = async (
     ),
   );
 
+/**
+ * How many boards one daemon is asked for at once.
+ *
+ * THE INBOX READS ONE BOARD PER SESSION THAT HAS AN OPEN ITEM, across the daemon's whole session list —
+ * finished children included — and it used to fire them all in one tick. On a busy machine that was
+ * dozens of reads queued on the one relay session every panel shares, which ended that session for every
+ * caller (`4400`, "too many records waiting on credit") and painted "Tasks are unavailable" on a surface
+ * that had asked for nothing unusual. Four keeps the inbox filling quickly and leaves the rest of the
+ * daemon's sixteen request slots to the panels a person is looking at.
+ */
+export const ATTENTION_READS_PER_DAEMON = 4;
+
 interface ConnectionBinding {
   readonly baseUrl: string;
   readonly deviceId: string;
@@ -140,6 +153,8 @@ export class DaemonAttentionClient {
   readonly #generations = new Map<DaemonId, number>();
   /** Board freshness only: badge reads observe it but may never advance it. */
   readonly #boardRevisions = new Map<string, number>();
+  /** Board reads in flight, bounded per daemon: see {@link ATTENTION_READS_PER_DAEMON}. */
+  readonly #reads = new Map<DaemonId, ConcurrencyLimit>();
 
   constructor(
     readonly store: DaemonAttentionStore = new DaemonAttentionStore(),
@@ -195,9 +210,17 @@ export class DaemonAttentionClient {
     // A live refresh must not replace an already usable board with a loading
     // state. Initial hydration and retries still expose that they are loading.
     if (this.store.status(scope) !== 'ready') this.store.beginLoad(scope);
-    const promise = fetchAttentionSnapshot(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
+    // Asked again once a slot is free, for the reason it is asked above: a read that waited behind others
+    // may reach its turn after the machine was unpaired or re-paired, and then it sends nothing at all.
+    // The wire is read when the slot comes, so a health answer that arrived meanwhile picks the route.
+    const promise = this.#readLimit(daemon.daemonId)
+      .run(async () =>
+        this.#currentConnection(daemon, generation)
+          ? await fetchAttentionSnapshot(daemon, scope, this.fetcher, this.wires.wireOf(daemon.daemonId))
+          : null,
+      )
       .then(snapshot => {
-        if (this.#current(daemon, generation, key, revision)) {
+        if (snapshot !== null && this.#current(daemon, generation, key, revision)) {
           this.#advanceBoardRevision(key);
           this.store.applySnapshot(scope, snapshot);
         }
@@ -207,6 +230,14 @@ export class DaemonAttentionClient {
         throw error;
       });
     return promise;
+  }
+
+  #readLimit(daemonId: DaemonId): ConcurrencyLimit {
+    const existing = this.#reads.get(daemonId);
+    if (existing !== undefined) return existing;
+    const limit = new ConcurrencyLimit(ATTENTION_READS_PER_DAEMON);
+    this.#reads.set(daemonId, limit);
+    return limit;
   }
 
   hydrateCount(daemon: DaemonConnection, scope: DaemonSessionScope): Promise<void> {
