@@ -43,7 +43,6 @@ import { SessionTaskKanban, SessionTaskList } from '../../components/session-tas
 import { taskReference } from '../../features/tasks/task-board-model.ts';
 import { TaskQuickSummary } from '../../features/tasks/task-row.tsx';
 import { useDebouncedEffect } from '../../hooks/use-debounce.ts';
-import { useInputModality } from '../../hooks/use-input-modality.ts';
 import { useLayoutMode } from '../../hooks/use-layout-mode.ts';
 import { addReferenceMessage, addReferenceToComposer } from '../../lib/composer-references.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -53,7 +52,6 @@ import type { DaemonFetch } from '../../lib/runtime-models.ts';
 import { useDaemonFetch } from '../../lib/store.tsx';
 import { nextActiveIndex, paletteCountLabel } from '../../shell/palette-model.ts';
 import { type FuzzyField, SUBSTRING_SCORE, scoreFields, WORD_START_SCORE } from '../../shell/palette-ranking.ts';
-import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from '../../shell/palette-shortcut.ts';
 
 export type SessionSearchResourceState = 'loading' | 'ready' | 'unavailable';
 export type SessionSearchMatchState = 'idle' | 'searching' | 'ready' | 'unavailable';
@@ -694,7 +692,6 @@ const resultDomId = (instanceId: string, result: SessionSearchResult): string =>
 export function SessionSearchControl({
   className = '',
   shortcutTarget = false,
-  touchAffected,
 }: {
   readonly className?: string;
   /**
@@ -703,17 +700,8 @@ export function SessionSearchControl({
    * input rather than every mounted copy racing to claim focus and presentation.
    */
   readonly shortcutTarget?: boolean;
-  /**
-   * Overrides the measured input modality. Every mount leaves it out; it exists
-   * so a test can state a device instead of the module-level modality store
-   * having to be reconfigured, and so the store's own conservative default
-   * (unknown ⇒ touch) is not the only branch this file can ever execute.
-   */
-  readonly touchAffected?: boolean;
 }) {
   const search = useSessionSearch();
-  const modality = useInputModality();
-  const touch = touchAffected ?? modality.touchAffected;
   const input = useRef<HTMLInputElement>(null);
   // React spells a generated id with delimiters that are legal in an HTML id and
   // awkward everywhere else (`:r0:` before 19, `«r0»` after). Reduced to word
@@ -884,7 +872,6 @@ export function SessionSearchControl({
         aria-autocomplete="list"
         aria-controls={presenting ? listboxId : undefined}
         aria-expanded={presenting}
-        aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
         autoComplete="off"
         className="kt-input h-control w-full min-w-0 text-ui"
         id={inputId}
@@ -916,19 +903,15 @@ export function SessionSearchControl({
         }}
         value={search.query}
       />
-      {/* THE TRAILING SLOT SAYS ONE TRUE THING. While the index is still being
-          built that fact outranks a shortcut hint, and on a device with no
-          keyboard the hint is a key the reader cannot press — which is the
-          exact mistake `palette-shortcut.ts` exists to prevent. */}
+      {/* THE TRAILING SLOT SAYS ONE TRUE THING: the index is still being built. Cmd/Ctrl+K opens the
+          global finder, not this box, so no shortcut is printed here. */}
       <span
         className="pointer-events-none absolute inset-y-0 right-2 flex items-center mono text-2xs text-muted"
         data-search-trailing=""
       >
         {loading ? (
           <LoaderCircle aria-hidden="true" className="animate-spin" size={13} data-search-indexing="" />
-        ) : touch ? null : (
-          <span data-search-shortcut="">{paletteShortcutLabel()}</span>
-        )}
+        ) : null}
       </span>
       {/* Announced, never drawn: the popup below is visible, and a sighted
           reader counting rows does not need the same sentence twice. */}
