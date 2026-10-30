@@ -4,7 +4,7 @@ import { handedOverDraft, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-p
 import { clockOfInstant } from '../lib/message-clock.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
-import { AgendaMessageOr } from './agenda-message.tsx';
+import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
 import { HandoffNoticeRow, PeerMessageRow, SystemNoticeRow } from './agent-message-rows.tsx';
 import { ChatProse } from './chat-prose.tsx';
 import { CommandRow } from './command-row.tsx';
@@ -221,8 +221,10 @@ function OwnSendRow({
               reading={pointer === undefined ? ON_ITS_WAY : reading}
               source={source}
             />
+          ) : travelling ? (
+            <OnItsWayWords text={record.message} />
           ) : (
-            <OwnWords text={travelling ? record.message : entry.text} />
+            <OwnWords text={entry.text} />
           )}
           {boundary === undefined ? null : (
             <span className="sr-only" data-ledger-boundary>
@@ -348,6 +350,14 @@ function OwnMessageRow({
  */
 function OwnWords({ text }: { readonly text: string }) {
   return <AgendaMessageOr fallback={<p>{text}</p>} text={text} />;
+}
+
+/**
+ * The reader's words while they are still on their way: worded as the ferret will receive them, so a reply about
+ * an open item (`!A5 …`) shows as its agenda card at once instead of turning into one when it lands.
+ */
+function OnItsWayWords({ text }: { readonly text: string }) {
+  return <OwnWords text={useAgendaChatReply(text)} />;
 }
 
 function TranscriptTextRow({

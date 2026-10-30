@@ -14,6 +14,7 @@ import {
   AgendaItemsProvider,
   AgendaMessageOr,
   isChosenAnswer,
+  useAgendaChatReply,
 } from '../../src/components/agenda-message.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
@@ -172,5 +173,27 @@ describe('the transcript', () => {
     const view = render(<TranscriptRow entry={entry} />);
     expect(byClass(view, 'fy-agenda-msg')).toHaveLength(1);
     expect(textOf(view)).not.toContain('[answer to');
+  });
+});
+
+describe('a message on its way', () => {
+  const Worded = ({ text }: { readonly text: string }) => <p>{useAgendaChatReply(text)}</p>;
+  const word = (text: string, board: AgendaSnapshot | null = snapshot): string =>
+    textOf(
+      render(
+        <AgendaItemsProvider snapshot={board}>
+          <Worded text={text} />
+        </AgendaItemsProvider>,
+      ),
+    );
+
+  test('is worded as the ferret will receive it: a reply naming an open item reads as one about it', () => {
+    expect(word('!A45 Button only, please')).toBe('[re !A45 «Restarting outdated ferrets»] !A45 Button only, please');
+  });
+
+  test('is left as typed when it names nothing open, a resolved item, or no board has been read', () => {
+    expect(word('plain words')).toBe('plain words');
+    expect(word('!A7 thanks')).toBe('!A7 thanks');
+    expect(word('!A45 hi', null)).toBe('!A45 hi');
   });
 });

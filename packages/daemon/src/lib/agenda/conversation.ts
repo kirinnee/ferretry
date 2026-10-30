@@ -8,8 +8,9 @@ import {
   agendaDismissedMessage,
   agendaDoneMessage,
   agendaNeedsInfoMessage,
-  agendaReMessage,
+  agendaChatReply,
   agendaTitle,
+  referencedAgendaIds,
   type ResolvedAgendaItem,
   type SessionAgendaSummary,
 } from '@ferretry/protocol';
@@ -32,13 +33,6 @@ import {
  * reading, the sending and the resolving.
  */
 
-/**
- * `!A3`, bounded exactly as the reference grammar bounds it (`packages/pwa/src/lib/references.ts`,
- * docs/reference-standard.md): after the start or a space/opening bracket/quote, and before the end,
- * a space, closing punctuation or a colon. Case-sensitive — `!a3` is prose.
- */
-const AGENDA_REFERENCE = /(?:^|[\s([{"'`<>=—–])!(A[1-9][0-9]*)(?=$|[\s)\]}"'`,;!?<>:.=—–])/gu;
-
 /** An item as a heading names it: by its ask, the words the ferret raised it with. */
 const byAsk = (item: Pick<AgendaItem, 'id' | 'subject'>): AgendaMessageItem => ({
   id: item.id,
@@ -50,7 +44,7 @@ const byTitle = (item: AgendaItem): AgendaMessageItem => ({ id: item.id, quote: 
 
 /** The open items a message references, in board order, each once. */
 export function referencedAgenda(message: string, items: readonly AgendaItem[]): readonly AgendaItem[] {
-  const ids = new Set([...message.matchAll(AGENDA_REFERENCE)].map(match => match[1]));
+  const ids = new Set(referencedAgendaIds(message));
   return items.filter(item => ids.has(item.id));
 }
 
@@ -124,11 +118,7 @@ export interface ConversationTurn {
  * - It references none: delivered exactly as typed, however many items are open.
  */
 export function conversationTurn(message: string, open: readonly AgendaItem[]): ConversationTurn {
-  const referenced = referencedAgenda(message, open).filter(item => item.notice !== true);
-  return {
-    message: referenced.length === 0 ? message : agendaReMessage(referenced.map(byTitle), message),
-    referenced,
-  };
+  return agendaChatReply(message, open, agendaTitle);
 }
 
 /** An item on the FERRET's turn because the owner wrote about it or asked to talk it through (not for more information). */

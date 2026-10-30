@@ -27,6 +27,7 @@ import {
   agendaTitle,
   parseAgendaMessage,
   type ResolvedAgendaItem,
+  agendaChatReply,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useId, useMemo, useState } from 'react';
@@ -41,6 +42,18 @@ type AgendaItemOrResolved = AgendaItem | ResolvedAgendaItem;
 export type AgendaItemLookup = (id: string) => AgendaItemOrResolved | undefined;
 
 const AgendaItemsContext = createContext<AgendaItemLookup>(() => undefined);
+
+/** The session's OPEN items, in board order: what a message on its way is worded against. */
+const AgendaOpenItemsContext = createContext<readonly AgendaItem[]>([]);
+
+/**
+ * A message still on its way, worded exactly as the ferret will receive it (`agendaChatReply`, the one writer):
+ * a reply naming `!A5` reads as its agenda card from the moment it is sent, not as the raw text until it lands.
+ */
+export function useAgendaChatReply(text: string): string {
+  const open = useContext(AgendaOpenItemsContext);
+  return useMemo(() => agendaChatReply(text, open, agendaTitle).message, [text, open]);
+}
 
 /**
  * The session's agenda, for the cards in its conversation. Absent, every card falls back to the ask its
@@ -59,7 +72,12 @@ export function AgendaItemsProvider({
     );
     return id => byId.get(id);
   }, [snapshot]);
-  return <AgendaItemsContext.Provider value={lookup}>{children}</AgendaItemsContext.Provider>;
+  const open = useMemo((): readonly AgendaItem[] => snapshot?.items ?? [], [snapshot]);
+  return (
+    <AgendaItemsContext.Provider value={lookup}>
+      <AgendaOpenItemsContext.Provider value={open}>{children}</AgendaOpenItemsContext.Provider>
+    </AgendaItemsContext.Provider>
+  );
 }
 
 /** What each form says happened, as the card's header names it. */

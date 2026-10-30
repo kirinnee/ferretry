@@ -11,6 +11,7 @@
 
 import type { AgendaId, AgendaSnapshot } from '@ferretry/protocol';
 import { type ReactElement, type ReactNode, useMemo, useState } from 'react';
+import { AgendaItemsProvider, AgendaMessageOr, useAgendaChatReply } from '../src/components/agenda-message.tsx';
 import { Markdown } from '../src/components/markdown.tsx';
 import { useAgenda } from '../src/features/agenda/agenda.tsx';
 import { daemonConnection } from '../src/lib/daemon-connection.ts';
@@ -110,7 +111,9 @@ export function AgendaChatHarness({
               data-chat-sent=""
               key={text}
             >
-              {text}
+              <AgendaItemsProvider snapshot={board}>
+                <SentWords text={text} />
+              </AgendaItemsProvider>
             </article>
           ))}
         </div>
@@ -171,4 +174,9 @@ export function AgendaChatHarness({
       )}
     </div>
   );
+}
+
+/** A message the harness sent, drawn the way the chat draws one on its way: worded as the ferret receives it. */
+function SentWords({ text }: { readonly text: string }): ReactElement {
+  return <AgendaMessageOr fallback={text} text={useAgendaChatReply(text)} />;
 }

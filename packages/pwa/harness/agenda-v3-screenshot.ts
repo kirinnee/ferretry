@@ -299,8 +299,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await choice.locator('[data-agenda-harness-send]').click();
   await choice.waitForTimeout(150);
   check((await overlay(choice).count()) === 0, 'a send left the item view open');
-  const sentText = (await choice.locator('[data-chat-sent]').last().textContent()) ?? '';
-  check(sentText.startsWith('!A5 '), `the send did not carry the reference: ${sentText}`);
+  const sentBubble = choice.locator('[data-chat-sent]').last();
+  const sentText = (await sentBubble.textContent()) ?? '';
+  check(sentText.includes('A5'), `the send did not carry the reference: ${sentText}`);
+  check((await sentBubble.locator('[data-agenda-message]').count()) === 1, 'the reply did not draw as its agenda card');
   sameBox(await composerBox(choice), composerRest, 'closing the view moved the composer');
   await shot(choice, 'after-send', form, theme);
   await choice.close();
