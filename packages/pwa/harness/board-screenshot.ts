@@ -3,6 +3,7 @@
  * List views on the desktop:
  *
  *   bun harness/board-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-u11-*.png
+ *   bun harness/board-screenshot.ts --scroll-only [outDir]   # the long board in the shell's frame: board-b62-*.png
  *
  * It bundles `board-page.tsx` (the real page, invented cards), serves it on an ephemeral loopback port,
  * aborts anything that leaves it, and fails when a page scrolls sideways.
@@ -12,11 +13,13 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { type BrowserContext, chromium, type Page } from 'playwright-core';
+import { pullDown, readBoardScroll, scrollBoardTo } from '../tests/integration/support/board-scroll.ts';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
 const buildDir = join(harnessDir, 'out', 'board');
-const shotsDir = resolve(process.argv[2] ?? '/tmp/claude-1000');
+const scrollOnly = process.argv.includes('--scroll-only');
+const shotsDir = resolve(process.argv.slice(2).find(argument => !argument.startsWith('--')) ?? '/tmp/claude-1000');
 
 const fail = (message: string): never => {
   process.stderr.write(`❌ ${message}\n`);
@@ -28,19 +31,27 @@ const run = (command: string, args: readonly string[]): void => {
   if (result.status !== 0) fail(`${command} exited ${result.status}`);
 };
 
-const html = (theme: string) => `<!doctype html>
+const html = (theme: string, script = '/board-page.js') => `<!doctype html>
 <html lang="en" data-theme="${theme}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="stylesheet" href="/app.css" />
   </head>
-  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/board-page.js"></script></body>
+  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="${script}"></script></body>
 </html>`;
 
 mkdirSync(buildDir, { recursive: true });
 mkdirSync(shotsDir, { recursive: true });
 run('bun', ['build', join(harnessDir, 'board-page.tsx'), '--outdir', buildDir, '--target', 'browser']);
+run('bun', [
+  'build',
+  join(packageDir, 'tests/integration/fixtures/board-scroll-scene.tsx'),
+  '--outdir',
+  buildDir,
+  '--target',
+  'browser',
+]);
 run('./node_modules/.bin/tailwindcss', [
   '--config',
   'tailwind.config.ts',
@@ -55,6 +66,10 @@ const server = Bun.serve({
   port: 0,
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/scroll')
+      return new Response(html(url.searchParams.get('theme') ?? 'studio-light', '/board-scroll-scene.js'), {
+        headers: { 'content-type': 'text/html' },
+      });
     if (url.pathname === '/')
       return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
         headers: { 'content-type': 'text/html' },
@@ -99,7 +114,55 @@ const shot = async (page: Page, name: string, prefix = 'board-u11'): Promise<voi
   process.stdout.write(`📸 ${path}\n`);
 };
 
+const openScene = async (context: BrowserContext, theme: string, scene: 'phone' | 'desktop'): Promise<Page> => {
+  const page = await context.newPage();
+  await page.route('**/*', route =>
+    route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
+  );
+  page.on('pageerror', error => process.stderr.write(`page error: ${error.message}\n`));
+  await page.goto(`${server.url}scroll?theme=${theme}&scene=${scene}`);
+  await page.locator('.fy-board-card').first().waitFor({ state: 'visible' });
+  await page.waitForTimeout(300);
+  const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  if (wide > 0) fail(`the ${scene} board scrolls sideways by ${wide}px`);
+  return page;
+};
+
+/** B62: the long board inside the shell's frame, at the top and scrolled mid-list, and the desktop beside it. */
+const scrollShots = async (): Promise<void> => {
+  for (const scheme of ['light', 'dark'] as const) {
+    const phone = await browser.newContext({ ...PHONE, colorScheme: scheme });
+    try {
+      const page = await openScene(phone, `studio-${scheme}`, 'phone');
+      await shot(page, `${scheme}-phone-top`, 'board-b62');
+      process.stdout.write(`top: ${JSON.stringify(await readBoardScroll(page))}\n`);
+      process.stdout.write(`pull from the top opened the finder ${await pullDown(page, 400, 160)}x\n`);
+      await scrollBoardTo(page, 1_100);
+      process.stdout.write(`pull from mid-list opened the finder ${await pullDown(page, 400, 160)}x\n`);
+      await scrollBoardTo(page, 1_100);
+      await shot(page, `${scheme}-phone-scrolled`, 'board-b62');
+      process.stdout.write(`scrolled: ${JSON.stringify(await readBoardScroll(page))}\n`);
+      await page.close();
+    } finally {
+      await phone.close();
+    }
+  }
+  const desktop = await browser.newContext({ ...DESKTOP, colorScheme: 'light' });
+  try {
+    const page = await openScene(desktop, 'studio-light', 'desktop');
+    await shot(page, 'light-desktop', 'board-b62');
+    await page.close();
+  } finally {
+    await desktop.close();
+  }
+};
+
 try {
+  if (scrollOnly) {
+    await scrollShots();
+    process.stdout.write('✅ the long board captured\n');
+    process.exit(0);
+  }
   for (const scheme of ['light', 'dark'] as const) {
     const theme = `studio-${scheme}`;
     const phone = await browser.newContext({ ...PHONE, colorScheme: scheme });
