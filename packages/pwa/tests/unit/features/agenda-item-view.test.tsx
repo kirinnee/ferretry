@@ -375,14 +375,14 @@ describe('several questions, drawn once each', () => {
 });
 
 describe('the ask', () => {
-  test('a long ask is cut to one line in the top and said whole in the body', async () => {
+  test('a long ask is said once, whole, in the top — never again in the body', async () => {
     const long = 'Which database should keep every one of the board’s finished items for the next two years?';
     await draw(
       agendaItem('A10', { title: 'Database', subject: long, ask: { kind: 'permission' } } as Partial<AgendaItem>),
     );
     const top = one('[data-agenda-top]');
-    expect(top.querySelector('[data-agenda-ask]')).not.toBeNull();
-    expect(one('.fy-item-view__body').textContent).toContain(long);
+    expect(top.querySelector('[data-agenda-ask]')?.textContent).toContain(long);
+    expect(one('.fy-item-view__body').textContent).not.toContain(long);
   });
 
   test('a short ask is said once, in the top', async () => {

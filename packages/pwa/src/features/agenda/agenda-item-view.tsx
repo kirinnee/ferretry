@@ -15,7 +15,6 @@
  */
 
 import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
-import { hasOwnTitle } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { cardModel } from '../../lib/agenda-card-model.ts';
@@ -51,9 +50,6 @@ export interface AgendaItemViewProps {
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   readonly renderProse: (text: string) => ReactNode;
 }
-
-/** An ask longer than this is cut to one line in the heading, so the body says it whole. */
-const ASK_PREVIEW_CHARS = 80;
 
 /** The option a question's recommendation names, or '' when it names none. */
 const recommendedPick = (question: AgendaQuestion): string => {
@@ -100,7 +96,6 @@ export function AgendaItemView({
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const ask = agendaAsk(item);
   const pull = useDownSwipe(onClose, swipeable);
-  const askInBody = ask !== null && hasOwnTitle(item) && ask.length > ASK_PREVIEW_CHARS;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -203,7 +198,6 @@ export function AgendaItemView({
               askShown: true,
               askLabel: null,
               ...(model.recommendation === undefined ? {} : { recommendation: model.recommendation }),
-              ...(askInBody ? { ask: item.subject } : {}),
               ...(picker === undefined ? {} : { picker }),
             }}
             busy={busy}

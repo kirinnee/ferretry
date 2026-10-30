@@ -218,16 +218,12 @@
   overflow-wrap: anywhere;
 }
 .fy-item-view__ask {
-  display: -webkit-box;
+  /* The ask is said ONCE, here, whole — never cut and never repeated in the body; ferrets keep it short. */
   margin: 0;
-  overflow: hidden;
   color: var(--muted);
   font-size: var(--text-sm);
   line-height: var(--leading-base);
   overflow-wrap: anywhere;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 1;
-  line-clamp: 1;
 }
 .fy-item-view__body {
   min-height: 0;
