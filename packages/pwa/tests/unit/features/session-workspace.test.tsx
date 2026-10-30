@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
 import { useState } from 'react';
 import type { ReactTestInstance } from 'react-test-renderer';
+import { FullscreenToggle } from '../../../src/components/fullscreen-toggle.tsx';
 import { FileInstanceSurface } from '../../../src/components/file-instance-surface.tsx';
 import { FilesTab } from '../../../src/components/files-tab.tsx';
 import { SessionTerminalDeck } from '../../../src/components/session-terminal-deck.tsx';
@@ -356,9 +357,10 @@ describe('SessionWorkspace on a desktop', () => {
       run(() => marker.props.onTakeOver());
       run(() => marker.props.onHandBack());
       expect(intents).toEqual([`take:terminal:${TERMINAL}`, `back:terminal:${TERMINAL}`]);
-      // Over a shell the marker has a strip of its own, and a refused control is said as an alert.
-      expect(marker.props.inline).toBe(true);
-      expect(page.root.findAllByProps({ className: 'fy-ws-marker-row' })).toHaveLength(1);
+      // Over a shell the marker rides inside the deck's own toolbar row — no strip of its own — and a
+      // refused control is said as an alert.
+      expect(page.root.findByType(SessionTerminalDeck).props.surfaceStatus).toBeDefined();
+      expect(page.root.findAllByProps({ className: 'fy-ws-marker-row' })).toHaveLength(0);
       const alerts = page.root.findAll(node => node.props.role === 'alert' && node.type === 'p').map(textOf);
       expect(alerts).toContain('Could not take over dev: refused');
     } finally {
@@ -452,9 +454,11 @@ describe('browser tabs', () => {
       const list = lists.find(candidate => candidate.props.selectedPageId === 'PAGE1') as ReactTestInstance;
       expect(list.props.driverFor(APP)).toEqual({ name: 'Hadi' });
       expect(list.props.takenOver(APP)).toBe(false);
-      // The page tab's marker sits inline at the end of the strip.
+      // The page tab's marker and its Full screen button sit in the strip's own first row.
       const markers = list.findAllByType(AgentControlMarker);
-      expect(markers.map(marker => [marker.props.inline, marker.props.driver])).toEqual([[true, { name: 'Hadi' }]]);
+      expect(markers.map(marker => marker.props.driver)).toEqual([{ name: 'Hadi' }]);
+      expect(list.findAllByType(FullscreenToggle)).toHaveLength(1);
+      expect(page.root.findAllByProps({ className: 'fy-ws-bar' })).toHaveLength(0);
 
       // A chip opens that page's own tab: by name when it has one, else by id, labelled for a reader.
       run(() => list.props.onOpenPage(PR));
@@ -481,7 +485,7 @@ describe('browser tabs', () => {
     }
   });
 
-  test('without a page list, a browser tab keeps the engine page tabs and a floating marker', async () => {
+  test('without a page list, a browser tab keeps the engine page tabs and carries its controls in a slim bar of its own', async () => {
     const store = new WorkspaceLayoutStore(NO_STORAGE);
     store.update(scope, layout => openWorkspaceTab(layout, workspaceTab('browser', 'b1', { label: 'Browser' })));
     const { page } = mountWorkspace('desktop', { browser: browserEngine }, store);
@@ -489,7 +493,9 @@ describe('browser tabs', () => {
       await settle();
       expect(page.root.findAllByType(BrowserSurfaceList)).toHaveLength(0);
       expect(page.root.findByType(UnifiedBrowserSurface).props.showPageTabs).toBe(true);
-      expect(page.root.findByType(AgentControlMarker).props.inline).toBe(false);
+      const bar = page.root.findByProps({ className: 'fy-ws-bar' });
+      expect(bar.findAllByType(AgentControlMarker)).toHaveLength(1);
+      expect(bar.findAllByType(FullscreenToggle)).toHaveLength(1);
       expect(browserEngineForSession(scope)).toBe('preview');
     } finally {
       run(() => page.unmount());
@@ -958,7 +964,7 @@ describe('SessionWorkspace — agent-opened surfaces', () => {
       expect(marker.props.ask).toEqual({ agent: 'Hadi', message: 'Press Enter' });
       run(() => marker.props.onDismissAsk());
       expect(calls).toEqual([`dismiss-ask:${tabId}`]);
-      expect(page.root.findAllByProps({ className: 'fy-ws-marker-row' })).toHaveLength(1);
+      expect(page.root.findAllByProps({ className: 'fy-ws-marker-row' })).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }

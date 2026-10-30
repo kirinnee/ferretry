@@ -34,21 +34,11 @@
  */
 
 import type { TerminalListView, TerminalView } from '@ferretry/protocol';
-import {
-  Check,
-  Clipboard,
-  Maximize2,
-  Minimize2,
-  Pencil,
-  Plus,
-  RefreshCw,
-  SquareTerminal,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { Check, Clipboard, Pencil, Plus, RefreshCw, SquareTerminal, Trash2, X } from 'lucide-react';
 import {
   type FormEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -56,11 +46,12 @@ import {
 } from 'react';
 import { useLinkBehaviour } from '../features/browser/external-link.tsx';
 import { useDocumentVisible } from '../hooks/use-document-visible.ts';
+import { useFullscreen } from '../hooks/use-fullscreen.ts';
 import { RECONNECTING_GRACE_MS } from '../lib/connection-health.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import { grantRefusalNotice } from '../lib/grants.ts';
-import { isCaptureEscapeChord, isKeyboardCaptured, KEYBOARD_CAPTURE_ATTRIBUTE } from '../lib/keyboard-capture.ts';
+import { KEYBOARD_CAPTURE_ATTRIBUTE } from '../lib/keyboard-capture.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { describeSurfaceOwnership, type SurfaceOwnership } from '../lib/surface-references.ts';
 import {
@@ -90,6 +81,7 @@ import {
   terminalLimitLabel,
 } from '../lib/web-terminals.ts';
 import { Button } from '../shell/primitives.tsx';
+import { FullscreenToggle } from './fullscreen-toggle.tsx';
 import { loadTerminalFont } from './terminal-font-loader.ts';
 
 type XtermModules = {
@@ -205,6 +197,11 @@ export interface SessionTerminalDeckProps {
    * stream and keeps each pane's scrollback; on, it reattaches. Defaults to on.
    */
   readonly active?: boolean;
+  /**
+   * The host's own state for this shell — the agent-control marker — drawn INSIDE the toolbar row, so a
+   * driven shell costs width and never a second bar. It stays visible in full screen.
+   */
+  readonly surfaceStatus?: ReactNode;
   /** Rewrites what the reader typed before it is sent: the phone key bar's sticky ctrl. */
   readonly interceptInput?: (data: string) => string;
   /** Hands the host a way to type into, and focus, the shell on screen — the phone key bar. */
@@ -637,6 +634,7 @@ export function SessionTerminalDeck({
   dependencies,
   focusTerminalId,
   solo = false,
+  surfaceStatus,
   active: onScreen = true,
   interceptInput = passInput,
   onInputPort,
@@ -650,7 +648,7 @@ export function SessionTerminalDeck({
   const [renaming, setRenaming] = useState(false);
   const [renameValue, setRenameValue] = useState('');
   const [busy, setBusy] = useState(false);
-  const [expanded, setExpanded] = useState(false);
+  const fullscreen = useFullscreen<HTMLElement>();
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -679,20 +677,6 @@ export function SessionTerminalDeck({
     const timer = setInterval(() => void refresh(), 5_000);
     return () => clearInterval(timer);
   }, [refresh]);
-
-  // Leaving the expanded view with Escape, because a fixed overlay with no
-  // keyboard exit traps a reader who opened it by accident.
-  useEffect(() => {
-    if (!expanded) return;
-    const onKey = (event: KeyboardEvent): void => {
-      if (event.key !== 'Escape') return;
-      // The shell owns plain Escape (vim, readline); Shift+Escape leaves the expanded view.
-      if (isKeyboardCaptured(event.target) && !isCaptureEscapeChord(event)) return;
-      setExpanded(false);
-    };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [expanded]);
 
   const listed = list?.terminals ?? [];
   // A solo body shows its one shell or nothing; it never falls back to whichever shell is first.
@@ -806,8 +790,9 @@ export function SessionTerminalDeck({
     <section
       aria-label="Shell terminals"
       className="kt-webterm"
-      data-expanded={expanded ? '' : undefined}
+      data-expanded={fullscreen.active ? '' : undefined}
       data-terminal-deck=""
+      ref={fullscreen.ref}
     >
       {solo ? null : (
         <div className="kt-webterm__deck">
@@ -864,11 +849,14 @@ export function SessionTerminalDeck({
       )}
 
       {active === null && solo ? (
-        <p className="kt-webterm__empty" data-terminal-missing="" role="status">
-          {list === null
-            ? 'Asking the daemon for this terminal…'
-            : 'This terminal is no longer open on the daemon. Close this tab, or open a new terminal with ＋.'}
-        </p>
+        <>
+          <div className="kt-webterm__status-fallback">{surfaceStatus}</div>
+          <p className="kt-webterm__empty" data-terminal-missing="" role="status">
+            {list === null
+              ? 'Asking the daemon for this terminal…'
+              : 'This terminal is no longer open on the daemon. Close this tab, or open a new terminal with ＋.'}
+          </p>
+        </>
       ) : active === null ? (
         <div className="kt-webterm__empty">
           <span aria-hidden="true" className="kt-webterm__empty-icon">
@@ -927,6 +915,7 @@ export function SessionTerminalDeck({
                 </span>
               </div>
             )}
+            {surfaceStatus}
             <div aria-label="Terminal actions" className="kt-webterm__actions" role="toolbar">
               <Button
                 aria-label="Copy selection"
@@ -939,19 +928,7 @@ export function SessionTerminalDeck({
               >
                 <Clipboard aria-hidden="true" size={14} />
               </Button>
-              <Button
-                aria-label={
-                  expanded ? 'Collapse the terminal back into the pane' : 'Expand the terminal to fill the screen'
-                }
-                aria-pressed={expanded}
-                onClick={() => setExpanded(current => !current)}
-                size="sm"
-                title={expanded ? 'Collapse (Shift+Esc)' : 'Expand to full screen'}
-                type="button"
-                variant="ghost"
-              >
-                {expanded ? <Minimize2 aria-hidden="true" size={14} /> : <Maximize2 aria-hidden="true" size={14} />}
-              </Button>
+              <FullscreenToggle active={fullscreen.active} onToggle={fullscreen.toggle} />
               <Button
                 aria-label="Rename terminal"
                 disabled={busy || renaming}

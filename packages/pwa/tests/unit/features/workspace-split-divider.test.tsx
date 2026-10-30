@@ -290,8 +290,9 @@ describe('AgentControlMarker', () => {
     );
     const status = must(mounted.container.querySelector('[role="status"]'), 'status');
     expect(status.textContent).toContain('You have control');
-    expect(status.textContent).toContain('Hand back');
-    await interact(() => (status.querySelector('button') as HTMLButtonElement).click());
+    const hand = must(status.querySelector<HTMLButtonElement>('button[aria-label="Hand back"]'), 'Hand back');
+    expect(hand.title).toContain('Hand back');
+    await interact(() => hand.click());
     expect(handed).toBe(1);
     await mounted.unmount();
   });
@@ -312,9 +313,13 @@ describe('AgentControlMarker — an ask', () => {
     );
     const status = must(mounted.container.querySelector('[role="status"]'), 'status');
     expect(status.getAttribute('data-state')).toBe('ask');
-    expect(status.textContent).toContain('Your turn here — Type the sudo password');
+    expect(status.querySelector('.fy-ws-marker-chip')?.textContent).toBe('Your turn here');
+    const note = must(status.querySelector('.fy-ws-marker-note'), 'note');
+    expect(note.textContent).toBe('Type the sudo password');
+    expect(note.getAttribute('title')).toBe('Type the sudo password');
     const buttons = [...status.querySelectorAll('button')];
-    expect(buttons.map(button => button.textContent)).toEqual(['Take over', 'Dismiss']);
+    expect(buttons.map(button => button.getAttribute('aria-label'))).toEqual(['Take over', 'Dismiss']);
+    expect(buttons.every(button => (button.getAttribute('title') ?? '').length > 0)).toBe(true);
     await interact(() => (buttons[0] as HTMLButtonElement).click());
     await interact(() => (buttons[1] as HTMLButtonElement).click());
     expect(taps).toEqual(['take', 'dismiss']);
@@ -332,7 +337,7 @@ describe('AgentControlMarker — an ask', () => {
       />,
     );
     const status = must(mounted.container.querySelector('[role="status"]'), 'status');
-    expect(status.textContent).toContain('Your turn here — Hadi needs you');
+    expect(status.querySelector('.fy-ws-marker-note')?.textContent).toBe('Hadi needs you');
     expect(status.querySelectorAll('button')).toHaveLength(1);
     await mounted.unmount();
   });
