@@ -270,6 +270,16 @@ export function controlSubscriptionLine(name: string, format: string): string | 
 /** What a session worker watches each pane for: whether it died, and when its window last drew. */
 export const PANE_WATCH_FORMAT = '#{pane_dead} #{window_activity}';
 
+/**
+ * The name of the one subscription a session worker's client holds — and so the name every kill of a
+ * session releases first (`TmuxController.stop`, `killPaneExact`): tmux 3.6a crashes the whole server when
+ * a client still subscribed outlives its session by one tick of the subscription timer.
+ */
+export const PANE_WATCH = 'fy-pane';
+
+/** Every subscription name a client of this daemon may hold, so a release misses none. */
+export const CONTROL_SUBSCRIPTION_NAMES: readonly string[] = [PANE_WATCH];
+
 /** The value of a {@link PANE_WATCH_FORMAT} subscription, read; `undefined` for one that is not. */
 export function parsePaneWatch(value: string): { readonly dead: boolean; readonly activityAt: number } | undefined {
   const match = /^([01]) (\d+)$/u.exec(value.trim());

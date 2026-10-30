@@ -1,32 +1,34 @@
 /**
- * ONE AGENDA ITEM, IN FOCUS — a full-width, full-height OVERLAY over the chat column. The chat stays mounted
- * underneath (its scroll position is simply kept); nothing of it shows or takes focus while this is open.
+ * ONE AGENDA ITEM, IN FOCUS — an OVERLAY over the MESSAGE LIST only. The agenda row and the real composer stay
+ * where they are, visible and typeable, below it; the transcript stays mounted underneath (its scroll position is
+ * simply kept) and nothing of it shows or takes focus while this is open.
  *
- *   top     STICKY   the title, the ask (two lines), where the item stands, ‹ n of N › and ✕
- *   body    SCROLLS  the ONE scroller (`overscroll-behavior: contain`, no nested scroller): the ask in full,
- *                    what's going on, why it matters, decided, still open, terms as a Term | Meaning table, steps,
- *                    mock-ups, then the item's history — revisions and what was said about it
- *   bottom  STICKY   the action bar, which takes the composer's place (`agenda-answer-bar.tsx`)
+ *   top     STICKY   the title, the one-line ask, where the item stands, ‹ n of N › and ✕
+ *   body    SCROLLS  the ONE scroller (`overscroll-behavior: contain`, no nested scroller): the questions, what's
+ *                    going on, why it matters, decided, still open, options, terms as a Term | Meaning table, steps,
+ *                    mock-ups, then the history — what the owner said and what changed
+ *   bottom  STICKY   the QUICK REPLIES (`agenda-quick-replies.tsx`), directly above the composer
  *
  * Top and bottom are flex items outside the scroller, so scrolling the body moves neither. ✕, Esc and ↓ go back
- * to the chat; ← ↑ → answer on a keyboard (a field or a button keeps its own keys).
+ * to the chat; ← ↑ → answer on a keyboard (a field or a button keeps its own keys). Everything typed goes through
+ * the composer: this view has no text field of its own.
  */
 
-import type { AgendaItem } from '@ferretry/protocol';
+import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
+import { hasOwnTitle } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
-import type { HistoryEvent } from '../../lib/agenda-history.ts';
-import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { cardModel } from '../../lib/agenda-card-model.ts';
+import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
-import { AgendaItemHistory } from './agenda-item-history.tsx';
-import { AgendaStatusPill } from './agenda-status-pill.tsx';
-import { agendaAsk } from './agenda-row.tsx';
-import { AgendaAnswerBar } from './agenda-answer-bar.tsx';
-import { AgendaBriefSections } from './agenda-brief.tsx';
+import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery, agendaHeading } from './agenda-delivery.tsx';
 import { AgendaDetail } from './agenda-detail.tsx';
+import { AgendaItemHistory } from './agenda-item-history.tsx';
+import { AgendaQuickReplies } from './agenda-quick-replies.tsx';
+import { agendaAsk } from './agenda-row.tsx';
+import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { useDownSwipe } from './use-down-swipe.ts';
 
 export interface AgendaItemViewProps {
@@ -43,22 +45,28 @@ export interface AgendaItemViewProps {
   readonly error: string | null;
   /** The primary pointer is touch: answers swipe. */
   readonly swipeable: boolean;
-  /** An answer, carrying the typed text as its note. */
-  readonly onAct: (action: InboxAction, note: string) => void;
-  /** Adds the item to the next reply, with whatever is typed in the bar, and returns to the chat. */
-  readonly onReply: (typed: string) => void;
-  readonly onSend: (text: string) => Promise<void>;
+  /** An answer; the host adds the composer's text as its note and closes the view once it is sent. */
+  readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   readonly renderProse: (text: string) => ReactNode;
 }
 
-/** Keys that are a field's or a button's own. */
+/** An ask longer than this is cut to one line in the heading, so the body says it whole. */
+const ASK_PREVIEW_CHARS = 80;
+
+/** The option a question's recommendation names, or '' when it names none. */
+const recommendedPick = (question: AgendaQuestion): string => {
+  const pick = question.recommended?.trim() ?? '';
+  return question.options?.some(option => option.label === pick) === true ? pick : '';
+};
+
 /** The detail without its premise: the daemon also writes a confirmed change into it for older apps, and the change is drawn on its own. */
 const withoutPremise = (item: AgendaItem): AgendaItem => {
   const { premise, ...rest } = item;
   return rest;
 };
 
+/** Keys that are a field's or a button's own. */
 const ownsKeys = (target: EventTarget): boolean =>
   target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable]') !== null;
 
@@ -75,8 +83,6 @@ export function AgendaItemView({
   error,
   swipeable,
   onAct,
-  onReply,
-  onSend,
   onProgress,
   renderProse,
 }: AgendaItemViewProps) {
@@ -85,11 +91,15 @@ export function AgendaItemView({
   const model = cardModel(item);
   const map = swipeMap(item);
   const questions = item.questions ?? [];
-  const sendable =
-    model.perQuestion && picks.some(pick => pick.trim() !== '') ? questionAnswersAction(questions, picks) : null;
+  const asked = questions.flatMap((question, index) => (question.options === undefined ? [] : [{ question, index }]));
+  const ready = asked.length > 0 && asked.every(({ index }) => (picks[index] ?? '').trim() !== '');
+  const agreed = questions.map(recommendedPick);
+  const canUseRecommended = asked.length > 0 && asked.every(({ index }) => agreed[index] !== '');
+  const sendable = model.perQuestion && ready ? questionAnswersAction(questions, picks) : null;
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const ask = agendaAsk(item);
   const pull = useDownSwipe(onClose, swipeable);
+  const askInBody = ask !== null && hasOwnTitle(item) && ask.length > ASK_PREVIEW_CHARS;
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -124,7 +134,7 @@ export function AgendaItemView({
     const action = direction === undefined || busy ? undefined : map[direction];
     if (action === undefined) return;
     event.preventDefault();
-    onAct(action, '');
+    onAct(action);
   };
 
   return (
@@ -185,23 +195,16 @@ export function AgendaItemView({
       </header>
       <div className="fy-item-view__body" data-agenda-body="">
         <div className="fy-item-view__column">
-          <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={action => onAct(action, '')} />
-          {model.showAsk || picker !== undefined ? (
-            <AgendaBriefSections
-              askShown
-              collapsible={false}
-              item={item}
-              part="card"
-              renderProse={renderProse}
-              {...(model.perQuestion && model.recommendation !== undefined
-                ? { recommendation: model.recommendation }
-                : {})}
-              {...(model.showAsk ? { ask: item.subject } : {})}
-              {...(picker === undefined ? {} : { picker })}
-            />
-          ) : null}
+          <AgendaDelivery busy={busy} ferret={ferret} item={item} onAct={onAct} />
           <AgendaConfigChange item={item} />
           <AgendaDetail
+            brief={{
+              askShown: true,
+              askLabel: null,
+              ...(model.recommendation === undefined ? {} : { recommendation: model.recommendation }),
+              ...(askInBody ? { ask: item.subject } : {}),
+              ...(picker === undefined ? {} : { picker }),
+            }}
             busy={busy}
             item={item.confirms === undefined ? item : withoutPremise(item)}
             layout="full"
@@ -211,27 +214,26 @@ export function AgendaItemView({
           <AgendaItemHistory events={history} ferret={ferret} now={now} prose={renderProse} />
         </div>
       </div>
-      <AgendaAnswerBar
+      <AgendaQuickReplies
         busy={busy}
         error={error}
-        ferret={ferret}
-        item={item}
         map={map}
         model={model}
         onAct={onAct}
-        onReply={onReply}
         onClose={onClose}
-        onSend={onSend}
         swipeable={swipeable}
-        {...(model.perQuestion
+        {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
+        {...(model.perQuestion && asked.length > 0
           ? {
-              sendAnswers: {
+              sending: {
                 ready: sendable !== null,
-                onSend: (note: string) => {
+                canUseRecommended,
+                onSend: () => {
                   if (sendable === null || busy) return;
-                  onAct(sendable, note);
+                  onAct(sendable);
                   setPicks([]);
                 },
+                onUseRecommended: () => setPicks(agreed),
               },
             }
           : {})}

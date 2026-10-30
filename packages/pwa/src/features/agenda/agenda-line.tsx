@@ -14,8 +14,8 @@ import type { AgendaId, AgendaItem } from '@ferretry/protocol';
 import { ChevronUp, LoaderCircle, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type AgendaCounts, agendaSegments } from '../../lib/agenda-chat.ts';
-import { AgendaRow } from './agenda-row.tsx';
 import { agendaHeading } from './agenda-delivery.tsx';
+import { AgendaRow } from './agenda-row.tsx';
 
 interface AgendaSending {
   readonly count: number;
@@ -272,14 +272,15 @@ export interface AgendaReferenceChipsProps {
   readonly onRemove: (id: AgendaId) => void;
 }
 
-/** "re: <title> ✕" for each item the next message is about. Nothing drawn when there are none. */
+/** "about !A47 · <title> ✕" for each item the next message is about. Nothing drawn when there are none. */
 export function AgendaReferenceChips({ items, onRemove }: AgendaReferenceChipsProps) {
   if (items.length === 0) return null;
   return (
     <ul aria-label="This message is about" className="fy-agenda-chips" data-agenda-chips="">
       {items.map(item => (
         <li className="fy-agenda-ref" data-agenda-chip={item.id} key={item.id}>
-          <span className="fy-agenda-ref__lead">re:</span>
+          <span className="fy-agenda-ref__lead">about</span>
+          <span className="fy-agenda-ref__id">{`!${item.id}`}</span>
           <span className="fy-agenda-ref__title">{agendaHeading(item)}</span>
           <button
             aria-label={`Stop replying about ${agendaHeading(item)}`}

@@ -1457,6 +1457,89 @@ describe('the bounded fleet event tail', () => {
     should(failures.every(failure => failure.includes('between 1 and 10000'))).be.true();
   });
 
+  it("should prove a live feed's sessions and tail in one backlog pass", async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    const first = parseSessionId('backlog-one');
+    const second = parseSessionId('backlog-two');
+    await opened.storage.append(first, 'a', {});
+    await opened.storage.append(second, 'b', {});
+    await opened.storage.append(first, 'c', {});
+    let claims = 0;
+
+    // Act
+    const backlog = await opened.storage.fleetBacklog(2, () => {
+      claims += 1;
+      return true;
+    });
+
+    // Assert — the same answer `fleetSessionIds` and `tailEvents` give, from ONE claimed pass.
+    should(claims).equal(1);
+    should([...(backlog?.sessionIds ?? [])].sort()).deepEqual(['backlog-one', 'backlog-two']);
+    should(backlog?.events.map(event => `${event.sessionId}/${event.sequence}`)).deepEqual([
+      'backlog-two/1',
+      'backlog-one/2',
+    ]);
+  });
+
+  it('should prove the sessions and read no tail for a backlog of zero', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    await opened.storage.append(parseSessionId('backlog-zero'), 'a', {});
+
+    // Act
+    const backlog = await opened.storage.fleetBacklog(0, () => true);
+
+    // Assert
+    should(backlog).deepEqual({ sessionIds: ['backlog-zero'], events: [] });
+  });
+
+  it('should skip the survey when a backlog pass is no longer wanted', async () => {
+    // Arrange — a lost index would make any survey that ran rebuild it, so its absence afterwards is the proof.
+    const home = await createTemporaryHome();
+    const first = await openStorage(home);
+    await first.storage.append(parseSessionId('backlog-skipped'), 'a', {});
+    const paths = first.paths;
+    await closeStorage(first.storage);
+    for (const file of indexFiles(paths)) await rm(file, { force: true });
+    const second = await openStorage(home);
+
+    // Act
+    const backlog = await second.storage.fleetBacklog(5, () => false);
+
+    // Assert — every reader of the pass had left, so it surveyed nothing for nobody.
+    should(backlog).be.undefined();
+    should(second.storage.listSessions()).deepEqual([]);
+  });
+
+  it('should refuse a backlog bound it cannot serve', async () => {
+    // Arrange
+    const home = await createTemporaryHome();
+    const opened = await openStorage(home);
+    let claims = 0;
+
+    // Act
+    const failures = [];
+    for (const limit of [-1, 1.5, 10_001])
+      failures.push(
+        String(
+          await capturedError(
+            async () =>
+              await opened.storage.fleetBacklog(limit, () => {
+                claims += 1;
+                return true;
+              }),
+          ),
+        ),
+      );
+
+    // Assert — refused before it ever queued for the lock.
+    should(failures.every(failure => failure.includes('between 1 and 10000'))).be.true();
+    should(claims).equal(0);
+  });
+
   it('should rebuild a wholly lost index rather than reporting an empty fleet', async () => {
     // Arrange — every index file deleted while the daemon was down. The journals are the authority;
     // SQLite is disposable, and a tail that trusted it would report a live fleet as having no history.

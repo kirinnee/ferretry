@@ -55,11 +55,11 @@ jobs:
     # Namespace on a pull request, GitHub otherwise (docs/standards/ci-cd, "Runners", says why and what
     # `vars.CI_RUNNER_POOL` does). The shape is per part, from measured use. `format` is treefmt alone:
     # 2x4 takes ~55s against ~30s on 4x8, for half the price and still well inside the critical path.
-    # `gates` holds knip, which ran out of memory on the 4GB of a 2x4, so it runs on GitHub's free 16GB
-    # runner on every event: 113s there against 97s on a Namespace 4x8, for nothing instead of a 4x8.
+    # `gates` holds knip, which ran out of memory on the 4GB of a 2x4, so it takes a 4x8: it was 183 s on
+    # GitHub's runner, over the two-minute rule every job holds (docs/standards/ci-cd, "Runners").
     runs-on: >-
       ${{
-        (matrix.shape == 'github' || github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
         && 'ubuntu-latest'
         || fromJSON(format('["nscloud-ubuntu-24.04-amd64-{0}-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]', matrix.shape))
       }}
@@ -70,7 +70,7 @@ jobs:
       matrix:
         include:
           - { part: format, shape: 2x4 }
-          - { part: gates, shape: github }
+          - { part: gates, shape: 4x8 }
     steps:
       - uses: actions/checkout@v5
         with:
@@ -206,6 +206,9 @@ jobs:
       # broke instead of reading a geometry number and guessing.
       - name: Upload the captured ${{ matrix.scope }} frames
         if: always()
+        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
+        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}${{ matrix.viewport && format('-{0}', matrix.viewport) || '' }}
@@ -246,11 +249,23 @@ jobs:
           TEST_GROUP: ${{ matrix.group }}
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh unit "$TEST_GROUP"
       - name: Upload the ${{ matrix.group }} coverage ledger
+        id: upload_1
+        continue-on-error: true
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit-${{ matrix.group }}
           path: coverage/unit/groups/${{ matrix.group }}/lcov.info
+          if-no-files-found: warn
+      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
+      # now and then) is retried once from the same files; a second failure fails the job as before.
+      - name: Upload the ${{ matrix.group }} coverage ledger (retry)
+        if: ${{ (always()) && steps.upload_1.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-${{ matrix.group }}
+          path: coverage/unit/groups/${{ matrix.group }}/lcov.info
+          overwrite: true
           if-no-files-found: warn
 
   # The unit tier's 100% ledger over every group's, as `int-ledger` does for int; no nix shell.
@@ -260,9 +275,13 @@ jobs:
     needs: test
     permissions:
       contents: read
-    # GitHub, not Namespace: bash, awk and jq over a few artifacts, under ten seconds and no nix shell.
-    # Namespace bills that a whole minute and attaches the cache volume for nothing; here it is free.
-    runs-on: ubuntu-latest
+    # Namespace 2x4 WITHOUT the cache volume, on every event: ten seconds of bash, awk and jq, but on GitHub
+    # it waited in the 20-job queue and `Release` waits for this gate. Two unit-minutes a run.
+    runs-on: >-
+      ${{
+        vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4"]')
+      }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -276,6 +295,9 @@ jobs:
         run: ./scripts/ci/coverage-ledger.sh unit --groups coverage/unit/groups
       - name: Upload unit coverage artifact
         if: always()
+        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
+        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
@@ -295,7 +317,15 @@ jobs:
     name: Integration Tests (${{ matrix.group }})
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    # Namespace 2x4 on a pull request: six jobs a run were most of what filled GitHub's 20-job cap, and the
+    # warm /nix saves ~20 s of setup. The tests mostly wait on Chrome and daemons, so two cores is the
+    # shape; `main` stays on GitHub (docs/standards/ci-cd, "Runners", per-job table).
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
     # A CEILING, NOT A RETRY: the slowest group takes ~8 min, so 20 is a wedged run. On 2026-10-29 the
     # daemon group hung in a test and held its runner for two hours; without this it holds one for six.
     # `scripts/test/stall-watch.ts` ends a silent run sooner and says why; this catches everything else.
@@ -308,17 +338,34 @@ jobs:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Run the ${{ matrix.group }} integration tests
         env:
           TEST_GROUP: ${{ matrix.group }}
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh int "$TEST_GROUP"
       - name: Upload the ${{ matrix.group }} coverage ledger
+        id: upload_2
+        continue-on-error: true
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-int-${{ matrix.group }}
           path: coverage/int/groups/${{ matrix.group }}/lcov.info
+          if-no-files-found: warn
+      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
+      # now and then) is retried once from the same files; a second failure fails the job as before.
+      - name: Upload the ${{ matrix.group }} coverage ledger (retry)
+        if: ${{ (always()) && steps.upload_2.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-int-${{ matrix.group }}
+          path: coverage/int/groups/${{ matrix.group }}/lcov.info
+          overwrite: true
           if-no-files-found: warn
 
   # The integration tier's 100% ledger over every group's (scripts/ci/coverage-ledger.sh says why it
@@ -330,9 +377,13 @@ jobs:
     needs: int
     permissions:
       contents: read
-    # GitHub, not Namespace: bash, awk and jq over a few artifacts, under ten seconds and no nix shell.
-    # Namespace bills that a whole minute and attaches the cache volume for nothing; here it is free.
-    runs-on: ubuntu-latest
+    # Namespace 2x4 WITHOUT the cache volume, on every event: ten seconds of bash, awk and jq, but on GitHub
+    # it waited in the 20-job queue and `Release` waits for this gate. Two unit-minutes a run.
+    runs-on: >-
+      ${{
+        vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4"]')
+      }}
     steps:
       - uses: actions/checkout@v5
         with:
@@ -346,6 +397,9 @@ jobs:
         run: ./scripts/ci/coverage-ledger.sh int --groups coverage/int/groups
       - name: Upload int coverage artifact
         if: always()
+        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
+        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-int
@@ -381,10 +435,22 @@ jobs:
       - name: List the binaries
         run: ./scripts/ci/binaries-manifest.sh write dist/bin
       - name: Upload binaries
+        id: upload_3
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: cli-binaries
           path: dist/bin/
+          if-no-files-found: error
+      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
+      # now and then) is retried once from the same files; a second failure fails the job as before.
+      - name: Upload binaries (retry)
+        if: steps.upload_3.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/bin/
+          overwrite: true
           if-no-files-found: error
 
   sit:
@@ -393,11 +459,21 @@ jobs:
     needs: compile
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: >-
+      ${{
+        (github.event_name != 'pull_request' || vars.CI_RUNNER_POOL == 'github')
+        && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-2x4-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
     steps:
       - uses: actions/checkout@v5
         with:
           persist-credentials: false
+      - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
       - uses: ./.github/actions/install-nix
       - name: Download compiled binaries
         uses: ./.github/actions/download-binaries

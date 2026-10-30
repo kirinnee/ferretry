@@ -10,13 +10,12 @@ import {
   dependencyCycle,
   gatherDerivation,
   HistoryActivityDeriver,
-  NoAgendaLinks,
   rollupOf,
   shippedIn,
   suggestedLaneOf,
   UNOBSERVED,
 } from '../../../src/lib/board/index.ts';
-import { card, lanes, MACHINE, NOW, OTHER_PROJECT, PROJECT } from './support.ts';
+import { card, lanes, MACHINE, NO_ASKS, NOW, OTHER_PROJECT, PROJECT } from './support.ts';
 
 const laneSets = new Map([
   [PROJECT, lanes(PROJECT)],
@@ -405,7 +404,7 @@ describe('the derived view', () => {
     // Act
     const gathered = await gatherDerivation(cards, new BoardIndex(cards, MACHINE), laneSets, {
       activity: new HistoryActivityDeriver(),
-      agenda: new NoAgendaLinks(),
+      agenda: NO_ASKS,
     });
 
     // Assert

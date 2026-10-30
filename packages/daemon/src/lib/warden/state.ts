@@ -40,6 +40,7 @@ import type { BackoffStore, InvestigationBackoff } from './backoff.ts';
 import type { Blessing, BlessingStore, ClearStreak, ClearStreakStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
+import type { ReviveState } from './revive.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
 import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
 
@@ -384,7 +385,29 @@ export interface WardenRuntimeState {
   readonly daily?: readonly WardenDayStats[];
   /** The sequence of the last investigator named `warden-xxxxxx`; the next one is issued after it. */
   readonly investigatorSequence?: number;
+  /** What auto-revive remembers: who was revived and when, the breaker, the deaths already explained. */
+  readonly revive?: ReviveState;
 }
+
+/**
+ * The Warden's own memory of the sessions it revived (`revive.ts`). Each part is optional and defaulted on
+ * read, so a document written before auto-revive existed reads as "never revived anything".
+ */
+const ReviveStateSchema = z.object({
+  sessions: z
+    .record(
+      z.string(),
+      z.object({
+        revivedAt: Instant,
+        attempts: z.number().int().min(0),
+        crashRevives: z.number().int().min(0),
+      }),
+    )
+    .default({}),
+  batches: z.array(z.object({ at: Instant, ids: z.array(z.string().min(1)) })).default([]),
+  breaker: z.object({ openedAt: Instant, until: Instant, why: z.string() }).optional(),
+  refused: z.record(z.string(), Instant).default({}),
+});
 
 const RuntimeStateSchema = z.object({
   lastSweepAt: Instant.optional(),
@@ -414,6 +437,7 @@ const RuntimeStateSchema = z.object({
   sweepCoverage: SweepCoverageSchema.optional(),
   daily: DailySchema.optional(),
   investigatorSequence: z.number().int().min(0).max(WARDEN_INVESTIGATOR_MAX_SEQUENCE).optional(),
+  revive: ReviveStateSchema.optional(),
 });
 
 export const EMPTY_WARDEN_STATE: WardenRuntimeState = {};

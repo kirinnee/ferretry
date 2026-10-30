@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AgendaBriefSections, cardLede, PointForm } from '../../../src/features/agenda/agenda-brief.tsx';
+import {
+  AgendaBriefSections,
+  cardLede,
+  contextHeading,
+  PointForm,
+} from '../../../src/features/agenda/agenda-brief.tsx';
 import { revisionHighlight } from '../../../src/lib/agenda-revisions.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
@@ -186,6 +191,47 @@ describe('the question picker', () => {
   });
 });
 
+describe('the open layout asks first', () => {
+  const asked = agendaItem('A3', {
+    title: 'Plan',
+    subject: 'Plan the launch',
+    ask: { kind: 'open-question' },
+    premise: '- The launch is Monday',
+    questions: [
+      {
+        question: 'Which day?',
+        options: [{ label: 'Monday' }, { label: 'Friday' }],
+        recommended: 'Monday',
+        why: 'The team is in.',
+      },
+      { question: 'Who announces it?', recommended: 'Zoe', why: 'She knows the users.' },
+      { question: 'Where?', options: [{ label: 'Blog' }], recommended: 'Newsletter' },
+    ],
+  } as never);
+  const order = (root: ParentNode): string[] =>
+    [...root.querySelectorAll('[data-agenda-section]')].map(node => node.getAttribute('data-agenda-section') ?? '');
+
+  test('puts the questions before what is going on, with each reason under its question', async () => {
+    const picker = { answers: ['', '', ''], disabled: false, onAnswer: () => undefined };
+    view = await mount(
+      <AgendaBriefSections askShown collapsible={false} item={asked} picker={picker} renderProse={text => text} />,
+    );
+    const root = must(view.container, 'view');
+    expect(order(root).indexOf('questions')).toBeLessThan(order(root).indexOf('premise'));
+    const reasons = [...root.querySelectorAll('[data-agenda-question-why]')].map(node => node.textContent);
+    expect(reasons).toEqual(['The team is in.', 'Suggested: Zoe — She knows the users.', 'Suggested: Newsletter']);
+    expect(root.textContent).not.toContain('message box');
+  });
+
+  test('the board folds the questions after the premise, and marks a picked question answered', async () => {
+    const picker = { answers: ['', 'Zoe', ''], disabled: false, onAnswer: () => undefined };
+    view = await mount(<AgendaBriefSections item={asked} picker={picker} renderProse={text => text} />);
+    const root = must(view.container, 'view');
+    expect(order(root).indexOf('premise')).toBeLessThan(order(root).indexOf('questions'));
+    expect(root.querySelectorAll('[aria-label="answered"]')).toHaveLength(1);
+  });
+});
+
 describe('cardLede', () => {
   test('a stated why leads and the context stays whole', () => {
     expect(cardLede({ context: '- one\n- two' }, 'Because.')).toEqual({ line: 'Because.', context: '- one\n- two' });
@@ -239,5 +285,14 @@ describe('PointForm emphasis and the changed context', () => {
     );
     const fresh = [...must(view.container, 'view').querySelectorAll('[data-agenda-changed="new"]')];
     expect(fresh.map(node => node.textContent)).toEqual(['newIt needs no server']);
+  });
+});
+
+describe('the context heading', () => {
+  test("a context that is the ferret's own picks is headed Suggested answers, never Why it matters", () => {
+    expect(contextHeading('My picks: A delete the line · B accept · C yes to all', false)).toBe('Suggested answers');
+    expect(contextHeading('- my pick: delete it', true)).toBe('Suggested answers');
+    expect(contextHeading('The relay drops sessions for ten seconds', false)).toBe('Why it matters');
+    expect(contextHeading('The relay drops sessions for ten seconds', true)).toBe('Context');
   });
 });

@@ -37,6 +37,26 @@ about half that, and the key went with it (on a pull request the legs stay on Na
 only moves to GitHub when Namespace buys it close to nothing: the time it adds to the run, its queue,
 its cache.
 
+**The owner's rules (2026-10-30).** Every job runs in under two minutes on Namespace. A job stays on
+GitHub when Namespace buys it little, measured per job. Nothing is split further for parallelism (no
+new jobs, shards or processes inside a job): a slow job gets faster tests. Per job, at the 14-day
+average of 64 pull-request and 41 `main` runs a day, with every job at its two-minute target:
+
+| Job                                      | PR runs                                  | `main` runs   | Why (measured, main run 41000752905 + #905's PR run)                                                                         | unit-min/mo at ≤120 s | $/mo |
+| ---------------------------------------- | ---------------------------------------- | ------------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------- | ---- |
+| Pre-Commit (format)                      | Namespace 2x4                            | GitHub        | ~90 s on Namespace; on `main` 113 s on GitHub is under 2 min                                                                 | 7.7k                  | 12   |
+| Pre-Commit (gates)                       | **Namespace 4x8** (was GitHub)           | GitHub        | 183 s on GitHub, over 2 min; ~110 s on a 4x8 (knip needs >4 GB)                                                              | 15.4k                 | 23   |
+| Build Checks                             | Namespace 2x4                            | Namespace 2x4 | refreshes the /nix cache volume `main` commits                                                                               | 6.3k                  | 9    |
+| PWA Settings / Gallery (mobile, desktop) | Namespace 2x4 / 4x8 / 4x8                | GitHub        | 175 / 280 / 217 s on Namespace: **over 2 min, need optimising** (next)                                                       | 38.4k                 | 58   |
+| Unit Tests ×3                            | Namespace 2x4                            | GitHub        | ~45 s Namespace, ~60 s GitHub: both under; PRs keep the warm /nix                                                            | 11.5k                 | 17   |
+| Unit / Integration ledgers               | **Namespace 2x4, no cache** (was GitHub) | **Namespace** | 10 s of work that starved in GitHub's 20-job queue and held Release                                                          | 12.6k                 | 19   |
+| Integration Tests ×6                     | **Namespace 2x4** (was GitHub)           | GitHub        | most of what filled GitHub's 20-job cap; ~20 s less setup; tests mostly wait, so 2 cores. **Need optimising to <2 min** (D2) | 46.1k                 | 69   |
+| Compile Binaries                         | Namespace 2x4                            | GitHub        | 49 s Namespace / 84 s GitHub: both under                                                                                     | 3.8k                  | 6    |
+| SIT                                      | **Namespace 2x4** (was GitHub)           | GitHub        | 76 s GitHub → ~50 s; 1 billed minute                                                                                         | 3.8k                  | 6    |
+| E2E shards                               | Namespace 2x4                            | Namespace 2x4 | unchanged (relevance-gated)                                                                                                  | ~5.8k                 | 9    |
+| Realworld (non-blocking)                 | Namespace 4x8 (relevant PRs)             | Namespace 4x8 | unchanged; machine-budget tests need a quiet VM                                                                              | ~21k                  | 31   |
+| Smoke ×3, every macOS job                | GitHub                                   | GitHub        | prove stock images / no Namespace macOS benefit for 10× the price                                                            | 0                     | 0    |
+
 **`vars.CI_RUNNER_POOL`** is the switch. Set the repository variable to `github` and every Namespace
 job, `Build Checks` and the E2E shards included, runs on `ubuntu-latest` from the next run on: no
 pull request, no Namespace bill. Unset, the pools are as this section describes. The cost of the

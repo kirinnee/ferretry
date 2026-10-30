@@ -13,6 +13,7 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { errorResponse, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { Delegation } from '../../board/index.ts';
 import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError } from './task-boards.ts';
 
 /**
@@ -128,12 +129,17 @@ export interface SessionControlSubsystem {
    * asks for board access. It is what the child grant is authorized by, so it travels to the
    * subsystem rather than being read from anything the start's body could name: a body field would
    * be a caller-controlled claim about who is asking, and on a board that is a privilege escalation.
+   *
+   * `delegation` is a `fy new`'s card, reserved by the daemon before the start (`SessionCards.delegate`):
+   * the started session's card is then the lead's, under the lead's focus card. It never comes from a
+   * request body. Without it a start with a prompt gets a card of its own.
    */
   start(
     request: StartSessionRequest,
     requestId: string,
     payload: string,
     boardCapability?: string,
+    delegation?: Delegation,
   ): Promise<SessionView>;
   stop(sessionId: string, reason: string | undefined): Promise<SessionView>;
   /**

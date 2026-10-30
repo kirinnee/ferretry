@@ -1,7 +1,15 @@
-import type { SerialExecutor } from '../../lib/index.ts';
+import type { YieldingSerialExecutor } from '../../lib/index.ts';
+
+/**
+ * How many times queued yielding exclusive work steps aside for keyed work before it queues fairly.
+ *
+ * Each step waits for real work to settle, so this is not a spin. It bounds the yield: a fleet so busy
+ * that a keyed tail is always open would otherwise never let its backlog proof run at all.
+ */
+export const EXCLUSIVE_YIELD_LIMIT = 16;
 
 /** Serializes work per key while allowing an exclusive rebuild barrier. */
-export class KeyedSerialExecutor implements SerialExecutor {
+export class KeyedSerialExecutor implements YieldingSerialExecutor {
   private readonly keyTails = new Map<string, Promise<void>>();
   private barrier: Promise<void> = Promise.resolve();
   private exclusivePending = 0;
@@ -48,5 +56,32 @@ export class KeyedSerialExecutor implements SerialExecutor {
     } finally {
       this.exclusivePending -= 1;
     }
+  }
+
+  /**
+   * Exclusive work that lets keyed work queued after it go first.
+   *
+   * WHY. `runExclusive` takes the barrier the moment it is CALLED, so every keyed call after it waits
+   * for it — and for every exclusive pass queued before it. A live feed's backlog proof is a full survey
+   * of the fleet; with dozens of feeds reconnecting, session writes (a launch, a resume, a signal) sat
+   * behind a queue of those passes for minutes.
+   *
+   * HOW. While it waits this holds no barrier, so keyed work keeps the barrier it saw. It waits for the
+   * barrier and the keyed tails it can see; once they have settled, and nothing new arrived meanwhile, it
+   * claims the barrier through `runExclusive` on the same synchronous turn, so from that instant it is
+   * exactly as exclusive as `runExclusive`. If new keyed work did arrive it waits again, at most
+   * {@link EXCLUSIVE_YIELD_LIMIT} times, and then queues like `runExclusive` so it cannot starve.
+   *
+   * It does not count as pending while it only waits: `runIfIdle` observation keeps running until the
+   * pass actually claims the barrier.
+   */
+  async runExclusiveYielding<T>(work: () => Promise<T>): Promise<T> {
+    for (let step = 0; step < EXCLUSIVE_YIELD_LIMIT; step += 1) {
+      const barrier = this.barrier;
+      const tails = new Set(this.keyTails.values());
+      await Promise.all([barrier, ...tails]);
+      if (this.barrier === barrier && [...this.keyTails.values()].every(tail => tails.has(tail))) break;
+    }
+    return await this.runExclusive(work);
   }
 }
