@@ -858,8 +858,8 @@ describe('BoardPage — an answer in flight', () => {
   it('spins Done on a Table row and says its refusal under the row', async () => {
     const held = hold();
     const { root } = await open({ act: held.act, props: { search: 'view=list' } });
-    await click(root, '.fy-board-table__row[data-task="F4"] .fy-board-done');
-    const row = must(root.querySelector('.fy-board-table__row[data-task="F4"]'), 'the row');
+    await click(root, '.fy-board-summary__row[data-task="F4"] .fy-board-done');
+    const row = must(root.querySelector('.fy-board-summary__row[data-task="F4"]'), 'the row');
     expect(row.getAttribute('data-settling')).toBe('done');
     expect(row.querySelector('.fy-board-done [data-spinner]')).not.toBeNull();
     held.release(boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }));

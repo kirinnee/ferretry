@@ -103,7 +103,7 @@ const shot = async (page: Page, name: string): Promise<void> => {
 /** Every row's Done / Reopen sits inside its row and shows its whole label. */
 const checkDoneFits = async (page: Page, where: string): Promise<void> => {
   const found = await page.evaluate(() =>
-    [...document.querySelectorAll<HTMLElement>('.fy-board-table__row')].flatMap(row => {
+    [...document.querySelectorAll<HTMLElement>('.fy-board-table__row, .fy-board-summary__row')].flatMap(row => {
       const box = row.getBoundingClientRect();
       return [...row.querySelectorAll<HTMLButtonElement>('.fy-board-done')].flatMap(button => {
         const own = button.getBoundingClientRect();
@@ -185,17 +185,13 @@ try {
       const context = await browser.newContext({ ...options, colorScheme: scheme });
       const page = await open(context, `studio-${scheme}`, 'list');
       await showDone(page);
-      const row = page
-        .locator('.fy-board-table__row', { has: page.locator('[data-col="status"]', { hasText: 'To test' }) })
-        .first();
+      const row = page.locator('.fy-board-summary__row[data-section="to-test"]').first();
       await row.locator('.fy-board-done').click();
       await row.locator('.fy-board-done[data-pending] [data-spinner]').waitFor({ state: 'visible' });
       await shot(page, `board-table-in-flight-${scheme}-${label}`);
       const refusing = await open(context, `studio-${scheme}`, 'list', '&refuse=1');
       await showDone(refusing);
-      const refused = refusing
-        .locator('.fy-board-table__row', { has: refusing.locator('[data-col="status"]', { hasText: 'To test' }) })
-        .first();
+      const refused = refusing.locator('.fy-board-summary__row[data-section="to-test"]').first();
       await refused.locator('.fy-board-done').click();
       await refused.locator('[data-answer-error]').waitFor({ state: 'visible' });
       await checkDoneFits(refusing, `list ${label} ${scheme}, refused`);

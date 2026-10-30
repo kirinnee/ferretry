@@ -226,6 +226,7 @@ function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly e
       data-action={action ? '' : undefined}
       data-agent={isAgentTask(task) ? '' : undefined}
       data-section={entry.section}
+      data-settling={answer.pressed === null ? undefined : answer.pressed}
       data-task={task.id}
       data-touch={env.touch === true ? '' : undefined}
       data-under={entry.under === null ? undefined : ''}
