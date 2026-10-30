@@ -257,6 +257,7 @@ const agendaCases: SchemaCase[] = [
   { name: 'attention id', schema: agenda.AgendaIdSchema, value: 'A1' },
   { name: 'attention actor', schema: agenda.AgendaBySchema, value: 'agent' },
   { name: 'attention item', schema: agenda.AgendaItemSchema, value: agendaItem },
+  { name: 'attention input pointer', schema: agenda.AgendaInputRefSchema, value: { requestId: 'a'.repeat(32) } },
   { name: 'resolved attention', schema: agenda.ResolvedAgendaItemSchema, value: resolvedAgenda },
   {
     name: 'session attention summary',

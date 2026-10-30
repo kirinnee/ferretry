@@ -55,6 +55,7 @@ import type {
   BoardSnapshot,
   BoardStore,
   LaneSetSource,
+  ProjectAdopter,
   ReopenNotifier,
   SessionFocus,
   SessionParents,
@@ -78,6 +79,8 @@ export interface BoardServiceDependencies {
   readonly machineId: () => string | undefined;
   /** The board-wide section dependency writes share. */
   readonly serial: Pick<SerialExecutor, 'run'>;
+  /** Moves a ferret on the Unfiled board onto the board of the repository it stands in, at its first card. */
+  readonly adoption?: ProjectAdopter;
 }
 
 /** What `fy signal done` did to the ferret's focus card. */
@@ -501,9 +504,23 @@ export class BoardService {
     return laneSet;
   }
 
+  /**
+   * The board a caller's new card goes on: its session's, where a ferret on the Unfiled board standing in a
+   * repository first has that repository registered and its board taken (`ProjectAdoption`). An adoption that
+   * fails leaves the card Unfiled, as it would have been.
+   */
   private async projectOf(caller: BoardCaller): Promise<BoardProjectId> {
     const session = sessionOf(caller);
-    return session === undefined ? UNFILED_PROJECT_ID : await this.ports.lanes.projectOf(session);
+    if (session === undefined) return UNFILED_PROJECT_ID;
+    const projectId = await this.ports.lanes.projectOf(session);
+    if (projectId !== UNFILED_PROJECT_ID || this.ports.adoption === undefined) return projectId;
+    const adopted = await this.ports.adoption.adopt(session).catch((error: unknown) => {
+      this.ports.diagnostics.warn(
+        `could not register the repository of ${session}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return null;
+    });
+    return adopted?.projectId ?? projectId;
   }
 
   private async laneSetsOf(projects: readonly BoardProjectId[]): Promise<LaneSets> {

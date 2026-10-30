@@ -1,8 +1,8 @@
 import { afterEach, describe, it, spyOn } from 'bun:test';
+import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import should from 'should';
 import { FileProjectCatalog } from '../../../src/adapters/catalog/index.ts';
 
@@ -97,5 +97,32 @@ describe('FileProjectCatalog failure paths', () => {
     const registered = await projects.register({ kind: 'existing-folder', path: folder });
 
     should(registered.git).deepEqual({ commonDirectory: join(await realpath(folder), '.git') });
+  });
+});
+
+describe('FileProjectCatalog registrations at once', () => {
+  it('makes one record for two registrations of one repository and keeps every other one', async () => {
+    root = await mkdtemp(join(tmpdir(), 'ferretry-race-'));
+    const repository = join(root, 'repo');
+    await mkdir(repository);
+    const init = Bun.spawn(['git', 'init', '--quiet', repository], { stdout: 'pipe', stderr: 'pipe' });
+    should(await init.exited).equal(0);
+    const folders = await Promise.all(
+      ['a', 'b', 'c'].map(async name => {
+        const folder = join(root as string, name);
+        await mkdir(folder);
+        return folder;
+      }),
+    );
+    const projects = new FileProjectCatalog(join(root, 'projects.json'));
+
+    const registered = await Promise.all([
+      projects.register({ kind: 'confirmed-discovery', path: repository }),
+      projects.register({ kind: 'existing-folder', path: repository }),
+      ...folders.map(path => projects.register({ kind: 'existing-folder', path })),
+    ]);
+
+    should(registered[0]?.id).equal(registered[1]?.id);
+    should((await projects.projects()).map(project => project.name).sort()).deepEqual(['a', 'b', 'c', 'repo']);
   });
 });

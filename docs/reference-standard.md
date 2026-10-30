@@ -330,3 +330,15 @@ in section 4, or left as plain text when it cannot be proved. The text the ferre
 always one tap away on the card ("Show sent text", and copy), so the card is a reading of the message,
 never a replacement for it. A message that does not read as headings in full — prose before the first
 heading, an unknown kind, an id that is not `A` and a positive number — is drawn as the words it is.
+
+## 10. Input cards are agenda items
+
+An [input request](input-requests.md) is an agenda item of `kind: 'input'`, so it is cited exactly as
+every other item: `!AN`, proved against the session's ledger, opened as in section 4. **There is no
+new sigil.** Two consequences for this grammar:
+
+- A message about an input card uses the existing headings (`[delivered !A7 …]` is worded by the
+  daemon's agenda path). The heading never carries the value, and no heading is ever built from an
+  input answer, because the generic agenda answer refuses `kind: 'input'`.
+- The `!AN` of an input card is a pointer to the card, nothing more. The card's own kind, `Input`, is
+  drawn from the item's `kind` like the others.

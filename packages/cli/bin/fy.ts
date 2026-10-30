@@ -53,6 +53,8 @@ import { desktopBrowserOpener } from '../src/adapters/pair/browser-opener';
 import { QrCodeTerminal } from '../src/adapters/pair/qr-terminal';
 import { PlainScreen, ProcessTerminalSize } from '../src/adapters/pair/screen';
 import { IntlLocalTime } from '../src/adapters/passkey/local-time';
+import { FyProjectGateway } from '../src/adapters/projects/fy-project-gateway';
+import { registerProjectCommands } from '../src/adapters/projects/project-commands';
 import { FileMarkerProbe, SystemPollClock } from '../src/adapters/reads/system-poller';
 import { BunTmuxAttachProcess, ExactTmuxAttacher } from '../src/adapters/reads/tmux-attacher';
 import { SecretConsoleOutput } from '../src/adapters/secrets/secret-output';
@@ -921,6 +923,13 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerLaneCommands(program, { gateway: new FyLaneGateway(client), io: world.io, binaryName: BINARY_NAME }),
   ({ program, world, client }) =>
     registerBoardImportCommand(program, { gateway: new FyBoardImportGateway(client), io: world.io }),
+  ({ program, world, client }) =>
+    registerProjectCommands(program, {
+      gateway: new FyProjectGateway(client),
+      io: world.io,
+      cwd: world.cwd,
+      binaryName: BINARY_NAME,
+    }),
   ({ program, world, client, ownSessionId }) =>
     registerStopCommands(
       program,

@@ -3,3 +3,4 @@ export * from './file-lane-set-store.ts';
 export * from './git-project-facts.ts';
 export * from './git-repository-probe.ts';
 export * from './storage-session-facts.ts';
+export * from './storage-session-project-stamp.ts';

@@ -46,6 +46,7 @@
  */
 
 import type { Locator, Page } from 'playwright-core';
+import { timed } from './walk-timing.ts';
 
 /**
  * The four names isolation writes into the document, and every one of them is
@@ -227,9 +228,9 @@ export const captureElement = async (page: Page, element: Locator, path: string)
   // Bring it into view first, exactly as the gallery always has: images below the
   // fold are `loading="lazy"` and content that has never been near the viewport has
   // never been decoded. Isolation moves the element, it does not load it.
-  await element.scrollIntoViewIfNeeded();
+  await timed('capture.scrollIntoView', () => element.scrollIntoViewIfNeeded());
 
-  const hoisted = await element.evaluate(hoist, ISOLATION);
+  const hoisted = await timed('capture.isolate', () => element.evaluate(hoist, ISOLATION));
   let grown = false;
   try {
     if ('refused' in hoisted) throw new Error(`refusing to capture ${label}: ${hoisted.refused}`);
@@ -259,13 +260,13 @@ export const captureElement = async (page: Page, element: Locator, path: string)
     const width = Math.max(viewport.width, Math.ceil(hoisted.after.x + hoisted.after.width) + 8);
     const height = Math.max(viewport.height, Math.ceil(hoisted.after.y + hoisted.after.height) + 8);
     if (width > viewport.width || height > viewport.height) {
-      await page.setViewportSize({ width, height });
+      await timed('capture.grow', () => page.setViewportSize({ width, height }));
       grown = true;
     }
 
     // Growing the viewport is itself a layout change, so the element is measured
     // AGAIN rather than assumed to have stayed where isolation left it.
-    const framed = await element.evaluate(measure);
+    const framed = await timed('capture.measure', () => element.evaluate(measure));
     if (resized(hoisted.after, framed.box))
       throw new Error(
         `refusing to capture ${label}: growing the viewport to ${width}x${height} changed its size ` +
@@ -287,9 +288,9 @@ export const captureElement = async (page: Page, element: Locator, path: string)
           'so the capture would carry a band Chromium never painted',
       );
 
-    await element.screenshot({ path });
+    await timed('capture.screenshot', () => element.screenshot({ path }));
   } finally {
-    if (grown) await page.setViewportSize(viewport);
-    await page.evaluate(release, ISOLATION);
+    if (grown) await timed('capture.shrink', () => page.setViewportSize(viewport));
+    await timed('capture.release', () => page.evaluate(release, ISOLATION));
   }
 };

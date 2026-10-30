@@ -300,6 +300,7 @@ import {
   StateVapidKeys,
   StorageConversationOwners,
   StorageSessionFacts,
+  StorageSessionProjectStamp,
   SystemClock,
   SystemFrameClock,
   SystemGrantClock,
@@ -751,6 +752,7 @@ import {
   EventLoopLagMeter,
   type ExecutableResolverPort,
   effectiveAnalyticsPricing,
+  expandProjectRoots,
   FileConversationDescriber,
   FileForeignTranscriptReader,
   type FileSystemPort,
@@ -881,8 +883,10 @@ import {
   PinService,
   type PlannedAttachmentFile,
   type PlannedInitialAttachments,
+  ProjectAdoption,
   ProjectMcpLaunch,
   ProjectMcpOAuthServers,
+  type ProjectRegistrar,
   ProvedPaneCapture,
   ProviderPresetService,
   ProviderProbeService,
@@ -1923,12 +1927,34 @@ function createBoardWorld(
   sessions: SessionLivenessSource,
   /** Where a lead's quiet lines wait for its next turn (`lib/board/pending-context.ts`). */
   pending: PendingContext,
+  /** Registers a folder as a project: the catalog `POST /v1/projects` writes through, so both share its dedupe. */
+  registrar: ProjectRegistrar,
+  /** The folders a ferret's repository is registered from (`projectRoots`), read per adoption. */
+  projectRoots: () => Promise<readonly string[]>,
+  userHome: string,
 ): BoardWorld {
   const diagnostics = boardDiagnostics;
   const parents = new StorageSessionParents(storage);
   const focus = new StorageSessionFocus(storage);
   // ONE store per daemon: the service and the legacy import share its id counter.
   const store = new FileBoardStore(join(paths.state, 'board'), stateFiles, new KeyedSerialExecutor(), diagnostics);
+  const proposer = new InferredLaneProposer(lanes, new GitProjectFacts());
+  // A ferret's first card in a repository nobody registered registers it (`ProjectAdoption`): ONE instance, so
+  // its per-repository section is shared by `fy task create` and the cards a start makes.
+  const adoption = new ProjectAdoption({
+    sessions: new StorageSessionFacts(storage),
+    repositories: new GitRepositoryProbe(),
+    registry: registrar,
+    lanes,
+    proposer,
+    stamp: new StorageSessionProjectStamp(storage),
+    places: async () => ({
+      projectRoots: expandProjectRoots(await projectRoots(), userHome),
+      home: userHome,
+      scratchRoots: [...COMMON_SCRATCH_ROOTS, tmpdir()],
+    }),
+    serial: new KeyedSerialExecutor(),
+  });
   const board = new BoardService({
     store,
     lanes,
@@ -1942,11 +1968,13 @@ function createBoardWorld(
     diagnostics: boardDiagnostics,
     machineId,
     serial: new KeyedSerialExecutor(),
+    adoption,
   });
   const cards = new SessionCards({
     board,
     lanes,
-    proposer: new InferredLaneProposer(lanes, new GitProjectFacts()),
+    proposer,
+    adoption,
     // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
     projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
     focus,
@@ -8988,6 +9016,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         CLIENT_NAME,
         boardSessions,
         boardPending,
+        { register: async request => await catalogs.registerProject(request) },
+        async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.projectRoots ?? [],
+        userHome,
       );
       // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after

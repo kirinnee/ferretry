@@ -212,6 +212,7 @@ const KIND_WORDS: Readonly<Record<AgendaKind, string>> = {
   review: 'Review',
   info: 'Info',
   reply: 'Reply',
+  input: 'Input',
 };
 
 /** The card's kind in the word its header says. */
