@@ -298,6 +298,13 @@ describe('joinOutbox', () => {
     });
     expect(joined[2]?.outbox).toEqual({ reason: 'x', refused: true, position: 2, of: 2 });
   });
+
+  test('files still to upload are named on the bubble, and a message with none names nothing', () => {
+    const photo = { name: 'site-photo.png', type: 'image/png', blob: new Blob([]) };
+    const joined = joinOutbox([], [entry({ files: [photo] }), entry({ id: 'o2' })]);
+    expect(joined[0]?.outbox?.files).toEqual(['site-photo.png']);
+    expect(joined[1]?.outbox).not.toHaveProperty('files');
+  });
 });
 
 describe('queueActions with an outbox', () => {

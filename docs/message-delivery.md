@@ -92,8 +92,12 @@ this page, which is still how a message reaches the pane.
   machine the bubble reads `waiting for connection` (with `n of m` when several wait). Each session drains in
   order, one flight at a time, on the browser coming online and on the machine's connection recovering
   (`watchOutbox`), and again after a reload. The send is idempotent: the request id is the queue id, and the
-  daemon answers a repeat from its first record, so a retry never types twice. Attachments are uploaded during
-  the drain, before the send; a failed upload keeps the message in the outbox with the plain reason
+  daemon answers a repeat from its first record, so a retry never types twice. A file picked while offline is
+  **deferred**, not failed: the browser already says it is offline, or the connection drops and stays down through
+  the composer's retries, so the chip reads `uploads when the connection is back` (with a retry), the message can
+  be sent, and the file goes into the outbox entry (IndexedDB keeps the `Blob`). A refusal with a reason (too
+  large, a type nothing reads) still fails on the chip. Attachments are uploaded during the drain, before the
+  send; a failed upload keeps the message in the outbox with the plain reason
   (`attachmentErrorMessage`) and holds the ones behind it. Only a failure that never reached the machine counts
   as waiting — the typed client's transport error, a deadline, a carrier with no route, a 408/429/5xx, or a bare
   fetch's own network `TypeError` ("Failed to fetch", "NetworkError when attempting to fetch resource.", "Load

@@ -270,6 +270,8 @@ export interface OutboxView {
   /** Its place among this session's entries that are still on the device (1-based), and how many there are. */
   readonly position: number;
   readonly of: number;
+  /** Names of the files it carries that are not uploaded yet: they go up before the send. */
+  readonly files?: readonly string[];
 }
 
 /**
@@ -303,6 +305,7 @@ export const joinOutbox = (
           ...(entry.refused === true ? { refused: true as const } : {}),
           position: index + 1,
           of: waiting.length,
+          ...(entry.files.length === 0 ? {} : { files: entry.files.map(file => file.name) }),
         },
       }),
     ),

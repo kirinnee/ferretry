@@ -103,6 +103,8 @@ export function PendingAttachmentStrip({
               </span>
               {entry.status === 'failed' ? (
                 <span className="block text-err">{entry.error}</span>
+              ) : entry.status === 'deferred' ? (
+                <span className="block text-muted">{entry.note}</span>
               ) : (
                 <span className="flex min-w-0 items-center gap-1">
                   <span className="shrink-0 text-faint">{formatAttachmentSize(entry.file.size)}</span>
@@ -190,7 +192,7 @@ export function PendingAttachmentStrip({
                 <LockKeyholeOpen aria-hidden="true" size={15} />
               </button>
             ) : null}
-            {entry.status === 'failed' ? (
+            {entry.status === 'failed' || entry.status === 'deferred' ? (
               <button
                 aria-label={`Retry ${entry.file.name}`}
                 className="inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-control text-muted hover:bg-surface hover:text-fg"

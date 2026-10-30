@@ -3,6 +3,7 @@ import type { FyApiClient } from '@ferretry/protocol/client';
 import { FyHttpError, FyTransportError } from '@ferretry/protocol/client';
 import type { AgendaId } from '@ferretry/protocol';
 import { Composer } from '../../src/components/composer.tsx';
+import type { ComposerAttachmentUploader } from '../../src/components/composer-attachments.ts';
 import { withReferencePrefix } from '../../src/lib/answer-chip.ts';
 import type { DaemonConnectionRepository } from '../../src/lib/connections.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -12,6 +13,7 @@ import { createAppStore, StoreProvider } from '../../src/lib/store.tsx';
 import '../support/dom.ts';
 import { writeMdComposePref } from '../../src/lib/md-compose.ts';
 import { render, run, runAsync } from '../support/react.ts';
+import { settleUntil } from '../support/settle.ts';
 
 beforeEach(() => writeMdComposePref('off'));
 afterEach(() => writeMdComposePref('on'));
@@ -49,6 +51,7 @@ const mount = async (
   send: (...args: unknown[]) => Promise<unknown>,
   withStore = true,
   chips: readonly AgendaId[] = [],
+  uploadAttachment?: ComposerAttachmentUploader,
 ) => {
   const store = await storeWith(send);
   const direct: unknown[] = [];
@@ -64,6 +67,7 @@ const mount = async (
       daemon={daemon}
       draftStore={new DaemonDraftStore(new Memory())}
       sessionId="s1"
+      {...(uploadAttachment === undefined ? {} : { uploadAttachment })}
     />
   );
   const tree = render(withStore ? <StoreProvider store={store}>{composer}</StoreProvider> : composer);
@@ -75,7 +79,12 @@ const mount = async (
     );
   const submit = async () =>
     await runAsync(async () => tree.root.findByType('form').props.onSubmit({ preventDefault() {} }));
-  return { store, direct, tree, type, submit };
+  const attach = (file: File) =>
+    run(() => {
+      const inputs = tree.root.findAll(node => node.type === 'input' && node.props.type === 'file');
+      inputs.at(-1)?.props.onChange({ currentTarget: { files: [file], value: '' } });
+    });
+  return { store, direct, tree, type, submit, attach };
 };
 
 describe('the composer with a device outbox', () => {
@@ -118,6 +127,42 @@ describe('the composer with a device outbox', () => {
     await runAsync(async () => await store.outbox.drainAll());
     expect(arrived).toEqual(['!A3 yes, ship it']);
     expect(store.outbox.snapshot()).toEqual([]);
+  });
+
+  test('offline, a file waits for the connection and goes into the outbox with its message', async () => {
+    const online = Object.getOwnPropertyDescriptor(globalThis.navigator, 'onLine');
+    Object.defineProperty(globalThis.navigator, 'onLine', { configurable: true, get: () => false });
+    let uploads = 0;
+    try {
+      const { store, type, submit, attach, tree } = await mount(
+        async () => {
+          throw new FyTransportError('no carrier', '/send', false, undefined);
+        },
+        true,
+        [],
+        async () => {
+          uploads += 1;
+          throw new Error('unreachable');
+        },
+      );
+      attach(new File([new Uint8Array([1, 2])], 'shot.png', { type: 'image/png' }));
+      expect(JSON.stringify(tree.toJSON())).toContain('uploads when the connection is back');
+      type('here it is');
+      await submit();
+      await settleUntil(
+        () => tree.root.findByType('textarea').props.value === '',
+        'the composer to clear once the message is on this device',
+        runAsync,
+      );
+      // Never tried while the browser said it was offline; the outbox holds the file with the words.
+      expect(uploads).toBe(0);
+      const [entry] = store.outbox.snapshot();
+      expect(entry?.message).toBe('here it is');
+      expect(entry?.files.map(file => file.name)).toEqual(['shot.png']);
+    } finally {
+      if (online === undefined) Reflect.deleteProperty(globalThis.navigator, 'onLine');
+      else Object.defineProperty(globalThis.navigator, 'onLine', online);
+    }
   });
 
   test('a message the machine refuses leaves no copy behind and the refusal is raised to the person', async () => {

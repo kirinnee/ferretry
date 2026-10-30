@@ -11,7 +11,7 @@ import {
   useComposerAttachments,
 } from '../../src/components/composer-attachments.ts';
 import { PendingAttachmentStrip } from '../../src/components/session-chat-parts.tsx';
-import { UPLOAD_CONNECTION_DROPPED_COPY, UPLOAD_QUEUED_COPY } from '../../src/lib/attachments.ts';
+import { UPLOAD_CONNECTION_DROPPED_COPY, UPLOAD_DEFERRED_COPY, UPLOAD_QUEUED_COPY } from '../../src/lib/attachments.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { DaemonDraftStore, type DraftStorage } from '../../src/lib/drafts.ts';
 import { DaemonResponseError } from '../../src/lib/runtime-models.ts';
@@ -327,10 +327,14 @@ describe('composer uploads over a connection that drops', () => {
   type Hook = ReturnType<typeof useComposerAttachments>;
   const photo = (index: number) => new File([new Uint8Array([index])], `${String(index)}.jpg`, { type: 'image/jpeg' });
 
-  const mountHook = (upload: ComposerAttachmentUploader, wait: RetryWait = async () => undefined) => {
+  const mountHook = (
+    upload: ComposerAttachmentUploader,
+    wait: RetryWait = async () => undefined,
+    defer?: { readonly offline: () => boolean },
+  ) => {
     const hook: { current?: Hook } = {};
     const Probe = () => {
-      hook.current = useComposerAttachments(upload, 'scope', wait);
+      hook.current = useComposerAttachments(upload, 'scope', wait, defer !== undefined, defer?.offline);
       return null;
     };
     const rendered = render(<Probe />);
@@ -407,6 +411,78 @@ describe('composer uploads over a connection that drops', () => {
     expect(calls).toBe(UPLOAD_ATTEMPTS);
     expect(state().entries[0]?.error).toBe(`${UPLOAD_CONNECTION_DROPPED_COPY} — try again`);
     run(() => rendered.unmount());
+  });
+
+  test('beside an outbox, a browser that knows it is offline defers the file without trying', async () => {
+    let calls = 0;
+    const { rendered, state } = mountHook(
+      async file => {
+        calls += 1;
+        return view('att_ok', file);
+      },
+      undefined,
+      { offline: () => true },
+    );
+    run(() => state().add([photo(1)]));
+    await settleUntil(() => state().entries[0]?.status === 'deferred', 'the deferral', runAsync);
+    expect(calls).toBe(0);
+    expect(state().entries[0]?.note).toBe(UPLOAD_DEFERRED_COPY);
+    expect(state().deferred).toHaveLength(1);
+    expect(state().failed).toEqual([]);
+    run(() => rendered.unmount());
+  });
+
+  test('beside an outbox, a connection that drops and stays down defers instead of failing', async () => {
+    let calls = 0;
+    let offline = false;
+    const { rendered, state } = mountHook(
+      async () => {
+        calls += 1;
+        throw new Error('the relay socket closed');
+      },
+      undefined,
+      { offline: () => offline },
+    );
+    run(() => state().add([photo(1)]));
+    await settleUntil(() => state().entries[0]?.status === 'deferred', 'the deferral after every attempt', runAsync);
+    expect(calls).toBe(UPLOAD_ATTEMPTS);
+    // A drop the browser confirms as offline defers at once, instead of waiting through the retries.
+    offline = false;
+    calls = 0;
+    run(() => state().retry(state().entries[0] as never));
+    offline = true;
+    await settleUntil(() => state().entries[0]?.status === 'deferred', 'the deferral while offline', runAsync);
+    expect(calls).toBe(1);
+    run(() => rendered.unmount());
+  });
+
+  test('beside an outbox, a refusal the daemon gave a reason for still fails', async () => {
+    const { rendered, state } = mountHook(
+      async () => {
+        throw new DaemonResponseError(415, 'unsupported image type', 'attachment_unsupported_mime');
+      },
+      undefined,
+      { offline: () => false },
+    );
+    run(() => state().add([photo(1)]));
+    await settleUntil(() => state().entries[0]?.status === 'failed', 'the refusal', runAsync);
+    expect(state().deferred).toEqual([]);
+    run(() => rendered.unmount());
+  });
+
+  test('a deferred file says it uploads when the connection is back, and offers a retry', () => {
+    const file = photo(1);
+    const tree = render(
+      <PendingAttachmentStrip
+        entries={[{ localId: 'l1', file, status: 'deferred', note: UPLOAD_DEFERRED_COPY }]}
+        onRemove={() => undefined}
+        onRetry={() => undefined}
+      />,
+    );
+    const json = JSON.stringify(tree.toJSON());
+    expect(json).toContain(UPLOAD_DEFERRED_COPY);
+    expect(tree.root.findAll(node => node.props['aria-label'] === `Retry ${file.name}`)).toHaveLength(1);
+    run(() => tree.unmount());
   });
 
   test('a refusal the daemon gave a reason for is not retried', async () => {

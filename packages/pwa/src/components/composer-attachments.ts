@@ -11,6 +11,12 @@
  * connection, a busy machine — is tried again on its own, {@link UPLOAD_ATTEMPTS} times in all, and
  * the chip says so while it waits; only what is still failing after that asks the reader to act.
  *
+ * OFFLINE, A FILE IS DEFERRED, NOT FAILED — when the composer has a device outbox to hand it to. A browser that
+ * already knows it is offline does not try at all, and a connection failure that outlasts the retries settles
+ * the same way: the chip says it uploads when the connection is back, the message can be sent, and the outbox
+ * uploads the file before the send once the machine answers. Without an outbox there is nowhere to keep it, so
+ * it fails as before.
+ *
  * Image previews are object URLs, and every one is revoked when its file leaves: on remove, on a
  * successful send, on a session change and on unmount. A leaked object URL is a leaked copy of the
  * file in this tab's memory.
@@ -23,6 +29,7 @@ import {
   attachmentErrorMessage,
   isImageMime,
   isTransientUploadFailure,
+  UPLOAD_DEFERRED_COPY,
   UPLOAD_QUEUED_COPY,
   uploadRetryingCopy,
   validateAttachmentFile,
@@ -46,6 +53,9 @@ export type RetryWait = (milliseconds: number) => Promise<void>;
 
 const sleep: RetryWait = async milliseconds => await new Promise(resolve => setTimeout(resolve, milliseconds));
 
+/** Whether the browser itself says there is no network; a renderer with no `navigator` is taken at its word as online. */
+const browserOffline = (): boolean => typeof navigator !== 'undefined' && navigator.onLine === false;
+
 /** Object URLs are a browser facility; a renderer with none previews nothing rather than failing. */
 const previewUrl = (file: File): string | undefined => {
   if (!isImageMime(file.type) || typeof URL.createObjectURL !== 'function') return undefined;
@@ -64,6 +74,8 @@ interface ComposerAttachments {
   readonly uploading: boolean;
   /** Files that did not reach the daemon: a send now would leave them out of the message without a word. */
   readonly failed: readonly PendingAttachment[];
+  /** Files waiting for the connection, to be handed to the outbox with the message. */
+  readonly deferred: readonly PendingAttachment[];
   readonly add: (files: Iterable<File>) => void;
   readonly remove: (entry: PendingAttachment) => void;
   readonly retry: (entry: PendingAttachment) => void;
@@ -75,6 +87,9 @@ export function useComposerAttachments(
   upload: ComposerAttachmentUploader | undefined,
   scopeKey: string,
   wait: RetryWait = sleep,
+  /** Whether a file may wait for the connection instead of failing: true only beside a device outbox. */
+  defer = false,
+  offline: () => boolean = browserOffline,
 ) {
   const [entries, setEntries] = useState<readonly PendingAttachment[]>([]);
   const live = useRef(entries);
@@ -111,13 +126,22 @@ export function useComposerAttachments(
         if (!current()) return;
         // A file that waited for a slot stops saying so the moment it starts.
         if (tried === 1) settle(entry.localId, {});
+        if (defer && offline()) {
+          settle(entry.localId, { status: 'deferred', note: UPLOAD_DEFERRED_COPY });
+          return;
+        }
         try {
           const view = await uploader(entry.file);
           if (current()) settle(entry.localId, { status: 'ready', view });
           return;
         } catch (error) {
           if (!current()) return;
-          if (tried >= UPLOAD_ATTEMPTS || !isTransientUploadFailure(error)) {
+          const transient = isTransientUploadFailure(error);
+          if (defer && transient && (tried >= UPLOAD_ATTEMPTS || offline())) {
+            settle(entry.localId, { status: 'deferred', note: UPLOAD_DEFERRED_COPY });
+            return;
+          }
+          if (tried >= UPLOAD_ATTEMPTS || !transient) {
             settle(entry.localId, { status: 'failed', error: attachmentErrorMessage(error) });
             return;
           }
@@ -126,7 +150,7 @@ export function useComposerAttachments(
         }
       }
     },
-    [patch, settle, wait],
+    [defer, offline, patch, settle, wait],
   );
 
   const pump = useCallback(() => {
@@ -221,6 +245,7 @@ export function useComposerAttachments(
     readyIds,
     uploading: entries.some(entry => entry.status === 'uploading'),
     failed: entries.filter(entry => entry.status === 'failed'),
+    deferred: entries.filter(entry => entry.status === 'deferred'),
     add,
     remove,
     retry,
