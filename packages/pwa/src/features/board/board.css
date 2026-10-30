@@ -1619,6 +1619,12 @@
   min-width: 2.5rem;
   justify-content: flex-end;
 }
+/* The card's verdict row, worn on a Table row: it sits at the row's end, not as a full-width line under it. */
+.fy-board-summary__act .fy-board-card__verdict {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  margin-top: 0;
+}
 .fy-board-summary__act:empty {
   display: none;
 }
