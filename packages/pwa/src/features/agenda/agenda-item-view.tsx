@@ -20,11 +20,13 @@ import type { AgendaItem, AgendaQuestion } from '@ferretry/protocol';
 import { ChevronLeft, ChevronRight, Info, X } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import { readAskPinned, writeAskPinned } from '../../lib/agenda-ask-pin.ts';
+import { useQuoteMenu } from '../../components/quote-menu.tsx';
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
 import { itemOptions } from '../../lib/agenda-options.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
+import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery, agendaHeading } from './agenda-delivery.tsx';
 import { AgendaDetail } from './agenda-detail.tsx';
@@ -52,6 +54,11 @@ export interface AgendaItemViewProps {
   readonly onAct: (action: InboxAction) => void;
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   readonly renderProse: (text: string) => ReactNode;
+  /**
+   * The conversation whose composer takes a quote: select any text in the item and "Quote in composer" puts it
+   * there, exactly as in the chat (`useQuoteMenu`). Absent: nothing to quote into.
+   */
+  readonly quoteScope?: DaemonSessionScope | null;
   /** What ✕ is called: "Back to the chat", unless the host is somewhere else (the Inbox). */
   readonly closeLabel?: string;
 }
@@ -88,8 +95,10 @@ export function AgendaItemView({
   onProgress,
   renderProse,
   closeLabel = 'Back to the chat',
+  quoteScope = null,
 }: AgendaItemViewProps) {
   const root = useRef<HTMLElement | null>(null);
+  const quote = useQuoteMenu(root, quoteScope);
   const [picks, setPicks] = useState<readonly string[]>([]);
   // On a phone the head is one line and the ask is the body's first paragraph; ⓘ pins it in the head instead.
   const [pinned, setPinned] = useState(readAskPinned);
@@ -150,6 +159,7 @@ export function AgendaItemView({
       data-agenda-view={item.id}
       data-ask-pinned={pinned || undefined}
       onKeyDown={onKeyDown}
+      {...quote.handlers}
       ref={root}
       role="dialog"
       tabIndex={-1}
@@ -242,7 +252,7 @@ export function AgendaItemView({
             renderProse={renderProse}
             {...(onProgress === undefined ? {} : { onProgress })}
           />
-          <AgendaItemHistory events={history} ferret={ferret} now={now} prose={renderProse} />
+          <AgendaItemHistory events={history} ferret={ferret} now={now} />
         </div>
       </div>
       <AgendaQuickReplies
@@ -270,6 +280,7 @@ export function AgendaItemView({
             }
           : {})}
       />
+      {quote.menu}
     </section>
   );
 }

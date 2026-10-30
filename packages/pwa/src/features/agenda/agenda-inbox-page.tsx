@@ -66,6 +66,7 @@ import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
+import { escapeCloses } from '../../lib/escape-closes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
@@ -250,6 +251,7 @@ const renderOpenItem = (
       onClose={place.onClose}
       onNext={skip}
       position={{ index: place.index, total: place.total }}
+      quoteScope={scopeOf(card)}
       renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
       // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
       // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
@@ -1002,7 +1004,12 @@ export function AgendaInboxPage({
                 />
               )}
               {deck[0] === undefined || renderComposer === undefined ? null : (
-                <div className="fy-inbox-composer" data-inbox-composer={deck[0].key}>
+                // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
+                <div
+                  className="fy-inbox-composer"
+                  data-inbox-composer={deck[0].key}
+                  onKeyDown={escapeCloses(() => setDeckOpen(false))}
+                >
                   {renderComposer(deck[0])}
                 </div>
               )}

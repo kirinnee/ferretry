@@ -18,8 +18,21 @@ export const HISTORY_FERRET_CHARS = 700;
 export type HistoryEvent =
   | { readonly kind: 'revision'; readonly key: string; readonly at: number; readonly entry: RevisionEntry }
   | { readonly kind: 'owner'; readonly key: string; readonly at: number; readonly part: AgendaMessagePart }
-  | { readonly kind: 'owner-text'; readonly key: string; readonly at: number; readonly text: string }
-  | { readonly kind: 'ferret'; readonly key: string; readonly at: number; readonly text: string };
+  | {
+      readonly kind: 'owner-text';
+      readonly key: string;
+      readonly at: number;
+      readonly text: string;
+      /** The chat's own row for what the owner said, so History draws it with the chat's own message component. */
+      readonly entry: TranscriptEntry;
+    }
+  | {
+      readonly kind: 'ferret';
+      readonly key: string;
+      readonly at: number;
+      readonly text: string;
+      readonly entry: TranscriptEntry;
+    };
 
 const mentions = (text: string, id: AgendaItem['id']): boolean =>
   new RegExp(`(?:^|[^\\w])!${id}(?![\\w])`, 'u').test(text);
@@ -39,10 +52,13 @@ const spoken = (id: AgendaItem['id'], entries: readonly TranscriptEntry[]): read
           .filter(part => part.items.some(named => named.id === id))
           .map(part => ({ kind: 'owner', key: `${entry.id}:${part.raw}`, at: clock, part }) as const);
       }
-      return mentions(entry.text, id) ? [{ kind: 'owner-text', key: entry.id, at: clock, text: entry.text }] : [];
+      return mentions(entry.text, id)
+        ? [{ kind: 'owner-text', key: entry.id, at: clock, text: entry.text, entry }]
+        : [];
     }
     if (entry.kind === 'assistant' && mentions(entry.text, id)) {
-      return [{ kind: 'ferret', key: entry.id, at: clock, text: cut(entry.text) }];
+      const text = cut(entry.text);
+      return [{ kind: 'ferret', key: entry.id, at: clock, text, entry: { ...entry, text } }];
     }
     return [];
   });
