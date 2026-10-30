@@ -49,7 +49,7 @@ class FakeBoardGateway implements IBoardGateway {
 
   act(as: string | undefined, id: string, request: BoardTaskActionRequestInput): Promise<BoardTaskResponse> {
     this.acted = { as, id, request };
-    return Promise.resolve(taskResponse({ laneId: 'doing' }));
+    return Promise.resolve(taskResponse({ laneId: 'implement' }));
   }
 
   projects(as: string | undefined): Promise<BoardProjectsResponse> {
@@ -195,7 +195,7 @@ describe('fy task lifecycle verbs', () => {
     const { run, gateway } = harness();
 
     // Act
-    await run('task', 'move', '&F412', 'doing', '--reason', 'started');
+    await run('task', 'move', '&F412', 'implement', '--reason', 'started');
 
     // Assert
     should(gateway.acted?.id).equal('F412');
@@ -287,7 +287,7 @@ describe('fy board', () => {
     await run('board', '--project', 'all', '--kind', 'bug', '--pr', 'open', '--activity', 'stale', '--closed');
 
     // Assert
-    should(gateway.queried).containEql({ kind: 'bug', pr: 'open', activity: 'stale' });
+    should(gateway.queried).containEql({ kind: 'bug', prState: 'open', activity: 'stale' });
   });
 
   it('should print JSON when asked', async () => {
