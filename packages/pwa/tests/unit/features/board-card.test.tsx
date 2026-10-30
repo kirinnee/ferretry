@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { BoardCard, type BoardCardMoves } from '../../../src/features/board/board-card.tsx';
 import { BoardLane } from '../../../src/features/board/board-lane.tsx';
-import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { moveChoices } from '../../../src/lib/board-move.ts';
+import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { interact, type Mounted, mount, must, pressKey } from '../../support/dom.ts';
 import { boardModelOf, card, laneSetFor } from '../board-support.ts';
 
@@ -189,7 +189,9 @@ describe('BoardCard', () => {
     const root = await draw({ category: 'verify', moves: moves(log) });
     const works = must(root.querySelector<HTMLButtonElement>('[data-verdict="works"]'), 'Works');
     const notGood = must(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]'), 'Not good');
-    expect(works.textContent).toBe('Works → Close');
+    expect(works.textContent).toBe('Close');
+    expect(works.title).toBe('Works → Close');
+    expect(notGood.textContent).toBe('Not good');
     await interact(() => works.click());
     await interact(() => notGood.click());
     expect(log).toEqual(['move:closed', 'move:implement']);

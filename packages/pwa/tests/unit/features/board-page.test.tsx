@@ -5,8 +5,8 @@ import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import {
   boardAnswer,
-  card,
   COUNTS,
+  card,
   fakeEnvironment,
   fakePort,
   flush,
@@ -115,7 +115,7 @@ describe('BoardPage — reading', () => {
     const { root, reads } = await open();
     expect(root.querySelector('h1')?.textContent).toBe('Board');
     expect(titles(root)).toEqual(['Plan the thing', 'Build the thing', 'Review the thing', 'Try the thing']);
-    expect(root.querySelector('[data-count="to_test"]')?.textContent).toBe('🧪 To test1');
+    expect(root.querySelector('[data-count="to_test"]')?.textContent).toBe('To test1');
     expect(root.querySelector('[data-count="closed"]')?.textContent).toBe('1 closed hidden');
     expect([...root.querySelectorAll('.fy-board-lane__name')].map(node => node.textContent)).not.toContain('Closed');
     expect(root.querySelector('.fy-board__reading')).toBeNull();

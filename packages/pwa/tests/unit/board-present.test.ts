@@ -67,21 +67,25 @@ describe('ferret names', () => {
 
 describe('cardSegments', () => {
   it('words each liveness state', () => {
-    const text = (extra: Record<string, unknown>, category: 'active' | 'verify' = 'active') =>
-      segment(card('F1', extra), 'activity', category)?.text;
-    expect(text({ activity: 'active' })).toBe('● 4m');
-    expect(text({ activity: 'active', lastTouchedAt: null })).toBe('● active');
-    expect(text({ activity: 'idle', lastTouchedAt: '2026-08-01T08:04:00.000Z' })).toBe('idle 2h');
-    expect(text({ activity: 'idle', lastTouchedAt: null })).toBe('idle');
-    expect(text({ activity: 'stale', lastTouchedAt: '2026-07-31T10:04:00.000Z' })).toBe('▲ stale 1d');
-    expect(text({ activity: 'stale', lastTouchedAt: null })).toBe('▲ stale');
-    expect(text({ activity: 'orphaned' })).toBe('⛔ orphaned');
-    expect(text({ activity: 'waiting' })).toBe('🚧 waiting');
-    expect(text({ activity: 'waiting', waitingOnOwner: [ASK], openAsks: [ASK] })).toBe('🚧 waiting on you');
+    const say = (extra: Record<string, unknown>) => {
+      const found = segment(card('F1', extra), 'activity', 'active');
+      return `${found?.icon ?? '-'}:${found?.text}`;
+    };
+    const text = say;
+    expect(text({ activity: 'active' })).toBe('active:4m');
+    expect(text({ activity: 'active', lastTouchedAt: null })).toBe('active:active');
+    expect(text({ activity: 'idle', lastTouchedAt: '2026-08-01T08:04:00.000Z' })).toBe('-:idle 2h');
+    expect(text({ activity: 'idle', lastTouchedAt: null })).toBe('-:idle');
+    expect(text({ activity: 'stale', lastTouchedAt: '2026-07-31T10:04:00.000Z' })).toBe('stale:stale 1d');
+    expect(text({ activity: 'stale', lastTouchedAt: null })).toBe('stale:stale');
+    expect(text({ activity: 'orphaned' })).toBe('orphaned:orphaned');
+    expect(text({ activity: 'waiting' })).toBe('waiting:waiting');
+    expect(text({ activity: 'waiting', waitingOnOwner: [ASK], openAsks: [ASK] })).toBe('waiting-on-you:waiting on you');
   });
 
   it('never words a card in the To test lane as stale or idle', () => {
-    expect(segment(card('F1', { activity: 'stale' }), 'activity', 'verify')?.text).toBe('🧪 to test');
+    const found = segment(card('F1', { activity: 'stale' }), 'activity', 'verify');
+    expect([found?.icon, found?.text]).toEqual(['to-test', 'to test']);
   });
 
   it('draws the ref, the people and the machine only when there are several', () => {
@@ -94,15 +98,19 @@ describe('cardSegments', () => {
   });
 
   it('words the headline PR by its checks', () => {
-    const text = (extra: Partial<PrLink>) =>
-      segment(card('F1', { links: { prs: [pr(extra)], branch: null, commits: [], docs: [] } }), 'pr')?.text;
-    expect(text({ checks: 'passing' })).toBe('PR ✓');
-    expect(text({ checks: 'failing' })).toBe('PR ✗');
-    expect(text({ checks: 'pending' })).toBe('PR ⏳');
+    const found = (extra: Partial<PrLink>) =>
+      segment(card('F1', { links: { prs: [pr(extra)], branch: null, commits: [], docs: [] } }), 'pr');
+    const text = (extra: Partial<PrLink>) => found(extra)?.text;
+    expect(found({ checks: 'passing' })?.icon).toBe('pr-pass');
+    expect(found({ checks: 'failing' })?.icon).toBe('pr-fail');
+    expect(found({ checks: 'pending' })?.icon).toBe('pr-pending');
+    expect(found({ checks: 'none' })?.icon).toBeNull();
+    expect(text({ checks: 'passing' })).toBe('PR');
     expect(text({ checks: 'none' })).toBe('PR');
-    expect(text({ draft: true })).toBe('PR draft');
-    expect(text({ state: 'merged', mergedAt: '2026-08-01T09:00:00.000Z', mergeSha: SHA })).toBe('PR merged');
-    expect(text({ state: 'closed' })).toBe('PR closed');
+    expect(found({ draft: true })?.icon).toBe('pr-draft');
+    expect(found({ state: 'merged', mergedAt: '2026-08-01T09:00:00.000Z', mergeSha: SHA })?.icon).toBe('pr-merged');
+    expect(found({ state: 'closed' })?.icon).toBe('pr-closed');
+    expect(found({ state: 'merged', mergedAt: '2026-08-01T09:00:00.000Z', mergeSha: SHA })?.title).toContain('Merged');
   });
 
   it('says how many more PRs are linked and has none without any', () => {
@@ -129,8 +137,10 @@ describe('cardSegments', () => {
       },
       shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
     });
-    expect(segment(task, 'blocked')?.text).toBe('⛓ 2');
-    expect(segment(task, 'subs')?.text).toBe('subs 2/3 ●');
+    expect(segment(task, 'blocked')?.text).toBe('2');
+    expect(segment(task, 'blocked')?.icon).toBe('blocked');
+    expect(segment(task, 'subs')?.text).toBe('2/3');
+    expect(segment(task, 'subs')?.icon).toBe('subs');
     expect(segment(task, 'shipped')?.text).toBe('in 4.110.0');
     expect(subsDone(task)).toBe(2);
     const quiet = card('F4', {
@@ -141,7 +151,7 @@ describe('cardSegments', () => {
         lastTouchedAt: null,
       },
     });
-    expect(segment(quiet, 'subs')?.text).toBe('subs 0/2');
+    expect(segment(quiet, 'subs')?.text).toBe('0/2');
     expect(segment(quiet, 'subs')?.tone).toBe('quiet');
   });
 });

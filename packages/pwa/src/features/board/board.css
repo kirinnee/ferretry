@@ -106,6 +106,11 @@
   outline: var(--stroke-heavy, 2px) solid var(--accent);
   outline-offset: -1px;
 }
+.fy-board-count__label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
 .fy-board-count__n {
   font-variant-numeric: tabular-nums;
   font-weight: var(--weight-medium);
@@ -340,7 +345,7 @@
   margin-left: calc(var(--fy-board-depth, 0) * 20px);
   padding: 4px var(--gap-xs) 4px var(--gap-sm);
   border: var(--stroke) solid var(--border-soft);
-  border-left: 3px solid var(--border-soft);
+  border-left: var(--stroke-heavy) solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface);
 }
@@ -383,18 +388,37 @@
 .fy-board-card__meta {
   display: flex;
   min-width: 0;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow: hidden;
   align-items: center;
   color: var(--muted);
   font-size: var(--text-xs);
   line-height: 1.3;
 }
 .fy-board-seg {
+  display: inline-flex;
+  min-width: 0;
+  flex: none;
+  overflow: hidden;
+  align-items: center;
+  gap: 3px;
   white-space: nowrap;
+}
+.fy-board-seg[data-seg='people'],
+.fy-board-seg[data-seg='lane'],
+.fy-board-seg[data-seg='machine'] {
+  display: block;
+  min-width: 0;
+  flex: 0 100 auto;
+  text-overflow: ellipsis;
+}
+.fy-board-icon {
+  flex: none;
 }
 .fy-board-seg + .fy-board-seg::before {
   content: '·';
-  margin: 0 4px;
+  flex: none;
+  margin: 0 3px;
   color: var(--faint);
 }
 .fy-board-seg[data-seg='ref'] {
@@ -415,10 +439,6 @@
 .fy-board-seg[data-tone='accent'] {
   color: var(--accent);
 }
-.fy-board-card[data-density='side'] .fy-board-card__meta {
-  flex-wrap: nowrap;
-  overflow: hidden;
-}
 .fy-board-card__verdict {
   display: flex;
   flex: 1 1 100%;
@@ -427,10 +447,16 @@
 }
 .fy-board-verdict {
   display: inline-flex;
-  min-height: 22px;
+  min-width: 0;
+  min-height: 20px;
+  flex: 1 1 0;
   align-items: center;
+  justify-content: center;
   gap: 4px;
-  padding: 0 var(--gap-sm);
+  padding: 0 var(--gap-xs);
+  overflow: hidden;
+  line-height: 1.3;
+  white-space: nowrap;
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface);
@@ -476,7 +502,7 @@
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-panel);
   background: var(--surface);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.25);
+  box-shadow: var(--shadow-popover);
 }
 .fy-board-menu__item {
   display: flex;

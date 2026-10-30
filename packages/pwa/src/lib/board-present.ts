@@ -17,10 +17,29 @@ import { displayCallsign } from './callsign.ts';
 /** How a segment is coloured; `quiet` is the plain meta text. */
 type BoardTone = 'quiet' | 'ok' | 'warn' | 'err' | 'pend' | 'accent';
 
+/** The glyph a segment or count wears: the card draws it from the app's icon set, so no emoji font is needed. */
+export type BoardIconName =
+  | 'active'
+  | 'to-test'
+  | 'stale'
+  | 'waiting-on-you'
+  | 'waiting'
+  | 'orphaned'
+  | 'blocked'
+  | 'subs'
+  | 'pr-merged'
+  | 'pr-closed'
+  | 'pr-draft'
+  | 'pr-pass'
+  | 'pr-fail'
+  | 'pr-pending';
+
 export interface BoardSegment {
   /** Stable per kind, so a test and a style can name one. */
   readonly key: 'ref' | 'people' | 'activity' | 'pr' | 'blocked' | 'subs' | 'shipped' | 'machine';
   readonly text: string;
+  /** Drawn before the text, or `null`. */
+  readonly icon: BoardIconName | null;
   readonly tone: BoardTone;
   /** The full sentence behind the short text, for a tooltip and a screen reader. */
   readonly title: string;
@@ -66,31 +85,33 @@ export const peopleLabel = (task: Pick<BoardTaskView, 'owner' | 'assignee'>, nam
 
 const activitySegment = (task: BoardTaskView, category: LaneCategory | null, now: number): BoardSegment => {
   const age = ageLabel(task.lastTouchedAt, now);
-  const make = (text: string, tone: BoardTone, title: string): BoardSegment => ({
+  const make = (text: string, icon: BoardIconName | null, tone: BoardTone, title: string): BoardSegment => ({
     key: 'activity',
     text,
+    icon,
     tone,
     title,
     optional: false,
   });
-  if (category === 'verify') return make('🧪 to test', 'accent', 'Waiting for you to try it');
+  if (category === 'verify') return make('to test', 'to-test', 'accent', 'Waiting for you to try it');
   switch (task.activity) {
     case 'active':
-      return make(age === null ? '● active' : `● ${age}`, 'ok', 'A ferret is working on it now');
+      return make(age === null ? 'active' : age, 'active', 'ok', 'A ferret is working on it now');
     case 'idle':
-      return make(age === null ? 'idle' : `idle ${age}`, 'quiet', 'Nobody is working on it right now');
+      return make(age === null ? 'idle' : `idle ${age}`, null, 'quiet', 'Nobody is working on it right now');
     case 'stale':
       return make(
-        age === null ? '▲ stale' : `▲ stale ${age}`,
+        age === null ? 'stale' : `stale ${age}`,
+        'stale',
         'warn',
         'Idle for longer than its lane allows. Nudge it or move it.',
       );
     case 'waiting':
       return task.waitingOnOwner.length > 0
-        ? make('🚧 waiting on you', 'warn', 'A ferret is stopped until you answer')
-        : make('🚧 waiting', 'pend', 'Waiting on something outside the ferret');
+        ? make('waiting on you', 'waiting-on-you', 'warn', 'A ferret is stopped until you answer')
+        : make('waiting', 'waiting', 'pend', 'Waiting on something outside the ferret');
     case 'orphaned':
-      return make('⛔ orphaned', 'err', 'No ferret is left on it. Start one.');
+      return make('orphaned', 'orphaned', 'err', 'No ferret is left on it. Start one.');
   }
 };
 
@@ -109,20 +130,21 @@ const prSegment = (prs: readonly PrLink[]): BoardSegment | null => {
   const pr = headlinePr(prs);
   if (pr === null) return null;
   const more = prs.length > 1 ? ` +${prs.length - 1}` : '';
-  const make = (text: string, tone: BoardTone, title: string): BoardSegment => ({
+  const make = (text: string, icon: BoardIconName | null, tone: BoardTone, title: string): BoardSegment => ({
     key: 'pr',
     text: `${text}${more}`,
+    icon,
     tone,
     title: `${title} (${pr.repo}#${pr.number})`,
     optional: false,
   });
-  if (pr.state === 'merged') return make('PR merged', 'ok', 'Merged');
-  if (pr.state === 'closed') return make('PR closed', 'quiet', 'Closed without merging');
-  if (pr.draft) return make('PR draft', 'quiet', 'A draft PR');
-  if (pr.checks === 'failing') return make('PR ✗', 'err', 'CI is red');
-  if (pr.checks === 'pending') return make('PR ⏳', 'pend', 'CI is running');
-  if (pr.checks === 'passing') return make('PR ✓', 'ok', 'CI is green');
-  return make('PR', 'quiet', 'A PR is linked');
+  if (pr.state === 'merged') return make('PR', 'pr-merged', 'ok', 'Merged');
+  if (pr.state === 'closed') return make('PR', 'pr-closed', 'quiet', 'Closed without merging');
+  if (pr.draft) return make('PR', 'pr-draft', 'quiet', 'A draft PR');
+  if (pr.checks === 'failing') return make('PR', 'pr-fail', 'err', 'CI is red');
+  if (pr.checks === 'pending') return make('PR', 'pr-pending', 'pend', 'CI is running');
+  if (pr.checks === 'passing') return make('PR', 'pr-pass', 'ok', 'CI is green');
+  return make('PR', null, 'quiet', 'A PR is linked');
 };
 
 /** How many of the children are finished: closed ones, of those not dropped. */
@@ -143,6 +165,7 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
     {
       key: 'ref',
       text: formatTaskRef({ id: task.id }),
+      icon: null,
       tone: 'quiet',
       title: `${task.kind} ${formatTaskRef({ id: task.id })}`,
       optional: false,
@@ -150,6 +173,7 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
     {
       key: 'people',
       text: peopleLabel(task, context.names),
+      icon: null,
       tone: 'quiet',
       title: `Owned by ${context.names(task.owner)}${
         task.assignee === null || task.assignee === task.owner ? '' : `, assigned to ${context.names(task.assignee)}`
@@ -163,17 +187,18 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
   if (task.blockedBy.length > 0) {
     segments.push({
       key: 'blocked',
-      text: `⛓ ${task.blockedBy.length}`,
+      text: String(task.blockedBy.length),
+      icon: 'blocked',
       tone: 'warn',
       title: `Blocked by ${task.blockedBy.map(ref => formatTaskRef(ref)).join(', ')}`,
       optional: false,
     });
   }
   if (task.rollup.children > 0) {
-    const active = task.rollup.active > 0 ? ' ●' : '';
     segments.push({
       key: 'subs',
-      text: `subs ${subsDone(task)}/${task.rollup.children}${active}`,
+      text: `${subsDone(task)}/${task.rollup.children}`,
+      icon: 'subs',
       tone: task.rollup.active > 0 ? 'ok' : 'quiet',
       title: `${subsDone(task)} of ${task.rollup.children} sub-tasks are closed, ${task.rollup.active} working now`,
       optional: false,
@@ -183,6 +208,7 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
     segments.push({
       key: 'shipped',
       text: `in ${task.shippedIn.version}`,
+      icon: null,
       tone: 'accent',
       title: `Shipped in ${task.shippedIn.version}`,
       optional: true,
@@ -192,6 +218,7 @@ export const cardSegments = (task: BoardTaskView, context: SegmentContext): read
     segments.push({
       key: 'machine',
       text: context.machine,
+      icon: null,
       tone: 'quiet',
       title: `On ${context.machine}`,
       optional: true,

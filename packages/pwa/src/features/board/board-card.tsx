@@ -13,10 +13,11 @@
 import type { LaneCategory } from '@ferretry/protocol';
 import { Check, ChevronLeft, EllipsisVertical, X } from 'lucide-react';
 import { type CSSProperties, type KeyboardEvent, useId, useState } from 'react';
-import { type FerretNames, cardSegments } from '../../lib/board-present.ts';
-import type { BoardCardOf } from '../../lib/board-view.ts';
 import type { MoveChoice } from '../../lib/board-move.ts';
+import { cardSegments, type FerretNames } from '../../lib/board-present.ts';
+import type { BoardCardOf } from '../../lib/board-view.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
+import { BoardIcon } from './board-icons.tsx';
 
 export type BoardDensity = 'page' | 'side';
 
@@ -119,6 +120,7 @@ export function BoardCard({
               key={segment.key}
               title={segment.title}
             >
+              {segment.icon === null ? null : <BoardIcon name={segment.icon} />}
               {segment.text}
             </span>
           ))}
@@ -141,10 +143,11 @@ function ToTestActions({ card, moves }: { readonly card: BoardCardOf; readonly m
           className="fy-board-verdict"
           data-verdict="works"
           onClick={() => moves.onMove(card, closeLaneId)}
+          title="Works → Close"
           type="button"
         >
           <Check aria-hidden="true" size={11} />
-          Works → Close
+          Close
         </button>
       )}
       {reworkLaneId === null ? null : (
@@ -152,6 +155,7 @@ function ToTestActions({ card, moves }: { readonly card: BoardCardOf; readonly m
           className="fy-board-verdict"
           data-verdict="not-good"
           onClick={() => moves.onMove(card, reworkLaneId)}
+          title="Not good → back for rework"
           type="button"
         >
           <X aria-hidden="true" size={11} />

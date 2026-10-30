@@ -25,6 +25,7 @@ import {
   sortRows,
 } from '../../lib/board-view.ts';
 import { BoardCard, type BoardCardMoves } from './board-card.tsx';
+import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
 
 /** What every view needs to draw and wire a card. */
@@ -129,7 +130,7 @@ function KanbanBoard({
           category="closed"
           count={0}
           density="page"
-          name="✓ Works → Close"
+          name="Works → Close"
           onDropCard={() => onDropCard(group.key, closeLane)}
           variant="target"
         />
@@ -263,7 +264,9 @@ export function DependenciesView({ model, env }: DependenciesViewProps) {
           </ul>
           <p className="fy-board-dep__line">
             {card.task.blockedBy.length === 0 ? null : (
-              <span data-dep="blocked-by">⛓ waits on {card.task.blockedBy.map(formatTaskRef).join(', ')}</span>
+              <span data-dep="blocked-by">
+                <BoardIcon name="blocked" /> waits on {card.task.blockedBy.map(formatTaskRef).join(', ')}
+              </span>
             )}
             {card.task.blocks.length === 0 ? null : (
               <span data-dep="blocks">unblocks {card.task.blocks.map(formatTaskRef).join(', ')}</span>

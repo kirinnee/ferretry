@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { BoardCountsBar } from '../../../src/features/board/board-counts.tsx';
-import { type BoardFilterChoices, BoardFilterBar } from '../../../src/features/board/board-filters.tsx';
+import { BoardFilterBar, type BoardFilterChoices } from '../../../src/features/board/board-filters.tsx';
 import { type BoardFilters, NO_BOARD_FILTERS } from '../../../src/lib/board-model.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { laptop, PROJECT, workstation } from '../board-support.ts';
@@ -26,8 +26,8 @@ describe('BoardCountsBar', () => {
       <BoardCountsBar activity={null} counts={counts} onActivity={() => undefined} onOpenArchive={() => undefined} />,
     );
     const root = view.container;
-    expect(root.querySelector('[data-count="to_test"]')?.textContent).toBe('🧪 To test3');
-    expect(root.querySelector('[data-count="waiting_on_you"]')?.textContent).toBe('🚧 Waiting on you4');
+    expect(root.querySelector('[data-count="to_test"]')?.textContent).toBe('To test3');
+    expect(root.querySelector('[data-count="waiting_on_you"]')?.textContent).toBe('Waiting on you4');
     expect(root.querySelector('[data-count="stale"]')?.getAttribute('aria-label')).toBe('2 stale');
     expect(root.querySelector('[data-count="closed"]')?.textContent).toBe('7 closed hidden');
   });

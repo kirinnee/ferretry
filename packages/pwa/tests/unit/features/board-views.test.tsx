@@ -7,9 +7,9 @@ import {
   ListView,
   TreeView,
 } from '../../../src/features/board/board-views.tsx';
+import type { BoardModel } from '../../../src/lib/board-model.ts';
 import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { cardPlaces } from '../../../src/lib/board-view.ts';
-import type { BoardModel } from '../../../src/lib/board-model.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { boardModelOf, card, OTHER_PROJECT } from '../board-support.ts';
 
@@ -160,7 +160,7 @@ describe('KanbanView', () => {
       />,
     );
     const target = must(view.container.querySelector<HTMLElement>('[data-variant="target"]'), 'the target');
-    expect(target.getAttribute('aria-label')).toBe('✓ Works → Close, 0 cards');
+    expect(target.getAttribute('aria-label')).toBe('Works → Close, 0 cards');
     const drop = new Event('drop', { bubbles: true, cancelable: true });
     Object.defineProperty(drop, 'dataTransfer', { value: {} });
     await interact(() => target.dispatchEvent(drop));
@@ -232,7 +232,7 @@ describe('DependenciesView', () => {
     ]);
     view = await mount(<DependenciesView env={envOf(model)} model={model} />);
     expect(ids(view.container)).toEqual(['F1', 'F2']);
-    expect(view.container.querySelector('[data-dep="blocked-by"]')?.textContent).toBe('⛓ waits on &F2, &F3');
+    expect(view.container.querySelector('[data-dep="blocked-by"]')?.textContent).toBe(' waits on &F2, &F3');
     expect(view.container.querySelector('[data-dep="blocks"]')?.textContent).toBe('unblocks &F1');
   });
 
