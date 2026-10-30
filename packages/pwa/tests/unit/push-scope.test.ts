@@ -3,6 +3,7 @@
  * say and open (docs/cross-daemon.md §4a–§4c).
  */
 import { describe, expect, it, test } from 'bun:test';
+import { attentionTargetFromSearch } from '../../src/lib/attention-inbox.ts';
 import { attentionNotificationPath, type PushNotificationPayload } from '@ferretry/protocol';
 import { daemonConnection, daemonId } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
@@ -138,6 +139,18 @@ describe('notificationUrl (§4a: only this site; §4c: only this machine)', () =
     expect(notificationUrl('/session/../../d/other', ORIGIN, WORK)).toBe(home);
     // The app-wide worker knows no machine, so a relative link opens nothing but the app.
     expect(notificationUrl(link, ORIGIN, null)).toBe(`${ORIGIN}/app/`);
+  });
+
+  it('opens at the item whichever link parameter the daemon spelled, agenda or attention', () => {
+    const home = `${ORIGIN}/d/sha256%3Awork%2Fone`;
+    expect(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?attention=A3`);
+    expect(notificationUrl('/session/s1?agenda=A3', ORIGIN, WORK, 's1')).toBe(`${home}/session/s1?agenda=A3`);
+    expect(
+      attentionTargetFromSearch(new URL(notificationUrl('/session/s1?agenda=A3', ORIGIN, WORK, 's1')).search),
+    ).toBe('A3');
+    expect(
+      attentionTargetFromSearch(new URL(notificationUrl('/session/s1?attention=A3', ORIGIN, WORK, 's1')).search),
+    ).toBe('A3');
   });
 
   it('opens the conversation a push is about when its daemon named no page (before #768, `fy attention notify`)', () => {
