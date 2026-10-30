@@ -763,9 +763,11 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql(
       '`--premise` = situation, `--context` = why now, `--decided` = settled, `--still-open` = left',
     );
-    should(text).containEql('`--body`: a SMALL diagram (fy-render svg|html|mermaid)');
+    should(text).containEql('`--body`: SMALL diagram (fy-render svg|html|mermaid)');
     should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
-    should(text).containEql('Choice: 2–3 `--option`s with `--recommend <pick> --recommend-why <line>`');
+    // Fields are Markdown, and each option is a short letter-able label plus a one-line reason.
+    should(text).containEql('Fields are Markdown: `code` for names/commands, **bold** key point.');
+    should(text).containEql('Choice: 2–3 `--option "Label: why"`; `--recommend <label> --recommend-why <line>`');
     should(text).containEql('To-do: `--step "<md>"`');
     // When it is needed: it blocks now, will block later, or by a time.
     should(text).containEql('`--blocking`');
@@ -774,12 +776,11 @@ describe('AGENDA_INSTRUCTION', () => {
     // The answer and discussion loops, then resolving and reading.
     should(text).containEql('"[answer to !A3 …]" is the answer');
     should(text).containEql('"[re !A3 …]" is chat.');
-    // Every item stays current, in the turn the facts changed: edited, closed or handed back, never left stale.
+    // Every item stays current, in the turn the facts changed: edited, closed or handed back.
     should(text).containEql('KEEP ITEMS CURRENT this turn');
     should(text).containEql('changed or discussed → `zz agenda edit <id>`');
     should(text).containEql('settled → `zz agenda done <id>`');
     should(text).containEql('still theirs → `zz agenda surface <id>`');
-    should(text).containEql('Never stale.');
     should(text).containEql('`zz agenda ls`');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');

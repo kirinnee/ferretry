@@ -15,12 +15,7 @@ import {
   agendaLedgerIds,
   useAgenda,
 } from '../../../src/features/agenda/agenda.tsx';
-import {
-  AgendaDrawer,
-  AgendaLine,
-  AgendaPanel,
-  AgendaReferenceChips,
-} from '../../../src/features/agenda/agenda-line.tsx';
+import { AgendaDrawer, AgendaLine, AgendaPanel } from '../../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../../src/features/agenda/agenda-row.tsx';
 import { useAgendaDock } from '../../../src/features/agenda/agenda-collapse.ts';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
@@ -474,50 +469,50 @@ describe('a request to show an item (`?attention=A5`)', () => {
   });
 });
 
-describe('the "about" chip', () => {
-  const chips = (view: ReturnType<typeof render>): readonly string[] =>
-    view.root
-      .findAllByType(AgendaReferenceChips)
-      .flatMap(entry => entry.props.items.map((it: { id: string }) => it.id));
+describe('the open item and the composer', () => {
+  test('the next message is about the open item, said in the placeholder, and follows the card to the next one', () => {
+    // Arrange
+    const host = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AgendaId, seq: 1 } });
 
-  test('rides the composer for the open item, and follows the card to the next one', () => {
-    const view = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AgendaId, seq: 1 } });
+    // Assert
     expect(live().references()).toEqual(['A3']);
-    expect(chips(view)).toEqual(['A3']);
-    run(() => view.root.findByType(AgendaItemView).props.onNext());
+    expect(live().placeholder).toBe('Reply about !A3…');
+    run(() => host.root.findByType(AgendaItemView).props.onNext());
     expect(live().references()).toEqual(['A2']);
-    expect(chips(view)).toEqual(['A2']);
+    expect(live().placeholder).toBe('Reply about !A2…');
   });
 
-  test('is absent while no item is open', () => {
-    const view = mount({ snapshot: board(MIXED) });
+  test('says nothing while no item is open', () => {
+    mount({ snapshot: board(MIXED) });
     expect(live().references()).toEqual([]);
-    expect(chips(view)).toEqual([]);
+    expect(live().placeholder).toBeUndefined();
   });
 
-  test('× means plain chat: the chip goes, the view stays, and the next card is about itself again', () => {
-    const view = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AgendaId, seq: 1 } });
-    run(() => view.root.findByType(AgendaReferenceChips).props.onRemove('A3'));
-    expect(live().references()).toEqual([]);
-    expect(chips(view)).toEqual([]);
-    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(1);
-    run(() => view.root.findByType(AgendaItemView).props.onNext());
-    expect(live().references()).toEqual(['A2']);
+  test('hides the pill while an item is open and draws it again once the view closes', () => {
+    // Arrange
+    const host = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AgendaId, seq: 1 } });
+
+    // Assert
+    expect(host.root.findAllByType(AgendaLine).every(line => line.props.counts === undefined)).toBe(true);
+    expect(host.root.findAll(node => node.props?.['data-agenda-chip'] !== undefined)).toHaveLength(0);
+    run(() => host.root.findByType(AgendaItemView).props.onClose());
+    expect(host.root.findByType(AgendaLine).props.counts).toBeDefined();
+    expect(live().placeholder).toBeUndefined();
   });
 
-  test('a message from the composer closes the view and spends the chip', () => {
-    const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
+  test('a message from the composer closes the view and spends the reference', () => {
+    const host = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
     expect(live().covered).toBe(true);
     run(() => live().composer.onSent());
-    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(0);
+    expect(host.root.findAllByType(AgendaItemView)).toHaveLength(0);
     expect(live().covered).toBe(false);
     expect(live().references()).toEqual([]);
-    expect(chips(view)).toEqual([]);
+    expect(live().placeholder).toBeUndefined();
   });
 
   test('is dropped when its item leaves the agenda', () => {
-    const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
-    run(() => view.update(<Host snapshot={board([item('A3')])} />));
+    const host = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
+    run(() => host.update(<Host snapshot={board([item('A3')])} />));
     expect(live().references()).toEqual([]);
   });
 });

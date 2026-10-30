@@ -6,15 +6,13 @@
  *   narrow. The row never wraps, and has no left half when nothing is running;
  * - the DRAWER the pill opens: a raised sheet above the chat, over a scrim, with its own header and scroll, one
  *   row (one button) per item;
- * - the removable "re: <title> ✕" CHIPS of the items the next message is about;
  * - the DOCKED PANEL a wide screen can keep beside the chat instead of the drawer.
  */
 
-import type { AgendaId, AgendaItem } from '@ferretry/protocol';
+import type { AgendaItem } from '@ferretry/protocol';
 import { ChevronUp, LoaderCircle, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { type AgendaCounts, agendaSegments } from '../../lib/agenda-chat.ts';
-import { agendaHeading } from './agenda-delivery.tsx';
 import { AgendaRow } from './agenda-row.tsx';
 
 interface AgendaSending {
@@ -265,34 +263,4 @@ export function AgendaPanel({ onClose, ...rows }: AgendaPanelProps) {
 function AgendaPanelBody(rows: AgendaRowsProps) {
   if (rows.items.length === 0) return <p className="fy-agenda-panel__empty">Nothing on the agenda.</p>;
   return <AgendaRows {...rows} />;
-}
-
-export interface AgendaReferenceChipsProps {
-  readonly items: readonly AgendaItem[];
-  readonly onRemove: (id: AgendaId) => void;
-}
-
-/** "about !A47 · <title> ✕" for each item the next message is about. Nothing drawn when there are none. */
-export function AgendaReferenceChips({ items, onRemove }: AgendaReferenceChipsProps) {
-  if (items.length === 0) return null;
-  return (
-    <ul aria-label="This message is about" className="fy-agenda-chips" data-agenda-chips="">
-      {items.map(item => (
-        <li className="fy-agenda-ref" data-agenda-chip={item.id} key={item.id}>
-          <span className="fy-agenda-ref__lead">about</span>
-          <span className="fy-agenda-ref__id">{`!${item.id}`}</span>
-          <span className="fy-agenda-ref__title">{agendaHeading(item)}</span>
-          <button
-            aria-label={`Stop replying about ${agendaHeading(item)}`}
-            className="fy-agenda-ref__clear"
-            data-agenda-chip-clear={item.id}
-            onClick={() => onRemove(item.id)}
-            type="button"
-          >
-            <X aria-hidden="true" size={14} />
-          </button>
-        </li>
-      ))}
-    </ul>
-  );
 }

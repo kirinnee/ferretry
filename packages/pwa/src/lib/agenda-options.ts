@@ -1,0 +1,67 @@
+/**
+ * THE OPTIONS OF AN AGENDA ITEM, LETTERED: "A — <label>", then its explanation. The Options section and the quick
+ * replies draw from this one list, so a button that says "B" and the section that says "B — Keep both" can never
+ * disagree. An option's explanation is the item's `optionDetails` entry (Markdown) when it has one, else the
+ * option's own one-line `description`. Pure.
+ */
+
+import type { AgendaAskOption, AgendaItem } from '@ferretry/protocol';
+import { singleAgendaQuestion } from '@ferretry/protocol';
+
+export interface LetteredOption {
+  readonly letter: string;
+  readonly label: string;
+  /** Markdown: what picking it means and why. */
+  readonly detail: string | undefined;
+  readonly recommended: boolean;
+}
+
+const same = (a: string, b: string | undefined): boolean =>
+  b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** A, B, C… in display order. An item has at most twelve options per question. */
+export const optionLetter = (index: number): string => String.fromCharCode(65 + index);
+
+/** The options in display order, each with its letter, its explanation and whether it is the recommended one. */
+export const letteredOptions = (
+  options: readonly AgendaAskOption[],
+  details: AgendaItem['optionDetails'],
+  recommended: string | undefined,
+): readonly LetteredOption[] =>
+  options.map((option, index) => ({
+    letter: optionLetter(index),
+    label: option.label,
+    detail: details?.find(entry => same(entry.label, option.label))?.detail ?? option.description,
+    recommended: same(option.label, recommended),
+  }));
+
+/** The options a lone question or a choice ask offers; none for a several-question item (each question has its own). */
+export const itemOptions = (item: AgendaItem): readonly AgendaAskOption[] => {
+  if (item.ask?.kind === 'multiple-choice') return item.ask.options;
+  return singleAgendaQuestion(item)?.options ?? [];
+};
+
+/** The letter of an option label among `options`, or `undefined` when the label is not one of them. */
+export const letterOf = (options: readonly AgendaAskOption[], label: string): string | undefined => {
+  const at = options.findIndex(option => same(option.label, label));
+  return at < 0 ? undefined : optionLetter(at);
+};
+
+/** A label this short is its own button text; a longer one is drawn as its letter. */
+const SHORT_LABEL_WORDS = 2;
+
+/**
+ * What a quick-reply button says: the label when it is one or two words ("Looks good"), else its letter. A label
+ * too long with no letter is left whole — the row clips it, and its full text is the accessible name.
+ */
+export const shortLabel = (label: string, letter: string | undefined): string => {
+  const words = label.trim().split(/\s+/u).length;
+  return words <= SHORT_LABEL_WORDS || letter === undefined ? label : letter;
+};
+
+/**
+ * Whether the Options section earns its place: some option says more than its label, or some quick reply is
+ * drawn as a bare letter that the section has to explain. A plain "Yes / No" would only repeat its buttons.
+ */
+export const needsOptionsSection = (options: readonly LetteredOption[]): boolean =>
+  options.some(option => option.detail !== undefined || shortLabel(option.label, option.letter) !== option.label);

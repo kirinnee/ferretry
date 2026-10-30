@@ -19,6 +19,7 @@ import {
   type AgendaUndelivered,
   agendaBriefOf,
   agendaNoticeProblems,
+  agendaOptionDetailProblems,
   MAX_AGENDA_HISTORY,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_REVISIONS,
@@ -407,6 +408,8 @@ function raise(ledger: AgendaLedger, command: RaiseCommand): AgendaMutation {
   }
   const noticeProblem = agendaNoticeProblems(request)[0];
   if (noticeProblem !== undefined) return failure('invalid', noticeProblem);
+  const optionDetailProblem = agendaOptionDetailProblems(request)[0];
+  if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   if (request.notice === true && actor.kind === 'human') {
     return failure('forbidden', 'only a ferret or the daemon sends a notice');
   }
@@ -516,6 +519,7 @@ function refreshStable(
     terms: request.terms,
     questions: request.questions,
     recommendation: request.recommendation,
+    optionDetails: request.optionDetails,
     impact: request.impact,
     urgency: request.urgency,
     blockingNow: request.blockingNow,
@@ -807,6 +811,7 @@ const EDITABLE_FIELDS = [
   'terms',
   'questions',
   'recommendation',
+  'optionDetails',
   'impact',
   'urgency',
   'blockingNow',
@@ -853,6 +858,11 @@ function edit(ledger: AgendaLedger, command: EditCommand): AgendaMutation {
   if (patch.questions !== undefined && questionShape(patch.questions) !== questionShape(target.item.questions)) {
     return failure('invalid', 'questions may be reworded but not added, removed or given other options');
   }
+  const optionDetailProblem = agendaOptionDetailProblems({
+    ...target.item,
+    ...(patch.optionDetails === undefined ? {} : { optionDetails: patch.optionDetails }),
+  })[0];
+  if (optionDetailProblem !== undefined) return failure('invalid', optionDetailProblem);
   const changed = EDITABLE_FIELDS.filter(
     field =>
       clears.some(cleared => cleared === field) ||

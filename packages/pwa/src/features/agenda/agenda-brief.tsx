@@ -28,45 +28,41 @@ import type {
 import { agendaCardKind, recommendedAgendaOption } from '@ferretry/protocol';
 import { Check, ChevronRight, ExternalLink } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { ChatProse } from '../../components/chat-prose.tsx';
+import {
+  itemOptions,
+  type LetteredOption,
+  letteredOptions,
+  needsOptionsSection,
+  shortLabel,
+} from '../../lib/agenda-options.ts';
 import { bulletPoints, type RevisionHighlight } from '../../lib/agenda-revisions.ts';
 
 type AgendaProse = (text: string) => ReactNode;
 
 export { bulletPoints };
 
-const EMPHASIS = /(\*\*[^*\n]+\*\*|\*[^*\s][^*\n]*\*|`[^`\n]+`)/u;
+/** The chat's one Markdown renderer: a brief drawn without a host's own (the board, the history) reads like the chat. */
+const markdownProse: AgendaProse = text => <ChatProse text={text} />;
 
 /**
- * Plain text with its inline emphasis drawn: `**bold**` (a key number), `*italic*` and `code`. Anything
- * else stays text — React escapes it — so a ferret's point never injects markup.
+ * Text drawn in point form: a bullet list when it is written as bullets, a paragraph otherwise. Every paragraph and
+ * every bullet is Markdown, drawn by the same renderer as the chat (`code`, **bold**, links, fy-render blocks).
  */
-function renderEmphasis(text: string): ReactNode {
-  return text.split(EMPHASIS).map((part, index) => {
-    // biome-ignore lint/suspicious/noArrayIndexKey: the pieces of one line keep their order
-    const key = index;
-    if (part.length > 4 && part.startsWith('**') && part.endsWith('**'))
-      return <strong key={key}>{part.slice(2, -2)}</strong>;
-    if (part.length > 2 && part.startsWith('*') && part.endsWith('*')) return <em key={key}>{part.slice(1, -1)}</em>;
-    if (part.length > 2 && part.startsWith('`') && part.endsWith('`'))
-      return <code key={key}>{part.slice(1, -1)}</code>;
-    return part;
-  });
-}
-
-/** Plain text drawn in point form: a bullet list when it is written as bullets, a paragraph otherwise. */
 export function PointForm({
   text,
   className = '',
   fresh,
+  renderProse = markdownProse,
 }: {
   readonly text: string;
   readonly className?: string;
   /** Points the last edit added or reworded: drawn highlighted, and said "new" in words. */
   readonly fresh?: ReadonlySet<string> | undefined;
+  readonly renderProse?: AgendaProse;
 }) {
   const points = bulletPoints(text);
-  if (points === null)
-    return <p className={`${className} m-0 whitespace-pre-wrap break-words`.trim()}>{renderEmphasis(text)}</p>;
+  if (points === null) return <div className={`${className} min-w-0 break-words`.trim()}>{renderProse(text)}</div>;
   return (
     <ul className={`fy-attn-points ${className}`.trim()}>
       {points.map((point, index) => {
@@ -75,7 +71,7 @@ export function PointForm({
           // biome-ignore lint/suspicious/noArrayIndexKey: points repeat; their order is their identity
           <li data-agenda-changed={isNew ? 'new' : undefined} key={index}>
             {isNew ? <NewMarker word="new" /> : null}
-            {renderEmphasis(point)}
+            {renderProse(point)}
           </li>
         );
       })}
@@ -228,63 +224,123 @@ function AgendaLinkRow({ link, renderProse }: { readonly link: AgendaLink; reado
   );
 }
 
+/** "A — Keep both", then what it means (Markdown), the recommended one marked. */
+function OptionsList({
+  options,
+  renderProse,
+}: {
+  readonly options: readonly LetteredOption[];
+  readonly renderProse: AgendaProse;
+}) {
+  return (
+    <ul className="fy-attn-options">
+      {options.map(option => (
+        <li className="fy-attn-options__row" data-agenda-option-detail={option.label} key={option.label}>
+          <span className="fy-attn-options__head">
+            <strong>
+              {option.letter} — {option.label}
+            </strong>
+            {option.recommended ? <RecommendedBadge /> : null}
+          </span>
+          {option.detail === undefined ? null : (
+            <div className="fy-attn-options__what">{renderProse(option.detail)}</div>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/** One short button of a question's row: its letter (or a label of one or two words); the full label names it. */
+function PickButton({
+  option,
+  pressed,
+  disabled,
+  onPick,
+}: {
+  readonly option: LetteredOption;
+  readonly pressed: boolean;
+  readonly disabled: boolean;
+  readonly onPick: () => void;
+}) {
+  return (
+    <button
+      aria-label={option.recommended ? `${option.label}, recommended` : option.label}
+      aria-pressed={pressed}
+      className="kt-attn-option fy-attn-q__option"
+      data-agenda-pick={option.label}
+      data-recommended={option.recommended || undefined}
+      disabled={disabled}
+      onClick={onPick}
+      title={option.label}
+      type="button"
+    >
+      {option.recommended ? <Check aria-hidden="true" size={12} /> : null}
+      <span className="fy-attn-q__option-text">{shortLabel(option.label, option.letter)}</span>
+    </button>
+  );
+}
+
 function QuestionPicker({
   question,
   index,
   picker,
+  details,
+  renderProse,
 }: {
   readonly question: AgendaQuestion;
   readonly index: number;
   readonly picker: QuestionAnswers;
+  readonly details: AgendaItem['optionDetails'];
+  readonly renderProse: AgendaProse;
 }) {
+  if (question.options === undefined) return null;
   const answer = picker.answers[index] ?? '';
-  const recommended = question.recommended?.trim();
+  const options = letteredOptions(question.options, details, question.recommended?.trim());
   return (
     <div className="fy-attn-q__picker">
-      {question.options === undefined ? null : (
-        <fieldset aria-label={`Options for question ${index + 1}`} className="fy-attn-q__options">
-          {question.options.map(option => (
-            <button
-              aria-pressed={answer === option.label}
-              className="kt-attn-option fy-attn-q__option"
-              data-agenda-pick={option.label}
-              disabled={picker.disabled}
-              key={option.label}
-              onClick={() => picker.onAnswer(index, answer === option.label ? '' : option.label)}
-              type="button"
-            >
-              <span className="kt-attn-option__body">
-                <span className="kt-attn-option__label">{option.label}</span>
-                {option.description === undefined ? null : (
-                  <span className="kt-attn-option__hint">{option.description}</span>
-                )}
-              </span>
-              {recommended === option.label ? <RecommendedBadge /> : null}
-            </button>
-          ))}
-        </fieldset>
-      )}
+      <fieldset aria-label={`Options for question ${index + 1}`} className="fy-attn-q__options">
+        {options.map(option => (
+          <PickButton
+            disabled={picker.disabled}
+            key={option.label}
+            onPick={() => picker.onAnswer(index, answer === option.label ? '' : option.label)}
+            option={option}
+            pressed={answer === option.label}
+          />
+        ))}
+      </fieldset>
+      {needsOptionsSection(options) ? <OptionsList options={options} renderProse={renderProse} /> : null}
     </div>
   );
 }
 
 /** The line under a question: why the pick, or the pick itself when it has no button to be tagged on. */
-function QuestionReason({ question, showWhy }: { readonly question: AgendaQuestion; readonly showWhy: boolean }) {
+function QuestionReason({
+  question,
+  showWhy,
+  renderProse,
+}: {
+  readonly question: AgendaQuestion;
+  readonly showWhy: boolean;
+  readonly renderProse: AgendaProse;
+}) {
   const recommended = question.recommended?.trim();
   if (recommended === undefined || !showWhy) return null;
   const onButton = question.options?.some(option => option.label === recommended) === true;
-  if (onButton && question.why === undefined) return null;
+  if (onButton) {
+    if (question.why === undefined) return null;
+    return (
+      <div className="fy-attn-q__why" data-agenda-question-why="">
+        {renderProse(question.why)}
+      </div>
+    );
+  }
   return (
-    <p className="fy-attn-q__why" data-agenda-question-why="">
-      {onButton ? (
-        question.why
-      ) : (
-        <>
-          <strong>Suggested:</strong> {recommended}
-          {question.why === undefined ? null : <> — {question.why}</>}
-        </>
-      )}
-    </p>
+    <div className="fy-attn-q__why" data-agenda-question-why="">
+      <strong>Suggested:</strong> {recommended}
+      {question.why === undefined ? null : <> — {question.why}</>}
+    </div>
   );
 }
 
@@ -295,6 +351,8 @@ function Question({
   picker,
   showWhy,
   showAsk = true,
+  details,
+  renderProse,
 }: {
   readonly question: AgendaQuestion;
   readonly index: number;
@@ -304,16 +362,21 @@ function Question({
   readonly showWhy: boolean;
   /** False where the question's text is already drawn (a folded row's summary): it is said once. */
   readonly showAsk?: boolean;
+  readonly details: AgendaItem['optionDetails'];
+  readonly renderProse: AgendaProse;
 }) {
   return (
     <>
       {showAsk ? (
-        <p className="fy-attn-q__ask">
-          {numbered ? <span className="fy-attn-q__n">{index + 1}.</span> : null} {question.question}
-        </p>
+        <div className="fy-attn-q__ask" data-numbered={numbered || undefined}>
+          {numbered ? <span className="fy-attn-q__n">{index + 1}.</span> : null}
+          <div className="min-w-0">{renderProse(question.question)}</div>
+        </div>
       ) : null}
-      {picker === undefined ? null : <QuestionPicker index={index} picker={picker} question={question} />}
-      <QuestionReason question={question} showWhy={showWhy} />
+      {picker === undefined ? null : (
+        <QuestionPicker details={details} index={index} picker={picker} question={question} renderProse={renderProse} />
+      )}
+      <QuestionReason question={question} renderProse={renderProse} showWhy={showWhy} />
     </>
   );
 }
@@ -361,16 +424,6 @@ export interface AgendaBriefProps {
   readonly highlight?: RevisionHighlight;
 }
 
-/** The options of a choice, when at least one says what happens if it is picked: the point of listing them. */
-const describedOptions = (
-  item: AgendaItem,
-  several: boolean,
-): readonly { readonly label: string; readonly description?: string | undefined }[] => {
-  if (several) return [];
-  const options = item.ask?.kind === 'multiple-choice' ? item.ask.options : (item.questions?.[0]?.options ?? []);
-  return options.some(option => option.description !== undefined) ? options : [];
-};
-
 /** The brief's sections, in order. Nothing for an item with none, so an old item stays minimal. */
 export function AgendaBriefSections({
   item,
@@ -401,8 +454,9 @@ export function AgendaBriefSections({
   const several = all.length > 1;
   const questions =
     asDetail || (askShown && !several && picker === undefined) || (asCard && picker === undefined) ? [] : all;
-  const options = asCard ? [] : describedOptions(item, several);
   const pick = recommendedAgendaOption(item);
+  const lettered = asCard || several ? [] : letteredOptions(itemOptions(item), item.optionDetails, pick);
+  const options = needsOptionsSection(lettered) ? lettered : [];
   const termsLine = asCard ? null : (item.terms ?? null);
   // The board folds the item's own recommendation. A card's answer bar says it under the options, so a card
   // draws a section only when it is handed one — the per-question card, whose bar has no options to tag.
@@ -417,9 +471,9 @@ export function AgendaBriefSections({
     asDetail || ((ask === undefined || heading === null) && questions.length === 0) ? null : (
       <Section fold={fold} name="questions" open title={heading ?? askHeading(item, several)}>
         {ask === undefined || heading === null ? null : (
-          <p className="fy-attn-card__ask" data-agenda-ask="">
-            {ask}
-          </p>
+          <div className="fy-attn-card__ask" data-agenda-ask="">
+            {renderProse(ask)}
+          </div>
         )}
         {questions.length === 0 ? null : (
           <ol className="fy-attn-q" data-several={several || undefined}>
@@ -427,10 +481,12 @@ export function AgendaBriefSections({
               !fold || index === 0 || !several ? (
                 <li className="fy-attn-q__item" data-agenda-question={index} key={question.question}>
                   <Question
+                    details={item.optionDetails}
                     index={index}
                     numbered={several}
                     picker={picker}
                     question={question}
+                    renderProse={renderProse}
                     showWhy={picker !== undefined || !several}
                   />
                 </li>
@@ -446,10 +502,12 @@ export function AgendaBriefSections({
                     </summary>
                     <div className="fy-attn-sec__body">
                       <Question
+                        details={item.optionDetails}
                         index={index}
                         numbered={false}
                         picker={picker}
                         question={question}
+                        renderProse={renderProse}
                         showAsk={false}
                         showWhy={picker !== undefined}
                       />
@@ -465,14 +523,19 @@ export function AgendaBriefSections({
   return (
     <div className="fy-attn-secs" data-layout={fold ? 'fold' : 'open'}>
       {asDetail || ask === undefined || heading !== null ? null : (
-        <p className="fy-attn-card__ask" data-agenda-ask="">
-          {ask}
-        </p>
+        <div className="fy-attn-card__ask" data-agenda-ask="">
+          {renderProse(ask)}
+        </div>
       )}
       {fold ? null : questionsBlock}
       {premise === null ? null : (
         <Section changed={changedWhole('premise')} fold={fold} name="premise" open={open} title="What's going on">
-          <PointForm className="fy-attn-prose" fresh={highlight?.points.premise} text={premise} />
+          <PointForm
+            className="fy-attn-prose"
+            renderProse={renderProse}
+            fresh={highlight?.points.premise}
+            text={premise}
+          />
         </Section>
       )}
       {context === null ? null : (
@@ -483,11 +546,12 @@ export function AgendaBriefSections({
           open={open}
           title={contextHeading(context, fold)}
         >
-          {highlight?.points.context === undefined ? (
-            <div className="fy-attn-prose">{renderProse(context)}</div>
-          ) : (
-            <PointForm className="fy-attn-prose" fresh={highlight.points.context} text={context} />
-          )}
+          <PointForm
+            className="fy-attn-prose"
+            fresh={highlight?.points.context}
+            renderProse={renderProse}
+            text={context}
+          />
         </Section>
       )}
       {decided === null ? null : (
@@ -498,34 +562,34 @@ export function AgendaBriefSections({
           open={open}
           title={fold ? 'Already decided' : 'Decided so far'}
         >
-          <PointForm className="fy-attn-prose" fresh={highlight?.points.decided} text={decided} />
+          <PointForm
+            className="fy-attn-prose"
+            renderProse={renderProse}
+            fresh={highlight?.points.decided}
+            text={decided}
+          />
         </Section>
       )}
       {stillOpen === null ? null : (
         <Section changed={changedWhole('stillOpen')} fold={fold} name="still-open" open={open} title="Still open">
-          <PointForm className="fy-attn-prose" fresh={highlight?.points.stillOpen} text={stillOpen} />
+          <PointForm
+            className="fy-attn-prose"
+            renderProse={renderProse}
+            fresh={highlight?.points.stillOpen}
+            text={stillOpen}
+          />
         </Section>
       )}
       {fold ? questionsBlock : null}
       {options.length === 0 ? null : (
-        <Section fold={fold} name="options" open={open} title="Options">
-          <ul className="fy-attn-options">
-            {options.map(option => (
-              <li className="fy-attn-options__row" data-agenda-option-detail={option.label} key={option.label}>
-                <span className="fy-attn-options__text">
-                  <strong>{option.label}</strong>
-                  {option.description === undefined ? null : (
-                    <span className="fy-attn-options__what"> — {option.description}</span>
-                  )}
-                  {pick === option.label.trim() ? <RecommendedBadge /> : null}
-                </span>
-              </li>
-            ))}
-          </ul>
+        <Section changed={changedWhole('optionDetails')} fold={fold} name="options" open={open} title="Options">
+          <OptionsList options={options} renderProse={renderProse} />
           {reasonUnderOptions && recommendation?.why !== undefined ? (
-            <p className="fy-attn-options__why m-0" data-agenda-recommendation="">
-              {recommendation.why}
-            </p>
+            <div className="fy-attn-options__why" data-agenda-recommendation="">
+              {renderProse(
+                `**Why ${options.find(option => option.recommended)?.letter ?? 'this'}:** ${recommendation.why}`,
+              )}
+            </div>
           ) : null}
         </Section>
       )}
@@ -542,7 +606,9 @@ export function AgendaBriefSections({
       )}
       {asCard || (item.impact === undefined && item.urgency === undefined) ? null : (
         <Section fold={fold} name="impact" open={open} title="Impact">
-          {item.impact === undefined ? null : <PointForm className="fy-attn-prose" text={item.impact} />}
+          {item.impact === undefined ? null : (
+            <PointForm className="fy-attn-prose" renderProse={renderProse} text={item.impact} />
+          )}
           {item.urgency === undefined ? null : (
             <p className="fy-attn-prose">
               <strong>Urgency:</strong> {item.urgency}
@@ -563,7 +629,7 @@ export function AgendaBriefSections({
               {termsLine.map(entry => (
                 <tr key={entry.term}>
                   <th scope="row">{entry.term}</th>
-                  <td>{entry.meaning}</td>
+                  <td>{renderProse(entry.meaning)}</td>
                 </tr>
               ))}
             </tbody>

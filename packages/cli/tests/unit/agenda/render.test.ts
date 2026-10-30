@@ -156,6 +156,20 @@ describe('attention listing', () => {
     should(rich).not.containEql('why:');
   });
 
+  it('should print each option detail under the item', () => {
+    // Act
+    const rich = renderAgendaList(
+      snapshot([
+        humanItem('A1', 'Approve the plan', {
+          optionDetails: [{ label: 'Go', detail: 'Ship it **now**' }],
+        }),
+      ]),
+    );
+
+    // Assert
+    should(rich).containEql('      option "Go": Ship it **now**');
+  });
+
   it('should spell out what each ask kind wants from the human', () => {
     // Act
     const permission = renderAgendaList(snapshot([humanItem('A1', 'x', { ask: { kind: 'permission' } })]));

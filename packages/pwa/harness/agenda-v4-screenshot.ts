@@ -1,20 +1,22 @@
 /**
  * Screenshots and layout checks for the agenda in a ferret's chat: the drawer, an agenda item OPEN over the message
- * list (the composer stays below it, typeable), the "about" chip and a send that closes the view, a multi-question
- * item (as written without options, and with them), a permission item, a config change, a long item scrolled
- * mid-way, the thinking line beside the pill and, on a phone, the quick replies above a faked keyboard. Desktop
- * 1440 and phone 390, in the Studio and Neo-Brutalism themes, light and dark.
+ * list (only the composer stays below it, its placeholder saying "Reply about !A57…"), a multi-question item, a
+ * permission item, a config change, a long item scrolled mid-way, the thinking line beside the pill and, on a
+ * phone, the quick replies above a faked keyboard — plus the two v4 items: a Jaeda-style item with five lettered
+ * options, and a single choice whose options explain themselves in Markdown. Desktop 1440 and phone 390, in the
+ * Studio theme, light and dark.
  *
- *   bun harness/agenda-v3-screenshot.ts [outDir]   # writes <outDir>/agenda-v3-<name>-<phone|desktop>-<theme>.png
+ *   bun harness/agenda-v4-screenshot.ts [outDir]   # writes <outDir>/agenda-v4-<name>-<phone|desktop>-<theme>.png
  *
  * It bundles `agenda-page.tsx` (the real `useAgenda`, invented data), serves it on an ephemeral loopback
  * port, drives it with real clicks, and FAILS (after writing every picture) when: a page scrolls sideways; the
  * overlay's box is not the message list's box, or it covers any of the composer; the composer moves when an item
  * opens or closes; the top or the quick replies move when the body scrolls; the transcript loses its scroll
- * position; anything but the one body scrolls; no "about" chip rides the composer while an item is open, or a
- * send does not carry the item's reference, or × does not make it plain, or a send leaves the view open; a
- * question's text is drawn twice; the old "message box below" boilerplate is back; a drawer row holds more than
- * the row button; or a phone touch target is under 44px.
+ * position; anything but the one body scrolls; the agenda pill or an "about" chip is on screen while an item is
+ * open, or the composer does not say "Reply about …", or it is not directly under the card; the quick-reply row
+ * does not span the card or its buttons are not equal; a send does not carry the item's reference, or × does not
+ * return plain chat, or a send leaves the view open; a question's text is drawn twice; an option's Markdown is
+ * drawn as plain text; a drawer row holds more than the row button; or a phone touch target is under 44px.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -24,7 +26,7 @@ import { chromium, type Locator, type Page } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
-const buildDir = join(harnessDir, 'out', 'agenda-v3-build');
+const buildDir = join(harnessDir, 'out', 'agenda-v4-build');
 const outDir = resolve(process.argv[2] ?? '/tmp/claude-1000');
 
 const fail = (message: string): never => {
@@ -88,7 +90,7 @@ const PHONE = {
 const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 const NOW = new Date('2026-10-29T09:00:00.000Z');
 const LOCALE = { timezoneId: 'UTC', locale: 'en-US' } as const;
-const THEMES = ['studio-light', 'studio-dark', 'neo-light', 'neo-dark'] as const;
+const THEMES = ['studio-light', 'studio-dark'] as const;
 type Form = 'phone' | 'desktop';
 
 const violations: string[] = [];
@@ -136,7 +138,7 @@ const open = async (browserContext: { newPage: () => Promise<Page> }, theme: str
 const shot = async (page: Page, name: string, form: Form, theme: string): Promise<void> => {
   await page.mouse.move(1, 1);
   await page.waitForTimeout(120);
-  const path = join(outDir, `agenda-v3-${name}-${form}-${theme}.png`);
+  const path = join(outDir, `agenda-v4-${name}-${form}-${theme}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -187,7 +189,38 @@ const checkOverlay = async (page: Page, form: Form, label: string, composerRest:
   check(sideways <= 1, `${label}: the body scrolls sideways by ${sideways}px`);
   const topBox = await boxOf(page.locator('[data-agenda-top]'), 'top');
   check(topBox.y >= log.y - 1, `${label}: the top starts above the message list`);
-  check((await page.locator('[data-agenda-chip]').count()) === 1, `${label}: no "about" chip rides the composer`);
+  check((await page.locator('[data-agenda-chip]').count()) === 0, `${label}: an "about" chip is on screen`);
+  check((await page.locator('[data-agenda-line-toggle]').count()) === 0, `${label}: the agenda pill is on screen`);
+  const placeholder = await page.locator('[data-agenda-harness-input]').getAttribute('placeholder');
+  check(/^Reply about !A\d+…$/u.test(placeholder ?? ''), `${label}: the placeholder is "${placeholder}"`);
+  const card = await boxOf(overlay(page), 'overlay');
+  const composerNow = await composerBox(page);
+  const gap = composerNow.y - (card.y + card.height);
+  check(gap >= -1 && gap <= 24, `${label}: the composer is ${Math.round(gap)}px from the card`);
+  const row = page.locator('[data-agenda-quick-replies] .fy-qr__row');
+  if ((await row.count()) > 0) {
+    const bar = await boxOf(page.locator('[data-agenda-quick-replies]'), 'quick replies');
+    const buttons = await row.locator('button:not([data-agenda-more])').all();
+    const boxes = (await Promise.all(buttons.map(button => button.boundingBox()))).filter(
+      (found): found is Box => found !== null,
+    );
+    const every = (await Promise.all((await row.locator('button').all()).map(button => button.boundingBox()))).filter(
+      (found): found is Box => found !== null,
+    );
+    const left = Math.min(...every.map(box => box.x));
+    const right = Math.max(...every.map(box => box.x + box.width));
+    const wanted = Math.min(bar.width - 24, 720);
+    check(
+      right - left >= wanted - 2,
+      `${label}: the quick replies span ${Math.round(right - left)}px, the card wants ${Math.round(wanted)}px`,
+    );
+    const widths = boxes.filter(box => box.width > 0).map(box => box.width);
+    check(
+      Math.max(...widths) - Math.min(...widths) < 2,
+      `${label}: the quick replies are not equal width: ${widths.map(Math.round).join(', ')}`,
+    );
+    check(new Set(boxes.map(box => Math.round(box.y))).size === 1, `${label}: the quick replies are not one row`);
+  }
   check(
     !((await overlay(page).textContent()) ?? '').includes('message box below'),
     `${label}: the "message box below" boilerplate is back`,
@@ -265,7 +298,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await shot(thinking, 'row-thinking-and-pill', form, theme);
   await thinking.close();
 
-  // a choice item: the composer stays, the chip rides it, a typed message goes out WITH the reference and closes the view
+  // a choice item: the composer stays (its placeholder names the item), a typed message goes out WITH the reference and closes the view
   const choice = await open(browserContext, theme, 'view=board&history=1');
   await openItem(choice, 'A5');
   await checkOverlay(choice, form, 'choice item', composerRest);
@@ -307,11 +340,16 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await shot(choice, 'after-send', form, theme);
   await choice.close();
 
-  // × on the chip means plain chat; a quick reply answers AND closes
+  // × on the card means plain chat (the pill is back, the normal placeholder), Esc does the same; a quick reply answers AND closes
   const plainSend = await open(browserContext, theme, 'view=board&agenda=A3');
   await overlay(plainSend).waitFor({ state: 'visible' });
-  await plainSend.locator('[data-agenda-chip-clear]').click();
-  check((await plainSend.locator('[data-agenda-chip]').count()) === 0, 'the × did not take the chip off');
+  await plainSend.locator('[data-agenda-close]').click();
+  check((await overlay(plainSend).count()) === 0, 'the × did not close the card');
+  check((await plainSend.locator('[data-agenda-line-toggle]').count()) === 1, 'the pill did not come back');
+  check(
+    !/^Reply about/u.test((await plainSend.locator('[data-agenda-harness-input]').getAttribute('placeholder')) ?? ''),
+    'the placeholder still says Reply about',
+  );
   await plainSend.locator('[data-agenda-harness-input]').fill('Unrelated: how is the build?');
   await plainSend.locator('[data-agenda-harness-send]').click();
   const plainText = (await plainSend.locator('[data-chat-sent]').last().textContent()) ?? '';
@@ -334,7 +372,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     const questions =
       id === 'A47'
         ? ['.dockerignore has', 'merge tool rebuilds nix/yaml lists', 'each template ships only the files']
-        : ['duplicate `retry` line', 'rename of `carrier`', 'the other two relay files'];
+        : ['duplicate retry line', 'rename of carrier', 'the other two relay files'];
     for (const question of questions) {
       const count = text.split(question).length - 1;
       check(count === 1, `${id}: "${question}" is drawn ${count} times`);
@@ -342,15 +380,44 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     check(!/Answer this one in the message box/u.test(text), `${id}: per-question boilerplate is back`);
     if (id === 'A47') check(!/Why it matters/u.test(text), 'A47: the ferret picks read as Why it matters');
     if (id === 'A48') {
-      check(
-        (await overlay(multi).locator('[data-agenda-recommended]').count()) >= 3,
-        'the recommended picks are not tagged',
-      );
+      check((await overlay(multi).locator('[data-recommended]').count()) >= 3, 'the recommended picks are not tagged');
       await multi.locator('[data-agenda-use-recommended]').click();
       await multi.waitForTimeout(100);
     }
     await shot(multi, id === 'A47' ? 'item-multi-question' : 'item-multi-structured', form, theme);
     await multi.close();
+  }
+
+  // v4: a Jaeda-style item — five lettered options, one recommended — and a single choice explained in Markdown
+  for (const [id, name] of [
+    ['A60', 'jaeda-options'],
+    ['A61', 'choice-markdown'],
+  ] as const) {
+    const v4 = await open(browserContext, theme, `view=board&v4=1&agenda=${id}`);
+    await overlay(v4).waitFor({ state: 'visible' });
+    await v4.waitForTimeout(150);
+    await checkOverlay(v4, form, `v4 ${id}`, composerRest);
+    const options = v4.locator('[data-agenda-option-detail]');
+    check((await options.count()) >= 3, `${id}: the options section has ${await options.count()} entries`);
+    const heads = await options.locator('strong').first().textContent();
+    check(/^A — /u.test(heads ?? ''), `${id}: the first option is headed "${heads}"`);
+    check((await v4.locator('[data-agenda-recommended]').count()) >= 1, `${id}: no option is marked Recommended`);
+    check((await options.locator('code').count()) >= 1, `${id}: option details drew no code span`);
+    check((await options.locator('strong').count()) >= 3, `${id}: option details drew no bold`);
+    const text = (await overlay(v4).textContent()) ?? '';
+    const leaked = /.{0,12}(?:[`]|\*\*).{0,12}/u.exec(text)?.[0];
+    check(leaked === undefined, `${id}: Markdown marks leaked into the card: ${leaked}`);
+    if (id === 'A61') check((await options.locator('a[href]').count()) >= 1, 'A61: the option link is not a link');
+    const buttons = await v4.locator('[data-agenda-quick-replies] .fy-qr__row button[data-agenda-option]').all();
+    const letters = await Promise.all(buttons.map(button => button.textContent()));
+    check(
+      letters.some(letter => /^\s*[A-E]\s*$/u.test(letter ?? '')),
+      `${id}: no quick reply is a bare letter: ${letters.join('|')}`,
+    );
+    for (const button of buttons)
+      check(((await button.getAttribute('title')) ?? '').length > 0, `${id}: a quick reply has no title`);
+    await shot(v4, name, form, theme);
+    await v4.close();
   }
 
   // a permission item

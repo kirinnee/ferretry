@@ -34,7 +34,7 @@ const sameLabel = (a: string, b: string | undefined): boolean =>
   b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** The small tag on the recommended option. Words, not colour alone, so a screen reader says it too. */
-export function RecommendedTag() {
+function RecommendedTag() {
   return (
     <span className="fy-attn-tag" data-agenda-recommended="">
       <span className="sr-only">, </span>

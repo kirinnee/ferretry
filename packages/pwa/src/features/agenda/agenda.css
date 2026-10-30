@@ -273,13 +273,13 @@
 .fy-qr[data-swipeable] {
   touch-action: pan-y;
 }
+/* ONE row, equal-width buttons across the whole width: a letter or a word or two each, never a wrapped pile. */
 .fy-qr__row {
   display: flex;
   width: 100%;
   min-width: 0;
   max-width: var(--chat-column, 720px);
-  flex-wrap: wrap;
-  align-items: center;
+  align-items: stretch;
   gap: var(--gap-xs);
   margin: 0 auto;
   border: 0;
@@ -287,17 +287,32 @@
 }
 .fy-qr__chip {
   display: inline-flex;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 36px;
+  padding-inline: var(--gap-xs);
   max-width: 100%;
   align-items: center;
   justify-content: center;
   gap: var(--gap-xs);
 }
 .fy-qr__label {
+  display: -webkit-box;
   min-width: 0;
+  overflow: hidden;
   overflow-wrap: anywhere;
-  text-align: left;
+  text-align: center;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+.fy-qr__chip[data-recommended] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.fy-qr__chip[data-variant='primary'][data-recommended] {
+  color: inherit;
 }
 .fy-qr__stamp {
   position: absolute;
@@ -352,13 +367,13 @@
 }
 .fy-item-view .fy-attn-q__options {
   display: flex;
-  flex-wrap: wrap;
 }
 .fy-item-view .fy-attn-q__option {
   width: auto;
   min-height: 36px;
   max-width: 100%;
-  flex: 0 1 auto;
+  flex: 1 1 0;
+  flex-wrap: nowrap;
   align-items: center;
   padding: 4px var(--gap-md);
   border-color: var(--divider-color);

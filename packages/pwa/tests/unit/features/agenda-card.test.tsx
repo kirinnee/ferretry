@@ -170,7 +170,7 @@ describe('AgendaDetail point form', () => {
     expect(points('impact')).toEqual(['blocks the release', 'costs a day']);
   });
 
-  test('with the plain renderer, prose or a mix of prose and bullets stays a paragraph', async () => {
+  test('prose or a mix of prose and bullets is drawn as Markdown, not split into points', async () => {
     view = await mount(
       <AgendaDetail
         item={{ ...rich, context: 'Lead.\n\nIntro line.\n- then a point', impact: 'Plain words.' }}
@@ -178,8 +178,9 @@ describe('AgendaDetail point form', () => {
         renderProse={text => <PointForm text={text} />}
       />,
     );
-    expect(view.container.querySelectorAll('[data-agenda-section="context"] li').length).toBe(0);
-    expect(view.container.querySelector('[data-agenda-section="context"]')?.textContent).toContain('Intro line.');
+    const context = view.container.querySelector('[data-agenda-section="context"]');
+    expect(context?.textContent).toContain('Intro line.');
+    expect(context?.querySelectorAll('.fy-attn-points').length).toBe(0);
     expect(view.container.querySelectorAll('[data-agenda-section="impact"] li').length).toBe(0);
   });
 });

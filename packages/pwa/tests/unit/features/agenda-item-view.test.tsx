@@ -225,7 +225,8 @@ describe('the quick replies', () => {
   test('sit under the body as chips, the recommended one tagged, and a tap answers', async () => {
     const spy = await draw(richItem);
     const chip = one<HTMLButtonElement>('[data-agenda-quick-replies] [data-agenda-option="SQLite"]');
-    expect(chip.querySelector('[data-agenda-recommended]')).not.toBeNull();
+    expect(chip.hasAttribute('data-recommended')).toBe(true);
+    expect(chip.getAttribute('aria-label')).toContain('SQLite, recommended');
     await interact(() => chip.click());
     expect(spy.acted).toHaveLength(1);
     expect(spy.acted[0]).toMatchObject({ kind: 'respond', response: { choice: 'SQLite' } });
@@ -334,8 +335,8 @@ describe('several questions, drawn once each', () => {
   test('tags "Recommended" on the matching option of each question, and offers "All recommended"', async () => {
     const spy = await draw(asked);
     const monday = one('[data-agenda-pick="Monday"]');
-    expect(monday.querySelector('[data-agenda-recommended]')).not.toBeNull();
-    expect(one('[data-agenda-pick="Friday"]').querySelector('[data-agenda-recommended]')).toBeNull();
+    expect(monday.getAttribute('aria-label')).toBe('Monday, recommended');
+    expect(one('[data-agenda-pick="Friday"]').getAttribute('aria-label')).toBe('Friday');
     await interact(() => one<HTMLButtonElement>('[data-agenda-use-recommended]').click());
     expect(one('[data-agenda-pick="Monday"]').getAttribute('aria-pressed')).toBe('true');
     expect(one('[data-agenda-pick="Zoe"]').getAttribute('aria-pressed')).toBe('true');

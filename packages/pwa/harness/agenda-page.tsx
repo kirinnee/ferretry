@@ -285,6 +285,72 @@ const A48 = item('A48', 5, {
   ],
 } as Partial<AgendaItem>);
 
+// V4: a Jaeda-style item — one question, five lettered options each with a Markdown reason, one recommended.
+const A60 = item('A60', 7, {
+  title: 'How should the merge tool treat comments in lists?',
+  subject: 'How should the merge tool treat `#` comments inside the **nix/yaml lists** it rebuilds?',
+  why: 'Generated projects lose every comment written *inside* a list, and the review is otherwise done.',
+  ask: {
+    kind: 'multiple-choice',
+    options: [
+      { label: 'Accept the loss' },
+      { label: 'Keep comments above lists' },
+      { label: 'Parse and keep comments' },
+      { label: 'Warn when one is dropped' },
+      { label: 'Do nothing for now' },
+    ],
+  },
+  optionDetails: [
+    {
+      label: 'Accept the loss',
+      detail: 'Move the notes **above** each list. Nothing to build, but the notes drift from the lines they explain.',
+    },
+    {
+      label: 'Keep comments above lists',
+      detail:
+        'The tool copies a comment block that sits *directly above* a list. Cheap, and `fy merge` stays stateless.',
+    },
+    {
+      label: 'Parse and keep comments',
+      detail:
+        'Switch to a round-trip YAML parser such as `yaml@2`. Keeps every comment, but adds a dependency and about a week of work.',
+    },
+    {
+      label: 'Warn when one is dropped',
+      detail:
+        'Print `warning: dropped 2 comments` and keep going. See [the merge notes](https://example.com/merge-notes).',
+    },
+    { label: 'Do nothing for now', detail: 'Ship as is and revisit after the release cut.' },
+  ],
+  recommendation: { decision: 'Keep comments above lists', why: 'Fixes the common case at the lowest cost' },
+} as Partial<AgendaItem>);
+
+// V4: a single choice whose options explain themselves in Markdown (backticks, bold, a link).
+const A61 = item('A61', 3, {
+  title: 'Which storage engine for the ledger?',
+  subject: 'Which engine should keep the **ledger**: `sqlite` or `postgres`?',
+  why: 'A restart forgets every resolved item today; see [the ledger notes](https://example.com/ledger).',
+  premise: '- The board keeps its ledger in **memory**\n- A restart forgets every resolved item',
+  context: 'Both can hold the ledger as it is. `SQLITE_BUSY` only appears with *several writers*.',
+  ask: {
+    kind: 'multiple-choice',
+    options: [{ label: 'Use SQLite' }, { label: 'Use Postgres' }, { label: 'Keep it in memory' }],
+  },
+  optionDetails: [
+    {
+      label: 'Use SQLite',
+      detail:
+        'One file beside the daemon, **no server**. Set `journal_mode=WAL` so a crash replays cleanly. [Why WAL](https://example.com/wal)',
+    },
+    {
+      label: 'Use Postgres',
+      detail: 'A server to run and patch, but it handles **many writers** and `LISTEN/NOTIFY`.',
+    },
+    { label: 'Keep it in memory', detail: 'Nothing changes; a restart still forgets resolved items.' },
+  ],
+  recommendation: { decision: 'Use SQLite', why: 'Needs nothing installed on the machine' },
+} as Partial<AgendaItem>);
+
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
 const HISTORY_ENTRIES = [
@@ -302,8 +368,9 @@ const long = params.get('long') === '1';
 const fakeKeyboard = params.get('kb') === '1';
 const configChange = params.get('config') === '1';
 const jaeda = params.get('jaeda') === '1';
+const v4 = params.get('v4') === '1';
 
-const items = [...AGENDA, ...(jaeda ? [A47, A48] : [])].map(entry =>
+const items = [...AGENDA, ...(jaeda ? [A47, A48] : []), ...(v4 ? [A60, A61] : [])].map(entry =>
   entry.id === 'A5'
     ? long
       ? A5_LONG

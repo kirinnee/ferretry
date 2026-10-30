@@ -133,7 +133,7 @@ export function AgendaChatHarness({
               className="min-w-0 flex-1 bg-transparent text-fg outline-none"
               data-agenda-harness-input=""
               onChange={event => setDraft(event.target.value)}
-              placeholder={`Message ${ferret.toLowerCase()}…`}
+              placeholder={agenda.placeholder ?? `Message ${ferret.toLowerCase()}…`}
               value={draft}
             />
             <button

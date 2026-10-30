@@ -1,7 +1,8 @@
 /**
- * THE QUICK REPLIES OF AN OPEN AGENDA ITEM — a wrapping row of compact chips directly above the REAL composer
- * (never covering it). The item's options are the chips, the recommended one tagged "Recommended"; a tap answers
- * at once. Answering is replying, so there is no text field here: the composer below is the one box, and what is
+ * THE QUICK REPLIES OF AN OPEN AGENDA ITEM — ONE row of equal-width buttons across the whole width, directly above
+ * the REAL composer (never covering it). The item's options are the buttons, each SHORT: its letter ("A", "B"), or
+ * its label when that is one or two words ("Looks good"); the full label is its accessible name and its title. The
+ * recommended one is in the accent. A tap answers at once. Answering is replying, so there is no text field here: the composer below is the one box, and what is
  * typed in it rides an answer as its note.
  *
  * On touch the chips swipe (← ↑ →) exactly as the Inbox deck does (`swipeIntent`), and ↓ goes back to the chat.
@@ -9,7 +10,7 @@
  * compact "Send answers" (and "All recommended" when every question has a pick to agree with).
  */
 
-import type { AgendaCardAnswer } from '@ferretry/protocol';
+import type { AgendaAskOption, AgendaCardAnswer } from '@ferretry/protocol';
 import { ArrowLeft, ArrowRight, ArrowUp, Check, LoaderCircle, Send } from 'lucide-react';
 import { type PointerEvent, type ReactNode, useRef, useState } from 'react';
 import { type AnswerDirection, answerAction, CLEAR_ACTION, optionAction } from '../../lib/agenda-answers.ts';
@@ -22,7 +23,8 @@ import {
   type SwipeMap,
   swipeIntent,
 } from '../../lib/agenda-inbox.ts';
-import { ActionMenu, RecommendedTag } from './agenda-actions.tsx';
+import { letterOf, shortLabel } from '../../lib/agenda-options.ts';
+import { ActionMenu } from './agenda-actions.tsx';
 import { isDownSwipe } from './use-down-swipe.ts';
 
 const ARROWS: Readonly<Record<AnswerDirection, ReactNode>> = {
@@ -54,6 +56,8 @@ export interface QuestionSending {
 
 export interface AgendaQuickRepliesProps {
   readonly model: CardModel;
+  /** The item's options in ask order: a button's letter is its place here, the same letter the Options section shows. */
+  readonly options?: readonly AgendaAskOption[];
   /** What each swipe sends, by direction. */
   readonly map: SwipeMap;
   readonly busy: boolean;
@@ -81,33 +85,35 @@ interface Drag {
 
 interface ChipProps {
   readonly label: string;
-  readonly hint?: string | undefined;
+  readonly letter: string | undefined;
   readonly recommended: boolean;
   readonly busy: boolean;
   readonly arrow?: AnswerDirection | undefined;
   readonly swipeable: boolean;
   readonly primary?: boolean;
   readonly onTap: () => void;
-  readonly option: string;
 }
 
-function Chip({ label, hint, recommended, busy, arrow, swipeable, primary = false, onTap, option }: ChipProps) {
+/** What a screen reader says: the full label, then whether it is the pick and which way it swipes. */
+const chipName = (label: string, recommended: boolean, swipe: string | null): string =>
+  [label, recommended ? 'recommended' : null, swipe === null ? null : `or ${swipe}`].filter(Boolean).join(', ');
+
+function Chip({ label, letter, recommended, busy, arrow, swipeable, primary = false, onTap }: ChipProps) {
   return (
     <button
+      aria-label={chipName(label, recommended, arrow !== undefined && swipeable ? SWIPE_WORD[arrow] : null)}
       className="kt-btn fy-qr__chip"
       data-agenda-answer={arrow}
-      data-agenda-option={option}
+      data-agenda-option={label}
       data-recommended={recommended || undefined}
       data-variant={primary ? 'primary' : undefined}
       disabled={busy}
       onClick={onTap}
-      title={hint}
+      title={label}
       type="button"
     >
       {arrow !== undefined && swipeable ? ARROWS[arrow] : null}
-      <span className="fy-qr__label">{label}</span>
-      {recommended ? <RecommendedTag /> : null}
-      {arrow !== undefined && swipeable ? <span className="sr-only">, or {SWIPE_WORD[arrow]}</span> : null}
+      <span className="fy-qr__label">{shortLabel(label, letter)}</span>
     </button>
   );
 }
@@ -180,12 +186,31 @@ function Stamp({
   );
 }
 
+/** One button of the row: an answer the card gives (it swipes), or one of an old choice's options past the third. */
+type Reply =
+  | { readonly label: string; readonly letter: string | undefined; readonly answer: AgendaCardAnswer }
+  | { readonly label: string; readonly letter: string | undefined; readonly option: AgendaAskOption };
+
+/**
+ * The row's buttons: when every one is an option of the ask they read A, B, C… left to right whichever way each
+ * swipes; otherwise the answers in swipe order, then the extras.
+ */
+const repliesOf = (model: CardModel, options: readonly AgendaAskOption[]): readonly Reply[] => {
+  const all: readonly Reply[] = [
+    ...model.answers.map(answer => ({ label: answer.label, letter: letterOf(options, answer.label), answer })),
+    ...model.extras.map(option => ({ label: option.label, letter: letterOf(options, option.label), option })),
+  ];
+  if (!all.every(reply => reply.letter !== undefined)) return all;
+  return [...all].sort((a, b) => ((a.letter ?? '') < (b.letter ?? '') ? -1 : 1));
+};
+
 /** Whether the row has anything to draw: chips, a clear, a send, a waiting line or an error. */
 const hasReplies = (model: CardModel, sending: QuestionSending | undefined): boolean =>
   model.notice || sending !== undefined || model.answers.length > 0 || model.extras.length > 0;
 
 export function AgendaQuickReplies({
   model,
+  options = [],
   map,
   busy,
   error,
@@ -290,28 +315,29 @@ export function AgendaQuickReplies({
             Clear
           </button>
         ) : null}
-        {model.answers.map(answer => (
-          <AnswerChip
-            answer={answer}
-            busy={busy}
-            give={give}
-            key={answer.direction}
-            recommended={recommended}
-            swipeable={swipeable}
-          />
-        ))}
-        {model.extras.map(option => (
-          <Chip
-            busy={busy}
-            hint={option.description}
-            key={option.label}
-            label={option.label}
-            onTap={() => give(optionAction(option, ''))}
-            option={option.label}
-            recommended={sameLabel(option.label, recommended)}
-            swipeable={swipeable}
-          />
-        ))}
+        {repliesOf(model, options).map(reply =>
+          'answer' in reply ? (
+            <AnswerChip
+              answer={reply.answer}
+              busy={busy}
+              give={give}
+              key={reply.label}
+              letter={reply.letter}
+              recommended={recommended}
+              swipeable={swipeable}
+            />
+          ) : (
+            <Chip
+              busy={busy}
+              key={reply.label}
+              label={reply.label}
+              letter={reply.letter}
+              onTap={() => give(optionAction(reply.option, ''))}
+              recommended={sameLabel(reply.label, recommended)}
+              swipeable={swipeable}
+            />
+          ),
+        )}
         {sending === undefined ? null : <QuestionChips busy={busy} sending={sending} />}
         {showMenu ? <ActionMenu busy={busy} onDismiss={() => give(DISMISS_ACTION)} /> : null}
       </fieldset>
@@ -323,12 +349,14 @@ function AnswerChip({
   answer,
   busy,
   give,
+  letter,
   recommended,
   swipeable,
 }: {
   readonly answer: AgendaCardAnswer;
   readonly busy: boolean;
   readonly give: (action: InboxAction) => void;
+  readonly letter: string | undefined;
   readonly recommended: string | undefined;
   readonly swipeable: boolean;
 }) {
@@ -336,13 +364,12 @@ function AnswerChip({
     <Chip
       arrow={answer.direction}
       busy={busy}
-      hint={answer.description}
       label={answer.label}
+      letter={letter}
       onTap={() => {
         const action = answerAction(answer, '');
         if (action !== null) give(action);
       }}
-      option={answer.label}
       primary={answer.direction === 'right'}
       recommended={sameLabel(answer.label, recommended)}
       swipeable={swipeable}

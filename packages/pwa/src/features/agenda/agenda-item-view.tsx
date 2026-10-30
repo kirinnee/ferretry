@@ -21,6 +21,7 @@ import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 
 import { cardModel } from '../../lib/agenda-card-model.ts';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { type InboxAction, questionAnswersAction, swipeMap } from '../../lib/agenda-inbox.ts';
+import { itemOptions } from '../../lib/agenda-options.ts';
 import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { AgendaConfigChange } from './agenda-config-change.tsx';
 import { AgendaDelivery, agendaHeading } from './agenda-delivery.tsx';
@@ -188,9 +189,9 @@ export function AgendaItemView({
           {agendaHeading(item)}
         </h2>
         {ask === null ? null : (
-          <p className="fy-item-view__ask" data-agenda-ask="">
-            {ask}
-          </p>
+          <div className="fy-item-view__ask" data-agenda-ask="">
+            {renderProse(ask)}
+          </div>
         )}
       </header>
       <div className="fy-item-view__body" data-agenda-body="">
@@ -221,6 +222,7 @@ export function AgendaItemView({
         model={model}
         onAct={onAct}
         onClose={onClose}
+        options={itemOptions(item)}
         swipeable={swipeable}
         {...(item.waitingOn === 'ferret' && !model.notice ? { waitingOn: ferret } : {})}
         {...(model.perQuestion && asked.length > 0

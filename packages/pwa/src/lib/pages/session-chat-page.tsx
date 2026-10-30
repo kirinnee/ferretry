@@ -1614,6 +1614,7 @@ export function SessionChatPage({
               // The model and effort chips ride the composer's own status line, so the
               // runtime costs no row of its own above the message box.
               statusSlot={runtimePickers(false)}
+              {...(agenda.placeholder === undefined ? {} : { placeholder: agenda.placeholder })}
             />
           )}
         </div>

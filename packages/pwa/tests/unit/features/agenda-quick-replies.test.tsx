@@ -81,7 +81,9 @@ describe('the quick replies', () => {
     expect(answer('SQLite').dataset.agendaAnswer).toBe('right');
     expect(answer('Postgres').dataset.agendaAnswer).toBe('left');
     expect(answer('SQLite').hasAttribute('data-recommended')).toBe(true);
-    expect(answer('SQLite').querySelector('[data-agenda-recommended]')).not.toBeNull();
+    expect(answer('SQLite').getAttribute('aria-label')).toBe('SQLite, recommended, or swipe right');
+    expect(answer('SQLite').querySelector('.lucide-check')).toBeNull();
+    expect(answer('Postgres').getAttribute('aria-label')).toBe('Postgres, or swipe left');
     expect(answer('Postgres').hasAttribute('data-recommended')).toBe(false);
   });
 

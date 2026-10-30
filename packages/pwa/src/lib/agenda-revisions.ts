@@ -42,6 +42,7 @@ const FIELD_LABEL: Readonly<Record<AgendaRevisableField, string>> = {
   stillOpen: 'Still open',
   terms: 'Terms',
   questions: 'Questions',
+  optionDetails: 'Option details',
   recommendation: 'Recommendation',
   impact: 'Impact',
   urgency: 'Urgency',
