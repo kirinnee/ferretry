@@ -6,7 +6,7 @@ import {
   type BoardSideViewStorage,
   DEFAULT_BOARD_SIDE_VIEW,
   parseBoardSideView,
-} from '../../src/lib/board-side-view.ts';
+} from '../../../src/lib/board-side-view.ts';
 
 const memory = (seed: Record<string, string> = {}): BoardSideViewStorage & { readonly values: Map<string, string> } => {
   const values = new Map(Object.entries(seed));
@@ -64,5 +64,59 @@ describe('BoardSideViewStore', () => {
     should(store.snapshot()).equal('kanban');
     store.set('list');
     should(store.snapshot()).equal('list');
+  });
+});
+
+describe('the device storage the store defaults to', () => {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
+  const restore = (): void => {
+    if (original === undefined) Reflect.deleteProperty(globalThis, 'localStorage');
+    else Object.defineProperty(globalThis, 'localStorage', original);
+  };
+  const stub = (descriptor: PropertyDescriptor): void => {
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, ...descriptor });
+  };
+
+  test('uses localStorage when the browser offers one', () => {
+    const storage = memory({ [BOARD_SIDE_VIEW_KEY]: 'list' });
+    stub({ value: storage });
+    try {
+      const store = new BoardSideViewStore();
+      should(store.snapshot()).equal('list');
+      store.set('kanban');
+      should(storage.values.get(BOARD_SIDE_VIEW_KEY)).equal('kanban');
+    } finally {
+      restore();
+    }
+  });
+
+  test('falls back to memory when there is none, or it is not a storage', () => {
+    for (const value of [undefined, {}]) {
+      stub({ value });
+      try {
+        const store = new BoardSideViewStore();
+        should(store.snapshot()).equal('kanban');
+        store.set('list');
+        should(store.snapshot()).equal('list');
+      } finally {
+        restore();
+      }
+    }
+  });
+
+  test('falls back to memory when merely reading localStorage is refused', () => {
+    stub({
+      get: () => {
+        throw new Error('blocked');
+      },
+    });
+    try {
+      const store = new BoardSideViewStore();
+      should(store.snapshot()).equal('kanban');
+      store.set('list');
+      should(store.snapshot()).equal('list');
+    } finally {
+      restore();
+    }
   });
 });
