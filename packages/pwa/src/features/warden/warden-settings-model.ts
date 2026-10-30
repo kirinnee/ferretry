@@ -8,13 +8,14 @@
  * Exported for onboarding: the new-machine flow sets the Warden up with this same form.
  */
 
-import type {
-  WardenAccount,
-  WardenConfig,
-  WardenConfigPatch,
-  WardenConfigView,
-  WardenEffort,
-  WardenMayActAlone,
+import {
+  WARDEN_CONFIG_SECTIONS,
+  type WardenAccount,
+  type WardenConfig,
+  type WardenConfigPatch,
+  type WardenConfigView,
+  type WardenEffort,
+  type WardenMayActAlone,
 } from '@ferretry/protocol';
 import type { PickerAccount } from '../../lib/account-picker-catalog.ts';
 
@@ -140,16 +141,31 @@ export const wardenSummary = (config: WardenConfig, hasJevKey: boolean, machineD
 };
 
 /**
- * The smallest PATCH that turns `base` into `next`: every top-level setting that changed, and nothing
- * else. A section that changed travels whole — the daemon merges a section, so this never resets a
- * sibling — and an untouched one does not travel at all, so a save cannot loosen what it did not touch.
+ * The smallest PATCH that turns `base` into `next`: every setting that changed, and nothing else. Inside a
+ * section (`guard`, `caps` …) only the keys that changed travel — the daemon merges a section key by key
+ * — so a save never restates a value the owner did not touch. That matters beyond tidiness: `base` is the
+ * version IN EFFECT, and while an edit waits for the owner's confirmation the file says something else.
+ * On 2026-10-29 a slider on the guard carried the whole section, Jev's price with it, and would have put
+ * a held price correction back to the old one. An untouched setting does not travel at all, so a save
+ * cannot loosen what it did not touch either.
  */
 export const wardenConfigPatchFrom = (base: WardenConfig, next: WardenConfig): WardenConfigPatch => {
   const patch: Record<string, unknown> = {};
-  for (const key of Object.keys(next) as (keyof WardenConfig)[])
-    if (JSON.stringify(base[key]) !== JSON.stringify(next[key])) patch[key] = next[key];
+  const sections: ReadonlySet<string> = new Set(WARDEN_CONFIG_SECTIONS);
+  for (const key of Object.keys(next) as (keyof WardenConfig)[]) {
+    if (same(base[key], next[key])) continue;
+    patch[key] = sections.has(key) ? changedKeys(base[key] as object, next[key] as object) : next[key];
+  }
   return patch as WardenConfigPatch;
 };
+
+const same = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
+
+/** The keys of one section whose value changed. */
+const changedKeys = (base: object, next: object): Record<string, unknown> =>
+  Object.fromEntries(
+    Object.entries(next).filter(([key, value]) => !same((base as Record<string, unknown>)[key], value)),
+  );
 
 /** Makes `agent` the investigation login: it moves to the head of the failover order. */
 export const withLogin = (config: WardenConfig, account: WardenAccount): WardenConfig => ({

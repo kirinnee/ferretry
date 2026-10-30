@@ -410,9 +410,7 @@ describe('What Jev may do alone', () => {
     // Assert
     const stop = jevRow(renderer, 'stop');
     expect(last(changes).jevActs).toEqual({ nudge: 0.9, resume: 0.93, restart: 0.95, stop: 1 });
-    expect(wardenConfigPatchFrom(wardenConfig(BOTH), last(changes))).toEqual({
-      jevActs: { nudge: 0.9, resume: 0.93, restart: 0.95, stop: 1 },
-    });
+    expect(wardenConfigPatchFrom(wardenConfig(BOTH), last(changes))).toEqual({ jevActs: { stop: 1 } });
     expect(flat(stop.shown)).toBe('Never');
     expect(stop.slider.props['aria-valuetext']).toBe('Never alone');
     expect(flat(jevRow(renderer, 'nudge').shown)).toBe('90%');

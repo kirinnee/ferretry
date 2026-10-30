@@ -1,7 +1,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { DEFAULT_WARDEN_CONFIG } from '@ferretry/protocol';
+import { DEFAULT_WARDEN_CONFIG, mergeWardenConfig, type WardenConfigPatch } from '@ferretry/protocol';
 import should from 'should';
 import {
   ConfigFileWardenConfigStore,
@@ -129,9 +129,9 @@ describe('the warden settings file', () => {
     const store = new ConfigFileWardenConfigStore({
       inEffect: async () => await home.service.inEffect(),
       load: async () => await home.service.load(),
-      writeOwn: async (file, text) => {
+      writeOwn: async (file, text, inEffect) => {
         writes.push(file);
-        await home.service.writeOwn(file, text);
+        await home.service.writeOwn(file, text, inEffect);
       },
     });
     return { home, store, writes, file: path.join(home.paths.config, 'warden.yaml') };
@@ -143,7 +143,7 @@ describe('the warden settings file', () => {
 
     // Act
     const actual = await store.read();
-    await store.write(defaultWardenConfig);
+    await store.write(defaultWardenConfig, {});
 
     // Assert
     should(actual).deepEqual(DEFAULT_WARDEN_CONFIG);
@@ -158,7 +158,7 @@ describe('the warden settings file', () => {
     const configured = { ...defaultWardenConfig, layers: { jev: false, llm: true }, intervalMinutes: 10 as const };
 
     // Act
-    await store.write(configured);
+    await store.write(configured, { layers: configured.layers, intervalMinutes: configured.intervalMinutes });
 
     // Assert — the owner's own act is acknowledged, never held as an unconfirmed loosening.
     should(parseStoredWardenConfig(await store.read())).deepEqual({ config: configured, warnings: [] });
@@ -174,7 +174,7 @@ describe('the warden settings file', () => {
     const legacy = parseStoredWardenConfig(await store.read()).config;
 
     // Act
-    await store.write({ ...legacy, layers: { jev: true, llm: false } });
+    await store.write({ ...legacy, layers: { jev: true, llm: false } }, { layers: { jev: true, llm: false } });
 
     // Assert
     const text = await readFile(file, 'utf8');
@@ -199,7 +199,7 @@ describe('the warden settings file', () => {
   it('should keep the last good settings while the file is broken', async () => {
     // Arrange
     const { store, file } = await settings('warden-config-broken');
-    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const });
+    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const }, { intervalMinutes: 10 });
     await writeFile(file, 'intervalMinutes: [not, a, number\n', 'utf8');
 
     // Act
@@ -215,7 +215,7 @@ describe('the warden settings file', () => {
     await writeFile(file, '# how often the Warden looks\nintervalMinutes: 5\n', 'utf8');
 
     // Act
-    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const });
+    await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const }, { intervalMinutes: 10 });
 
     // Assert
     const text = await readFile(file, 'utf8');
@@ -228,14 +228,94 @@ describe('the warden settings file', () => {
     // Arrange
     const { store, writes, file } = await settings('warden-config-unchanged');
     const configured = { ...defaultWardenConfig, intervalMinutes: 10 as const };
-    await store.write(configured);
+    await store.write(configured, { intervalMinutes: 10 });
     const before = await readFile(file, 'utf8');
 
     // Act
-    await store.write(configured);
+    await store.write(configured, { intervalMinutes: 10 });
 
     // Assert
     should(writes).deepEqual(['warden.yaml']);
     should(await readFile(file, 'utf8')).equal(before);
+  });
+  describe('while an edit waits for the owner', () => {
+    /** Settings in effect at $2 per million, then a hand edit to the real $0.042, held because it loosens. */
+    async function heldPrice(label: string) {
+      const home = await settings(label);
+      const atTwo = mergeWardenConfig(defaultWardenConfig, { guard: { usdPerMillionInputTokens: 2 } });
+      await home.store.write(atTwo, { guard: { usdPerMillionInputTokens: 2 } });
+      const text = await readFile(home.file, 'utf8');
+      await writeFile(
+        home.file,
+        text.replace('usdPerMillionInputTokens: 2', 'usdPerMillionInputTokens: 0.042'),
+        'utf8',
+      );
+      await home.home.service.load();
+      /** What the app sends: the settings in effect with the owner's patch, and the patch. */
+      const save = async (patch: WardenConfigPatch): Promise<void> => {
+        const inEffect = parseStoredWardenConfig(await home.store.read()).config;
+        await home.store.write(mergeWardenConfig(inEffect, patch), patch);
+      };
+      return { ...home, save };
+    }
+
+    it('should never put a held price back to the one in effect when the owner saves another setting', async () => {
+      // Arrange: 2026-10-29 — a save of the daily caps rewrote the held $0.042 back to $2.
+      const { home, store, file, save } = await heldPrice('warden-config-held-price');
+      should((await home.service.load()).evaluation.pending).match([{ path: 'warden.yaml' }]);
+
+      // Act
+      await save({ caps: { jevUsdPerDay: 1 } });
+
+      // Assert: the owner's change is in effect at once; the held price is still in the file, still held.
+      const text = await readFile(file, 'utf8');
+      should(text).match(/usdPerMillionInputTokens: 0\.042/u);
+      should(text).match(/jevUsdPerDay: 1/u);
+      should(await store.read()).match({ caps: { jevUsdPerDay: 1 }, guard: { usdPerMillionInputTokens: 2 } });
+      const held = (await home.service.load()).evaluation.pending;
+      should(held).match([{ path: 'warden.yaml' }]);
+      should(held[0]?.changes.join(' ')).match(/Jev price/u);
+    });
+
+    it("should put the held price into effect, with the owner's other change, once it is confirmed", async () => {
+      // Arrange
+      const { home, store, save } = await heldPrice('warden-config-held-confirm');
+      await save({ caps: { jevUsdPerDay: 1 } });
+      const [held] = (await home.service.load()).evaluation.pending;
+
+      // Act
+      const confirmed = await home.service.confirm('warden.yaml', held?.etag ?? '');
+
+      // Assert
+      should(confirmed).be.true();
+      should(await store.read()).match({ caps: { jevUsdPerDay: 1 }, guard: { usdPerMillionInputTokens: 0.042 } });
+    });
+
+    it('should settle the hold when the owner saves the held value themselves', async () => {
+      // Arrange
+      const { home, store, file, save } = await heldPrice('warden-config-held-settled');
+
+      // Act
+      await save({ guard: { usdPerMillionInputTokens: 0.042 } });
+
+      // Assert
+      should((await home.service.load()).evaluation.pending).deepEqual([]);
+      should(await store.read()).match({ guard: { usdPerMillionInputTokens: 0.042 } });
+      should(await readFile(file, 'utf8')).match(/usdPerMillionInputTokens: 0\.042/u);
+    });
+
+    it('should save as before when the held file no longer checks, the last good version in effect', async () => {
+      // Arrange: nothing is held for a file that does not parse — it is broken, and the save repairs it.
+      const { home, store, file } = await settings('warden-config-held-broken');
+      await writeFile(file, 'intervalMinutes: [not, a, number\n', 'utf8');
+      await home.service.load();
+
+      // Act
+      await store.write({ ...defaultWardenConfig, intervalMinutes: 10 as const }, { intervalMinutes: 10 });
+
+      // Assert
+      should(await store.read()).match({ intervalMinutes: 10 });
+      should((await home.service.load()).evaluation.pending).deepEqual([]);
+    });
   });
 });

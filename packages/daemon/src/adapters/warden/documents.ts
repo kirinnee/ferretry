@@ -1,6 +1,6 @@
 import { join } from 'node:path';
-import { renderConfigFile } from '@ferretry/fleet';
-import { type ConfigFileAddress, configFilePath } from '@ferretry/protocol';
+import { type ConfigEvaluation, checkConfigFile, renderConfigFile } from '@ferretry/fleet';
+import { type ConfigFileAddress, configFilePath, mergeWardenConfig, type WardenConfigPatch } from '@ferretry/protocol';
 import type { ConfigFilesService } from '../../lib/config-files/index.ts';
 import type {
   WardenConfig,
@@ -80,6 +80,13 @@ export class FileWardenStateStore implements WardenStateStore {
  *
  * A write from here is the owner's own act (`PATCH /v1/warden/config` is `warden.configure`), so it is
  * acknowledged and in effect at once rather than held.
+ *
+ * A SAVE NEVER DISCARDS A HELD EDIT. While an edit waits for the owner, the file says one thing and the
+ * version in effect another; rendering the settings in effect over the file would put every held value
+ * back to what is in effect — on 2026-10-29 a save of the daily caps put Jev's price back from $0.042 to
+ * $2 a minute after the corrected price was written, and Jev then spent its cap twenty times too early.
+ * So the owner's patch is made to both: the held edit, changed, stays in the file and stays held; the
+ * version in effect, changed, is what the daemon records as accepted.
  */
 export class ConfigFileWardenConfigStore implements WardenConfigStore {
   constructor(private readonly config: Pick<ConfigFilesService, 'inEffect' | 'load' | 'writeOwn'>) {}
@@ -88,10 +95,31 @@ export class ConfigFileWardenConfigStore implements WardenConfigStore {
     return (await this.config.inEffect()).evaluation.effective.warden;
   }
 
-  async write(config: WardenConfig): Promise<void> {
+  async write(config: WardenConfig, patch: WardenConfigPatch): Promise<void> {
     const path = configFilePath(WARDEN_FILE);
-    const { files } = await this.config.load();
-    const text = renderConfigFile(path, WARDEN_FILE, config, files.get(path)?.text);
-    if (text !== undefined) await this.config.writeOwn(path, text);
+    const { files, evaluation } = await this.config.load();
+    const disk = files.get(path)?.text;
+    const held = heldWardenConfig(evaluation, path, disk);
+    if (held === undefined) {
+      const text = renderConfigFile(path, WARDEN_FILE, config, disk);
+      if (text !== undefined) await this.config.writeOwn(path, text);
+      return;
+    }
+    const accepted = evaluation.accepted[path]?.text;
+    const inEffect = renderConfigFile(path, WARDEN_FILE, config, accepted) ?? accepted ?? '';
+    const text = renderConfigFile(path, WARDEN_FILE, mergeWardenConfig(held.config, patch), held.text) ?? held.text;
+    await this.config.writeOwn(path, text, inEffect);
   }
+}
+
+/** The edit held for the owner in `warden.yaml`, as settings and as text — `undefined` when none is. */
+function heldWardenConfig(
+  evaluation: ConfigEvaluation,
+  path: string,
+  disk: string | undefined,
+): { readonly config: WardenConfig; readonly text: string } | undefined {
+  // A held DELETION has no file to keep: the save writes the file again, which is the owner’s own act.
+  if (disk === undefined || !evaluation.pending.some(pending => pending.path === path)) return undefined;
+  const checked = checkConfigFile(path, disk);
+  return checked.ok ? { config: checked.value as WardenConfig, text: disk } : undefined;
 }
