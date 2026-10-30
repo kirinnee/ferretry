@@ -1,3 +1,9 @@
+## [4.126.0](https://github.com/kirinnee/ferretry/compare/v4.125.0...v4.126.0) (2026-10-30)
+
+### Features
+
+* **pwa:** lane editor, template picker and lane-proposal Edit deep link (U15) ([#986](https://github.com/kirinnee/ferretry/issues/986)) ([5862c18](https://github.com/kirinnee/ferretry/commit/5862c188c1d5922291b033c748852f59bdfe5d65))
+
 ## [4.125.0](https://github.com/kirinnee/ferretry/compare/v4.124.0...v4.125.0) (2026-10-30)
 
 ### Features

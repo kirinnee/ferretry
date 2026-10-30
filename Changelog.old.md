@@ -1,3 +1,10 @@
+## [4.125.0](https://github.com/kirinnee/ferretry/compare/v4.124.0...v4.125.0) (2026-10-30)
+
+### Features
+
+* **board:** enforce the board — Board prompt section, turn-end check, fy task skip, fy ps CARD (U8) ([#985](https://github.com/kirinnee/ferretry/issues/985)) ([f558009](https://github.com/kirinnee/ferretry/commit/f558009733df41ce31ca126f814028ed8208e9b2))
+* **pwa:** per-chat card chip, Tasks side tab and Info card row (U14) ([#984](https://github.com/kirinnee/ferretry/issues/984)) ([8dce512](https://github.com/kirinnee/ferretry/commit/8dce512f8d40fc031a1eaeb3525e07fc5ff32827))
+
 ## [4.124.0](https://github.com/kirinnee/ferretry/compare/v4.123.0...v4.124.0) (2026-10-30)
 
 ### Features
