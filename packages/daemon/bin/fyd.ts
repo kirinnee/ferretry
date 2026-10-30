@@ -14,6 +14,7 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
+  agendaNudgeEnabled,
   ALWAYS_ON_SECTIONS,
   CredentialStatusService,
   configJsonSchemaFiles,
@@ -845,6 +846,7 @@ import {
   RELAY_DIRECTORY_NOT_ASKED,
   RELOAD_THE_APP,
   RETIRED_ACCOUNT_MODEL_NOTICE,
+  attentionBlockNotice,
   RETIRED_FLEET_BLOCK_NOTICE,
   RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   RecommendError,
@@ -9177,7 +9179,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       const attentionNudge = new AttentionTurnNudge(
         {
-          enabled: async () => (await effectiveAccountModel())?.machine.attentionNudge ?? true,
+          enabled: async () => agendaNudgeEnabled((await effectiveAccountModel())?.machine ?? { attentionNudge: true }),
           subject: async sessionId => await nudgeSessions.subject(sessionId),
           tail: async (sessionId, limit) => {
             const subject = await nudgeSessions.subject(sessionId);
@@ -10944,6 +10946,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // it is still there, so the operator can delete it.
   if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
   if (config.retiredFleetBlock) world.notices.state(RETIRED_FLEET_BLOCK_NOTICE);
+  const attentionNotice = attentionBlockNotice(config.attentionSpelling);
+  if (attentionNotice !== undefined) world.notices.state(attentionNotice);
   if (config.sessionWorkers.enabled === false) world.notices.state(RETIRED_SESSION_WORKERS_SWITCH_NOTICE);
 
   progress.enter('opening the usage feed');

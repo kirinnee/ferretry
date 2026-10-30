@@ -260,6 +260,54 @@ export const DaemonAttentionConfigSchema = z
     path: ['replySettleSeconds'],
   });
 
+/**
+ * THE SAME BLOCK UNDER ITS NEW NAME (`agenda`, wire `agenda.wire.1`), every key optional.
+ *
+ * `attention` is still read until the agenda removal release, so the two spellings are resolved to ONE
+ * value, PER KEY, before anything else reads either: a key the `agenda` block sets wins over the same
+ * key in `attention`, and a key it leaves out falls through to `attention` and then to the default. The
+ * keys carry no defaults here so that "left out" stays distinguishable from "set to the default".
+ */
+export const DaemonAgendaConfigSchema = z
+  .strictObject({
+    replySettleSeconds: z.number().int().min(1).max(3_600).optional(),
+    replyMaxWaitSeconds: z.number().int().min(1).max(3_600).optional(),
+    replyComposerWaitSeconds: z.number().int().min(10).max(86_400).optional(),
+    replyReceiptSeconds: z.number().int().min(30).max(86_400).optional(),
+    resurfaceAfterMinutes: z.number().int().min(1).max(10_080).optional(),
+    deadlineWarnHours: z.number().min(0.25).max(168).optional(),
+  })
+  .refine(
+    window =>
+      window.replySettleSeconds === undefined ||
+      window.replyMaxWaitSeconds === undefined ||
+      window.replySettleSeconds <= window.replyMaxWaitSeconds,
+    {
+      message: 'agenda.replySettleSeconds must not exceed agenda.replyMaxWaitSeconds',
+      path: ['replySettleSeconds'],
+    },
+  );
+
+type DaemonAttentionConfig = z.output<typeof DaemonAttentionConfigSchema>;
+
+/** Which spelling of the reply-window block a document used, so the boot can say so once. */
+export type AttentionBlockSpelling = 'agenda' | 'attention' | 'both' | 'none';
+
+function attentionBlockSpelling(attention: unknown, agenda: unknown): AttentionBlockSpelling {
+  if (attention !== undefined && agenda !== undefined) return 'both';
+  if (agenda !== undefined) return 'agenda';
+  return attention === undefined ? 'none' : 'attention';
+}
+
+/** The sentence a boot says when the older `attention` block is in the document; absent when it is not. */
+export function attentionBlockNotice(spelling: AttentionBlockSpelling): string | undefined {
+  if (spelling === 'attention')
+    return 'daemon config: "attention" is renamed to "agenda"; the old key is still read until the agenda removal release — rename it';
+  if (spelling === 'both')
+    return 'daemon config: both "attention" and "agenda" are set; "agenda" wins key by key and "attention" is only read for the keys it leaves out — delete "attention"';
+  return undefined;
+}
+
 export const DaemonConfigDocumentSchema = z
   .object({
     host: HostSchema.default(LOOPBACK),
@@ -307,7 +355,9 @@ export const DaemonConfigDocumentSchema = z
      */
     housekeeping: z.strictObject({ enabled: z.boolean().default(true) }).prefault({}),
     /** How long the owner's attention answers are held and batched before they reach the ferret. */
-    attention: DaemonAttentionConfigSchema.prefault({}),
+    attention: DaemonAttentionConfigSchema.optional(),
+    /** The same block under its new name; wins key by key when both are written. */
+    agenda: DaemonAgendaConfigSchema.optional(),
     /** The rendezvous carrier, if this host has one. Absent means direct-only. */
     relay: DaemonRelayConfigSchema.optional(),
     /** The peer-to-peer carrier: on, with Cloudflare's public STUN server, unless the operator says otherwise. */
@@ -484,31 +534,49 @@ function recordedAdvertisement(config: DaemonConfig): { readonly operatorPublicU
  * bind rather than off the document, which is what makes an explicit bind carrier a decision rather
  * than a decoration: the two spellings would otherwise agree everywhere except at the socket.
  */
-export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(({ accountModel, fleet, ...value }) => {
-  const declared = resolveDaemonCarriers({
-    host: value.host,
-    port: value.port,
-    relay: value.relay,
-    carriers: value.carriers,
-  });
-  const host = declared.bind.host;
-  const port = declared.bind.port ?? FY_DEFAULT_DAEMON_PORT;
-  return {
-    ...value,
-    host,
-    port,
-    // Read off the resolved bind, not off `value.port`: a `port` key superseded by a portless bind
-    // carrier is not a claim on anything, and treating it as one would refuse a boot over a line the
-    // operator has already migrated away from.
-    portIsRecorded: declared.bind.port !== undefined,
-    carrierSet: boundAt(declared, { host, port }),
-    ...derivedAddresses({ host, port, ...operatorPublicUrl(value.publicUrl) }),
-    /** The document still carries the retired `accountModel` key, so the boot says so once. */
-    retiredAccountModel: accountModel !== undefined,
-    /** The document still carries the retired `fleet` block, so the boot says so once. */
-    retiredFleetBlock: fleet !== undefined,
-  };
-});
+export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(
+  ({ accountModel, fleet, agenda, ...value }, ctx) => {
+    const reply: DaemonAttentionConfig = {
+      ...(value.attention ?? DaemonAttentionConfigSchema.parse({})),
+      ...Object.fromEntries(Object.entries(agenda ?? {}).filter(([, setting]) => setting !== undefined)),
+    };
+    if (reply.replySettleSeconds > reply.replyMaxWaitSeconds) {
+      ctx.addIssue({
+        code: 'custom',
+        message: 'agenda.replySettleSeconds must not exceed agenda.replyMaxWaitSeconds',
+        path: ['agenda', 'replySettleSeconds'],
+      });
+      return z.NEVER;
+    }
+    const declared = resolveDaemonCarriers({
+      host: value.host,
+      port: value.port,
+      relay: value.relay,
+      carriers: value.carriers,
+    });
+    const host = declared.bind.host;
+    const port = declared.bind.port ?? FY_DEFAULT_DAEMON_PORT;
+    return {
+      ...value,
+      /** The ONE reply-window value every consumer reads, whichever spelling set it. */
+      attention: reply,
+      agenda: reply,
+      attentionSpelling: attentionBlockSpelling(value.attention, agenda),
+      host,
+      port,
+      // Read off the resolved bind, not off `value.port`: a `port` key superseded by a portless bind
+      // carrier is not a claim on anything, and treating it as one would refuse a boot over a line the
+      // operator has already migrated away from.
+      portIsRecorded: declared.bind.port !== undefined,
+      carrierSet: boundAt(declared, { host, port }),
+      ...derivedAddresses({ host, port, ...operatorPublicUrl(value.publicUrl) }),
+      /** The document still carries the retired `accountModel` key, so the boot says so once. */
+      retiredAccountModel: accountModel !== undefined,
+      /** The document still carries the retired `fleet` block, so the boot says so once. */
+      retiredFleetBlock: fleet !== undefined,
+    };
+  },
+);
 
 export type DaemonConfig = z.output<typeof DaemonConfigSchema>;
 
