@@ -249,10 +249,17 @@ attributes could be captured, and the status lines change nothing. It is also wh
 stalled pane, every look still showed the suggestion — empty — and each fill typed again. The one-fill
 rule and the stretching window above are the fix; the reader was right.
 
-A composer that cannot be read is refused before a key: a fresh send is withdrawn and answered `409`
-(`send_refused`: "nothing was typed; send it again in a moment"), a released held message goes back to
-held, and a tracker re-attempt is withheld (`unreadable`) and settled `unaccounted`
-(`pane_unreadable`) — never retyped.
+A composer that cannot be read is refused before a key. A **person's** fresh send is kept open rather
+than withdrawn: it stays `accepted` and `untyped` (journal `control.send_deferred`), and the tracker
+tries it every `untypedLookMs` (5 s), ahead of every other send in the same look, until the pane reads
+clear and it is typed — its first typing, so still attempt 1. Nothing was typed, so none of the duplicate
+guards (a turn taken since, a busy-pane typing, an unreadable transcript) hold it back; a re-read that
+still cannot prove the composer empty, or a draft in the way, only waits. Never typed by the hold
+ceiling, it is `timed_out` (`not_delivered`) and retryable. This is what the owner's message lacked:
+withdrawn a second after it was accepted, it was never tried again. A ferret's or the daemon's fresh
+send is still withdrawn and answered `409` (`send_refused`: "nothing was typed; send it again in a
+moment"), a released held message goes back to held, and a tracker re-attempt of a TYPED send is
+withheld (`unreadable`) and settled `unaccounted` (`pane_unreadable`) — never retyped.
 
 A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
 next depends on whose text it is.

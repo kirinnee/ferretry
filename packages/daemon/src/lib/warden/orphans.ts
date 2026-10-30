@@ -143,6 +143,12 @@ export type OrphanTell =
       readonly assignee: string;
       readonly sessionId: string;
       readonly message: string;
+      /**
+       * Put on the same ferret's board instead when the message cannot be typed. A message that did not
+       * land was not remembered, so every sweep typed it again: nine notices every two minutes, each
+       * refused by the same composer, crowding out the owner's own message to that ferret.
+       */
+      readonly fallback: WardenCardNotice;
     }
   | {
       readonly kind: 'notice';
@@ -286,6 +292,9 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
     if (told !== undefined && !sameEpisode)
       clear(view.id, told, 'Cleared by the Warden: the card changed hands since.');
     const ownerAlive = view.owner !== assignee && alive(view.owner);
+    // An INTERACTIVE owner is the owner's own chat: a notice typed into it lands in the middle of their
+    // conversation (or sits unsent in its composer, ahead of what they type). It goes on its board instead.
+    const ownerChat = ownerAlive && fleet.get(view.owner)?.config.mode === 'interactive';
     if (sameEpisode && (told.via === 'notice' || ownerAlive)) {
       memory[view.id] = told;
       continue;
@@ -295,6 +304,11 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
       if (sameEpisode) memory[view.id] = told;
       continue;
     }
+    const notice = orphanNotice(view, input.board, fleet, input, anomaly.since ?? view.createdAt);
+    if (ownerChat) {
+      tell.push({ kind: 'notice', taskId: view.id, assignee, sessionId: view.owner, notice });
+      continue;
+    }
     if (ownerAlive) {
       tell.push({
         kind: 'message',
@@ -302,6 +316,7 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
         assignee,
         sessionId: view.owner,
         message: orphanOwnerMessage(view, input.board, fleet, input.clientName),
+        fallback: notice,
       });
       continue;
     }
@@ -310,13 +325,7 @@ export function planOrphanEscalations(input: OrphanPlanInput): OrphanPlan {
       unreported.push(view.id);
       continue;
     }
-    tell.push({
-      kind: 'notice',
-      taskId: view.id,
-      assignee,
-      sessionId: home,
-      notice: orphanNotice(view, input.board, fleet, input, anomaly.since ?? view.createdAt),
-    });
+    tell.push({ kind: 'notice', taskId: view.id, assignee, sessionId: home, notice });
   }
 
   for (const [taskId, told] of Object.entries(input.memory))

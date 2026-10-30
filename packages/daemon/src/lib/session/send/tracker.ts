@@ -197,7 +197,9 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
   private async checkLocked(id: SessionId): Promise<void> {
     const records = await this.ports.ledger.list(id);
     const now = Date.parse(this.ports.clock.now());
-    const watched = records.filter(record => this.watches(record, now));
+    // A person's send nothing has been typed for goes FIRST: it is the owner's message, and every other
+    // send in this look would otherwise be typed ahead of it into the same queue.
+    const watched = records.filter(record => this.watches(record, now)).sort(untypedFirst);
     if (watched.length === 0) return;
     const oldest = Math.min(...watched.map(record => Date.parse(record.acceptedAt)));
     const since = new Date(oldest - this.settings.matchSlackMs).toISOString();
@@ -367,6 +369,7 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     hold: PaneHold,
     now: number,
   ): Promise<SendRecord> {
+    if (record.untyped === true) return await this.typeUntyped(id, record, now);
     if (!reading.readable) {
       // A harness parked on a dialog writes no transcript at all, so "unreadable" was true and useless:
       // the screen says what is wrong, and the person can fix it. A transcript that was never PROVEN
@@ -453,12 +456,33 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     return await this.settle(id, record, 'unaccounted', reason);
   }
 
+  /**
+   * Types a person's send that nothing was typed for, now that its look is due.
+   *
+   * None of the absence proofs below apply: no key was ever sent, so no copy can be in the composer, the
+   * harness's queue or the transcript, and a turn the agent took since cannot have been about it. The
+   * re-attempt still reads the pane under the send lock and refuses to type into a composer it cannot
+   * prove empty — that refusal, or a draft in the way, is a reason to look again soon, not a loss.
+   */
+  private async typeUntyped(id: SessionId, record: SendRecord, now: number): Promise<SendRecord> {
+    const target = await this.ports.repository.read(id);
+    if (target === undefined || TERMINAL_SEND_STATUSES.has(target.status))
+      return await this.settle(id, record, 'timed_out', 'session_ended');
+    const typed = await this.ports.attempts.reattempt(id, record.sendId).catch(() => undefined);
+    return typed === undefined || typed.untyped === true ? await this.wait(id, record, now) : typed;
+  }
+
   /** Pushes the look out rather than counting it against an attempt, up to the hold ceiling. */
   private async wait(id: SessionId, record: SendRecord, now: number): Promise<SendRecord> {
+    // Never typed is proven absent, and a person may Retry it; anything typed may still have landed.
     if (now - Date.parse(record.acceptedAt) >= this.settings.holdLimitMs)
-      return await this.settle(id, record, 'unaccounted', 'timeout');
+      return record.untyped === true
+        ? await this.settle(id, record, 'timed_out', 'not_delivered')
+        : await this.settle(id, record, 'unaccounted', 'timeout');
     const extended = await this.ports.ledger.settle(id, record.sendId, {
-      deadlineAt: new Date(now + this.settings.busyExtensionMs).toISOString(),
+      deadlineAt: new Date(
+        now + (record.untyped === true ? this.settings.untypedLookMs : this.settings.busyExtensionMs),
+      ).toISOString(),
     });
     return extended ?? record;
   }
@@ -502,6 +526,11 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
  * counts: an idle boundary after a send typed into a composer says nothing about it. An unreadable
  * clock proves nothing, so it never withholds a retry.
  */
+/** Orders a look's sends so a person's untyped send is typed before any other. */
+function untypedFirst(left: SendRecord, right: SendRecord): number {
+  return Number(right.untyped === true) - Number(left.untyped === true);
+}
+
 function turnStartedAfter(record: SendRecord, target: SendTarget): boolean {
   if (target.turnStateAt === undefined) return false;
   const queued = record.fate === 'queued' || record.queueProof !== undefined;

@@ -2230,15 +2230,17 @@ export class WardenSweepService {
         reason: 'neither the card’s owner nor its ferret is on this machine, so no board can hold a notice',
       });
     const memory: Record<string, OrphanTold> = { ...plan.memory };
+    const posted = async (sessionId: string, notice: WardenCardNotice): Promise<boolean> =>
+      (await this.ports.attention.notice(sessionId, notice).catch(() => 'rejected' as const)) !== 'rejected';
     for (const tell of plan.tell) {
-      const landed =
-        tell.kind === 'message'
-          ? await this.ports.remedies.nudge(tell.sessionId, tell.message).then(
-              () => true,
-              () => false,
-            )
-          : (await this.ports.attention.notice(tell.sessionId, tell.notice).catch(() => 'rejected' as const)) !==
-            'rejected';
+      // A message that could not be typed goes on the same ferret's board, and is remembered as a notice.
+      const typed =
+        tell.kind === 'message' &&
+        (await this.ports.remedies.nudge(tell.sessionId, tell.message).then(
+          () => true,
+          () => false,
+        ));
+      const landed = typed || (await posted(tell.sessionId, tell.kind === 'message' ? tell.fallback : tell.notice));
       if (!landed) {
         this.ports.journal.record('fleet.warden_orphan_failed', {
           taskId: tell.taskId,
@@ -2247,7 +2249,7 @@ export class WardenSweepService {
         });
         continue;
       }
-      const via = tell.kind === 'message' ? 'owner' : 'notice';
+      const via = typed ? 'owner' : 'notice';
       memory[tell.taskId] = { assignee: tell.assignee, via, to: tell.sessionId, at: input.at };
       this.ports.journal.record('fleet.warden_orphan_told', { taskId: tell.taskId, via, sessionId: tell.sessionId });
     }

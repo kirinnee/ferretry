@@ -201,9 +201,12 @@ describe("a send to a Claude ferret whose composer holds a person's question", (
       subject.pane.cursor = 'lost';
 
       const answer = await subject.send();
-      await subject.deadlines();
+      const record = await subject.deadlines();
 
-      should(answer).startWith('refused');
+      // Idle, the draft refuses the send outright. Busy, the person's send is kept open and untyped
+      // for the tracker, which looked at every deadline and still typed nothing.
+      if (status === 'running') should(record).containEql({ fate: 'accepted', untyped: true });
+      else should(answer).startWith('refused');
       should(subject.pane.fills()).be.empty();
       should(subject.pane.enters()).equal(0);
       should(subject.pane.composer).equal(DRAFT);

@@ -160,6 +160,20 @@ type LockedOutcome =
       readonly held: boolean;
     };
 
+/** What a transport did: typed (and what it proved), or refused before any key and kept open. */
+type Transported<T> =
+  | { readonly typed: true; readonly value: T }
+  | { readonly typed: false; readonly record: SendRecord };
+
+/**
+ * Whose refused send is kept open rather than withdrawn: a PERSON'S. A ferret's send is answered with
+ * the refusal and its sender acts on it; the daemon's own (the Warden's) is re-planned by its sweep. A
+ * person sent it from a screen that has already said "sent", and is not watching for a retry prompt.
+ */
+function keptForTheTracker(record: SendRecord): boolean {
+  return record.senderKind === 'human';
+}
+
 /** A held message being delivered after its session came back. */
 interface HeldRelease {
   readonly record: SendRecord;
@@ -207,6 +221,7 @@ function restorable(record: SendRecord): SendSettlement {
     queueProof: record.queueProof,
     submitNudges: record.submitNudges,
     busyTyped: record.busyTyped,
+    untyped: record.untyped,
   };
 }
 
@@ -314,7 +329,8 @@ export class SessionSendService {
             'ends; send it again anyway to queue another copy now',
           'busy',
         );
-      const attempt = (current.attempt ?? 1) + 1;
+      // A send nothing was typed for yet keeps its attempt number: this is its FIRST typing.
+      const attempt = current.untyped === true ? (current.attempt ?? 1) : (current.attempt ?? 1) + 1;
       const next = await this.ports.ledger.settle(id, sendId, {
         fate: 'accepted',
         attempt,
@@ -326,6 +342,7 @@ export class SessionSendService {
         queuedAt: undefined,
         queueProof: undefined,
         submitNudges: undefined,
+        untyped: undefined,
         // Marked BEFORE the keys, like the attempt itself: a crash mid-retype must still count it.
         ...(midTurn ? { busyTyped: true } : {}),
       });
@@ -503,13 +520,15 @@ export class SessionSendService {
     if (!accepted.created) return this.settledAs(accepted.record, false);
     // May throw after the keys landed or the Enter was consumed. That is an UNCERTAIN fate, never a
     // withdrawal: the record stays accepted so a human can see a message that may have arrived. The
-    // one exception is a refusal BEFORE any keystroke, which `untyped` turns back into a refusal.
-    await this.untyped(
+    // one exception is a refusal BEFORE any keystroke, which `untyped` turns back into a refusal — or,
+    // for a person's send behind an unreadable screen, into a send kept open for the tracker to type.
+    const typed = await this.untyped(
       target.id,
       accepted.record,
       release,
       async () => await this.ports.terminal.deliver(target.id, text),
     );
+    if (!typed.typed) return { kind: 'settled', path, applied: true, record: typed.record, held: false };
     await this.turnStarted(target.id, {
       sendId: request.sendId,
       message: payload,
@@ -600,12 +619,14 @@ export class SessionSendService {
       ...(payloadFile === undefined ? {} : { payloadFile }),
     });
     if (!accepted.created) return this.settledAs(accepted.record, accepted.record.fate === 'queued');
-    const outcome = await this.untyped(
+    const typed = await this.untyped(
       target.id,
       accepted.record,
       release,
       async () => await this.ports.terminal.queue(target.id, text),
     );
+    if (!typed.typed) return { kind: 'settled', path, applied: true, record: typed.record, held: false };
+    const outcome = typed.value;
     const record = (await this.queued(target.id, accepted.record, outcome)) ?? accepted.record;
     await this.ports.channel.recordInbound(target.id, {
       at: this.ports.clock.now(),
@@ -638,13 +659,15 @@ export class SessionSendService {
     record: SendRecord,
     release: HeldRelease | undefined,
     transport: () => Promise<T>,
-  ): Promise<T> {
+  ): Promise<Transported<T>> {
     try {
-      return await transport();
+      return { typed: true, value: await transport() };
     } catch (error) {
       if (error instanceof SendLandingUnconfirmed) throw await this.unconfirmed(id, record);
       if (!(error instanceof SendComposerOccupied) && !(error instanceof SendComposerUnreadable)) throw error;
       const occupied = error instanceof SendComposerOccupied;
+      if (!occupied && release === undefined && keptForTheTracker(record))
+        return { typed: false, record: await this.keptUntyped(id, record) };
       if (release !== undefined) await this.ports.ledger.settle(id, record.sendId, { held: true });
       else
         await this.ports.ledger.withdraw(
@@ -655,6 +678,23 @@ export class SessionSendService {
       if (occupied) throw composerOccupiedRefusal(error.draft);
       throw composerUnreadableRefusal();
     }
+  }
+
+  /**
+   * A person's send the screen refused before any key, kept OPEN rather than withdrawn.
+   *
+   * "Send it again in a moment" reached nobody: the owner's message was withdrawn a second after it was
+   * accepted, behind a composer the reader could not place, and nothing ever tried it again. The record
+   * stays `accepted` and `untyped`, the tracker is told, and it types the send — ahead of any other —
+   * the first time the pane reads clear.
+   */
+  private async keptUntyped(id: SessionId, record: SendRecord): Promise<SendRecord> {
+    const kept = await this.ports.ledger.settle(id, record.sendId, { untyped: true });
+    await this.ports.repository.journal(id, 'control.send_deferred', {
+      sendId: record.sendId,
+      reason: 'the composer could not be read',
+    });
+    return kept ?? { ...record, untyped: true };
   }
 
   /**

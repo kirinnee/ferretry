@@ -4227,8 +4227,15 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       redactor: parts.redactor,
       jevChecks: new FileWardenJevCheckLog(parts.jevChecksDirectory, () => Date.now()),
       remedies: {
+        // The daemon is the sender: recorded as a person's, every Warden notice was a "human" send, kept
+        // and retried as the owner's own messages are, and counted against them.
         nudge: async (sessionId, message) => {
-          await parts.sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+          await parts.sends.send({
+            id: parseSessionId(sessionId),
+            sendId: crypto.randomUUID(),
+            message,
+            origin: 'daemon',
+          });
         },
         // A message is the turn the ferret is handed (its focus card, `focus-card.ts`); without one the resume
         // domain hands its own default turn.

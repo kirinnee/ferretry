@@ -201,13 +201,15 @@ class World {
               return queued;
             }
             this.retyped.push(sendId);
+            // As the service does: a send nothing was typed for keeps its attempt — this is its first typing.
             const next = {
               ...current,
               fate: 'accepted' as const,
-              attempt: (current.attempt ?? 1) + 1,
+              attempt: current.untyped === true ? (current.attempt ?? 1) : (current.attempt ?? 1) + 1,
               attemptAt: clock.now(),
             };
             delete (next as { deadlineAt?: string }).deadlineAt;
+            delete (next as { untyped?: boolean }).untyped;
             this.records.set(sendId, next);
             return next;
           },
@@ -1283,6 +1285,76 @@ describe('a message held in a queue the daemon cannot see', () => {
     await world.checkAt(60_000);
 
     should(world.only).match({ fate: 'queued', queueProof: 'pane', attempt: 1, deadlineAt: at(120_000) });
+    should(world.retyped).be.empty();
+  });
+});
+
+/**
+ * A person's send the screen refused before any key is kept open as `untyped`, and this tracker types
+ * it. The owner's message used to be withdrawn instead, and nothing ever tried it again.
+ */
+describe("typing a person's send that nothing was typed for yet", () => {
+  it('looks again within seconds, not at the minute-long deadline a typed send waits for', async () => {
+    const world = new World(record({ untyped: true }));
+    world.withhold = 'unreadable';
+
+    await world.checkAt(defaultSendTrackerSettings.untypedLookMs);
+
+    should(world.only.fate).equal('accepted');
+    should(world.only.untyped).be.true();
+    should(world.only.deadlineAt).equal(at(2 * defaultSendTrackerSettings.untypedLookMs));
+    should(world.events).not.containEql('control.send_unaccounted');
+  });
+
+  it('waits out a draft in the way or a failed retype rather than settling it', async () => {
+    const world = new World(record({ untyped: true }));
+    world.retypeFails = true;
+
+    await world.checkAt(defaultSendTrackerSettings.untypedLookMs);
+
+    should(world.only).containEql({ fate: 'accepted', untyped: true });
+  });
+
+  it('types it even when no transcript can be read and the agent took a turn since: nothing typed can be a copy', async () => {
+    const world = new World(record({ path: 'native-file', untyped: true }));
+    world.readFails = true;
+    world.target = { id: ID, status: 'running', mode: 'auto', turn: 6, turnState: 'working', turnStateAt: at(1_000) };
+    world.pane = pane({ activeWork: true, promptReady: false });
+
+    await world.checkAt(defaultSendTrackerSettings.untypedLookMs);
+
+    should(world.retyped).eql(['send-1']);
+    should(world.only.attempt).equal(1);
+    should(world.only.untyped).be.undefined();
+  });
+
+  it("types the person's send before any other in the same look", async () => {
+    const world = new World(
+      record({ sendId: 'agent-1', senderKind: 'agent', from: SENDER, acceptedAt: at(0), attemptAt: at(0) }),
+      record({ sendId: 'owner-1', untyped: true, acceptedAt: at(1_000), attemptAt: at(1_000) }),
+    );
+
+    await world.checkAt(defaultSendTrackerSettings.deadlinesMs.agent[0] as number);
+
+    should(world.retyped).eql(['owner-1', 'agent-1']);
+  });
+
+  it('says a send never typed by the hold ceiling was not delivered, and lets the person retry it', async () => {
+    const world = new World(record({ untyped: true }));
+    world.withhold = 'unreadable';
+
+    await world.checkAt(defaultSendTrackerSettings.holdLimitMs);
+
+    should(world.only).containEql({ fate: 'timed_out', unaccountedReason: 'not_delivered', retryable: true });
+  });
+
+  it('settles it as ended when its session has ended', async () => {
+    const world = new World(record({ untyped: true }));
+    world.target = { id: ID, status: 'completed', mode: 'auto', turn: 4 };
+
+    await world.checkAt(defaultSendTrackerSettings.untypedLookMs);
+
+    should(world.only).containEql({ fate: 'timed_out', unaccountedReason: 'session_ended' });
     should(world.retyped).be.empty();
   });
 });

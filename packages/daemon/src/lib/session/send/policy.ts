@@ -101,8 +101,12 @@ export function paneMidTurn(target: SendTarget, pane: SendPaneObservation): bool
  * message became four copies in Claude Code's queue. So a send is typed into a mid-turn pane at most
  * ONCE unless a person forces another; the daemon instead waits for the turn boundary, where the
  * harness either submits what it held (and the transcript proves it) or holds nothing.
+ *
+ * A send whose busy-pane transport refused before its first key (`untyped`) was typed nowhere, so it
+ * has no copy for the guard to protect.
  */
-export function typedIntoBusyPane(record: Pick<SendRecord, 'path' | 'busyTyped'>): boolean {
+export function typedIntoBusyPane(record: Pick<SendRecord, 'path' | 'busyTyped' | 'untyped'>): boolean {
+  if (record.untyped === true) return false;
   return record.busyTyped === true || record.path === 'native-inline' || record.path === 'native-file';
 }
 
