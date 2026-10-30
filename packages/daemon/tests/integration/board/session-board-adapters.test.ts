@@ -2,7 +2,7 @@ import { afterEach, describe, it } from 'bun:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { BOARD_EVENT_TYPES, SessionConfigSchema } from '@ferretry/protocol';
+import { BOARD_EVENT_TYPES, TaskRefSchema } from '@ferretry/protocol';
 import should from 'should';
 import {
   JournalBoardChanges,
@@ -19,6 +19,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../src/adapters/index.ts';
+import { jsonObject } from '../../../src/lib/json.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
 
 /**
@@ -98,13 +99,14 @@ describe('the board session adapters', () => {
     const before = await focus.focusOf('lead');
     const written = await focus.setFocus('lead', { id: 'F12' });
     const after = await focus.focusOf('lead');
-    const config = SessionConfigSchema.parse(await storage.readConfig(id));
+    const config = jsonObject(await storage.readConfig(id));
 
     // Assert
     should(before).be.null();
     should(written).be.true();
     should(after).eql({ id: 'F12' });
-    should(config).match({ name: 'lead', focusTask: { id: 'F12' }, tmuxSession: 'fy-lead' });
+    should(config).match({ name: 'lead', tmuxSession: 'fy-lead' });
+    should(TaskRefSchema.parse(config?.focusTask)).eql({ id: 'F12' });
   });
 
   it('should not focus a session the daemon does not hold', async () => {
