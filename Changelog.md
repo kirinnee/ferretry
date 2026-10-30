@@ -1,3 +1,15 @@
+## [4.131.0](https://github.com/kirinnee/ferretry/compare/v4.130.0...v4.131.0) (2026-10-30)
+
+### Features
+
+* **agenda:** rich, lettered agenda card with one-row quick replies ([#1000](https://github.com/kirinnee/ferretry/issues/1000)) ([6398499](https://github.com/kirinnee/ferretry/commit/6398499a924a5686736ccf66a16b43ec3f5c6033))
+* **board:** lanes follow PR facts, reconciled on every poll ([#1015](https://github.com/kirinnee/ferretry/issues/1015)) ([201e896](https://github.com/kirinnee/ferretry/commit/201e89630560453b587c15fa8c795903a9230385))
+
+### Fixes
+
+* **pwa:** decode markdown entities without an innerHTML write ([#1018](https://github.com/kirinnee/ferretry/issues/1018)) ([4604672](https://github.com/kirinnee/ferretry/commit/4604672cbb6e4090db0816d5d477201b916275e1))
+* **pwa:** scroll the Board in one place on a phone and fold its header ([#1011](https://github.com/kirinnee/ferretry/issues/1011)) ([f94a539](https://github.com/kirinnee/ferretry/commit/f94a539deceb75f7703e918daa046289b3e96213))
+
 ## [4.130.0](https://github.com/kirinnee/ferretry/compare/v4.129.0...v4.130.0) (2026-10-30)
 
 ### Features
