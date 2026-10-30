@@ -34,7 +34,7 @@ const project: FleetProject = {
 const projectSession = (id: string, overrides: Parameters<typeof sessionView>[1] = {}): SessionView =>
   sessionView(id, {
     ...overrides,
-    config: { cwd: '/work/ferretry', boardAccess: 'none', ...overrides.config },
+    config: { cwd: '/work/ferretry', ...overrides.config },
   });
 
 interface StoreShape {
@@ -196,11 +196,11 @@ describe('ProjectDetailPage', () => {
     expect(view.container.querySelector(`[data-project-detail="${PROJECT_ID}"]`)).toBeNull();
   });
 
-  it('renders the project with its provenance, its agents, its files and its boards', async () => {
+  it('renders the project with its provenance, its agents and its files', async () => {
     // Arrange
     const sessions = [
       projectSession('s-old', {
-        config: { name: 'Older work', boardAccess: 'read' },
+        config: { name: 'Older work' },
         state: { status: 'running', lastActivityAt: '2026-08-01T09:00:00.000Z' },
       }),
       projectSession('s-new', {
@@ -208,7 +208,7 @@ describe('ProjectDetailPage', () => {
         state: { status: 'running', lastActivityAt: '2026-08-06T09:00:00.000Z' },
       }),
       // Another folder entirely: it must not appear on this project.
-      sessionView('s-other', { config: { cwd: '/work/other', name: 'Elsewhere', boardAccess: 'none' } }),
+      sessionView('s-other', { config: { cwd: '/work/other', name: 'Elsewhere' } }),
     ];
 
     // Act
@@ -237,22 +237,15 @@ describe('ProjectDetailPage', () => {
 
     // Files are rooted in the most recently active session of this project.
     expect(page.querySelector('[data-project-files="s-new"]')).not.toBeNull();
-
-    // Only the session that actually exposes a board is listed as one.
-    const boards = must(page.querySelector('[data-project-boards="ready"]'), 'the boards list');
-    expect(boards.textContent).toContain('Older work');
-    expect(boards.textContent).toContain('read access · s-old');
-    expect(boards.textContent).not.toContain('Newest work');
   });
 
-  it('says a project with no session has no files to browse and no board', async () => {
+  it('says a project with no session has no files to browse', async () => {
     // Act
     const view = await show(shell(storeFor({ fleet: listing([]) })));
 
     // Assert
     expect(view.container.textContent).toContain('No active agents are working in this project.');
     expect(view.container.querySelector('[data-project-files="unavailable"]')).not.toBeNull();
-    expect(view.container.querySelector('[data-project-boards="empty"]')).not.toBeNull();
   });
 
   it('does not count a finished session as an agent still working here', async () => {
@@ -289,25 +282,20 @@ describe('ProjectDetailPage', () => {
       ),
     );
 
-    // Assert — and every panel says "unknown", not "none". Files and Boards are
+    // Assert — and every panel says "unknown", not "none". The agents and files panels are
     // drawn from the same unread list, so a collapsed empty set would turn "not
-    // read yet" into "this project has no session" and "nothing exposes a board".
+    // read yet" into "this project has no session".
     expect(view.container.querySelector('[data-project-agents="unread"]')).not.toBeNull();
     expect(view.container.querySelector('[data-project-agents="empty"]')).toBeNull();
     expect(must(view.container.querySelector('[data-project-files="unread"]'), 'the files note').textContent).toContain(
       'Files are unknown until this daemon’s session list is read',
     );
-    expect(
-      must(view.container.querySelector('[data-project-boards="unread"]'), 'the boards note').textContent,
-    ).toContain('Boards are unknown until this daemon’s session list is read');
     expect(view.container.querySelector('[data-project-files="unavailable"]')).toBeNull();
-    expect(view.container.querySelector('[data-project-boards="empty"]')).toBeNull();
 
     release([]);
     await settle();
     expect(view.container.querySelector('[data-project-agents="empty"]')).not.toBeNull();
     expect(view.container.querySelector('[data-project-files="unavailable"]')).not.toBeNull();
-    expect(view.container.querySelector('[data-project-boards="empty"]')).not.toBeNull();
   });
 
   it('names a failed session read instead of spinning on it forever', async () => {
@@ -333,16 +321,12 @@ describe('ProjectDetailPage', () => {
     expect(status.textContent).toContain('Could not read this daemon’s sessions: daemon is offline');
     expect(view.container.textContent).not.toContain('Loading this daemon’s sessions…');
 
-    // Files and Boards read the same failed list, so neither may conclude that
-    // the project has no session or no board. Both name the failure instead.
+    // The agents and files panels read the same failed list, so neither may conclude that
+    // the project has no session. Each names the failure instead.
     expect(must(view.container.querySelector('[data-project-files="failed"]'), 'the files note').textContent).toContain(
       'Could not read this daemon’s sessions, so this project’s files are unknown: daemon is offline',
     );
-    expect(
-      must(view.container.querySelector('[data-project-boards="failed"]'), 'the boards note').textContent,
-    ).toContain('Could not read this daemon’s sessions, so this project’s boards are unknown: daemon is offline');
     expect(view.container.querySelector('[data-project-files="unavailable"]')).toBeNull();
-    expect(view.container.querySelector('[data-project-boards="empty"]')).toBeNull();
   });
 
   it('calls a list it already showed stale rather than deleting it on a failed refresh', async () => {
@@ -383,7 +367,7 @@ describe('ProjectDetailPage', () => {
     expect(rows).toHaveLength(1);
     expect(must(rows[0], 'the agent row').textContent).toContain('Still here');
     expect(must(rows[0], 'the agent row').querySelector('button')?.textContent).toBe('Open');
-    // Files and Boards are drawn from that same stale set, so the screen agrees
+    // The panels are drawn from that same stale set, so the screen agrees
     // with itself rather than showing rows in one panel and nothing in another.
     expect(view.container.querySelector('[data-project-files="s-1"]')).not.toBeNull();
   });
@@ -473,9 +457,7 @@ describe('ProjectDetailPage', () => {
     await settle();
 
     // Assert
-    expect(started).toEqual([
-      { agent: 'claude-auto-loge', cwd: '/work/ferretry', mode: 'interactive', boardAccess: 'none' },
-    ]);
+    expect(started).toEqual([{ agent: 'claude-auto-loge', cwd: '/work/ferretry', mode: 'interactive' }]);
     expect(window.location.pathname).toBe('/d/workstation/session/s-created');
   });
 

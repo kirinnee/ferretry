@@ -470,7 +470,9 @@ describe('navigation without reloads, and the session cache, in the real shell',
           const listAfterReload = await settlesAt(tab, SCROLLER, listTop);
 
           // Act: Settings, out to the sessions list and Back, then reloaded.
-          await tab.click(`a[href="${sessionsPathOf(daemon)}/settings"]`);
+          // Settings is under More on a phone and in the sidebar on a desktop.
+          if (form === 'phone') await tab.click('[data-app-tab="more"]');
+          await tab.click(`a[href="${sessionsPathOf(daemon)}/settings"]:visible`);
           await tab.waitForSelector(settings);
           // Behaviour is the longest section at either width.
           await tab.click('[data-settings-section-choice="behaviour"]:visible');

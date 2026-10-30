@@ -224,7 +224,6 @@ describe('SessionTransferPreparer', () => {
     const plan = await subject.prepare(request());
 
     expect(plan.durable.parentSessionId).toBeNull();
-    expect(plan.durable.boardAccess).toBe('none');
     expect(plan.durable.cwd).toBe('/work/repo');
     expect(plan.durable.mode).toBe('auto');
     expect(plan.durable.remoteControl).toBe(true);

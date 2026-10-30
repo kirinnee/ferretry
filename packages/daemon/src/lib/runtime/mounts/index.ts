@@ -107,7 +107,6 @@ import { type SpeedupsSubsystem, speedupRoutes } from './speedups.ts';
 import { stepUpRoutes } from './step-up.ts';
 import { type SttEnhancementSubsystem, sttEnhancementRoutes } from './stt.ts';
 import { type SystemOpenSubsystem, systemOpenRoutes } from './system-open.ts';
-import { type TaskBoardSubsystem, taskBoardRoutes } from './task-boards.ts';
 import { type TaskSubsystem, taskRoutes } from './tasks.ts';
 import { type TerminalSubsystem, terminalRoutes, terminalSocketRoutes } from './terminals.ts';
 import { tunnelRoutes } from './tunnel.ts';
@@ -339,10 +338,6 @@ export interface MountedSubsystems {
   /** The board's GitHub watcher (board-design.md §3.1): it serves no route, and it is a mounted subsystem
    *  for the reason `handoverReconcile` is — a loop nothing arms is a watcher that never looks. */
   readonly boardGitHub: { arm(): () => void };
-  /** The shared task-board MEMBERSHIP lifecycle — who is on a board and what they may do — as
-   *  distinct from `tasks`, which is the records themselves. Three of the CLI's eleven board routes
-   *  are not served; the mount's own header names each one and why. */
-  readonly taskBoards: TaskBoardSubsystem;
   /** The fleet-wide analytics read over every finished session the daemon has ingested. */
   readonly analytics: AnalyticsSubsystem;
   /** Operator-owned future pricing plus exact-preview synchronization from configured feeds. */
@@ -628,10 +623,6 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
         // literals are registered before the patterns beneath them.
         ...boardRoutes(subsystems.board),
-        // The board membership surface registers beside the records it governs. Every path is under
-        // `/v1/task-boards`, which no other subsystem uses, so it can neither shadow nor be shadowed —
-        // and its own fixed literals are registered before its deeper patterns.
-        ...taskBoardRoutes(subsystems.taskBoards),
         ...analyticsRoutes(subsystems.analytics),
         ...analyticsPricingRoutes(subsystems.analyticsPricing),
         // The agent's route is a fixed literal under `/v1/agent`, and a person's are under

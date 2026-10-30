@@ -14,7 +14,7 @@
  * and started with nothing having proved it was the session the receipt reserved. So every bound
  * operation proves the target first: the id, the canonical working directory, the mode, the
  * authorized base command, a fresh identity, incarnation, runtime generation and credential, no
- * parent, `boardAccess: 'none'`, the whole plan-derived durable configuration, the lineage edge once
+ * parent, the whole plan-derived durable configuration, the lineage edge once
  * an import has written one, and the persisted plan compared VALUE FOR VALUE rather than by its
  * derived id. A disagreement refuses; it never overwrites, never creates a second target and never
  * starts one.
@@ -517,7 +517,6 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
         incarnation: `${id}-1`,
         runtimeGeneration: 1,
         // I3, stated on the document as well as made unreachable by the importer's port set.
-        boardAccess: 'none',
         agent: resolved.account.agent,
         harness: resolved.account.kind,
         modelHint: plan.target.model ?? '',
@@ -605,7 +604,6 @@ export class SessionForkTargetBinder implements SessionForkTargetBinderPort {
       ),
       demand(held.parent === undefined, `it descends from ${JSON.stringify(held.parent)} rather than from nothing`),
       demand(held.sessionCapabilityHash !== undefined, 'it holds no credential of its own'),
-      agree('board access', config.data.boardAccess, 'none'),
       agree('incarnation', config.data.incarnation, `${id}-1`),
       agree('runtime generation', config.data.runtimeGeneration, 1),
       agree('harness', config.data.harness, plan.target.harness),

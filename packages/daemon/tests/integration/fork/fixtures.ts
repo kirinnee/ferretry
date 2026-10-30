@@ -140,7 +140,6 @@ export function plan(cwd: string, overrides: Partial<SessionTransferPlan> = {}):
       cwd,
       mode: 'auto',
       parentSessionId: null,
-      boardAccess: 'none',
       label: 'f117',
       harnessFlags: ['--dangerously-skip-permissions'],
       remoteControl: true,

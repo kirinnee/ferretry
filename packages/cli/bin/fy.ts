@@ -57,15 +57,13 @@ import { BunTextFileReader } from '../src/adapters/tasks/bun-text-file-reader';
 import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
 import { BoardController } from '../src/lib/board/board-controllers';
-import { FyTaskBoardGateway } from '../src/adapters/tasks/fy-task-board-gateway';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
-import { registerTaskBoardCommands } from '../src/adapters/tasks/task-board-commands';
 import { registerBoardImportCommand } from '../src/adapters/board-import/board-import-command';
 import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
 import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
-import { environmentBoardCredentials, environmentSessionId } from '../src/adapters/tasks/task-environment';
+import { environmentSessionId } from '../src/adapters/tasks/task-environment';
 import { ConsoleIo, type ICliIo } from '../src/adapters/terminal/console-io';
 import { chooseProgress, processProgressHost } from '../src/adapters/terminal/progress-factory';
 import { ProgressAwareIo } from '../src/adapters/terminal/progress-io';
@@ -918,12 +916,6 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerLaneCommands(program, { gateway: new FyLaneGateway(client), io: world.io, binaryName: BINARY_NAME }),
   ({ program, world, client }) =>
     registerBoardImportCommand(program, { gateway: new FyBoardImportGateway(client), io: world.io }),
-  ({ program, world, client }) =>
-    registerTaskBoardCommands(program, {
-      gateway: new FyTaskBoardGateway(client),
-      io: world.io,
-      credentials: environmentBoardCredentials(world.environment),
-    }),
   ({ program, world, client, ownSessionId }) =>
     registerStopCommands(
       program,
@@ -1295,9 +1287,6 @@ function sessionCommands(
   const environment: SessionEnvironment = {
     cwd: world.cwd,
     ...(ownSessionId === undefined ? {} : { callerSessionId: ownSessionId }),
-    ...(cliEnvironment.FY_BOARD_CAPABILITY === undefined
-      ? {}
-      : { boardCapability: cliEnvironment.FY_BOARD_CAPABILITY }),
   };
   const api = new FySessionApi(
     createFyClientConnector({

@@ -378,9 +378,6 @@ export const PendingQuestionSchema = z.object({
 });
 export type PendingQuestion = z.infer<typeof PendingQuestionSchema>;
 
-export const TaskBoardAccessSchema = z.enum(['none', 'read', 'worker', 'coordinator']);
-export type TaskBoardAccess = z.infer<typeof TaskBoardAccessSchema>;
-
 const RetryPolicySchema = z.object({
   transientAttempts: NonNegativeIntegerSchema,
   stalledAttempts: NonNegativeIntegerSchema,
@@ -508,7 +505,6 @@ export const SessionConfigSchema = z.object({
    * hazard class.
    */
   provenance: SessionProvenanceSchema.optional(),
-  boardAccess: TaskBoardAccessSchema,
   agent: z.string().min(1),
   harness: HarnessSchema,
   modelHint: z.string(),
@@ -1015,7 +1011,6 @@ const StartSessionBaseSchema = z.strictObject({
   teammateFallback: z.boolean().optional(),
   label: z.string().min(1).optional(),
   parent: z.string().min(1).optional(),
-  boardAccess: TaskBoardAccessSchema.default('none'),
   cwd: z.string().min(1).optional(),
   remoteControl: z.boolean().optional(),
   harnessFlags: z.array(HarnessFlagSchema).max(MAX_HARNESS_FLAGS).optional(),
@@ -1049,29 +1044,25 @@ const StartSessionBaseSchema = z.strictObject({
     .optional(),
 });
 
-export const StartSessionRequestSchema = z
-  .discriminatedUnion('mode', [
-    StartSessionBaseSchema.extend({ mode: z.literal('auto'), prompt: z.string().trim().min(1) }),
-    StartSessionBaseSchema.extend({ mode: z.literal('interactive'), prompt: z.string().trim().min(1).optional() }),
-  ])
-  .superRefine((value, context) => {
-    if (value.boardAccess !== 'none' && value.parent === undefined) {
-      context.addIssue({
-        code: 'custom',
-        message: 'parent is required when board access is requested',
-        path: ['parent'],
-      });
-    }
-    if (value.boardAccess !== 'none' && value.mode !== 'auto') {
-      context.addIssue({
-        code: 'custom',
-        message: 'board access is available only for auto sessions',
-        path: ['boardAccess'],
-      });
-    }
-  });
-export type StartSessionRequest = z.infer<typeof StartSessionRequestSchema>;
-export type StartSessionRequestInput = z.input<typeof StartSessionRequestSchema>;
+const StartSessionRequestShapeSchema = z.discriminatedUnion('mode', [
+  StartSessionBaseSchema.extend({ mode: z.literal('auto'), prompt: z.string().trim().min(1) }),
+  StartSessionBaseSchema.extend({ mode: z.literal('interactive'), prompt: z.string().trim().min(1).optional() }),
+]);
+
+/**
+ * Drops the `boardAccess` key the retired task-board ACL used to carry. Old configs, envelopes and
+ * clients still send it, so a read strips it rather than rejecting a strict object over a field
+ * nothing honours any more.
+ */
+export function withoutBoardAccess(input: unknown): unknown {
+  if (typeof input !== 'object' || input === null || Array.isArray(input)) return input;
+  const { boardAccess: _retired, ...rest } = input as Record<string, unknown>;
+  return rest;
+}
+
+export const StartSessionRequestSchema = z.preprocess(withoutBoardAccess, StartSessionRequestShapeSchema);
+export type StartSessionRequest = z.infer<typeof StartSessionRequestShapeSchema>;
+export type StartSessionRequestInput = z.input<typeof StartSessionRequestShapeSchema>;
 
 /** Client-authored fields only; actor identity and idempotency come from headers. */
 export const SendRequestSchema = z.strictObject({

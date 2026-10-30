@@ -679,3 +679,208 @@
     height: 36px;
   }
 }
+
+/* ---- Phone (the `drawer` layout): one lane under a chip strip, thumb-sized rows ------------------- */
+.fy-board[data-phone] {
+  padding-inline: 12px;
+}
+.fy-board[data-phone] .fy-board-phone {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-board-phone__strip {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  gap: var(--gap-xs);
+  overflow-x: auto;
+  padding-bottom: 2px;
+  scrollbar-width: none;
+  scroll-snap-type: x proximity;
+}
+.fy-board-phone__strip::-webkit-scrollbar {
+  display: none;
+}
+.fy-board-phone__chip {
+  display: inline-flex;
+  min-height: 40px;
+  flex: none;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-md);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  white-space: nowrap;
+  scroll-snap-align: center;
+  cursor: pointer;
+}
+.fy-board-phone__chip[aria-selected='true'] {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-board-phone__chip[data-empty]:not([aria-selected='true']) {
+  opacity: 0.65;
+}
+.fy-board-phone__chip-n {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-2);
+  color: var(--fg);
+  font-size: var(--text-xs);
+  line-height: 18px;
+  text-align: center;
+}
+.fy-board-phone__panel {
+  min-width: 0;
+  min-height: 40vh;
+  /* A sideways drag is the lane switch; the page still scrolls up and down. */
+  touch-action: pan-y;
+}
+.fy-board[data-phone] .fy-board-card {
+  padding: 8px var(--gap-sm);
+}
+.fy-board[data-phone] .fy-board-card__verdict {
+  gap: var(--gap-sm);
+  margin-top: 8px;
+}
+.fy-board[data-phone] .fy-board-verdict {
+  min-height: 44px;
+  gap: 6px;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+/* One row above the lanes: the Filters icon, then the count pills, then the closed count, scrolling sideways. */
+.fy-board__phone-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--gap-xs);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.fy-board__phone-bar::-webkit-scrollbar {
+  display: none;
+}
+.fy-board__phone-bar .fy-board-filters,
+.fy-board__phone-bar .fy-board-filters__bar {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+.fy-board__phone-bar .fy-board-counts {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: var(--gap-xs);
+}
+.fy-board[data-phone] .fy-board-count,
+.fy-board[data-phone] .fy-board-count[data-kind='pill'] {
+  flex: none;
+  min-height: 32px;
+  font-size: var(--text-xs);
+}
+.fy-board[data-phone] .fy-board-filters__toggle,
+.fy-board[data-phone] .fy-board-filters__clear {
+  min-height: 32px;
+  font-size: var(--text-xs);
+}
+.fy-board[data-phone] .fy-board-filters__toggle {
+  position: relative;
+  min-width: 36px;
+  justify-content: center;
+}
+.fy-board[data-phone] .fy-board-filters__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.fy-board[data-phone] .fy-board-counts__closed {
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--gap-sm);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+/* The filter sheet: every field stacked at full width, the actions pinned under them. */
+.fy-board-filter-sheet {
+  padding: 0 var(--gap-md) calc(var(--gap-md) + var(--safe-bottom, 0px));
+}
+.fy-board-filter-sheet__title {
+  margin: 0 0 var(--gap-sm);
+  font-family: var(--font-display);
+  font-size: var(--text-lg);
+}
+.fy-board-filter-sheet__fields {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  overflow-y: auto;
+}
+.fy-board-filter-sheet__fields .fy-board-filters__select,
+.fy-board-filter-sheet__fields .fy-board-filters__date {
+  width: 100%;
+  max-width: none;
+  min-height: 44px;
+  font-size: var(--text-sm);
+}
+.fy-board-filter-sheet__fields .fy-board-filters__range {
+  flex-direction: column;
+  align-items: stretch;
+}
+.fy-board-filter-sheet__fields .fy-board-filters__mine {
+  min-height: 44px;
+  font-size: var(--text-sm);
+}
+.fy-board-filter-sheet__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--gap-sm);
+  padding-top: var(--gap-md);
+}
+
+/* The "why is it going back" box slides up from the bottom edge, above the keyboard. */
+.fy-board__scrim[data-phone] {
+  align-items: flex-end;
+  padding: 0;
+}
+.fy-board__scrim[data-phone] .fy-board-reason {
+  width: 100%;
+  padding-bottom: calc(var(--gap-md) + var(--safe-bottom, 0px));
+  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
+  animation: fy-board-slide-up 180ms ease-out;
+}
+.fy-board__scrim[data-phone] .fy-board-reason__input {
+  min-height: 44px;
+  font-size: 16px;
+}
+@keyframes fy-board-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .fy-board__scrim[data-phone] .fy-board-reason {
+    animation: none;
+  }
+}

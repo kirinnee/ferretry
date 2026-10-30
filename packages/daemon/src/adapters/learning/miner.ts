@@ -136,7 +136,6 @@ export class LearningMiner {
       label: LEARNING_MINER_LABEL,
       name: 'Learning Miner',
       cwd: this.paths.home,
-      boardAccess: 'none',
       ...(this.config().model === undefined ? {} : { model: this.config().model }),
     };
     const payload = JSON.stringify(request);
@@ -326,7 +325,6 @@ export class LearningMiner {
       label: LEARNING_MINER_LABEL,
       name: 'Lesson Scan',
       cwd: this.paths.home,
-      boardAccess: 'none',
       ...(model === undefined ? {} : { model }),
     };
     const miner = await this.sessionControl.start(request, `learning:${name}`, JSON.stringify(request));

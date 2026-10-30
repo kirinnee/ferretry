@@ -1,11 +1,7 @@
 import { describe, expect, it } from 'bun:test';
 import type { ProjectInfo } from '@ferretry/protocol';
 
-import {
-  activeProjectSessions,
-  projectBoardSessions,
-  projectSessions,
-} from '../../../src/features/projects/project-detail-model.ts';
+import { activeProjectSessions, projectSessions } from '../../../src/features/projects/project-detail-model.ts';
 import { projectLaunchRequest } from '../../../src/features/projects/project-launch-model.ts';
 import { sessionView } from '../../support/sessions.ts';
 
@@ -34,17 +30,16 @@ describe('project detail model', () => {
     expect(sessions.map(session => session.config.id)).toEqual(['newer', 'older']);
   });
 
-  it('keeps active and board projections honest and separately derived from that session set', () => {
+  it('keeps the active projection derived from that session set', () => {
     const sessions = projectSessions(project, [
-      sessionView('active', { config: { cwd: '/work/registry', boardAccess: 'worker' } }),
+      sessionView('active', { config: { cwd: '/work/registry' } }),
       sessionView('finished', {
-        config: { cwd: '/work/registry', boardAccess: 'none' },
+        config: { cwd: '/work/registry' },
         state: { status: 'completed' },
       }),
     ]);
 
     expect(activeProjectSessions(sessions).map(session => session.config.id)).toEqual(['active']);
-    expect(projectBoardSessions(sessions).map(session => session.config.id)).toEqual(['active']);
   });
 
   it('builds only the existing top-level interactive creation contract', () => {
@@ -52,7 +47,6 @@ describe('project detail model', () => {
       agent: 'claude-auto-loge',
       cwd: '/work/registry/',
       mode: 'interactive',
-      boardAccess: 'none',
     });
   });
 });

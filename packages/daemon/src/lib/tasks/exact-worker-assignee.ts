@@ -1,19 +1,11 @@
 import type { Task } from '@ferretry/protocol';
-import type { TaskBoardSession } from './types.ts';
 
-/**
- * The three fields resolving an assignee actually needs.
- *
- * NARROWER THAN `TaskBoardSession` deliberately. The rest of that record — the capability hash, the
- * incarnation, the runtime generation — is AUTHORIZATION state, and this function answers a display
- * question: which session does the name a human typed refer to. Demanding the whole record would mean
- * the only directory that fits is the board's own, which omits every session without a capability
- * hash, so a task assigned to a teammate whose session predates the credential would read as unknown.
- * Worse, satisfying the wide type with a projection would mean FABRICATING an authorization field for
- * a display read, and an array of those is one careless call away from an authorization path.
- * `TaskBoardSession` is assignable to this, so the board's own directory still fits.
- */
-export type TaskAssigneeCandidate = Pick<TaskBoardSession, 'id' | 'name' | 'teammate'>;
+/** The three fields resolving an assignee reads: a display question, with no authorization state in it. */
+export interface TaskAssigneeCandidate {
+  readonly id: string;
+  readonly name: string | null;
+  readonly teammate?: string | null | undefined;
+}
 
 /**
  * The session an assignee names, or `null` when nothing does — or when more than one thing does.

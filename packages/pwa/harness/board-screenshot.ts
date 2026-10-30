@@ -79,12 +79,12 @@ const PHONE = {
 const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 
 /** Every part of the page that scrolls on its own (a Kanban row does) is allowed; the document is not. */
-const open = async (context: BrowserContext, theme: string, view: string): Promise<Page> => {
+const open = async (context: BrowserContext, theme: string, view: string, extra = ''): Promise<Page> => {
   const page = await context.newPage();
   await page.route('**/*', route =>
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
-  await page.goto(`${server.url}?theme=${theme}&view=${view}`);
+  await page.goto(`${server.url}?theme=${theme}&view=${view}${extra}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
   await page.locator('.fy-board-card, .fy-board__empty').first().waitFor({ state: 'visible' });
   await page.waitForTimeout(200);
@@ -93,8 +93,8 @@ const open = async (context: BrowserContext, theme: string, view: string): Promi
   return page;
 };
 
-const shot = async (page: Page, name: string): Promise<void> => {
-  const path = join(shotsDir, `board-u11-${name}.png`);
+const shot = async (page: Page, name: string, prefix = 'board-u11'): Promise<void> => {
+  const path = join(shotsDir, `${prefix}-${name}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -113,6 +113,19 @@ try {
         await shot(page, `${scheme}-${label}`);
         await page.close();
       }
+      // U13: the phone's lane strip, a To test row, the filter sheet and the bottom bar.
+      const strip = await open(phone, theme, 'kanban', '&bar=1');
+      await shot(strip, `${scheme}-phone`, 'board-u13');
+      await strip.close();
+      const toTest = await open(phone, theme, 'kanban', '&at=tested&bar=1');
+      await shot(toTest, `${scheme}-phone-to-test`, 'board-u13');
+      await toTest.close();
+      const sheet = await open(phone, theme, 'kanban');
+      await sheet.locator('.fy-board-filters__toggle').click();
+      await sheet.locator('[data-bottom-sheet="board-filter-sheet"] [role="dialog"]').waitFor({ state: 'visible' });
+      await sheet.waitForTimeout(400);
+      await shot(sheet, `${scheme}-phone-filters`, 'board-u13');
+      await sheet.close();
       if (scheme === 'light') {
         for (const view of ['archive', 'list', 'tree', 'dependencies'] as const) {
           const page = await open(desktop, theme, view);

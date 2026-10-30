@@ -1,3 +1,10 @@
+## [4.123.0](https://github.com/kirinnee/ferretry/compare/v4.122.0...v4.123.0) (2026-10-30)
+
+### Features
+
+* **board:** GitHub watcher — PR auto-link, lane triggers, CI, releases, refiling (U6) ([#956](https://github.com/kirinnee/ferretry/issues/956)) ([24a5251](https://github.com/kirinnee/ferretry/commit/24a52510ba5c733b9033a469f9abb7653f3b7612))
+* **daemon:** propose inferred lanes when a start lands in a project with none ([#975](https://github.com/kirinnee/ferretry/issues/975)) ([b940527](https://github.com/kirinnee/ferretry/commit/b9405272c6304230fcbfee998e93cc9a17c00aa5))
+
 ## [4.122.0](https://github.com/kirinnee/ferretry/compare/v4.121.0...v4.122.0) (2026-10-30)
 
 ### Features

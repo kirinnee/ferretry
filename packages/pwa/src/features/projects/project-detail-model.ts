@@ -21,7 +21,3 @@ export const projectSessions = (project: ProjectInfo, sessions: readonly Session
 /** Active means a session the fleet does not report as terminal. */
 export const activeProjectSessions = (sessions: readonly SessionView[]): readonly SessionView[] =>
   sessions.filter(session => !TERMINAL_STATUSES.has(session.state.status));
-
-/** A board has no project key; this is the honest session-derived projection. */
-export const projectBoardSessions = (sessions: readonly SessionView[]): readonly SessionView[] =>
-  sessions.filter(session => session.config.boardAccess !== 'none');

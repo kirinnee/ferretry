@@ -11,7 +11,6 @@ export function launchConfig(overrides: Readonly<Record<string, unknown>> = {}):
     incarnation: 's1-1',
     runtimeGeneration: 1,
     name: 'Keep Settings Current',
-    boardAccess: 'none',
     agent: 'claude-auto-boot',
     harness: 'claude',
     modelHint: 'claude-opus-5',

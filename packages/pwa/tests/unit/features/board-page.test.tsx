@@ -292,7 +292,7 @@ describe('BoardPage — filters and counts', () => {
   });
 
   it('starts the filters folded on a narrow screen', async () => {
-    const { root } = await open({ props: { compact: true } });
+    const { root } = await open({ props: { phone: true } });
     expect(root.querySelector('.fy-board-filters__row')).toBeNull();
   });
 

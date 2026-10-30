@@ -44,7 +44,6 @@ function session(patch: SessionPatch = {}): SessionView {
       incarnation: `${id}-1`,
       runtimeGeneration: 1,
       name: 'Complete task',
-      boardAccess: 'none',
       agent: 'claude',
       harness: patch.harness ?? 'claude',
       modelHint: '',

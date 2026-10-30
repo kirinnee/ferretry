@@ -413,7 +413,6 @@ describe('SessionForkTargetBinder', () => {
     should(held.config.sessionCapabilityHash).equal(CAPABILITY_HASH);
     should(started.config.incarnation).equal(`${TARGET_ID}-1`);
     should(started.config.runtimeGeneration).equal(1);
-    should(started.config.boardAccess).equal('none');
     should(started.config.teammate).equal(undefined);
     should(started.config.harness).equal('claude');
     should(started.config.agent).equal('claude-auto-zelda');
@@ -868,7 +867,6 @@ describe('SessionForkTargetBinder', () => {
         repository: new StorageSessionLifecycleRepository(subject.storage, {
           incarnation: `${TARGET_ID}-4`,
           runtimeGeneration: 4,
-          boardAccess: 'worker',
           agent: 'claude-auto-zelda',
           harness: 'claude',
           modelHint: '',
@@ -917,7 +915,7 @@ describe('SessionForkTargetBinder', () => {
     should(refused.message).match(/is not the fresh target plan/u);
     should(refused.message).match(/canonical working directory/u);
     should(refused.message).match(/interaction mode/u);
-    should(refused.message).match(/board access/u);
+    should(refused.message).match(/model/u);
     should(refused.message).match(/incarnation/u);
     should(refused.message).match(/runtime generation/u);
     should(refused.message).match(/is not exactly the authorized base command/u);
@@ -1163,7 +1161,7 @@ describe('SessionForkTargetBinder', () => {
     await drive(subject);
     await subject.storage.updateConfig(
       subject.target,
-      current => ({ ...(current as Record<string, unknown>), boardAccess: 'worker' }) as JsonValue,
+      current => ({ ...(current as Record<string, unknown>), model: 'drifted-model' }) as JsonValue,
     );
 
     // Act
@@ -1171,7 +1169,7 @@ describe('SessionForkTargetBinder', () => {
 
     // Assert
     should(refused.message).match(/is not the fresh target plan/u);
-    should(refused.message).match(/board access/u);
+    should(refused.message).match(/model/u);
   });
 
   it('should refuse a completed target whose lineage edge has been altered or removed', async () => {
