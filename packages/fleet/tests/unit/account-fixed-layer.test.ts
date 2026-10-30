@@ -756,18 +756,18 @@ describe('AGENDA_INSTRUCTION', () => {
     // Assert
     should(text).startWith('Agenda mode: keep an agenda of what ONLY the owner can do or decide.');
     should(text).containEql('add each ask as its OWN item');
-    should(text).containEql('`zz agenda add --title "<what it is about>" "<the ask>"`');
+    // Premise and context are part of the one command, and required: every item is read cold.
+    should(text).containEql(
+      '`zz agenda add --title "<topic>" --premise "<situation>" --context "<why now>" "<the ask>"` (required)',
+    );
     should(text).containEql('Title ≤40 chars; ask ≤120.');
     should(text).containEql('no "as above", ticket/PR numbers, paths or unexplained acronyms');
     should(text).containEql('`--term "X=meaning"`');
-    should(text).containEql(
-      '`--premise` = situation, `--context` = why now, `--decided` = settled, `--still-open` = left',
-    );
-    should(text).containEql('`--body`: show it with hypermedia (fy-render image|chart|mermaid|svg) when it helps');
+    should(text).containEql('`--decided` = settled, `--still-open` = left');
+    should(text).containEql('`--body`: hypermedia (fy-render image|chart|mermaid|svg) where it helps');
     should(text).containEql('`--kind todo|yesno|permission|choice|review|info`');
     // Each item stands alone, in full Markdown, and each option is a short letter-able label plus a one-line reason.
-    should(text).containEql('Each item stands ALONE — the owner never looks elsewhere');
-    should(text).containEql('full Markdown (`code` for names/commands, **bold** key point)');
+    should(text).containEql('Each item stands ALONE: full Markdown (`code` names, **bold** key point)');
     should(text).containEql('Choice: 2–3 `--option "Label: why"`; `--recommend <label> --recommend-why <line>`');
     should(text).containEql('To-do: `--step "<md>"`');
     // When it is needed: it blocks now, will block later, or by a time.
@@ -777,8 +777,8 @@ describe('AGENDA_INSTRUCTION', () => {
     // The answer and discussion loops, then resolving and reading.
     should(text).containEql('"[answer to !A3 …]" is the answer');
     should(text).containEql('"[re !A3 …]" is chat.');
-    // Every item stays current, in the turn the facts changed: edited, closed or handed back.
-    should(text).containEql('KEEP ITEMS CURRENT this turn');
+    // Every item stays current: edited, closed or handed back.
+    should(text).containEql('KEEP ITEMS CURRENT');
     should(text).containEql('changed or discussed → `zz agenda edit <id>`');
     should(text).containEql('settled → `zz agenda done <id>`');
     should(text).containEql('still theirs → `zz agenda surface <id>`');
