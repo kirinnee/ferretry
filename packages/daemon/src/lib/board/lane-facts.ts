@@ -7,18 +7,19 @@
  * {@link laneFromFacts} where the facts say the card belongs, instead of waiting for the event.
  *
  * - **Facts, not lanes.** The answer is read off the card's PRs, most advanced first: all merged and in a
- *   release → the lane `release.published` enters, and the lane `release.running` enters once this machine
- *   runs that release; any merged with none open → `pr.merged`; any open → `pr.ready` (`pr.opened` while
- *   all are drafts). A lane set that lacks the lane a fact names falls back to the next fact down.
+ *   release → the lane `release.published` enters (Released · to test), and, in a set that still has one, the
+ *   lane `release.running` enters once this machine runs that release (no shipped template has one); any
+ *   merged with none open → `pr.merged`; any open → `pr.ready` (`pr.opened` while all are drafts). A lane
+ *   set that lacks the lane a fact names falls back to the next fact down.
  * - **Never backward, never sideways, except for open work.** A card already at or past the lane stays. A
  *   card the owner or a ferret sent back stays back until a PR newer than that move merges; the merges it
  *   was sent back from are spent. The one fact that moves a card back is an open PR, draft or not and
  *   whenever it was opened, on a card that has shipped something: work still in flight means the card is not
- *   shipped, so it is back in review and the history says "moved back to Review/CI: PR #1013 ready for
- *   review". A PR closed unmerged says nothing.
+ *   shipped, so it is back where `pr.ready` puts it and the history says "moved back to In progress: PR #1013
+ *   ready for review". A PR closed unmerged says nothing.
  * - **Gates are for decisions, not facts.** A fact moves a card through an `ownerGate` lane, forward out of
- *   Plan/Design or back out of To test. It never enters an owner-gated `closed` lane, nor any `closed`
- *   lane in a set with a `verify` lane: only the owner closes there.
+ *   Plan/Design or back out of Released · to test. It never enters an owner-gated `closed` lane, nor any
+ *   `closed` lane in a set with a `verify` lane: only the owner closes there.
  * - **No opinion** is `null`: the card is dropped or closed, has no PR to say anything, or is already where
  *   its facts put it.
  */

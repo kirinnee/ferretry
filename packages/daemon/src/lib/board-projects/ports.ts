@@ -33,10 +33,11 @@ export interface LaneProposalAgenda {
 /**
  * Moves the cards of a deleted lane to the lane the edit named, in the board store (U2). Called after the
  * edited set is stored, with the new set already readable; it must be safe to repeat, because a failure here
- * leaves the set edited and the cards where they were.
+ * leaves the set edited and the cards where they were. `reason` is what each card's history says about the
+ * move; absent, it says the lane was removed.
  */
 export interface CardRelocator {
-  relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>): Promise<void>;
+  relocate(projectId: BoardProjectId, moves: Readonly<Record<string, string>>, reason?: string): Promise<void>;
 }
 
 /** Reads {@link ProjectGitFacts} for a folder. Never rejects: a folder it cannot read is a folder with no repository. */

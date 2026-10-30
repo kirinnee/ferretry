@@ -29,12 +29,42 @@ export const directory: readonly SessionDirectoryEntry[] = [
   { id: ANON, callsign: undefined },
 ];
 
+/**
+ * The `pr` lanes as they were before board v3 folded Review/CI into In progress: the renderers draw any lane
+ * set, so these tests keep the one with the most lanes to draw.
+ */
+const CLASSIC_PR: Pick<LaneSet, 'lanes' | 'variants' | 'doneLane' | 'notGoodLane'> = {
+  lanes: [
+    { id: 'todo', name: 'Todo', category: 'backlog', staleAfter: '3d' },
+    {
+      id: 'plan',
+      name: 'Plan/Design',
+      category: 'active',
+      enterOn: ['work.started'],
+      ownerGate: true,
+      staleAfter: '2h',
+    },
+    { id: 'implement', name: 'Implement', category: 'active', enterOn: ['work.started'], staleAfter: '2h' },
+    {
+      id: 'review',
+      name: 'Review/CI',
+      category: 'review',
+      enterOn: ['pr.opened', 'pr.ready', 'signal.done'],
+      staleAfter: '24h',
+    },
+    { id: 'merged', name: 'Merged', category: 'closed', enterOn: ['pr.merged'] },
+  ],
+  variants: { quick: ['todo', 'implement', 'review', 'merged'] },
+  doneLane: 'merged',
+  notGoodLane: 'implement',
+};
+
 export const laneSet = (overrides: Partial<LaneSet> = {}): LaneSet => ({
   projectId: FERRETRY_ID as LaneSet['projectId'],
   version: 3,
   confirmedBy: null,
   proposedBy: 'denisha',
-  ...LANE_TEMPLATES.pr,
+  ...CLASSIC_PR,
   ...overrides,
 });
 

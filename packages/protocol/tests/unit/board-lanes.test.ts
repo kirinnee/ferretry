@@ -4,6 +4,7 @@ import * as lanesModule from '../../src/lib/board-lanes.ts';
 import {
   categoryOf,
   DependencyUntilSchema,
+  defaultLaneTargets,
   firstLaneOfCategory,
   isBackwardMove,
   isBlockerDone,
@@ -11,6 +12,7 @@ import {
   LANE_TEMPLATES,
   type Lane,
   LaneCategorySchema,
+  LaneEmphasisSchema,
   LaneIdSchema,
   LaneLayoutSchema,
   LaneNameSchema,
@@ -21,10 +23,12 @@ import {
   LaneTemplateNameSchema,
   LaneTriggerSchema,
   LaneVariantsSchema,
+  laneEmphasis,
   laneForTrigger,
   laneLayoutFromTemplate,
   laneLayoutProblems,
   laneOf,
+  laneTargets,
   needsOwner,
   nextLane,
   StaleAfterSchema,
@@ -46,6 +50,30 @@ const laneSetOf = (template: lanesModule.LaneTemplateName): LaneSet => ({
 
 const FERRETRY = laneSetOf('pr-release-verify');
 
+/**
+ * Ferretry's lanes before board v3: Review/CI on its own, and Released apart from To test. Stored and
+ * hand-made sets still look like this, so the helpers are exercised over it.
+ */
+const CLASSIC: LaneSet = {
+  projectId: PROJECT,
+  version: 1,
+  confirmedBy: null,
+  proposedBy: 'session-1',
+  lanes: [
+    { id: 'todo', name: 'Todo', category: 'backlog', staleAfter: '3d' },
+    { id: 'plan', name: 'Plan/Design', category: 'active', enterOn: ['work.started'], ownerGate: true },
+    { id: 'implement', name: 'Implement', category: 'active', enterOn: ['work.started'] },
+    { id: 'review', name: 'Review/CI', category: 'review', enterOn: ['pr.opened', 'pr.ready', 'signal.done'] },
+    { id: 'merged', name: 'Merged', category: 'shipped', enterOn: ['pr.merged'] },
+    { id: 'released', name: 'Released', category: 'shipped', enterOn: ['release.published'] },
+    { id: 'tested', name: 'To test', category: 'verify', enterOn: ['release.running'], ownerGate: true },
+    { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true },
+  ],
+  variants: { quick: ['todo', 'implement', 'review', 'merged', 'released', 'tested', 'closed'] },
+  doneLane: 'closed',
+  notGoodLane: 'implement',
+};
+
 const lane = (id: string, category: Lane['category'], extra: Partial<Lane> = {}): Lane => ({
   id,
   name: id,
@@ -63,6 +91,7 @@ const VALID: readonly SchemaCase[] = [
   { name: 'lane id', schema: LaneIdSchema, value: 'review-ci' },
   { name: 'lane name', schema: LaneNameSchema, value: 'Review/CI' },
   { name: 'stale after', schema: StaleAfterSchema, value: '24h' },
+  { name: 'emphasis', schema: LaneEmphasisSchema, value: 'action' },
   { name: 'lane', schema: LaneSchema, value: FERRETRY.lanes[1] },
   { name: 'variants', schema: LaneVariantsSchema, value: { quick: ['todo', 'closed'] } },
   { name: 'layout', schema: LaneLayoutSchema, value: layout(SOUND) },
@@ -80,6 +109,7 @@ const INVALID: readonly SchemaCase[] = [
   { name: 'long id', schema: LaneIdSchema, value: `a${'b'.repeat(32)}` },
   { name: 'two-line name', schema: LaneNameSchema, value: 'Review\nCI' },
   { name: 'empty name', schema: LaneNameSchema, value: '  ' },
+  { name: 'unknown emphasis', schema: LaneEmphasisSchema, value: 'loud' },
   { name: 'no unit', schema: StaleAfterSchema, value: '2' },
   { name: 'zero', schema: StaleAfterSchema, value: '0h' },
   { name: 'repeated trigger', schema: LaneSchema, value: lane('a', 'review', { enterOn: ['pr.opened', 'pr.opened'] }) },
@@ -178,9 +208,9 @@ describe('lane templates', () => {
     }
   });
 
-  it('should give Ferretry its lanes, triggers, gates and thresholds', () => {
+  it('should give Ferretry its action-first lanes, triggers, gates and thresholds', () => {
     should(FERRETRY.lanes).deepEqual([
-      { id: 'todo', name: 'Todo', category: 'backlog', staleAfter: '3d' },
+      { id: 'todo', name: 'Todo', category: 'backlog', staleAfter: '3d', emphasis: 'progress' },
       {
         id: 'plan',
         name: 'Plan/Design',
@@ -188,30 +218,62 @@ describe('lane templates', () => {
         enterOn: ['work.started'],
         ownerGate: true,
         staleAfter: '2h',
+        emphasis: 'action',
       },
-      { id: 'implement', name: 'Implement', category: 'active', enterOn: ['work.started'], staleAfter: '2h' },
       {
-        id: 'review',
-        name: 'Review/CI',
-        category: 'review',
-        enterOn: ['pr.opened', 'pr.ready', 'signal.done'],
-        staleAfter: '24h',
+        id: 'implement',
+        name: 'In progress',
+        category: 'active',
+        enterOn: ['work.started', 'pr.opened', 'pr.ready'],
+        staleAfter: '4h',
+        emphasis: 'progress',
       },
-      { id: 'merged', name: 'Merged', category: 'shipped', enterOn: ['pr.merged'], staleAfter: '3d' },
-      { id: 'released', name: 'Released', category: 'shipped', enterOn: ['release.published'] },
-      { id: 'tested', name: 'To test', category: 'verify', enterOn: ['release.running'], ownerGate: true },
-      { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true },
+      { id: 'merged', name: 'Merged', category: 'shipped', enterOn: ['pr.merged'], staleAfter: '3d', emphasis: 'info' },
+      {
+        id: 'released',
+        name: 'Released · to test',
+        category: 'verify',
+        enterOn: ['release.published'],
+        ownerGate: true,
+        emphasis: 'action',
+      },
+      { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true, emphasis: 'info' },
     ]);
-    should(FERRETRY.variants.quick).deepEqual([
-      'todo',
-      'implement',
-      'review',
-      'merged',
-      'released',
-      'tested',
-      'closed',
-    ]);
+    should(FERRETRY.doneLane).equal('closed');
+    should(FERRETRY.notGoodLane).equal('implement');
+  });
+
+  it('should walk Plan/Design only for the workflows that plan first', () => {
+    const unplanned = ['todo', 'implement', 'merged', 'released', 'closed'];
+    should(FERRETRY.variants.quick).deepEqual(unplanned);
+    should(FERRETRY.variants.investigate).deepEqual(unplanned);
     should(FERRETRY.variants['design-first']).deepEqual(FERRETRY.lanes.map(entry => entry.id));
+    should(FERRETRY.variants['research-first']).deepEqual(FERRETRY.lanes.map(entry => entry.id));
+  });
+
+  it('should fold review into In progress and keep no lane that waits on a release running', () => {
+    for (const template of ['pr-release-verify', 'pr-release', 'pr'] as const) {
+      const lanes = LANE_TEMPLATES[template].lanes;
+      should(lanes.some(entry => entry.category === 'review')).be.false();
+      should(lanes.find(entry => entry.id === 'implement')?.enterOn).deepEqual([
+        'work.started',
+        'pr.opened',
+        'pr.ready',
+      ]);
+    }
+    for (const template of LaneTemplateNameSchema.options) {
+      should(
+        LANE_TEMPLATES[template].lanes.some(entry => entry.enterOn?.includes('release.running') === true),
+      ).be.false();
+    }
+  });
+
+  it('should send Done to the closed lane and Not good to the last active lane, in every template', () => {
+    for (const template of LaneTemplateNameSchema.options) {
+      const { lanes, doneLane, notGoodLane } = LANE_TEMPLATES[template];
+      should(lanes.find(entry => entry.id === doneLane)?.category).equal('closed');
+      should(notGoodLane).equal(lanes.findLast(entry => entry.category === 'active')?.id);
+    }
   });
 
   it('should close on the last lane’s trigger in the sets with no verify lane', () => {
@@ -222,8 +284,15 @@ describe('lane templates', () => {
       name: 'Released',
       category: 'closed',
       enterOn: ['release.published'],
+      emphasis: 'info',
     });
-    should(closing('pr')).deepEqual({ id: 'merged', name: 'Merged', category: 'closed', enterOn: ['pr.merged'] });
+    should(closing('pr')).deepEqual({
+      id: 'merged',
+      name: 'Merged',
+      category: 'closed',
+      enterOn: ['pr.merged'],
+      emphasis: 'info',
+    });
     should(closing('quick')?.enterOn).deepEqual(['signal.done']);
     should(closing('ops')?.ownerGate).be.true();
     should(closing('writing')?.ownerGate).be.true();
@@ -231,23 +300,26 @@ describe('lane templates', () => {
 
   it('should name the lanes of the other templates', () => {
     const names = (template: lanesModule.LaneTemplateName) => LANE_TEMPLATES[template].lanes.map(entry => entry.name);
+    should(names('pr-release')).deepEqual(['Todo', 'Plan/Design', 'In progress', 'Merged', 'Released']);
+    should(names('pr')).deepEqual(['Todo', 'Plan/Design', 'In progress', 'Merged']);
     should(names('ops')).deepEqual(['Todo', 'Investigate', 'Fix', 'Verify', 'Closed']);
     should(names('writing')).deepEqual(['Todo', 'Research', 'Draft', 'Review', 'Published', 'Closed']);
     should(names('quick')).deepEqual(['Todo', 'Doing', 'Closed']);
   });
 
-  it('should apply a proposal’s renames and keep lane ids', () => {
+  it('should apply a proposal’s renames and keep lane ids and targets', () => {
     // Act
-    const renamed = laneLayoutFromTemplate('pr-release-verify', { plan: 'Investigate', tested: 'QA' });
+    const renamed = laneLayoutFromTemplate('pr-release-verify', { plan: 'Investigate', released: 'Shipped · try it' });
 
     // Assert
     should(renamed.ok).be.true();
     if (!renamed.ok) return;
     should(renamed.value.lanes.map(entry => `${entry.id}:${entry.name}`)).containDeep([
       'plan:Investigate',
-      'tested:QA',
+      'released:Shipped · try it',
     ]);
     should(renamed.value.lanes.map(entry => entry.id)).deepEqual(FERRETRY.lanes.map(entry => entry.id));
+    should(renamed.value).match({ doneLane: 'closed', notGoodLane: 'implement' });
     should(laneLayoutFromTemplate('quick')).deepEqual({ ok: true, value: LANE_TEMPLATES.quick });
   });
 
@@ -259,51 +331,157 @@ describe('lane templates', () => {
   });
 });
 
+describe('lane emphasis', () => {
+  it('should draw a lane with the emphasis it declares', () => {
+    should(laneEmphasis(lane('merged', 'shipped', { emphasis: 'progress' }))).equal('progress');
+  });
+
+  it('should derive it from the category, and from an owner gate, when the lane does not say', () => {
+    should(laneEmphasis(lane('tested', 'verify'))).equal('action');
+    should(laneEmphasis(lane('plan', 'active', { ownerGate: true }))).equal('action');
+    should(laneEmphasis(lane('implement', 'active'))).equal('progress');
+    should(laneEmphasis(lane('todo', 'backlog'))).equal('progress');
+    should(laneEmphasis(lane('review', 'review'))).equal('progress');
+    should(laneEmphasis(lane('merged', 'shipped'))).equal('info');
+    should(laneEmphasis(lane('closed', 'closed', { ownerGate: true }))).equal('info');
+  });
+
+  it('should refuse a verify lane that is not action, and a closed lane that is not info', () => {
+    const problemsOf = (lanes: readonly Lane[]) => laneLayoutProblems(layout(lanes)).map(([, message]) => message);
+    should(
+      problemsOf([SOUND[0] as Lane, lane('doing', 'active'), lane('closed', 'closed', { emphasis: 'action' })]),
+    ).deepEqual(['the closed lane is hidden information, so its emphasis is info']);
+    should(
+      problemsOf([
+        SOUND[0] as Lane,
+        lane('tested', 'verify', { ownerGate: true, emphasis: 'info' }),
+        lane('closed', 'closed', { ownerGate: true }),
+      ]),
+    ).deepEqual(["a verify lane is the owner's action, so its emphasis is action"]);
+  });
+});
+
+describe('Done and Not good lanes', () => {
+  const problemsOf = (value: Parameters<typeof laneLayoutProblems>[0]) =>
+    laneLayoutProblems(value).map(([path, message]) => `${path}: ${message}`);
+
+  it('should derive them: the closed lane, and the last active lane, else the first backlog lane', () => {
+    should(defaultLaneTargets(CLASSIC.lanes)).deepEqual({ doneLane: 'closed', notGoodLane: 'implement' });
+    should(defaultLaneTargets([lane('todo', 'backlog'), lane('later', 'backlog'), lane('closed', 'closed')])).deepEqual(
+      {
+        doneLane: 'closed',
+        notGoodLane: 'todo',
+      },
+    );
+    should(defaultLaneTargets([lane('todo', 'backlog')])).be.undefined();
+    should(defaultLaneTargets([lane('closed', 'closed')])).be.undefined();
+  });
+
+  it('should take a layout’s own targets, else the previous set’s that still fit, else derive them', () => {
+    const sound = layout(SOUND);
+    should(laneTargets({ ...sound, doneLane: 'closed', notGoodLane: 'doing' })).deepEqual({
+      doneLane: 'closed',
+      notGoodLane: 'doing',
+    });
+    const twoActive = layout([...SOUND.slice(0, 2), lane('fix', 'active'), lane('closed', 'closed')]);
+    should(laneTargets(twoActive, { doneLane: 'closed', notGoodLane: 'doing' })).deepEqual({
+      doneLane: 'closed',
+      notGoodLane: 'doing',
+    });
+    should(laneTargets(twoActive, { doneLane: 'gone', notGoodLane: 'gone' })).deepEqual({
+      doneLane: 'closed',
+      notGoodLane: 'fix',
+    });
+    should(laneTargets(twoActive, { doneLane: 'todo', notGoodLane: 'todo' })).deepEqual({
+      doneLane: 'closed',
+      notGoodLane: 'fix',
+    });
+    should(laneTargets(layout([lane('todo', 'backlog')]))).be.undefined();
+  });
+
+  it('should refuse a Done lane that is not the closed lane, and a Not good lane work cannot resume in', () => {
+    should(problemsOf({ ...layout(SOUND), doneLane: 'doing' })).deepEqual([
+      'doneLane: Done moves a card to the closed lane',
+    ]);
+    should(problemsOf({ ...layout(SOUND), notGoodLane: 'closed' })).deepEqual([
+      'notGoodLane: Not good moves a card back to an active lane, where work resumes',
+    ]);
+    should(problemsOf({ ...layout(SOUND), notGoodLane: 'todo' })).deepEqual([
+      'notGoodLane: Not good moves a card back to an active lane, where work resumes',
+    ]);
+    should(problemsOf({ ...layout(SOUND), notGoodLane: 'ghost' })).deepEqual([
+      'notGoodLane: Not good moves a card back to an active lane, where work resumes',
+    ]);
+    should(problemsOf({ ...layout([SOUND[0] as Lane, lane('closed', 'closed')]), notGoodLane: 'todo' })).deepEqual([]);
+  });
+
+  it('should read a stored set from before them with the targets derived, and keep declared ones', () => {
+    // Arrange
+    const { doneLane: _done, notGoodLane: _notGood, ...old } = CLASSIC;
+
+    // Act
+    const parsed = LaneSetSchema.parse(old);
+
+    // Assert
+    should(parsed).match({ doneLane: 'closed', notGoodLane: 'implement' });
+    should(LaneSetSchema.parse({ ...old, notGoodLane: 'plan' })).match({ doneLane: 'closed', notGoodLane: 'plan' });
+  });
+
+  it('should leave what is not a lane set for the schema to refuse', () => {
+    should(LaneSetSchema.safeParse(null).success).be.false();
+    should(LaneSetSchema.safeParse({ ...CLASSIC, lanes: 'none' }).success).be.false();
+    should(LaneSetSchema.safeParse({ ...CLASSIC, lanes: [{ id: 'Bad' }], doneLane: undefined }).success).be.false();
+    should(
+      LaneSetSchema.safeParse({ ...CLASSIC, lanes: [lane('todo', 'backlog')], doneLane: undefined }).success,
+    ).be.false();
+  });
+});
+
 describe('lane helpers', () => {
   const unknown = (laneId: string) => ({ ok: false, error: { code: 'unknown-lane', laneId } });
   /** A set whose variant names a lane it does not have: only reachable without parsing. */
-  const broken: LaneSet = { ...FERRETRY, variants: { quick: ['todo', 'ghost'] } };
+  const broken: LaneSet = { ...CLASSIC, variants: { quick: ['todo', 'ghost'] } };
 
   it('should find a lane and its category', () => {
-    should(laneOf(FERRETRY, 'merged')).deepEqual({ ok: true, value: FERRETRY.lanes[4] });
-    should(laneOf(FERRETRY, 'ghost')).deepEqual(unknown('ghost'));
-    should(categoryOf(FERRETRY, 'tested')).deepEqual({ ok: true, value: 'verify' });
-    should(categoryOf(FERRETRY, 'ghost')).deepEqual(unknown('ghost'));
+    should(laneOf(CLASSIC, 'merged')).deepEqual({ ok: true, value: CLASSIC.lanes[4] });
+    should(laneOf(CLASSIC, 'ghost')).deepEqual(unknown('ghost'));
+    should(categoryOf(CLASSIC, 'tested')).deepEqual({ ok: true, value: 'verify' });
+    should(categoryOf(CLASSIC, 'ghost')).deepEqual(unknown('ghost'));
   });
 
   it('should tell a move back by lane order', () => {
-    should(isBackwardMove(FERRETRY, 'tested', 'implement')).deepEqual({ ok: true, value: true });
-    should(isBackwardMove(FERRETRY, 'plan', 'implement')).deepEqual({ ok: true, value: false });
-    should(isBackwardMove(FERRETRY, 'implement', 'plan')).deepEqual({ ok: true, value: true });
-    should(isBackwardMove(FERRETRY, 'ghost', 'plan')).deepEqual(unknown('ghost'));
-    should(isBackwardMove(FERRETRY, 'plan', 'ghost')).deepEqual(unknown('ghost'));
+    should(isBackwardMove(CLASSIC, 'tested', 'implement')).deepEqual({ ok: true, value: true });
+    should(isBackwardMove(CLASSIC, 'plan', 'implement')).deepEqual({ ok: true, value: false });
+    should(isBackwardMove(CLASSIC, 'implement', 'plan')).deepEqual({ ok: true, value: true });
+    should(isBackwardMove(CLASSIC, 'ghost', 'plan')).deepEqual(unknown('ghost'));
+    should(isBackwardMove(CLASSIC, 'plan', 'ghost')).deepEqual(unknown('ghost'));
   });
 
   it('should walk a workflow’s variant, or every lane when it has none', () => {
     const ids = (result: ReturnType<typeof variantLanes>) => (result.ok ? result.value.map(entry => entry.id) : result);
-    should(ids(variantLanes(FERRETRY, 'quick'))).deepEqual(FERRETRY.variants.quick);
-    should(ids(variantLanes({ ...FERRETRY, variants: {} }, 'investigate'))).deepEqual(
-      FERRETRY.lanes.map(entry => entry.id),
+    should(ids(variantLanes(CLASSIC, 'quick'))).deepEqual(CLASSIC.variants.quick);
+    should(ids(variantLanes({ ...CLASSIC, variants: {} }, 'investigate'))).deepEqual(
+      CLASSIC.lanes.map(entry => entry.id),
     );
     should(variantLanes(broken, 'quick')).deepEqual(unknown('ghost'));
   });
 
   it('should find the next lane, skipping what the variant skips', () => {
     const next = (workflow: 'quick' | 'design-first', from: string) => {
-      const result = nextLane(FERRETRY, workflow, from);
+      const result = nextLane(CLASSIC, workflow, from);
       return result.ok ? (result.value?.id ?? null) : result;
     };
     should(next('quick', 'todo')).equal('implement');
     should(next('design-first', 'todo')).equal('plan');
     should(next('quick', 'plan')).equal('implement');
     should(next('quick', 'closed')).be.null();
-    should(nextLane(FERRETRY, 'quick', 'ghost')).deepEqual(unknown('ghost'));
+    should(nextLane(CLASSIC, 'quick', 'ghost')).deepEqual(unknown('ghost'));
     should(nextLane(broken, 'quick', 'todo')).deepEqual(unknown('ghost'));
   });
 
   it('should find the first lane of a category in a variant', () => {
-    should(firstLaneOfCategory(FERRETRY, 'design-first', 'active')).deepEqual({ ok: true, value: FERRETRY.lanes[1] });
-    should(firstLaneOfCategory(FERRETRY, 'quick', 'active')).deepEqual({ ok: true, value: FERRETRY.lanes[2] });
+    should(firstLaneOfCategory(CLASSIC, 'design-first', 'active')).deepEqual({ ok: true, value: CLASSIC.lanes[1] });
+    should(firstLaneOfCategory(CLASSIC, 'quick', 'active')).deepEqual({ ok: true, value: CLASSIC.lanes[2] });
     should(firstLaneOfCategory(laneSetOf('quick'), 'quick', 'verify')).deepEqual({
       ok: false,
       error: { code: 'no-lane-of-category', category: 'verify' },
@@ -313,7 +491,7 @@ describe('lane helpers', () => {
 
   it('should send a trigger to the first lane of the variant that enters on it', () => {
     const target = (workflow: 'quick' | 'design-first', trigger: lanesModule.LaneTrigger) => {
-      const result = laneForTrigger(FERRETRY, workflow, trigger);
+      const result = laneForTrigger(CLASSIC, workflow, trigger);
       return result.ok ? (result.value?.id ?? null) : result;
     };
     should(target('design-first', 'work.started')).equal('plan');
@@ -325,15 +503,15 @@ describe('lane helpers', () => {
   });
 
   it('should need the owner to close, and to move forward out of a gated lane', () => {
-    should(needsOwner(FERRETRY, 'tested', 'closed')).deepEqual({ ok: true, value: true });
-    should(needsOwner(FERRETRY, 'implement', 'closed')).deepEqual({ ok: true, value: true });
-    should(needsOwner(FERRETRY, 'plan', 'implement')).deepEqual({ ok: true, value: true });
-    should(needsOwner(FERRETRY, 'tested', 'implement')).deepEqual({ ok: true, value: false });
-    should(needsOwner(FERRETRY, 'plan', 'plan')).deepEqual({ ok: true, value: false });
-    should(needsOwner(FERRETRY, 'implement', 'review')).deepEqual({ ok: true, value: false });
+    should(needsOwner(CLASSIC, 'tested', 'closed')).deepEqual({ ok: true, value: true });
+    should(needsOwner(CLASSIC, 'implement', 'closed')).deepEqual({ ok: true, value: true });
+    should(needsOwner(CLASSIC, 'plan', 'implement')).deepEqual({ ok: true, value: true });
+    should(needsOwner(CLASSIC, 'tested', 'implement')).deepEqual({ ok: true, value: false });
+    should(needsOwner(CLASSIC, 'plan', 'plan')).deepEqual({ ok: true, value: false });
+    should(needsOwner(CLASSIC, 'implement', 'review')).deepEqual({ ok: true, value: false });
     should(needsOwner(laneSetOf('quick'), 'doing', 'closed')).deepEqual({ ok: true, value: false });
-    should(needsOwner(FERRETRY, 'ghost', 'closed')).deepEqual(unknown('ghost'));
-    should(needsOwner(FERRETRY, 'plan', 'ghost')).deepEqual(unknown('ghost'));
+    should(needsOwner(CLASSIC, 'ghost', 'closed')).deepEqual(unknown('ghost'));
+    should(needsOwner(CLASSIC, 'plan', 'ghost')).deepEqual(unknown('ghost'));
   });
 
   it('should count a blocker done once it ships, or once it is released when that is what is waited for', () => {

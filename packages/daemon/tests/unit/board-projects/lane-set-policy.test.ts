@@ -1,5 +1,11 @@
 import { describe, it } from 'bun:test';
-import { LANE_TEMPLATES, type LaneLayoutValue, type LaneSet, UNFILED_PROJECT_ID } from '@ferretry/protocol';
+import {
+  LANE_TEMPLATES,
+  type LaneLayoutValue,
+  type LaneSet,
+  LaneSetSchema,
+  UNFILED_PROJECT_ID,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   actorName,
@@ -7,10 +13,13 @@ import {
   describeLaneSetFailure,
   editLaneSet,
   type LaneActor,
+  mergeReleaseLanes,
   noLaneSetMessage,
   proposeLaneSet,
+  RELEASED_TO_TEST_NAME,
   unfiledLaneSet,
 } from '../../../src/lib/board-projects/index.ts';
+import { lanes, templateLanes } from '../board/support.ts';
 import { FERRETRY_ID } from './support.ts';
 
 const OWNER: LaneActor = { kind: 'owner' };
@@ -120,6 +129,29 @@ describe('editLaneSet', () => {
 
     should(actual.ok && actual.value).containDeep({ version: 2, confirmedBy: null, proposedBy: 'koen' });
   });
+
+  it('should keep the set’s Done and Not good lanes while they fit, unless the edit names its own', () => {
+    // Arrange
+    const { doneLane: _done, notGoodLane: _notGood, ...bare } = LANE_TEMPLATES.ops;
+    const ops = proposed({ ...LANE_TEMPLATES.ops, notGoodLane: 'investigate' });
+
+    // Act
+    const kept = editLaneSet(ops, edit({ layout: bare }), OWNER);
+    const named = editLaneSet(ops, edit({ layout: { ...bare, notGoodLane: 'fix' } }), OWNER);
+    const gone = editLaneSet(
+      ops,
+      edit({
+        layout: { ...bare, lanes: bare.lanes.filter(lane => lane.id !== 'investigate'), variants: {} },
+        relocate: { investigate: 'fix' },
+      }),
+      OWNER,
+    );
+
+    // Assert
+    should(kept.ok && kept.value).containDeep({ doneLane: 'closed', notGoodLane: 'investigate' });
+    should(named.ok && named.value).containDeep({ doneLane: 'closed', notGoodLane: 'fix' });
+    should(gone.ok && gone.value).containDeep({ doneLane: 'closed', notGoodLane: 'fix' });
+  });
 });
 
 describe('confirmLaneSet', () => {
@@ -154,5 +186,118 @@ describe('the words of a refusal', () => {
     should(describeLaneSetFailure({ code: 'already-confirmed', version: 2 })).containEql('version 2');
     should(describeLaneSetFailure({ code: 'no-lane-set' })).containEql('no lanes yet');
     should(describeLaneSetFailure({ code: 'owner-only' })).containEql('only the owner');
+  });
+});
+
+describe('mergeReleaseLanes', () => {
+  const classic = (overrides: Partial<LaneSet> = {}): LaneSet => ({
+    ...lanes(FERRETRY_ID),
+    version: 4,
+    confirmedBy: 'owner',
+    proposedBy: 'koen',
+    ...overrides,
+  });
+
+  it('should fold Released and To test into one owner-gated verify lane, entered on release', () => {
+    // Act
+    const merged = mergeReleaseLanes(classic());
+
+    // Assert
+    should(merged?.from).equal('tested');
+    should(merged?.into).equal('released');
+    should(merged?.next.lanes.map(lane => lane.id)).deepEqual([
+      'todo',
+      'plan',
+      'implement',
+      'review',
+      'merged',
+      'released',
+      'closed',
+    ]);
+    should(merged?.next.lanes.find(lane => lane.id === 'released')).deepEqual({
+      id: 'released',
+      name: RELEASED_TO_TEST_NAME,
+      category: 'verify',
+      enterOn: ['release.published'],
+      ownerGate: true,
+      emphasis: 'action',
+    });
+  });
+
+  it('should raise the version, keep the confirmation and the targets, and ask the owner nothing', () => {
+    const next = mergeReleaseLanes(classic())?.next;
+    should(next).containDeep({ version: 5, confirmedBy: 'owner', proposedBy: 'koen' });
+    should(next).containDeep({ doneLane: 'closed', notGoodLane: 'implement' });
+    should(next === undefined ? false : LaneSetSchema.safeParse(next).success).be.true();
+  });
+
+  it('should walk the merged lane in every variant that walked either', () => {
+    // Arrange
+    const set = classic({
+      variants: {
+        quick: ['todo', 'implement', 'review', 'merged', 'tested', 'closed'],
+        investigate: ['todo', 'implement', 'review', 'merged', 'released', 'tested', 'closed'],
+      },
+    });
+
+    // Act
+    const next = mergeReleaseLanes(set)?.next;
+
+    // Assert
+    should(next?.variants.quick).deepEqual(['todo', 'implement', 'review', 'merged', 'released', 'closed']);
+    should(next?.variants.investigate).deepEqual(['todo', 'implement', 'review', 'merged', 'released', 'closed']);
+  });
+
+  it('should find the lanes by what enters them, whatever they are called, and keep any other trigger', () => {
+    // Arrange
+    const set = classic({
+      lanes: lanes(FERRETRY_ID).lanes.map(lane => {
+        if (lane.id === 'released') return { ...lane, id: 'shipped-out', name: 'Out' };
+        if (lane.id === 'tested') return { ...lane, id: 'qa', name: 'QA', enterOn: ['release.running', 'signal.done'] };
+        return lane;
+      }),
+      variants: {},
+    });
+
+    // Act
+    const merged = mergeReleaseLanes(set);
+
+    // Assert
+    should(merged).match({ from: 'qa', into: 'shipped-out' });
+    should(merged?.next.lanes.find(lane => lane.id === 'shipped-out')).match({
+      name: RELEASED_TO_TEST_NAME,
+      enterOn: ['release.published', 'signal.done'],
+    });
+  });
+
+  it('should carry To test’s gate as it was, and say nothing of a gate it did not have', () => {
+    const ungated = classic({
+      lanes: lanes(FERRETRY_ID).lanes.map(lane => {
+        if (lane.id === 'tested')
+          return { id: lane.id, name: lane.name, category: lane.category, enterOn: lane.enterOn };
+        return lane;
+      }),
+    });
+    should(mergeReleaseLanes(ungated)?.next.lanes.find(lane => lane.id === 'released')?.ownerGate).be.undefined();
+  });
+
+  it('should be idempotent, leave alone every set with nothing to merge, and need only the two lanes', () => {
+    // Arrange
+    const once = mergeReleaseLanes(classic())?.next;
+    const noMerged = classic({ lanes: lanes(FERRETRY_ID).lanes.filter(lane => lane.id !== 'merged'), variants: {} });
+    const reordered = (() => {
+      const all = [...lanes(FERRETRY_ID).lanes];
+      const tested = all.splice(6, 1);
+      all.splice(5, 0, ...tested);
+      return classic({ lanes: all, variants: {} });
+    })();
+
+    // Act + Assert
+    should(once === undefined ? undefined : mergeReleaseLanes(once)).be.null();
+    should(mergeReleaseLanes(templateLanes(FERRETRY_ID))).be.null();
+    should(mergeReleaseLanes(lanes(FERRETRY_ID, 'pr-release'))).be.null();
+    should(mergeReleaseLanes(lanes(FERRETRY_ID, 'quick'))).be.null();
+    should(mergeReleaseLanes(reordered)).be.null();
+    should(mergeReleaseLanes(noMerged)).not.be.null();
   });
 });
