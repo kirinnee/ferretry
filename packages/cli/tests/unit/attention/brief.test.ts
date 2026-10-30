@@ -626,3 +626,52 @@ describe('attention brief answer limit', () => {
     );
   });
 });
+
+describe('a confirmation of a held configuration change (--confirms)', () => {
+  it('should name the file and leave the card’s kind, ask and answers to the daemon', () => {
+    // Arrange / Act
+    const request = add(['Allow the Jev price correction?'], {
+      confirms: 'warden.yaml',
+      premise: ['the cap counted with $2 per million tokens'],
+      step: ['Read the diff'],
+    });
+
+    // Assert
+    should(request).deepEqual({
+      action: 'add',
+      source: 'agent-raised',
+      sourceRef: null,
+      subject: 'Allow the Jev price correction?',
+      title: 'Plan approval',
+      why: 'Allow the Jev price correction?',
+      context: null,
+      premise: 'the cap counted with $2 per million tokens',
+      howToResolve: 'Answer this item on the agenda (it records who answered).',
+      steps: ['Read the diff'],
+      confirms: 'warden.yaml',
+    });
+  });
+
+  it('should read the file from the JSON body too', () => {
+    // Arrange
+    const file = parseBriefFile(JSON.stringify({ confirms: 'pack.yaml' }));
+
+    // Act
+    const request = add(['Allow Pack mode?'], {}, file);
+
+    // Assert
+    should(request).containDeep({ confirms: 'pack.yaml' });
+    should(request).not.have.property('ask');
+  });
+
+  it('should refuse the flags that would choose the card’s own answers', () => {
+    // Arrange / Act / Assert
+    should(() => add(['Allow it?'], { confirms: 'warden.yaml', kind: 'yesno' })).throw(
+      "--confirms writes the card's answers itself (Allow, Deny, Discard change): drop --kind",
+    );
+    should(() =>
+      add(['Allow it?'], { confirms: 'warden.yaml', option: ['a', 'b'], question: ['which?'], up: 'Skip' }),
+    ).throw(/drop --option, --question, --up$/u);
+    should(() => add(['Allow it?'], { confirms: 'warden.yaml' }, { up: { label: 'Skip' } })).throw(/drop --up$/u);
+  });
+});

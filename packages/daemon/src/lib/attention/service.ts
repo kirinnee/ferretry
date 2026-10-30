@@ -1,4 +1,5 @@
 import type {
+  AttentionConfirms,
   AttentionId,
   AttentionItem,
   AttentionResponse,
@@ -223,6 +224,26 @@ export class AttentionService {
       id,
       reason,
       ...(request === undefined ? {} : { request }),
+      at: this.clock.now(),
+    });
+  }
+
+  /**
+   * The held change a confirmation names moved on: the item names the new one, restated, and is the owner's
+   * again (docs/agenda.md § Confirming a configuration change). Daemon-only: the config files are the witness.
+   */
+  async restateConfirms(
+    sessionId: string,
+    id: AttentionId,
+    confirms: AttentionConfirms,
+    premise: string,
+  ): Promise<AttentionMutation> {
+    return this.apply(sessionId, {
+      action: 'restate-confirms',
+      actor: { kind: 'daemon', cause: 'system' },
+      id,
+      confirms,
+      premise,
       at: this.clock.now(),
     });
   }

@@ -59,6 +59,10 @@ class MemoryDirectory implements ConfigDirectoryPort {
     this.texts.set(path, text);
   }
 
+  async remove(path: string): Promise<void> {
+    this.texts.delete(path);
+  }
+
   async writeSchemas(): Promise<void> {}
 }
 
@@ -825,7 +829,7 @@ describe('the configuration files mount', () => {
 
         // Assert
         should(answer.body.summary).match(
-          /^Wrote warden\.yaml, but it loosens what this machine allows \(.*Warden may now spend.*\), so it waits for the owner to confirm it; .* Tell the owner\.$/u,
+          /^Wrote warden\.yaml, but it loosens what this machine allows \(.*Warden may now spend.*\), so it waits for the owner to confirm it; .* Tell the owner with a card whose Allow confirms it: fy agenda add "<the ask>" --title "<title>" --confirms warden\.yaml\.$/u,
         );
         should(answer.body.etag).equal(digest(WARDEN_ON));
         should(await wardenInEffect(subject)).be.false();

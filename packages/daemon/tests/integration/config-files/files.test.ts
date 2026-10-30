@@ -300,6 +300,19 @@ describe('FileConfigDirectory', () => {
     should((await stat(target)).mode & 0o777).equal(0o600);
   });
 
+  it('should remove a file, and a file already gone without an error', async () => {
+    // Arrange
+    const subject = await fixture();
+    await put(subject.config, 'pack.yaml', 'enabled: true\n');
+
+    // Act
+    await subject.directory.remove('pack.yaml');
+    await subject.directory.remove('pack.yaml');
+
+    // Assert
+    should(await subject.directory.read('pack.yaml')).be.undefined();
+  });
+
   it('should rewrite only the schemas that changed', async () => {
     // Arrange
     const subject = await fixture();

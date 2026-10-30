@@ -135,6 +135,8 @@ import { LessonController } from '../src/lib/lesson/controller';
 import { McpServer, McpServersController, ProtocolMcpServersGateway, registerMcpCommands } from '../src/lib/mcp';
 import { registerMigrationCommands } from '../src/lib/migration/commands';
 import { MigrationController } from '../src/lib/migration/controller';
+import { registerRestartCommands } from '../src/lib/restart/commands';
+import { RestartController } from '../src/lib/restart/controller';
 import { registerModelsCommands } from '../src/lib/models/commands';
 import { ModelsController } from '../src/lib/models/controller';
 import { registerNotifyCommands, runNotify } from '../src/lib/notify/commands';
@@ -410,6 +412,9 @@ type SharedDaemonClient = Pick<
   | 'stop'
   | 'migrate'
   | 'conversionPreview'
+  | 'restart'
+  | 'restartStatus'
+  | 'cancelRestarts'
   | 'scratchPlan'
   | 'scratchSweep'
   | 'harnessUpdate'
@@ -438,6 +443,9 @@ function lazyDaemonClient(client: () => Promise<IFyApiClient>): SharedDaemonClie
     migrate: async (id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation) =>
       (await client()).migrate(id, agent, model, allowContextDowngrade, requestId, forceInflight, conversation),
     conversionPreview: async (id, agent, model) => (await client()).conversionPreview(id, agent, model),
+    restart: async (request, requestId) => (await client()).restart(request, requestId),
+    restartStatus: async () => (await client()).restartStatus(),
+    cancelRestarts: async () => (await client()).cancelRestarts(),
     scratchPlan: async (limit?: number) => (await client()).scratchPlan(limit),
     scratchSweep: async (force?: boolean) => (await client()).scratchSweep(force),
     snapshot: async (id: string) => (await client()).snapshot(id),
@@ -862,6 +870,11 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
     registerMigrationCommands(
       program,
       new MigrationController(client, new SessionPresenter(world.io, new SystemClock()), world.progress),
+    ),
+  ({ program, world, client, ownSessionId }) =>
+    registerRestartCommands(
+      program,
+      new RestartController(client, new SessionPresenter(world.io, new SystemClock()), ownSessionId, world.progress),
     ),
   ({ program, world, client }) => registerScratchCommands(program, new ScratchController(client, world.io)),
   ({ program, world, client }) =>

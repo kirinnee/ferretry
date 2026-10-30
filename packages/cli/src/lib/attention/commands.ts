@@ -179,6 +179,10 @@ function mountVerbs(
       .option('--blocking', 'you are stopped until the owner answers')
       .option('--will-block <thing>', 'what this will block, in a few words (e.g. "the 14:00 deploy")')
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
+      .option(
+        '--confirms <file>',
+        "a config file with a change held for the owner (fy config status): the owner's Allow applies it; the card's answers are Allow, Deny, Discard change",
+      )
       .option('--json-file <path>', 'read these fields as JSON from a file, or - for stdin')
       .addHelpText('after', `\n${ASK_KINDS}`),
   ).action(async (words: string[], _flags: unknown, command: Command) => {

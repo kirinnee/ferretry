@@ -102,6 +102,7 @@ export * from './session/question/index.ts';
 export * from './session/reads/index.ts';
 export * from './session/reap.ts';
 export * from './session/reap-service.ts';
+export * from './session/restart/index.ts';
 export * from './session/resume/index.ts';
 export * from './session/runtime-control/index.ts';
 export * from './session/send/index.ts';
