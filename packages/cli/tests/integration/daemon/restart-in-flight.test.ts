@@ -420,7 +420,7 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
     const marker = join(daemon.root, 'delivered');
     const waiting = fy(
       daemon,
-      ['wait', session.config.id, '--timeout', '12', '--interval', '0.2', '--until-marker', marker, '--keep'],
+      ['wait', session.config.id, '--timeout', '12', '--interval', '1', '--until-marker', marker, '--keep'],
       ferret,
     );
 
