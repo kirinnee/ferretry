@@ -36,6 +36,7 @@ import {
   wardenLoginProblem,
   wardenPacedUntil,
 } from './warden-status-model.ts';
+import { jevBeforeLine } from './warden-jev-line.ts';
 import { ANOMALY_CHIPS, chip, layersLabel, type WardenChip } from './warden-vocabulary.ts';
 
 // ── Vocabulary ──────────────────────────────────────────────────────────────────────────────────
@@ -406,6 +407,8 @@ export interface WardenInvestigationRow {
   readonly title: string;
   readonly reportPath?: string;
   readonly verdict?: WardenVerdictKind;
+  /** What Jev did about the flag first (`warden-jev-line.ts`). */
+  readonly jev: string;
 }
 
 const investigationName = (entry: WardenInvestigation): string => {
@@ -447,6 +450,7 @@ export const investigationRows = (status: WardenStatusView): readonly WardenInve
           .join(' · '),
         ...optional('reportPath', entry.reportPath),
         ...optional('verdict', entry.verdict),
+        jev: jevBeforeLine(entry.jev, entry.scope),
       };
     });
 
@@ -472,4 +476,6 @@ export interface WardenReportTarget {
   readonly reportPath: string;
   readonly at?: string;
   readonly verdict?: WardenVerdictKind;
+  /** What Jev did before the investigation, as its line (`warden-jev-line.ts`). */
+  readonly jev?: string;
 }

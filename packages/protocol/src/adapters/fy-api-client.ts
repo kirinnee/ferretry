@@ -129,6 +129,16 @@ import {
   type SessionLiveActivity,
   type SessionTranscriptMoved,
 } from '../lib/session-live.ts';
+import {
+  type RestartCancelResult,
+  RestartCancelResultSchema,
+  type RestartRequest,
+  RestartRequestSchema,
+  type RestartResult,
+  RestartResultSchema,
+  type RestartStatus,
+  RestartStatusSchema,
+} from '../lib/session-restart.ts';
 import { type SessionTranscriptPage, SessionTranscriptPageSchema } from '../lib/session-transcript.ts';
 import { type TranscriptImageDownload, TranscriptImageDownloadSchema } from '../lib/transcript-images.ts';
 import {
@@ -991,6 +1001,24 @@ export class FyApiClient implements IFyApiClient {
       { agent, ...(model === undefined ? {} : { model }) },
       ConversionPreviewSchema,
     );
+  }
+
+  /** Restarts the ferrets `request` names now, and queues the busy ones; at most once per request id. */
+  restart(request: RestartRequest, requestId?: string): Promise<RestartResult> {
+    const init = jsonRequest('POST', RestartRequestSchema, request);
+    const headers = new Headers(init.headers);
+    headers.set(FY_REQUEST_ID_HEADER, NonEmptyValueSchema.parse(requestId ?? this.#requestId()));
+    return this.request('/v1/restarts', RestartResultSchema, { ...init, headers });
+  }
+
+  /** The outdated ferrets and the restarts waiting for an idle moment. */
+  restartStatus(): Promise<RestartStatus> {
+    return this.request('/v1/restarts', RestartStatusSchema);
+  }
+
+  /** Clears every waiting restart. */
+  cancelRestarts(): Promise<RestartCancelResult> {
+    return this.request('/v1/restarts', RestartCancelResultSchema, { method: 'DELETE' });
   }
 
   handover(id: string, request: SessionHandoverRequestInput, requestId?: string): Promise<SessionHandoverReceipt> {

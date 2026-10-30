@@ -102,6 +102,79 @@ so the next message queues nothing. The Instructions row then shows the new size
   on switches and on the routing prompt. The Settings row's "Running with older settings — Restart to apply"
   still covers every change, because the wrapper that carries all the sections is part of its digest.
 
+## Restarting ferrets whose instructions are out of date
+
+The live note above reaches only the three always-on sections. Everything else a launch hands a ferret
+(Hypermedia, Pack mode, Agenda mode, Learning, and the wrapper around them) changes only at a restart. A
+ferret that has not had one is **outdated**: the instructions it would get if it were launched now differ
+from those it launched with, and the live note has not already delivered the difference.
+
+### What "outdated" means
+
+The daemon asks the very renderer a launch uses (`launchInstructions` in `@ferretry/fleet`) what a
+relaunch would hand this ferret now, with the environment a relaunch would build, and compares that with
+the ferret's launch record (`packages/daemon/src/lib/session/launch/outdated.ts`). A section differs when
+it is on in one and not the other, or its fingerprint changed. A section the live note already told is
+re-recorded, so it does not count. Every section carries a fingerprint, not only the always-on three; a
+record made before fingerprints compares sizes, and a ferret with no record is never outdated, because
+nothing says what it has.
+
+The result is `outdated: { sections: [ids] }` on the session view (`SessionOutdatedSchema`). It is absent on
+a current ferret, never an empty list. It is computed daemon-side and cached for a few seconds; the PWA only
+counts the marks, it never re-derives the comparison.
+
+### Restarting is never forced
+
+A restart here is the same-login migrate with the conversation resumed. It goes through the migrate's
+in-flight inventory and is **never forced past it**: a running test, a held process or an unanswered
+question all refuse it. A refusal is not an error; the ferret is **queued** and restarted at its next idle
+moment (its turn is the owner's, or it declared a wait), once the inventory agrees.
+
+| Outcome   | Meaning                                                                                        |
+| --------- | ---------------------------------------------------------------------------------------------- |
+| restarted | idle, and the inventory agreed: restarted now                                                  |
+| queued    | `mid-turn`, `in-flight` (the inventory refused), or `own-session` (see below); restarted later |
+| skipped   | not found, or not running                                                                      |
+| failed    | the restart itself failed; the others carry on                                                 |
+
+- **The caller's own session is always queued.** A ferret that runs `fy restart` never restarts itself
+  mid-turn: the CLI sends its own session id and the daemon waits until its turn has ended.
+- **The queue is durable** (`FileRestartQueue`, in the daemon state home), so a daemon restart does not
+  lose it. A timer drains it every ten seconds. An entry made by `--outdated` is dropped, not restarted, if
+  the ferret is current by the time it is idle.
+- **A repeat is harmless.** The request id is optional (a repeat restarts nothing that is already current),
+  and the same id answers the same result.
+
+### The surface
+
+`POST`, `GET` and `DELETE /v1/restarts` (operator scope, as the migrate it drives is).
+
+```text
+fy restart                       # show what is out of date and what is waiting
+fy restart --outdated            # restart every ferret whose instructions are out of date
+fy restart --all                 # restart every running ferret
+fy restart <id|callsign>...      # restart these
+fy restart --cancel              # clear the restarts that are waiting
+```
+
+Each prints what restarted now, then what is queued and why. `--json` prints the result as it is.
+
+### In the app
+
+An **Outdated** mark sits on the sidebar row and in the session header of every outdated ferret, and one
+**Restart outdated (N)** button heads the sessions list. It sends the same request as `fy restart
+--outdated` and shows the same result, restarted now and queued, until it is dismissed. Nothing restarts
+automatically: a restart interrupts a ferret, so the owner presses it.
+
+The rows answer the press at once, before the list refreshes: a ferret that restarted now drops its mark, one
+that is queued reads **Queued** in a muted chip, and the button's count falls by both (it disappears at 0,
+leaving the result line). **Dismiss** forgets the answer and the rows go back to what the daemon says. The
+daemon's `outdated` flag stays the source of truth: the page's memory of the press only bridges the gap.
+
+The button is in the sessions bar rather than the header or Settings because the owner scans that list to
+choose a ferret and sees the marks there, so the action is beside the thing it acts on and shows its own
+count. It covers the ferrets of the machine whose page it is, even in the all-machines view.
+
 ## Only new ferrets
 
 | Setting                                                                                                                 | Decided                                |

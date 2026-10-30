@@ -99,6 +99,10 @@ export class FileConfigDirectory implements ConfigDirectoryPort {
     await this.files.writeTextAtomic(join(this.directory, path), text);
   }
 
+  async remove(path: string): Promise<void> {
+    await this.files.removeFile(join(this.directory, path));
+  }
+
   /** Each schema rewritten only when it changed, so a restart does not touch a file an editor has open. */
   async writeSchemas(schemas: ReadonlyMap<string, string>): Promise<void> {
     for (const [id, text] of schemas) {

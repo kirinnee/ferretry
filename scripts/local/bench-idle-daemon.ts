@@ -34,7 +34,7 @@ import type { PerformanceProfileView, PerformanceReport } from '../../packages/p
 import { parseStraceTrace } from '../../packages/cli/src/lib/daemon/profile/syscall-trace.ts';
 import { FilePassiveUsageStore } from '../../packages/fleet/src/adapters/anthropic-usage-probe.ts';
 import { renderPerformanceReport } from '../../packages/protocol/src/lib/performance-render.ts';
-import { freeLoopbackPort } from '../../packages/daemon/tests/integration/support/booted-daemon.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../../packages/daemon/tests/integration/support/os-port.ts';
 import { startFakeUsageServer } from '../../packages/daemon/tests/integration/support/fake-usage-server.ts';
 import {
   OWNER_MAC_FLEET,
@@ -79,11 +79,10 @@ await cp(fixture.home, join(run, 'home'), { recursive: true });
 await cp(fixture.userHome, join(run, 'user'), { recursive: true });
 const home = join(run, 'home');
 const userHome = join(run, 'user');
-const port = await freeLoopbackPort();
 await mkdir(join(home, 'config'), { recursive: true });
 await writeFile(
   join(home, 'config', 'daemon.json'),
-  JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
+  JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
 );
 
 // A real pane for every running session, on the daemon's own private socket.
@@ -124,7 +123,7 @@ const daemon = Bun.spawn([...fyd], {
   stdout: Bun.file(join(run, 'fyd.out')),
   stderr: Bun.file(join(run, 'fyd.err')),
 });
-const base = `http://127.0.0.1:${String(port)}`;
+const base = `http://127.0.0.1:${String(await recordedPort(home))}`;
 let report: PerformanceReport | undefined;
 let external: { cpuPercent: number; childrenPercent: number } | undefined;
 let trace: ReturnType<typeof parseStraceTrace> | undefined;

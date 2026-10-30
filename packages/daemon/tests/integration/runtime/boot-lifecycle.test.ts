@@ -110,6 +110,7 @@ import {
   registration as passkeyRegistration,
 } from '../../support/passkey-authenticator.ts';
 import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
 import { FakeHostedService, fakeCloudflared, removeTempDirectories } from '../tunnel/support.ts';
 
@@ -128,12 +129,24 @@ function boundPort(server: { readonly port?: number }): number {
   return server.port;
 }
 
-/** A port nothing is listening on, learned by letting the kernel pick one and then releasing it. */
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
+/**
+ * A relay address that refuses every dial. The kernel chose its port and the test holds it for the whole
+ * boot, so nothing else can take it the way a number found free and then released can be taken.
+ */
+function refusingRelay(): { readonly url: string; readonly port: number; readonly stop: () => Promise<void> } {
+  const server = Bun.serve({
+    hostname: '127.0.0.1',
+    port: 0,
+    fetch: () => new Response('no relay here', { status: 404 }),
+  });
   const port = boundPort(server);
-  await server.stop(true);
-  return port;
+  return {
+    url: `http://127.0.0.1:${String(port)}`,
+    port,
+    stop: async () => {
+      await server.stop(true);
+    },
+  };
 }
 
 /**
@@ -890,10 +903,9 @@ describe('daemon boot lifecycle', () => {
   it('should serve health and usage over the configured address, then release everything', async () => {
     // Arrange
     const home = await tempDirectory('fyd-boot');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -901,6 +913,7 @@ describe('daemon boot lifecycle', () => {
 
     // Act
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     // The server is listening once /healthz answers; the poll bounds how long boot may take.
     let health: Response | undefined;
     for (let attempt = 0; attempt < 100 && health === undefined; attempt += 1) {
@@ -941,11 +954,10 @@ describe('daemon boot lifecycle', () => {
     // row carries this session's private correlation token, which is the resolver's ownership proof.
     const home = await tempDirectory('fyd-message-discovery');
     const codexHome = await tempDirectory('fyd-message-discovery-codex');
-    const port = await freeLoopbackPort();
     const at = '2026-08-06T12:00:00.000Z';
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -991,6 +1003,7 @@ describe('daemon boot lifecycle', () => {
     // Act: the first GET itself performs discovery. Production must persist it, re-read that
     // completed record, and only then perform the transcript-byte read that produces this token.
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     const base = `http://127.0.0.1:${String(port)}`;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
@@ -1060,12 +1073,11 @@ describe('daemon boot lifecycle', () => {
 
   it('should mint, redeem over a direct session, persist and authenticate a device key through the production composition root', async () => {
     const home = await tempDirectory('fyd-pairing');
-    const port = await freeLoopbackPort();
-    const relayPort = await freeLoopbackPort();
-    const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+    const relay = refusingRelay();
+    const relayUrl = relay.url;
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -1074,12 +1086,13 @@ describe('daemon boot lifecycle', () => {
       join(home, 'config', 'daemon.json'),
       daemonDocument({
         host: '127.0.0.1',
-        port,
+        port: OS_CHOSEN_PORT,
         carriers: [{ kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 }],
       }),
       { mode: 0o600 },
     );
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     const base = `http://127.0.0.1:${port}`;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
@@ -1173,6 +1186,7 @@ describe('daemon boot lifecycle', () => {
     release();
     const code = await exit;
     await runCleanups(cleanups);
+    await relay.stop();
 
     should(code).equal(0);
     should(preflight.status).equal(204);
@@ -1218,12 +1232,11 @@ describe('daemon boot lifecycle', () => {
     // on` sends — with no restart.
     // Arrange
     const home = await tempDirectory('fyd-tunnel');
-    const port = await freeLoopbackPort();
     const service = new FakeHostedService();
     const fake = await fakeCloudflared();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const seeded = await worldAt(home, port, async () => {
+    const seeded = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -1238,6 +1251,7 @@ describe('daemon boot lifecycle', () => {
     const discovery = process.env.FY_RELAY_DIRECTORY_ORIGIN;
     process.env.FY_RELAY_DIRECTORY_ORIGIN = service.origin;
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     const base = `http://127.0.0.1:${port}`;
     const origin = 'https://ferretry.pages.dev';
     for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -1387,13 +1401,12 @@ describe('daemon boot lifecycle', () => {
     // back to the pool with one line saying why and how to have it back.
     // Arrange
     const home = await tempDirectory('fyd-tunnel-migration');
-    const port = await freeLoopbackPort();
     const service = new FakeHostedService();
     const fake = await fakeCloudflared();
     const said = recordingNotices();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const seeded = await worldAt(home, port, async () => {
+    const seeded = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -1444,12 +1457,11 @@ describe('daemon boot lifecycle', () => {
     // it, so a real boot removes it and tells the operator where the password went.
     // Arrange — a state home with the retired file in it, and a second boot with none.
     const home = await tempDirectory('fyd-retired-password');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     const said = recordingNotices();
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -1461,6 +1473,7 @@ describe('daemon boot lifecycle', () => {
 
     // Act
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -1471,12 +1484,11 @@ describe('daemon boot lifecycle', () => {
     await runCleanups(cleanups);
 
     const secondHome = await tempDirectory('fyd-no-retired-password');
-    const secondPort = await freeLoopbackPort();
     const secondCleanups: Array<() => void | Promise<void>> = [];
     const secondSaid = recordingNotices();
     let secondRelease = (): void => {};
     const secondWorld = {
-      ...(await worldAt(secondHome, secondPort, async () => {
+      ...(await worldAt(secondHome, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           secondRelease = resolve;
         });
@@ -1484,6 +1496,7 @@ describe('daemon boot lifecycle', () => {
       notices: secondSaid.port,
     };
     const secondExit = start(secondWorld, secondCleanups);
+    const secondPort = await recordedPort(secondHome);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${secondPort}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -1514,17 +1527,17 @@ describe('daemon boot lifecycle', () => {
   it('should create, persist, enrich and re-read a task through the mounted board', async () => {
     // Arrange
     const home = await tempDirectory('fyd-tasks');
-    const port = await freeLoopbackPort();
     const at = '2026-07-31T09:00:00.000Z';
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
     });
     await seedSession(home, at);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -1646,10 +1659,9 @@ describe('daemon boot lifecycle', () => {
   it('should list and read the seeded sessions through the mounted session read', async () => {
     // Arrange
     const home = await tempDirectory('fyd-sessions');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -1663,6 +1675,7 @@ describe('daemon boot lifecycle', () => {
       mode: 0o600,
     });
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -1744,12 +1757,11 @@ describe('daemon boot lifecycle', () => {
   it('should start, launch, list and stop a session through the mounted lifecycle', async () => {
     // Arrange
     const home = await tempDirectory('fyd-session-start');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -1760,6 +1772,7 @@ describe('daemon boot lifecycle', () => {
     // foreign state the layout gate refuses.
     const executable = await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -1946,11 +1959,10 @@ describe('daemon boot lifecycle', () => {
   it('should name every new agent and rename one through the mounted route', async () => {
     // Arrange
     const home = await tempDirectory('fyd-agent-names');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -1959,6 +1971,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2037,11 +2050,10 @@ describe('daemon boot lifecycle', () => {
   it('should start an auto ferret with hypermedia off, and let the owner switch it on and off for the next launch', async () => {
     // Arrange
     const home = await tempDirectory('fyd-hypermedia');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2050,6 +2062,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2118,11 +2131,10 @@ describe('daemon boot lifecycle', () => {
   it('should hold every start with a parent to the sub-ferret limits and tell each ferret about Pack mode', async () => {
     // Arrange
     const home = await tempDirectory('fyd-pack');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2133,6 +2145,7 @@ describe('daemon boot lifecycle', () => {
     // Tighter than the defaults, so it applies at once: one running sub-ferret per unattended ferret.
     await writeFile(join(home, 'config', 'pack.yaml'), 'limits:\n  autoChildren: 1\n', { mode: 0o600 });
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2213,12 +2226,11 @@ describe('daemon boot lifecycle', () => {
   it('should refuse a start naming a model the account cannot serve, and free the callsign it claimed', async () => {
     // Arrange
     const home = await tempDirectory('fyd-session-model-refusal');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2251,6 +2263,7 @@ describe('daemon boot lifecycle', () => {
       },
     ]);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2317,13 +2330,12 @@ describe('daemon boot lifecycle', () => {
   it('should launch in fast mode, keep it across a restart, and refuse a model that has none', async () => {
     // Arrange
     const home = await tempDirectory('fyd-fast-mode');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2362,6 +2374,7 @@ describe('daemon boot lifecycle', () => {
       },
     ]);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2459,12 +2472,11 @@ describe('daemon boot lifecycle', () => {
   it('should refuse the terminal account by naming the auto account that can run the session', async () => {
     // Arrange
     const home = await tempDirectory('fyd-session-terminal-account');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2493,6 +2505,7 @@ describe('daemon boot lifecycle', () => {
       account(BOOT_ACCOUNT, executable, 'auto'),
     ]);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2549,7 +2562,6 @@ describe('daemon boot lifecycle', () => {
   it('should refuse a damaged indexed parent instead of excluding it from spawn ancestry', async () => {
     // Arrange
     const home = await tempDirectory('fyd-spawn-ancestry-damaged');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
@@ -2558,7 +2570,7 @@ describe('daemon boot lifecycle', () => {
     const legacyChildId = 'wire-legacy-child';
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2580,6 +2592,7 @@ describe('daemon boot lifecycle', () => {
     await seeded.storage.writeConfig(parseSessionId(legacyChildId), { ...childConfig, parent: parentId });
     await seeded.storage.close();
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2668,12 +2681,11 @@ describe('daemon boot lifecycle', () => {
   it('should answer a path-free 503 for a start over a damaged callsign ledger', async () => {
     // Arrange
     const home = await tempDirectory('fyd-callsign-damaged');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2682,6 +2694,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2740,12 +2753,11 @@ describe('daemon boot lifecycle', () => {
   it('should request a child grant for a start that asked for board access', async () => {
     // Arrange
     const home = await tempDirectory('fyd-board-access-start');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2754,6 +2766,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2878,12 +2891,11 @@ describe('daemon boot lifecycle', () => {
   it('should store the files an opening message attached and name them in turn one', async () => {
     // Arrange
     const home = await tempDirectory('fyd-session-attachments');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2892,6 +2904,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -2982,13 +2995,12 @@ describe('daemon boot lifecycle', () => {
   it('should send into a live session, refuse an empty revive, and relaunch a stopped one', async () => {
     // Arrange
     const home = await tempDirectory('fyd-session-resume');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -2998,6 +3010,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -3121,13 +3134,12 @@ describe('daemon boot lifecycle', () => {
   it('should attribute a peer send to the sending session, and only when it identifies itself', async () => {
     // Arrange
     const home = await tempDirectory('fyd-peer-send');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -3137,6 +3149,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -3263,14 +3276,13 @@ describe('daemon boot lifecycle', () => {
   it('should refuse an unsafe migration and move a session the gate clears', async () => {
     // Arrange
     const home = await tempDirectory('fyd-session-migrate');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
     const inventory = new StubProcessInventory();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -3282,6 +3294,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedMigrationFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -3678,13 +3691,12 @@ describe('daemon boot lifecycle', () => {
   it('should revive and restart a session on current settings, keeping the model it is on', async () => {
     // Arrange
     const home = await tempDirectory('fyd-relaunch-settings');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -3726,6 +3738,7 @@ describe('daemon boot lifecycle', () => {
       },
     ]);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -3862,13 +3875,12 @@ describe('daemon boot lifecycle', () => {
   it('should resume the bound conversation on Restart and migrate, and repair one a Restart lost', async () => {
     // Arrange
     const home = await tempDirectory('fyd-restart-resume');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -3932,6 +3944,7 @@ describe('daemon boot lifecycle', () => {
       })),
     );
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -4102,13 +4115,12 @@ describe('daemon boot lifecycle', () => {
   it('should convert a Claude conversation onto Codex and back, refusing a target that rejects it', async () => {
     // Arrange
     const home = await tempDirectory('fyd-convert');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     const reviver = new RecordingResumeLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -4181,6 +4193,7 @@ describe('daemon boot lifecycle', () => {
       { mode: 0o600 },
     );
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -4373,12 +4386,11 @@ describe('daemon boot lifecycle', () => {
   it('should serve, refuse and read a cross-harness handover through the mounted composition root', async () => {
     // Arrange
     const home = await tempDirectory('fyd-session-handover');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const launcher = new RecordingSessionLauncher();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -4387,6 +4399,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedMigrationFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -4488,10 +4501,9 @@ describe('daemon boot lifecycle', () => {
   it('should recommend a team from the fleet manifest and the routing catalog', async () => {
     // Arrange
     const home = await tempDirectory('fyd-recommend');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -4511,6 +4523,7 @@ describe('daemon boot lifecycle', () => {
       },
     ]);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -4591,10 +4604,9 @@ describe('daemon boot lifecycle', () => {
   it('should ingest and query analytics from the real session documents', async () => {
     // Arrange
     const home = await tempDirectory('fyd-analytics');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -4608,6 +4620,7 @@ describe('daemon boot lifecycle', () => {
     // Still running: no finish instant, so it must not be measured as a run of some length.
     await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-live');
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -4680,12 +4693,11 @@ describe('daemon boot lifecycle', () => {
   it('should apply a pricing PATCH to a later analytics ingest without restarting', async () => {
     // Arrange
     const home = await tempDirectory('fyd-analytics-live-pricing');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const sessionId = 'wire-priced-later';
     let release = (): void => {};
     let mounted: ReturnType<DaemonWorld['createSubsystems']> | undefined;
-    const baseWorld = await worldAt(home, port, async () => {
+    const baseWorld = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -4748,6 +4760,7 @@ describe('daemon boot lifecycle', () => {
       { mode: 0o600 },
     );
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     const base = `http://127.0.0.1:${String(port)}`;
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
@@ -4846,12 +4859,11 @@ describe('daemon boot lifecycle', () => {
   it('should open, retitle, list and close a terminal through the mounted lifecycle', async () => {
     // Arrange
     const home = await tempDirectory('fyd-terminals');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const runtime = new RecordingTerminalRuntime();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -4860,6 +4872,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -4914,12 +4927,11 @@ describe('daemon boot lifecycle', () => {
   it('should carry pane bytes out and keystrokes in over a real terminal socket', async () => {
     // Arrange
     const home = await tempDirectory('fyd-terminal-stream');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const runtime = new RecordingTerminalRuntime();
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -4928,6 +4940,7 @@ describe('daemon boot lifecycle', () => {
     };
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5013,11 +5026,10 @@ describe('daemon boot lifecycle', () => {
   it('should carry backlog and then live journal events over a real event socket', async () => {
     // Arrange
     const home = await tempDirectory('fyd-event-stream');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
     const world = {
-      ...(await worldAt(home, port, async () => {
+      ...(await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -5030,6 +5042,7 @@ describe('daemon boot lifecycle', () => {
     await seedEvents(home, 'wire-quiet', ['session.created']);
     await seedFleet(home);
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5146,15 +5159,15 @@ describe('daemon boot lifecycle', () => {
   it('should tell an open config stream about a hand-edited runtime and another client edit', async () => {
     // Arrange
     const home = await tempDirectory('fyd-config-stream');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
     });
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     // READY, not merely serving: the hand edits below must land after the configuration watcher's first
     // load, or a load that runs between two of the writes splits one edit across two frames.
     for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -5241,16 +5254,16 @@ describe('daemon boot lifecycle', () => {
   it('should refuse an attach for a session with no proven pane, over the mounted route', async () => {
     // Arrange
     const home = await tempDirectory('fyd-attach');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
     });
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5288,14 +5301,14 @@ describe('daemon boot lifecycle', () => {
   it('should never suggest a callsign a live session already answers to', async () => {
     // Arrange
     const home = await tempDirectory('fyd-names');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     // `/healthz` only proves the socket is live. It can answer before boot reaches `untilShutdown`,
     // so install the shutdown latch before starting instead of racing a late `release` assignment.
     const shutdown = Promise.withResolvers<void>();
-    const world = await worldAt(home, port, () => shutdown.promise);
+    const world = await worldAt(home, OS_CHOSEN_PORT, () => shutdown.promise);
     await seedSession(home, new Date().toISOString());
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5339,10 +5352,9 @@ describe('daemon boot lifecycle', () => {
   it('should serve, judge and durably record learning proposals through the mounted board', async () => {
     // Arrange
     const home = await tempDirectory('fyd-learning');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const world = await worldAt(home, port, async () => {
+    const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -5407,6 +5419,7 @@ describe('daemon boot lifecycle', () => {
       { mode: 0o600 },
     );
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5518,10 +5531,9 @@ describe('daemon boot lifecycle', () => {
   it('should serve, open and prime the human login window through the mounted subsystem', async () => {
     // Arrange
     const home = await tempDirectory('fyd-browser-login');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const base = await worldAt(home, port, async () => {
+    const base = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
@@ -5538,6 +5550,7 @@ describe('daemon boot lifecycle', () => {
       },
     };
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5618,20 +5631,20 @@ describe('daemon boot lifecycle', () => {
   it('should report its own health, measured by the self-check the boot ran', async () => {
     // Arrange
     const home = await tempDirectory('fyd-health');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     // Register the shutdown latch before boot starts. The server binds before the monitor and warden
     // loops finish arming, so `/healthz` can answer before `start` reaches `untilShutdown`; assigning a
     // release callback inside that late call races the request below and intermittently leaves `exit`
     // waiting forever.
     const shutdown = Promise.withResolvers<void>();
-    const world = await worldAt(home, port, () => shutdown.promise);
+    const world = await worldAt(home, OS_CHOSEN_PORT, () => shutdown.promise);
     await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-live');
     await seedSession(home, '2026-07-30T09:00:00.000Z', 'wire-done', {
       status: 'completed',
       finishedAt: '2026-07-30T09:45:00.000Z',
     });
     const exit = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5713,16 +5726,16 @@ describe('daemon boot lifecycle', () => {
   it('should reach the dictation enhancer and answer unknown_route for the deleted surface', async () => {
     // Arrange
     const home = await tempDirectory('fyd-stt');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     let release = (): void => {};
-    const base = await worldAt(home, port, async () => {
+    const base = await worldAt(home, OS_CHOSEN_PORT, async () => {
       await new Promise<void>(resolve => {
         release = resolve;
       });
     });
     const enhancer = new RecordingSttEnhancer();
     const exit = start({ ...base, sttEnhancement: enhancer }, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 100; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(50);
@@ -5772,7 +5785,6 @@ describe('daemon boot lifecycle', () => {
   it('should release the home lock so a second boot of the same home succeeds', async () => {
     // Arrange
     const home = await tempDirectory('fyd-relock');
-    const port = await freeLoopbackPort();
     const boot = async (): Promise<number> => {
       const cleanups: Array<() => void | Promise<void>> = [];
       process.env.FY_HOME = home;
@@ -5780,7 +5792,7 @@ describe('daemon boot lifecycle', () => {
       await runCleanups(cleanups);
       return code;
     };
-    await seedHome(home, port);
+    await seedHome(home, OS_CHOSEN_PORT);
 
     // Act
     const first = await boot();
@@ -5794,8 +5806,7 @@ describe('daemon boot lifecycle', () => {
   it('should report already-running when another owner holds the home lock, and say so', async () => {
     // Arrange
     const home = await tempDirectory('fyd-locked');
-    const port = await freeLoopbackPort();
-    await seedHome(home, port);
+    await seedHome(home, OS_CHOSEN_PORT);
     const incumbent = await buildIntegrationWorld().storage.open();
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
@@ -5958,17 +5969,17 @@ describe('daemon boot lifecycle', () => {
     // Arrange: a state home with no fleet manifest, which is what a fresh install looks like before
     // anyone has installed Claude Code or Codex.
     const home = await tempDirectory('fyd-no-harness');
-    const port = await freeLoopbackPort();
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
     let release = (): void => {};
     const stopped = new Promise<void>(resolve => {
       release = resolve;
     });
-    const world = { ...(await worldAt(home, port, async () => await stopped)), notices: said.port };
+    const world = { ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)), notices: said.port };
 
     // Act
     const booting = start(world, cleanups);
+    const port = await recordedPort(home);
     let health: Response | undefined;
     for (let attempt = 0; attempt < 200 && health === undefined; attempt += 1) {
       health = await fetch(`http://127.0.0.1:${String(port)}/healthz`)
@@ -6001,8 +6012,7 @@ describe('daemon boot lifecycle', () => {
     // Code on the runner — and it is resolved BY PATH, never found on `PATH`, which is the whole
     // point: a service-managed daemon has no `PATH` containing the fleet's bin directory.
     const home = await tempDirectory('fyd-harness');
-    const port = await freeLoopbackPort();
-    await seedHome(home, port);
+    await seedHome(home, OS_CHOSEN_PORT);
     await mkdir(join(home, 'bin'), { recursive: true });
     await writeFile(join(home, 'bin', 'sh'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
     await publishManifest(home, [
@@ -6029,6 +6039,7 @@ describe('daemon boot lifecycle', () => {
 
     // Act
     const booting = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 200; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(25);
@@ -6059,8 +6070,7 @@ describe('daemon boot lifecycle', () => {
     // Arrange: a directory nothing has put on this daemon's `PATH`, holding a file named exactly as
     // the harness command is — plus an override for the OTHER harness that names nothing.
     const home = await tempDirectory('fyd-harness-declared');
-    const port = await freeLoopbackPort();
-    await seedHome(home, port);
+    await seedHome(home, OS_CHOSEN_PORT);
     const tools = join(home, 'tools');
     await mkdir(tools, { recursive: true });
     await writeFile(join(tools, 'claude'), '#!/bin/sh\nexit 0\n', { mode: 0o755 });
@@ -6068,7 +6078,7 @@ describe('daemon boot lifecycle', () => {
       join(home, 'config', 'daemon.json'),
       daemonDocument({
         host: '127.0.0.1',
-        port,
+        port: OS_CHOSEN_PORT,
         harness: { searchPaths: [tools], paths: { codex: join(tools, 'not-installed') } },
       }),
       { mode: 0o600 },
@@ -6083,6 +6093,7 @@ describe('daemon boot lifecycle', () => {
 
     // Act
     const booting = start(world, cleanups);
+    const port = await recordedPort(home);
     for (let attempt = 0; attempt < 200; attempt += 1) {
       if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
       await Bun.sleep(25);
@@ -6112,44 +6123,50 @@ describe('daemon boot lifecycle', () => {
   it('should trace every boot milestone so a stall names the step it stalled on', async () => {
     // Arrange
     const home = await tempDirectory('fyd-journal');
-    const port = await freeLoopbackPort();
-    const cleanups: Array<() => void | Promise<void>> = [];
-    const said = recordingNotices();
-    let release = (): void => {};
-    const stopped = new Promise<void>(resolve => {
-      release = resolve;
-    });
-    const world = { ...(await worldAt(home, port, async () => await stopped)), notices: said.port };
+    const bootOnce = async (
+      address: number,
+    ): Promise<{ readonly code: number; readonly trail: string[]; readonly said: string; readonly port: number }> => {
+      const cleanups: Array<() => void | Promise<void>> = [];
+      const said = recordingNotices();
+      let release = (): void => {};
+      const stopped = new Promise<void>(resolve => {
+        release = resolve;
+      });
+      const world = { ...(await worldAt(home, address, async () => await stopped)), notices: said.port };
+
+      // Act
+      const booting = start(world, cleanups);
+      const port = await recordedPort(home);
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
+        await Bun.sleep(25);
+      }
+      release();
+      const code = await booting;
+      await runCleanups(cleanups);
+      return { code, trail: said.steps.map(step => step.split(' — ')[0] ?? ''), said: said.steps.join('\n'), port };
+    };
+    const shared = ['starting', 'state home opened', 'configuration loaded'];
+    const served = ['listening', 'harnesses checked', 'subsystems mounted', 'serving', 'ready'];
 
     // Act
-    const booting = start(world, cleanups);
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(25);
-    }
-    release();
-    const code = await booting;
-    await runCleanups(cleanups);
+    const first = await bootOnce(OS_CHOSEN_PORT);
+    const again = await bootOnce(first.port);
 
     // Assert — before this trail existed, a daemon that failed and a daemon that spent ninety
-    // seconds initializing successfully produced the same zero bytes.
-    should(code).equal(0);
-    const trail = said.steps.map(step => step.split(' — ')[0]);
-    should(trail).containDeepOrdered([
-      'starting',
-      'state home opened',
-      'configuration loaded',
-      'address is free',
-      // The address is bound as soon as it is decided, so liveness answers while the rest boots.
-      'listening',
-      'harnesses checked',
-      'subsystems mounted',
-      'serving',
-      'ready',
-    ]);
+    // seconds initializing successfully produced the same zero bytes. A first boot has the OS choose
+    // the address and records it; the next one claims what was recorded and finds it free.
+    should(first.code).equal(0);
+    should(first.trail).containDeepOrdered([...shared, 'address chosen', 'address recorded', ...served]);
+    should(again.code).equal(0);
+    should(again.port).equal(first.port);
+    // The address is bound as soon as it is decided, so liveness answers while the rest boots.
+    should(again.trail).containDeepOrdered([...shared, 'address is free', ...served]);
     // The state home and the address it serves are named, not merely implied.
-    should(said.steps.join('\n')).match(new RegExp(home.replaceAll('/', '\\/'), 'u'));
-    should(said.steps.join('\n')).match(new RegExp(`ready.*127\\.0\\.0\\.1:${String(port)}`, 'u'));
+    for (const booted of [first, again]) {
+      should(booted.said).match(new RegExp(home.replaceAll('/', '\\/'), 'u'));
+      should(booted.said).match(new RegExp(`ready.*127\\.0\\.0\\.1:${String(first.port)}`, 'u'));
+    }
   });
 
   /**
@@ -6167,7 +6184,6 @@ describe('daemon boot lifecycle', () => {
   describe('the relay carriers a boot resolves', () => {
     it('should keep two relay WebSockets open together and stop every carrier on shutdown', async () => {
       const home = await tempDirectory('fyd-relay-plural');
-      const port = await freeLoopbackPort();
       const relays = [relaySocketProbe(), relaySocketProbe()] as const;
       const relayUrls = relays.map(relay => `http://127.0.0.1:${String(boundPort(relay.server))}`);
       const cleanups: Array<() => void | Promise<void>> = [];
@@ -6178,12 +6194,12 @@ describe('daemon boot lifecycle', () => {
       });
 
       try {
-        await seedHome(home, port);
+        await seedHome(home, OS_CHOSEN_PORT);
         await writeFile(
           join(home, 'config', 'daemon.json'),
           daemonDocument({
             carriers: [
-              { kind: 'bind', host: '127.0.0.1', port },
+              { kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT },
               ...relayUrls.map(url => ({ kind: 'relay', url, reconnectSeconds: 3_600 })),
               { kind: 'relay', url: 'https://off.example', enabled: false },
             ],
@@ -6230,14 +6246,13 @@ describe('daemon boot lifecycle', () => {
       // released normally, which is what makes the leak invisible. Registered before, the same throw
       // releases everything this boot took.
       const home = await tempDirectory('fyd-relay-start-throws');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
+      await seedHome(home, OS_CHOSEN_PORT);
       const relayUrls = ['https://first.example', 'https://second.example'] as const;
       await writeFile(
         join(home, 'config', 'daemon.json'),
         daemonDocument({
           host: '127.0.0.1',
-          port,
+          port: OS_CHOSEN_PORT,
           carriers: relayUrls.map(url => ({ kind: 'relay', url, reconnectSeconds: 3_600 })),
         }),
         { mode: 0o600 },
@@ -6286,17 +6301,16 @@ describe('daemon boot lifecycle', () => {
 
     it('should read discovery once and retain a configured relay beside the different advertised one', async () => {
       const home = await tempDirectory('fyd-relay-mixed');
-      const port = await freeLoopbackPort();
-      const configuredPort = await freeLoopbackPort();
-      const discoveredPort = await freeLoopbackPort();
-      const configuredUrl = `http://127.0.0.1:${String(configuredPort)}`;
-      const discoveredUrl = `http://127.0.0.1:${String(discoveredPort)}`;
-      await seedHome(home, port);
+      const configured = refusingRelay();
+      const discovered = refusingRelay();
+      const configuredUrl = configured.url;
+      const discoveredUrl = discovered.url;
+      await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
         join(home, 'config', 'daemon.json'),
         daemonDocument({
           host: '127.0.0.1',
-          port,
+          port: OS_CHOSEN_PORT,
           carriers: [
             { kind: 'relay', url: configuredUrl, reconnectSeconds: 3_600 },
             { kind: 'relay', source: 'discovery', reconnectSeconds: 3_600 },
@@ -6321,26 +6335,27 @@ describe('daemon boot lifecycle', () => {
 
       const code = await start(world, cleanups);
       await runCleanups(cleanups);
+      await configured.stop();
+      await discovered.stop();
 
       should(code).equal(0);
       should(reads).equal(1);
       const dialled = said.steps.filter(step => step.startsWith('dialling the relay'));
       should(dialled).have.length(2);
-      should(dialled.join('\n')).containEql(`127.0.0.1:${String(configuredPort)}`);
-      should(dialled.join('\n')).containEql(`127.0.0.1:${String(discoveredPort)}`);
+      should(dialled.join('\n')).containEql(`127.0.0.1:${String(configured.port)}`);
+      should(dialled.join('\n')).containEql(`127.0.0.1:${String(discovered.port)}`);
     });
 
     it('should refuse boot clearly when discovery resolves onto a configured rendezvous', async () => {
       const home = await tempDirectory('fyd-relay-duplicate');
-      const port = await freeLoopbackPort();
-      const relayPort = await freeLoopbackPort();
-      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
-      await seedHome(home, port);
+      const relay = refusingRelay();
+      const relayUrl = relay.url;
+      await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
         join(home, 'config', 'daemon.json'),
         daemonDocument({
           host: '127.0.0.1',
-          port,
+          port: OS_CHOSEN_PORT,
           carriers: [
             { kind: 'relay', url: relayUrl },
             { kind: 'relay', source: 'discovery' },
@@ -6367,6 +6382,7 @@ describe('daemon boot lifecycle', () => {
 
       const code = await start(world, cleanups);
       await runCleanups(cleanups);
+      await relay.stop();
 
       should(code).equal(1);
       should(reads).equal(1);
@@ -6378,14 +6394,13 @@ describe('daemon boot lifecycle', () => {
 
     it('should report every resolved carrier in --check and name a post-discovery refusal', async () => {
       const home = await tempDirectory('fyd-relay-check');
-      const port = await freeLoopbackPort();
       const configuredUrl = 'https://mine.example';
       const discoveredUrl = 'https://hosted.example';
-      await seedHome(home, port);
+      await seedHome(home, OS_CHOSEN_PORT);
       const configFile = join(home, 'config', 'daemon.json');
       const document = {
         host: '127.0.0.1',
-        port,
+        port: OS_CHOSEN_PORT,
         carriers: [
           { kind: 'relay', url: configuredUrl },
           { kind: 'relay', source: 'discovery' },
@@ -6448,15 +6463,14 @@ describe('daemon boot lifecycle', () => {
 
     it('should omit a wildcard direct carrier while keeping relays reachable and say why', async () => {
       const home = await tempDirectory('fyd-carrier-wildcard');
-      const port = await freeLoopbackPort();
-      const relayPort = await freeLoopbackPort();
-      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
-      await seedHome(home, port);
+      const relay = refusingRelay();
+      const relayUrl = relay.url;
+      await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
         join(home, 'config', 'daemon.json'),
         daemonDocument({
           carriers: [
-            { kind: 'bind', host: '0.0.0.0', port },
+            { kind: 'bind', host: '0.0.0.0', port: OS_CHOSEN_PORT },
             { kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 },
           ],
         }),
@@ -6471,6 +6485,7 @@ describe('daemon boot lifecycle', () => {
       const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
 
       const booting = start(world, cleanups);
+      const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
       await waitUntil(
         () => said.steps.some(step => step.startsWith('ready')),
@@ -6484,6 +6499,7 @@ describe('daemon boot lifecycle', () => {
       release();
       const code = await booting;
       await runCleanups(cleanups);
+      await relay.stop();
 
       should(code).equal(0);
       should(response.status).equal(200);
@@ -6507,17 +6523,16 @@ describe('daemon boot lifecycle', () => {
 
     it('should omit a reverse-proxy path from the carrier wire while boot and --check stay healthy', async () => {
       const home = await tempDirectory('fyd-carrier-proxy-path');
-      const port = await freeLoopbackPort();
-      const relayPort = await freeLoopbackPort();
-      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+      const relay = refusingRelay();
+      const relayUrl = relay.url;
       const publicUrl = 'https://box.example/ferretry';
-      await seedHome(home, port);
+      await seedHome(home, OS_CHOSEN_PORT);
       await seedFleet(home);
       await writeFile(
         join(home, 'config', 'daemon.json'),
         daemonDocument({
           host: '127.0.0.1',
-          port,
+          port: OS_CHOSEN_PORT,
           publicUrl,
           carriers: [{ kind: 'relay', url: relayUrl, reconnectSeconds: 3_600 }],
         }),
@@ -6532,6 +6547,7 @@ describe('daemon boot lifecycle', () => {
       const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
 
       const booting = start(world, cleanups);
+      const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
       await waitUntil(() => said.steps.some(step => step.startsWith('ready')), 'the proxy-path daemon to become ready');
       const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -6542,6 +6558,7 @@ describe('daemon boot lifecycle', () => {
       release();
       const bootCode = await booting;
       await runCleanups(cleanups);
+      await relay.stop();
       const bootNotice = said.stated.find(message => message.startsWith('direct carrier omitted'));
       if (bootNotice === undefined) throw new Error('the boot did not explain why its direct carrier was omitted');
 
@@ -6569,14 +6586,14 @@ describe('daemon boot lifecycle', () => {
 
     it('should publish an operator-written wildcard publicUrl without reinterpreting its hostname', async () => {
       const home = await tempDirectory('fyd-carrier-operator-wildcard');
-      const port = await freeLoopbackPort();
-      const publicUrl = `http://0.0.0.0:${String(port)}`;
-      await seedHome(home, port);
+      // Written before the boot, so it cannot name the port the kernel is about to hand out. Nothing dials it.
+      const publicUrl = 'http://0.0.0.0:7431';
+      await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
         join(home, 'config', 'daemon.json'),
         daemonDocument({
           host: '127.0.0.1',
-          port,
+          port: OS_CHOSEN_PORT,
           publicUrl,
           carriers: [{ kind: 'relay', source: 'discovery', enabled: false }],
         }),
@@ -6591,6 +6608,7 @@ describe('daemon boot lifecycle', () => {
       const world = { ...buildIntegrationWorld(), notices: said.port, untilShutdown: async () => await stopped };
 
       const booting = start(world, cleanups);
+      const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
       await waitUntil(
         () => said.steps.some(step => step.startsWith('ready')),
@@ -6613,14 +6631,13 @@ describe('daemon boot lifecycle', () => {
 
     it('should report only superseded legacy keys the raw document actually contains', async () => {
       const home = await tempDirectory('fyd-carrier-superseded');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
+      await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
         join(home, 'config', 'daemon.json'),
         daemonDocument({
           host: 'box.invalid',
           carriers: [
-            { kind: 'bind', host: '127.0.0.1', port },
+            { kind: 'bind', host: '127.0.0.1', port: OS_CHOSEN_PORT },
             { kind: 'relay', source: 'discovery', enabled: false },
           ],
         }),
@@ -6647,9 +6664,8 @@ describe('daemon boot lifecycle', () => {
       // a directory advertising a rendezvous. The address is a port nothing is listening on: the
       // assertion is that the daemon DIALS it, and a real rendezvous is `bun-relay-carrier.test.ts`.
       const home = await tempDirectory('fyd-relay-discovered');
-      const port = await freeLoopbackPort();
-      const relayPort = await freeLoopbackPort();
-      const relayUrl = `http://127.0.0.1:${String(relayPort)}`;
+      const relay = refusingRelay();
+      const relayUrl = relay.url;
       const cleanups: Array<() => void | Promise<void>> = [];
       const said = recordingNotices();
       let release = (): void => {};
@@ -6657,13 +6673,14 @@ describe('daemon boot lifecycle', () => {
         release = resolve;
       });
       const world = {
-        ...(await worldAt(home, port, async () => await stopped)),
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
         notices: said.port,
         relayDirectory: { read: async (): Promise<RelayAdvertisement> => ({ kind: 'available', relayUrl }) },
       };
 
       // Act
       const booting = start(world, cleanups);
+      const port = await recordedPort(home);
       for (let attempt = 0; attempt < 200; attempt += 1) {
         if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
@@ -6671,12 +6688,13 @@ describe('daemon boot lifecycle', () => {
       release();
       const code = await booting;
       await runCleanups(cleanups);
+      await relay.stop();
 
       // Assert — the daemon dialled, at the advertised address, addressed by its own fingerprint.
       should(code).equal(0);
       should(said.steps.join('\n')).match(
         new RegExp(
-          `dialling the relay — ws://127\\.0\\.0\\.1:${String(relayPort)}/v1/rendezvous/fy_daemon_[^/]+/daemon`,
+          `dialling the relay — ws://127\\.0\\.0\\.1:${String(relay.port)}/v1/rendezvous/fy_daemon_[^/]+/daemon`,
           'u',
         ),
       );
@@ -6688,7 +6706,6 @@ describe('daemon boot lifecycle', () => {
     it('should say the consequence and the remedy when it discovers nothing, not only the reason', async () => {
       // Arrange: a build with no directory to ask, which is a real deployment state.
       const home = await tempDirectory('fyd-relay-none');
-      const port = await freeLoopbackPort();
       const cleanups: Array<() => void | Promise<void>> = [];
       const said = recordingNotices();
       let release = (): void => {};
@@ -6696,13 +6713,14 @@ describe('daemon boot lifecycle', () => {
         release = resolve;
       });
       const world = {
-        ...(await worldAt(home, port, async () => await stopped)),
+        ...(await worldAt(home, OS_CHOSEN_PORT, async () => await stopped)),
         notices: said.port,
         relayDirectory: { read: async (): Promise<RelayAdvertisement> => NO_RELAY_DIRECTORY },
       };
 
       // Act
       const booting = start(world, cleanups);
+      const port = await recordedPort(home);
       for (let attempt = 0; attempt < 200; attempt += 1) {
         if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
@@ -6735,11 +6753,14 @@ describe('daemon boot lifecycle', () => {
     it('should leave a relay the operator switched off switched off, whatever is advertised', async () => {
       // Arrange: an emergency stop somebody typed, and a directory that would happily override it.
       const home = await tempDirectory('fyd-relay-off');
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
+      await seedHome(home, OS_CHOSEN_PORT);
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        daemonDocument({ host: '127.0.0.1', port, relay: { url: 'https://mine.example', enabled: false } }),
+        daemonDocument({
+          host: '127.0.0.1',
+          port: OS_CHOSEN_PORT,
+          relay: { url: 'https://mine.example', enabled: false },
+        }),
         { mode: 0o600 },
       );
       const cleanups: Array<() => void | Promise<void>> = [];
@@ -6763,6 +6784,7 @@ describe('daemon boot lifecycle', () => {
 
       // Act
       const booting = start(world, cleanups);
+      const port = await recordedPort(home);
       for (let attempt = 0; attempt < 200; attempt += 1) {
         if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
         await Bun.sleep(25);
@@ -6832,14 +6854,17 @@ describe('daemon boot lifecycle', () => {
     }
 
     /** A first-run home: its layout, and a `daemon.json` holding exactly `extra` beside the address. */
-    async function firstRunHome(name: string, extra: Record<string, unknown>): Promise<{ home: string; port: number }> {
+    async function firstRunHome(name: string, extra: Record<string, unknown>): Promise<{ home: string }> {
       const home = await tempDirectory(name);
-      const port = await freeLoopbackPort();
-      await seedHome(home, port);
-      await writeFile(join(home, 'config', 'daemon.json'), daemonDocument({ host: '127.0.0.1', port, ...extra }), {
-        mode: 0o600,
-      });
-      return { home, port };
+      await seedHome(home, OS_CHOSEN_PORT);
+      await writeFile(
+        join(home, 'config', 'daemon.json'),
+        daemonDocument({ host: '127.0.0.1', port: OS_CHOSEN_PORT, ...extra }),
+        {
+          mode: 0o600,
+        },
+      );
+      return { home };
     }
 
     /**
@@ -6849,7 +6874,6 @@ describe('daemon boot lifecycle', () => {
     async function bootOnce<T>(
       world: DaemonWorld,
       home: string,
-      port: number,
       during: (base: string, headers: Record<string, string>) => Promise<T>,
     ): Promise<{ readonly code: number; readonly answer: T; readonly said: ReturnType<typeof recordingNotices> }> {
       const cleanups: Array<() => void | Promise<void>> = [];
@@ -6859,6 +6883,7 @@ describe('daemon boot lifecycle', () => {
         release = resolve;
       });
       const booting = start({ ...world, notices: said.port, untilShutdown: async () => await stopped }, cleanups);
+      const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
       for (let attempt = 0; attempt < 400; attempt += 1) {
         if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
@@ -6889,11 +6914,11 @@ describe('daemon boot lifecycle', () => {
 
     it('should import nothing from a host with a harness installed, and leave the machine not set up', async () => {
       // Arrange — exactly the host the retired boot-time import used to set up by itself.
-      const { home, port } = await firstRunHome('fyd-first-run', {});
+      const { home } = await firstRunHome('fyd-first-run', {});
       const world = await harnessOnPath(home, ['claude']);
 
       // Act
-      const { code, said, answer } = await bootOnce(world, home, port, machineView);
+      const { code, said, answer } = await bootOnce(world, home, machineView);
 
       // Assert — the boot completed, and wrote nothing into the fleet: somebody has to choose first.
       should(code).equal(0);
@@ -6908,11 +6933,11 @@ describe('daemon boot lifecycle', () => {
 
     it('should boot with the retired fleet.prepareDefaults key, say once that it is no longer read, and import nothing', async () => {
       // Arrange — the block every earlier boot wrote into a fresh state home, still saying "true".
-      const { home, port } = await firstRunHome('fyd-retired-prepare-defaults', { fleet: { prepareDefaults: true } });
+      const { home } = await firstRunHome('fyd-retired-prepare-defaults', { fleet: { prepareDefaults: true } });
       const world = await harnessOnPath(home, ['claude']);
 
       // Act
-      const { code, said } = await bootOnce(world, home, port, nothing);
+      const { code, said } = await bootOnce(world, home, nothing);
 
       // Assert — tolerated rather than refused, said exactly once, and obeyed by nobody.
       should(code).equal(0);
@@ -6929,7 +6954,7 @@ describe('daemon boot lifecycle', () => {
      */
     it('should boot, refuse and name a fleet configuration in the old account format, touching nothing', async () => {
       // Arrange
-      const { home, port } = await firstRunHome('fyd-first-run-v1', {});
+      const { home } = await firstRunHome('fyd-first-run-v1', {});
       const configPath = join(home, 'fleet', 'config.yaml');
       const retired = 'accounts: {}\n';
       await mkdir(join(home, 'fleet'), { recursive: true });
@@ -6937,7 +6962,7 @@ describe('daemon boot lifecycle', () => {
       const world = await harnessOnPath(home, ['claude']);
 
       // Act
-      const { code, answer } = await bootOnce(world, home, port, machineView);
+      const { code, answer } = await bootOnce(world, home, machineView);
 
       // Assert — it started anyway.
       should(code).equal(0);
@@ -6952,11 +6977,11 @@ describe('daemon boot lifecycle', () => {
 
     it('should boot with the retired accountModel key and say once that it is no longer read', async () => {
       // Arrange — the switch the account model used to sit behind, left in an old document.
-      const { home, port } = await firstRunHome('fyd-retired-switch', { accountModel: { enabled: true } });
+      const { home } = await firstRunHome('fyd-retired-switch', { accountModel: { enabled: true } });
       const world = await harnessOnPath(home, []);
 
       // Act
-      const { code, said } = await bootOnce(world, home, port, nothing);
+      const { code, said } = await bootOnce(world, home, nothing);
 
       // Assert — tolerated rather than refused, and said exactly once so the operator can delete it.
       should(code).equal(0);
@@ -6999,10 +7024,9 @@ describe('daemon boot lifecycle', () => {
     it('should complete the boot pass and a real scheduled tick with no wrapper launch', async () => {
       // Arrange
       const home = await tempDirectory('fyd-unattended-spend');
-      const port = await freeLoopbackPort();
       const cleanups: Array<() => void | Promise<void>> = [];
       let release = (): void => {};
-      const world = await worldAt(home, port, async () => {
+      const world = await worldAt(home, OS_CHOSEN_PORT, async () => {
         await new Promise<void>(resolve => {
           release = resolve;
         });
@@ -7051,13 +7075,14 @@ describe('daemon boot lifecycle', () => {
       );
       await writeFile(
         join(home, 'config', 'daemon.json'),
-        daemonDocument({ host: '127.0.0.1', port, usage: { url: collectorUrl } }),
+        daemonDocument({ host: '127.0.0.1', port: OS_CHOSEN_PORT, usage: { url: collectorUrl } }),
         { mode: 0o600 },
       );
 
       // Act
       const bootAt = Date.now();
       const exit = start(world, cleanups);
+      const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
       for (let attempt = 0; attempt < 400; attempt += 1) {
         if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;

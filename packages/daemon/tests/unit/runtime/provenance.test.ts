@@ -71,6 +71,26 @@ describe('effective configuration with provenance', () => {
     should(row(rows, 'analyticsPricing')).deepEqual({ value: '(empty)', origin: 'default' });
   });
 
+  it('should say that an OS-chosen port is assigned at bind and then recorded', () => {
+    // Arrange
+    const document = { host: '127.0.0.1', port: 0 };
+    const base = {
+      document,
+      config: parseDaemonConfig(document),
+      configFile: CONFIG_FILE,
+      stateHome: STATE_HOME,
+      stateHomeFromEnvironment: false,
+    };
+
+    // Act
+    const rows = describeConfiguration({ ...base, overrides: {} });
+    const flagged = describeConfiguration({ ...base, overrides: { port: 9_100 } });
+
+    // Assert — and a port named on the command line is a claim, so it says nothing of the sort.
+    should(rows.find(candidate => candidate.name === 'port')?.note).match(/operating system assigns the port/u);
+    should(flagged.find(candidate => candidate.name === 'port')?.note).be.undefined();
+  });
+
   it('should attribute a value named on the command line to the flag that named it', () => {
     // Arrange
     const document = { host: '127.0.0.1', port: 7_431 };

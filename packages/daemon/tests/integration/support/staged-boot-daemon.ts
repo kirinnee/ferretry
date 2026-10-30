@@ -7,7 +7,7 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { buildWorld } from '../../../bin/fyd.ts';
-import { freeLoopbackPort } from './booted-daemon.ts';
+import { OS_CHOSEN_PORT, recordedPort } from './os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from './repository.ts';
 
 const modulePath = (relative: string): string => JSON.stringify(resolve(import.meta.dir, relative));
@@ -56,7 +56,7 @@ export async function stopStagedDaemons(): Promise<void> {
   await cleanupTempDirectories();
 }
 
-async function seededHome(port: number): Promise<string> {
+async function seededHome(): Promise<string> {
   const home = await tempDirectory('fyd-staged-boot-');
   const previous = process.env.FY_HOME;
   process.env.FY_HOME = home;
@@ -67,7 +67,7 @@ async function seededHome(port: number): Promise<string> {
   await mkdir(join(home, 'config'), { recursive: true });
   await writeFile(
     join(home, 'config', 'daemon.json'),
-    JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
+    JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
     { mode: 0o600 },
   );
   return home;
@@ -77,8 +77,7 @@ export async function bootStagedDaemon(
   mode: 'slow' | 'hiccup' | 'stall',
   environment: Record<string, string> = {},
 ): Promise<Running> {
-  const port = await freeLoopbackPort();
-  const home = await seededHome(port);
+  const home = await seededHome();
   const child = Bun.spawn({
     cmd: [process.execPath, '--eval', program(mode)],
     env: { ...process.env, FY_HOME: home, HOME: ABSENT_USER_HOME, ...environment },
@@ -95,6 +94,10 @@ export async function bootStagedDaemon(
       if (startedAtMs === undefined && / starting — /u.test(text)) startedAtMs = Date.now();
     }
   })();
+  const port = await recordedPort(home).catch((error: unknown) => {
+    child.kill('SIGKILL');
+    throw error;
+  });
   const daemon: Running = {
     child,
     base: `http://127.0.0.1:${String(port)}`,

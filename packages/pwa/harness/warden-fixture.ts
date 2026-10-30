@@ -14,6 +14,7 @@ import {
   type WardenAttentionView,
   type WardenConfigView,
   type WardenDayStats,
+  type WardenJevBefore,
   type WardenJevCheck,
   type WardenStatusView,
 } from '@ferretry/protocol';
@@ -97,7 +98,7 @@ const JEV_CHECKS: readonly WardenJevCheck[] = [
   },
 ];
 
-export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
+const STATUS_WITHOUT_JEV: WardenStatusView = {
   config,
   lastSweepAt: at(1),
   nextSweepAt: new Date(WARDEN_FIXTURE_NOW + 60_000).toISOString(),
@@ -551,6 +552,50 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
     },
   ],
   blessings: [{ sessionId: 'harness-workspace', kinds: ['sus_subprocess'], expiresAt: at(-54), by: 'jev', streak: 2 }],
+};
+
+/** What Jev did before each investigation, by its report: every case the page has words for, one each. */
+const JEV_BY_REPORT: Readonly<Record<string, WardenJevBefore>> = {
+  'warden/reports/harness-kamila.md': {
+    verdict: 'handed_on',
+    why: 'unsure',
+    at: at(48),
+    confidence: 0.21,
+    costUsd: 0.0041,
+  },
+  'warden/reports/harness-marin.md': { verdict: 'skipped', why: 'jev_cap', at: at(181), confidence: 0, costUsd: 0 },
+  'warden/reports/harness-jaylynn.md': { verdict: 'not_asked', why: 'not_judgeable' },
+  'warden/reports/fleet.md': { verdict: 'off' },
+};
+
+const withJev = <T extends { readonly reportPath?: string }>(entry: T): T => {
+  const jev = entry.reportPath === undefined ? undefined : JEV_BY_REPORT[entry.reportPath];
+  return jev === undefined ? entry : { ...entry, jev };
+};
+
+export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
+  ...STATUS_WITHOUT_JEV,
+  investigations: STATUS_WITHOUT_JEV.investigations.map(entry =>
+    entry.state === 'done'
+      ? withJev(entry)
+      : {
+          ...entry,
+          jev:
+            entry.state === 'queued'
+              ? {
+                  verdict: 'handed_on',
+                  why: 'not_sure_enough',
+                  act: 'restart',
+                  at: at(2),
+                  confidence: 0.62,
+                  costUsd: 0.0038,
+                }
+              : { verdict: 'not_asked', why: 'not_judgeable' },
+        },
+  ),
+  actions: STATUS_WITHOUT_JEV.actions.map(action =>
+    action.actor === 'llm' || action.by === 'warden' ? withJev(action) : action,
+  ),
 };
 
 export const WARDEN_FIXTURE_ATTENTION: WardenAttentionView = {

@@ -252,6 +252,8 @@ let inFlight = 0;
 let immediates = 0;
 /** Off-thread work started and not yet settled: WebCrypto and file-system promises. */
 let offThread = 0;
+/** The same work as promises, so a wait can await the work itself instead of counting turns past it. */
+const offThreadWork = new Set<Promise<unknown>>();
 /**
  * Which test the counts belong to. Work a test left behind — a crypto promise nobody awaited, an
  * immediate still queued — must not keep the NEXT test's clock from moving, so each test starts its
@@ -467,7 +469,41 @@ function trackedClearImmediate(handle: unknown) {
   clearReal(realClearImmediate as AnyFunction, handle);
 }
 
-/** Wraps a promise-returning function so the work it started counts as in hand until it settles. */
+/**
+ * OFF-THREAD RESULTS ARRIVE IN CALL ORDER, AT A QUIET MOMENT. Native work — WebCrypto, a file read, a
+ * body read — finishes whenever the machine gets to it, so two seals started together could finish in
+ * either order, and land between whichever JavaScript tasks happened to be queued then. On a loaded
+ * runner that reordering was enough to move a poll, a deadline and a request count. So the wrapped call
+ * returns a promise of its own, settled from {@link deliveries}: strictly in the order the calls were
+ * made, one per real immediate, and only while no immediate is queued (ahead of any zero-delay timer,
+ * which waits for them: off-thread work takes zero virtual time). The work counts as in
+ * hand until its result is DELIVERED, so neither the clock nor a zero-delay timer moves past it.
+ */
+interface Delivery {
+  outcome: { readonly ok: boolean; readonly value: unknown } | undefined;
+  readonly settle: (ok: boolean, value: unknown) => void;
+}
+const deliveries: Delivery[] = [];
+let deliveryArmed = false;
+const deliver = () => {
+  deliveryArmed = false;
+  const head = deliveries[0];
+  if (head?.outcome === undefined) return;
+  if (immediates > 0) {
+    armDelivery();
+    return;
+  }
+  deliveries.shift();
+  head.settle(head.outcome.ok, head.outcome.value);
+  if (deliveries[0]?.outcome !== undefined) armDelivery();
+};
+const armDelivery = () => {
+  if (deliveryArmed) return;
+  deliveryArmed = true;
+  Reflect.apply(realSetImmediate as AnyFunction, globalThis, [deliver] as never[]);
+};
+
+/** Wraps a promise-returning function so its work counts as in hand, and its result is delivered in order. */
 const trackPromises = (owner: object | undefined, names: readonly string[]) => {
   if (owner === undefined) return;
   for (const name of names) {
@@ -475,14 +511,33 @@ const trackPromises = (owner: object | undefined, names: readonly string[]) => {
     if (typeof original !== 'function') continue;
     define(owner, name, function (this: unknown, ...args: unknown[]) {
       const result = Reflect.apply(original as AnyFunction, this, args as never[]);
-      if (!(result instanceof Promise)) return result;
-      offThread += 1;
+      if (!(result instanceof Promise) || clockMode === 'real') return result;
       const owner = generation;
-      const done = () => {
-        if (owner === generation) offThread -= 1;
-      };
-      result.then(done, done);
-      return result;
+      offThread += 1;
+      let settle: Delivery['settle'] = () => {};
+      const delivered = new Promise<unknown>((resolve, reject) => {
+        settle = (ok, value) => {
+          if (owner === generation) offThread -= 1;
+          offThreadWork.delete(delivered);
+          if (ok) resolve(value);
+          else reject(value);
+        };
+      });
+      const entry: Delivery = { outcome: undefined, settle };
+      deliveries.push(entry);
+      if (owner === generation) offThreadWork.add(delivered);
+      result.then(
+        value => {
+          entry.outcome = { ok: true, value };
+          armDelivery();
+        },
+        (error: unknown) => {
+          entry.outcome = { ok: false, value: error };
+          armDelivery();
+        },
+      );
+      // The caller awaits the delivery; a rejection it never awaits is still its own, so it is not muted.
+      return delivered;
     });
   }
 };
@@ -547,17 +602,28 @@ export const unitClock = {
    * let a sealed session's crypto land first. Throws, naming the count, if it never goes quiet.
    */
   async quiet(maxTurns = 10_000): Promise<void> {
+    // Off-thread work is AWAITED, never counted past: how many turns a WebCrypto call takes is the
+    // machine's speed, and a turn ceiling on it was a wall-clock budget by another name — it ran out on
+    // a loaded runner with two seals still in flight. Only queued JavaScript tasks count toward
+    // `maxTurns`, which catches a task that keeps re-queueing itself forever.
     let calm = 0;
-    for (let turn = 0; turn < maxTurns; turn += 1) {
+    let turns = 0;
+    while (calm < IDLE_PROBES) {
+      if (offThreadWork.size > 0) {
+        await Promise.allSettled([...offThreadWork]);
+        calm = 0;
+        continue;
+      }
+      if (turns >= maxTurns)
+        throw new Error(
+          `the unit clock never went quiet: ${inFlight + immediates} queued task(s) still re-queueing after ${maxTurns} turns`,
+        );
       calm = inFlight + immediates + offThread === 0 ? calm + 1 : 0;
-      if (calm >= IDLE_PROBES) return;
+      turns += 1;
       await new Promise(resolve => {
         Reflect.apply(realSetImmediate as AnyFunction, globalThis, [resolve] as never[]);
       });
     }
-    throw new Error(
-      `the unit clock never went quiet: ${offThread} off-thread and ${inFlight} queued task(s) still in flight after ${maxTurns} turns`,
-    );
   },
   /** Stops advancing on idle for the rest of this test: only advance()/next() move time. */
   hold(): void {
@@ -719,6 +785,10 @@ trackPromises(require('node:fs/promises'), [
   'chmod',
 ]);
 trackPromises(Bun, ['write']);
+// Reading a body is native work too: a stubbed fetch's Response settles on Bun's own schedule.
+for (const Body of [globalThis.Response, globalThis.Request])
+  trackPromises(Body?.prototype, ['text', 'json', 'arrayBuffer', 'blob', 'bytes', 'formData']);
+trackPromises(globalThis.Blob?.prototype, ['text', 'arrayBuffer', 'bytes']);
 
 /**
  * EVERY TEST STARTS AT {@link UNIT_CLOCK_ORIGIN}. Timers still waiting from an earlier test are KEPT,
@@ -733,6 +803,7 @@ beforeEach(() => {
   elapsed = 0;
   generation += 1;
   offThread = 0;
+  offThreadWork.clear();
   immediates = 0;
   inFlight = zeroTasks.size;
   nextFrame = new Map();

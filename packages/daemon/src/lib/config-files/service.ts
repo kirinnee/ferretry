@@ -80,6 +80,8 @@ export interface ConfigDirectoryPort {
   read(path: string): Promise<string | undefined>;
   /** Write one file atomically, owner-only, creating its directory. */
   write(path: string, text: string): Promise<void>;
+  /** Remove one file; a file already gone is no error. */
+  remove(path: string): Promise<void>;
   /** Replace the JSON Schemas editors read, by schema id. */
   writeSchemas(schemas: ReadonlyMap<string, string>): Promise<void>;
 }
@@ -456,6 +458,28 @@ export class ConfigFilesService {
       if (disk === undefined) delete accepted[path];
       else accepted[path] = { etag: disk.etag, text: disk.text };
       await this.deps.accepted.write(accepted);
+      await this.#load();
+      return true;
+    });
+  }
+
+  /**
+   * Drop ONE held edit, named by the etag that was reviewed: the file goes back to the version in effect —
+   * its accepted text written over it, or, for a new file that was never in effect, the file removed (its
+   * defaults are what is in effect). Answers `false`, touching nothing, when there is no such held edit any
+   * more, so a discard can never drop an edit nobody saw. Discarding only ever tightens.
+   */
+  async discard(path: string, etag: string): Promise<boolean> {
+    return await this.#serial(async () => {
+      const snapshot = await this.#load();
+      const held = snapshot.evaluation.pending.find(item => item.path === path && item.etag === etag);
+      if (held === undefined) return false;
+      const inEffect = snapshot.evaluation.accepted[path];
+      if (inEffect === undefined) await this.deps.directory.remove(path);
+      else {
+        this.acknowledge(path, inEffect.text);
+        await this.deps.directory.write(path, inEffect.text);
+      }
       await this.#load();
       return true;
     });

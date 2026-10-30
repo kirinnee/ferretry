@@ -28,6 +28,7 @@ export * from './mounts/session-filesystem.ts';
 export * from './mounts/session-agenda-mode.ts';
 export * from './mounts/session-hypermedia.ts';
 export * from './mounts/session-migrate.ts';
+export * from './mounts/session-restart.ts';
 export * from './mounts/session-reads.ts';
 export * from './mounts/session-rename.ts';
 export * from './mounts/session-resume.ts';

@@ -38,6 +38,10 @@ class MemoryDirectory implements ConfigDirectoryPort {
     this.texts.set(path, text);
   }
 
+  async remove(path: string): Promise<void> {
+    this.texts.delete(path);
+  }
+
   async writeSchemas(): Promise<void> {}
 }
 
