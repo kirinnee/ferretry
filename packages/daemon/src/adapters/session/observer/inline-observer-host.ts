@@ -42,7 +42,10 @@ export interface InlineObserverPorts {
   /** One live frame of a session's pane, read as turn evidence. */
   readonly pane: (id: SessionId) => Promise<TurnPaneEvidence | undefined>;
   readonly answers: Pick<AnswerLedger, 'all'>;
-  /** The question Claude's hook recorded as asked, which its transcript holds back while the form is open. */
+  /**
+   * The question Claude's hook recorded as asked, which its transcript holds back while the form is open.
+   * Total: anything it cannot read answers `undefined`, never a rejection.
+   */
   readonly asked?: (id: SessionId) => Promise<AskedQuestion | undefined>;
   /**
    * The answer queue. A projection never waits behind a live answer drive: that drive owns the
@@ -140,7 +143,7 @@ export class InlineObserverHost implements SessionObserverHost {
       if (!current.success) return;
       this.remember(id, revision, current.data);
       const answers = await this.ports.answers.all(id);
-      const asked = await (this.ports.asked?.(id) ?? Promise.resolve(undefined)).catch(() => undefined);
+      const asked = await this.ports.asked?.(id);
       const step = this.observer.step(INITIAL_OBSERVER_STATE, {
         kind: 'look',
         question: { state: current.data, events: transcript.events, answers, asked },

@@ -70,7 +70,10 @@ export interface SessionWorkerDeps {
   readonly tmux: (binding: SessionBinding['tmux']) => WorkerTmuxClient;
   readonly transcripts: Readonly<Record<'claude' | 'codex', TranscriptSource>>;
   readonly stat: (file: string) => Promise<{ readonly size: number; readonly mtimeMs: number } | undefined>;
-  /** The question Claude's hook recorded in `file` for `transcript` (`readAskedQuestion`). Absent reads none. */
+  /**
+   * The question Claude's hook recorded in `file` for `transcript` (`readAskedQuestion`). Total: an absent,
+   * unreadable or foreign file answers `undefined`, never a rejection. Absent, the worker reads none.
+   */
   readonly asked?: (file: string, transcript: string | undefined) => Promise<AskedQuestion | undefined>;
   readonly clock: ClockPort;
   readonly nowMs: () => number;
@@ -448,9 +451,7 @@ export class SessionWorkerRuntime {
   private async askedOf(binding: SessionBinding): Promise<AskedQuestion | undefined> {
     const transcript = binding.transcript;
     if (binding.questionAsked === undefined || transcript?.harness !== 'claude') return undefined;
-    return await (this.deps.asked?.(binding.questionAsked, transcript.file) ?? Promise.resolve(undefined)).catch(
-      () => undefined,
-    );
+    return await this.deps.asked?.(binding.questionAsked, transcript.file);
   }
 
   /** The facts or the receipts changed: decide the question again from the tail already parsed. */
