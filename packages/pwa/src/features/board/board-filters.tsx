@@ -338,7 +338,7 @@ export function BoardFilterSheet({
           type="button"
         >
           <ListFilter aria-hidden="true" size={14} />
-          Filters
+          <span className="fy-board-filters__label">Filters</span>
           {count > 0 ? <span className="fy-board-filters__n">{count}</span> : null}
         </button>
         {count > 0 ? (

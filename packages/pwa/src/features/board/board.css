@@ -738,18 +738,64 @@
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
 }
-.fy-board[data-phone] .fy-board-counts__closed {
-  min-height: 36px;
-  white-space: nowrap;
+/* One row above the lanes: the Filters icon, then the count pills, then the closed count, scrolling sideways. */
+.fy-board__phone-bar {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: var(--gap-xs);
+  overflow-x: auto;
+  scrollbar-width: none;
 }
-.fy-board[data-phone] .fy-board-count {
+.fy-board__phone-bar::-webkit-scrollbar {
+  display: none;
+}
+.fy-board__phone-bar .fy-board-filters,
+.fy-board__phone-bar .fy-board-filters__bar {
+  display: flex;
   flex: none;
-  min-height: 40px;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+.fy-board__phone-bar .fy-board-counts {
+  flex: none;
+  flex-wrap: nowrap;
+  gap: var(--gap-xs);
+}
+.fy-board[data-phone] .fy-board-count,
+.fy-board[data-phone] .fy-board-count[data-kind='pill'] {
+  flex: none;
+  min-height: 32px;
+  font-size: var(--text-xs);
 }
 .fy-board[data-phone] .fy-board-filters__toggle,
 .fy-board[data-phone] .fy-board-filters__clear {
-  min-height: 40px;
-  font-size: var(--text-sm);
+  min-height: 32px;
+  font-size: var(--text-xs);
+}
+.fy-board[data-phone] .fy-board-filters__toggle {
+  position: relative;
+  min-width: 36px;
+  justify-content: center;
+}
+.fy-board[data-phone] .fy-board-filters__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.fy-board[data-phone] .fy-board-counts__closed {
+  flex: none;
+  min-height: 32px;
+  padding: 0 var(--gap-sm);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  font-size: var(--text-xs);
+  text-decoration: none;
+  white-space: nowrap;
 }
 
 /* The filter sheet: every field stacked at full width, the actions pinned under them. */

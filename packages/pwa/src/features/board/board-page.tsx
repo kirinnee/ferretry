@@ -338,16 +338,26 @@ export function BoardPage({
           <PageThemeSwitch />
         </div>
       </header>
-      <BoardCountsBar
-        activity={filters.activity}
-        counts={model.counts}
-        onActivity={pressCount}
-        onOpenArchive={() => setView('archive')}
-      />
       {phone ? (
-        <BoardFilterSheet archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+        <div className="fy-board__phone-bar">
+          <BoardFilterSheet archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+          <BoardCountsBar
+            activity={filters.activity}
+            counts={model.counts}
+            onActivity={pressCount}
+            onOpenArchive={() => setView('archive')}
+          />
+        </div>
       ) : (
-        <BoardFilterBar archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+        <>
+          <BoardCountsBar
+            activity={filters.activity}
+            counts={model.counts}
+            onActivity={pressCount}
+            onOpenArchive={() => setView('archive')}
+          />
+          <BoardFilterBar archive={archive} choices={choices} filters={filters} onChange={next => setFilters(next)} />
+        </>
       )}
       {notice === null ? null : (
         <p className="fy-board__notice" role="status">
