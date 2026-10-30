@@ -14,11 +14,11 @@ const recent = new Date(NOW - 60_000).toISOString();
 
 const SESSIONS = [
   sessionView('hadi-1', {
-    config: { teammate: 'hadi', label: 'Fix the stuck sign-in', cwd: '/work/ferretry' },
+    config: { teammate: 'hadi', name: 'Fix the stuck sign-in', cwd: '/work/ferretry' },
     state: { lastActivityAt: recent },
   }),
   sessionView('maryah-1', {
-    config: { teammate: 'maryah', label: 'Diene work', cwd: '/work/home-manager' },
+    config: { teammate: 'maryah', name: 'Diene work', cwd: '/work/home-manager' },
     state: {
       status: 'awaiting_user',
       attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
@@ -112,16 +112,16 @@ describe('SessionsBar as a column', () => {
     expect(nameless.querySelector('[data-sbar-dir]')?.textContent).toBe('/work/home-manager');
     // Only a session that is actually waiting on a question echoes it.
     expect(view.container.querySelector('[data-sbar-session="hadi-1"] [data-sbar-question]')).toBeNull();
-    // A session with no callsign and no label falls back to its id rather than an empty row.
+    // A session with no callsign and no name falls back to its id rather than an empty row.
     expect(view.container.querySelector('[data-sbar-session="nameless"] .fy-sbar__name')?.textContent).toBe('nameless');
   });
 
-  test('titles a row by its task and falls back to the ferret when there is no task title', async () => {
+  test('titles a row by its task and falls back to the ferret when there is no name', async () => {
     const taskless = sessionView('taskless-1', {
       config: { teammate: 'pim', label: undefined as never, name: undefined as never, cwd: '/work/ferretry' },
     });
     const labelOnly = sessionView('label-only', {
-      config: { teammate: undefined as never, label: 'Home Manager', cwd: '/work/ferretry' },
+      config: { teammate: undefined as never, name: 'Home Manager', cwd: '/work/ferretry' },
     });
     view = await mount(bar({ sessions: [...SESSIONS, taskless, labelOnly] }).element);
     const row = (id: string) => must(view?.container.querySelector(`[data-sbar-session="${id}"]`) ?? null, id);
@@ -166,7 +166,7 @@ describe('SessionsBar as a column', () => {
 
   test('hides stopped sessions until "Show stopped" is ticked, and says how many it is hiding', async () => {
     const stopped = sessionView('old-1', {
-      config: { teammate: 'ora', label: 'Finished work', cwd: '/work/ferretry' },
+      config: { teammate: 'ora', name: 'Finished work', cwd: '/work/ferretry' },
       state: { status: 'completed', lastActivityAt: recent },
     });
     const { element } = bar({ sessions: [...SESSIONS, stopped] });
@@ -193,7 +193,7 @@ describe('SessionsBar as a column', () => {
 
   test('keeps the open session listed even when it has stopped', async () => {
     const stopped = sessionView('hadi-1', {
-      config: { teammate: 'hadi', label: 'Done', cwd: '/work/ferretry' },
+      config: { teammate: 'hadi', name: 'Done', cwd: '/work/ferretry' },
       state: { status: 'stopped' },
     });
     view = await mount(bar({ sessions: [stopped] }).element);
@@ -207,7 +207,7 @@ describe('SessionsBar as a column', () => {
 
   test('narrows by kind with live counts, and says plainly when a kind has nothing', async () => {
     const person = sessionView('pat-1', {
-      config: { teammate: 'pat', label: 'Pairing', mode: 'interactive', cwd: '/work/ferretry' },
+      config: { teammate: 'pat', name: 'Pairing', mode: 'interactive', cwd: '/work/ferretry' },
     });
     const { element } = bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number], person] });
     view = await mount(element);
@@ -244,7 +244,7 @@ describe('SessionsBar as a column', () => {
 
   test('opens on Interactive, listed first, until the device remembers another kind', async () => {
     const person = sessionView('pat-1', {
-      config: { teammate: 'pat', label: 'Pairing', mode: 'interactive', cwd: '/work/ferretry' },
+      config: { teammate: 'pat', name: 'Pairing', mode: 'interactive', cwd: '/work/ferretry' },
     });
     const sessions = [SESSIONS[0] as (typeof SESSIONS)[number], person];
     const chosen: string[] = [];
@@ -607,9 +607,9 @@ describe('SessionsBar across every machine', () => {
     },
   });
   const BETA_SESSIONS = [
-    sessionView('hadi-1', { config: { teammate: 'pim', label: 'Same id, other machine', cwd: '/work/site' } }),
+    sessionView('hadi-1', { config: { teammate: 'pim', name: 'Same id, other machine', cwd: '/work/site' } }),
     sessionView('ask-1', {
-      config: { teammate: 'ora', label: 'A question', cwd: '/work/site' },
+      config: { teammate: 'ora', name: 'A question', cwd: '/work/site' },
       state: {
         status: 'awaiting_question',
         attention: { open: 1, first: 'A1', ask: 'Ask?', latestAt: recent },
@@ -695,7 +695,7 @@ describe('SessionsBar across every machine', () => {
 
   test('filters every machine alike, hides what stopped on either, and the rail follows', async () => {
     const stoppedBeta = sessionView('end-1', {
-      config: { teammate: 'ula', label: 'Over', cwd: '/work/site', mode: 'interactive' },
+      config: { teammate: 'ula', name: 'Over', cwd: '/work/site', mode: 'interactive' },
       state: { status: 'completed' },
     });
     const machineSources = [
@@ -718,7 +718,7 @@ describe('SessionsBar across every machine', () => {
   });
 
   test('the rail follows the column’s filter', async () => {
-    const stopped = sessionView('old-1', { config: { label: 'Finished' }, state: { status: 'completed' } });
+    const stopped = sessionView('old-1', { config: { name: 'Finished' }, state: { status: 'completed' } });
     const { element } = bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number], stopped] });
     view = await mount(element);
     await click(view.container.querySelector('[data-sbar-show-stopped]'), 'Show stopped');

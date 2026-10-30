@@ -12,9 +12,9 @@ afterEach(async () => {
 });
 
 describe('what the session bar calls a session', () => {
-  test('the callsign first, then the label, the name and finally the id', () => {
+  test('the callsign first, then the name, never the label, and finally the id', () => {
     expect(sessionDisplayName(sessionView('a', { config: { teammate: 'hadi', label: 'Fix it' } }))).toBe('Hadi');
-    expect(sessionDisplayName(sessionView('b', { config: { label: 'Fix it' } }))).toBe('Fix it');
+    expect(sessionDisplayName(sessionView('b', { config: { name: 'Renamed', label: 'diene-cyan' } }))).toBe('Renamed');
     expect(sessionDisplayName(sessionView('c'))).toBe('Session c');
     expect(sessionDisplayName(sessionView('d', { config: { name: undefined as never } }))).toBe('d');
   });
@@ -35,7 +35,7 @@ describe('SessionTopBar', () => {
         }
         onToggleInfo={() => (toggled += 1)}
         project="ferretry"
-        session={sessionView('s1', { config: { teammate: 'hadi', label: 'Fix the sign-in' } })}
+        session={sessionView('s1', { config: { teammate: 'hadi', name: 'Fix the sign-in', label: 'diene-cyan' } })}
         status={<span data-extra="">needs you</span>}
       />,
     );

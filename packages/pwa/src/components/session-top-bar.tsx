@@ -39,12 +39,12 @@ import { StatusMark } from '../shell/status-mark.tsx';
 import { UnreadBadge } from '../shell/unread-badge.tsx';
 
 /**
- * The name a person calls this session by: its callsign, else whatever the session was labelled,
+ * The name a person calls this session by: its callsign, else the name it was given,
  * else its id. The callsign leads because it is how teammates are referred to everywhere else.
  */
 export const sessionDisplayName = (session: SessionView): string => {
   const { config } = session;
-  return displaySystemCallsign(displayCallsign(config.teammate) || config.label || config.name || config.id);
+  return displaySystemCallsign(displayCallsign(config.teammate) || config.name || config.id);
 };
 
 /** The status word for each turn: the person's words, not the daemon's. */
@@ -114,7 +114,7 @@ export function SessionTopBar({
   switches,
 }: SessionTopBarProps) {
   const name = sessionDisplayName(session);
-  const task = session.config.label ?? session.config.name;
+  const task = session.config.name;
   // What a needs-input session is parked on: the one thing it is waiting for. A permission prompt is said
   // as the request itself and a harness dialog as its own title — what the person is being asked to decide.
   const permission = turn === 'needs-input' ? session.state.permissionRequest : undefined;

@@ -30,7 +30,7 @@ export function SessionsRailDot({
   readonly active: boolean;
   readonly onNavigate: (to: string) => void;
 }) {
-  const name = displayCallsign(view.config.teammate) || view.config.label || view.config.id;
+  const name = displayCallsign(view.config.teammate) || view.config.name || view.config.id;
   const where = machine === undefined ? name : `${name} on ${machine}`;
   const unread = unreadCount(view);
   return (

@@ -69,6 +69,7 @@
         "harness/relaunch-settings-screenshot.tsx",
         "harness/restart-unresumable-screenshot.tsx",
         "harness/restart-outdated-screenshot.tsx",
+        "harness/label-rename-screenshot.tsx",
         "harness/send-status-unknown-screenshot.tsx",
         "harness/context-outdated-screenshot.tsx",
         "harness/convert-sheet-screenshot.tsx",

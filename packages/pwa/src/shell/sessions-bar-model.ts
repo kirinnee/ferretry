@@ -207,15 +207,14 @@ export const sessionsBarView = (
  */
 export const sessionsBarNames = (view: SessionView): { readonly title: string; readonly ferret: string | null } => {
   const callsign = displayCallsign(view.config.teammate);
-  const task = (view.config.label ?? view.config.name ?? '').trim();
+  const task = (view.config.name ?? '').trim();
   const ferret = callsign || view.config.id;
   if (task === '' || task === callsign) return { title: ferret, ferret: null };
   return { title: task, ferret: callsign === '' ? null : callsign };
 };
 
 /** The second line under a session's name: what it is working on, else where. */
-export const sessionsBarSubline = (view: SessionView): string =>
-  view.config.label ?? view.config.name ?? view.config.cwd;
+export const sessionsBarSubline = (view: SessionView): string => view.config.name ?? view.config.cwd;
 
 /** A home directory, written the way a shell prompt writes it. */
 const HOME_PREFIX = /^\/(?:home|Users)\/[^/]+(?=\/|$)/u;

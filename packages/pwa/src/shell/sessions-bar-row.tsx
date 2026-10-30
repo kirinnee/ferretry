@@ -15,11 +15,15 @@
  * that learns, then Hypermedia and Pack mode while each is on (`switch-marks.tsx`) — or,
  * inside the all-machines Needs you group, the machine's name (beside the badge, when there is one),
  * because every row there needs you and nothing else on the line says where it runs.
+ *
+ * THE TITLE IS ALWAYS THE SESSION'S NAME. A batch label ("diene-cyan") never stands in for it: a rename
+ * changes the name, so a title that preferred the label would hide the rename. A ferret on older
+ * instructions adds one more small glyph (Outdated, or Queued) at the head of the marks cell.
  */
 
 import type { SessionView } from '@ferretry/protocol';
 import { type ReactNode, useContext, useState } from 'react';
-import { OutdatedMark } from '../features/restart-outdated/outdated-mark.tsx';
+import { OutdatedGlyph, useOutdatedMarkState } from '../features/restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
 import { unreadCount } from '../lib/attention-inbox.ts';
@@ -65,6 +69,7 @@ export function SessionsBarRow({
   const directory = sessionsBarDirectory(view);
   const unread = unreadCount(view);
   const preview = rowPreview(view);
+  const outdated = useOutdatedMarkState(view);
   const openMenu = useContext(SessionMenuContext);
   const [pressing, setPressing] = useState(false);
   const gesture = useRowContextGesture<SessionView>(
@@ -72,6 +77,32 @@ export function SessionsBarRow({
     view,
     setPressing,
   );
+  const rightmost =
+    unread > 0 ? (
+      <>
+        {machine === undefined ? null : <MachineChip name={machine} />}
+        <UnreadBadge count={unread} />
+      </>
+    ) : machine !== undefined ? (
+      <MachineChip name={machine} />
+    ) : (
+      <SwitchMarks
+        agenda={agendaOn(view)}
+        hypermedia={hypermediaOn(view)}
+        learning={learningPassive}
+        pack={packOn(view)}
+      />
+    );
+  // The glyph is one more mode icon: it shares the row's marks cell, so the name keeps the whole name cell.
+  const marks =
+    outdated === null && unread === 0 ? (
+      rightmost
+    ) : (
+      <span className="fy-sbar__marks">
+        {outdated === null ? null : <OutdatedGlyph state={outdated} view={view} />}
+        {rightmost}
+      </span>
+    );
   return (
     <li data-sbar-depth={depth}>
       <RouteLink
@@ -89,23 +120,8 @@ export function SessionsBarRow({
         <StatusMark view={view} />
         <span className="fy-sbar__title">
           <span className="fy-sbar__name">{name}</span>
-          <OutdatedMark view={view} />
         </span>
-        {unread > 0 ? (
-          <span className="fy-sbar__marks">
-            {machine === undefined ? null : <MachineChip name={machine} />}
-            <UnreadBadge count={unread} />
-          </span>
-        ) : machine !== undefined ? (
-          <MachineChip name={machine} />
-        ) : (
-          <SwitchMarks
-            agenda={agendaOn(view)}
-            hypermedia={hypermediaOn(view)}
-            learning={learningPassive}
-            pack={packOn(view)}
-          />
-        )}
+        {marks}
         {preview === undefined ? null : (
           <span
             className="fy-sbar__question"
