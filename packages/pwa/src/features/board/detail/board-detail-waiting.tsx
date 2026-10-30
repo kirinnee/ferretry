@@ -1,18 +1,19 @@
-/** THE ASKS THAT STOP A FERRET UNTIL THE OWNER ANSWERS, with the answer buttons the Inbox and the chat have. */
+/** THE ASKS THAT STOP A FERRET UNTIL THE OWNER ANSWERS, with the quick replies the Inbox and the chat have. */
 
-import type { AgendaResponse } from '@ferretry/protocol';
+import type { AgendaRef, AgendaResponse } from '@ferretry/protocol';
 import { useState } from 'react';
-import type { AgendaRef } from '@ferretry/protocol';
+import { cardModel } from '../../../lib/agenda-card-model.ts';
+import { swipeMap } from '../../../lib/agenda-inbox.ts';
 import type { CardAsks } from '../../../lib/board-detail.ts';
 import type { FerretNames } from '../../../lib/board-present.ts';
-import { AgendaAnswerControls } from '../../agenda/agenda-answer-controls.tsx';
 import { agendaHeading } from '../../agenda/agenda-delivery.tsx';
+import { AgendaQuickReplies } from '../../agenda/agenda-quick-replies.tsx';
 
 export interface WaitingOnYouProps {
   readonly asks: CardAsks;
   readonly names: FerretNames;
   /** Answers through the agenda path; the words of a refusal, or `null` when it went through. */
-  readonly onAnswer: (ref: AgendaRef, response: AgendaResponse) => Promise<string | null>;
+  readonly onAnswer: (ref: AgendaRef, response: AgendaResponse, note?: string) => Promise<string | null>;
 }
 
 export function WaitingOnYou({ asks, names, onAnswer }: WaitingOnYouProps) {
@@ -23,6 +24,7 @@ export function WaitingOnYou({ asks, names, onAnswer }: WaitingOnYouProps) {
     <ul className="fy-board-detail__waiting">
       {blocking.map(({ ref, item }) => {
         const key = `${ref.sessionId}/${ref.id}`;
+        const model = item === null ? null : cardModel(item);
         return (
           <li data-ask={ref.id} key={key}>
             {item === null ? (
@@ -37,20 +39,25 @@ export function WaitingOnYou({ asks, names, onAnswer }: WaitingOnYouProps) {
                 {item.why === undefined || item.why === '' ? null : (
                   <p className="fy-board-detail__quiet">{item.why}</p>
                 )}
-                {item.ask === undefined ? (
+                {item.ask === undefined || model === null || model.perQuestion ? (
                   <p className="fy-board-detail__quiet">Answer this one in the Inbox.</p>
                 ) : (
-                  <AgendaAnswerControls
-                    ask={item.ask}
+                  <AgendaQuickReplies
                     busy={busy === key}
-                    onRespond={response => {
+                    error={null}
+                    map={swipeMap(item)}
+                    model={model}
+                    onAct={action => {
+                      if (action.kind !== 'respond') return;
                       setBusy(key);
                       setError(null);
-                      void onAnswer(ref, response).then(failed => {
+                      void onAnswer(ref, action.response, action.note).then(failed => {
                         setBusy(null);
                         setError(failed);
                       });
                     }}
+                    onClose={() => undefined}
+                    swipeable={false}
                   />
                 )}
               </>

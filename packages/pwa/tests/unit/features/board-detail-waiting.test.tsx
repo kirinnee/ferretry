@@ -92,6 +92,57 @@ describe('WaitingOnYou', () => {
     expect(buttonNamed(root, 'Yes').disabled).toBe(false);
   });
 
+  it('draws the Inbox quick replies: a Recommended tag, no pre-checked option, no caps label', async () => {
+    const root = await show(
+      asks([
+        row(
+          agendaItem('A1', {
+            title: 'Which database?',
+            ask: choices('SQLite', 'Postgres'),
+            recommendation: { decision: 'SQLite', why: 'No server to run.' },
+          }),
+        ),
+      ]),
+    );
+    const chips = [...root.querySelectorAll('.fy-qr__chip')];
+    expect(chips.map(chip => chip.querySelector('.fy-qr__label')?.textContent).sort()).toEqual(['Postgres', 'SQLite']);
+    expect(chips.filter(chip => chip.querySelector(':scope > svg') !== null)).toEqual([]);
+    const tagged = chips.filter(chip => chip.textContent?.includes('Recommended'));
+    expect(tagged.map(chip => chip.querySelector('.fy-qr__label')?.textContent)).toEqual(['SQLite']);
+    expect(root.textContent).not.toMatch(/CHOOSE THIS ANSWER/i);
+  });
+
+  it('answers nothing when the menu dismisses: only an answer goes to the ferret', async () => {
+    const answered: AgendaResponse[] = [];
+    const root = await show(
+      asks([row(agendaItem('A1', { title: 'Approve?', ask: choices('Yes', 'No') }))]),
+      async (_ref, response) => {
+        answered.push(response);
+        return null;
+      },
+    );
+    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-more]'), 'the ⋯ button').click());
+    await interact(() => must(root.querySelector<HTMLElement>('[data-agenda-dismiss]'), 'Not needed').click());
+    expect(answered).toEqual([]);
+    expect(root.querySelector('[role="alert"]')).toBeNull();
+  });
+
+  it('sends an ask answered one answer per question to the Inbox', async () => {
+    const root = await show(
+      asks([
+        row(
+          agendaItem('A1', {
+            title: 'Two things',
+            ask: { kind: 'open-question' } as never,
+            questions: [{ question: 'Which day?' }, { question: 'Who?' }] as never,
+          }),
+        ),
+      ]),
+    );
+    expect(root.textContent).toContain('Answer this one in the Inbox.');
+    expect(root.querySelector('.fy-qr')).toBeNull();
+  });
+
   it('sends an ask with no answer controls to the Inbox', async () => {
     const root = await show(asks([row(agendaItem('A1', { title: 'Look at this' }))]));
     expect(root.textContent).toContain('Answer this one in the Inbox.');

@@ -77,10 +77,15 @@
 .fy-board-detail__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px var(--gap-sm);
+  gap: 2px 0;
   margin: 4px 0 0;
   color: var(--muted);
   font-size: var(--text-xs);
+}
+.fy-board-detail__meta > span + span::before {
+  content: '·';
+  margin: 0 6px;
+  color: var(--faint);
 }
 .fy-board-detail__activity {
   display: flex;

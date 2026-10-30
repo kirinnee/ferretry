@@ -348,8 +348,8 @@ function DetailBody({
           <WaitingOnYou
             asks={asks}
             names={names}
-            onAnswer={async (ref, response) => {
-              const result = await actions.answer(machine.connection.daemonId, ref, response);
+            onAnswer={async (ref, response, note) => {
+              const result = await actions.answer(machine.connection.daemonId, ref, response, note);
               return result.ok ? null : result.error.message;
             }}
           />

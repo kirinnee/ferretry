@@ -555,7 +555,9 @@ describe('BoardDetail — answering', () => {
     const { root, actions } = await open({ task: blocked(), agendaItems: [item] });
     await tap(buttonNamed(root, 'Yes'));
     await interact(() => flush());
-    expect(actions.calls).toEqual([`answer:${JSON.stringify([waiting, { kind: 'multiple-choice', choice: 'Yes' }])}`]);
+    expect(actions.calls).toEqual([
+      `answer:${JSON.stringify([waiting, { kind: 'multiple-choice', choice: 'Yes' }, undefined])}`,
+    ]);
     expect(root.querySelector('[data-section="waiting"] [role="alert"]')).toBeNull();
   });
 
