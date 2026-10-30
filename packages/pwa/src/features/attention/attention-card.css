@@ -408,8 +408,6 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   color: var(--muted);
   font-size: var(--text-xs, var(--text-sm));
   font-weight: var(--weight-strong);
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 .fy-attn-terms-table tbody tr:last-child > * {
   border-bottom: 0;
