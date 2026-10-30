@@ -14,6 +14,7 @@ import {
   StateHomeLayout,
   SystemClock,
 } from '../../../../daemon/src/adapters/index.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../../../../daemon/tests/integration/support/os-port.ts';
 import { BunDaemonProcess } from '../../../src/adapters/daemon/process.ts';
 import { FileServiceStore } from '../../../src/adapters/daemon/service-files.ts';
 import { FileStateHomeClaim } from '../../../src/adapters/state-home/claim-files.ts';
@@ -46,14 +47,6 @@ const sockets = new Set<string>();
 afterEach(async () => {
   await tearDownSupervisedDaemons({ daemons, sockets, roots }, { tmux: TMUX });
 }, TEARDOWN_TIMEOUT_MS);
-
-async function freeLoopbackPort(): Promise<number> {
-  const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('probe') });
-  const port = server.port;
-  await server.stop(true);
-  if (port === undefined) throw new Error('the fixture server reported no port');
-  return port;
-}
 
 async function executable(path: string, lines: readonly string[]): Promise<void> {
   await writeFile(path, `${lines.join('\n')}\n`);
@@ -99,7 +92,6 @@ async function boot(): Promise<BootedDaemon> {
   if (TMUX === null) throw new Error('tmux is required for this journey and was not found');
   const root = await mkdtemp(join(tmpdir(), 'fy-turn-'));
   roots.add(root);
-  const port = await freeLoopbackPort();
   const bin = join(root, 'bin');
   const stateHome = join(root, 'state');
   await mkdir(bin, { recursive: true });
@@ -122,7 +114,7 @@ async function boot(): Promise<BootedDaemon> {
     join(stateHome, 'config', 'daemon.json'),
     JSON.stringify({
       host: '127.0.0.1',
-      port,
+      port: OS_CHOSEN_PORT,
       relay: { url: 'https://off.example', enabled: false },
       // One-second health ticks, so a crashed harness is noticed within the test's budget.
       healthIntervalSeconds: 1,
@@ -183,6 +175,7 @@ async function boot(): Promise<BootedDaemon> {
   );
   const handle = await supervisor.start(fyd);
   if (handle.pid !== undefined) daemons.add(handle.pid);
+  const port = await recordedPort(stateHome);
   await waitFor(
     async () => (await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true,
     'the daemon to answer its health probe',

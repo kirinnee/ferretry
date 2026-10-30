@@ -25,6 +25,7 @@ import {
   DaemonCarriersDocumentSchema,
   type DaemonTunnelCarrierEntry,
   HostSchema,
+  OS_CHOSEN_PORT,
   PortSchema,
   resolveDaemonCarriers,
 } from './carriers.ts';
@@ -500,7 +501,7 @@ export const DaemonConfigSchema = DaemonConfigDocumentSchema.transform(({ accoun
     // Read off the resolved bind, not off `value.port`: a `port` key superseded by a portless bind
     // carrier is not a claim on anything, and treating it as one would refuse a boot over a line the
     // operator has already migrated away from.
-    portIsRecorded: declared.bind.port !== undefined,
+    portIsRecorded: declared.bind.port !== undefined && declared.bind.port !== OS_CHOSEN_PORT,
     carrierSet: boundAt(declared, { host, port }),
     ...derivedAddresses({ host, port, ...operatorPublicUrl(value.publicUrl) }),
     /** The document still carries the retired `accountModel` key, so the boot says so once. */
@@ -533,6 +534,16 @@ export function configuredAt(config: DaemonConfig, port: number): DaemonConfig {
     carrierSet: boundAt(config.carrierSet, { host: config.host, port }),
     ...derivedAddresses({ host: config.host, port, ...recordedAdvertisement(config) }),
   };
+}
+
+/**
+ * Whether this boot is to take whatever port the operating system hands it, rather than claim one.
+ *
+ * The configuration still reads `port: 0` until the bind has happened; every address it derives is
+ * meaningless until `configuredAt` is given the port the socket actually got.
+ */
+export function choosesPortAtBind(config: DaemonConfig): boolean {
+  return config.port === OS_CHOSEN_PORT;
 }
 
 /** Parses a complete configuration document and derives its canonical addresses. */

@@ -161,10 +161,10 @@ describe('starting a Codex sign-in over, for real', () => {
   });
 
   it('should name and leave alone a program that is not a Codex sign-in', async () => {
-    // Arrange — somebody's own server on the port.
-    const port = await freePort();
+    // Arrange — somebody's own server on the port, bound by the OS so no number is ever guessed.
     const { binary } = await fakeCodex();
-    const theirs = Bun.serve({ hostname: '127.0.0.1', port, fetch: () => new Response('theirs') });
+    const theirs = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('theirs') });
+    const port = Number(theirs.port);
     try {
       const subject = service(binary, port);
 

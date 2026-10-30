@@ -17,7 +17,7 @@
 import { afterAll, describe, it } from 'bun:test';
 import { join, resolve } from 'node:path';
 import should from 'should';
-import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { OS_CHOSEN_PORT } from '../../integration/support/os-port.ts';
 import { startFleetPanes } from '../../integration/support/fleet-panes.ts';
 import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
 import { type ScaledFleetShape, scaledFleet } from '../../integration/support/scaled-fleet.ts';
@@ -52,7 +52,7 @@ interface SpawnMeasurement {
 }
 
 /** The child's whole program: the real `start`, with every spawn counted once the warm-up is over. */
-const program = (home: string, userHome: string, port: number): string => `
+const program = (home: string, userHome: string): string => `
   import { mkdir, writeFile } from 'node:fs/promises';
   import { basename } from 'node:path';
   import { buildWorld, start } from ${modulePath('../../../bin/fyd.ts')};
@@ -60,7 +60,7 @@ const program = (home: string, userHome: string, port: number): string => `
   process.env.FY_HOME = ${JSON.stringify(home)};
   await mkdir(${JSON.stringify(join(home, 'config'))}, { recursive: true });
   await writeFile(${JSON.stringify(join(home, 'config', 'daemon.json'))}, JSON.stringify({
-    host: '127.0.0.1', port: ${String(port)}, relay: { url: 'ws://127.0.0.1:9', enabled: false },
+    host: '127.0.0.1', port: ${String(OS_CHOSEN_PORT)}, relay: { url: 'ws://127.0.0.1:9', enabled: false },
   }));
   const spawns = {};
   let counting = false;
@@ -119,8 +119,7 @@ describe('an idle daemon over a fleet the size of the owner’s', () => {
       ['sleep', '600'],
       { columns: 120, rows: 40 },
     );
-    const port = await freeLoopbackPort();
-    const child = Bun.spawn([process.execPath, '-e', program(fleet.home, fleet.userHome, port)], {
+    const child = Bun.spawn([process.execPath, '-e', program(fleet.home, fleet.userHome)], {
       stdout: 'pipe',
       stderr: 'pipe',
       env: { ...process.env, FYD_BACKGROUND_DELAY_SECONDS: '0', FYD_WATCHDOG_SECONDS: '0' },

@@ -22,7 +22,7 @@ import { join, resolve } from 'node:path';
 import type { PerformanceProfileView, PerformanceReport } from '@ferretry/protocol';
 import should from 'should';
 import { IDLE_DAEMON_BUDGETS } from '../../../src/lib/performance/budgets.ts';
-import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { OS_CHOSEN_PORT, recordedPort } from '../../integration/support/os-port.ts';
 import {
   ANTHROPIC_USAGE_PATH,
   CODEX_USAGE_PATH,
@@ -123,11 +123,10 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
     const panes = await startFleetPanes(fleet.home, sessions);
     // The providers' free usage reads, answered on this machine: the fixture's logins are real stores.
     const usage = startFakeUsageServer();
-    const port = await freeLoopbackPort();
     await mkdir(join(fleet.home, 'config'), { recursive: true });
     await writeFile(
       join(fleet.home, 'config', 'daemon.json'),
-      JSON.stringify({ host: '127.0.0.1', port, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
+      JSON.stringify({ host: '127.0.0.1', port: OS_CHOSEN_PORT, relay: { url: 'ws://127.0.0.1:9', enabled: false } }),
     );
     const daemon = Bun.spawn([process.execPath, FYD_ENTRY], {
       env: {
@@ -142,7 +141,7 @@ describe('an idle daemon on a fleet the size of the owner’s Mac', () => {
       stdout: 'ignore',
       stderr: Bun.file(join(fleet.home, 'fyd.err')),
     });
-    const base = `http://127.0.0.1:${String(port)}`;
+    const base = `http://127.0.0.1:${String(await recordedPort(fleet.home))}`;
     let report: PerformanceReport | undefined;
     try {
       for (let attempt = 0; (await fetch(`${base}/healthz`).catch(() => undefined))?.ok !== true; attempt += 1) {
