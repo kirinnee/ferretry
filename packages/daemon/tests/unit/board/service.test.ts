@@ -665,6 +665,47 @@ describe('everything else on a card', () => {
     should(ghost.code).equal('not-found');
   });
 
+  it("should record a ferret's skip on its own session, stamped now, without touching a card", async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card()]);
+
+    // Act
+    const recorded = await service.skip({ reason: 'chit-chat, nothing to track' }, lead);
+
+    // Assert
+    should(recorded).eql({ sessionId: 'lead', skip: { reason: 'chit-chat, nothing to track', at: NOW } });
+    should(ports.focus.skips.get('lead')).eql({ reason: 'chit-chat, nothing to track', at: NOW });
+    should(ports.store.writes).eql([]);
+    should(ports.changes.events).eql([]);
+  });
+
+  it('should clear a standing skip when the ferret takes a card', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card()]);
+    await service.skip({ reason: 'chit-chat' }, lead);
+
+    // Act
+    await service.act('F1', action({ action: 'focus' }), lead);
+
+    // Assert
+    should(await ports.focus.skipOf('lead')).be.null();
+  });
+
+  it('should refuse a skip from the owner or the daemon, and for a session that is gone', async () => {
+    // Arrange
+    const { service } = serviceWith([card()]);
+
+    // Act
+    const human = await refusal(service.skip({ reason: 'x' }, owner));
+    const machine = await refusal(service.skip({ reason: 'x' }, daemon));
+    const ghost = await refusal(service.skip({ reason: 'x' }, ferret('ghost')));
+
+    // Assert
+    should(human.code).equal('invalid');
+    should(machine.code).equal('invalid');
+    should(ghost.code).equal('not-found');
+  });
+
   it('should block and unblock on the outside world only', async () => {
     // Arrange
     const { ports, service } = serviceWith([card()]);

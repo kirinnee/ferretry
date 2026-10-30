@@ -270,6 +270,7 @@ packages/pwa/src/lib/text-scale-postcss.ts # build tooling for the Text size set
 
 # The gate's roots skip .tsx entries (packages/pwa exports ./main → src/main.tsx), so a .ts module imported only from the app tree reads as unreached.
 packages/pwa/src/hooks/use-fine-pointer.ts # used by SessionChatPage via App.tsx ← main.tsx; unreached only because the gate ignores .tsx roots
+packages/pwa/src/hooks/use-chat-card.ts # the chat page's card chip and Tasks tab (U14), used by session-chat-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 
 # The project board's data layer (board U10) lands before the pages that read it (board U11–U15).
 packages/pwa/src/hooks/use-board.ts # the board hooks; the board pages import them next (U11–U15)
@@ -280,5 +281,4 @@ packages/pwa/src/lib/lane-editor-model.ts # the lane editor draft model, used by
 
 packages/pwa/src/lib/board-move.ts # the Board page's move rules (U11), reached from board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-present.ts # the Board card's meta line (U11), reached from board-card.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
-packages/pwa/src/lib/board-view.ts # the Board's List, Tree and Archive shapes (U11), reached from board-views.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-phone.ts # the phone Board's lane switching and tab badge (U13), reached from board-phone.tsx and App.tsx ← main.tsx; the gate ignores .tsx roots

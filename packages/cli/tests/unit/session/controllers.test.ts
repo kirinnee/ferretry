@@ -16,6 +16,7 @@ import {
   capturedPresenter,
   FakeFiles,
   RecordingApi,
+  RecordingBoard,
   SteppedClock,
   WAIT_CLOCK,
 } from './controller-doubles.ts';
@@ -134,15 +135,56 @@ describe('ListSessionsController', () => {
     const api = new RecordingApi({
       list: [sessionView({ id: 'ses-1' }), sessionView({ id: 'ses-2' }, { status: 'completed' })],
     });
+    const board = new RecordingBoard();
     const { io, presenter } = capturedPresenter();
 
     // Act
-    await new ListSessionsController(api, presenter).execute();
+    await new ListSessionsController(api, presenter, board, { amber: cell => cell }).execute();
 
     // Assert
     should(io.out[0]).startWith('TEAMMATE');
     should(io.out).have.length(2);
     should(io.out[1]).match(/ses-1/);
+    should(board.calls).equal(0);
+  });
+
+  it('should name each focus card and its lane in the CARD column, one board read for all of them', async () => {
+    // Arrange
+    const api = new RecordingApi({
+      list: [
+        sessionView({ id: 'ses-1', focusTask: { id: 'F18' }, name: 'Send Retry Duplicates' }),
+        sessionView({ id: 'ses-2', focusTask: { id: 'F21' }, name: 'Board Activity Finish' }),
+      ],
+    });
+    const board = new RecordingBoard(
+      new Map([
+        ['F18', 'Plan/Design'],
+        ['F21', 'Implement'],
+      ]),
+    );
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    await new ListSessionsController(api, presenter, board, { amber: cell => cell }).execute();
+
+    // Assert
+    should(io.out[1]).match(/&F18 Plan\/Design/);
+    should(io.out[2]).match(/&F21 Implement/);
+    should(board.calls).equal(1);
+  });
+
+  it('should still print the ids when the board cannot be read', async () => {
+    // Arrange
+    const api = new RecordingApi({ list: [sessionView({ id: 'ses-1', focusTask: { id: 'F18' } })] });
+    const board = new RecordingBoard(new Map(), new Error('daemon: no board'));
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    await new ListSessionsController(api, presenter, board, { amber: cell => cell }).execute();
+
+    // Assert
+    should(io.err).be.empty();
+    should(io.out[1]).match(/&F18( |$)/);
   });
 
   it('should print the empty explanation rather than a bare header', async () => {
@@ -151,7 +193,9 @@ describe('ListSessionsController', () => {
     const { io, presenter } = capturedPresenter();
 
     // Act
-    await new ListSessionsController(api, presenter).execute({ label: 'batch' });
+    await new ListSessionsController(api, presenter, new RecordingBoard(), { amber: cell => cell }).execute({
+      label: 'batch',
+    });
 
     // Assert
     should(io.out).deepEqual(['no sessions with label "batch"']);
@@ -163,10 +207,37 @@ describe('ListSessionsController', () => {
     const { io, presenter } = capturedPresenter();
 
     // Act
-    await new ListSessionsController(api, presenter).execute({ json: true });
+    await new ListSessionsController(api, presenter, new RecordingBoard(), { amber: cell => cell }).execute({
+      json: true,
+    });
 
     // Assert
     should(JSON.parse(io.out.join('\n'))).deepEqual([]);
+  });
+
+  it('should add the focus card and its lane to each --json row without touching the rest', async () => {
+    // Arrange
+    const api = new RecordingApi({
+      list: [
+        sessionView({ id: 'ses-1', focusTask: { id: 'F18' } }),
+        // A card the board read missed: cited, with no lane name invented for it.
+        sessionView({ id: 'ses-2', focusTask: { id: 'F19' } }),
+        sessionView({ id: 'ses-3' }),
+      ],
+    });
+    const board = new RecordingBoard(new Map([['F18', 'Plan/Design']]));
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    await new ListSessionsController(api, presenter, board, { amber: cell => cell }).execute({ json: true });
+
+    // Assert
+    const rows = JSON.parse(io.out.join('\n')) as Array<Record<string, unknown>>;
+    should(rows[0]).properties({ focusCard: '&F18', focusLaneName: 'Plan/Design' });
+    should(rows[0]?.config).properties({ id: 'ses-1', focusTask: { id: 'F18' } });
+    should(rows[1]).property('focusCard', '&F19');
+    should(Object.keys(rows[1] ?? {})).not.containEql('focusLaneName');
+    should(Object.keys(rows[2] ?? {})).not.containEql('focusCard');
   });
 });
 

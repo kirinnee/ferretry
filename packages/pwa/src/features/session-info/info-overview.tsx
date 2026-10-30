@@ -1,8 +1,9 @@
 /** Info › Overview: who this ferret is, where it works, where it came from. */
 
 import type { ManagedWorktreeView, SessionView } from '@ferretry/protocol';
-import { GitBranch, ListTodo, Pencil } from 'lucide-react';
+import { GitBranch, Pencil } from 'lucide-react';
 import { SubFerretsPack, activeSubFerrets } from '../../components/sub-ferrets.tsx';
+import { type ChatChip, chatCardLabel } from '../../lib/board-chat.ts';
 import { displayCallsign } from '../../lib/callsign.ts';
 import { relativeTime } from '../../lib/session-screens.ts';
 import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
@@ -22,8 +23,8 @@ export interface InfoOverviewProps {
   readonly onRename?: () => void;
   /** Goes to another ferret: `/d/<daemon>/s/<id>` style, decided by the host. */
   readonly onOpenSession?: (sessionId: string) => void;
-  /** Opens this ferret's tasks. */
-  readonly onOpenTasks?: () => void;
+  /** The ferret's focus card and how to open it. Absent: the host has no board, so there is no Card row. */
+  readonly card?: { readonly chip: ChatChip; readonly onOpen: () => void };
 }
 
 const sessionName = (view: SessionView): string => displayCallsign(view.config.teammate) || view.config.name;
@@ -38,7 +39,7 @@ export function InfoOverview({
   now,
   onRename,
   onOpenSession,
-  onOpenTasks,
+  card,
 }: InfoOverviewProps) {
   const tree = worktreeFact(view, worktrees);
   const family = lineage(view, sessions);
@@ -112,12 +113,23 @@ export function InfoOverview({
       </InfoRow>
       <InfoRow label="Started">{relativeTime(view.state.startedAt ?? view.config.createdAt, now)}</InfoRow>
       <InfoRow label="Last activity">{relativeTime(view.state.lastActivityAt, now)}</InfoRow>
-      {onOpenTasks === undefined ? null : (
-        <InfoRow label="Tasks">
-          <button className="fy-info-inline-action" data-info-open-tasks="" onClick={onOpenTasks} type="button">
-            <ListTodo aria-hidden="true" size={12} />
-            Open tasks
-          </button>
+      {card === undefined ? null : (
+        <InfoRow label="Card">
+          {card.chip.kind === 'none' ? (
+            <span className="fy-info-warn" data-info-card="none">
+              No card
+            </span>
+          ) : (
+            <button
+              className="fy-info-inline-action"
+              data-info-card={card.chip.id}
+              onClick={card.onOpen}
+              title={card.chip.title ?? undefined}
+              type="button"
+            >
+              {chatCardLabel(card.chip)}
+            </button>
+          )}
         </InfoRow>
       )}
     </InfoSection>

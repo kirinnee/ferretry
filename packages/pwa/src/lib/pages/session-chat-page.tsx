@@ -83,7 +83,11 @@ import { readRelaunchSettings } from '../../features/session-info/relaunch-setti
 import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
 import type { SwitchSection } from '../../features/session-info/switch-marks.tsx';
 import { useInfoPlacement } from '../../features/session-info/use-info-placement.ts';
-import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
+import { BoardSideTab } from '../../features/board/board-side-tab.tsx';
+import { ChatCardChip } from '../../features/board/chat-card-chip.tsx';
+import { useChatCard } from '../../hooks/use-chat-card.ts';
+import type { DaemonBoardStore } from '../board-store.ts';
+import { useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
 import { addSkillInvocationToComposer } from '../../features/skills/skills-composer.ts';
 import type { ConsoleTyper } from '../../features/workspace/console-surface.tsx';
@@ -138,7 +142,7 @@ import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
-import { daemonSessionPath } from './routes.ts';
+import { daemonBoardCardPath, daemonSessionPath } from './routes.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -335,6 +339,11 @@ export interface SessionChatPageProps {
   };
   /** Info open on this tab from the first frame. Absent: Info starts shut. */
   readonly initialInfo?: InfoTab;
+  /**
+   * The board this ferret's card is read from: the header chip, Info's Card row and the Tasks tab.
+   * Absent: the host has no board, so the chat shows none of the three.
+   */
+  readonly board?: DaemonBoardStore;
 }
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */
@@ -348,11 +357,10 @@ interface SessionContextDependencies {
 const defaultWorkspaceLayouts = new WorkspaceLayoutStore();
 const defaultWorkspaceRails = workspaceRailPreferences;
 
-/** The two tools Info opens in a sheet of their own: this ferret's tasks and its full analytics. */
-type SessionUtility = 'tasks' | 'analytics';
+/** The one tool Info opens in a sheet of its own: this ferret's full analytics. */
+type SessionUtility = 'analytics';
 
 const UTILITY_LABEL: Readonly<Record<SessionUtility, string>> = {
-  tasks: 'Tasks',
   analytics: 'Analytics for this session',
 };
 
@@ -459,6 +467,7 @@ export function SessionChatPage({
   infoLearning,
   switches,
   initialInfo,
+  board,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const measuredFormFactor = useWorkspaceFormFactor();
@@ -466,6 +475,14 @@ export function SessionChatPage({
   const formFactor = formFactorOverride ?? (presentation === 'sheet' ? 'phone' : measuredFormFactor);
   const workspace = useSessionWorkspace(workspaceLayouts, scope);
   const info = useInfoPlacement(initialInfo);
+  const cardChat = useChatCard({
+    store: board,
+    connection,
+    machineName: contextDependencies?.machineName ?? connection.daemonName ?? connection.daemonId,
+    session,
+    sessions: daemonSessions,
+    reading: session.config.focusTask !== undefined || (info.open && info.tab === 'tasks'),
+  });
   const [actionForm, setActionForm] = useState<string | null>(null);
   // Who drives which terminal and page, and the session's pages: both through the daemon client, so a
   // relay-only machine answers them as surely as one on the LAN.
@@ -560,8 +577,17 @@ export function SessionChatPage({
     showAgentTab('console');
     return true;
   }, [showAgentTab]);
-  const openTasks = useCallback(() => setUtility('tasks'), []);
   const { show: showInfo } = info;
+  const hasBoard = cardChat !== null;
+  const cardHref = cardChat?.chip.kind === 'card' ? daemonBoardCardPath(connection.daemonId, cardChat.chip.id) : '';
+  const callsigns = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const other of daemonSessions ?? []) {
+      if (other.config.teammate !== undefined) names.set(other.config.id, other.config.teammate);
+    }
+    return names;
+  }, [daemonSessions]);
+  const openTasks = useCallback(() => showInfo(hasBoard ? 'tasks' : 'overview'), [showInfo, hasBoard]);
   // Where a proved reference opens: the workspace's tabs, and the context rail for a skill. ONE click
   // behaviour still — Markdown calls the surface — with these as its destinations.
   const referenceDestinations = useMemo(
@@ -1262,8 +1288,24 @@ export function SessionChatPage({
               driving={driving}
               name={agentName}
               onOpenAnalytics={() => setUtility('analytics')}
+              {...(cardChat === null
+                ? {}
+                : {
+                    card: {
+                      chip: cardChat.chip,
+                      onOpen: () => onNavigate?.(cardHref),
+                      tasks: (
+                        <BoardSideTab
+                          callsigns={callsigns}
+                          chat={cardChat}
+                          now={Date.now()}
+                          scope={scope}
+                          {...(onNavigate === undefined ? {} : { onNavigate })}
+                        />
+                      ),
+                    },
+                  })}
               onOpenPage={page => openSurface('browser', page.name ?? page.id, browserPageLabel(page))}
-              onOpenTasks={openTasks}
               onOpenTerminal={(id, label) => openSurface('terminal', id, label)}
               placement={info}
               ports={{
@@ -1322,6 +1364,17 @@ export function SessionChatPage({
         }
         turn={turn}
         compact={compact}
+        {...(cardChat === null
+          ? {}
+          : {
+              cardChip: (
+                <ChatCardChip
+                  chip={cardChat.chip}
+                  href={cardHref}
+                  {...(onNavigate === undefined ? {} : { onNavigate })}
+                />
+              ),
+            })}
         infoOpen={info.open}
         menu={actionsMenu}
         trailing={<ThemeToggle iconOnly touch={compact} />}
@@ -1586,7 +1639,6 @@ export function SessionChatPage({
                 panelClassName="bg-surface"
               >
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
-                  {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
                   {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
                 </div>
               </BottomSheet>

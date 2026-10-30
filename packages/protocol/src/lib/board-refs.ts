@@ -70,3 +70,18 @@ export const parseTaskRef = (input: string): BoardResult<TaskRef, TaskRefParseEr
   const id = bare.toUpperCase();
   return BOARD_TASK_ID_PATTERN.test(id) ? boardOk({ id }) : boardErr({ code: 'malformed', input });
 };
+
+/** The longest reason a card-less turn is recorded with: the same bound as a card's own reasons. */
+export const MAX_BOARD_SKIP_REASON_LENGTH = 2 * 1024;
+
+/**
+ * A session's decision that its work needs no card (`fy task skip "<why>"`, `board-design.md` §3.4): chit-chat,
+ * or the owner said not to track it. Kept as `config.boardSkip`, because the session owns the decision. While
+ * it stands the turn-end check stays quiet; taking a card (a new `config.focusTask`) clears it, so a later ask
+ * is checked afresh. Here rather than in `board.ts` because `session.ts` reads it (see the file header).
+ */
+export const BoardSkipSchema = z.strictObject({
+  reason: z.string().trim().min(1).max(MAX_BOARD_SKIP_REASON_LENGTH),
+  at: z.iso.datetime({ offset: true }),
+});
+export type BoardSkip = z.infer<typeof BoardSkipSchema>;

@@ -10,6 +10,7 @@ import {
   DAEMON_CAPABILITIES,
   type IoPressureView,
   type LearningConfig,
+  type LegacyWireUse,
   PIN_SCHEMA_VERSION,
   type Pin,
   type PinSnapshot,
@@ -27,7 +28,6 @@ import {
   type SpeedupTestResult,
   type StartSessionRequest,
   type SttEnhancementResult,
-  type LegacyWireUse,
   type SurfaceOpener,
   type TaskActionRequest,
   type TaskCreateRequestInput,
@@ -47,6 +47,13 @@ import {
 } from '@ferretry/protocol';
 import type { DaemonIdentity } from '@ferretry/relay';
 import { WebCryptoRelayCrypto } from '@ferretry/relay/adapters';
+import {
+  type AgendaLedger,
+  type AgendaLedgerRepository,
+  type AgendaMutation,
+  type AgendaRepliesSubsystem,
+  AgendaService,
+} from '../../../../src/lib/agenda/index.ts';
 import type { AnalyticsPricingRate } from '../../../../src/lib/analytics/pricing.ts';
 import {
   type FinishedAnalyticsSession,
@@ -55,13 +62,7 @@ import {
 import { ANALYTICS_INDEX_SCHEMA_VERSION } from '../../../../src/lib/analytics/store.ts';
 import type { CapabilityDemand, CapabilityGuard } from '../../../../src/lib/api/capability.ts';
 import type { SocketDownstream, SocketHandler } from '../../../../src/lib/api/socket.ts';
-import {
-  type AgendaLedger,
-  type AgendaLedgerRepository,
-  type AgendaMutation,
-  type AgendaRepliesSubsystem,
-  AgendaService,
-} from '../../../../src/lib/agenda/index.ts';
+import { BoardError } from '../../../../src/lib/board/index.ts';
 import type {
   BrowserControlError,
   BrowserLoginLifecycle,
@@ -103,6 +104,7 @@ import { CALLSIGN_WINDOW_MS, type NameClaim } from '../../../../src/lib/names/in
 import { type PinRepository, PinService, type PinSessionDirectory } from '../../../../src/lib/pins/index.ts';
 import type { ClockPort } from '../../../../src/lib/ports.ts';
 import type { AnalyticsSubsystem } from '../../../../src/lib/runtime/mounts/analytics.ts';
+import type { BoardSubsystem } from '../../../../src/lib/runtime/mounts/board.ts';
 import type { DaemonHealthSubsystem, ScratchReclamation } from '../../../../src/lib/runtime/mounts/health.ts';
 import type { LearningSubsystem } from '../../../../src/lib/runtime/mounts/learning.ts';
 import type { NameSubsystem } from '../../../../src/lib/runtime/mounts/names.ts';
@@ -127,8 +129,6 @@ import { type SessionDirectorySubsystem, SessionReadError } from '../../../../sr
 import type { SpeedupsSubsystem } from '../../../../src/lib/runtime/mounts/speedups.ts';
 import type { SttEnhancementSubsystem } from '../../../../src/lib/runtime/mounts/stt.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
-import type { BoardSubsystem } from '../../../../src/lib/runtime/mounts/board.ts';
-import { BoardError } from '../../../../src/lib/board/index.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
 import {
@@ -2258,6 +2258,7 @@ export function boardSubsystem(overrides: Partial<BoardSubsystem> = {}): BoardSu
     }),
     create: missing,
     act: missing,
+    skip: missing,
     ...overrides,
   };
 }

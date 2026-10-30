@@ -150,7 +150,13 @@ describe('choice asks', () => {
 describe('task asks', () => {
   it('should map the to-do kind and list it among the accepted names', () => {
     // Act + Assert
+    should(parseAsk({ kind: 'todo' })).deepEqual({ kind: 'task', ask: { kind: 'task' } });
+    should(ASK_KIND_NAMES).containEql('todo');
+  });
+
+  it('should still read --kind task as the older spelling, but never document it: "task" means a board card', () => {
+    // Act + Assert — the wire value stays `task`, so a released daemon's strict add schema keeps accepting it.
     should(parseAsk({ kind: 'task' })).deepEqual({ kind: 'task', ask: { kind: 'task' } });
-    should(ASK_KIND_NAMES).containEql('task');
+    should(ASK_KIND_NAMES).not.containEql('task');
   });
 });

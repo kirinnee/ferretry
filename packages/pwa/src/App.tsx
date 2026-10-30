@@ -1564,6 +1564,7 @@ function SessionRoute({
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
+          board={store.board}
           actionContributions={sessionActions}
           infoLearning={learningActions.passiveFor(scope.sessionId)}
           switches={{

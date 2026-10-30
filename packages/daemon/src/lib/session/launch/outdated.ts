@@ -34,7 +34,7 @@ export function outdatedSections(
   const told = new Map(recorded.sections.map(section => [canonical(section.id), section]));
   const current = new Map(now.sections.map(section => [canonical(section.id), section]));
   const ids = [...new Set([...current.keys(), ...told.keys()])];
-  const order = ['tools', 'settings', 'notify', 'hypermedia', 'pack', 'agenda', 'learning'];
+  const order = ['tools', 'settings', 'notify', 'board', 'hypermedia', 'pack', 'agenda', 'learning'];
   return ids
     .filter(id => {
       const before = told.get(id);

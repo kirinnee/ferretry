@@ -2,6 +2,7 @@ import { describe, it } from 'bun:test';
 import should from 'should';
 import {
   ageLabel,
+  cardCell,
   compactQuota,
   displayModel,
   quotaLabel,
@@ -10,7 +11,14 @@ import {
   statusLabel,
   TERMINAL_STATUSES,
 } from '../../../src/lib/session/display.ts';
+import type { ICellColour } from '../../../src/lib/session/ports.ts';
 import { sessionView } from './session-fixtures.ts';
+
+/** Wraps what the renderer asked to emphasise, so a test sees which cell carried the colour. */
+const markerColour: ICellColour = { amber: cell => `<amber>${cell}</amber>` };
+
+/** The lane names a table render is handed: card id → lane name, as the board read returns. */
+const laneNames = (entries: readonly [string, string][]): ReadonlyMap<string, string> => new Map(entries);
 
 const NOW = Date.parse('2026-01-01T00:10:00.000Z');
 
@@ -254,7 +262,7 @@ describe('renderSessionTable', () => {
     ];
 
     // Act
-    const [header, first, second] = renderSessionTable(views);
+    const [header, first, second] = renderSessionTable(views, laneNames([]), markerColour);
 
     // Assert
     should(header).startWith('TEAMMATE  ID             STATUS');
@@ -266,11 +274,86 @@ describe('renderSessionTable', () => {
 
   it('should render a header-only table when there is nothing to list', () => {
     // Arrange / Act
-    const lines = renderSessionTable([]);
+    const lines = renderSessionTable([], laneNames([]), markerColour);
 
     // Assert
     should(lines).have.length(1);
     should(lines[0]).startWith('TEAMMATE  ID  STATUS');
+  });
+
+  it('should carry the focus card and its lane in a CARD column between QUOTA and TASK', () => {
+    // Arrange
+    const views = [
+      sessionView({ id: 'ses-1', focusTask: { id: 'F18' }, name: 'Send Retry Duplicates' }),
+      // A card the board read did not name shows its id alone, never a blank cell.
+      sessionView({ id: 'ses-2', focusTask: { id: 'F19' }, name: 'Theme Fonts Load' }),
+    ];
+
+    // Act
+    const [header, first, second] = renderSessionTable(views, laneNames([['F18', 'Plan/Design']]), markerColour);
+
+    // Assert
+    should(header).match(/QUOTA +CARD +TASK/);
+    should(first?.slice(first.indexOf('&'))).startWith('&F18 Plan/Design');
+    should(second).match(/&F19 {2}/);
+  });
+
+  it('should paint the dash of a RUNNING session with no focus card amber, padding included', () => {
+    // Arrange
+    const views = [sessionView({ id: 'ses-1', name: 'Untracked work' })];
+
+    // Act
+    const [header, first] = renderSessionTable(views, laneNames([]), markerColour);
+
+    // Assert — the paint wraps the padded cell, so the columns after it stay aligned.
+    should(header).match(/QUOTA +CARD +TASK/);
+    should(first).match(/— {6}<amber>— {3}<\/amber> {2}Untracked work/);
+  });
+
+  it('should leave the dash of a finished session with no focus card plain', () => {
+    // Arrange
+    const views = [sessionView({ id: 'ses-1', name: 'Old work' }, { status: 'completed' })];
+
+    // Act
+    const [, first] = renderSessionTable(views, laneNames([]), markerColour);
+
+    // Assert
+    should(first).match(/— {6}— {5}Old work/);
+    should(first?.includes('<amber>')).be.false();
+  });
+});
+
+describe('cardCell', () => {
+  it('should name the focus card with its lane', () => {
+    // Arrange / Act
+    const cell = cardCell(sessionView({ focusTask: { id: 'F18' } }), 'Plan/Design');
+
+    // Assert
+    should(cell).deepEqual({ text: '&F18 Plan/Design', amber: false });
+  });
+
+  it('should show the id alone when no lane name was resolved', () => {
+    // Arrange / Act
+    const cell = cardCell(sessionView({ focusTask: { id: 'F18' } }), undefined);
+
+    // Assert
+    should(cell).deepEqual({ text: '&F18', amber: false });
+  });
+
+  it('should mark a running session with no focus card amber', () => {
+    // Arrange / Act
+    const cell = cardCell(sessionView(), undefined);
+
+    // Assert
+    should(cell).deepEqual({ text: '—', amber: true });
+  });
+
+  it('should leave a finished session with no focus card plain', () => {
+    // Arrange / Act
+    const cell = cardCell(sessionView({}, { status: 'stopped' }), undefined);
+
+    // Assert
+    should(cell).deepEqual({ text: '—', amber: false });
   });
 });
 

@@ -124,7 +124,6 @@ import {
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
-import { FilePendingContext, FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
   HttpAnalyticsPricingFeed,
@@ -141,6 +140,16 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
+import { FilePendingContext, FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
+import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
+import {
+  JournalBoardChanges,
+  JournalBoardChecks,
+  StorageSessionFocus,
+  StorageSessionParents,
+} from '../src/adapters/board/session-board-adapters.ts';
+import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
+import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
 import { GhCliRunner, GitWorkingCopies } from '../src/adapters/board-github/index.ts';
 import {
   AgendaImportAgenda,
@@ -148,16 +157,6 @@ import {
   FileLegacyTaskSource,
   StorageImportSessions,
 } from '../src/adapters/board-import/index.ts';
-import { BoardImporter, LaneSetImportProjects } from '../src/lib/board-import/index.ts';
-import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
-import {
-  JournalBoardChanges,
-  StorageSessionFocus,
-  StorageSessionParents,
-} from '../src/adapters/board/session-board-adapters.ts';
-import { type LivenessLedgerReader, StorageSessionRoster } from '../src/adapters/board/session-roster.ts';
-import { StorageSessionCardFacts } from '../src/adapters/board/storage-session-card-facts.ts';
-import { GitHubWatcher } from '../src/lib/board-github/index.ts';
 import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/config-files/files.ts';
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
@@ -545,6 +544,7 @@ import {
   BOARD_SWEEP_INTERVAL_MS,
   BoardService,
   BoardSweep,
+  BoardTurnCheck,
   LivenessActivityDeriver,
   type PendingContext,
   PendingContextDelivery,
@@ -552,6 +552,8 @@ import {
   SessionCards,
   type SessionLivenessSource,
 } from '../src/lib/board/index.ts';
+import { GitHubWatcher } from '../src/lib/board-github/index.ts';
+import { BoardImporter, LaneSetImportProjects } from '../src/lib/board-import/index.ts';
 import {
   ConfigChangeLedger,
   ConfigChangeStreamService,
@@ -796,6 +798,7 @@ import {
   harnessOverrideFailures,
   harnessPreflightSummary,
   harnessQuirks,
+  InferredLaneProposer,
   InitialAttachmentError,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
@@ -813,7 +816,6 @@ import {
   jsonObject,
   KnownAndFerretFolders,
   LaneProposalAcceptance,
-  InferredLaneProposer,
   LaneSetService,
   type LearningSubsystem,
   LegacyWireUseCounter,
@@ -9554,6 +9556,34 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       armAgendaNudge(storage, attentionNudge, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
         setTimeout(run, delayMs).unref();
       });
+      // The board's turn-end check (board-design.md §3.4): a turn that edited, committed, pushed, started a
+      // sub-ferret or opened a PR while the session had no open card gets one nudge an hour. Armed on the same
+      // settled turn end as the agenda check, through the same one-check-per-session listener.
+      const boardFocus = new StorageSessionFocus(storage);
+      const boardChecks = new JournalBoardChecks(storage);
+      const boardTurnCheck = new BoardTurnCheck(
+        {
+          readable: async sessionId => (await nudgeSessions.subject(sessionId)) !== undefined,
+          tail: async (sessionId, limit) => {
+            const subject = await nudgeSessions.subject(sessionId);
+            return subject === undefined
+              ? []
+              : await sendTranscripts.tail({ sessionId, harness: subject.harness }, limit);
+          },
+          focus: boardFocus,
+          card: async ref => await boardWorld.board.task(ref.id),
+          send: async (sessionId, sendId, message) => {
+            const id = tryParseSessionId(sessionId);
+            if (id !== undefined) await sends.send({ id, sendId, message });
+          },
+          record: async (sessionId, seen) => await boardChecks.record(sessionId, seen),
+          now: () => Date.parse(clock.now()),
+        },
+        CLIENT_NAME,
+      );
+      armAgendaNudge(storage, boardTurnCheck, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
+        setTimeout(run, delayMs).unref();
+      });
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
       // that reads them. Two would each hold their own account of whether a pass is in flight, and the
       // read would report `refreshing: false` while the loop was mid-pass.
@@ -10787,6 +10817,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           taskByLegacyRef: async legacyRef => await boardWorld.board.taskByLegacyRef(legacyRef),
           create: async (request, caller) => await boardWorld.board.create(request, caller),
           act: async (id, request, caller) => await boardWorld.board.act(id, request, caller),
+          skip: async (request, caller) => await boardWorld.board.skip(request, caller),
           importLegacy: async options => await boardImporter.run({ dryRun: options.dryRun, force: true }),
         },
         boardGitHub,

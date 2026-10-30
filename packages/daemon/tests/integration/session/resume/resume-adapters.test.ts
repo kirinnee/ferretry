@@ -499,6 +499,7 @@ describe('tmux resume launcher', () => {
       'tools',
       'settings',
       'notify',
+      'board',
       'hypermedia',
       'learning',
     ]);
