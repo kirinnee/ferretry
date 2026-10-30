@@ -39,11 +39,12 @@ import { useInputModality } from '../hooks/use-input-modality.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
+import { chipFromSender, ferretryChip, stripFraming } from '../lib/message-framing.ts';
 import { peerFrom } from '../lib/peer-message.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import { effectiveQueueState } from '../lib/send-queue.ts';
-import { Textarea } from '../shell/primitives.tsx';
 import { ContextMenu, type ContextMenuItem, type MenuAnchor } from '../shell/context-menu.tsx';
+import { Textarea } from '../shell/primitives.tsx';
 import { useQueueActions } from './queue-actions-context.tsx';
 import { MessageFooter } from './send-receipt.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
@@ -118,7 +119,16 @@ export function LedgerMessage({
   onCollapse,
   write = browserClipboardWriter(),
 }: LedgerMessageProps) {
-  const { from, body } = peerFrom(record.message);
+  const { from, body: peerBody } = peerFrom(record.message);
+  const framed = stripFraming(peerBody);
+  const body = framed.body;
+  const chip =
+    chipFromSender(record.queue?.by, displayCallsign) ??
+    (from
+      ? displayCallsign(from.name)
+      : framed.ferretry || framed.feature !== undefined
+        ? ferretryChip(framed)
+        : undefined);
   const boundary = ledgerPlacementCopy(placement);
   return (
     <div className="kt-bubble-row" data-ledger-placement={placement}>
@@ -126,9 +136,11 @@ export function LedgerMessage({
       <div className="kt-bubble">
         {/* No "You" header: the bubble's alignment already says who sent it. A teammate's message
             keeps its sender's name, because alignment cannot. */}
-        {from ? (
-          <div className="px-panel pt-1 text-[10.5px] font-medium text-muted">{displayCallsign(from.name)}</div>
-        ) : null}
+        {chip === undefined ? null : (
+          <div className="px-panel pt-1 text-[10.5px] font-medium text-muted" data-sender-chip>
+            {chip}
+          </div>
+        )}
         {boundary === undefined ? null : (
           <span className="sr-only" data-ledger-boundary>
             {boundary}
@@ -285,7 +297,7 @@ function useLedgerActions({
   write = browserClipboardWriter(),
   enabled = true,
 }: LedgerActionsProps): LedgerActions {
-  const { body } = peerFrom(record.message);
+  const body = stripFraming(peerFrom(record.message).body).body;
   const queueApi = useQueueActions();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState('');

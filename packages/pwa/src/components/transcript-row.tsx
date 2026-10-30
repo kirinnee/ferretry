@@ -2,6 +2,7 @@ import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@fe
 import { type ReactNode, useState } from 'react';
 import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
+import { stripFraming } from '../lib/message-framing.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
 import { AgendaMessageOr, useAgendaChatReply } from './agenda-message.tsx';
@@ -355,7 +356,7 @@ function OwnWords({ text, onItsWay = false }: { readonly text: string; readonly 
   // Still on its way: worded as the ferret will receive it, so a reply about an open item (`!A5 …`) shows as its
   // agenda card at once. One component either way, so the bubble stays ONE element from sent to answered.
   const worded = useAgendaChatReply(text);
-  return <AgendaMessageOr fallback={<p>{text}</p>} text={onItsWay ? worded : text} />;
+  return <AgendaMessageOr fallback={<p>{stripFraming(text).body}</p>} text={onItsWay ? worded : text} />;
 }
 
 function TranscriptTextRow({
@@ -385,7 +386,9 @@ function TranscriptTextRow({
       </header>
       <EntryBody
         entry={entry}
-        prose={entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{entry.text}</p>}
+        prose={
+          entry.kind === 'assistant' ? <AssistantProse text={entry.text} /> : <p>{stripFraming(entry.text).body}</p>
+        }
         speaker={entry.kind === 'assistant' ? 'assistant' : undefined}
       />
       {run === undefined || run.end ? footer : <div className="fy-run-time">{footer}</div>}

@@ -9,6 +9,17 @@ import { type IFyApiClient, type QueuedMessage, QueueEditRequestSchema, SessionQ
 import { z } from 'zod';
 import type { LedgerSendRecord } from './send-ledger.ts';
 
+interface QueueSender {
+  readonly kind: 'owner' | 'ferret' | 'ferretry';
+  readonly name?: string;
+  readonly feature?: string;
+}
+
+const senderOf = (message: QueuedMessage): QueueSender | undefined => {
+  const by = (message as { readonly by?: QueueSender }).by;
+  return by !== undefined && (by.kind === 'owner' || by.kind === 'ferret' || by.kind === 'ferretry') ? by : undefined;
+};
+
 /** What the queue says about one message — the part of a `QueuedMessage` a bubble draws. */
 export interface QueueView {
   readonly state: QueuedMessage['state'];
@@ -16,6 +27,8 @@ export interface QueueView {
   readonly revision: number;
   readonly waitReason?: NonNullable<QueuedMessage['waitReason']>;
   readonly failure?: string;
+  /** Who sent it, when the daemon says (`QueuedMessage.by`); absent on a daemon from before it. */
+  readonly by?: QueueSender;
 }
 
 /** How long one queue read may take; it rides the same poll as the ledger. */
@@ -57,6 +70,7 @@ const viewOf = (message: QueuedMessage): QueueView => ({
   revision: message.revision,
   ...(message.waitReason === undefined ? {} : { waitReason: message.waitReason }),
   ...(message.failure === undefined ? {} : { failure: message.failure }),
+  ...(senderOf(message) === undefined ? {} : { by: senderOf(message) }),
 });
 
 /** The ledger fate a queue state stands for, so placement and the actions treat a queue-only row like a ledger one. */

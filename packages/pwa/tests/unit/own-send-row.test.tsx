@@ -285,7 +285,7 @@ describe('a Ferretry notice is never the owner’s bubble', () => {
   it('draws a landed daemon send, or one whose text reads as a notice, as a Ferretry notice', async () => {
     for (const send of [record({ senderKind: 'daemon' }), record({ message: NOTICE })]) {
       const view = await mount(<TranscriptRow entry={landed(send, { text: NOTICE })} />);
-      expect(labelOf(view)).toEqual(['Ferretry']);
+      expect(labelOf(view)).toEqual(['Ferretry · Board']);
       expect(view.container.querySelector('[data-transcript-kind="system"]')).not.toBeNull();
       expect(view.container.textContent).toContain('The staging deploy is queued behind mine.');
       expect(view.container.textContent).not.toContain('[ferretry]');
