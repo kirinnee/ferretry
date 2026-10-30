@@ -219,7 +219,8 @@ const reopen = (
 
 /**
  * A daemon move on a real signal (§3.1): into the lane the trigger names for the card's workflow. It
- * never goes backwards and never moves a dropped card, and it is NOT stopped by dependencies, because
+ * never goes backwards (unless `backward` says the facts pulled the card back, see {@link laneFromFacts})
+ * and never moves a dropped card, and it is NOT stopped by dependencies, because
  * reality wins over the rule; the history says what it was blocked by. `null` when nothing moves.
  */
 export const triggerMove = (
@@ -227,15 +228,16 @@ export const triggerMove = (
   trigger: LaneTrigger,
   reason: string | undefined,
   context: CardContext,
+  backward = false,
 ): BoardTask | null => {
   requireStanding('trigger', context.standing, card);
   if (card.dropped !== null) return null;
   const lane = laneForTrigger(context.laneSet, card.workflow, trigger);
   if (!lane.ok || lane.value === null || lane.value.id === card.laneId) return null;
   if (lane.value.category === 'closed' && lane.value.ownerGate === true) return null;
-  const backward = isBackwardMove(context.laneSet, card.laneId, lane.value.id);
-  if (!backward.ok || backward.value) return null;
-  const blockers = blockedBy(card, context.index, context.laneSets);
+  const movesBack = isBackwardMove(context.laneSet, card.laneId, lane.value.id);
+  if (!movesBack.ok || movesBack.value !== backward) return null;
+  const blockers = backward ? [] : blockedBy(card, context.index, context.laneSets);
   const note = blockers.length === 0 ? null : `${trigger} while blocked by ${blockers.map(formatTaskRef).join(', ')}`;
   const said = [reason, note].filter(part => part !== undefined && part !== null).join('; ');
   return {
@@ -245,7 +247,7 @@ export const triggerMove = (
         type: 'moved',
         from: card.laneId,
         to: lane.value.id,
-        backward: false,
+        backward,
         reason: said === '' ? null : said,
         auto: true,
         trigger,
@@ -268,7 +270,13 @@ export const reconcileFacts = (card: BoardTask, context: CardContext): BoardTask
     runningVersion: context.runningVersion ?? null,
   });
   if (move === null) return null;
-  return triggerMove(card, move.trigger, move.reason, { ...context, actor: { kind: 'daemon' }, standing: 'daemon' });
+  return triggerMove(
+    card,
+    move.trigger,
+    move.reason,
+    { ...context, actor: { kind: 'daemon' }, standing: 'daemon' },
+    move.backward,
+  );
 };
 
 // ---------------------------------------------------------------------------------------------------

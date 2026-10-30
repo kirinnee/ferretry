@@ -8,6 +8,10 @@
  * ferret's queue), `all` (every queue on every machine). It renders the REAL `TranscriptRow`,
  * `QueuePageView` and `MessageMarksLegend`; the outbox rows are ledger rows carrying an `outbox` view,
  * exactly as `joinOutbox` makes them. A final shot opens an outbox message's ⋯ menu and its editor.
+ *
+ * `files` is a file picked while offline: the REAL `Composer` beside a device outbox, with the browser context
+ * set offline and a photo chosen through its own file input (the chip reads "uploads when the connection is
+ * back"), above an outbox bubble that carries a file still to upload.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdirSync } from 'node:fs';
@@ -36,6 +40,10 @@ import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { QueueActionsContext } from '../../src/components/queue-actions-context.tsx';
 import { transcriptEntriesFromLog } from '../../src/components/session-workspace-model.ts';
 import { outboxRowOf, queueRowOf } from '../../src/lib/queue-view.ts';
+import { Composer } from '../../src/components/composer.tsx';
+import { createAppStore, StoreProvider } from '../../src/lib/store.tsx';
+import { daemonConnection } from '../../src/lib/daemon-connection.ts';
+import { DaemonDraftStore } from '../../src/lib/drafts.ts';
 
 const view = new URLSearchParams(location.search).get('view') ?? 'chat';
 const at = '2026-10-30T01:49:00.000Z';
@@ -88,10 +96,55 @@ const waiting = (g: any) => ({ ...g, rows: g.rows.filter((r: any) => r.state ===
 const handlers = { edit: async () => undefined, cancel: async () => undefined };
 const inert = async () => true;
 
+class Memory {
+  values = new Map<string, string>();
+  getItem(key: string) { return this.values.get(key) ?? null; }
+  setItem(key: string, value: string) { this.values.set(key, value); }
+  async load(key: string) { return this.getItem(key); }
+  async save(key: string, value: string) { this.setItem(key, value); }
+}
+const machine = daemonConnection({ daemonId: 'laptop', baseUrl: 'https://laptop.example.test', deviceId: 'device' });
+const offlineSend = async () => { throw new TypeError('Failed to fetch'); };
+const store = view === 'files'
+  ? await createAppStore({
+      repository: new Memory() as never,
+      connectClient: async () => ({ send: offlineSend }) as never,
+      fetcher: offlineSend as never,
+      outboxBackend: null,
+    })
+  : null;
+store?.connections.add(machine);
+const fileEntries = transcriptEntriesFromLog('[01:46:00] user/message: Here is the site photo', Date.UTC(2026, 9, 30, 2, 0, 0)).map(
+  entry => ({
+    id: 'send:f1',
+    kind: 'ledger',
+    text: entry.text,
+    placement: 'chronological',
+    ledger: { ...base, sendId: 'f1', message: entry.text, ...outbox(1, 1, { files: ['site-photo.png'] }) },
+  }) as never,
+);
+
 const root = document.getElementById('root');
 if (root === null) throw new Error('missing #root');
 createRoot(root).render(
-  view === 'chat' ? (
+  view === 'files' && store !== null ? (
+    <StoreProvider store={store}>
+      <QueueActionsContext.Provider value={{ edit: async () => true, cancel: async () => true }}>
+        <main data-marks="" style={{ margin: '0 auto', maxWidth: 560, padding: '12px 16px' }}>
+          <div className="fy-transcript-shell" style={{ height: 'auto', overflow: 'visible' }}>
+            <div className="fy-transcript-content">
+              {fileEntries.map((e: any) => (
+                <TranscriptRow answered={false} entry={e} key={e.id} onCancel={inert} onRetry={inert} onSubmit={inert} />
+              ))}
+            </div>
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <Composer api={{ send: offlineSend } as never} daemon={machine} draftStore={new DaemonDraftStore(new Memory())} sessionId="s1" />
+          </div>
+        </main>
+      </QueueActionsContext.Provider>
+    </StoreProvider>
+  ) : view === 'chat' ? (
     <QueueActionsContext.Provider value={{ edit: async () => true, cancel: async () => true }}>
       <main style={{ margin: '0 auto', maxWidth: 560, padding: '12px 16px' }}>
         <div className="fy-transcript-shell" style={{ height: 'auto', overflow: 'visible' }}>
@@ -188,6 +241,26 @@ try {
           await page.screenshot({ path: target, fullPage: true });
           process.stdout.write(`📸 ${target}\n`);
           if (view === 'chat') {
+            // The composer case: offline, then a photo picked through the composer's own input.
+            await page.goto(`${server.url}?theme=studio-${scheme}&view=files`);
+            await page.locator('[data-marks]').waitFor({ state: 'visible' });
+            await context.setOffline(true);
+            await page.locator('input[type=file]:not([accept])').setInputFiles({
+              name: 'site-photo.png',
+              mimeType: 'image/png',
+              buffer: Buffer.from(
+                'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==',
+                'base64',
+              ),
+            });
+            await page.getByText('uploads when the connection is back').first().waitFor({ state: 'visible' });
+            await page.locator('textarea, [contenteditable="true"]').first().fill('Here is the second photo');
+            const files = join(outDir, `outbox-files-${device.name}-${scheme}.png`);
+            await page.screenshot({ path: files, fullPage: true });
+            process.stdout.write(`📸 ${files}\n`);
+            await context.setOffline(false);
+            await page.goto(`${server.url}?theme=studio-${scheme}&view=chat`);
+            await page.locator('[data-marks]').waitFor({ state: 'visible' });
             const more = page
               .getByText('Also saved here, second in line')
               .first()

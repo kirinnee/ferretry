@@ -584,6 +584,76 @@ describe('GitHubWatcher: releases', () => {
     should((await subject.watcher.tick()).polled).be.empty();
   });
 
+  it('should pull a card in To test back to Review/CI on the next poll when a newer PR is open on it', async () => {
+    const shipped = link(1008, {
+      state: 'merged',
+      mergedAt: '2026-10-30T09:00:00Z',
+      mergeSha: SHA,
+      releasedIn: RELEASE,
+      polledAt: NOW,
+    });
+    const subject = rig({
+      cards: [withLinks([shipped, link(1013)], { laneId: 'tested' })],
+      gh: new FakeGh(
+        repoAnswer({
+          prs: {
+            1008: prNode(1008, { state: 'MERGED' }),
+            1013: prNode(1013, { rollup: 'FAILURE', createdAt: '2026-10-30T10:00:00Z' }),
+          },
+          releases: [],
+        }),
+      ),
+      version: '4.110.0',
+    });
+    should((await subject.watcher.tick()).written).deepEqual(['F1']);
+    should(subject.stored().laneId).equal('review');
+    const moved = subject.stored().history.filter(entry => entry.type === 'moved');
+    should(moved.at(-1)).match({
+      from: 'tested',
+      to: 'review',
+      backward: true,
+      auto: true,
+      trigger: 'pr.ready',
+      reason: 'moved back to Review/CI: PR #1013 opened after #1008 shipped',
+    });
+    // Settled: a later tick does not move it again, and does not fight it.
+    subject.clock.ms += POLL_OPEN_MS * 2;
+    await subject.watcher.tick();
+    should(subject.stored().laneId).equal('review');
+    should(subject.stored().history.filter(entry => entry.type === 'moved')).have.length(moved.length);
+  });
+
+  it('should leave a card in To test alone for an older open PR, and for one with no open time by its number', async () => {
+    const shipped = link(1008, {
+      state: 'merged',
+      mergedAt: '2026-10-30T09:00:00Z',
+      mergeSha: SHA,
+      releasedIn: RELEASE,
+      polledAt: NOW,
+    });
+    const stale = rig({
+      cards: [withLinks([shipped, link(1005)], { laneId: 'tested' })],
+      gh: new FakeGh(
+        repoAnswer({ prs: { 1008: prNode(1008, { state: 'MERGED' }), 1005: prNode(1005) }, releases: [] }),
+      ),
+      version: '4.110.0',
+    });
+    await stale.watcher.tick();
+    should(stale.stored().laneId).equal('tested');
+    const unsaid = rig({
+      cards: [withLinks([shipped, link(1013)], { laneId: 'tested' })],
+      gh: new FakeGh(
+        repoAnswer({
+          prs: { 1008: prNode(1008, { state: 'MERGED' }), 1013: prNode(1013, { createdAt: null }) },
+          releases: [],
+        }),
+      ),
+      version: '4.110.0',
+    });
+    await unsaid.watcher.tick();
+    should(unsaid.stored().laneId).equal('review');
+  });
+
   it('should move a released card to To test without asking GitHub anything', async () => {
     const subject = rig({ cards: [withLinks([merged({ releasedIn: RELEASE })], { laneId: 'released' })] });
     should((await subject.watcher.tick()).written).deepEqual(['F1']);

@@ -155,7 +155,8 @@ The same tools server serves a lead and a sub-ferret; the **daemon** tells them 
 (`config.parent`). A sub-ferret may read everything and report with `fy send`, `fy task note` and `fy task link
 --pr` / `--branch`; agenda writes, `fy notify` and card moves are refused with `forbidden` and the line to tell its lead
 ([pack-mode.md](pack-mode.md#sub-ferret-limits)). Nothing here is a tool the model is withheld: the refusal is on
-the route, so it holds for an MCP call and a shell `fy` alike.
+the route, so it holds for an MCP call and a shell `fy` alike. A lead may `edit`, `surface`, `done` and `dismiss`
+agenda items in a sub-ferret's session with `-s <session>`, proven by lineage.
 
 ## Declared gaps
 

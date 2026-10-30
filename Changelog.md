@@ -1,3 +1,40 @@
+## [4.141.1](https://github.com/kirinnee/ferretry/compare/v4.141.0...v4.141.1) (2026-10-30)
+
+### Fixes
+
+* **agenda:** count parked items in the snapshot again, so the board reads back on the wire ([#1051](https://github.com/kirinnee/ferretry/issues/1051)) ([fbe4e00](https://github.com/kirinnee/ferretry/commit/fbe4e0090f2f1d68c7c029e94ed5600e71374465)), closes [#1043](https://github.com/kirinnee/ferretry/issues/1043)
+
+## [4.141.0](https://github.com/kirinnee/ferretry/compare/v4.140.0...v4.141.0) (2026-10-30)
+
+### Features
+
+* **agenda:** let a lead edit, surface, close and dismiss its sub-ferrets' items ([#1050](https://github.com/kirinnee/ferretry/issues/1050)) ([fd07e80](https://github.com/kirinnee/ferretry/commit/fd07e80e7ae612d990126e1a55d9920929a2afab))
+
+### Fixes
+
+* **board:** a newer open PR pulls a shipped card back to Review/CI ([#1049](https://github.com/kirinnee/ferretry/issues/1049)) ([6df084f](https://github.com/kirinnee/ferretry/commit/6df084f4615b17ce886434357cae1dbc83e1d5c6))
+
+### Performance
+
+* **pwa:** trim the settings walk on a 2-vCPU runner ([#1034](https://github.com/kirinnee/ferretry/issues/1034)) ([9cde5df](https://github.com/kirinnee/ferretry/commit/9cde5df5df133243ba19334973aa3c2e6d0dacdb))
+
+## [4.140.0](https://github.com/kirinnee/ferretry/compare/v4.139.0...v4.140.0) (2026-10-30)
+
+### Features
+
+* **pwa:** let a file picked offline wait in the outbox with its message ([#1048](https://github.com/kirinnee/ferretry/issues/1048)) ([412d009](https://github.com/kirinnee/ferretry/commit/412d0090a93c57b3d616f7e37dce6cc34f788865))
+
+## [4.139.0](https://github.com/kirinnee/ferretry/compare/v4.138.0...v4.139.0) (2026-10-30)
+
+### Features
+
+* **pwa:** Done on Kanban cards in To test and Released and in the ⋯ menu ([#1045](https://github.com/kirinnee/ferretry/issues/1045)) ([07649b9](https://github.com/kirinnee/ferretry/commit/07649b9e6aaf71ba025a26f8e01ee28c211822f6))
+
+### Fixes
+
+* **pwa:** keep a reply's agenda reference on every outbox attempt ([#1047](https://github.com/kirinnee/ferretry/issues/1047)) ([ebdda55](https://github.com/kirinnee/ferretry/commit/ebdda55c5e99367ad77f61efbf2d5b27b4bf1508))
+* **pwa:** space the card detail sections apart ([#1046](https://github.com/kirinnee/ferretry/issues/1046)) ([6d00e4d](https://github.com/kirinnee/ferretry/commit/6d00e4d56bdd4c2ae9bfdd35e20be9ae1d3f6377))
+
 ## [4.138.0](https://github.com/kirinnee/ferretry/compare/v4.137.0...v4.138.0) (2026-10-30)
 
 ### Features

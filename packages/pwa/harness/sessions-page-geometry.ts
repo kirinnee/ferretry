@@ -29,22 +29,26 @@ export interface SessionsPageRun {
 export async function runSessionsPageGeometry(run: SessionsPageRun): Promise<number> {
   const { browser, rootUrl, scheme, fail } = run;
   let checks = 0;
-  for (const width of WIDTHS) {
-    for (const density of DENSITIES) {
-      const context = await browser.newContext({
-        viewport: { width, height: 800 },
-        isMobile: true,
-        hasTouch: true,
-        colorScheme: scheme,
-        reducedMotion: 'reduce',
-      });
-      try {
-        const page = await context.newPage();
-        await page.goto(`${rootUrl}?app-chrome=sessions&long-names=1&density=${density}`);
-        await page
-          .getByText(/bartholomew/i)
-          .first()
-          .waitFor({ state: 'attached' });
+  // ONE LOAD PER DENSITY, the four widths reached by resizing the same page: density is read from the URL
+  // once at mount, while width is only ever CSS and the layout hook's phone/drawer answer (all four widths
+  // are phone), so a resize lands exactly where a fresh load at that width would.
+  for (const density of DENSITIES) {
+    const context = await browser.newContext({
+      viewport: { width: WIDTHS[0], height: 800 },
+      isMobile: true,
+      hasTouch: true,
+      colorScheme: scheme,
+      reducedMotion: 'reduce',
+    });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${rootUrl}?app-chrome=sessions&long-names=1&density=${density}`);
+      await page
+        .getByText(/bartholomew/i)
+        .first()
+        .waitFor({ state: 'attached' });
+      for (const width of WIDTHS) {
+        await page.setViewportSize({ width, height: 800 });
         const m = await page.evaluate(async () => {
           await document.fonts.ready;
           await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
@@ -59,6 +63,8 @@ export async function runSessionsPageGeometry(run: SessionsPageRun): Promise<num
           };
         });
         if (!m.sawLongName) fail(`sessions page @ ${width}px ${density}: the long-name fixture did not render`);
+        if (m.viewport !== width)
+          fail(`sessions page @ ${width}px ${density}: the page is ${m.viewport}px wide after the resize`);
         if (!(m.page <= EPSILON && m.scroller <= EPSILON) || m.widestGroup > m.viewport + EPSILON)
           fail(
             `sessions page @ ${width}px ${density}: scrolls sideways — page +${m.page}px, list +${m.scroller}px, ` +
@@ -66,9 +72,9 @@ export async function runSessionsPageGeometry(run: SessionsPageRun): Promise<num
           );
         checks += 1;
         process.stdout.write(`   sessions page @ ${width}px ${density}: no sideways scroll (long names)\n`);
-      } finally {
-        await context.close();
       }
+    } finally {
+      await context.close();
     }
   }
   return checks;

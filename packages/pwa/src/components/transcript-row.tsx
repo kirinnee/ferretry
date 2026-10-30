@@ -22,6 +22,7 @@ import {
   type LedgerActions,
   LedgerActionsHost,
   LedgerMessage,
+  OutboxFiles,
   type SendCancel,
   type SendRetry,
   type SendSubmit,
@@ -230,6 +231,7 @@ function OwnSendRow({
           ) : (
             <OwnWords onItsWay={travelling} text={travelling ? record.message : entry.text} />
           )}
+          <OutboxFiles record={record} />
           {boundary === undefined ? null : (
             <span className="sr-only" data-ledger-boundary>
               {boundary}

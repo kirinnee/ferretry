@@ -41,6 +41,8 @@ export interface PrObservation {
   readonly state: 'open' | 'closed' | 'merged';
   readonly draft: boolean;
   readonly checks: PrChecks;
+  /** When the PR was opened; `null` or absent when GitHub did not say. */
+  readonly createdAt?: string | null;
   /** Set exactly when `state` is `merged`. */
   readonly mergedAt: string | null;
   readonly mergeSha: string | null;
@@ -117,6 +119,7 @@ const factsDiffer = (before: PrLink, after: PrLink): boolean =>
   before.checks !== after.checks ||
   before.mergedAt !== after.mergedAt ||
   before.mergeSha !== after.mergeSha ||
+  (before.createdAt ?? null) !== (after.createdAt ?? null) ||
   before.releasedIn !== after.releasedIn;
 
 /** One link after this poll, and the changes it saw. */
@@ -134,6 +137,9 @@ const nextLink = (pr: PrLink, update: PrUpdate, now: string): LinkChange => {
           state: observed.state,
           draft: observed.draft,
           checks: observed.checks,
+          ...(observed.createdAt === undefined && pr.createdAt === undefined
+            ? {}
+            : { createdAt: observed.createdAt ?? pr.createdAt ?? null }),
           mergedAt: merged ? observed.mergedAt : null,
           mergeSha: merged ? observed.mergeSha : null,
           releasedIn: merged ? releasedIn : null,

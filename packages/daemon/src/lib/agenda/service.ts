@@ -22,7 +22,7 @@ import {
   emptyAgendaLedger,
   type RaiseAgendaRequest,
 } from './state-machine.ts';
-import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
+import { isAncestorOf, NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
 
 /** The heading of an item the daemon raised without wording one: plain words, never an id. */
 const DAEMON_TITLES: Readonly<Record<DaemonAgendaCause, string>> = {
@@ -308,12 +308,16 @@ export class AgendaService {
 
   private async apply(
     sessionId: string,
-    command: Parameters<typeof applyAgendaCommandToSession>[2],
+    asked: Parameters<typeof applyAgendaCommandToSession>[2],
     via: AgendaVia = 'board',
   ): Promise<AgendaMutation> {
+    const command = await this.withLineage(sessionId, asked);
     const unauthorized = await this.authorize(sessionId, command.actor);
     if (unauthorized !== null) return { ok: false, error: unauthorized };
-    const limited = await this.limitSubFerret(command.actor, command.action);
+    const limited =
+      command.actor.kind === 'agent' && command.actor.overSubFerret === true
+        ? null
+        : await this.limitSubFerret(command.actor, command.action);
     if (limited !== null) return { ok: false, error: limited };
     const mutation = await this.repository.transact(sessionId, current =>
       applyAgendaCommandToSession(current, sessionId, command),
@@ -342,6 +346,21 @@ export class AgendaService {
     return mutation;
   }
 
+  /**
+   * A lead (or any ancestor) may edit, surface, resolve or dismiss items on the board of a session it started
+   * (docs/agenda.md § Sub-ferret agenda). The daemon proves it by lineage and marks the actor; a caller can
+   * never set the mark, because the route builds the actor from its credential alone.
+   */
+  private async withLineage<C extends Parameters<typeof applyAgendaCommandToSession>[2]>(
+    sessionId: string,
+    command: C,
+  ): Promise<C> {
+    const { actor } = command;
+    if (actor.kind !== 'agent' || actor.sessionId === sessionId || !LEAD_VERBS.has(command.action)) return command;
+    if (!(await isAncestorOf(this.subFerrets, actor.sessionId, sessionId))) return command;
+    return { ...command, actor: { ...actor, overSubFerret: true } };
+  }
+
   /** Only a lead speaks for the owner's agenda: a sub-ferret that tries is told whom to tell instead. */
   private async limitSubFerret(actor: AgendaActor, action: string): Promise<AgendaFailure | null> {
     if (actor.kind !== 'agent') return null;
@@ -362,6 +381,8 @@ export class AgendaService {
     return (await this.sessions.has(sessionId)) ? null : { code: 'not-found', message: `no such session ${sessionId}` };
   }
 }
+
+const LEAD_VERBS: ReadonlySet<string> = new Set(['edit', 'surface', 'resolve', 'dismiss']);
 
 function invalidSession(sessionId: string): AgendaFailure | null {
   return isAgendaSessionId(sessionId)

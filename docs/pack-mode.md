@@ -299,6 +299,13 @@ to report back. Enforced by the daemon from the caller's session identity, not b
   `Sub-ferrets don't <this>; tell your lead: fy send <lead-callsign> "…"`.
 - **Allowed:** `fy send` to the lead (and peers it names); `fy task note`, and `fy task link --pr` / `--branch`, on a card;
   reading the board and the agenda. `fy new` still makes the sub-ferret's card.
+- **A lead looks after its sub-ferrets' agenda.** The lead — and any ancestor — may `edit`, `surface`, `done` and
+  `dismiss` items on a session it started: `fy agenda done !A1 -s <sub-session>`. The daemon proves it by lineage
+  (walking `config.parent` up from the target session, fail-closed on a cycle, a missing session or an unreadable
+  registry) and attributes the change to the lead, not the sub-ferret. A sibling, an unrelated lead and a
+  descendant acting on its ancestor stay refused; `add`, `progress`, `answer` and the owner's snooze/reply verbs
+  are not covered, and the daemon's warden-escalation items are never the lead's to close. A sub-ferret that
+  itself started a deeper session holds the same authority over that one.
 - **Prompt:** a sub-ferret's fixed layer is the tools and settings rules plus two lines (`SUB_FERRET_INSTRUCTION`):
   report to your lead with `fy send`; link your PR to your card. The Notify, Board and Agenda mode paragraphs are left
   out. Sizes with the default binary name: **lead 2230 characters** (3274 with Agenda mode on), **sub-ferret 1560**.

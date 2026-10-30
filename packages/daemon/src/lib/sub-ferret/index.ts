@@ -70,3 +70,32 @@ export const sessionSubFerretDirectory = (sessions: SessionConfigReader): SubFer
  */
 export const nudgeTarget = async (directory: SubFerretDirectory, sessionId: string): Promise<string> =>
   (await directory.leadOf(sessionId).catch(() => undefined)) ?? sessionId;
+
+/** Deepest lineage the ancestor walk follows; a longer chain is treated as not an ancestor. */
+const MAX_LINEAGE_DEPTH = 16;
+
+/**
+ * Whether `ancestorId` started `sessionId`, directly or through a chain of leads. Fails closed: a directory
+ * that cannot answer, a cycle, or a chain past {@link MAX_LINEAGE_DEPTH} is "no", because this widens authority.
+ */
+export const isAncestorOf = async (
+  directory: SubFerretDirectory,
+  ancestorId: string,
+  sessionId: string,
+): Promise<boolean> => {
+  const seen = new Set<string>([sessionId]);
+  let current = sessionId;
+  for (let depth = 0; depth < MAX_LINEAGE_DEPTH; depth += 1) {
+    let lead: string | undefined;
+    try {
+      lead = await directory.leadOf(current);
+    } catch {
+      return false;
+    }
+    if (lead === undefined || seen.has(lead)) return false;
+    if (lead === ancestorId) return true;
+    seen.add(lead);
+    current = lead;
+  }
+  return false;
+};

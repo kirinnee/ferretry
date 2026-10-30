@@ -1,3 +1,48 @@
+## [4.141.0](https://github.com/kirinnee/ferretry/compare/v4.140.0...v4.141.0) (2026-10-30)
+
+### Features
+
+* **agenda:** let a lead edit, surface, close and dismiss its sub-ferrets' items ([#1050](https://github.com/kirinnee/ferretry/issues/1050)) ([fd07e80](https://github.com/kirinnee/ferretry/commit/fd07e80e7ae612d990126e1a55d9920929a2afab))
+
+### Fixes
+
+* **board:** a newer open PR pulls a shipped card back to Review/CI ([#1049](https://github.com/kirinnee/ferretry/issues/1049)) ([6df084f](https://github.com/kirinnee/ferretry/commit/6df084f4615b17ce886434357cae1dbc83e1d5c6))
+
+### Performance
+
+* **pwa:** trim the settings walk on a 2-vCPU runner ([#1034](https://github.com/kirinnee/ferretry/issues/1034)) ([9cde5df](https://github.com/kirinnee/ferretry/commit/9cde5df5df133243ba19334973aa3c2e6d0dacdb))
+
+## [4.140.0](https://github.com/kirinnee/ferretry/compare/v4.139.0...v4.140.0) (2026-10-30)
+
+### Features
+
+* **pwa:** let a file picked offline wait in the outbox with its message ([#1048](https://github.com/kirinnee/ferretry/issues/1048)) ([412d009](https://github.com/kirinnee/ferretry/commit/412d0090a93c57b3d616f7e37dce6cc34f788865))
+
+## [4.139.0](https://github.com/kirinnee/ferretry/compare/v4.138.0...v4.139.0) (2026-10-30)
+
+### Features
+
+* **pwa:** Done on Kanban cards in To test and Released and in the ⋯ menu ([#1045](https://github.com/kirinnee/ferretry/issues/1045)) ([07649b9](https://github.com/kirinnee/ferretry/commit/07649b9e6aaf71ba025a26f8e01ee28c211822f6))
+
+### Fixes
+
+* **pwa:** keep a reply's agenda reference on every outbox attempt ([#1047](https://github.com/kirinnee/ferretry/issues/1047)) ([ebdda55](https://github.com/kirinnee/ferretry/commit/ebdda55c5e99367ad77f61efbf2d5b27b4bf1508))
+* **pwa:** space the card detail sections apart ([#1046](https://github.com/kirinnee/ferretry/issues/1046)) ([6d00e4d](https://github.com/kirinnee/ferretry/commit/6d00e4d56bdd4c2ae9bfdd35e20be9ae1d3f6377))
+
+## [4.138.0](https://github.com/kirinnee/ferretry/compare/v4.137.0...v4.138.0) (2026-10-30)
+
+### Features
+
+* **agenda:** snooze an agenda item, and park replied ones instead of closing them ([#1043](https://github.com/kirinnee/ferretry/issues/1043)) ([e303aa9](https://github.com/kirinnee/ferretry/commit/e303aa9e8f51f4b1bc0eb5257732058ac2dc9250))
+* **daemon:** sub-ferrets report to their lead, no agenda items or card moves ([#1037](https://github.com/kirinnee/ferretry/issues/1037)) ([95839c1](https://github.com/kirinnee/ferretry/commit/95839c1ec64309e60320428ac0a966404f5b4fb5))
+* **pwa:** device outbox as tick one, and queue views ([#1042](https://github.com/kirinnee/ferretry/issues/1042)) ([4693608](https://github.com/kirinnee/ferretry/commit/4693608d8c0d39a396a5655aa1062c4d46b1c332))
+* **pwa:** redesign the board card detail as one flowing page ([#1040](https://github.com/kirinnee/ferretry/issues/1040)) ([3595920](https://github.com/kirinnee/ferretry/commit/35959208c6a781efdf929bc925183c672e75c972))
+
+### Fixes
+
+* **daemon:** quote a dying codex probe, not its broken pipe; deflake three tests ([#1044](https://github.com/kirinnee/ferretry/issues/1044)) ([8d9e3fb](https://github.com/kirinnee/ferretry/commit/8d9e3fbe6addd7fffd88b6375026941b23055b67))
+* **pwa:** let the Board Table use the full page width ([#1041](https://github.com/kirinnee/ferretry/issues/1041)) ([6e5c846](https://github.com/kirinnee/ferretry/commit/6e5c8462364fd75ddedaebed80faa685dd0b2aba))
+
 ## [4.137.0](https://github.com/kirinnee/ferretry/compare/v4.136.0...v4.137.0) (2026-10-30)
 
 ### Features

@@ -3,6 +3,8 @@ import type { AgendaAsk, AgendaCardAnswer, AgendaId, AgendaItem, AgendaResponse 
 import {
   AGENDA_URGENT_WAKE_MS,
   AgendaItemSchema,
+  AgendaSnapshotSchema,
+  agendaBadgeCount,
   MAX_AGENDA_PER_SESSION,
   MAX_AGENDA_REVISIONS,
 } from '@ferretry/protocol';
@@ -1834,16 +1836,25 @@ describe('Agenda state machine reply', () => {
     should(fromSnooze.item?.history?.map(entry => entry.kind)).deepEqual(['replied']);
   });
 
-  it('should leave a parked item out of the board count a badge shows, and keep it in the items', () => {
-    // Act
+  it('should keep parked items in the snapshot and its count, so it reads back on the wire; a badge leaves them out', () => {
+    // Arrange — one snoozed, one replied to, one in play (the live 4.140 board: count 2, items 4, refused)
+    const two = succeeded(applyAgendaCommand(raised().ledger, raiseCommand(AGENT, { subject: 'Second ask?' })));
+    const three = succeeded(applyAgendaCommand(two.ledger, raiseCommand(AGENT, { subject: 'Third ask?' })));
     const snoozed = succeeded(
-      applyAgendaCommand(raised().ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+      applyAgendaCommand(three.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+    );
+    const replied = succeeded(
+      applyAgendaCommand(snoozed.ledger, { action: 'reply', actor: HUMAN, id: 'A2', at: SECOND }),
     );
 
+    // Act
+    const wire = AgendaSnapshotSchema.safeParse(JSON.parse(JSON.stringify(replied.snapshot)));
+
     // Assert
-    should(raised().snapshot.count).equal(1);
-    should(snoozed.snapshot.count).equal(0);
-    should(snoozed.snapshot.items.map(item => item.id)).deepEqual(['A1']);
+    should(wire.success).be.true();
+    should(replied.snapshot.count).equal(3);
+    should(replied.snapshot.items.map(item => item.parked?.reason ?? 'open')).deepEqual(['snoozed', 'replied', 'open']);
+    should(agendaBadgeCount(replied.snapshot)).equal(1);
   });
 
   it('should keep no note when the owner sent no words', () => {

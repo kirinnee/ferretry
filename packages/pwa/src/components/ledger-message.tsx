@@ -32,10 +32,11 @@
  * the agent is holding it) and a generic "failed" would hide it.
  */
 
-import { Ban, ChevronUp, Copy, CornerDownLeft, Ellipsis, Pencil, RotateCw, X } from 'lucide-react';
+import { Ban, ChevronUp, Copy, CornerDownLeft, Ellipsis, Paperclip, Pencil, RotateCw, X } from 'lucide-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { browserClipboardWriter, type ClipboardWriter } from '../features/onboarding/copy-button.tsx';
 import { useInputModality } from '../hooks/use-input-modality.ts';
+import { UPLOAD_DEFERRED_COPY } from '../lib/attachments.ts';
 import { displayCallsign } from '../lib/callsign.ts';
 import { type LedgerBlockPlacement, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
@@ -109,6 +110,32 @@ interface Note {
 const refusal = (error: unknown): string | undefined =>
   error instanceof Error && error.message.trim().length > 0 ? error.message.trim() : undefined;
 
+/**
+ * The files a message on this device still has to upload, under its words: they go up before the send, once
+ * the machine answers. Nothing for a message with none.
+ */
+export function OutboxFiles({ record, className }: { readonly record: LedgerSendRecord; readonly className?: string }) {
+  const files = record.outbox?.files;
+  if (files === undefined) return null;
+  return (
+    <ul
+      aria-label="Files waiting to upload"
+      className={`m-0 list-none pt-1 text-meta text-muted ${className ?? ''}`}
+      data-outbox-files=""
+    >
+      {files.map(name => (
+        <li className="min-w-0" key={name}>
+          <span className="flex min-w-0 items-center gap-1">
+            <Paperclip aria-hidden="true" className="shrink-0" size={11} />
+            <span className="min-w-0 truncate text-fg">{name}</span>
+          </span>
+          <span className="block">{UPLOAD_DEFERRED_COPY}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function LedgerMessage({
   record,
   placement = 'chronological',
@@ -151,6 +178,7 @@ export function LedgerMessage({
             {body}
           </div>
         ) : null}
+        <OutboxFiles className="px-panel" record={record} />
         <LedgerActionsHost
           onCancel={onCancel}
           onCollapse={onCollapse}
