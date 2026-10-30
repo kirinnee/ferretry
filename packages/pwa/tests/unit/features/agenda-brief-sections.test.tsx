@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { AgendaBriefSections, cardLede, PointForm } from '../../../src/features/agenda/agenda-brief.tsx';
+import {
+  AgendaBriefSections,
+  cardLede,
+  contextHeading,
+  PointForm,
+} from '../../../src/features/agenda/agenda-brief.tsx';
 import { revisionHighlight } from '../../../src/lib/agenda-revisions.ts';
 import { agendaItem, choices } from '../../support/agenda-inbox.tsx';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
@@ -280,5 +285,14 @@ describe('PointForm emphasis and the changed context', () => {
     );
     const fresh = [...must(view.container, 'view').querySelectorAll('[data-agenda-changed="new"]')];
     expect(fresh.map(node => node.textContent)).toEqual(['newIt needs no server']);
+  });
+});
+
+describe('the context heading', () => {
+  test("a context that is the ferret's own picks is headed Suggested answers, never Why it matters", () => {
+    expect(contextHeading('My picks: A delete the line · B accept · C yes to all', false)).toBe('Suggested answers');
+    expect(contextHeading('- my pick: delete it', true)).toBe('Suggested answers');
+    expect(contextHeading('The relay drops sessions for ten seconds', false)).toBe('Why it matters');
+    expect(contextHeading('The relay drops sessions for ten seconds', true)).toBe('Context');
   });
 });

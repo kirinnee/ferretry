@@ -96,6 +96,17 @@ export interface CardLede {
 }
 
 /**
+ * A ferret that wrote its own picks into the context ("My picks: A delete · B accept") is suggesting answers, not
+ * saying why the item matters: that context is headed "Suggested answers", so a pick never reads as a reason.
+ */
+const SUGGESTED_PICKS = /^\s*(?:[-*•]\s*)?my picks?\b/iu;
+
+export const contextHeading = (context: string, fold: boolean): string => {
+  if (SUGGESTED_PICKS.test(context)) return 'Suggested answers';
+  return fold ? 'Context' : 'Why it matters';
+};
+
+/**
  * "Why it matters" as ONE plain line under the heading: the item's own `why` when it adds something, else
  * the first point of its context (the first bullet, or the first paragraph) — which the section then does
  * not say again.
@@ -470,7 +481,7 @@ export function AgendaBriefSections({
           fold={fold}
           name="context"
           open={open}
-          title={fold ? 'Context' : 'Why it matters'}
+          title={contextHeading(context, fold)}
         >
           {highlight?.points.context === undefined ? (
             <div className="fy-attn-prose">{renderProse(context)}</div>

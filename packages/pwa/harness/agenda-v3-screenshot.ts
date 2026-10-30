@@ -328,10 +328,17 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     await overlay(multi).waitFor({ state: 'visible' });
     await checkOverlay(multi, form, `multi-question ${id}`, composerRest);
     const text = (await overlay(multi).textContent()) ?? '';
-    for (const question of ['duplicate `retry` line', 'rename of `carrier`', 'the other two relay files']) {
+    // A47 is Jaeda's item word for word; A48 the same three questions written with options.
+    const questions =
+      id === 'A47'
+        ? ['.dockerignore has', 'merge tool rebuilds nix/yaml lists', 'each template ships only the files']
+        : ['duplicate `retry` line', 'rename of `carrier`', 'the other two relay files'];
+    for (const question of questions) {
       const count = text.split(question).length - 1;
       check(count === 1, `${id}: "${question}" is drawn ${count} times`);
     }
+    check(!/Answer this one in the message box/u.test(text), `${id}: per-question boilerplate is back`);
+    if (id === 'A47') check(!/Why it matters/u.test(text), 'A47: the ferret picks read as Why it matters');
     if (id === 'A48') {
       check(
         (await overlay(multi).locator('[data-agenda-recommended]').count()) >= 3,

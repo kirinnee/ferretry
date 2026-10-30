@@ -236,13 +236,22 @@ const A5_LONG = {
 
 // A MULTI-QUESTION ITEM, as a ferret really wrote it: three questions with no options, its picks in the context.
 const JAEDA_QUESTIONS = [
-  { question: 'The duplicate `retry` line in relay.ts: delete it or keep it?' },
-  { question: "The reviewer's rename of `carrier` to `route`: accept it?" },
-  { question: 'May I apply the same cleanup to the other two relay files?' },
+  {
+    question:
+      "A. Workspace's .dockerignore has '!README.md' meant to put README.md into Docker images, but the next line '*.md' cancels it, so README is never included. Delete the useless line, or make README go into images?",
+  },
+  {
+    question:
+      'B. The merge tool rebuilds nix/yaml lists from scratch, so comments written inside those lists disappear in generated projects. Accept that, moving important notes above the lists?',
+  },
+  {
+    question:
+      "C. Finalize: each template ships only the files it changed; the final check compares meaning, not exact spacing; and the merge tool's 6 formatting/sorting bugs get reported and fixed in your resolver repos? (yes to all, or which not)",
+  },
 ];
 const A47 = item('A47', 6, {
-  title: 'Three leftovers from the review',
-  subject: 'Three leftovers from the review of the relay change — how should I close them?',
+  title: '3 calls left for the nix fix',
+  subject: "Three calls left. Reply 'all your picks' or change any.",
   why: 'The review is otherwise done; these three are the only open threads.',
   ask: { kind: 'open-question' },
   questions: JAEDA_QUESTIONS,
