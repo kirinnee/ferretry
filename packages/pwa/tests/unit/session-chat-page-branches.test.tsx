@@ -6,7 +6,6 @@ import { Composer } from '../../src/components/composer.tsx';
 import {
   SessionSearchProvider,
   type SessionSearchResult,
-  SessionTasksSearchSurface,
   useSessionSearch,
 } from '../../src/features/session-search/session-search.tsx';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
@@ -158,12 +157,11 @@ describe('SessionChatPage search destinations', () => {
     return { page, open: () => run(() => openResult(taskResult)) };
   };
 
-  test('a search result opens this session’s tasks when the search is scoped to this session', () => {
+  test('a search result routes to Info, not to a sheet of its own, when the search is scoped to this session', () => {
     const { page, open } = renderSearching('shared');
     try {
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(0);
       open();
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
+      expect(page.root.findAll(node => node.props?.['data-session-utility'] === 'tasks')).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }
@@ -173,7 +171,6 @@ describe('SessionChatPage search destinations', () => {
     const { page, open } = renderSearching('other');
     try {
       open();
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(0);
     } finally {
       run(() => page.unmount());
     }

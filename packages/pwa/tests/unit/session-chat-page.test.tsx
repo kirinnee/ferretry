@@ -1,12 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import {
-  type HarnessDialog,
-  MCP_OAUTH_PATH,
-  matchesSessionSearchQuery,
-  type PermissionRequest,
-  type SessionView,
-  sessionSearchTaskHaystack,
-} from '@ferretry/protocol';
+import { type HarnessDialog, MCP_OAUTH_PATH, type PermissionRequest, type SessionView } from '@ferretry/protocol';
 import { type FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import { Copy } from 'lucide-react';
 import { type ComponentProps, cloneElement, type ReactElement } from 'react';
@@ -38,7 +31,11 @@ import { ForkForm } from '../../src/features/session-actions/fork-form.tsx';
 import type { SessionActionContribution } from '../../src/features/session-actions/registry.ts';
 import { RenameForm } from '../../src/features/session-actions/rename-form.tsx';
 import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
-import { SessionSearchProvider, SessionTasksSearchSurface } from '../../src/features/session-search/session-search.tsx';
+import { BoardSideTab } from '../../src/features/board/board-side-tab.tsx';
+import { ChatCardChip } from '../../src/features/board/chat-card-chip.tsx';
+import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import { DaemonBoardStore } from '../../src/lib/board-store.ts';
+import { PROJECT, boardAnswer, card as boardCard, fakeEnvironment, fakePort, laneSetFor } from './board-support.ts';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
@@ -67,7 +64,6 @@ import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
-import { taskSummary } from '../support/tasks.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -1408,23 +1404,7 @@ describe('SessionChatPage', () => {
     run(() => page.unmount());
   });
 
-  test('renders each supported pane surface and current-session task search', async () => {
-    // THE SUMMARY AND THE PROSE ARE SEPARATE RECORDS ON PURPOSE.
-    //
-    // `ScopedTaskSummarySchema` is non-strict, so a fixture that hung
-    // `description`/`ask`/`clarifications` on the summary would have them
-    // silently stripped and would keep passing while proving nothing about
-    // prose. Keeping the prose here, and answering `?q=` with the protocol's own
-    // matcher over it, is what makes this page prove the daemon-side search
-    // rather than an unfiltered stub that returns the row whatever is typed.
-    const searchSummary = { ...taskSummary({ id: 'F6', title: 'Needle task' }), sessionId: 'shared' };
-    const searchProse = {
-      id: 'F6',
-      title: 'Needle task',
-      description: 'A task used to prove the current-session search action.',
-      ask: { text: 'Find the needle' },
-      clarifications: [],
-    };
+  test('renders each supported pane surface', async () => {
     const seen: Array<{ method: string; pathname: string; search: URLSearchParams }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -1441,20 +1421,14 @@ describe('SessionChatPage', () => {
           coverage: 'complete',
           skipped: [],
         });
-      if (url.pathname.endsWith('/tasks')) {
-        const query = url.searchParams.get('q');
-        const rows =
-          query === null || matchesSessionSearchQuery(sessionSearchTaskHaystack(searchProse), query)
-            ? [searchSummary]
-            : [];
+      if (url.pathname.endsWith('/tasks'))
         return Response.json({
           v: 1,
           sessionId: 'shared',
-          tasks: rows,
+          tasks: [],
           parseErrors: 0,
           updatedAt: '2026-08-06T00:00:00.000Z',
         });
-      }
       if (url.pathname.endsWith('/fs')) return Response.json({ entries: [{ name: 'needle.ts', type: 'file' }] });
       return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
     }) as typeof fetch;
@@ -1494,42 +1468,7 @@ describe('SessionChatPage', () => {
       await runAsync(async () => await Promise.resolve());
       expect(JSON.stringify(page.toJSON())).toContain('paired snapshot');
 
-      // A `&task` reference opens this ferret's tasks in their sheet.
-      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F6'));
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
-      await runAsync(async () => {
-        for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
-      });
-      expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
-      const input = page.root.findByProps({ 'data-session-utility': 'tasks' }).findByType('input');
-      run(() => input.props.onChange({ target: { value: 'needle' } }));
-      // The task half is network-bound now. Reading the popup on the very next
-      // line would see the file row alone and count 1 — a failure that looks
-      // like a missing result and is really a missing wait.
-      //
-      // GATED ON THE ANSWER, NOT ON A DURATION. A single sleep of the query debounce plus a margin is
-      // enough on an idle machine and measurably is not under full-suite load, where the timer fires
-      // late and the fetch still has to resolve behind it. Waiting for the response this test is
-      // about removes the race instead of widening it — and the shared wait FAILS when its budget
-      // runs out, so an answer that never arrives is reported as the expired wait it is rather than
-      // as one popup row too few.
-      const popupRows = () =>
-        page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
-      const answered = () => seen.some(row => row.pathname.endsWith('/tasks') && row.search.get('q') === 'needle');
-      await settleUntil(
-        () => answered() && popupRows().length === 2,
-        'the narrowed task search to answer and both rows to render',
-        runAsync,
-      );
-
-      const results = popupRows();
-      expect(results).toHaveLength(2);
-      // Exactly one narrowing request, and the daemon decided what it returned.
-      expect(seen.filter(row => row.pathname.endsWith('/tasks') && row.search.get('q') === 'needle')).toHaveLength(1);
-      // By KIND, not by position: results are ranked, so a file and a task can
-      // trade places as the scoring changes.
-      run(() => results.find(row => row.props['data-result-kind'] === 'file')?.props.onClick());
-
+      run(() => workspace().openFile('needle.ts'));
       // ONE TAB PER FILE (#35): a file tab renders ITS file, not the picker.
       await runAsync(async () => await Promise.resolve());
       expect(page.root.findAllByType(FileInstanceSurface)).toHaveLength(1);
@@ -1540,7 +1479,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('Info opens the real session-scoped tasks and analytics sheets', async () => {
+  test('Info opens the real session-scoped analytics sheet; no board means no card chip and no Tasks tab', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const current = sessionView('shared');
     const page = renderSessionChatPage(
@@ -1564,13 +1503,95 @@ describe('SessionChatPage', () => {
       expect(analytics.props.scope).toEqual(scope);
       const sheet = () => page.root.findAll(node => node.type === BottomSheet && node.props.closeLabel === 'Close')[0];
       expect(sheet()?.props.ariaLabel).toBe('Analytics for this session');
-      run(() => page.root.findByType(SessionInfo).props.onOpenTasks());
-      expect(page.root.findAllByType(SessionAnalyticsSurface)).toHaveLength(0);
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
-      expect(sheet()?.props.ariaLabel).toBe('Tasks');
+      expect(page.root.findByType(SessionInfo).props.card).toBeUndefined();
+      expect(page.root.findAllByType(ChatCardChip)).toHaveLength(0);
       run(() => sheet()?.props.onClose());
       expect(sheet()?.props.open).toBe(false);
       expect(sheet()?.props.ariaLabel).toBe('Session tool');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a board gives the header its card chip, and a task reference opens the Tasks tab on this ferret’s cards', async () => {
+    const current = sessionView('shared', { config: { focusTask: { id: 'F18' } } });
+    const board = new DaemonBoardStore(
+      fakePort({
+        board: async () =>
+          boardAnswer([boardCard('F18', { owner: 'shared' }), boardCard('F19', { owner: 'other' })], {
+            projectId: PROJECT,
+            laneSet: laneSetFor(),
+          }),
+      }),
+      fakeEnvironment(),
+    );
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        board={board}
+        client={client([], current)}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        initialInfo="overview"
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={current}
+      />,
+      fakeDaemon().factory,
+    );
+    try {
+      await flush();
+      const chip = page.root.findByType(ChatCardChip);
+      expect(chip.props.chip).toMatchObject({ kind: 'card', ref: '&F18', title: 'Card F18' });
+      expect(chip.props.href).toBe('/d/alpha/board/F18');
+      expect(page.root.findAllByType(BoardSideTab)).toHaveLength(0);
+      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F18'));
+      await flush();
+      const tab = page.root.findByType(BoardSideTab);
+      expect(tab.props.chat.cards.focus?.task.id).toBe('F18');
+      expect(tab.props.chat.cards.total).toBe(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a chat with no focus card and no Tasks tab open never reads the board', async () => {
+    let reads = 0;
+    const board = new DaemonBoardStore(
+      fakePort({
+        board: async () => {
+          reads += 1;
+          return boardAnswer([boardCard('F18', { owner: 'shared' })], { projectId: PROJECT, laneSet: laneSetFor() });
+        },
+      }),
+      fakeEnvironment(),
+    );
+    const current = sessionView('shared');
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        board={board}
+        client={client([], current)}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={current}
+      />,
+      fakeDaemon().factory,
+    );
+    try {
+      await flush();
+      expect(page.root.findByType(ChatCardChip).props.chip).toEqual({ kind: 'none' });
+      expect(reads).toBe(0);
+      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F18'));
+      await flush();
+      expect(reads).toBeGreaterThan(0);
+      expect(
+        page.root
+          .findByType(BoardSideTab)
+          .props.chat.cards.owned.flatMap((group: { readonly cards: readonly unknown[] }) => group.cards),
+      ).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }
@@ -1733,7 +1754,6 @@ describe('SessionChatPage', () => {
       expect(JSON.stringify(page.toJSON())).toContain('Terminals are not available on this page.');
 
       run(() => surface().onTaskOpen?.('F1'));
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
     } finally {
       run(() => page.unmount());

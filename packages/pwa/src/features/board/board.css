@@ -660,3 +660,121 @@
     height: 36px;
   }
 }
+
+/* ---- Per-chat card chip and Tasks tab ------------------------------------------------------------- */
+.fy-card-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 1px var(--gap-sm);
+  overflow: hidden;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-decoration: none;
+  white-space: nowrap;
+}
+a.fy-card-chip:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+.fy-card-chip[data-tone='warn'] {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.fy-card-chip__ref {
+  flex: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+}
+.fy-card-chip__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  text-overflow: ellipsis;
+}
+.fy-card-chip__lane,
+.fy-card-chip__activity {
+  flex: none;
+}
+.fy-card-chip__lane::before,
+.fy-card-chip__activity::before {
+  margin-right: 6px;
+  color: var(--faint);
+  content: '·';
+}
+.fy-card-chip__activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.fy-card-chip__dot {
+  font-size: 0.7em;
+}
+.fy-card-chip__activity[data-tone='ok'] {
+  color: var(--ok);
+}
+.fy-card-chip__activity[data-tone='warn'] {
+  color: var(--warn);
+}
+.fy-card-chip__activity[data-tone='err'] {
+  color: var(--err);
+}
+.fy-session-bar[data-compact] .fy-card-chip__title,
+.fy-session-bar[data-compact] .fy-card-chip__lane {
+  display: none;
+}
+.fy-session-bar[data-compact] .fy-card-chip {
+  flex: none;
+}
+.fy-board-side {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+}
+.fy-board-side__status {
+  margin: 0;
+  padding: var(--gap-xs) var(--gap-sm);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-board-card__chat {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-board-card__chat:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+@media (pointer: coarse) {
+  .fy-board-card__chat {
+    width: 36px;
+    height: 36px;
+  }
+}
+.fy-board-lane[data-density='side'] {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
+}

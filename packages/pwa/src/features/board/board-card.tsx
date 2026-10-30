@@ -10,8 +10,8 @@
  * draggable, and a "Move to…" menu does the same job from the keyboard; both end in the same `onMove`.
  */
 
-import type { LaneCategory } from '@ferretry/protocol';
-import { Check, ChevronLeft, EllipsisVertical, X } from 'lucide-react';
+import { formatTaskRef, type LaneCategory } from '@ferretry/protocol';
+import { Check, ChevronLeft, EllipsisVertical, MessageSquarePlus, X } from 'lucide-react';
 import { type CSSProperties, type KeyboardEvent, useId, useState } from 'react';
 import type { MoveChoice } from '../../lib/board-move.ts';
 import { cardSegments, type FerretNames } from '../../lib/board-present.ts';
@@ -51,6 +51,8 @@ export interface BoardCardProps {
   readonly lane?: string;
   /** Nesting under a lead, for the Tree. */
   readonly depth?: number;
+  /** Present where a card can be pointed at from a chat (the per-chat Tasks tab): puts the card's `&F18` in the draft. */
+  readonly onAddToChat?: (card: BoardCardOf) => void;
 }
 
 export function BoardCard({
@@ -66,6 +68,7 @@ export function BoardCard({
   dragging = false,
   lane,
   depth,
+  onAddToChat,
 }: BoardCardProps) {
   const { task } = card;
   const segments = cardSegments(task, {
@@ -126,6 +129,18 @@ export function BoardCard({
           ))}
         </span>
       </RouteLink>
+      {onAddToChat === undefined ? null : (
+        <button
+          aria-label={`Add ${formatTaskRef(task)} to chat`}
+          className="fy-board-card__chat"
+          data-add-to-chat={task.id}
+          onClick={() => onAddToChat(card)}
+          title="Add to chat"
+          type="button"
+        >
+          <MessageSquarePlus aria-hidden="true" size={12} />
+        </button>
+      )}
       {moves !== undefined && moves.choices.length > 0 ? <BoardMoveMenu card={card} moves={moves} /> : null}
       {toTest ? <ToTestActions card={card} moves={moves} /> : null}
     </li>

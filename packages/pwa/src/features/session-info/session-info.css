@@ -154,6 +154,10 @@
   color: var(--fg);
   font-size: var(--text-xs);
 }
+.fy-info-warn {
+  color: var(--warn);
+  font-weight: 600;
+}
 .fy-info-muted {
   color: var(--muted);
 }

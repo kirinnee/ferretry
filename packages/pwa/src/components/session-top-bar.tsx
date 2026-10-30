@@ -77,6 +77,8 @@ export interface SessionTopBarProps {
    * any, nothing when there are none — the pinned block above the composer is the item itself.
    */
   readonly agendaOpen?: number;
+  /** The ferret's card chip (`ChatCardChip`), drawn beside the name at every width. Absent: this host has no board. */
+  readonly cardChip?: ReactNode;
   /** Status additions after the status word: "needs you", a dead live feed. */
   readonly status?: ReactNode;
   /**
@@ -112,6 +114,7 @@ export function SessionTopBar({
   compact,
   actions,
   agendaOpen = 0,
+  cardChip,
   status,
   turn = null,
   infoOpen = false,
@@ -180,6 +183,7 @@ export function SessionTopBar({
           </button>
         )}
         {compact ? null : subFerrets}
+        {cardChip}
         <span
           className="fy-session-bar__status"
           data-session-activity={turn ?? undefined}
