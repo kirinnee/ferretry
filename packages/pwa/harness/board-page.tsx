@@ -327,6 +327,43 @@ const OPEN = [
   }),
 ];
 
+const LANES = ['todo', 'plan', 'implement', 'review', 'merged', 'released', 'tested'] as const;
+const WORDS = [
+  'Reconcile',
+  'relay-directory',
+  'advertisement',
+  'fingerprints',
+  'authorisation',
+  'notifications',
+  'pairing',
+  'migration',
+];
+const LONG_SUMMARY =
+  'Imported from the old task list: rework the settings page, the daemon route and the wording of every message a person sees.';
+
+/** `?big=1`: sixty more cards in every lane, with long titles, long summaries and imported ones. */
+const BIG = Array.from({ length: 40 }, (_, index) => {
+  const lane = LANES[index % LANES.length] ?? 'todo';
+  const merged = lane === 'merged' || lane === 'released' || lane === 'tested';
+  const imported = index % 4 === 0;
+  return card(`F${300 + index}`, {
+    title: `${WORDS[index % WORDS.length]} ${WORDS[(index + 3) % WORDS.length]} follow-up ${index}`,
+    laneId: lane,
+    owner: DENISHA,
+    assignee: index % 5 === 0 ? null : [OTTILIE, MARGOT][index % 2],
+    summary: imported ? LONG_SUMMARY : 'Short and to the point.',
+    ...(imported ? { legacyRef: `old:F${index + 1}` } : {}),
+    links: merged
+      ? links([pr(1_000 + index, { state: 'merged', mergedAt: ago(60 + index * 40), mergeSha: SHA })])
+      : index % 3 === 0
+        ? links([pr(1_000 + index, { checks: index % 2 === 0 ? 'passing' : 'pending' })])
+        : links([]),
+    activity: index % 6 === 0 ? 'stale' : index % 3 === 0 ? 'idle' : 'active',
+    lastTouchedAt: ago(10 + index * 55),
+  });
+});
+const BIG_ON = new URLSearchParams(window.location.search).get('big') !== null;
+
 const closed = (id: string, title: string, minutes: number, extra: Record<string, unknown> = {}) =>
   card(id, {
     title,
@@ -362,9 +399,14 @@ const store = new DaemonBoardStore(
   fakePort({
     board: async (_daemon, query) =>
       boardAnswer(
-        (query.state === 'closed' ? CLOSED : query.state === 'dropped' ? DROPPED : OPEN).filter(
-          item => query.ferret === null || item.owner === query.ferret || item.assignee === query.ferret,
-        ),
+        (query.state === 'closed'
+          ? CLOSED
+          : query.state === 'dropped'
+            ? DROPPED
+            : BIG_ON
+              ? [...OPEN, ...BIG]
+              : OPEN
+        ).filter(item => query.ferret === null || item.owner === query.ferret || item.assignee === query.ferret),
         {
           projectId: PROJECT,
           laneSet: laneSetFor(),

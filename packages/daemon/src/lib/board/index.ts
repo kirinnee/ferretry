@@ -10,6 +10,7 @@ export * from './lineage.ts';
 export * from './ports.ts';
 export * from './pr-cache.ts';
 export * from './query.ts';
+export * from './done-delivery.ts';
 export * from './reopen-delivery.ts';
 export * from './service.ts';
 export * from './session-cards.ts';

@@ -390,6 +390,39 @@ describe('BoardDetail — the verdict', () => {
   });
 });
 
+describe('BoardDetail — Mark done', () => {
+  it('closes an open card in one tap with a clear primary Mark done', async () => {
+    const { root, actions } = await open({ task: card('F1', IMPLEMENT) });
+    const button = must(root.querySelector<HTMLButtonElement>('.fy-board-detail__done .fy-board-done'), 'Mark done');
+    expect(button.textContent).toBe('Mark done');
+    expect(button.getAttribute('data-size')).toBe('primary');
+    await interact(() => button.click());
+    await interact(() => flush());
+    expect(actions.calls).toEqual(['moveTask:["closed"]']);
+  });
+
+  it('is left to Works → Close on a card to try, and is not offered on a dropped card', async () => {
+    const tested = await open({ task: card('F1', { laneId: 'tested', title: 'Try it' }) });
+    expect(tested.root.querySelector('.fy-board-detail__done')).toBeNull();
+    await view?.unmount();
+    view = null;
+    const dropped = await open({
+      task: card('F2', { ...IMPLEMENT, dropped: DROPPED }),
+    });
+    expect(dropped.root.querySelector('.fy-board-detail__done')).toBeNull();
+  });
+
+  it('offers Reopen on a closed card and asks why before sending it back', async () => {
+    const { root, actions } = await open({ task: card('F1', { laneId: 'closed', title: 'Done it' }) });
+    const button = must(root.querySelector<HTMLButtonElement>('.fy-board-detail__done .fy-board-done'), 'Reopen');
+    expect(button.getAttribute('data-done')).toBe('reopen');
+    await interact(() => button.click());
+    expect(actions.calls).toEqual([]);
+    await reasonSubmit(root, 'it came back');
+    expect(actions.calls).toEqual(['moveTask:["implement","it came back"]']);
+  });
+});
+
 describe('BoardDetail — dropping', () => {
   it('asks why and drops the card with the words', async () => {
     const { root, actions } = await open({ task: card('F1', IMPLEMENT) });

@@ -286,3 +286,4 @@ packages/pwa/src/lib/board-ports.ts # the Board's send-and-start ports (U12), re
 packages/pwa/src/hooks/use-board-asks.ts # the card detail's ask reader (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-detail.ts # the card detail's pure helpers (U12), reached from board-detail.tsx ← board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/item-conversation.ts # the Inbox item's History read, used by App.tsx ← main.tsx; the gate ignores .tsx roots
+packages/pwa/src/lib/board-done.ts # the owner's Done and Reopen decision (Board table), reached from board-page.tsx and board-detail.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots

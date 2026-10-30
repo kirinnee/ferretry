@@ -27,6 +27,7 @@ import {
   FakeChanges,
   FakeFocus,
   FakeLanes,
+  FakeDone,
   FakeReopen,
   FakeSessions,
   lanes,
@@ -366,6 +367,33 @@ describe('moving a card', () => {
       { from: 'tested', to: 'implement', by: { kind: 'owner' }, task: { id: 'F1' } },
     ]);
     should(ports.changes.events[0]?.sessionId).equal('lead');
+  });
+
+  it("should tell the card's ferret ONCE when the owner moves it into the closed lane, and not on a reopen", async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ laneId: 'tested', assignee: 'child', title: 'Ship it' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'move', to: 'closed' }), owner);
+
+    // Assert
+    should(ports.done.notices).match([{ task: { id: 'F1', laneId: 'closed' } }]);
+    should(ports.reopen.notices).eql([]);
+  });
+
+  it('should tell nobody when a ferret closes the card, or the owner moves it within the open lanes', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([
+      card({ id: 'F1', laneId: 'tested', assignee: 'child' }),
+      card({ id: 'F2', laneId: 'review', assignee: 'child' }),
+    ]);
+
+    // Act
+    await service.act('F1', action({ action: 'move', to: 'closed' }), lead).catch(() => undefined);
+    await service.act('F2', action({ action: 'move', to: 'merged' }), owner);
+
+    // Assert
+    should(ports.done.notices).eql([]);
   });
 
   it('should refuse to move a dropped card', async () => {
@@ -1350,20 +1378,24 @@ describe('what follows a write', () => {
       focus: new FakeFocus(new Set(), true),
       changes: new FakeChanges('journal closed'),
       reopen: new FakeReopen(true),
+      done: new FakeDone(true),
     });
     const service = new BoardService(ports);
 
     // Act
     await service.act('F1', action({ action: 'note', text: 'hi' }), lead);
     await service.act('F1', action({ action: 'move', to: 'implement', reason: 'not good' }), owner);
+    await service.act('F1', action({ action: 'move', to: 'closed' }), owner);
 
     // Assert
-    should(stored(ports).laneId).equal('implement');
+    should(stored(ports).laneId).equal('closed');
     should(ports.warnings).eql([
       'could not focus lead on &F1: config is read-only',
       'could not publish board.changed for &F1: journal closed',
       'could not publish board.changed for &F1: journal closed',
       'could not deliver the reopen of &F1: nobody to tell',
+      'could not publish board.changed for &F1: journal closed',
+      'could not tell the ferret &F1 is done: nobody to tell',
     ]);
   });
 
