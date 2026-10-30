@@ -134,6 +134,21 @@ try {
       }
     }
   }
+  for (const width of [1_440, 1_920]) {
+    const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: 'light' });
+    try {
+      const page = await open(context, 'studio-light', 'list');
+      const gap = await page.evaluate(() => {
+        const table = document.querySelector('.fy-board-table')?.getBoundingClientRect();
+        return table === undefined ? 0 : window.innerWidth - table.right;
+      });
+      if (gap > 40) fail(`the table leaves a ${Math.round(gap)}px band on the right at ${width}px`);
+      await shot(page, `board-table-light-desktop-wide-${width}`);
+      await page.close();
+    } finally {
+      await context.close();
+    }
+  }
   process.stdout.write('✅ the table captured; nothing scrolls sideways\n');
 } finally {
   await browser.close();

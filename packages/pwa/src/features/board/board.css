@@ -1088,7 +1088,7 @@
 
 /* ---- Table view and the Done control -------------------------------------------------------------- */
 .fy-board-list {
-  max-width: 76rem;
+  max-width: none;
 }
 .fy-board-table__tools {
   display: flex;
