@@ -232,6 +232,25 @@ const ATTACHABLE = /^[a-z0-9][a-z0-9_.-]{0,127}$/u;
 /** Whether a control client may attach to the session `name`. */
 export const isControlAttachable = (name: string): boolean => ATTACHABLE.test(name);
 
+/**
+ * The `-f` flags a session worker's control client attaches with: `ignore-size`, so it never resizes the
+ * pane; `no-output`, so no pane byte is streamed to it. NOT `read-only` — see {@link isReadOnlyAttach}.
+ */
+export const SESSION_WORKER_ATTACH_FLAGS = 'ignore-size,no-output';
+
+/**
+ * Whether a client attached with the `-f` flags `flags` would be READ-ONLY — which no client of the
+ * daemon may be, because ONE read-only client on the server can refuse every keystroke the daemon types.
+ *
+ * Since tmux 3.7, `send-keys` fails `client is read-only` when its TARGET CLIENT is read-only. A
+ * `send-keys` without `-c` takes as its target client the most recently active client attached to the
+ * best session — any attached client, a control client included, and not necessarily one on the pane's
+ * own session. So a worker's read-only client turned a message, an answer, a nudge or an Escape into a
+ * refusal on 3.7+, while on 3.6a, which has no such check, everything typed. `-c` cannot pin the target
+ * instead: tmux before 3.4 has no `send-keys -c`.
+ */
+export const isReadOnlyAttach = (flags: string): boolean => flags.split(',').includes('read-only');
+
 const SUBSCRIPTION_NAME = /^[a-z][a-z0-9-]{0,31}$/u;
 
 /**
