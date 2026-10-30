@@ -109,6 +109,8 @@ import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
+import { sessionAgendaSummary } from '../agenda-wire.ts';
+import { useAgendaWire } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
 import type { DaemonAttentionClient } from '../attention-client.ts';
@@ -530,25 +532,31 @@ export function SessionChatPage({
   const entriesRef = useRef(entries);
   entriesRef.current = entries;
   const readDictationConversation = useCallback(() => conversationFromTranscript(entriesRef.current), []);
-  const composerCatalogs = useComposerReferenceCatalogs(client, session.config.id, {
-    tasks: referenceTasks,
-    skills: skills.catalog,
-    waitForTasks: search.waitForTasks,
-    waitForSkills: skills.settled,
-    ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
-    // The `!` menu reads the SAME live board the panel draws, so an item raised a moment ago is offered
-    // without a reload — and the page asks the daemon for this board once, not twice.
-    ...(attention === undefined
-      ? {}
-      : {
-          attention: {
-            items: attention.snapshot?.items,
-            ...(attention.status === 'error' && attention.snapshot === null
-              ? { failure: 'this session’s agenda could not be read' }
-              : {}),
-          },
-        }),
-  });
+  const agendaWire = useAgendaWire(connection.daemonId);
+  const composerCatalogs = useComposerReferenceCatalogs(
+    client,
+    session.config.id,
+    {
+      tasks: referenceTasks,
+      skills: skills.catalog,
+      waitForTasks: search.waitForTasks,
+      waitForSkills: skills.settled,
+      ...(search.taskState === 'unavailable' && search.taskError !== null ? { taskFailure: search.taskError } : {}),
+      // The `!` menu reads the SAME live board the panel draws, so an item raised a moment ago is offered
+      // without a reload — and the page asks the daemon for this board once, not twice.
+      ...(attention === undefined
+        ? {}
+        : {
+            attention: {
+              items: attention.snapshot?.items,
+              ...(attention.status === 'error' && attention.snapshot === null
+                ? { failure: 'this session’s agenda could not be read' }
+                : {}),
+            },
+          }),
+    },
+    agendaWire,
+  );
   /** Codex's native model picker is in the agent's own pane: the runtime sheet's way there is the Console. */
   const { showAgentTab, openFile, openSurface } = workspace;
   const openConsole = useCallback((): boolean => {
@@ -1088,7 +1096,7 @@ export function SessionChatPage({
   }, []);
   const finePointer = useFinePointer();
   const wide = formFactor === 'desktop' && finePointer;
-  const agendaMode = attention !== undefined && session.state.attention?.agendaMode === true;
+  const agendaMode = attention !== undefined && sessionAgendaSummary(session.state)?.agendaMode === true;
   const agenda = useAttentionAgenda({
     agendaMode,
     client: attention?.client,

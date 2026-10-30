@@ -25,6 +25,8 @@ interface Spy {
   readonly acted: { action: InboxAction; note: string }[];
   readonly sent: string[];
   replies: number;
+  readonly replied: string[];
+  closed: number;
 }
 
 const draw = async (
@@ -32,7 +34,7 @@ const draw = async (
   extra: Partial<AttentionAnswerBarProps> = {},
   onSend?: (text: string) => Promise<void>,
 ): Promise<Spy> => {
-  const spy: Spy = { acted: [], sent: [], replies: 0 };
+  const spy: Spy = { acted: [], sent: [], replies: 0, replied: [], closed: 0 };
   view = await mount(
     <AttentionAnswerBar
       busy={false}
@@ -42,8 +44,12 @@ const draw = async (
       map={swipeMap(item)}
       model={cardModel(item)}
       onAct={(action, note) => spy.acted.push({ action, note })}
-      onReply={() => {
+      onClose={() => {
+        spy.closed += 1;
+      }}
+      onReply={typed => {
         spy.replies += 1;
+        spy.replied.push(typed);
       }}
       onSend={
         onSend ??
@@ -122,6 +128,13 @@ describe('the answer bar', () => {
     await interact(() => one<HTMLButtonElement>('[data-agenda-add-reply]').click());
     expect(spy.replies).toBe(1);
     expect(spy.acted).toEqual([]);
+  });
+
+  test('"Add to reply" hands over the text typed in the field, trimmed', async () => {
+    const spy = await draw(chosen);
+    await typeInto(field(), '  on staging first  ');
+    await interact(() => one<HTMLButtonElement>('[data-agenda-add-reply]').click());
+    expect(spy.replied).toEqual(['on staging first']);
   });
 
   test('has no arrows on a mouse', async () => {
@@ -309,5 +322,42 @@ describe('several questions', () => {
     await typeInto(field(), 'both Monday');
     await interact(() => one<HTMLButtonElement>('[data-attention-send-answers]').click());
     expect(sent).toEqual(['both Monday']);
+  });
+});
+
+describe('the pull down over the answers', () => {
+  test('a clear pull down closes the item view', async () => {
+    const spy = await draw(chosen);
+    await drag({ x: 200, y: 400 });
+    expect(spy.closed).toBe(1);
+    expect(spy.acted).toEqual([]);
+  });
+
+  test('a short pull down, or one more sideways than down, closes nothing', async () => {
+    const spy = await draw(chosen);
+    await drag({ x: 200, y: 240 });
+    await drag({ x: 300, y: 260 });
+    expect(spy.closed).toBe(0);
+  });
+
+  test('says where a pull down goes while it is dragged, and commits it past the threshold', async () => {
+    await draw(chosen);
+    const lane = one<HTMLElement>('.fy-item-bar__answers');
+    await interact(() => lane.dispatchEvent(pointer('pointerdown', 200, 200)));
+    await interact(() => lane.dispatchEvent(pointer('pointermove', 200, 260)));
+    expect(one<HTMLElement>('.fy-item-bar__stamp').dataset.swipe).toBe('down');
+    expect(one('.fy-item-bar__stamp').hasAttribute('data-committed')).toBe(false);
+    await interact(() => lane.dispatchEvent(pointer('pointermove', 200, 420)));
+    expect(one('.fy-item-bar__stamp').hasAttribute('data-committed')).toBe(true);
+  });
+
+  test('a bar that does not swipe, or a mouse, does not close on a pull down', async () => {
+    const still = await draw(chosen, { swipeable: false });
+    await drag({ x: 200, y: 400 });
+    expect(still.closed).toBe(0);
+    await view?.unmount();
+    const mouse = await draw(chosen);
+    await drag({ x: 200, y: 400 }, { pointerType: 'mouse' });
+    expect(mouse.closed).toBe(0);
   });
 });

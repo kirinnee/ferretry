@@ -333,3 +333,55 @@ describe('several questions without a recommendation', () => {
     expect(root().querySelectorAll('[data-attention-pick]')).toHaveLength(2);
   });
 });
+
+describe('the pull down over the head', () => {
+  const pointer = (type: string, y: number, init: PointerEventInit = {}): PointerEvent =>
+    new PointerEvent(type, { bubbles: true, clientX: 200, clientY: y, pointerId: 3, pointerType: 'touch', ...init });
+  const pull = async (to: number, init: PointerEventInit = {}): Promise<void> => {
+    const head = one<HTMLElement>('[data-agenda-top]');
+    await interact(() => head.dispatchEvent(pointer('pointerdown', 100, init)));
+    await interact(() => head.dispatchEvent(pointer('pointerup', to, init)));
+  };
+
+  test('a clear pull down on touch closes the view', async () => {
+    const spy = await draw(richItem);
+    await pull(300);
+    expect(spy.closed).toBe(1);
+  });
+
+  test('a short pull, a mouse, a bar that does not swipe and a pointer it never saw close nothing', async () => {
+    const spy = await draw(richItem);
+    await pull(140);
+    await pull(300, { pointerType: 'mouse' });
+    const head = one<HTMLElement>('[data-agenda-top]');
+    await interact(() => head.dispatchEvent(pointer('pointerdown', 100)));
+    await interact(() => head.dispatchEvent(pointer('pointerup', 300, { pointerId: 9 })));
+    await interact(() => head.dispatchEvent(pointer('pointercancel', 300)));
+    await interact(() => head.dispatchEvent(pointer('pointerup', 300)));
+    expect(spy.closed).toBe(0);
+    await view?.unmount();
+    const still = await draw(richItem, { swipeable: false });
+    await pull(300);
+    expect(still.closed).toBe(0);
+  });
+});
+
+describe('a change to the Ferretry config', () => {
+  const confirms = {
+    path: 'warden.yaml',
+    etag: 'a'.repeat(64),
+    changes: ['the Warden may now spend on AI investigations'],
+  };
+
+  test('is drawn before the premise, and the premise is left out, when the item confirms one', async () => {
+    await draw({ ...richItem, confirms } as AttentionItem);
+    expect(root().querySelector('[data-attention-confirms="warden.yaml"]')).not.toBeNull();
+    expect(root().textContent).not.toContain('The board keeps every finished item');
+  });
+
+  test('is not drawn, and the premise stays, for an item that confirms nothing', async () => {
+    await draw(richItem);
+    expect(root().querySelector('[data-attention-confirms]')).toBeNull();
+    expect(root().textContent).toContain('The board keeps every finished item');
+  });
+});

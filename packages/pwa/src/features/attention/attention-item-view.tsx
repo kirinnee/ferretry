@@ -24,8 +24,10 @@ import { AgendaStatusPill } from './agenda-status-pill.tsx';
 import { agendaAsk } from './attention-agenda-row.tsx';
 import { AttentionAnswerBar } from './attention-answer-bar.tsx';
 import { AttentionBriefSections } from './attention-brief.tsx';
+import { AttentionConfigChange } from './attention-config-change.tsx';
 import { AttentionDelivery, attentionHeading } from './attention-delivery.tsx';
 import { AttentionDetail } from './attention-detail.tsx';
+import { useDownSwipe } from './use-down-swipe.ts';
 
 export interface AttentionItemViewProps {
   readonly item: AttentionItem;
@@ -43,13 +45,20 @@ export interface AttentionItemViewProps {
   readonly swipeable: boolean;
   /** An answer, carrying the typed text as its note. */
   readonly onAct: (action: InboxAction, note: string) => void;
-  readonly onReply: () => void;
+  /** Adds the item to the next reply, with whatever is typed in the bar, and returns to the chat. */
+  readonly onReply: (typed: string) => void;
   readonly onSend: (text: string) => Promise<void>;
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   readonly renderProse: (text: string) => ReactNode;
 }
 
 /** Keys that are a field's or a button's own. */
+/** The detail without its premise: the daemon also writes a confirmed change into it for older apps, and the change is drawn on its own. */
+const withoutPremise = (item: AttentionItem): AttentionItem => {
+  const { premise, ...rest } = item;
+  return rest;
+};
+
 const ownsKeys = (target: EventTarget): boolean =>
   target instanceof HTMLElement && target.closest('input, textarea, select, button, a, [contenteditable]') !== null;
 
@@ -80,6 +89,7 @@ export function AttentionItemView({
     model.perQuestion && picks.some(pick => pick.trim() !== '') ? questionAnswersAction(questions, picks) : null;
   const status = agendaStatus(item, agendaAuthor(item, ferret), now);
   const ask = agendaAsk(item);
+  const pull = useDownSwipe(onClose, swipeable);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: focus the dialog again whenever another item opens
   useEffect(() => {
@@ -128,7 +138,7 @@ export function AttentionItemView({
       role="dialog"
       tabIndex={-1}
     >
-      <header className="fy-item-view__top" data-agenda-top="">
+      <header className="fy-item-view__top" data-agenda-top="" {...pull}>
         <div className="fy-item-view__nav">
           {status === null ? <span /> : <AgendaStatusPill status={status} />}
           <div className="fy-item-view__pager">
@@ -190,9 +200,10 @@ export function AttentionItemView({
               {...(picker === undefined ? {} : { picker })}
             />
           ) : null}
+          <AttentionConfigChange item={item} />
           <AttentionDetail
             busy={busy}
-            item={item}
+            item={item.confirms === undefined ? item : withoutPremise(item)}
             layout="full"
             renderProse={renderProse}
             {...(onProgress === undefined ? {} : { onProgress })}
@@ -209,6 +220,7 @@ export function AttentionItemView({
         model={model}
         onAct={onAct}
         onReply={onReply}
+        onClose={onClose}
         onSend={onSend}
         swipeable={swipeable}
         {...(model.perQuestion

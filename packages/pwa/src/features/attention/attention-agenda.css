@@ -70,7 +70,7 @@
   align-items: stretch;
   gap: 2px;
   margin: 0;
-  padding: var(--gap-md) var(--gap-md) var(--gap-md) calc(var(--gap-md) + 4px);
+  padding: var(--gap-md);
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface);
@@ -78,24 +78,6 @@
   font: inherit;
   text-align: left;
   cursor: pointer;
-}
-/* The marker: a bar down the row's edge for what has stopped on the owner (blocking, or needs them). */
-.fy-agenda-row::before {
-  content: '';
-  position: absolute;
-  inset: var(--gap-sm) auto var(--gap-sm) var(--gap-xs);
-  width: 3px;
-  border-radius: var(--radius-pill);
-  background: transparent;
-}
-.fy-agenda-row[data-tone='blocking']::before,
-.fy-agenda-row[data-overdue]::before {
-  background: var(--err);
-}
-.fy-agenda-row[data-tone='needs-you']::before,
-.fy-agenda-row[data-tone='needed-by']::before,
-.fy-agenda-row[data-tone='will-block']::before {
-  background: var(--accent);
 }
 .fy-agenda-row:hover {
   border-color: var(--accent);

@@ -4,7 +4,7 @@
  * turn, what it blocks). Nothing else is on it — no answer chips, no reply — because everything to decide is on
  * the item's card, which the tap opens in place of the conversation.
  *
- * A ferret's-turn row is dimmed. A row that has stopped on the owner carries a bar down its edge.
+ * A ferret's-turn row is dimmed.
  */
 
 import { type AttentionItem, hasOwnTitle } from '@ferretry/protocol';

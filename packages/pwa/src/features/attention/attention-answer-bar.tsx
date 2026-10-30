@@ -23,6 +23,7 @@ import {
   swipeIntent,
 } from '../../lib/attention-inbox.ts';
 import { AttentionActions } from './attention-actions.tsx';
+import { isDownSwipe } from './use-down-swipe.ts';
 
 export interface AttentionAnswerBarProps {
   readonly item: AttentionItem;
@@ -39,7 +40,9 @@ export interface AttentionAnswerBarProps {
   /** An answer, carrying the field's text as its note. */
   readonly onAct: (action: InboxAction, note: string) => void;
   /** Adds the item to the next reply and returns to the chat. */
-  readonly onReply: () => void;
+  readonly onReply: (typed: string) => void;
+  /** Back to the chat (the ↓ swipe on the answers). */
+  readonly onClose: () => void;
   /** Sends the field's text as a reply about this item; resolves once sent. */
   readonly onSend: (text: string) => Promise<void>;
 }
@@ -67,6 +70,7 @@ export function AttentionAnswerBar({
   sendAnswers,
   onAct,
   onReply,
+  onClose,
   onSend,
 }: AttentionAnswerBarProps) {
   const [text, setText] = useState('');
@@ -127,6 +131,10 @@ export function AttentionAnswerBar({
     setDrag(null);
     if (!current.moved) return;
     swallow.current = true;
+    if (isDownSwipe(current.dx, current.dy, current.width)) {
+      onClose();
+      return;
+    }
     const intent = swipeIntent(current.dx, current.dy, current.width, map);
     const action = intent.committed && intent.direction !== null ? map[intent.direction] : undefined;
     if (action !== undefined) give(action);
@@ -155,6 +163,16 @@ export function AttentionAnswerBar({
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
       >
+        {drag !== null && drag.dy > Math.abs(drag.dx) ? (
+          <p
+            aria-hidden="true"
+            className="fy-item-bar__stamp"
+            data-committed={isDownSwipe(drag.dx, drag.dy, drag.width) || undefined}
+            data-swipe="down"
+          >
+            ↓ Back to the chat
+          </p>
+        ) : null}
         {intent === null || intent.direction === null || aiming === undefined ? null : (
           <p
             aria-hidden="true"
@@ -185,7 +203,12 @@ export function AttentionAnswerBar({
           recommendationLine={model.recommendationLine}
           recommended={model.recommended}
           secondaryExtra={
-            <button className="kt-btn fy-item-bar__reply" data-agenda-add-reply="" onClick={onReply} type="button">
+            <button
+              className="kt-btn fy-item-bar__reply"
+              data-agenda-add-reply=""
+              onClick={() => onReply(text.trim())}
+              type="button"
+            >
               <MessageSquarePlus aria-hidden="true" size={14} />
               Add to reply
             </button>

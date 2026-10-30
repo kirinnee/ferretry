@@ -35,6 +35,7 @@ import { withComposerNote, withReferences } from '../../lib/attention-reply.ts';
 import type { AttentionLoadStatus } from '../../lib/attention-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
+import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import {
@@ -101,6 +102,14 @@ const runAttentionAction = async (
 const NO_ITEMS: readonly AttentionItem[] = [];
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
+
+/** What was typed in the item view's bar goes into the composer's draft, after what is already there. */
+const keepTyped = (scope: DaemonSessionScope, typed: string): void => {
+  const composer = typed === '' ? null : composerQuoteTarget(scope);
+  if (composer === null) return;
+  const draft = composer.draft();
+  composer.replaceDraft(draft.trim() === '' ? typed : `${draft.replace(/\s*$/u, '')}\n\n${typed}`);
+};
 
 const failure = (reason: unknown): string =>
   reason instanceof Error ? reason.message : 'The machine did not accept this answer.';
@@ -347,8 +356,9 @@ export const useAttentionAgenda = ({
           key={cardItem.id}
           onAct={(action, note) => act(cardItem, action, note)}
           onClose={() => update(() => ({ card: null }))}
-          onReply={() => {
+          onReply={typed => {
             addReply(cardItem);
+            keepTyped(scope, typed);
             update(() => ({ card: null }));
           }}
           onSend={async text => {

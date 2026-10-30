@@ -203,6 +203,19 @@ const A2_FULL = {
   ],
 } as AttentionItem;
 
+// A PERMISSION ITEM THAT CONFIRMS A CONFIG CHANGE: the daemon also writes the change into premise for old apps.
+const CHANGES = [
+  'the Jev price the cap counts with goes down from 2 to 0.042',
+  'the Warden may now spend on AI investigations',
+];
+const A2_CONFIG = {
+  ...A2_FULL,
+  title: "Loosen the Warden's spending limits?",
+  subject: "Can I loosen the Warden's spending limits in warden.yaml?",
+  premise: CHANGES.map(change => `- ${change}`).join('\n'),
+  confirms: { path: 'warden.yaml', etag: 'a'.repeat(64), changes: CHANGES },
+} as unknown as AttentionItem;
+
 // A LONG ITEM: many bullets, a table of terms, a diagram and a long body — the one body scrolls.
 const LONG_LINES = (stem: string, count: number): string =>
   Array.from(
@@ -236,9 +249,20 @@ const target = (params.get('attention') ?? params.get('agenda') ?? null) as Atte
 const withHistory = params.get('history') === '1';
 const long = params.get('long') === '1';
 const fakeKeyboard = params.get('kb') === '1';
+const configChange = params.get('config') === '1';
 
 const items = AGENDA.map(entry =>
-  entry.id === 'A5' ? (long ? A5_LONG : withHistory ? A5_UPDATED : entry) : entry.id === 'A2' ? A2_FULL : entry,
+  entry.id === 'A5'
+    ? long
+      ? A5_LONG
+      : withHistory
+        ? A5_UPDATED
+        : entry
+    : entry.id === 'A2'
+      ? configChange
+        ? A2_CONFIG
+        : A2_FULL
+      : entry,
 );
 
 const board: AttentionSnapshot =

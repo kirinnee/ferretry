@@ -20,6 +20,7 @@ import { useAgendaDock } from '../../../src/features/attention/attention-collaps
 import { AttentionItemView } from '../../../src/features/attention/attention-item-view.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
+import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import '../../support/dom.ts';
 import { attentionItem } from '../../support/attention-inbox.tsx';
@@ -439,7 +440,7 @@ describe('the "re:" chips', () => {
 
   test('collect several items, add each once, and can be removed one by one', () => {
     const view = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AttentionId, seq: 1 } });
-    const reply = () => run(() => view.root.findByType(AttentionItemView).props.onReply());
+    const reply = () => run(() => view.root.findByType(AttentionItemView).props.onReply(''));
     const openFromDrawer = (id: string) => {
       run(() => toggle(view.root)[0]?.props.onClick());
       run(() =>
@@ -462,7 +463,7 @@ describe('the "re:" chips', () => {
 
   test('"Add to reply" closes the view and the chips are spent when a message goes', () => {
     const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AttentionId, seq: 1 } });
-    run(() => view.root.findByType(AttentionItemView).props.onReply());
+    run(() => view.root.findByType(AttentionItemView).props.onReply(''));
     expect(view.root.findAllByType(AttentionItemView)).toHaveLength(0);
     expect(live().covered).toBe(false);
     expect(live().references()).toEqual(['A2']);
@@ -473,7 +474,7 @@ describe('the "re:" chips', () => {
 
   test('are dropped when their item leaves the agenda', () => {
     const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AttentionId, seq: 1 } });
-    run(() => view.root.findByType(AttentionItemView).props.onReply());
+    run(() => view.root.findByType(AttentionItemView).props.onReply(''));
     run(() => view.update(<Host snapshot={board([item('A3')])} />));
     expect(live().references()).toEqual([]);
   });
@@ -742,5 +743,53 @@ describe('the layout choice when the browser hides its storage', () => {
       if (original) Object.defineProperty(globalThis, 'localStorage', original);
       else delete (globalThis as { localStorage?: unknown }).localStorage;
     }
+  });
+});
+
+describe('"Add to reply" keeps what was typed', () => {
+  const composer = (draft: string) => {
+    const state = { draft, replaced: 0 };
+    const dispose = registerComposerQuoteTarget({
+      ...scope,
+      draft: () => state.draft,
+      replaceDraft: next => {
+        state.draft = next;
+        state.replaced += 1;
+      },
+    });
+    return { state, dispose };
+  };
+  const reply = (typed: string) => {
+    const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AttentionId, seq: 1 } });
+    run(() => view.root.findByType(AttentionItemView).props.onReply(typed));
+    return view;
+  };
+
+  test('moves the typed text into an empty composer draft, with the chip and the view closed', () => {
+    const { state, dispose } = composer('  ');
+    const view = reply('on staging first');
+    expect(state.draft).toBe('on staging first');
+    expect(live().references()).toEqual(['A2']);
+    expect(view.root.findAllByType(AttentionItemView)).toHaveLength(0);
+    dispose();
+  });
+
+  test('puts it after what the composer already holds, a blank line apart', () => {
+    const { state, dispose } = composer('already here  \n');
+    reply('and this');
+    expect(state.draft).toBe('already here\n\nand this');
+    dispose();
+  });
+
+  test('touches nothing when nothing was typed', () => {
+    const { state, dispose } = composer('kept');
+    reply('');
+    expect(state.replaced).toBe(0);
+    dispose();
+  });
+
+  test('still adds the chip when no composer is mounted', () => {
+    reply('lost with no composer');
+    expect(live().references()).toEqual(['A2']);
   });
 });

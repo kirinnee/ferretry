@@ -2403,6 +2403,22 @@ describe('SessionChatPage', () => {
       }
     });
 
+    test('reads agenda mode from the `agenda` summary, which wins over `attention`', () => {
+      const only = sessionView('shared', { state: { agenda: { agendaMode: true } as never } });
+      const page = renderSessionChatPage(chatPage({ session: only, attention: attentionModel() }));
+      const stale = sessionView('shared', {
+        state: { agenda: { agendaMode: false } as never, attention: { agendaMode: true } as never },
+      });
+      const off = renderSessionChatPage(chatPage({ session: stale, attention: attentionModel() }));
+      try {
+        expect(lines(page.root)).toHaveLength(1);
+        expect(lines(off.root)).toHaveLength(0);
+      } finally {
+        run(() => page.unmount());
+        run(() => off.unmount());
+      }
+    });
+
     test('draws no agenda for a ferret that is not in agenda mode, whatever its board holds', () => {
       const page = renderSessionChatPage(chatPage({ attention: attentionModel() }));
       try {
@@ -2684,7 +2700,7 @@ describe('SessionChatPage', () => {
         await send('plain');
         press(page.root);
         run(() => page.root.findByType(AttentionAgendaRow).props.onOpen());
-        run(() => page.root.findByType(AttentionItemView).props.onReply());
+        run(() => page.root.findByType(AttentionItemView).props.onReply(''));
         expect(
           page.root.findByType(AttentionReferenceChips).props.items.map((item: { id: string }) => item.id),
         ).toEqual(['A3']);

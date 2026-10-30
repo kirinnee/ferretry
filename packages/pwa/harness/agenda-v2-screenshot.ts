@@ -221,6 +221,20 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
     check(extra === 0, 'a drawer row holds more than the row button');
     if (phone) check(((await row.boundingBox())?.height ?? 0) >= 44, 'a drawer row is under 44px');
   }
+  // no coloured rail or stripe on the left of anything in the drawer: a left border wider than 1px that the right one does not share
+  const rails = await plain.locator('[data-agenda-drawer], [data-agenda-drawer] *').evaluateAll(nodes =>
+    nodes
+      .map(node => getComputedStyle(node))
+      .filter(
+        style =>
+          Number.parseFloat(style.borderLeftWidth) > 1 &&
+          style.borderLeftStyle !== 'none' &&
+          style.borderLeftColor !== 'rgba(0, 0, 0, 0)' &&
+          (style.borderLeftWidth !== style.borderRightWidth || style.borderLeftColor !== style.borderRightColor),
+      )
+      .map(style => `${style.borderLeftWidth} ${style.borderLeftColor}`),
+  );
+  check(rails.length === 0, `the drawer has a left rail: ${rails.join(', ')}`);
   await shot(plain, 'drawer', form, theme);
   await plain.close();
 
@@ -256,6 +270,21 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await checkOverlay(permission, form, 'permission item');
   await shot(permission, 'item-permission', form, theme);
   await permission.close();
+
+  // a permission item that confirms a config change: the change block, no premise
+  const change = await open(browserContext, theme, 'view=board&history=1&config=1');
+  await openItem(change, 'A2');
+  await checkOverlay(change, form, 'config-change item');
+  check(
+    (await change.locator('[data-attention-confirms="warden.yaml"]').count()) === 1,
+    'the config change is not drawn',
+  );
+  check(
+    !((await overlay(change).textContent()) ?? '').includes("What's going on"),
+    'the premise is drawn beside the change',
+  );
+  await shot(change, 'item-config-change', form, theme);
+  await change.close();
 
   // a LONG item scrolled mid-way: top and bar stay put, the chat keeps its scroll, only the body scrolls
   const longPage = await open(browserContext, theme, 'view=board&long=1');
