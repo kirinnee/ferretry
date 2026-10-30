@@ -1,6 +1,6 @@
 /**
- * THE BOARD'S WRITES, as one small set of verbs a page calls: move, reopen, depend, note, link, drop, edit,
- * and answer an agenda ask.
+ * THE BOARD'S WRITES, as one small set of verbs a page calls: move, reopen, depend, undepend, note, link, drop,
+ * edit, create, and answer an agenda ask.
  *
  * EVERY VERB NAMES A CARD BY `(daemonId, taskId)`. A card lives on one machine, so a verb is sent to that
  * machine's daemon and no other; there is no "the card named F12" across the fleet.
@@ -21,6 +21,7 @@ import {
   type BoardErrorCode,
   type BoardResult,
   type BoardTaskActionRequestInput,
+  type BoardTaskCreateRequestInput,
   type BoardTaskId,
   type BoardTaskView,
   boardErr,
@@ -71,10 +72,14 @@ export interface BoardActions {
   /** Reopens a closed card into a lane, with the owner's reason and the ask as said. */
   reopen(target: BoardCardTarget, to: string, reason: string, ask: TaskMessage): Promise<BoardMutation>;
   depend(target: BoardCardTarget, dependency: BoardDependency): Promise<BoardMutation>;
+  /** Takes a dependency off; the daemon records why. */
+  undepend(target: BoardCardTarget, task: Action<'undepend'>['task'], reason: string): Promise<BoardMutation>;
   note(target: BoardCardTarget, text: string): Promise<BoardMutation>;
   link(target: BoardCardTarget, link: BoardLinkTarget): Promise<BoardMutation>;
   drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
   editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
+  /** Opens a card the owner writes, on one machine. */
+  create(daemonId: DaemonId, request: BoardTaskCreateRequestInput): Promise<BoardMutation>;
   /** Answers one of the card's open asks, in the ferret's own agenda. */
   answer(
     daemonId: DaemonId,
@@ -85,7 +90,7 @@ export interface BoardActions {
 }
 
 export interface BoardActionsDeps {
-  readonly store: Pick<DaemonBoardStore, 'act'>;
+  readonly store: Pick<DaemonBoardStore, 'act' | 'create'>;
   readonly agenda: Pick<DaemonAgendaClient, 'respond'>;
   /** The current pairing of a machine, or `undefined` once it is unpaired. */
   readonly connection: (daemonId: DaemonId) => DaemonConnection | undefined;
@@ -136,10 +141,16 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
         until,
         ...(overrideReason === undefined ? {} : { override: { reason: overrideReason } }),
       }),
+    undepend: (target, task, reason) => send(target, { action: 'undepend', task, reason }),
     note: (target, text) => send(target, { action: 'note', text }),
     link: (target, link) => send(target, { action: 'link', ...link }),
     drop: (target, reason) => send(target, { action: 'drop', reason }),
     editField: (target, edit) => send(target, { action: 'edit', ...edit }),
+    create: async (daemonId, request) => {
+      const machine = deps.connection(daemonId);
+      if (machine === undefined) return boardErr(unpaired(daemonId));
+      return await deps.store.create(machine, request);
+    },
     answer: async (daemonId, ref, response, note) => {
       const machine = deps.connection(daemonId);
       if (machine === undefined) return boardErr(unpaired(daemonId));

@@ -1986,7 +1986,7 @@ function AgendaRoute({ connection }: DaemonPageProps) {
  * The Board across every paired machine. The query string carries the filters and the view, so a view is a
  * link; a change replaces the entry (the back button leaves the board, it does not walk every filter).
  */
-function BoardRoute(_props: BoardPageProps) {
+function BoardRoute({ connection, taskId }: BoardPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
   const { connections } = useConnectionSnapshot();
@@ -2017,6 +2017,16 @@ function BoardRoute(_props: BoardPageProps) {
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
   );
+  const ports = useMemo(
+    () => ({
+      sendMessage: async (daemon: DaemonConnection, sessionId: string, message: string) => {
+        await (await store.clients.client(daemon)).send(sessionId, { message });
+      },
+      startFerret: async (daemon: DaemonConnection, prompt: string) =>
+        (await (await store.clients.client(daemon)).start({ mode: 'auto', prompt })).config.id,
+    }),
+    [store.clients],
+  );
   return (
     <BoardPage
       agenda={store.attention}
@@ -2025,6 +2035,8 @@ function BoardRoute(_props: BoardPageProps) {
       machines={machines}
       onNavigate={navigate}
       onSearch={onSearch}
+      openCard={taskId === undefined ? null : { daemonId: connection.daemonId, taskId }}
+      ports={ports}
       search={window.location.search}
       store={store.board}
     />

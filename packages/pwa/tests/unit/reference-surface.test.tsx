@@ -200,6 +200,25 @@ describe('sessionReferenceSurface', () => {
     should([afterTask, readSidePaneTabsState(scope).active]).deepEqual(['tasks', 'skills']);
   });
 
+  test("should open a task on this machine's board when the host can navigate, not the Tasks sheet", () => {
+    // Arrange
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+      destinations: { openTasks: () => visited.push('tasks') },
+    });
+
+    // Act
+    surface.onTaskOpen?.('f412');
+
+    // Assert
+    should(visited).deepEqual(['/d/daemon-a/board/F412']);
+    should(readSidePaneTabsState(scope).active).equal(null);
+  });
+
   // Attention is deliberately NOT a side-pane tab (handover #35); its home is
   // #17's focused action modal. The opener therefore comes from the host that
   // OWNS that modal, and a host without one must not manufacture a dead link.

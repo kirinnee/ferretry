@@ -33,6 +33,7 @@ import type { ResolvedSurfaceReference } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { createSurfaceReferenceResolver, terminalIdForSurfaceKey } from '../lib/surface-references.ts';
 import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
+import { daemonBoardCardPath } from '../lib/pages/routes.ts';
 import {
   openSidePaneFileTab,
   openSidePaneTab,
@@ -187,7 +188,12 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       if (destinations.openFile !== undefined) destinations.openFile(reference.path, selection);
       else openSidePaneFileTab(scope, reference.path, selection);
     },
-    onTaskOpen: destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')),
+    // `&F412` opens the card on THIS machine's board (the Board's detail, which a link and Back both
+    // reach). A host with no router has no such place, so it keeps the session's Tasks sheet.
+    onTaskOpen: id => {
+      if (onNavigate !== undefined) onNavigate(daemonBoardCardPath(scope.daemonId, id.toUpperCase()));
+      else (destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')))();
+    },
     // Attention is deliberately NOT a side-pane tab (handover #35). A proved
     // id opens the Agenda panel at the top of the conversation, at that item;
     // when either the ledger or opener is absent Markdown still leaves `!A3` as

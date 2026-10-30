@@ -18,8 +18,8 @@ import {
   useBoardProjects,
   type BoardMachine,
 } from '../../hooks/use-board.ts';
-import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
+import type { DaemonId } from '../../lib/daemon-connection.ts';
 import type { BoardFilters } from '../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
@@ -38,17 +38,19 @@ import {
   parseBoardView,
   parseListSort,
 } from '../../lib/board-view.ts';
-import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
+import { daemonBoardCardPath, daemonBoardPath } from '../../lib/pages/routes.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardCountsBar } from './board-counts.tsx';
 import { BoardFilterBar } from './board-filters.tsx';
 import { BoardReasonBox } from './board-reason-box.tsx';
+import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
+import { BoardNewCard, type NewCardPorts } from './detail/board-new-card.tsx';
 import { ArchiveView, type BoardCardEnv, DependenciesView, KanbanView, ListView, TreeView } from './board-views.tsx';
 
 export interface BoardPageProps {
   readonly store: DaemonBoardStore;
-  readonly agenda: Pick<DaemonAgendaClient, 'respond'>;
+  readonly agenda: Pick<BoardAgenda, 'respond'> & Partial<Pick<BoardAgenda, 'hydrate' | 'store'>>;
   /** Every paired machine, in the order the shell shows them. */
   readonly machines: readonly BoardMachine[];
   /** Ferret callsigns by session id; a ferret not listed is named by the start of its id. */
@@ -62,6 +64,10 @@ export interface BoardPageProps {
   readonly now?: number;
   /** Starts the filters folded: a narrow screen opens them from the "Filters" button. */
   readonly compact?: boolean;
+  /** The card the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
+  readonly openCard?: { readonly daemonId: DaemonId; readonly taskId: string } | null;
+  /** Speaking to ferrets and starting one; without them the detail cannot comment and there is no "+ Card". */
+  readonly ports?: BoardDetailPorts & NewCardPorts;
 }
 
 interface PendingMove {
@@ -93,6 +99,8 @@ export function BoardPage({
   onNavigate,
   now: fixedNow,
   compact = false,
+  openCard = null,
+  ports,
 }: BoardPageProps) {
   const params = useMemo(() => new URLSearchParams(search), [search]);
   const view = parseBoardView(params.get('view'));
@@ -173,6 +181,7 @@ export function BoardPage({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [composing, setComposing] = useState(false);
 
   const send = useCallback(
     async (card: BoardCardOf, group: BoardGroupOf, to: string, reason?: string): Promise<boolean> => {
@@ -290,6 +299,29 @@ export function BoardPage({
     };
   }, [model, projects, machines, names]);
 
+  const detailMachine =
+    openCard === null ? undefined : machines.find(machine => machine.connection.daemonId === openCard.daemonId);
+  const siblings = useMemo(
+    () =>
+      openCard === null
+        ? []
+        : model.cards
+            .filter(card => card.daemonId === openCard.daemonId)
+            .map(card => ({
+              task: card.task,
+              laneName: places.get(card.key)?.laneName ?? card.task.laneId,
+              runningOn: card.runningOn,
+            })),
+    [model.cards, places, openCard],
+  );
+  const composeMachine = detailMachine ?? machines[0];
+  const detailAgenda =
+    agenda.hydrate !== undefined && agenda.store !== undefined
+      ? { hydrate: agenda.hydrate, respond: agenda.respond, store: agenda.store }
+      : null;
+  const closeDetail = useCallback(() => {
+    if (openCard !== null) onNavigate(daemonBoardPath(openCard.daemonId));
+  }, [openCard, onNavigate]);
   const hideClosed = filters.state === 'open';
   const reading = board.status === 'loading' || board.status === 'idle';
   const failed = board.status === 'error';
@@ -313,6 +345,11 @@ export function BoardPage({
           ))}
         </nav>
         <div className="fy-board__tools">
+          {ports === undefined || machines.length === 0 ? null : (
+            <button className="kt-btn" data-variant="primary" onClick={() => setComposing(true)} type="button">
+              + Card
+            </button>
+          )}
           <PageThemeSwitch />
         </div>
       </header>
@@ -400,6 +437,40 @@ export function BoardPage({
               setProblem(null);
             }}
             onSubmit={reason => void submitReason(reason)}
+          />
+        </div>
+      )}
+      {openCard === null || detailMachine === undefined || ports === undefined || detailAgenda === null ? null : (
+        <BoardDetail
+          actions={actions}
+          agenda={detailAgenda}
+          machine={detailMachine}
+          names={names}
+          now={now}
+          onClose={closeDetail}
+          onNavigate={onNavigate}
+          phone={compact}
+          ports={ports}
+          projectName={id => projectNames.get(id) ?? id.slice(0, 8)}
+          siblings={siblings}
+          store={store}
+          taskId={openCard.taskId}
+        />
+      )}
+      {!composing || ports === undefined || composeMachine === undefined ? null : (
+        <div className="fy-board__scrim">
+          <BoardNewCard
+            actions={actions}
+            assignees={choices.ferrets.map(ferret => ({ sessionId: ferret.id, name: ferret.name }))}
+            connection={composeMachine.connection}
+            machineName={composeMachine.name}
+            onCancel={() => setComposing(false)}
+            onCreated={task => {
+              setComposing(false);
+              onNavigate(daemonBoardCardPath(composeMachine.connection.daemonId, task.id));
+            }}
+            ports={ports}
+            projects={choices.projects}
           />
         </div>
       )}

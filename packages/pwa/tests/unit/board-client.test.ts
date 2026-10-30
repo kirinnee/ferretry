@@ -8,6 +8,7 @@ import {
   fetchBoardTask,
   fetchDaemonVersion,
   postBoardAction,
+  postBoardCreate,
   readWholeBoard,
 } from '../../src/lib/board-client.ts';
 import { NO_BOARD_FILTERS, toServerQuery } from '../../src/lib/board-model.ts';
@@ -148,6 +149,59 @@ describe('postBoardAction', () => {
       throw 'plain';
     });
     expect(!text.ok && text.error.message).toBe('plain');
+  });
+});
+
+describe('postBoardCreate', () => {
+  const request = { kind: 'feature', title: 'Try it', ask: { text: 'do it', source: 'owner (board)' } } as const;
+
+  it('posts the parsed card to the machine’s board and returns the card it opened', async () => {
+    let sent: { url: string; method?: string; body?: Record<string, unknown> } = { url: '' };
+    const answer = await postBoardCreate(laptop, request, async (asked, init) => {
+      sent = { url: String(asked), method: init?.method, body: JSON.parse(String(init?.body)) };
+      return json({ task: card('F9'), laneSet: laneSetFor() });
+    });
+    expect(sent.url).toBe('https://laptop.example.test/v1/board/tasks');
+    expect(sent.method).toBe('POST');
+    expect(sent.body).toMatchObject({ kind: 'feature', title: 'Try it', workflow: 'quick' });
+    expect(answer.ok && answer.value.task.id).toBe('F9');
+  });
+
+  it('hands a refusal back as a value, with the daemon’s code', async () => {
+    const refused = await postBoardCreate(laptop, request, async () =>
+      json({ error: 'owner only', code: 'owner-gate' }, 403),
+    );
+    expect(refused).toEqual({ ok: false, error: { status: 403, message: 'owner only', boardCode: 'owner-gate' } });
+  });
+
+  it('says so when the daemon cannot be reached', async () => {
+    const down = await postBoardCreate(laptop, request, async () => {
+      throw new Error('offline');
+    });
+    expect(!down.ok && down.error).toEqual({ status: 0, message: 'offline', boardCode: null });
+    const text = await postBoardCreate(laptop, request, async () => {
+      throw 'plain';
+    });
+    expect(!text.ok && text.error.message).toBe('plain');
+  });
+
+  it('never sends a malformed card', async () => {
+    let called = false;
+    const answer = await postBoardCreate(laptop, { ...request, title: '' }, async () => {
+      called = true;
+      return json({});
+    });
+    expect(called).toBe(false);
+    expect(!answer.ok && answer.error).toMatchObject({ status: 0, boardCode: 'invalid' });
+  });
+
+  it('says so when the daemon answers with a card it cannot read', async () => {
+    const odd = await postBoardCreate(laptop, request, async () => json({ nonsense: true }));
+    expect(!odd.ok && odd.error).toEqual({
+      status: 200,
+      message: 'the daemon answered with a card this app cannot read',
+      boardCode: null,
+    });
   });
 });
 

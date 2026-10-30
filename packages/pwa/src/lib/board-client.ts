@@ -20,6 +20,8 @@ import {
   type BoardResult,
   type BoardTaskActionRequestInput,
   BoardTaskActionRequestSchema,
+  type BoardTaskCreateRequestInput,
+  BoardTaskCreateRequestSchema,
   type BoardTaskId,
   type BoardTaskResponse,
   BoardTaskResponseSchema,
@@ -68,6 +70,11 @@ export interface BoardPort {
     daemon: DaemonConnection,
     id: BoardTaskId,
     request: BoardTaskActionRequestInput,
+  ): Promise<BoardResult<BoardTaskResponse, BoardWriteError>>;
+  /** Opens a card the owner writes, on the machine that will hold it. */
+  create(
+    daemon: DaemonConnection,
+    request: BoardTaskCreateRequestInput,
   ): Promise<BoardResult<BoardTaskResponse, BoardWriteError>>;
 }
 
@@ -190,6 +197,39 @@ export const postBoardAction = async (
     : boardErr(writeError(response.status, 'the daemon answered with a card this app cannot read', undefined));
 };
 
+/** `POST /v1/board/tasks`: the card as the daemon now holds it, or the refusal as a value. */
+export const postBoardCreate = async (
+  daemon: DaemonConnection,
+  request: BoardTaskCreateRequestInput,
+  fetcher: DaemonFetch = browserFetch,
+): Promise<BoardResult<BoardTaskResponse, BoardWriteError>> => {
+  const parsed = BoardTaskCreateRequestSchema.safeParse(request);
+  if (!parsed.success) return boardErr(writeError(0, parsed.error.message, 'invalid'));
+  let response: Response;
+  try {
+    response = await send(
+      daemon,
+      '/v1/board/tasks',
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', [FY_REQUEST_ID_HEADER]: crypto.randomUUID() },
+        body: JSON.stringify(parsed.data),
+      },
+      fetcher,
+    );
+  } catch (reason) {
+    return boardErr(writeError(0, reason instanceof Error ? reason.message : String(reason), undefined));
+  }
+  if (!response.ok) {
+    const refused = await failure(response);
+    return boardErr(writeError(refused.status, refused.message, refused.code));
+  }
+  const answer = BoardTaskResponseSchema.safeParse(await response.json().catch(() => null));
+  return answer.success
+    ? boardOk(answer.data)
+    : boardErr(writeError(response.status, 'the daemon answered with a card this app cannot read', undefined));
+};
+
 /** The browser port over the functions above. */
 export const daemonBoardPort = (fetcher: DaemonFetch = browserFetch): BoardPort => ({
   board: (daemon, query, cursor, limit) => fetchBoardPage(daemon, query, cursor, fetcher, limit),
@@ -197,6 +237,7 @@ export const daemonBoardPort = (fetcher: DaemonFetch = browserFetch): BoardPort 
   projects: daemon => fetchBoardProjects(daemon, fetcher),
   version: daemon => fetchDaemonVersion(daemon, fetcher),
   act: (daemon, id, request) => postBoardAction(daemon, id, request, fetcher),
+  create: (daemon, request) => postBoardCreate(daemon, request, fetcher),
 });
 
 /**
