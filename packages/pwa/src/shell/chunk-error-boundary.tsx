@@ -64,6 +64,12 @@ export interface ChunkErrorBoundaryProps {
    * boundary reports rather than swallows, without a global console stub.
    */
   readonly onReport?: (message: string, error: unknown, componentStack: string | null | undefined) => void;
+  /**
+   * Which page the pane is showing. A change clears a caught failure, so one page that cannot render — a
+   * chat holding a message that throws — leaves every OTHER page reachable instead of turning the whole
+   * app into the same dead end until a reload. The same page keeps its failure: it would only throw again.
+   */
+  readonly resetKey?: string;
   readonly children: ReactNode;
 }
 
@@ -81,6 +87,10 @@ export class ChunkErrorBoundary extends Component<ChunkErrorBoundaryProps, Chunk
    */
   static getDerivedStateFromError(): ChunkErrorBoundaryState {
     return { failed: true };
+  }
+
+  override componentDidUpdate(previous: ChunkErrorBoundaryProps): void {
+    if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false });
   }
 
   override componentDidCatch(error: unknown, info: ErrorInfo): void {
