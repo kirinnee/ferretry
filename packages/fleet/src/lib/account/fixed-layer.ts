@@ -464,7 +464,7 @@ export const NOTIFY_INSTRUCTION = (fy: string): string =>
  * the daemon). docs/board.md quotes this text verbatim.
  */
 export const BOARD_INSTRUCTION = (fy: string): string =>
-  `Board: all work is a card (&F412) on its project's board; agenda items are !A48. Before your first edit for a new ask, have one: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"\` (${fy} new and ${fy} start make one). Move it as work changes: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked on the owner: \`${fy} agenda add --task <id>\`; a card: \`${fy} task depend\`; outside: \`${fy} task block\`. Abandoned: \`${fy} task drop --reason\`; switched: \`${fy} task focus <id>\`. Owner reports a problem: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Never move what a PR or release moves; only the owner closes.`;
+  `Board: all work is a card (&F412) on its project's board (new repo: \`${fy} project add .\`); agenda items are !A48. Before your first edit for a new ask, have one: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"\` (${fy} new/start make one). Move it: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked on owner: \`${fy} agenda add --task <id>\`; a card: \`${fy} task depend\`; outside: \`${fy} task block\`. Dropped: \`${fy} task drop --reason\`; switched: \`${fy} task focus <id>\`. Owner finds a problem: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Never move what a PR or release moves; only the owner closes.`;
 
 /**
  * Everything every agent runtime is told, as ONE appended system prompt section: the tools, the
