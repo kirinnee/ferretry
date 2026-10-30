@@ -120,7 +120,7 @@ export function WardenStatsPanel({ status, now }: { readonly status: WardenStatu
       {chart !== undefined && (
         <div className="flex min-w-0 flex-col gap-xs">
           <AnalyticsMetricChart
-            title="Actions per day"
+            title={chart.title}
             series={CHART_SERIES}
             points={chart.points}
             format={value => String(value)}

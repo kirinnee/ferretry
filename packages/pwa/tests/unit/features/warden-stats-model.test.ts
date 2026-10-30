@@ -258,7 +258,7 @@ describe('layerLines', () => {
     // Assert
     expect(lines).toHaveLength(1);
     expect(lines[0]).toMatchObject({
-      summary: '0 decisions · $0.50 of $0.50 today · paused until 13:00 UTC',
+      summary: '0 decisions · $0.50 of $0.50 today · Jev paused until 13:00 UTC: this hour’s share of the cap reached',
       ratio: 1,
       warn: true,
     });
@@ -389,5 +389,119 @@ describe('small helpers', () => {
     expect(big[0]).toBe(0);
     expect(big.at(-1)).toBeGreaterThanOrEqual(57);
     expect(big.every(Number.isInteger)).toBe(true);
+  });
+});
+
+describe('Jev’s checks', () => {
+  /** 2026-10-29 in miniature: Jev looked at every flag, handed every one on, and spent its cap. */
+  const jevDay = (date: string, checks: Partial<NonNullable<WardenDayStats['jev']>> = {}): WardenDayStats =>
+    day(date, {
+      flags: 9,
+      jevDecisions: 6,
+      investigations: 2,
+      cleared: { auto: 0, jev: 1, llm: 1 },
+      jev: { checks: 6, healthy: 1, acted: 0, handedOn: 5, skippedForCap: 0, ...checks },
+    });
+
+  it('should say Jev checked, counting the flags it handed on, when the day kept its checks', () => {
+    // Arrange
+    const status = withHistory([jevDay('2026-07-31', { checks: 7, handedOn: 6 })]);
+
+    // Act / Assert
+    expect(tile(status, 'today', 'flagged')?.sub).toBe('Jev checked 7 · LLM investigated 2');
+  });
+
+  it('should fall back to decisions over a week in which some day did not keep checks', () => {
+    // Arrange
+    const status = withHistory([day('2026-07-30', { jevDecisions: 3 }), jevDay('2026-07-31')]);
+
+    // Act / Assert
+    expect(tile(status, 'week', 'flagged')?.sub).toBe('Jev decided 9 · LLM investigated 2');
+  });
+
+  it('should spell out Jev’s checks on its line, and say it is paused when its daily cap is reached', () => {
+    // Arrange
+    const status = withHistory([jevDay('2026-07-31', { skippedForCap: 3 })], {
+      config: wardenConfig({ layers: { jev: true, llm: true } }),
+      spend: { ...wardenStatus().spend, jevUsd: 0.51, jevCapUsd: 0.5, capsHit: ['jev'] },
+    });
+
+    // Act
+    const [jev] = layerLines(status);
+
+    // Assert
+    expect(jev).toMatchObject({
+      summary:
+        '6 checks: 1 healthy · 0 acted · 5 handed on · $0.51 of $0.50 today · Jev paused: daily cap reached, back at midnight UTC',
+      clause: '3 flags not checked for the cap',
+      warn: true,
+    });
+  });
+
+  it('should say this hour’s share is reached when Jev is paced, and add what Jev saved', () => {
+    // Arrange
+    const status = withHistory([jevDay('2026-07-31')], {
+      config: wardenConfig({ layers: { jev: true, llm: true } }),
+      spend: {
+        ...wardenStatus().spend,
+        jevUsd: 0.13,
+        jevCapUsd: 0.5,
+        capsHit: ['jev'],
+        capsPaced: ['jev'],
+        pacedUntil: '2026-07-31T13:00:00.000Z',
+      },
+      savings: { ...wardenStatus().savings, savedUsd: 0.4 },
+    });
+
+    // Act
+    const [jev] = layerLines(status);
+
+    // Assert
+    expect(jev?.summary).toEndWith(' · Jev paused until 13:00 UTC: this hour’s share of the cap reached');
+    expect(jev?.clause).toBe('~$0.40 saved vs investigating all');
+  });
+
+  it('should say nothing about a pause while Jev is under its cap', () => {
+    // Arrange
+    const status = withHistory([jevDay('2026-07-31')], { config: wardenConfig({ layers: { jev: true, llm: false } }) });
+
+    // Act
+    const [jev] = layerLines(status);
+
+    // Assert
+    expect(jev?.summary).toBe('6 checks: 1 healthy · 0 acted · 5 handed on · $0.00 of $0.50 today');
+    expect(jev?.warn).toBe(false);
+    expect(jev).not.toHaveProperty('clause');
+  });
+
+  it('should draw Jev’s bar as its checks and say so', () => {
+    // Arrange
+    const status = withHistory([day('2026-07-30', { flags: 1 }), jevDay('2026-07-31')]);
+
+    // Act
+    const chart = wardenDayChart(status, NOW);
+
+    // Assert
+    expect(chart?.title).toBe('Actions and Jev checks per day');
+    expect(chart?.points[6]).toMatchObject({
+      values: [0, 6, 1],
+      readout: 'Fri 31 Jul · Jev 6 checks, LLM 1 · 9 flags',
+    });
+    expect(chart?.points[5]?.readout).toBe('Thu 30 Jul · no actions · 1 flag');
+  });
+
+  it('should say a day that kept checks and did nothing did nothing', () => {
+    // Arrange
+    const status = withHistory([
+      day('2026-07-31', { jev: { checks: 0, healthy: 0, acted: 0, handedOn: 0, skippedForCap: 0 } }),
+    ]);
+
+    // Act / Assert
+    expect(wardenDayChart(status, NOW)?.points[6]?.readout).toBe('Fri 31 Jul · nothing done · 0 flags');
+  });
+
+  it('should keep the old title for a week no day of which kept checks', () => {
+    // Act / Assert
+    expect(wardenDayChart(withHistory(WEEK), NOW)?.title).toBe('Actions per day');
   });
 });

@@ -75,6 +75,7 @@ function Detail({ row }: { readonly row: WardenActionRow }) {
         {row.anomaly !== undefined && <WardenChipBadge chip={row.anomaly} />}
         {row.failoverTo !== undefined && <span>Moved to {row.failoverTo}</span>}
         {row.investigator !== undefined && <span>Investigated by {row.investigator}</span>}
+        {row.cost !== undefined && <span>Cost {row.cost}</span>}
       </div>
       <div className="flex flex-wrap gap-x-sm text-faint">
         {row.times.map(time => (

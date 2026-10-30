@@ -1,6 +1,7 @@
 /**
  * The Warden as a realistic week with both layers on — Jev, then an LLM investigation: seven days of
- * stats (a quiet day, a busy day, one day with no record), Jev paced for the hour, two sessions being
+ * stats (a quiet day, a busy day, one day with no record), each with Jev's checks, Jev paused for the day
+ * with its cap spent, Jev's hand-ons and cap skips in the list, two sessions being
  * watched, investigations running, queued and finished, and ~30 recent actions covering every outcome
  * by every actor, a run of identical repeats, and a stop the owner has not let the Warden take alone. Session ids are the harness fleet's own, so rows
  * resolve to real names and status marks.
@@ -13,6 +14,7 @@ import {
   type WardenAttentionView,
   type WardenConfigView,
   type WardenDayStats,
+  type WardenJevCheck,
   type WardenStatusView,
 } from '@ferretry/protocol';
 
@@ -39,18 +41,61 @@ const day = (
   jevUsd: number,
   investigationUsd: number,
   outcomes: Readonly<Record<'moved' | 'cleared' | 'stopped' | 'asked', ActorTriple>>,
-): WardenDayStats => ({
-  day: date,
-  flags,
-  jevDecisions,
-  investigations,
-  jevUsd,
-  investigationUsd,
-  moved: counts(outcomes.moved),
-  cleared: counts(outcomes.cleared),
-  stopped: counts(outcomes.stopped),
-  asked: counts(outcomes.asked),
-});
+  skippedForCap = 0,
+): WardenDayStats => {
+  // Jev checked every flag it decided: what it cleared was healthy, what it moved or stopped it acted on,
+  // and the rest it handed on — the part a day without these counters could not show.
+  const healthy = outcomes.cleared[1];
+  const acted = outcomes.moved[1] + outcomes.stopped[1];
+  return {
+    day: date,
+    flags,
+    jevDecisions,
+    investigations,
+    jevUsd,
+    investigationUsd,
+    moved: counts(outcomes.moved),
+    cleared: counts(outcomes.cleared),
+    stopped: counts(outcomes.stopped),
+    asked: counts(outcomes.asked),
+    jev: { checks: jevDecisions, healthy, acted, handedOn: jevDecisions - healthy - acted, skippedForCap },
+  };
+};
+
+/** Jev's checks that settled nothing: what Recent actions lists for Jev beside its actions. */
+const JEV_CHECKS: readonly WardenJevCheck[] = [
+  {
+    at: at(2),
+    sessionId: 'harness-marin',
+    anomalyKind: 'sus_thinking',
+    verdict: 'skipped',
+    why: 'jev_cap',
+    route: 'investigation',
+    confidence: 0,
+    costUsd: 0,
+  },
+  {
+    at: at(4),
+    sessionId: 'harness-maryah',
+    anomalyKind: 'unattended_question',
+    verdict: 'handed_on',
+    why: 'unsure',
+    route: 'investigation',
+    confidence: 0.21,
+    costUsd: 0.0041,
+  },
+  {
+    at: at(12),
+    sessionId: 'harness-jaylynn',
+    anomalyKind: 'sus_subprocess',
+    verdict: 'handed_on',
+    why: 'never_alone',
+    act: 'stop',
+    route: 'investigation',
+    confidence: 0.99,
+    costUsd: 0.0038,
+  },
+];
 
 export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
   config,
@@ -95,19 +140,17 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
     lastSelection: { agent: 'claude-default', policy: 'fallback', at: at(30), reason: 'first eligible' },
   },
   triage: {
-    jev: { configured: true, active: true, reason: 'configured' },
+    jev: { configured: true, active: false, reason: 'jev_cap' },
     llm: { configured: true, active: true, reason: 'configured' },
   },
   spend: {
     day: '2026-07-31',
-    jevUsd: 0.31,
+    jevUsd: 0.51,
     jevCapUsd: 0.5,
     investigationUsd: 1.2,
     investigationCapUsd: 2,
     pendingInvestigations: 1,
-    capsHit: [],
-    capsPaced: ['jev'],
-    pacedUntil: new Date(Date.parse('2026-07-31T13:00:00.000Z')).toISOString(),
+    capsHit: ['jev'],
     investigationsLastHour: 2,
     maxInvestigationsPerHour: 6,
   },
@@ -148,13 +191,23 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
       stopped: [1, 0, 1],
       asked: [0, 2, 0],
     }),
-    day('2026-07-31', 41, 41, 4, 0.31, 1.2, {
-      moved: [3, 5, 1],
-      cleared: [0, 26, 2],
-      stopped: [1, 0, 1],
-      asked: [0, 2, 1],
-    }),
+    day(
+      '2026-07-31',
+      41,
+      41,
+      4,
+      0.51,
+      1.2,
+      {
+        moved: [3, 5, 1],
+        cleared: [0, 26, 2],
+        stopped: [1, 0, 1],
+        asked: [0, 2, 1],
+      },
+      6,
+    ),
   ],
+  jevChecks: [...JEV_CHECKS],
   investigations: [
     {
       id: 'warden-jaylynn',

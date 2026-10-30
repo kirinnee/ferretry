@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'bun:test';
+import type { WardenJevCheck } from '@ferretry/protocol';
 import {
   ACTIONS_PAGE,
   actionRows,
   actionTotal,
   filterActionRows,
   NO_FILTERS,
+  OUTCOME_FILTERS,
   pageActionRows,
 } from '../../../src/features/warden/warden-action-rows-model.ts';
 import { wardenAction, wardenStatus } from '../../support/warden.ts';
@@ -308,5 +310,138 @@ describe('pageActionRows', () => {
     // Arrange / Act / Assert
     expect(pageActionRows(rows, 0).rows).toHaveLength(20);
     expect(pageActionRows([], 1)).toEqual({ rows: [], hidden: 0 });
+  });
+});
+
+describe('Jev’s checks on the list', () => {
+  const check = (overrides: Partial<WardenJevCheck> = {}): WardenJevCheck => ({
+    at: at(5),
+    sessionId: 's1',
+    anomalyKind: 'sus_thinking',
+    verdict: 'handed_on',
+    why: 'unsure',
+    route: 'investigation',
+    confidence: 0.21,
+    costUsd: 0.0004,
+    ...overrides,
+  });
+  const rowsWith = (jevChecks: WardenJevCheck[], actions: ReturnType<typeof wardenAction>[] = []) =>
+    actionRows(wardenStatus({ actions, jevChecks }), NOW);
+
+  it('should list a check Jev handed on as Jev’s, with how sure it was, what it cost and where the flag went', () => {
+    // Act
+    const [row] = rowsWith([check()]);
+
+    // Assert
+    expect(row).toMatchObject({
+      key: `jev:s1:sus_thinking:${at(5)}`,
+      chip: { label: 'Handed on', tone: 'accent' },
+      verb: 'Checked by Jev and handed on',
+      actor: 'jev',
+      actorLabel: 'Jev 21%',
+      reason: 'Jev was not sure (21%), so it went to an investigation.',
+      anomaly: { label: 'long think' },
+      outcome: undefined,
+      check: 'handed_on',
+      cost: '$0.0004',
+      count: 1,
+    });
+  });
+
+  it('should list a flag skipped for the cap as Jev’s, without a confidence or a cost', () => {
+    // Act
+    const [daily, hourly] = rowsWith([
+      check({ verdict: 'skipped', why: 'jev_cap', route: 'owner', confidence: 0, costUsd: 0 }),
+      check({ at: at(6), verdict: 'skipped', why: 'jev_paced', confidence: 0, costUsd: 0 }),
+    ]);
+
+    // Assert
+    expect(daily).toMatchObject({
+      chip: { label: 'Skipped', tone: 'warn' },
+      actorLabel: 'Jev',
+      reason: 'Jev was not asked: its daily cap is spent, so it waits for you.',
+      check: 'skipped',
+    });
+    expect(daily).not.toHaveProperty('cost');
+    expect(hourly?.reason).toBe(
+      'Jev was not asked: this hour’s share of its cap is spent, so it went to an investigation.',
+    );
+  });
+
+  it.each([
+    [{ why: 'not_sure_enough', act: 'restart' }, 'Jev was only 21% sure it should restart it, below your bar'],
+    [{ why: 'not_sure_enough' }, 'Jev was only 21% sure, below your bar'],
+    [{ why: 'never_alone', act: 'stop', confidence: 0.99 }, 'Jev would stop it (99% sure), but stopping alone is off'],
+    [
+      { why: 'not_allowed', act: 'failover' },
+      'Jev would move it to another account (21% sure), but moving accounts alone is off',
+    ],
+    [{ why: 'not_allowed' }, 'Jev was 21% sure, but may not act alone'],
+    [
+      { why: 'cannot_choose_login', act: 'failover' },
+      'Jev would move it to another account (21% sure), but cannot choose which',
+    ],
+    [{ why: 'no_message' }, 'Jev would nudge it, but was not sure enough of what to say'],
+    [{ why: 'already_acted' }, 'Jev already acted on this and it is still flagged'],
+    [{ why: 'not_offered' }, 'Jev chose something this flag does not allow'],
+    [{ why: 'failed' }, 'Jev’s check failed'],
+    [{ why: 'act_failed', act: 'nudge', confidence: 0.93 }, 'Jev tried to nudge it (93% sure) and it did not take'],
+    [{ why: 'act_failed', act: undefined, confidence: 0.93 }, 'Jev tried to act (93% sure) and it did not take'],
+    [{ why: undefined }, 'Jev was not sure (21%)'],
+    [{ why: 'never_alone', act: 'resume' }, 'Jev would resume it (21% sure), but resuming alone is off'],
+  ] as const)('should say why for %o', (overrides, cause) => {
+    // Act
+    const [row] = rowsWith([check(overrides as Partial<WardenJevCheck>)]);
+
+    // Assert
+    expect(row?.reason).toBe(`${cause}, so it went to an investigation.`);
+  });
+
+  it('should leave a check that cleared or acted to the action it already is', () => {
+    // Act
+    const rows = rowsWith([check({ verdict: 'healthy', why: undefined }), check({ verdict: 'acted', act: 'nudge' })]);
+
+    // Assert
+    expect(rows).toEqual([]);
+  });
+
+  it('should put checks and actions on one timeline, folding only identical neighbours', () => {
+    // Arrange
+    const jevChecks = [check({ at: at(1) }), check({ at: at(2) }), check({ at: at(4) })];
+    const actions = [wardenAction({ at: at(3), sessionId: 's2' })];
+
+    // Act
+    const rows = rowsWith(jevChecks, actions);
+
+    // Assert
+    expect(rows.map(row => [row.check ?? 'action', row.count])).toEqual([
+      ['handed_on', 2],
+      ['action', 1],
+      ['handed_on', 1],
+    ]);
+    expect(rows[0]?.times.map(time => time.compact)).toEqual(['1m', '2m']);
+    expect(actionTotal(rows)).toBe(4);
+  });
+
+  it('should show only Jev’s hand-ons and skips under Handed on, and keep them under Jev', () => {
+    // Arrange
+    const rows = rowsWith([check()], [wardenAction({ at: at(9), by: 'warden', reportPath: '/r.md' })]);
+
+    // Act
+    const handed = filterActionRows(rows, { actor: 'all', outcome: 'handed' });
+    const jev = filterActionRows(rows, { actor: 'jev', outcome: 'all' });
+
+    // Assert
+    expect(OUTCOME_FILTERS.map(option => option.label)).toContain('Handed on');
+    expect(handed.map(row => row.check)).toEqual(['handed_on']);
+    expect(jev.map(row => row.check)).toEqual(['handed_on']);
+    expect(filterActionRows(rows, { actor: 'all', outcome: 'cleared' }).some(row => row.check !== undefined)).toBe(
+      false,
+    );
+  });
+
+  it('should read a daemon that sends no checks as before', () => {
+    // Act / Assert
+    expect(actionRows(wardenStatus({ actions: [wardenAction({ at: at(1) })] }), NOW)).toHaveLength(1);
   });
 });

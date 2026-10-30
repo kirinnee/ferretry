@@ -131,7 +131,8 @@ const guardWarning = (status: WardenStatusView, now: number): string | undefined
   const jevPaced = wardenPacedUntil(status, 'jev');
   if (jev.reason === 'jev_cap' && jevPaced !== undefined)
     return `Jev paused until ${jevPaced} — new flags ${pausedTo(status)}`;
-  if (jev.reason === 'jev_cap') return `Jev cap hit — every flag ${passedTo(status)} until midnight UTC`;
+  if (jev.reason === 'jev_cap')
+    return `Jev paused: daily cap reached — every flag ${passedTo(status)} until midnight UTC`;
   if (!jev.configured) return undefined;
   if (status.triage.guardFailure?.code === 'not_set') return `No Jev key — every flag ${passedTo(status)}`;
   const backoff = Date.parse(status.triage.guardBackoffUntil ?? '');
