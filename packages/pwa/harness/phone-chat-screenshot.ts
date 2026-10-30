@@ -12,9 +12,12 @@
  *   - Jump to latest cannot be tapped, or does not land on the newest line;
  *   - the "N need you" pill does not open the agenda drawer where a finger can reach it, or a drawer row does not
  *     open its item;
- *   - at 360, 390 and 430 px the header draws anything but ☰, the name, the card's reference, one status dot and ▾,
- *     any two of those overlap or leave the row, or ▾ does not hold what moved out of the bar (Interrupt, Info,
- *     Theme, and Restart CLI marked Outdated).
+ *   - at 360, 390 and 430 px the header draws anything but ☰, the name, one status dot, the theme icon, ⓘ and ▾,
+ *     any two of those overlap or leave the row, or ▾ does not hold what moved out of the bar (Interrupt, and
+ *     Restart CLI marked Outdated);
+ *   - the theme picker (the bar's icon, on a phone and on a desktop) does not show a visible ✕ on screen, or does
+ *     not close from the ✕, Done, Escape, a tap outside it, or the platform Back (owner, 2026-10-30: "make sure
+ *     i can close it!").
  */
 
 import { spawnSync } from 'node:child_process';
@@ -163,9 +166,9 @@ const headerParts = async (page: Page): Promise<{ name: string; box: Box }[]> =>
       ['outdated', '[data-outdated-mark]'],
       ['status dot', '.fy-session-bar__status'],
       ['actions', '[data-session-actions]'],
+      ['theme', '[data-theme-trigger]'],
       ['info', '[data-session-info-toggle]'],
       ['menu', '[data-session-actions-trigger]'],
-      ['theme', '[data-theme-trigger]'],
     ];
     return named.flatMap(([name, selector]) => {
       const element = header.querySelector(selector);
@@ -193,7 +196,94 @@ const expectAbout = async (page: Page, label: string): Promise<void> => {
   check(inView, `${label}: the block sits inside the screen`);
 };
 
-const PHONE_BAR = ['sessions', 'name', 'status dot', 'info', 'menu'];
+const PHONE_BAR = ['sessions', 'name', 'status dot', 'theme', 'info', 'menu'];
+
+const THEME_PANEL = '[role="dialog"][aria-label="Theme"]';
+
+/** A point beside the open theme picker (on whichever side has room) at height `y`, i.e. outside it. */
+const freeSide = async (page: Page, y: number): Promise<{ x: number; y: number }> => {
+  const width = page.viewportSize()?.width ?? 0;
+  const panel = await page.locator('[role="dialog"][aria-label="Theme"]').boundingBox();
+  const left = panel === null ? 0 : panel.x;
+  const right = panel === null ? 0 : width - (panel.x + panel.width);
+  return { x: left >= right ? Math.max(1, left / 2) : width - Math.max(1, right / 2), y };
+};
+
+/** Opens the theme picker from the bar and proves every way out of it, each from a freshly opened picker. */
+const themePickerPaths = async (page: Page, label: string, touch: boolean, scheme: string, name: string) => {
+  const viewport = page.viewportSize() ?? { width: 0, height: 0 };
+  const trigger = page.locator('[data-theme-trigger]');
+  const press = async (selector: string): Promise<void> => {
+    const target = page.locator(selector).first();
+    if (touch) await target.tap();
+    else await target.click();
+  };
+  const openPicker = async (): Promise<void> => {
+    await press('[data-theme-trigger]');
+    await page.locator(THEME_PANEL).waitFor({ state: 'visible', timeout: 3_000 });
+    await page.waitForTimeout(150);
+  };
+  const gone = async (): Promise<boolean> =>
+    await page
+      .locator(THEME_PANEL)
+      .waitFor({ state: 'hidden', timeout: 3_000 })
+      .then(
+        () => true,
+        () => false,
+      );
+  check((await trigger.count()) === 1, `${label}: the bar carries the theme button`);
+
+  await openPicker();
+  await shot(page, name, scheme);
+  const panel = await box(page, THEME_PANEL);
+  const closeBox = await box(page, '[data-theme-close]');
+  check(
+    panel !== null && panel.x >= 0 && panel.x + panel.width <= viewport.width,
+    `${label}: the picker sits inside the screen sideways (${JSON.stringify(panel)})`,
+  );
+  check(
+    closeBox !== null &&
+      closeBox.x >= 0 &&
+      closeBox.y >= 0 &&
+      closeBox.x + closeBox.width <= viewport.width &&
+      closeBox.y + closeBox.height <= viewport.height,
+    `${label}: the ✕ is on screen (${JSON.stringify(closeBox)})`,
+  );
+  check(await hitInside(page, '[data-theme-close]', '[data-theme-close]'), `${label}: nothing covers the ✕`);
+  check((await page.locator('[data-theme-done]').count()) === 1, `${label}: the picker has Done`);
+
+  // Choosing a theme is not a way out: it stays open (Done ends the choice).
+  await page.locator('input[data-mode="dark"]').first().check({ force: true });
+  check((await page.locator(THEME_PANEL).count()) === 1, `${label}: choosing a mode leaves it open for Done`);
+  await page.locator('input[data-mode="system"]').first().check({ force: true });
+  await page.locator('[data-theme-close]').first().click();
+  check(await gone(), `${label}: the ✕ closes it`);
+
+  const outside = { x: 0, y: Math.min(viewport.height - 8, 600) };
+  const paths: readonly [string, () => Promise<void>][] = [
+    ['Done', () => press('[data-theme-done]')],
+    ['Escape', () => page.keyboard.press('Escape')],
+    [
+      'a tap outside it',
+      async () => {
+        const at = await freeSide(page, outside.y);
+        if (touch) await page.touchscreen.tap(at.x, at.y);
+        else await page.mouse.click(at.x, at.y);
+      },
+    ],
+    ['the platform Back', () => page.evaluate(() => history.back())],
+  ];
+  for (const [path, act] of paths) {
+    await openPicker();
+    await act();
+    const closed = await gone();
+    check(closed, `${label}: ${path} closes it`);
+    check(
+      new URL(page.url()).pathname === '/',
+      `${label}: ${path} leaves the page it was opened over (${new URL(page.url()).pathname})`,
+    );
+  }
+};
 const GONE_FROM_BAR = [
   '[data-card-chip]',
   '[data-outdated-mark]',
@@ -325,21 +415,26 @@ try {
           );
         await shot(page, 'menu', scheme);
         // Info is offered only by a host with Info (`context`), which this page leaves out; the unit tests cover it.
-        for (const id of ['interrupt', 'theme'])
-          check(
-            items.some(item => item.startsWith(`${id}:`)),
-            `${scheme}: ▾ holds ${id}`,
-          );
+        check(
+          items.some(item => item.startsWith('interrupt:')),
+          `${scheme}: ▾ holds interrupt`,
+        );
+        check(
+          !items.some(item => item.startsWith('theme:')),
+          `${scheme}: ▾ no longer holds a Theme… form (the bar's icon is the picker)`,
+        );
         check(
           items.some(item => item.startsWith('restart:') && item.includes('Outdated')),
           `${scheme}: ▾ says the ferret is outdated, on its remedy`,
         );
-        await page.locator('[data-session-action-item="theme"]').tap();
-        await page.waitForTimeout(400);
-        const radios = await page.locator('[data-session-action-sheet] input[type="radio"]').count();
-        await shot(page, 'menu-theme', scheme);
-        check(radios > 0, `${scheme}: ▾ › Theme… opens the theme controls (${radios} choices)`);
       }
+      await page.context().close();
+    }
+
+    // 3b. The theme picker from the header's own icon, on a phone: visible ✕, and every way out works.
+    {
+      const page = await open(theme, 390);
+      await themePickerPaths(page, `${scheme} phone chat`, true, scheme, 'theme-open');
       await page.context().close();
     }
 
@@ -366,6 +461,7 @@ try {
       await page.locator('.fy-transcript').waitFor();
       await page.waitForTimeout(600);
       await shot(page, 'desktop', scheme);
+      await themePickerPaths(page, `${scheme} desktop chat`, false, scheme, 'desktop-theme-open');
       const stillThere = await page.evaluate(
         gone => gone.filter(selector => document.querySelector(`[data-session-bar] ${selector}`) !== null),
         GONE_FROM_BAR,

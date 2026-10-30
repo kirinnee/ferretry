@@ -29,11 +29,11 @@ import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx'
 import { ConvertSheet } from '../../src/features/session-actions/convert-sheet.tsx';
 import type { CoreActionContext } from '../../src/features/session-actions/core-actions.ts';
 import { ForkForm } from '../../src/features/session-actions/fork-form.tsx';
-import type { SessionActionContribution, SessionActionSection } from '../../src/features/session-actions/registry.ts';
+import type { SessionActionContribution } from '../../src/features/session-actions/registry.ts';
 import { RenameForm } from '../../src/features/session-actions/rename-form.tsx';
 import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
-import { ThemeSettingsPanel } from '../../src/shell/theme-toggle.tsx';
+import { ThemeToggle } from '../../src/shell/theme-toggle.tsx';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
@@ -474,10 +474,12 @@ describe('SessionChatPage', () => {
     expect(page.root.findByType(Transcript).props.daemonId).toBe('alpha');
     expect(page.root.findByType(Transcript).props.entries[0].text).toBe('The daemon answered.');
     expect(page.root.findByProps({ className: 'fy-composer' })).toBeDefined();
+    // The theme picker sits in the bar beside Interrupt/Stop, as an icon (the owner asked for it there).
+    expect(page.root.findByType(SessionTopBar).props.themeToggle.type).toBe(ThemeToggle);
+    expect(page.root.findByType(SessionTopBar).props.themeToggle.props.touch).toBe(false);
     // DO is Actions ▾, grouped; the old ⋯ menu is gone.
     expect(page.root.findAllByProps({ 'data-session-more': '' })).toHaveLength(0);
     expect(actionLabels(page.root)).toEqual([
-      'Theme…',
       'Rename…',
       'Fork into a new ferret…',
       'Copy session id',
@@ -980,8 +982,11 @@ describe('SessionChatPage', () => {
       expect(hasBarAction(page.root, 'Interrupt turn')).toBe(false);
       expect(hasBarAction(page.root, 'Stop session')).toBe(false);
       expect(page.root.findAllByProps({ 'data-session-info-toggle': '' })).toHaveLength(0);
-      expect(page.root.findAllByProps({ 'data-theme-trigger': '' })).toHaveLength(0);
-      expect(actionLabels(page.root).slice(0, 2)).toEqual(['Interrupt turn', 'Theme…']);
+      // The theme picker is the bar's own icon, not a form in ▾ (a form there had no way to close).
+      expect(page.root.findByType(SessionTopBar).props.themeToggle.type).toBe(ThemeToggle);
+      expect(page.root.findByType(SessionTopBar).props.themeToggle.props.touch).toBe(true);
+      expect(actionLabels(page.root)[0]).toBe('Interrupt turn');
+      expect(actionLabels(page.root)).not.toContain('Theme…');
       expect(actionLabels(page.root)).not.toContain('Info');
       expect(actionLabels(page.root).at(-1)).toBe('Stop ferret…');
       // On a phone the trigger is an icon, named for a screen reader.
@@ -1010,7 +1015,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('on a phone ▾ interrupts and opens the theme controls, and ⓘ opens Info — all the bar no longer draws', async () => {
+  test('on a phone ▾ interrupts, the bar carries the theme picker, and ⓘ opens Info', async () => {
     const calls: string[] = [];
     const page = renderSessionChatPage(
       <SessionChatPage
@@ -1024,21 +1029,12 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      expect(actionLabels(page.root).slice(0, 2)).toEqual(['Interrupt turn', 'Theme…']);
+      expect(actionLabels(page.root)[0]).toBe('Interrupt turn');
+      expect(actionLabels(page.root)).not.toContain('Theme…');
       expect(actionLabels(page.root)).not.toContain('Info');
       chooseAction(page.root, 'interrupt');
       await flush();
       expect(calls).toEqual(['interrupt:shared']);
-
-      // The form's sheet is portalled on a phone (the real controls are proved in harness/phone-chat-screenshot.ts).
-      chooseAction(page.root, 'theme');
-      const menu = page.root.findByType(ActionsMenu);
-      expect(menu.props.form).toBe('theme');
-      const theme = (menu.props.sections as readonly SessionActionSection[])
-        .flatMap(section => section.entries)
-        .find(entry => entry.id === 'theme');
-      if (theme?.kind !== 'form') throw new Error('Theme… is not a form in Actions');
-      expect((theme.render({} as never) as ReactElement).type).toBe(ThemeSettingsPanel);
 
       run(() => page.root.findByType(SessionTopBar).props.onToggleInfo());
       expect(page.root.findByType(SessionInfo).props.placement.open).toBe(true);
@@ -1061,7 +1057,7 @@ describe('SessionChatPage', () => {
     );
     try {
       expect(actionLabels(page.root)).not.toContain('Interrupt turn');
-      expect(actionLabels(page.root)[0]).toBe('Theme…');
+      expect(actionLabels(page.root)).not.toContain('Theme…');
     } finally {
       run(() => page.unmount());
     }
@@ -3253,7 +3249,7 @@ describe('SessionChatPage Info and Actions', () => {
     const page = renderSessionChatPage(chatPage({ canControl: false, initialInfo: 'overview' }), fakeDaemon().factory);
     try {
       await flush();
-      expect(actionLabels(page.root)).toEqual(['Theme…', 'Copy session id']);
+      expect(actionLabels(page.root)).toEqual(['Copy session id']);
       expect(page.root.findByType(SessionInfo).props.onRename).toBeUndefined();
       expect(page.root.findAllByProps({ 'data-info-rename': '' })).toHaveLength(0);
     } finally {
