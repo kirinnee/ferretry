@@ -1050,6 +1050,8 @@ import {
   type TerminalSessionResolver,
   type TerminalSubsystem,
   TmuxController,
+  isTmuxServerAbsent,
+  type JsonValue,
   type TmuxLaunchGuard,
   type TranscriptEvent,
   type TranscriptFileResolver,
@@ -1096,6 +1098,9 @@ import {
   WardenLivenessMonitor,
   type WardenSubsystem,
   WardenSweepLoop,
+  WardenReviveService,
+  type WardenJournal,
+  type WardenRevivePorts,
   WardenSweepService,
   WatchedDocument,
   WatchedPanes,
@@ -4072,6 +4077,8 @@ interface WardenParts {
   readonly closeLeftoverBrowsers: (sessionId: string) => Promise<number>;
   /** This machine's name, as pairing gave it: every Warden notification says which machine it is about. */
   readonly machineName: () => string | undefined;
+  /** What auto-revive reaches the rest of the daemon through: the journal, the resume, the tmux probe, the clock. */
+  readonly revive: Pick<WardenRevivePorts, 'events' | 'resume' | 'tmuxReady' | 'sleep'>;
 }
 
 /**
@@ -4122,8 +4129,40 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     WARDEN_LIVENESS_TICK_SECONDS,
   );
   const artifacts = new FileWardenArtifacts(parts.files, parts.reportsReader, parts.reportsDirectory);
+  const wardenJournal: WardenJournal = {
+    record: (type, data) => process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`),
+  };
+  const revive = new WardenReviveService({
+    ...parts.revive,
+    journal: wardenJournal,
+    // The breaker's one notice lands on the session that tripped it, as a plain notification that buzzes.
+    notifyOwner: async notice => {
+      await parts.attention
+        .raise(
+          notice.sessionId,
+          {
+            source: 'agent-raised',
+            sourceRef: 'warden-revive-breaker',
+            subject: notice.subject,
+            why: notice.why,
+            context: 'Auto-revive paused itself after revived sessions kept dying.',
+            waitingSince: new Date().toISOString(),
+            howToResolve:
+              'Nothing to answer. Look at why sessions keep dying; revives resume by themselves after the pause.',
+            notice: true,
+            ping: true,
+            title: notice.title,
+            kind: 'info',
+            premise: 'Ferretry restarts sessions that die abnormally, at most a few at a time.',
+          },
+          WARDEN_ESCALATION_ACTOR,
+        )
+        .catch(() => undefined);
+    },
+  });
   const service = new WardenSweepService(
     {
+      revive,
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
       // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
@@ -4302,10 +4341,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       // The journal is the daemon's own log for now: the fleet event tier these belong on is
       // `emitTransient`, which section I of the survey records as absent. A supervision decision an
       // operator cannot see is worse than a noisy one, so they are written rather than dropped.
-      journal: {
-        record: (type, data) =>
-          process.stdout.write(`${JSON.stringify({ at: new Date().toISOString(), type, data })}\n`),
-      },
+      journal: wardenJournal,
       nowMs: () => Date.now(),
       // Two UUIDs concatenated: the value authorizes stopping a session, so it is minted from the
       // same source as every other secret here and is longer than one.
@@ -10199,6 +10235,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             `pack: the routing prompt migration did not run: ${error instanceof Error ? error.message : String(error)}\n`,
           );
         });
+      const sessionResumeSubsystem = createSessionResumeSubsystem(
+        storage,
+        sessions,
+        resume,
+        // The SAME stamper the start uses, so a create and a revive can never disagree about how
+        // descent is decided; only the ancestry snapshot differs, and it is taken per relaunch.
+        new SessionProvenanceRecorder(spawnProvenance, new StorageSessionProvenanceStore(storage), {
+          snapshot: async () => await spawnAncestry(storage, sessions),
+        }),
+        // A message held while this session could not take input is delivered now that it is back.
+        sends,
+      );
       const mounted: Omit<MountedSubsystems, 'sessionMcp' | 'mcpInventory'> = {
         pack: {
           service: packService,
@@ -10473,18 +10521,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           worktrees.managedRoot,
         ),
         sessionControl,
-        sessionResume: createSessionResumeSubsystem(
-          storage,
-          sessions,
-          resume,
-          // The SAME stamper the start uses, so a create and a revive can never disagree about how
-          // descent is decided; only the ancestry snapshot differs, and it is taken per relaunch.
-          new SessionProvenanceRecorder(spawnProvenance, new StorageSessionProvenanceStore(storage), {
-            snapshot: async () => await spawnAncestry(storage, sessions),
-          }),
-          // A message held while this session could not take input is delivered now that it is back.
-          sends,
-        ),
+        sessionResume: sessionResumeSubsystem,
         sendTracking: sendTracker,
         sessionSend: createSessionSendSubsystem(
           storage,
@@ -10763,6 +10800,46 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             }),
           sends,
           resume,
+          revive: {
+            events: {
+              read: async sessionId => {
+                const id = parseSessionId(sessionId);
+                const last = storage.findSession(id)?.lastSequence ?? 0;
+                // The last page is enough: only the LAST terminal event decides.
+                const page = await storage.replay(id, Math.max(0, last - 200), 200).catch(() => undefined);
+                return page?.events ?? [];
+              },
+              emit: async (sessionId, type, data) => {
+                await storage.append(parseSessionId(sessionId), type, data as JsonValue).catch(() => undefined);
+              },
+            },
+            // The refusal word is the resume service's own failure name; anything else is just "error".
+            resume: async (sessionId, message) => {
+              try {
+                await sessionResumeSubsystem.resume(sessionId, 'warden', message, {
+                  automatic: true,
+                  dedupeSharedRecoveryScope: false,
+                  expectedStatus: 'failed',
+                  humanOperator: false,
+                });
+                return { ok: true };
+              } catch (error) {
+                return {
+                  ok: false,
+                  reason: error instanceof SessionResumeError ? error.failure : 'error',
+                };
+              }
+            },
+            // "Answers" means tmux ran and said something definite: a listing, or a clean "no server" (a
+            // revive starts one). A hang, a crash message or a thrown spawn is "not yet".
+            tmuxReady: async () => {
+              const result = await launchTmuxCommands
+                .execute(['list-sessions', '-F', '#{session_name}'])
+                .catch(() => undefined);
+              return result !== undefined && (result.code === 0 || isTmuxServerAbsent(result.stderr));
+            },
+            sleep: async milliseconds => await Bun.sleep(milliseconds),
+          },
           migrate: sessionMigrate,
           analytics: analyticsIngestion,
           events: listener => storage.subscribeEvents(listener),

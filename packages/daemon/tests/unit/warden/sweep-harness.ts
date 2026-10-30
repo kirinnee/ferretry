@@ -18,6 +18,7 @@ import {
   WardenSweepService,
   type WardenSweepSettings,
   wardenEscalationSourceRef,
+  type WardenReviveService,
 } from '../../../src/lib/warden/index.ts';
 
 /**
@@ -133,6 +134,8 @@ export function harness(
     readonly verdicts?: () => Promise<readonly WardenEscalationVerdict[] | undefined>;
     /** Nodes whose agenda board cannot be read this sweep. */
     readonly unreadableBoards?: readonly string[];
+    /** Auto-revive, when a test is about it. */
+    readonly revive?: WardenReviveService;
     /** Force every raise to one outcome, for the paths a real store reaches rarely. */
     readonly raiseWrite?: WardenAgendaWrite;
     /** The Jev guard's answer to each snapshot, in order; the last one repeats. */
@@ -309,6 +312,7 @@ export function harness(
       },
     },
     journal: { record: (type, data) => void journal.push({ type, data: { ...data } }) },
+    ...(options.revive === undefined ? {} : { revive: options.revive }),
     jevChecks: {
       append: async check => {
         if (options.jevChecksFail === 'append') throw new Error('disk full');

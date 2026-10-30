@@ -187,6 +187,7 @@ import {
   wardenActDetail,
   wardenNudgeMessage,
 } from './remedy.ts';
+import type { WardenReviveService } from './revive-service.ts';
 import {
   parseWardenRuntimeState,
   jevHandoffKey,
@@ -409,6 +410,8 @@ export interface WardenSweepPorts {
   /** Written AFTER detection, for the escalation reconciliation only. */
   readonly attention: WardenAgendaPort;
   readonly journal: WardenJournal;
+  /** Auto-revive of sessions that died abnormally (`revive-service.ts`). Absent: nothing is revived. */
+  readonly revive?: WardenReviveService;
   /** Jev's checks, one record each, kept beside the reports (`jev-checks.ts`). */
   readonly jevChecks: WardenJevCheckLog;
   /** Wall-clock milliseconds. */
@@ -1012,9 +1015,12 @@ export class WardenSweepService {
     };
     await this.ports.state.write(state);
     state = await this.closeLeftovers(state, fleet, config, nowMs);
+    const reviveRun = await this.reviveDead(state, fleet, config, nowMs);
+    state = reviveRun.state;
+    const anomalies = detected.anomalies.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
 
     const assigned = await this.runAssigned({
-      anomalies: detected.anomalies.filter(anomaly => anomaly.assignedWarden === true),
+      anomalies: anomalies.filter(anomaly => anomaly.assignedWarden === true),
       fleet,
       config,
       login,
@@ -1025,7 +1031,7 @@ export class WardenSweepService {
     state = assigned.state;
 
     const escalated = await this.escalate({
-      anomalies: detected.anomalies.filter(anomaly => anomaly.assignedWarden !== true),
+      anomalies: anomalies.filter(anomaly => anomaly.assignedWarden !== true),
       fleet,
       config,
       login,
@@ -1041,7 +1047,7 @@ export class WardenSweepService {
     // a single agenda board is opened, which is what makes "ordinary
     // Attention cannot affect the scan" a property of the ORDER rather than a
     // promise. Moving this call earlier would break it.
-    await this.reconcileEscalations(detected.anomalies, fleet, {
+    await this.reconcileEscalations(anomalies, fleet, {
       config,
       login,
       state: final,
@@ -1051,7 +1057,7 @@ export class WardenSweepService {
 
     return {
       sweptAt: at,
-      anomalies: detected.anomalies.map(wireAnomaly),
+      anomalies: anomalies.map(wireAnomaly),
       ...escalated.outcome,
       ...(assigned.spawned.length === 0 ? {} : { assignedWardens: [...assigned.spawned] }),
     };
@@ -1870,6 +1876,34 @@ export class WardenSweepService {
       }
     }
     return next;
+  }
+
+  /**
+   * Revive what died abnormally, by rule (`revive.ts`): no Jev, no investigation, no spend. Each wave is
+   * written as it completes, so a daemon that dies mid-cascade has already spent those cooldowns. A session
+   * revived here is not flagged as dead on this same pass: the caller drops it from the anomalies.
+   */
+  private async reviveDead(
+    state: WardenRuntimeState,
+    fleet: readonly WardenFleetSession[],
+    config: WardenConfig,
+    nowMs: number,
+  ): Promise<{ readonly state: WardenRuntimeState; readonly revived: ReadonlySet<string> }> {
+    const service = this.ports.revive;
+    if (service === undefined) return { state, revived: new Set() };
+    let next = state;
+    try {
+      const result = await service.run({ fleet, config, revive: state.revive, nowMs }, async (revive, actions) => {
+        let written: WardenRuntimeState = { ...next, revive };
+        for (const action of actions) written = this.recordAction(written, action);
+        next = written;
+        await this.ports.state.write(next);
+      });
+      return { state: next, revived: result.revived };
+    } catch (error) {
+      this.ports.journal.record('fleet.warden_revive_failed', { message: failureMessage(error) });
+      return { state: next, revived: new Set() };
+    }
   }
 
   /**
