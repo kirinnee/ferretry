@@ -35,6 +35,8 @@ export const agendaWireOf = (read: DaemonHealthRead): AgendaWire =>
  */
 export class AgendaWireDirectory {
   readonly #wires = new Map<DaemonId, AgendaWire>();
+  /** Whether each read machine can snooze (`agenda.snooze.1`); absent until its health answered. */
+  readonly #snooze = new Map<DaemonId, boolean>();
   readonly #listeners = new Set<() => void>();
 
   subscribe = (listener: () => void): (() => void) => {
@@ -47,11 +49,22 @@ export class AgendaWireDirectory {
     return this.#wires.get(daemonId) ?? 'attention';
   }
 
+  /**
+   * Whether the machine can snooze and unsnooze (`agenda.snooze.1`): `false` only when its health ANSWERED
+   * without the name — an older daemon refuses the request as an unknown action — and `undefined` until then.
+   */
+  snoozeOf(daemonId: DaemonId): boolean | undefined {
+    return this.#snooze.get(daemonId);
+  }
+
   note(daemonId: DaemonId, read: DaemonHealthRead): void {
-    if (read.kind === 'read') this.#set(daemonId, agendaWireOf(read));
+    if (read.kind !== 'read') return;
+    this.#snooze.set(daemonId, machineOffers(read, DAEMON_FEATURES.agendaSnooze));
+    this.#set(daemonId, agendaWireOf(read));
   }
 
   clearDaemon(daemonId: DaemonId): void {
+    this.#snooze.delete(daemonId);
     if (this.#wires.delete(daemonId)) this.#notify();
   }
 

@@ -41,6 +41,12 @@ export const DAEMON_FEATURES = {
   agendaTask: 'agenda.task.1',
   /** The board's per-project lane sets: `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`. */
   boardLanes: 'board.lanes.1',
+  /**
+   * The agenda's parked items (docs/agenda.md § Parked items): `snooze` and `unsnooze` requests, and `now` on
+   * `edit` and `surface`. A daemon without this name refuses them as an unknown action: the app offers the
+   * clock only where the machine reports it, and otherwise says the machine needs an update.
+   */
+  agendaSnooze: 'agenda.snooze.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];
