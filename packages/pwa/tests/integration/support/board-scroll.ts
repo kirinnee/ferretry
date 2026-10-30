@@ -134,3 +134,66 @@ export const readBoardDensity = async (page: Page): Promise<BoardDensityFacts> =
       },
     };
   });
+
+export interface BoardReadableFacts {
+  readonly cards: number;
+  /** The most lines any title takes, and how many titles the two-line clamp had to cut. */
+  readonly titleMaxLines: number;
+  readonly titlesCut: number;
+  /** Meta items drawn only in part (cut by the row's right or bottom edge): there must be none. */
+  readonly partialItems: number;
+  /** Cards whose id, or whose activity, is not drawn whole on the meta line. */
+  readonly cardsMissingId: number;
+  readonly cardsMissingActivity: number;
+  /** The tallest card, and the narrowest title box (what the column leaves the text). */
+  readonly tallestCard: number;
+  readonly titleWidth: number;
+}
+
+export const readBoardReadable = async (page: Page): Promise<BoardReadableFacts> =>
+  await page.evaluate(() => {
+    const cards = [...document.querySelectorAll<HTMLElement>('.fy-board-card')];
+    let titleMaxLines = 0;
+    let titlesCut = 0;
+    let partialItems = 0;
+    let cardsMissingId = 0;
+    let cardsMissingActivity = 0;
+    let tallestCard = 0;
+    let titleWidth = Number.POSITIVE_INFINITY;
+    for (const card of cards) {
+      tallestCard = Math.max(tallestCard, card.getBoundingClientRect().height);
+      const title = card.querySelector<HTMLElement>('.fy-board-card__title');
+      if (title !== null) {
+        const lineHeight = Number.parseFloat(getComputedStyle(title).lineHeight);
+        titleMaxLines = Math.max(titleMaxLines, Math.round(title.getBoundingClientRect().height / lineHeight));
+        if (title.scrollHeight > title.clientHeight + 1) titlesCut += 1;
+        titleWidth = Math.min(titleWidth, title.getBoundingClientRect().width);
+      }
+      const meta = card.querySelector<HTMLElement>('.fy-board-card__meta')?.getBoundingClientRect();
+      const whole = (segment: Element | null): boolean => {
+        if (segment === null || meta === undefined) return false;
+        const box = segment.getBoundingClientRect();
+        return box.top >= meta.top - 0.5 && box.bottom <= meta.bottom + 0.5 && box.right <= meta.right + 0.5;
+      };
+      if (meta !== undefined) {
+        for (const segment of card.querySelectorAll('.fy-board-seg')) {
+          const box = segment.getBoundingClientRect();
+          const inside = whole(segment);
+          const outside = box.top >= meta.bottom - 0.5;
+          if (!inside && !outside) partialItems += 1;
+        }
+      }
+      if (!whole(card.querySelector('.fy-board-seg[data-seg="ref"]'))) cardsMissingId += 1;
+      if (!whole(card.querySelector('.fy-board-seg[data-seg="activity"]'))) cardsMissingActivity += 1;
+    }
+    return {
+      cards: cards.length,
+      titleMaxLines,
+      titlesCut,
+      partialItems,
+      cardsMissingId,
+      cardsMissingActivity,
+      tallestCard,
+      titleWidth,
+    };
+  });

@@ -10,7 +10,7 @@ import { type AgendaItem, agendaTurn } from '@ferretry/protocol';
 
 /** The items of an agenda: open, and not a plain notification. */
 export const agendaItems = (items: readonly AgendaItem[]): readonly AgendaItem[] =>
-  items.filter(item => item.notice !== true && agendaTurn(item) !== 'done');
+  items.filter(item => item.notice !== true && agendaTurn(item) !== 'done' && item.parked === undefined);
 
 export interface AgendaCounts {
   /** Items on the owner's turn that block the ferret now. */

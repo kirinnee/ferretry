@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it } from 'bun:test';
 import { BoardSideTab } from '../../../src/features/board/board-side-tab.tsx';
-import { ChatCardChip } from '../../../src/features/board/chat-card-chip.tsx';
-import { type BoardChat, type ChatChip, chatCards, chatChip } from '../../../src/lib/board-chat.ts';
+import { type BoardChat, chatCards, chatChip } from '../../../src/lib/board-chat.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { daemonBoardCardPath } from '../../../src/lib/pages/routes.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
@@ -46,50 +45,6 @@ const chatOf = async (
   const chat: BoardChat = { chip, cards, status, refresh: () => void refreshed.push(true) };
   return { chat, refreshed };
 };
-
-describe('ChatCardChip', () => {
-  const chip: ChatChip = {
-    kind: 'card',
-    id: 'F18',
-    ref: '&F18',
-    title: 'Board system',
-    lane: 'Plan/Design',
-    activity: 'active',
-    tone: 'ok',
-  };
-
-  it('reads the id, title, lane and a dotted activity, and links to the card', async () => {
-    const opened: string[] = [];
-    view = await mount(<ChatCardChip chip={chip} href="/d/laptop/board/F18" onNavigate={to => void opened.push(to)} />);
-    const link = must(view.container.querySelector<HTMLAnchorElement>('[data-card-chip="card"]'), 'chip');
-    expect(link.getAttribute('href')).toBe('/d/laptop/board/F18');
-    expect(link.getAttribute('aria-label')).toBe('Card &F18, Board system, Plan/Design, active');
-    expect(link.querySelector('.fy-card-chip__ref')?.textContent).toBe('&F18');
-    expect(link.querySelector('.fy-card-chip__title')?.textContent).toBe('Board system');
-    expect(link.querySelector('[data-part="lane"]')?.textContent).toBe('Plan/Design');
-    expect(link.querySelector('[data-part="activity"]')?.textContent).toContain('active');
-    expect(link.querySelector('[data-part="activity"]')?.getAttribute('data-tone')).toBe('ok');
-    await interact(() => link.click());
-    expect(opened).toEqual(['/d/laptop/board/F18']);
-  });
-
-  it('is amber and not a link when the session has no card', async () => {
-    view = await mount(<ChatCardChip chip={{ kind: 'none' }} href="" />);
-    const none = must(view.container.querySelector('[data-card-chip="none"]'), 'none');
-    expect(none.textContent).toBe('No card');
-    expect(none.getAttribute('data-tone')).toBe('warn');
-    expect(none.tagName).toBe('SPAN');
-    expect(view.container.querySelector('a')).toBeNull();
-  });
-
-  it('leaves out the title, lane and activity it does not have yet', async () => {
-    view = await mount(
-      <ChatCardChip chip={{ ...chip, title: null, lane: null, activity: null }} href="/d/laptop/board/F18" />,
-    );
-    const link = must(view.container.querySelector('[data-card-chip="card"]'), 'chip');
-    expect(link.textContent).toBe('&F18');
-  });
-});
 
 describe('BoardSideTab', () => {
   const scope = daemonSessionScope(laptop, SELF);

@@ -7,6 +7,7 @@
  *   ?view=status-both     the line AND "Sending…"
  *   ?view=status-sending  nothing on the agenda, an answer still on its way: "Sending…" alone
  *   ?attention=A5         a notification tap: A5's full card opens on arrival
+ *   &parked=1             adds a snoozed (A70) and a replied (A71) item: neither counts, neither is listed
  *
  * Every component is the REAL one (`useAgenda` through `AgendaChatHarness`); only the data is
  * invented and the answers go nowhere.
@@ -404,6 +405,20 @@ const A65 = item('A65', 6, {
   recommendation: { decision: 'Saturday', why: 'Nobody is on the board then' },
 } as Partial<AgendaItem>);
 
+// PARKED: snoozed until the afternoon, and replied-to (waiting on the ferret). Neither is on the owner's list.
+const A70 = item('A70', 40, {
+  title: 'Waiting for the deploy approval',
+  subject: 'Waiting for the deploy approval before the relay change ships',
+  ask: { kind: 'permission' },
+  parked: { reason: 'snoozed', at: ago(30), until: ahead(300) },
+} as Partial<AgendaItem>);
+const A71 = item('A71', 50, {
+  title: 'Which log level for the relay?',
+  subject: 'Which log level should the relay run at in production?',
+  ask: { kind: 'open-question' },
+  parked: { reason: 'replied', at: ago(12) },
+} as Partial<AgendaItem>);
+
 const owner = (id: string, at: number, text: string) => ({ id, kind: 'user', text, at: NOW - at * 60_000 });
 const ferretSays = (id: string, at: number, text: string) => ({ id, kind: 'assistant', text, at: NOW - at * 60_000 });
 const HISTORY_ENTRIES = [
@@ -422,8 +437,14 @@ const fakeKeyboard = params.get('kb') === '1';
 const configChange = params.get('config') === '1';
 const jaeda = params.get('jaeda') === '1';
 const v4 = params.get('v4') === '1';
+const parked = params.get('parked') === '1';
 
-const items = [...AGENDA, ...(jaeda ? [A47, A48] : []), ...(v4 ? [A60, A61, A62, A63, A64, A65] : [])].map(entry =>
+const items = [
+  ...AGENDA,
+  ...(jaeda ? [A47, A48] : []),
+  ...(v4 ? [A60, A61, A62, A63, A64, A65] : []),
+  ...(parked ? [A70, A71] : []),
+].map(entry =>
   entry.id === 'A5'
     ? long
       ? A5_LONG

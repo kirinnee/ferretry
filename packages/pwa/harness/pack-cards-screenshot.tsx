@@ -38,12 +38,10 @@ import { createRoot } from 'react-dom/client';
 import { PackSessionsProvider } from '../../src/components/pack-call.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { SessionTopBar } from '../../src/components/session-top-bar.tsx';
-import { SubFerretIndicator } from '../../src/components/sub-ferrets.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { transcriptEntriesFromLog } from '../../src/components/session-workspace-model.ts';
 import { InfoOverview } from '../../src/features/session-info/info-overview.tsx';
 import { createAgentReferenceResolver } from '../../src/lib/agent-references.ts';
-import { subFerretsOf } from '../../src/lib/sub-ferret-state.ts';
 
 const LEAD = 'mvlead00-1a2b3c4d';
 const NADIA = 'mvnadia0-7f3a9c21';
@@ -160,9 +158,7 @@ const header = (
       actions={<button className="kt-btn kt-btn--sm" type="button">Interrupt</button>}
       compact={compact}
       onToggleInfo={() => undefined}
-      project="ferretry"
       session={lead}
-      subFerrets={<SubFerretIndicator onOpenSession={() => undefined} sessions={subFerretsOf(LEAD, fleet)} />}
       turn="working"
     />
   </section>
@@ -174,7 +170,6 @@ const info = (
       name="Fernanda"
       now={now}
       onOpenSession={() => undefined}
-      project="ferretry"
       sessions={fleet}
       view={lead}
       worktrees={[]}

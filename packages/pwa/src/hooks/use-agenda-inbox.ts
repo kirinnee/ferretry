@@ -23,6 +23,7 @@ import {
   useSyncExternalStore,
 } from 'react';
 import type { DaemonAgendaClient } from '../lib/agenda-client.ts';
+import { type AgendaSender, sendAgendaAction } from '../lib/agenda-send.ts';
 import {
   agendaSummaryKey,
   DeferredAgendaActions,
@@ -32,6 +33,7 @@ import {
   type InboxCard,
   type InboxResolved,
   inboxCards,
+  inboxParked,
   inboxResolved,
   sessionsToReadForResolved,
   type UnreadSession,
@@ -62,6 +64,8 @@ export interface AgendaInbox {
   readonly withFerret: readonly InboxCard[];
   /** True while an unread conversation's board has not been read yet. */
   readonly reading: boolean;
+  /** Snoozed and replied items of every conversation whose board is held, newest parked first. */
+  readonly parked: readonly InboxCard[];
   /** Resolved items of every conversation whose board is held, newest first: the Resolved filter's list. */
   readonly resolved: readonly InboxResolved[];
   /** True while `loadResolved` is reading boards. */
@@ -103,19 +107,13 @@ export const useInboxMachines = (
 };
 
 /** Sends one inbox answer through the ONE agenda client, to the machine the card came from. */
-const runInboxAction = async (
-  client: Pick<DaemonAgendaClient, 'respond' | 'resolve' | 'dismiss' | 'needsInfo' | 'discuss'>,
+const runInboxAction = (
+  client: AgendaSender,
   connection: DaemonConnection,
   card: InboxCard,
   action: InboxAction,
-): Promise<void> => {
-  const scope = daemonSessionScope(connection, card.view.config.id);
-  if (action.kind === 'respond') await client.respond(connection, scope, card.item.id, action.response, action.note);
-  else if (action.kind === 'dismiss') await client.dismiss(connection, scope, card.item.id, action.note);
-  else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, card.item.id, action.note);
-  else if (action.kind === 'discuss') await client.discuss(connection, scope, card.item.id, action.note);
-  else await client.resolve(connection, scope, card.item.id, action.note);
-};
+): Promise<void> =>
+  sendAgendaAction(client, connection, daemonSessionScope(connection, card.view.config.id), card.item.id, action);
 
 /**
  * The previous value while `key` holds still. The fleet is re-read every few seconds and every read is
@@ -271,6 +269,16 @@ export function useAgendaInboxModel(
       inboxResolved(sources, (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId }))),
     [sources, boards],
   );
+  const freshParked = useMemo(
+    () =>
+      inboxParked(
+        sources,
+        (daemonId, sessionId) => boards.snapshots.get(daemonSessionKey({ daemonId, sessionId })),
+        new Set([...deferredState.pending.map(entry => entry.key), ...deferredState.sending]),
+      ),
+    [sources, boards, deferredState],
+  );
+  const parked = useStable(freshParked, cardsKey(freshParked));
   const [resolvedReading, setResolvedReading] = useState(false);
   const resolvedBusy = useRef(false);
   const loadResolved = useCallback((): void => {
@@ -300,6 +308,7 @@ export function useAgendaInboxModel(
       cards,
       withFerret,
       reading,
+      parked,
       resolved,
       resolvedReading,
       loadResolved,
@@ -312,6 +321,7 @@ export function useAgendaInboxModel(
       cards,
       withFerret,
       reading,
+      parked,
       resolved,
       resolvedReading,
       loadResolved,

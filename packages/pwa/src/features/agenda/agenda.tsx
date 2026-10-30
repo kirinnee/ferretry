@@ -16,21 +16,22 @@
  *   is typed goes with the item's reference (`withReferencePrefix`), said in the composer's placeholder ("Reply about
  *   !A5…"). ✕ or Esc is plain chat. A send, or a quick-reply tap, sends AND closes the view, and the conversation
  *   returns to the new message. A quick reply carries the composer's text as its note.
- * - A wide screen with a mouse can DOCK the agenda beside the chat; the view opens over the chat column.
+ * - The same rows are also a section of Info (`section`): the agenda has no side bar of its own.
  * - `?agenda=A5` or `?attention=A5` (a notification tap, a proved `!A5`) arrives as a `focus` request: an open
  *   item opens its card, a resolved one opens in the resolved list, and an id the board does not hold is said
  *   out loud.
  */
 
 import type { AgendaId, AgendaItem, AgendaSnapshot } from '@ferretry/protocol';
-import { CircleAlert, PanelRight } from 'lucide-react';
+import { CircleAlert } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import type { InboxAction } from '../../lib/agenda-answers.ts';
 import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
+import { sendAgendaAction } from '../../lib/agenda-send.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
-import { actionSentence } from '../../lib/agenda-inbox.ts';
+import { actionSentence, snoozeAction } from '../../lib/agenda-inbox.ts';
 import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
@@ -42,15 +43,14 @@ import { useOptionalRouter } from '../../lib/router.tsx';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import { browserClipboardWriter } from '../onboarding/copy-button.tsx';
 import { agendaReference } from './agenda-board.tsx';
-import { useAgendaDock } from './agenda-collapse.ts';
 import { AgendaDeliveryContext, agendaHeading, deliveringIds } from './agenda-delivery.tsx';
 import { AgendaItemView } from './agenda-item-view.tsx';
-import { AgendaDrawer, AgendaLine, AgendaPanel } from './agenda-line.tsx';
+import { AgendaDrawer, AgendaLine, AgendaPanelBody } from './agenda-line.tsx';
 
 /** What the chat sends of the agenda client, and nothing else of it. */
 export type AgendaActionClient = Pick<
   DaemonAgendaClient,
-  'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'discuss' | 'progress'
+  'dismiss' | 'respond' | 'resolve' | 'needsInfo' | 'discuss' | 'progress' | 'snooze' | 'unsnooze'
 >;
 
 /** A request to show one item. `seq` makes a repeated request a new one. */
@@ -87,21 +87,6 @@ const stepTicker =
   (step: number, done: boolean): Promise<void> =>
     client.progress(connection, scope, id, step, done);
 
-/** Sends one answer, as the daemon is asked for it, to this session on this machine. */
-const runAgendaAction = async (
-  client: AgendaActionClient,
-  connection: DaemonConnection,
-  scope: DaemonSessionScope,
-  id: AgendaId,
-  action: InboxAction,
-): Promise<void> => {
-  if (action.kind === 'respond') await client.respond(connection, scope, id, action.response, action.note);
-  else if (action.kind === 'dismiss') await client.dismiss(connection, scope, id, action.note);
-  else if (action.kind === 'needs-info') await client.needsInfo(connection, scope, id, action.note);
-  else if (action.kind === 'discuss') await client.discuss(connection, scope, id, action.note);
-  else await client.resolve(connection, scope, id, action.note);
-};
-
 const NO_ITEMS: readonly AgendaItem[] = [];
 const NO_ENTRIES: readonly TranscriptEntry[] = [];
 const copyWriter = browserClipboardWriter();
@@ -132,8 +117,6 @@ export interface UseAgendaInput {
   readonly onOpenResolved?: (id: AgendaId) => void;
   /** Drawn on the line's right while the machine holds answers ("Sending in 8 s… / Send now"). */
   readonly repliesSlot?: ReactNode;
-  /** A wide screen with a mouse: the agenda can be docked, and the card has no swipe arrows. */
-  readonly desktop: boolean;
   /** The primary pointer is touch: the card can be swiped. */
   readonly swipeable: boolean;
   /** What is running ("Pondering… 11s"), for the line's left half. Drawn there only while the line exists. */
@@ -156,16 +139,22 @@ export interface Agenda {
   readonly covered: boolean;
   /** The line takes `live` itself, so the transcript must not draw it a second time. */
   readonly hostsLive: boolean;
-  /** The docked panel, beside the chat. */
-  readonly side: ReactNode;
-  /** The header's "Agenda" button that docks the panel (a wide screen only). */
-  readonly dockButton: ReactNode;
+  /**
+   * The ferret's agenda as a section of Info: the same rows as the drawer, under no header of their own.
+   * `afterOpen` runs when a row opened its card, so a phone's Info sheet can get out of the card's way.
+   * `null` while this ferret is not in agenda mode.
+   */
+  readonly section: (afterOpen?: () => void) => ReactNode;
   /** The ids the next message is about: the open item. */
   readonly references: () => readonly AgendaId[];
   /** The composer's placeholder while an item is open ("Reply about !A57…"); absent in plain chat. */
   readonly placeholder: string | undefined;
   /** Wire this into the Composer: a message went, so the open item closes. */
-  readonly composer: { readonly onSent: () => void };
+  readonly composer: {
+    readonly onSent: () => void;
+    /** Escape in the composer goes back to the chat; absent while no item is open. */
+    readonly onEscape?: () => void;
+  };
 }
 
 export const useAgenda = ({
@@ -179,7 +168,6 @@ export const useAgenda = ({
   focus = null,
   onOpenResolved,
   repliesSlot,
-  desktop,
   swipeable,
   live,
   entries = NO_ENTRIES,
@@ -210,8 +198,6 @@ export const useAgenda = ({
     [scopeKey],
   );
 
-  const [dock, toggleDock] = useAgendaDock();
-  const docked = desktop && dock;
   const cardId = here.card !== null && byId.has(here.card) ? here.card : null;
   const aboutRef = useRef<readonly AgendaId[]>([]);
   aboutRef.current = cardId === null ? [] : [cardId];
@@ -234,7 +220,7 @@ export const useAgenda = ({
     const sent = withComposerNote(action, note);
     setCard(item.id, null);
     setAnnouncement('');
-    runAgendaAction(client, connection, scope, item.id, sent).then(
+    sendAgendaAction(client, connection, scope, item.id, sent).then(
       () => {
         setCard(item.id, undefined);
         setAnnouncement(actionSentence(sent, item.id));
@@ -285,7 +271,7 @@ export const useAgenda = ({
   const unavailable = agendaMode && snapshot === null && status === 'error';
   const parseErrors = agendaMode ? (snapshot?.parseErrors ?? 0) : 0;
   const counts = agendaMode && agenda.length > 0 ? agendaCounts(agenda) : undefined;
-  const drawerOpen = here.drawer && counts !== undefined && !docked;
+  const drawerOpen = here.drawer && counts !== undefined;
   const closeDrawer = (): void => update(() => ({ drawer: false }));
   const sendingCount = repliesSlot === undefined ? delivering.size : 0;
   const hostsLive = !loading && (counts !== undefined || repliesSlot !== undefined || sendingCount > 0);
@@ -328,7 +314,6 @@ export const useAgenda = ({
       ) : null}
       <AgendaLine
         controls={drawerId}
-        docked={docked}
         ferret={ferret}
         onToggle={() => update(current => ({ drawer: !current.drawer }))}
         open={drawerOpen}
@@ -357,7 +342,9 @@ export const useAgenda = ({
           key={cardItem.id}
           onAct={action => act(cardItem, action, composerDraft(scope))}
           onClose={() => update(() => ({ card: null }))}
+          onSnooze={until => act(cardItem, snoozeAction(until), '')}
           position={{ index: at, total: agenda.length }}
+          quoteScope={scope}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
           swipeable={swipeable}
           {...(now === undefined ? {} : { now })}
@@ -379,25 +366,18 @@ export const useAgenda = ({
     />
   ) : null;
 
-  const side = !docked ? null : (
-    <AgendaDeliveryContext.Provider value={deliveryState}>
-      <AgendaPanel items={agenda} onClose={toggleDock} {...rows} />
-    </AgendaDeliveryContext.Provider>
-  );
-
-  const dockButton =
-    !desktop || !agendaMode ? null : (
-      <button
-        aria-pressed={dock}
-        className="fy-agenda-dock"
-        data-agenda-dock=""
-        onClick={toggleDock}
-        title={dock ? 'Undock the agenda' : 'Dock the agenda beside the chat'}
-        type="button"
-      >
-        <PanelRight aria-hidden="true" size={16} />
-        Agenda
-      </button>
+  const section = (afterOpen?: () => void): ReactNode =>
+    !agendaMode ? null : (
+      <AgendaDeliveryContext.Provider value={deliveryState}>
+        <AgendaPanelBody
+          items={agenda}
+          {...rows}
+          onOpen={item => {
+            openCard(item);
+            afterOpen?.();
+          }}
+        />
+      </AgendaDeliveryContext.Provider>
     );
 
   return {
@@ -406,10 +386,9 @@ export const useAgenda = ({
     scrim,
     covered: cardItem !== undefined,
     hostsLive,
-    side,
-    dockButton,
+    section,
     references: () => aboutRef.current,
     placeholder: cardId === null ? undefined : `Reply about ${agendaReference(cardId)}…`,
-    composer: { onSent },
+    composer: { onSent, ...(cardId === null ? {} : { onEscape: () => update(() => ({ card: null })) }) },
   };
 };

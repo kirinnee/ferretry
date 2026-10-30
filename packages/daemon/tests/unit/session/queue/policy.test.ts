@@ -72,11 +72,12 @@ describe("the owner's own chat", () => {
     should(deliveryOrder(queue, 'interactive').map(entry => entry.id)).eql(['peer']);
   });
 
-  it('should type a daemon notice made for the chat into it, as a message of its own', () => {
-    const board = { ...message('board', 'daemon', 0), chat: true };
+  it('should keep out a board digest an older daemon marked for the chat', () => {
+    // An older queue file's `chat: true` (the board's batched news for a lead) is no exception any more.
+    const board = { ...message('board', 'daemon', 0), chat: true } as QueuedMessage;
 
-    should(boardOnly(board, 'interactive')).be.false();
-    should(deliveryOrder([board], 'interactive').map(entry => entry.id)).eql(['board']);
+    should(boardOnly(board, 'interactive')).be.true();
+    should(deliveryOrder([board], 'interactive')).eql([]);
   });
 });
 

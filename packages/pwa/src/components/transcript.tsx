@@ -1,22 +1,19 @@
 import type { SessionLiveActivity } from '@ferretry/protocol';
-import { Fragment, type MouseEvent, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useInputModality } from '../hooks/use-input-modality.ts';
+import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useTranscriptHold } from '../hooks/use-live-clock.ts';
 import { PULL_TO_PALETTE_IGNORE_ATTR } from '../hooks/use-pull-to-palette.ts';
 import { useStickToBottom } from '../hooks/use-stick-to-bottom.ts';
 import { compactionStripIndex } from '../lib/compaction-readout.ts';
-import { type ContextMenuEventLike, textContextMenuEventAllowed } from '../lib/context-menu-policy.ts';
 import { daemonId as toDaemonId } from '../lib/daemon-connection.ts';
 import type { PaneActivity } from '../lib/pane-activity.ts';
-import { quoteSelectionIntoComposer } from '../lib/quote.ts';
 import type { ChatScrollSlot } from '../lib/scroll-memory.ts';
 import { agentRuns, type TranscriptEntry, transcriptItems } from '../lib/session-screens.ts';
 import { newTailRows, prependedAbove, prependRestoreTarget } from '../lib/transcript-follow.ts';
-import { ContextMenu, type ContextMenuItem } from '../shell/context-menu.tsx';
 import { CompactionCard, CompactionStrip } from './compaction-card.tsx';
 import { JumpToLatest } from './jump-to-latest.tsx';
 import type { SendCancel, SendRetry, SendSubmit } from './ledger-message.tsx';
 import { LiveActivityLine } from './live-activity.tsx';
+import { useQuoteMenu } from './quote-menu.tsx';
 import type { SendDismiss, SendExpand } from './settled-send-note.tsx';
 import { TranscriptRow } from './transcript-row.tsx';
 
@@ -65,28 +62,7 @@ export interface TranscriptProps {
 export const withAgentName = (entry: TranscriptEntry, agentName: string): TranscriptEntry =>
   entry.kind !== 'assistant' || agentName === '' ? entry : { ...entry, label: agentName };
 
-/** The selection surface needed to decide whether transcript prose is quotable. */
-export interface QuoteSelectionLike {
-  readonly isCollapsed: boolean;
-  readonly rangeCount: number;
-  readonly anchorNode: Node | null;
-  readonly focusNode: Node | null;
-  toString(): string;
-}
-
-/**
- * Returns a trimmed transcript selection, or an empty string when the browser
- * selection belongs to another surface. Either endpoint inside is enough: a
- * reader may extend a range from text just above the visible transcript.
- */
-export const quotableTranscriptSelectionText = (
-  selection: QuoteSelectionLike | null,
-  contains: (node: Node | null) => boolean,
-): string => {
-  if (selection === null || selection.isCollapsed || selection.rangeCount === 0) return '';
-  if (!contains(selection.anchorNode) && !contains(selection.focusNode)) return '';
-  return selection.toString().trim();
-};
+export { type QuoteSelectionLike, quotableTranscriptSelectionText } from './quote-menu.tsx';
 
 /**
  * Return `value`, except while `hold` is engaged — then keep returning what it was when the hold
@@ -184,47 +160,10 @@ export function Transcript({
     prevFirstId.current = firstId;
   }, [firstId, ids.length]);
 
-  const lastPointerType = useRef<string | null>(null);
-  const quoteTrigger = useRef<HTMLElement | null>(null);
-  const [quoteMenu, setQuoteMenu] = useState<{ readonly x: number; readonly y: number; readonly text: string } | null>(
-    null,
+  const quote = useQuoteMenu(
+    viewportRef,
+    useMemo(() => ({ daemonId: toDaemonId(daemonId), sessionId }), [daemonId, sessionId]),
   );
-  const { touchAffected } = useInputModality();
-
-  const onQuoteContextMenu = (event: MouseEvent<HTMLDivElement>): void => {
-    const root = viewportRef.current;
-    const selection = typeof window === 'undefined' ? null : window.getSelection();
-    const text = root
-      ? quotableTranscriptSelectionText(
-          selection as QuoteSelectionLike | null,
-          node => node !== null && root.contains(node),
-        )
-      : '';
-    const allowed = textContextMenuEventAllowed(event.nativeEvent as ContextMenuEventLike, {
-      lastPointerType: lastPointerType.current,
-      touchAffected,
-      hasSelection: text.length > 0,
-    });
-
-    // A phone's long-press is the native text-selection gesture. Leaving this
-    // event alone preserves its handles and copy menu; session-row long-press
-    // handling remains separate in row-context-gesture.ts.
-    if (!allowed || !text) return;
-    event.preventDefault();
-    quoteTrigger.current = event.currentTarget;
-    setQuoteMenu({ x: event.clientX, y: event.clientY, text });
-  };
-
-  const quoteMenuItems: readonly ContextMenuItem[] =
-    quoteMenu === null
-      ? []
-      : [
-          {
-            key: 'quote',
-            label: 'Quote in composer',
-            onSelect: () => quoteSelectionIntoComposer(quoteMenu.text, { daemonId: toDaemonId(daemonId), sessionId }),
-          },
-        ];
 
   return (
     <section aria-label={label} className="fy-transcript-shell" data-daemon-id={daemonId} data-session-id={sessionId}>
@@ -233,15 +172,7 @@ export function Transcript({
         /* Pulling down here loads older messages. The global finder gesture must
            not take that away, so this scroller declines it by name. */
         {...{ [PULL_TO_PALETTE_IGNORE_ATTR]: '' }}
-        onContextMenu={onQuoteContextMenu}
-        onPointerDownCapture={event => {
-          lastPointerType.current = event.pointerType || 'unknown';
-        }}
-        onTouchStartCapture={() => {
-          // Some WebKit paths expose the later contextmenu as a plain
-          // MouseEvent. This is the touch press that began its long-press.
-          lastPointerType.current = 'touch';
-        }}
+        {...quote.handlers}
         onScroll={onScroll}
         ref={viewportRef}
         role="log"
@@ -280,15 +211,7 @@ export function Transcript({
           ) : null}
         </div>
       </div>
-      <ContextMenu
-        anchor={quoteMenu ?? { x: 0, y: 0 }}
-        ariaLabel="Quote menu"
-        items={quoteMenuItems}
-        onClose={() => setQuoteMenu(null)}
-        open={quoteMenu !== null}
-        touch={touchAffected}
-        triggerRef={quoteTrigger}
-      />
+      {quote.menu}
       {detached ? <JumpToLatest count={newCount} onJump={jumpToLatest} /> : null}
     </section>
   );

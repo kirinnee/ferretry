@@ -1,5 +1,5 @@
-import { DoctorReportSchema, HealthViewSchema } from '@ferretry/protocol';
-import { QrCode, Sparkles } from 'lucide-react';
+import { DoctorReportSchema, HealthViewSchema, type QueuedMessage } from '@ferretry/protocol';
+import { KanbanSquare, QrCode, Sparkles } from 'lucide-react';
 import {
   createContext,
   type ReactNode,
@@ -205,6 +205,7 @@ import {
   daemonLearningPath,
   daemonProjectPath,
   daemonSessionsPath,
+  daemonBoardForFerretPath,
   daemonSettingsPath,
   daemonWardenPath,
   type PageRoute,
@@ -228,12 +229,15 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
+import { readItemConversation } from './lib/item-conversation.ts';
 import { RECENT_MESSAGE_COUNT, type RecentMessagesMemory, readRecentMessages } from './lib/recent-messages.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
+import { joinQueue, queueActions, readSessionQueue } from './lib/send-queue.ts';
+import { QueueActionsContext } from './components/queue-actions-context.tsx';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
   type AppStore,
@@ -263,7 +267,11 @@ import { ChunkErrorBoundary } from './shell/chunk-error-boundary.tsx';
 import { CommandPalette, type PaletteSettingsSource } from './shell/command-palette.tsx';
 import { InsightsFrame } from './shell/insights-frame.tsx';
 import { PageScrollRegion } from './shell/page-scroll-region.tsx';
-import { pairPhonePaletteCommand, whatsNewPaletteCommand } from './shell/palette-destinations.ts';
+import {
+  boardForFerretPaletteCommand,
+  pairPhonePaletteCommand,
+  whatsNewPaletteCommand,
+} from './shell/palette-destinations.ts';
 import { machinePaletteSessions, paletteSessionEntries } from './shell/palette-model.ts';
 import { PullToPaletteRegion } from './shell/pull-to-palette-region.tsx';
 import { ReleaseNoticeBanner } from './shell/release-notice.tsx';
@@ -1113,6 +1121,8 @@ function SessionRoute({
   const [sends, setSends] = useState<readonly LedgerSendRecord[]>(() =>
     parseLedgerSendsResponse(store.sessionCache.peekTranscript(scope)?.sends ?? []),
   );
+  /** The session's durable queue — the first ticks of a message, before the ledger has it (`lib/send-queue.ts`). */
+  const [queue, setQueue] = useState<readonly QueuedMessage[]>([]);
   const [transcriptCached, setTranscriptCached] = useState(
     () => store.sessionCache.peekTranscript(scope) !== undefined,
   );
@@ -1259,6 +1269,7 @@ function SessionRoute({
     const drawCached = (cached: CachedTranscript | null | undefined): void => {
       setEntries(cached == null ? [] : transcriptEntriesFromLog(cached.log));
       setSends(cached == null ? [] : parseLedgerSendsResponse(cached.sends));
+      setQueue([]);
       setTranscriptCached(cached != null);
       setCacheCurrent(cached != null && transcriptIsCurrent(cached, store.fleet.session(cacheScope)));
     };
@@ -1292,6 +1303,7 @@ function SessionRoute({
             },
             get: async id => await store.fleet.fetchSession(connection, { daemonId, sessionId: id }),
             sends: async id => await readLedgerSends(api, id),
+            queue: async id => await readSessionQueue(api, id),
           },
           sessionId,
           environment: browserWorkspaceRefreshEnvironment,
@@ -1306,6 +1318,7 @@ function SessionRoute({
             ledger.onSends(parseLedgerSendsResponse(rows));
           },
           onSendsFailed: ledger.onSendsFailed,
+          onQueue: setQueue,
           // fetchSession publishes the same proved view into the daemon-scoped
           // fleet cache; publishing it again here would force two shell renders.
           onSession: () => undefined,
@@ -1414,12 +1427,13 @@ function SessionRoute({
    * The transcript with the send ledger IN it: delivered sends chip the message they became, and every
    * send not yet in the conversation sits after it with a chip saying where it is.
    */
-  const sendView = useSendView(sends);
+  const joinedSends = useMemo(() => joinQueue(sends, queue), [sends, queue]);
+  const sendView = useSendView(joinedSends);
   const { view: sendViewState, tick: settledTick, dismiss: dismissSends, setExpanded: expandSend } = sendView;
   // biome-ignore lint/correctness/useExhaustiveDependencies: `settledTick` re-places the rows when one folds or retires on its own.
   const placedEntries = useMemo(
-    () => placeLedgerRows(entries, sends, Date.now(), sendViewState),
-    [entries, sends, sendViewState, settledTick],
+    () => placeLedgerRows(entries, joinedSends, Date.now(), sendViewState),
+    [entries, joinedSends, sendViewState, settledTick],
   );
   /** A row's × — puts one undelivered send away on this device; the daemon's ledger is never told. */
   const dismissSend = useCallback<SendDismiss>(record => dismissSends([record.sendId]), [dismissSends]);
@@ -1439,6 +1453,11 @@ function SessionRoute({
   /** A row's Press Enter — for a message typed into the agent's composer and never submitted. */
   const submitSend = useMemo<SendSubmit>(
     () => sendSubmitter(client, sessionId, refreshSends),
+    [client, sessionId, refreshSends],
+  );
+  /** Edit and Cancel for a message still in the queue; the bubble reaches them through a context, not props. */
+  const queueActionsValue = useMemo(
+    () => (client === null ? null : queueActions(client, sessionId, refreshSends)),
     [client, sessionId, refreshSends],
   );
   // "Clear stuck messages" — Actions-menu entry that takes back every message nothing proved arrived.
@@ -1550,77 +1569,81 @@ function SessionRoute({
       {packActions.host}
       {agendaActions.host}
       {session !== undefined && client !== null ? (
-        <SessionChatPage
-          accountPicker={store.accountPicker}
-          board={store.board}
-          actionContributions={sessionActions}
-          infoLearning={learningActions.passiveFor(scope.sessionId)}
-          switches={{
-            hypermedia: hypermediaActions.onFor(session),
-            pack: packActions.onFor(session),
-            onToggle: switchTapper(
-              { hypermedia: hypermediaActions, pack: packActions, agenda: agendaActions },
-              session.config.id,
-            ),
-          }}
-          browserLogin={store.browserLogin}
-          attention={agenda}
-          agendaReplies={agendaReplies}
-          // A notification tap or an unread row names the item it opens at (`?attention=A3`).
-          agendaTarget={agendaOverride !== undefined ? agendaOverride : agendaTargetFromSearch(window.location.search)}
-          // Each navigation that names one re-targets it, so tapping the same item's notification again rings it again.
-          agendaTargetKey={entryKey}
-          chatWidth={controls.chatWidth}
-          composerEnterKey={controls.composerEnterKey}
-          composerPhoneEnterKey={controls.composerPhoneEnterKey}
-          composerFetch={daemonFetch}
-          composerSuggestions={composerSuggestions}
-          composerVimMode={controls.composerVimMode}
-          connectionState={connectionHealth}
-          context={sessionContext}
-          workspaceLayouts={store.workspaceLayouts}
-          // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,
-          // rename, close, and the ticket purchase — defaulted to the raw network, so on a
-          // relay-only network a reader opening a shell got a bare `Failed to fetch` from an
-          // address the relay exists because the browser cannot reach it. Its live stream is bound
-          // the same way: `openStream` answers a §14 stream session on a rendezvous and `null` on
-          // direct, so the deck asks one question and gets whichever carrier is live.
-          deck={terminalDeck}
-          dictationSettings={dictation.settings}
-          client={client}
-          connection={connection}
-          // Whether this session's live feed is actually alive, and the reader's way back when it is
-          // not. It travels as a prop rather than being read from a store inside the page for the
-          // same reason everything else here does: a component that reached for the store could not
-          // be mounted by a test without one.
-          liveStream={liveStream}
-          // Only THIS daemon's slice, and only once it has actually been read:
-          // `sessions === null` is "not read yet", which must not reach the
-          // reference surface as a fleet with nobody in it.
-          daemonSessions={fleetSlice?.sessions ?? undefined}
-          entries={placedEntries}
-          onRetry={retrySend}
-          onCancel={cancelSend}
-          onSubmit={submitSend}
-          onDismiss={dismissSend}
-          onExpand={toggleSend}
-          onNavigate={navigate}
-          {...(openSessions === null ? {} : { onOpenSessions: openSessions })}
-          project={projectKeyFor(session.config.cwd, projects).name}
-          onRefresh={refresh}
-          onSessionChange={publishSession}
-          presentation={layout === 'drawer' ? 'sheet' : 'pane'}
-          pins={store.pins}
-          refreshError={sessionIssue}
-          transcriptUnbound={transcriptUnbound}
-          updating={transcriptCached && !cacheCurrent && !catchingUp}
-          catchingUp={transcriptCached && catchingUp}
-          readingPosition={readingPosition}
-          session={session}
-          surfaceEvents={surfaceEvents}
-          liveActivity={liveActivity}
-          usage={store.usage}
-        />
+        <QueueActionsContext.Provider value={queueActionsValue}>
+          <SessionChatPage
+            accountPicker={store.accountPicker}
+            board={store.board}
+            actionContributions={sessionActions}
+            infoLearning={learningActions.passiveFor(scope.sessionId)}
+            switches={{
+              hypermedia: hypermediaActions.onFor(session),
+              pack: packActions.onFor(session),
+              onToggle: switchTapper(
+                { hypermedia: hypermediaActions, pack: packActions, agenda: agendaActions },
+                session.config.id,
+              ),
+            }}
+            browserLogin={store.browserLogin}
+            attention={agenda}
+            agendaReplies={agendaReplies}
+            // A notification tap or an unread row names the item it opens at (`?attention=A3`).
+            agendaTarget={
+              agendaOverride !== undefined ? agendaOverride : agendaTargetFromSearch(window.location.search)
+            }
+            // Each navigation that names one re-targets it, so tapping the same item's notification again rings it again.
+            agendaTargetKey={entryKey}
+            chatWidth={controls.chatWidth}
+            composerEnterKey={controls.composerEnterKey}
+            composerPhoneEnterKey={controls.composerPhoneEnterKey}
+            composerFetch={daemonFetch}
+            composerSuggestions={composerSuggestions}
+            composerVimMode={controls.composerVimMode}
+            connectionState={connectionHealth}
+            context={sessionContext}
+            workspaceLayouts={store.workspaceLayouts}
+            // THE TERMINAL DECK TRAVELS THE CARRIER TOO. Its HTTP control plane — list, create,
+            // rename, close, and the ticket purchase — defaulted to the raw network, so on a
+            // relay-only network a reader opening a shell got a bare `Failed to fetch` from an
+            // address the relay exists because the browser cannot reach it. Its live stream is bound
+            // the same way: `openStream` answers a §14 stream session on a rendezvous and `null` on
+            // direct, so the deck asks one question and gets whichever carrier is live.
+            deck={terminalDeck}
+            dictationSettings={dictation.settings}
+            client={client}
+            connection={connection}
+            // Whether this session's live feed is actually alive, and the reader's way back when it is
+            // not. It travels as a prop rather than being read from a store inside the page for the
+            // same reason everything else here does: a component that reached for the store could not
+            // be mounted by a test without one.
+            liveStream={liveStream}
+            // Only THIS daemon's slice, and only once it has actually been read:
+            // `sessions === null` is "not read yet", which must not reach the
+            // reference surface as a fleet with nobody in it.
+            daemonSessions={fleetSlice?.sessions ?? undefined}
+            entries={placedEntries}
+            onRetry={retrySend}
+            onCancel={cancelSend}
+            onSubmit={submitSend}
+            onDismiss={dismissSend}
+            onExpand={toggleSend}
+            onNavigate={navigate}
+            {...(openSessions === null ? {} : { onOpenSessions: openSessions })}
+            project={projectKeyFor(session.config.cwd, projects).name}
+            onRefresh={refresh}
+            onSessionChange={publishSession}
+            presentation={layout === 'drawer' ? 'sheet' : 'pane'}
+            pins={store.pins}
+            refreshError={sessionIssue}
+            transcriptUnbound={transcriptUnbound}
+            updating={transcriptCached && !cacheCurrent && !catchingUp}
+            catchingUp={transcriptCached && catchingUp}
+            readingPosition={readingPosition}
+            session={session}
+            surfaceEvents={surfaceEvents}
+            liveActivity={liveActivity}
+            usage={store.usage}
+          />
+        </QueueActionsContext.Provider>
       ) : (
         <main className="mx-auto flex h-full w-full max-w-[980px] flex-col gap-3 overflow-y-auto py-3">
           <button type="button" className="kt-btn self-start" onClick={() => back(daemonSessionsPath(scope.daemonId))}>
@@ -1992,6 +2015,11 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             view={card.view}
           />
         );
+      }}
+      readConversation={async card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
+        return await readItemConversation(await store.clients.client(target), card.view.config.id, card.item.id);
       }}
       readRecent={async card => {
         const target = inbox.connectionFor(card.daemonId);
@@ -2644,6 +2672,19 @@ export function AppShell() {
       allMachines === undefined
         ? { sessions: paletteSessionEntries(sessions), note: null }
         : machinePaletteSessions(allMachines.sources);
+    // Cmd-K "Board for <ferret>": only on a chat, where there is a ferret to narrow the Board to.
+    const chatFerret =
+      pageRoute.kind === 'session'
+        ? paletteSearch.sessions.find(entry => entry.view.config.id === pageRoute.sessionId)
+        : undefined;
+    const boardForFerret =
+      pageRoute.kind !== 'session'
+        ? null
+        : boardForFerretPaletteCommand(chatFerret?.headline ?? pageRoute.sessionId, KanbanSquare, () =>
+            navigate(
+              daemonBoardForFerretPath(connection.daemonId, pageRoute.sessionId, chatFerret?.view.config.focusTask?.id),
+            ),
+          );
     // Every paired machine, so one that is down is counted whichever machine's page is open.
     const noticeMachines = machineDisplayOrder(connectionSnapshot.connections, savedMachineOrder).map(record => ({
       daemonId: record.daemonId,
@@ -2666,7 +2707,7 @@ export function AppShell() {
       />
     );
     content = (
-      <SessionSearchProvider connection={connection} scope={currentSessionScope}>
+      <SessionSearchProvider board={store.board} connection={connection} scope={currentSessionScope}>
         <BoardOriginProvider value={boardOrigin}>
           <WhatsNewProvider value={whatsNew.entry}>
             <RestartOverlayProvider>
@@ -2762,6 +2803,7 @@ export function AppShell() {
                           ]
                         : []),
                       whatsNewPaletteCommand(Sparkles, whatsNew.entry.open),
+                      ...(boardForFerret === null ? [] : [boardForFerret]),
                     ]}
                   />
                   {/* After the finder, so the finder hands focus back to its opener before this captures it. */}

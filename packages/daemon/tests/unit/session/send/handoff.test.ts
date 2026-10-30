@@ -6,6 +6,13 @@ import { handoffFolders, handoffReadArguments, handoffView } from '../../../../s
 const context = { reminder: 'Keep the protocol.', attachmentRoot: '/state/attachments/d/s1' };
 
 describe('a hand-off read back', () => {
+  it('should carry who Ferretry wrote it as, when it says, and nothing when it does not', () => {
+    const by = { kind: 'ferretry', feature: 'Warden' } as const;
+
+    should(handoffView('turn-009', 'Carry on\n', context, by).by).deepEqual(by);
+    should(handoffView('turn-009', 'Carry on\n', context)).not.have.property('by');
+  });
+
   it("should give the person's words and fetchable ids for this session's own attachments", () => {
     const document = `${messageWithAttachments('look at this', [
       { path: '/state/attachments/d/s1/att_1/shot.png', mime: 'image/png' },

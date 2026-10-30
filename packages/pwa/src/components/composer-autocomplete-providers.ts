@@ -16,8 +16,6 @@
  */
 
 import type { AgendaItem, SessionView, TerminalListView } from '@ferretry/protocol';
-import { taskBoardState } from '../features/tasks/task-board-model.ts';
-import { TASK_STATUS_META } from '../features/tasks/task-presentation.ts';
 import { agentReferenceIdentityKey, createAgentReferenceResolver } from '../lib/agent-references.ts';
 import type { ComposerReferenceTask } from '../lib/composer-reference-catalogs.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
@@ -749,26 +747,16 @@ const agendaCandidates = (
     } satisfies ComposerAutocompleteCandidate;
   });
 
-const isClosedTask = (task: ComposerReferenceTask): boolean => task.status === 'done' || task.status === 'dropped';
-
-const isActiveTask = (task: ComposerReferenceTask): boolean =>
-  task.status === 'in_progress' || task.phase === 'research' || task.phase === 'design' || task.phase === 'build';
-
 const taskRecency = (task: ComposerReferenceTask): number => {
-  const parsed = Date.parse(task.updatedAt ?? task.createdAt ?? '');
+  const parsed = Date.parse(task.touchedAt);
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
 /** Active work first, then the most recently touched, then id so a re-read never reshuffles equals. */
 const compareTasks = (left: ComposerReferenceTask, right: ComposerReferenceTask): number =>
-  Number(isActiveTask(right)) - Number(isActiveTask(left)) ||
+  Number(right.active) - Number(left.active) ||
   taskRecency(right) - taskRecency(left) ||
   left.id.localeCompare(right.id);
-
-const taskLane = (task: ComposerReferenceTask): string =>
-  task.phase === undefined
-    ? TASK_STATUS_META[task.status].label
-    : taskBoardState({ blocked: task.blocked ?? false, phase: task.phase }).label;
 
 /**
  * Closed work (done, dropped) is hidden until the reader types its id exactly: a finished task is rarely
@@ -781,19 +769,18 @@ const taskCandidates = (
 ): ComposerAutocompleteCandidate[] => {
   const typed = query.toUpperCase();
   return tasks
-    .filter(task => !isClosedTask(task) || task.id.toUpperCase() === typed)
+    .filter(task => !task.closed || task.id.toUpperCase() === typed)
     .sort(compareTasks)
     .map(task => {
       const reference = formatReference({ kind: 'task', id: task.id });
-      const lane = taskLane(task);
       return {
         id: scopedId('task', scope, task.id),
         kind: 'task',
         label: reference,
         detail: [task.title, task.assignee ?? 'unassigned'].join(' · '),
-        keywords: [task.id, task.title, lane, task.assignee ?? ''].join(' '),
+        keywords: [task.id, task.title, task.lane, task.assignee ?? '', task.legacyId ?? ''].join(' '),
         group: 'Tasks',
-        badge: lane,
+        badge: task.lane,
         replacement: reference,
         append: 'space',
       } satisfies ComposerAutocompleteCandidate;

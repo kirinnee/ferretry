@@ -29,6 +29,7 @@ import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
+import { escapeCloses } from '../lib/escape-closes.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import { carrierDelivery } from '../lib/relay-carrier.ts';
@@ -115,6 +116,8 @@ export interface ComposerProps {
   readonly quota?: ComposerQuotaProps['quota'];
   readonly draftStore?: DaemonDraftStore;
   readonly onSent?: () => void;
+  /** Escape in the composer, when no completion list or Vim mode used it: set while an agenda item is open, to go back. */
+  readonly onEscape?: () => void;
   /** Told the draft's text whenever it changes — the agenda sends it along as the note of an option picked outside the composer. */
   readonly onDraftChange?: (text: string) => void;
   /** A new value empties the draft: the text was used by an answer sent from outside the composer. */
@@ -198,16 +201,15 @@ export interface ComposerProps {
  * Growth is capped for the opposite reason — a pasted essay must not swallow
  * the conversation it is about.
  *
- * THE PHONE COMPOSER IS A WRITING SURFACE, not a one-line chat box (owner: "way too
- * small … make buttons vertical so there's more space for typing"). Its controls
- * stack in a narrow column on the right (`.fy-composer-dock`), so the field takes
- * the full remaining width, and it rests at about four lines — a CSS floor on the
- * phone layout, `[data-composer-layout='phone']` in session-screens.css. It grows
- * to ten lines at rest, and while the keyboard is up its ceiling drops to six:
- * with ~430px of visible viewport the turn being answered has to stay readable
- * above the box. Six lines is no lower than the stacked controls already make the
- * row, so a lower ceiling would only add a scrollbar inside a box that is taller
- * anyway (the status line also steps aside then; see `.fy-composer-status-chrome`).
+ * THE PHONE COMPOSER IS ONE LINE WHEN EMPTY (owner, 2026-10-30: an empty one took
+ * about 260px of the screen) and A WRITING SURFACE ONCE THERE IS A DRAFT (owner: "make
+ * buttons vertical so there's more space for typing"): empty, its controls sit inline
+ * (`.fy-composer-dock`); with a draft they stack in a column on each side, so the field
+ * takes the width between — `[data-composer-layout='phone']` in session-screens.css.
+ * It grows as the owner types, to ten lines at rest, and while the keyboard is up its
+ * ceiling drops to six: with ~430px of visible viewport the turn being answered has to stay
+ * readable above the box (the status line also steps aside then; see
+ * `.fy-composer-status-chrome`).
  */
 /** A chosen document, read in the browser's own tab from the local file — it has not been fetched from anywhere. */
 const openLocalFile = (file: File): void => {
@@ -363,6 +365,7 @@ export function Composer({
   quota,
   draftStore = documentDraftStore,
   onSent,
+  onEscape,
   onDraftChange,
   clearSignal = 0,
   connectionLive = false,
@@ -1166,6 +1169,7 @@ export function Composer({
     <form
       className="fy-composer"
       data-composer-dropping={dropping ? '' : undefined}
+      data-composer-empty={draft.trim() === '' ? '' : undefined}
       data-composer-layout={compact ? 'phone' : undefined}
       data-composer-style={editorStyle}
       onDragLeave={() => setDropping(false)}
@@ -1175,6 +1179,7 @@ export function Composer({
         event.preventDefault();
         setDropping(true);
       }}
+      onKeyDown={onEscape === undefined ? undefined : escapeCloses(onEscape)}
       onDrop={event => {
         setDropping(false);
         if (!hasFiles(event.dataTransfer)) return;
@@ -1244,10 +1249,10 @@ export function Composer({
         />
       ) : null}
       <div className="fy-composer-row">
-        {/* THE PHONE ROW IS KTEAM'S: attach and the mic stacked on the LEFT, Interrupt & send above Send
-            on the RIGHT, the field between them. Both columns are always two 44px slots tall — the
-            interrupt's slot is held empty while the agent is idle — so neither the field's height nor
-            its width moves when a turn starts or ends. A desktop keeps its one inline row. */}
+        {/* THE PHONE ROW: attach and the mic on the LEFT, Interrupt & send and Send on the RIGHT, the field
+            between them — inline while the field is empty, stacked in two columns once there is a draft.
+            The interrupt's slot is held empty while the agent is idle, so the field never resizes when a
+            turn starts or ends. A desktop keeps its one inline row. */}
         {compact ? (
           <div className="fy-composer-dock" data-composer-dock="start">
             {attachButton}
@@ -1336,8 +1341,8 @@ export function Composer({
               under the on-screen keyboard. */}
           <ComposerAutocompletePopover surface={autocomplete} />
         </div>
-        {/* The controls after the field: inline in the row on a desktop (`display: contents`), the
-            right-hand column on a phone — Interrupt & send's slot over Send, nearest the thumb. */}
+        {/* The controls after the field: inline in the row on a desktop (`display: contents`), on a phone
+            Interrupt & send's slot then Send — side by side while empty, stacked with a draft. */}
         <div className="fy-composer-dock" data-composer-dock="">
           {compact ? null : dictation}
           {busy ? (

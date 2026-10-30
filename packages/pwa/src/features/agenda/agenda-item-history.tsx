@@ -7,8 +7,8 @@
  */
 
 import { Check } from 'lucide-react';
-import type { ReactNode } from 'react';
 import { AGENDA_KIND_LABEL } from '../../components/agenda-message.tsx';
+import { TranscriptRow } from '../../components/transcript-row.tsx';
 import type { HistoryEvent } from '../../lib/agenda-history.ts';
 import { revisionAuthor, revisionStamp } from '../../lib/agenda-revisions.ts';
 import { PointForm } from './agenda-brief.tsx';
@@ -20,7 +20,7 @@ function When({ at, now }: { readonly at: number; readonly now: number }) {
   return stamp === '' ? null : <time dateTime={new Date(at).toISOString()}>{stamp}</time>;
 }
 
-function HistoryRow({ event, now, ferret, prose }: HistoryRowProps) {
+function HistoryRow({ event, now, ferret }: HistoryRowProps) {
   if (event.kind === 'revision') {
     const { entry } = event;
     return (
@@ -50,25 +50,19 @@ function HistoryRow({ event, now, ferret, prose }: HistoryRowProps) {
       </li>
     );
   }
+  // What was said in the conversation is drawn by the chat's own row: the same bubble, clock, pictures and
+  // references as in the chat, so the item reads like the conversation it replaces.
   if (event.kind === 'ferret') {
     return (
-      <li className="fy-item-history__event" data-history="ferret">
-        <p className="fy-item-history__head m-0">
-          <When at={event.at} now={now} />
-          <span>{ferret}</span>
-        </p>
-        <div className="fy-item-history__bubble">{prose(event.text)}</div>
+      <li className="fy-item-history__event fy-item-history__chat" data-history="ferret">
+        <TranscriptRow entry={{ ...event.entry, label: ferret }} />
       </li>
     );
   }
   if (event.kind === 'owner-text') {
     return (
-      <li className="fy-item-history__event" data-history="owner">
-        <p className="fy-item-history__head m-0">
-          <When at={event.at} now={now} />
-          <span>You</span>
-        </p>
-        <p className="fy-item-history__bubble m-0">{event.text}</p>
+      <li className="fy-item-history__event fy-item-history__chat" data-history="owner">
+        <TranscriptRow entry={event.entry} />
       </li>
     );
   }
@@ -99,19 +93,16 @@ interface HistoryRowProps {
   readonly event: HistoryEvent;
   readonly now: number;
   readonly ferret: string;
-  readonly prose: (text: string) => ReactNode;
 }
 
 export function AgendaItemHistory({
   events,
   now,
   ferret,
-  prose,
 }: {
   readonly events: readonly HistoryEvent[];
   readonly now: number;
   readonly ferret: string;
-  readonly prose: (text: string) => ReactNode;
 }) {
   if (events.length === 0) return null;
   return (
@@ -119,7 +110,7 @@ export function AgendaItemHistory({
       <h3 className="fy-item-history__title m-0">History</h3>
       <ol className="fy-item-history__list">
         {events.map(event => (
-          <HistoryRow event={event} ferret={ferret} key={event.key} now={now} prose={prose} />
+          <HistoryRow event={event} ferret={ferret} key={event.key} now={now} />
         ))}
       </ol>
     </section>

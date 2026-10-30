@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import { parseFerretryNotice } from '@ferretry/protocol';
 import should from 'should';
 import {
   bootNotice,
@@ -43,13 +42,16 @@ describe('auto-resume policy', () => {
 
   it('should tell a mid-turn session that what it was running could not be checked', () => {
     for (const mode of ['auto', 'interactive'] as const) {
-      const notice = parseFerretryNotice(bootNotice('tool_running', mode) ?? '');
-      should(notice).containEql('restarted mid-turn');
+      const notice = bootNotice('tool_running', mode) ?? '';
+      should(notice).startWith('Ferretry resumed you after the machine restarted mid-turn');
+      should(notice).not.containEql('not from the owner');
     }
   });
 
   it('should send an idle auto session a nothing-was-interrupted notice', () => {
-    should(parseFerretryNotice(bootNotice('awaiting_user', 'auto') ?? '')).containEql('nothing was interrupted');
+    should(bootNotice('awaiting_user', 'auto')).startWith(
+      'Ferretry resumed you after the machine restarted, and nothing was interrupted.',
+    );
   });
 
   it('should send an idle interactive session nothing, so it just gets its terminal back', () => {

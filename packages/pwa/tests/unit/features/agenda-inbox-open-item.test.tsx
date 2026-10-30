@@ -217,7 +217,9 @@ describe('the open Inbox item', () => {
       'Ship',
     );
     await interact(() => ship.click());
-    expect(fake.deferred.getSnapshot().pending.map(entry => entry.action.note)).toEqual(['only after the smoke test']);
+    expect(
+      fake.deferred.getSnapshot().pending.map(entry => ('note' in entry.action ? entry.action.note : undefined)),
+    ).toEqual(['only after the smoke test']);
     expect(draft).toBe('');
     unregister();
     await mounted.unmount();
@@ -287,6 +289,44 @@ describe('the deck that skips', () => {
     expect(mounted.container.querySelector('.fy-attn-deck__leaving')?.getAttribute('data-direction')).toBe('down');
     await interact(() => must(mounted.container.querySelector<HTMLButtonElement>('[data-skip-here]'), 'skip').click());
     expect(skipped).toEqual(['A1', 'A1']);
+    await mounted.unmount();
+  });
+});
+
+describe('the open Inbox item’s History', () => {
+  it('shows the owner’s replies and the ferret’s answers as chat bubbles, read for the card on top', async () => {
+    const asked: string[] = [];
+    const mounted = await mount(
+      page(fakeInbox(), [shipIt], {
+        initialOpen: shipIt.key,
+        readConversation: async card => {
+          asked.push(card.key);
+          return [
+            { id: '1', kind: 'assistant', text: 'Asking about !A2 — ship it?', at: NOW - 3_600_000 },
+            { id: '2', kind: 'user', text: 'Hold until Monday !A2', at: NOW - 1_800_000 },
+          ];
+        },
+      }),
+    );
+    await interact(() => Promise.resolve());
+    const bubbles = [...mounted.container.querySelectorAll('.fy-item-history__chat')].map(node => node.textContent);
+    expect(bubbles.some(text => text?.includes('Hold until Monday'))).toBe(true);
+    expect(bubbles.some(text => text?.includes('Asking about'))).toBe(true);
+    expect(asked).toEqual([shipIt.key]);
+    await mounted.unmount();
+  });
+
+  it('keeps the revisions when the conversation cannot be read', async () => {
+    const mounted = await mount(
+      page(fakeInbox(), [shipIt], {
+        initialOpen: shipIt.key,
+        readConversation: async () => {
+          throw new Error('offline');
+        },
+      }),
+    );
+    await interact(() => Promise.resolve());
+    expect(topView(mounted).getAttribute('data-agenda-view')).toBe('A2');
     await mounted.unmount();
   });
 });

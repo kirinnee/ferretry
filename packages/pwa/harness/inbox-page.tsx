@@ -20,6 +20,7 @@ import { AgendaInboxPage } from '../src/features/agenda/agenda-inbox-page.tsx';
 import type { AgendaInbox } from '../src/hooks/use-agenda-inbox.ts';
 import { DeferredAgendaActions, type InboxCard, inboxCardKey } from '../src/lib/agenda-inbox.ts';
 import { type DaemonConnection, daemonConnection, daemonId } from '../src/lib/daemon-connection.ts';
+import type { TranscriptEntry } from '../src/lib/session-screens.ts';
 import { ScrollMemory } from '../src/lib/scroll-memory.ts';
 import { AppTabBar } from '../src/shell/app-bar.tsx';
 import { PageScrollRegion } from '../src/shell/page-scroll-region.tsx';
@@ -218,6 +219,29 @@ const FERRET: readonly InboxCard[] = [
   card(WITH('A10', 4, 'Which cache to drop?'), NIGHTLY, 'studio'),
 ];
 
+const PARKED_SNOOZED = (id: string, title: string, until: number): AgendaItem =>
+  item(id, 90, 'hadi', {
+    title,
+    subject: title,
+    ask: { kind: 'permission' },
+    parked: { reason: 'snoozed', at: ago(60), until: new Date(until).toISOString() },
+  } as Partial<AgendaItem>);
+/** Parked items come from the boards the page read, not the daemon summary: snoozed, then replied. */
+const PARKED: readonly InboxCard[] = [
+  card(PARKED_SNOOZED('A50', 'Waiting for the deploy approval', NOW + 5 * 3_600_000), RELEASE, 'studio'),
+  card(PARKED_SNOOZED('A51', 'Check the nightly benchmark', NOW + 27 * 3_600_000), NIGHTLY, 'studio'),
+  card(
+    item('A52', 120, 'ottilie', {
+      title: 'Which storage engine for the ledger?',
+      subject: 'Which storage engine should keep the ledger: SQLite or Postgres?',
+      ask: { kind: 'open-question' },
+      parked: { reason: 'replied', at: ago(18) },
+    } as Partial<AgendaItem>),
+    LEDGER,
+    'studio',
+  ),
+];
+
 const memory = new ScrollMemory(null);
 
 /** The open item's composer talks to this machine: a fake one, whose sends go nowhere. */
@@ -226,6 +250,27 @@ const MACHINE: DaemonConnection = daemonConnection({
   baseUrl: 'https://studio.example.test',
   deviceId: 'harness',
 });
+/** What the conversation holds about the open item: the ferret's question, the owner's reply, the ferret's answer. */
+const conversationAbout = async (open: InboxCard): Promise<readonly TranscriptEntry[]> => [
+  {
+    id: 'c1',
+    kind: 'assistant',
+    text: `I need a call on !${open.item.id}: **SQLite** is quick to ship, Postgres is safer long term.`,
+    at: NOW - 50 * 60_000,
+  },
+  {
+    id: 'c2',
+    kind: 'user',
+    text: `Is Postgres overkill for !${open.item.id}? Lean toward SQLite.`,
+    at: NOW - 30 * 60_000,
+  },
+  {
+    id: 'c3',
+    kind: 'assistant',
+    text: `Not overkill, but the ledger is read in full once a day, so SQLite fits !${open.item.id}. I will wait for your answer.`,
+    at: NOW - 20 * 60_000,
+  },
+];
 const FAKE_CLIENT = { send: async () => ({}) as never };
 const deferred = new DeferredAgendaActions(async () => undefined);
 
@@ -252,6 +297,7 @@ function Inbox({
     reading: false,
     resolved: [],
     resolvedReading: false,
+    parked: PARKED,
     loadResolved: () => undefined,
     deferred,
     deferredState: state,
@@ -275,6 +321,7 @@ function Inbox({
               phone={phone}
               withFerretsOpen={withFerretsOpen}
               reducedMotion
+              readConversation={conversationAbout}
               {...(openAt === undefined ? {} : { initialOpen: openAt })}
               renderComposer={open => (
                 <AgendaInboxComposer

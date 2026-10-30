@@ -11,6 +11,7 @@
 import type {
   AnalyticsResponse,
   AgendaSnapshot,
+  BoardTaskView,
   BrowserStatus,
   CapabilityGrant,
   CapabilityGrants,
@@ -34,11 +35,7 @@ import type {
   SecretList,
   SecuritySettingsView,
   SessionFsFile,
-  SessionSearchTask,
   SessionView,
-  TaskLive,
-  TaskStatus,
-  TaskSummary,
   TerminalListView,
   WardenConfigView,
   WardenStatusView,
@@ -46,13 +43,23 @@ import type {
 import {
   DAEMON_CAPABILITIES,
   HARNESS_UPDATE_CODES,
-  matchesSessionSearchQuery,
   SECRET_SCHEMA_VERSION,
   SESSION_FILE_INDEX_VERSION,
   secretReference,
-  sessionSearchTaskHaystack,
-  TASK_SCHEMA_VERSION,
 } from '@ferretry/protocol';
+import {
+  boardAnswer,
+  card as boardCard,
+  fakeEnvironment as fakeBoardEnvironment,
+  fakePort as fakeBoardPort,
+  COUNTS as BOARD_COUNTS,
+  laneSetFor,
+  PROJECT as BOARD_PROJECT,
+} from '../tests/unit/board-support.ts';
+import { BoardPage } from '../src/features/board/board-page.tsx';
+import { DaemonAgendaStore } from '../src/lib/agenda-store.ts';
+import { DaemonBoardStore } from '../src/lib/board-store.ts';
+import { daemonBoardPort } from '../src/lib/board-client.ts';
 import { AgendaChatHarness } from './agenda-chat.tsx';
 import { FyHttpError } from '@ferretry/protocol/client';
 import { type ConnectionChoice, chooseConnection } from '@ferretry/relay';
@@ -98,7 +105,6 @@ import { SessionDetails } from '../src/components/session-details.tsx';
 import { SessionHeader } from '../src/components/session-header.tsx';
 import { SessionList } from '../src/components/session-list.tsx';
 import { SessionSurfaceReferences } from '../src/components/session-surface-references.tsx';
-import { SessionTaskKanban, SessionTaskList } from '../src/components/session-tasks.tsx';
 import { SessionTerminalDeck, type TerminalDeckDependencies } from '../src/components/session-terminal-deck.tsx';
 import { transcriptEntriesFromLog } from '../src/components/session-workspace-model.ts';
 import { SessionsPage } from '../src/components/sessions-page.tsx';
@@ -195,12 +201,7 @@ import { VoiceEngineChoice } from '../src/features/settings/voice-engine-choice.
 import type { SkillsCatalog } from '../src/features/skills/skills-catalog.ts';
 import { SkillsSurface } from '../src/features/skills/skills-surface.tsx';
 import { StepUpDialog, UNLOCK_COPY } from '../src/features/step-up/step-up-dialog.tsx';
-import { filterTaskDag, taskDag } from '../src/features/tasks/task-dag.ts';
-import { TaskDagGraph } from '../src/features/tasks/task-dag-graph.tsx';
 import { TaskName } from '../src/features/tasks/task-name.tsx';
-import { taskStatusCounts, toggleTaskStatusFilter } from '../src/features/tasks/task-presentation.ts';
-import { TaskQuickSummary, TaskRow } from '../src/features/tasks/task-row.tsx';
-import { TaskStatusFilter } from '../src/features/tasks/task-status-filter.tsx';
 import { askWardenContribution } from '../src/features/warden/ask-warden.tsx';
 import {
   type WardenClientFactory,
@@ -1709,7 +1710,6 @@ const harnessChildSession = {
   config: { ...harnessSession.config, parent: 'harness-lead' },
 } as SessionView;
 
-openSidePaneTab(scope, 'tasks');
 openSidePaneFileTab(scope, 'packages/p../src/shell/side-pane-tabs.tsx');
 openSidePaneFileTab(scope, 'README.md');
 
@@ -1769,84 +1769,6 @@ const QUOTA_TIGHT = { fiveHourPercent: 92, weeklyPercent: 78, atLimit: true } as
 function DeadPane(): never {
   throw new TypeError("Cannot read properties of undefined (reading 'SessionChatPage')");
 }
-
-const task = (overrides: Partial<Omit<TaskSummary, 'live'>> & { live?: Partial<TaskLive> }): TaskSummary => ({
-  v: 1,
-  id: 'F12',
-  kind: 'feature',
-  // FIVE WORDS. `TaskTitleSchema` caps a title at five, and this fixture used
-  // six — type-valid and schema-invalid, so every card rendering it was drawing
-  // a task the daemon would refuse. Found by the current-session search, which
-  // is the first surface here to parse these rows rather than only render them.
-  title: 'Port the remaining PWA components',
-  workflow: 'quick',
-  phase: 'todo',
-  dependsOn: [],
-  status: 'todo',
-  statusReason: null,
-  assignee: null,
-  repo: null,
-  files: [],
-  links: { prs: [], branch: null, commits: [], docs: [] },
-  order: null,
-  createdAt: '2026-07-30T09:00:00.000Z',
-  createdBy: null,
-  updatedAt: '2026-07-31T09:00:00.000Z',
-  descriptionChars: 0,
-  askChars: 40,
-  askSource: 'slack',
-  clarificationCount: 0,
-  blocked: false,
-  blockedReason: null,
-  blockedSince: null,
-  blockedBy: [],
-  ...overrides,
-  live: {
-    assigneeSessionId: null,
-    assigneeName: null,
-    assigneeStatus: null,
-    assigneeHealth: null,
-    assigneeDoneMarker: false,
-    assigneeLastActivityAt: null,
-    staleness: null,
-    ...overrides.live,
-  },
-});
-
-const TASKS: readonly TaskSummary[] = [
-  task({
-    id: 'F12',
-    phase: 'build',
-    status: 'in_progress',
-    assignee: 'hayden',
-    files: ['packages/pwa/src/features/tasks/task-row.tsx'],
-    links: { prs: ['https://github.com/kirinnee/ferretry/pull/49'], branch: null, commits: [], docs: [] },
-    live: { assigneeSessionId: 'harness-session', assigneeName: 'Hayden', assigneeHealth: 'active' },
-  }),
-  task({
-    id: 'B7',
-    kind: 'bug',
-    title: 'Transcript detaches on prepend',
-    phase: 'build',
-    status: 'blocked',
-    blocked: true,
-    statusReason: 'waiting on the scroller port',
-    blockedReason: 'Blocked by the scroller port',
-    blockedBy: ['F12'],
-    askChars: 40,
-    askSource: 'agent: warden',
-    live: { staleness: 'quiet', assigneeHealth: 'unknown' },
-  }),
-  task({
-    id: 'C3',
-    kind: 'chore',
-    title: 'Retire the legacy state path',
-    phase: 'done',
-    status: 'done',
-    dependsOn: ['F12'],
-  }),
-];
-const TASK_DAG = taskDag(TASKS);
 
 const WARDEN: WardenStatusView = WARDEN_FIXTURE_STATUS;
 
@@ -2817,77 +2739,75 @@ const HARNESS_DRIVEN_READS: Readonly<Record<string, DrivenRead>> = {
  * request, reviewed as if the product had produced it.
  */
 /**
- * The task board the current-session search reads — ONE list of FULL tasks.
+ * The cards the current-session search reads: this ferret's slice of the board, `GET /v1/board?ferret=<id>&state=all`.
  *
- * The prose (description, original ask, clarifications) never reaches a client:
- * `/tasks` answers SUMMARIES, and the daemon decides matching. So this fixture
- * holds the whole task and PROJECTS the summary from it, exactly as the daemon
- * does, and answers `?q=` with the protocol's own haystack and matcher rather
- * than a second rule invented here.
- *
- * C3 is the load-bearing row. Its summary contains no `port` anywhere — not its
- * title, not its number — and only its original ask says `ported`. If a reader
- * ever went back to matching locally against summaries, C3 disappears from the
- * `port` capture, so the results assertion fails instead of passing for the
- * wrong reason. F12's title matches `port` outright, which is why C3 rather
- * than F12 is the proof that server-side prose matching is what answered.
- *
- * Built from the existing `TASKS` so the rows a screenshot shows are the same
- * rows every other task card in this harness shows.
+ * The search matches them in the browser against the card's id, old id, title, summary and lane name, so the
+ * fixture holds only what a board card carries. C3 is the load-bearing row: its title says nothing about
+ * `port`, and only its summary line does. If the search ever stopped reading the summary, C3 would drop out of
+ * the `port` capture and the results assertion would fail instead of passing for the wrong reason. It also
+ * carries the old id this ferret knew it by (`legacyRef`), so the old text still finds the card.
  */
-const HARNESS_SEARCH_PROSE: Readonly<
-  Record<string, { readonly ask: string; readonly clarifications: readonly string[] }>
-> = {
-  F12: {
-    ask: 'Finish porting the PWA feature components so the workspace stops falling back.',
-    clarifications: ['Include the side-pane surfaces, not just the transcript.'],
-  },
-  B7: {
-    ask: 'The transcript jumps to the bottom whenever older messages are prepended.',
-    clarifications: ['Only reproducible with the composer focused.'],
-  },
-  C3: {
-    ask: 'Retire the legacy state path once the last reader is ported onto the new home.',
-    clarifications: ['Leave the migration command in place for one more release.'],
-  },
-};
+const HARNESS_BOARD_OWNER = 'harness-session';
+const HARNESS_CHAT_OWNER = 'harness-workspace';
+const HARNESS_BOARD_CARDS: readonly BoardTaskView[] = [
+  boardCard('F12', {
+    title: 'Port the remaining PWA components',
+    summary: 'Moves the last feature components onto the shared shell.',
+    laneId: 'implement',
+    owner: HARNESS_BOARD_OWNER,
+    lastTouchedAt: '2026-07-31T09:00:00.000Z',
+  }),
+  boardCard('B7', {
+    kind: 'bug',
+    title: 'Transcript detaches on prepend',
+    summary: 'The transcript jumps to the bottom when older messages arrive.',
+    laneId: 'review',
+    owner: HARNESS_BOARD_OWNER,
+    lastTouchedAt: '2026-07-31T08:00:00.000Z',
+  }),
+  boardCard('C3', {
+    kind: 'chore',
+    title: 'Retire the legacy state path',
+    summary: 'The last reader is ported onto the new home.',
+    laneId: 'todo',
+    owner: HARNESS_BOARD_OWNER,
+    legacyRef: `${HARNESS_BOARD_OWNER}:C1`,
+    lastTouchedAt: '2026-07-30T09:00:00.000Z',
+  }),
+  // The workspace chat's own cards: a current one, and one that replaced the old task this chat knew as F12.
+  boardCard('B21', {
+    kind: 'bug',
+    title: 'Chat reference opens wrong pane',
+    summary: 'A tap on a card reference should open that card.',
+    laneId: 'implement',
+    owner: HARNESS_CHAT_OWNER,
+    lastTouchedAt: '2026-07-31T09:30:00.000Z',
+  }),
+  boardCard('F96', {
+    title: 'Retire the old task list',
+    summary: 'Chats read the board now; the old list is gone.',
+    laneId: 'review',
+    owner: HARNESS_CHAT_OWNER,
+    legacyRef: `${HARNESS_CHAT_OWNER}:F12`,
+    lastTouchedAt: '2026-07-31T09:00:00.000Z',
+  }),
+  // The truncated-index session owns one card, so its task half is seen to survive a short file index.
+  boardCard('F40', {
+    title: 'Port the file walk',
+    summary: 'Reads the files the walk never reached.',
+    laneId: 'implement',
+    owner: 'harness-partial-session',
+    lastTouchedAt: '2026-07-29T09:00:00.000Z',
+  }),
+];
 
-/** The searchable task, plus the summary the wire is allowed to carry. */
-type HarnessSearchTask = SessionSearchTask & { readonly summary: TaskSummary };
+/** The real browser board port, over this page's patched network: the search reads cards the way the app does. */
+const HARNESS_BOARD = new DaemonBoardStore(daemonBoardPort());
 
-const HARNESS_SEARCH_TASKS: readonly HarnessSearchTask[] = TASKS.map(summary => {
-  const prose = HARNESS_SEARCH_PROSE[summary.id] ?? { ask: summary.title, clarifications: [] };
-  return {
-    summary,
-    id: summary.id,
-    title: summary.title,
-    description: `${summary.title}. Tracked on the tree board and searchable by its number, ${summary.id}.`,
-    ask: { text: prose.ask },
-    clarifications: prose.clarifications.map(text => ({ text })),
-  };
-});
-
-/**
- * `GET /v1/sessions/:id/tasks[?q=]`, shaped as `SessionTaskListResponseSchema`.
- *
- * The whole-response schema is what carries `parseErrors` and `updatedAt`, and a
- * fixture that answered a bare `{ tasks: [...] }` would fail to parse the moment
- * the reader adopts it — silently, as an unavailable half rather than as a test
- * failure. A blank or absent `q` is the board itself; a present one is filtered
- * with `matchesSessionSearchQuery`, so `no-match` is a genuine empty answer.
- */
-const harnessTaskListResponse = (sessionId: string, query: string | null): unknown => {
-  const matched =
-    query === null
-      ? HARNESS_SEARCH_TASKS
-      : HARNESS_SEARCH_TASKS.filter(task => matchesSessionSearchQuery(sessionSearchTaskHaystack(task), query));
-  return {
-    v: TASK_SCHEMA_VERSION,
-    sessionId,
-    tasks: matched.map(task => ({ ...task.summary, sessionId })),
-    parseErrors: 0,
-    updatedAt: new Date(HARNESS_NOW).toISOString(),
-  };
+/** `GET /v1/board` for one ferret: the cards it owns, under the lanes the board names. */
+const harnessBoardResponse = (ferret: string): unknown => {
+  const cards = HARNESS_BOARD_CARDS.filter(entry => entry.owner === ferret);
+  return boardAnswer(cards, { projectId: BOARD_PROJECT, laneSet: laneSetFor(), counts: BOARD_COUNTS });
 };
 
 /**
@@ -3560,13 +3480,16 @@ globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
   // fails `SessionFileIndexResponseSchema` and paints every card `unavailable`.
   if (method === 'GET' && sessionRoute !== null && sessionRoute.rest === 'fs/index')
     return harnessJson(harnessFileIndexResponse(sessionRoute.sessionId));
-  // The board and the query are ONE route. A `q` present is filtered by the
-  // daemon-owned matcher; absent, the whole board is the answer. There is
-  // deliberately no `/tasks/:id` route: the reader that used to dial one per row
-  // is the design this change deletes, so a fixture for it would let the old
-  // fan-out come back green.
-  if (method === 'GET' && sessionRoute?.rest === 'tasks' && HARNESS_SEARCH_SESSION_IDS.includes(sessionRoute.sessionId))
-    return harnessJson(harnessTaskListResponse(sessionRoute.sessionId, url.searchParams.get('q')));
+  // The chat's task search is one ferret-scoped board read. There is deliberately no per-session task
+  // route: nothing in the PWA may ask for one, so a fixture for it would let the old read come back green.
+  if (
+    method === 'GET' &&
+    url.pathname === '/v1/board' &&
+    (HARNESS_SEARCH_SESSION_IDS.includes(url.searchParams.get('ferret') ?? '') ||
+      url.searchParams.get('ferret') === HARNESS_CHAT_OWNER ||
+      url.searchParams.get('project') === BOARD_PROJECT)
+  )
+    return harnessJson(harnessBoardResponse(url.searchParams.get('ferret') ?? HARNESS_CHAT_OWNER));
   if (url.pathname.includes('/fs')) {
     const path = url.searchParams.get('path') ?? '';
     if (url.pathname.endsWith('/fs/changes')) return harnessJson(HARNESS_FS_CHANGES);
@@ -5178,7 +5101,6 @@ function Shell() {
   const [view, setView] = useState<'chat' | 'terminal'>('chat');
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sttSettings, setSttSettings] = useState<SttSettings>(HARNESS_STT_SETTINGS);
-  const [statuses, setStatuses] = useState<ReadonlySet<TaskStatus> | null>(null);
   const [detailsTab, setDetailsTab] = useState<DetailsTab>('identity');
   const [paneWidth, setPaneWidth] = useState(SIDE_PANE_DEFAULT_WIDTH);
   const [paneQuery, setPaneQuery] = useState('');
@@ -6203,54 +6125,6 @@ function Shell() {
       ),
     },
     {
-      label: 'Session task board',
-      render: () => (
-        <section aria-label="Task board preview" id="harness-task-board">
-          <SessionTaskKanban
-            compact={phone}
-            daemonId={daemon.daemonId}
-            onAddToChat={() => {}}
-            onMarkDone={() => {}}
-            onOpen={() => {}}
-            tasks={[
-              { ...TASKS[0]!, phase: 'live', status: 'live' },
-              {
-                ...TASKS[1]!,
-                blocked: true,
-                blockedReason: 'Waiting on the review queue',
-                phase: 'build',
-                status: 'blocked',
-              },
-              { ...TASKS[2]!, phase: 'done', status: 'done' },
-            ]}
-          />
-        </section>
-      ),
-    },
-    {
-      // #43: the same rows in the LIST view, with the reference action a reader
-      // uses to point an agent at exactly one task, and the sentence that says
-      // where it went.
-      label: 'Task list reference actions',
-      render: () => (
-        <section aria-label="Task list reference actions" className="flex flex-col gap-2" id="harness-task-list-refs">
-          <SessionTaskList
-            daemonId={daemon.daemonId}
-            onAddToChat={() => {}}
-            onMarkDone={() => {}}
-            onOpen={() => {}}
-            tasks={[
-              { ...TASKS[0]!, phase: 'live', status: 'live' },
-              { ...TASKS[1]!, phase: 'build', status: 'in_progress' },
-            ]}
-          />
-          <p className="m-0 rounded-control bg-surface-2 px-2 py-1.5 text-ui text-muted" role="status">
-            Added &amp;F12 to this session&apos;s message.
-          </p>
-        </section>
-      ),
-    },
-    {
       label: 'Side pane tabs',
       render: () => (
         <Card data-harness="side-pane-tabs" className="flex min-h-0 flex-col overflow-hidden">
@@ -6746,54 +6620,6 @@ function Shell() {
             onRemove={() => {}}
             onOpenMessage={() => {}}
           />
-        </Card>
-      ),
-    },
-    {
-      label: 'Tasks',
-      render: () => (
-        <Card className="overflow-hidden">
-          <PanelHeader>
-            <Label>Tasks</Label>
-          </PanelHeader>
-          {/* Outside the header on purpose: `.kt-panel__header` is declared after
-            `@tailwind utilities`, so its own flex rules beat any utility a
-            caller adds and the filter would be centred. */}
-          <div className="px-panel pb-panel">
-            <TaskStatusFilter
-              counts={taskStatusCounts(TASKS)}
-              selected={statuses}
-              onSelect={status => setStatuses(toggleTaskStatusFilter(statuses, status))}
-              onShowAll={() => setStatuses(null)}
-            />
-          </div>
-          <div className="flex flex-col divide-y divide-border-soft">
-            {TASKS.filter(entry => statuses === null || statuses.has(entry.status)).map(entry => (
-              <TaskRow daemonId={daemon.daemonId} key={entry.id} onOpen={() => {}} task={entry} />
-            ))}
-          </div>
-          <PanelBody>
-            <TaskQuickSummary task={TASKS[1] as TaskSummary} />
-          </PanelBody>
-        </Card>
-      ),
-    },
-    {
-      label: 'Task dependency graph',
-      render: () => (
-        <Card aria-label="Task dependency graph" className="min-w-0 overflow-hidden">
-          <PanelHeader>
-            <Label>Task dependency graph</Label>
-          </PanelHeader>
-          <PanelBody className="min-w-0">
-            <TaskDagGraph
-              daemonId={daemon.daemonId}
-              dag={filterTaskDag(TASK_DAG, statuses)}
-              onOpen={() => {}}
-              onNavigate={() => {}}
-              onShowAll={() => setStatuses(null)}
-            />
-          </PanelBody>
         </Card>
       ),
     },
@@ -8210,8 +8036,25 @@ const PEER_SENDER_LOG = [
   '[10:09:12] user/message: [ferretry] Your message to kamila (send 7f3a) did not reach it: it could not be confirmed (timeout) — it may still have landed. Decide whether to send it again with `fy send kamila …`.',
 ].join('\n');
 const PEER_VIEW = new URLSearchParams(window.location.search).get('peer');
-const SESSION_ENTRIES: readonly TranscriptEntry[] =
-  PEER_VIEW === 'receiver'
+/** `?cards`: a chat that mentions one current card and one the chat knew by its old id, with the board wired. */
+const CARDS_VIEW = new URLSearchParams(window.location.search).has('cards');
+const CARDS_ENTRIES: readonly TranscriptEntry[] = [
+  {
+    id: 'cards-user-0',
+    kind: 'user',
+    text: 'Which cards does this chat still owe? Look at &B21 and the old &F12.',
+    label: 'You',
+  },
+  {
+    id: 'cards-assistant-0',
+    kind: 'assistant',
+    text: 'Two of them. &B21 is the open bug about references opening the wrong pane. &F12 was a task of this chat before the import; it is now the card that retired the per-session task list. Tap either one to open its card.',
+    label: 'hadi',
+  },
+];
+const SESSION_ENTRIES: readonly TranscriptEntry[] = CARDS_VIEW
+  ? CARDS_ENTRIES
+  : PEER_VIEW === 'receiver'
     ? transcriptEntriesFromLog(PEER_RECEIVER_LOG, HARNESS_NOW)
     : PEER_VIEW === 'sender'
       ? transcriptEntriesFromLog(PEER_SENDER_LOG, HARNESS_NOW)
@@ -8432,13 +8275,40 @@ const HARNESS_WIRE_CONFIG = {
   retry: { transientAttempts: 0, stalledAttempts: 0, waitForQuotaReset: false, allowAccountFailover: false },
 } as const;
 
+const CARD_DETAIL_CALLSIGNS = new Map([[HARNESS_CHAT_OWNER, 'hadi']]);
+const CARD_DETAIL_STORE = new DaemonBoardStore(
+  fakeBoardPort({
+    board: async () =>
+      boardAnswer(
+        HARNESS_BOARD_CARDS.filter(entry => entry.owner === HARNESS_CHAT_OWNER),
+        { projectId: BOARD_PROJECT, laneSet: laneSetFor(), counts: BOARD_COUNTS },
+      ),
+    task: async (_daemon, id) => {
+      const task = HARNESS_BOARD_CARDS.find(entry => entry.owner === HARNESS_CHAT_OWNER && entry.id === id);
+      return task === undefined ? null : { task, laneSet: laneSetFor() };
+    },
+    projects: async () => [{ id: BOARD_PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
+  }),
+  fakeBoardEnvironment(),
+);
+const CARD_DETAIL_AGENDA = {
+  store: new DaemonAgendaStore(),
+  hydrate: async () => undefined,
+  respond: async () => undefined,
+};
+
 function SessionWorkspaceHarness() {
   useAppViewport();
+  const [openCard, setOpenCard] = useState<string | null>(null);
   const layout = useLayoutMode();
   const presentation = layout === 'drawer' ? 'sheet' : 'pane';
   const [session, setSession] = useState({
     ...WORKSPACE_SESSION,
-    config: { ...WORKSPACE_SESSION.config, teammate: 'hadi' },
+    config: {
+      ...WORKSPACE_SESSION.config,
+      teammate: 'hadi',
+      ...(CARDS_VIEW ? { projectId: BOARD_PROJECT, focusTask: { id: 'F96' } } : {}),
+    },
     ...(WORKSPACE_TURN === undefined
       ? {}
       : {
@@ -8508,7 +8378,14 @@ function SessionWorkspaceHarness() {
           daemonSessions={WORKSPACE_FLEET}
           dictationSettings={DEFAULT_STT_SETTINGS}
           entries={SESSION_ENTRIES}
-          {...(PEER_VIEW === null ? {} : { onNavigate: () => undefined })}
+          {...(CARDS_VIEW
+            ? {
+                board: HARNESS_BOARD,
+                onNavigate: (to: string) => setOpenCard(/\/board\/([^/?#]+)/.exec(to)?.[1] ?? null),
+              }
+            : PEER_VIEW === null
+              ? {}
+              : { onNavigate: () => undefined })}
           onSessionChange={setSession}
           {...(layout === 'drawer' ? { onOpenSessions: () => setDrawer(true) } : {})}
           presentation={presentation}
@@ -8530,6 +8407,23 @@ function SessionWorkspaceHarness() {
       </div>
       {layout === 'drawer' && drawer ? bar('drawer') : null}
       {learningActions.host}
+      {openCard === null ? null : (
+        <div className="absolute inset-0 z-50 overflow-y-auto bg-bg" data-harness-card-detail={openCard}>
+          <BoardPage
+            agenda={CARD_DETAIL_AGENDA as never}
+            callsigns={CARD_DETAIL_CALLSIGNS}
+            machines={[{ connection: daemon, name: 'AMER-D22HXVF42W' }]}
+            now={Date.parse('2026-07-31T10:00:00.000Z')}
+            onNavigate={to => setOpenCard(/\/board\/([^/?#]+)/.exec(to)?.[1] ?? null)}
+            onSearch={() => undefined}
+            openCard={{ daemonId: daemon.daemonId, taskId: openCard }}
+            phone={layout === 'drawer'}
+            ports={{ sendMessage: async () => undefined, startFerret: async () => 'harness-workspace' }}
+            search=""
+            store={CARD_DETAIL_STORE}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -8694,7 +8588,7 @@ function SessionSearchStateCard({
       {/* Room for the popup to hang into: it is `absolute`, so the card has to
           reserve the space or the next card is drawn over the evidence. */}
       <div className="pb-[19rem]">
-        <SessionSearchProvider connection={connection} focusSignal={0} scope={searchScope}>
+        <SessionSearchProvider board={HARNESS_BOARD} connection={connection} focusSignal={0} scope={searchScope}>
           <div className="max-w-[34rem]">
             <SessionSearchControl />
           </div>
@@ -8801,7 +8695,7 @@ if (host) {
     // The harness answers its daemon inside the page, on the plain network, so every surface is handed
     // a client over it; the app itself only ever has the store's session-routed pool.
     <DaemonClientProvider client={harnessDaemonClient}>
-      <SessionSearchProvider connection={daemon} focusSignal={0} scope={scope}>
+      <SessionSearchProvider board={HARNESS_BOARD} connection={daemon} focusSignal={0} scope={scope}>
         {mcpFrame !== undefined ? (
           <McpSignInFrameHarness frame={mcpFrame} />
         ) : contextTools !== undefined ? (
@@ -8819,7 +8713,19 @@ if (host) {
         ) : settingsHarness ? (
           <StandaloneSettingsPageHarness />
         ) : window.location.hash === '#session-workspace' ? (
-          <SessionWorkspaceHarness />
+          CARDS_VIEW ? (
+            // The app's search provider follows the open chat; this chat is the workspace session.
+            <SessionSearchProvider
+              board={HARNESS_BOARD}
+              connection={daemon}
+              focusSignal={0}
+              scope={daemonSessionScope(daemon, HARNESS_CHAT_OWNER)}
+            >
+              <SessionWorkspaceHarness />
+            </SessionSearchProvider>
+          ) : (
+            <SessionWorkspaceHarness />
+          )
         ) : window.location.hash === '#session-new' ? (
           <NewSessionHarness />
         ) : window.location.hash === '#session-search' ? (

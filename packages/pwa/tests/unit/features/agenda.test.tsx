@@ -15,9 +15,8 @@ import {
   agendaLedgerIds,
   useAgenda,
 } from '../../../src/features/agenda/agenda.tsx';
-import { AgendaDrawer, AgendaLine, AgendaPanel } from '../../../src/features/agenda/agenda-line.tsx';
+import { AgendaDrawer, AgendaLine } from '../../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../../src/features/agenda/agenda-row.tsx';
-import { useAgendaDock } from '../../../src/features/agenda/agenda-collapse.ts';
 import { AgendaItemView } from '../../../src/features/agenda/agenda-item-view.tsx';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
@@ -69,6 +68,12 @@ const client = (fail = false): AgendaActionClient => ({
   },
   needsInfo: async () => undefined,
   discuss: async () => undefined,
+  snooze: async (_c, _s, id, until) => {
+    calls.push(`snooze:${id}:${until}`);
+  },
+  unsnooze: async (_c, _s, id) => {
+    calls.push(`unsnooze:${id}`);
+  },
   progress: async (_c, _s, id, step, done) => {
     calls.push(`progress:${id}:${step}:${done}`);
   },
@@ -78,6 +83,7 @@ interface HostProps {
   readonly snapshot: AgendaSnapshot | null;
   readonly agendaMode?: boolean;
   readonly desktop?: boolean;
+  readonly afterOpen?: () => void;
   readonly focus?: AgendaFocus | null;
   readonly scope?: typeof scope;
   readonly onOpenResolved?: (id: AgendaId) => void;
@@ -100,7 +106,6 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     agendaMode,
     client: rest.clientOverride ?? client(),
     connection,
-    desktop,
     ferret: 'Johnnie',
     focus,
     scope: rest.scope ?? scope,
@@ -124,8 +129,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
         {agenda.above}
         <div data-composer="" />
       </div>
-      {agenda.side}
-      {agenda.dockButton}
+      <div data-section="">{agenda.section(rest.afterOpen)}</div>
     </div>
   );
 }
@@ -150,6 +154,7 @@ const lines = (root: ReactTestInstance) =>
   root.findAll(node => node.type === 'div' && node.props['data-agenda-line'] !== undefined);
 const toggle = (root: ReactTestInstance) =>
   root.findAll(node => node.type === 'button' && node.props['data-agenda-line-toggle'] !== undefined);
+const section = (root: ReactTestInstance) => root.find(node => node.props['data-section'] !== undefined);
 const lastIsComposer = (root: ReactTestInstance): boolean => {
   const column = root.find(node => node.type === 'div' && node.props.className === 'fy-chat-input__column');
   const last = column.children.at(-1);
@@ -262,7 +267,10 @@ describe('the drawer', () => {
     const view = mount({ snapshot: board(MIXED) });
     expect(view.root.findAllByType(AgendaDrawer)).toHaveLength(0);
     run(() => toggle(view.root)[0]?.props.onClick());
-    const rows = view.root.findAllByType(AgendaRow).map(row => row.props.item.id);
+    const rows = view.root
+      .findByType(AgendaDrawer)
+      .findAllByType(AgendaRow)
+      .map(row => row.props.item.id);
     expect(rows).toEqual(['A3', 'A2', 'A1']);
     expect(view.root.findByType(AgendaLine).props.open).toBe(true);
     run(() => toggle(view.root)[0]?.props.onClick());
@@ -309,14 +317,6 @@ describe('the drawer', () => {
     expect(view.root.findAllByType(AgendaDrawer)).toHaveLength(1);
     run(() => drawer.props.onKeyDown({ key: 'Escape', stopPropagation: () => stopped.push(true) }));
     expect(stopped).toEqual([true]);
-    expect(view.root.findAllByType(AgendaDrawer)).toHaveLength(0);
-  });
-
-  test('is not offered while the agenda is docked', () => {
-    const view = mount({ snapshot: board(MIXED), desktop: true });
-    run(() => view.root.find(node => node.props['data-agenda-dock'] !== undefined).props.onClick());
-    expect(toggle(view.root)).toHaveLength(0);
-    expect(view.root.findAllByType(AgendaPanel)).toHaveLength(1);
     expect(view.root.findAllByType(AgendaDrawer)).toHaveLength(0);
   });
 });
@@ -585,66 +585,51 @@ describe('what the item view sends', () => {
   });
 });
 
-describe('the docked panel', () => {
-  test('is a wide screen’s choice: no dock button on a phone, and the header button toggles it', () => {
-    const phone = mount({ snapshot: board(MIXED) });
-    expect(phone.root.findAll(node => node.props?.['data-agenda-dock'] !== undefined)).toHaveLength(0);
-    expect(live().side).toBeNull();
+describe('the agenda as a section of Info', () => {
+  const rowIds = (view: ReturnType<typeof render>) =>
+    section(view.root)
+      .findAllByType(AgendaRow)
+      .map(row => row.props.item.id);
 
-    const wide = mount({ snapshot: board(MIXED), desktop: true });
-    const dock = () => wide.root.find(node => node.type === 'button' && node.props['data-agenda-dock'] !== undefined);
-    expect(dock().props['aria-pressed']).toBe(false);
-    run(() => dock().props.onClick());
-    expect(dock().props['aria-pressed']).toBe(true);
-    expect(wide.root.findByType(AgendaPanel).props.items.map((row: AgendaItem) => row.id)).toEqual(['A3', 'A2', 'A1']);
-    run(() => dock().props.onClick());
-    expect(wide.root.findAllByType(AgendaPanel)).toHaveLength(0);
+  test('shows the ferret’s open items as rows, most pressing first', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    expect(rowIds(view)).toEqual(['A3', 'A2', 'A1']);
   });
 
-  test('keeps the composer last whether docked or not', () => {
+  test('says so when there is nothing on the agenda', () => {
+    const view = mount({ snapshot: board([]) });
+    expect(rowIds(view)).toEqual([]);
+    expect(textOf(section(view.root))).toBe('Nothing on the agenda.');
+  });
+
+  test('draws nothing when the ferret is not in agenda mode', () => {
+    const view = mount({ snapshot: board(MIXED), agendaMode: false });
+    expect(section(view.root).children).toHaveLength(0);
+  });
+
+  test('opens the item’s card when a row is opened, then tells the host', () => {
+    const opened: string[] = [];
+    const view = mount({ snapshot: board(MIXED), afterOpen: () => opened.push('closed-info') });
+    run(() =>
+      section(view.root)
+        .findAllByType(AgendaRow)
+        .find(row => row.props.item.id === 'A2')
+        ?.props.onOpen(),
+    );
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A2');
+    expect(live().covered).toBe(true);
+    expect(opened).toEqual(['closed-info']);
+  });
+
+  test('opens the card without a host callback', () => {
+    const view = mount({ snapshot: board(MIXED) });
+    run(() => section(view.root).findAllByType(AgendaRow)[0]?.props.onOpen());
+    expect(view.root.findByType(AgendaItemView).props.item.id).toBe('A3');
+  });
+
+  test('keeps the composer last', () => {
     const view = mount({ snapshot: board(MIXED), desktop: true });
     expect(lastIsComposer(view.root)).toBe(true);
-    run(() => view.root.find(node => node.props['data-agenda-dock'] !== undefined).props.onClick());
-    expect(lastIsComposer(view.root)).toBe(true);
-  });
-
-  test('is never offered when the ferret is not in agenda mode', () => {
-    const view = mount({ snapshot: board(MIXED), desktop: true, agendaMode: false });
-    expect(view.root.findAll(node => node.props?.['data-agenda-dock'] !== undefined)).toHaveLength(0);
-  });
-});
-
-describe('the layout choices', () => {
-  function DockProbe({ storage }: { readonly storage: Parameters<typeof useAgendaDock>[0] }) {
-    const [docked, toggleDock] = useAgendaDock(storage);
-    return <button data-docked={docked} onClick={toggleDock} type="button" />;
-  }
-
-  test('remember the dock in storage, and still hold for the tab when storage refuses', () => {
-    const values = new Map<string, string>();
-    const storage = {
-      getItem: (key: string) => values.get(key) ?? null,
-      setItem: (k: string, v: string) => void values.set(k, v),
-    };
-    const view = render(<DockProbe storage={storage} />);
-    mounted.push(view);
-    run(() => view.root.findByType('button').props.onClick());
-    expect(values.get('fy-agenda-dock-v1')).toBe('1');
-    expect(view.root.findByType('button').props['data-docked']).toBe(true);
-
-    const refusing = {
-      getItem: () => {
-        throw new Error('blocked');
-      },
-      setItem: () => {
-        throw new Error('blocked');
-      },
-    };
-    const other = render(<DockProbe storage={refusing} />);
-    mounted.push(other);
-    expect(other.root.findByType('button').props['data-docked']).toBe(false);
-    run(() => other.root.findByType('button').props.onClick());
-    expect(other.root.findByType('button').props['data-docked']).toBe(true);
   });
 });
 
@@ -759,31 +744,6 @@ describe('the drawer’s scroll cue', () => {
     mounted.push(bare);
     run(() => toggle(bare.root)[0]?.props.onClick());
     expect(drawer(bare).props['data-more']).toBe(true);
-  });
-});
-
-describe('the layout choice when the browser hides its storage', () => {
-  function Probe() {
-    const [docked] = useAgendaDock();
-    return <i data-docked={docked} />;
-  }
-
-  test('reads as not docked when asking for storage throws', () => {
-    const original = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-    Object.defineProperty(globalThis, 'localStorage', {
-      configurable: true,
-      get: () => {
-        throw new Error('storage is blocked');
-      },
-    });
-    try {
-      const view = render(<Probe />);
-      mounted.push(view);
-      expect(view.root.findByType('i').props['data-docked']).toBe(false);
-    } finally {
-      if (original) Object.defineProperty(globalThis, 'localStorage', original);
-      else delete (globalThis as { localStorage?: unknown }).localStorage;
-    }
   });
 });
 

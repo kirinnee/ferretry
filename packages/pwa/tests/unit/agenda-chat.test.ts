@@ -49,3 +49,17 @@ describe('agendaCounts and agendaSegments', () => {
     ]);
   });
 });
+
+describe('parked items', () => {
+  const snoozed = { parked: { reason: 'snoozed', at: '2026-07-31T12:00:00.000Z', until: '2026-08-01T09:00:00.000Z' } };
+  const replied = { parked: { reason: 'replied', at: '2026-07-31T12:00:00.000Z' } };
+
+  it('leaves a snoozed or replied item out of the open items', () => {
+    expect(ids(agendaItems([item('A1'), item('A2', snoozed), item('A3', replied)]))).toEqual(['A1']);
+  });
+
+  it('counts a parked item nowhere', () => {
+    const board = [item('A1', { blockingNow: true }), item('A2', snoozed), item('A3', replied)];
+    expect(agendaCounts(board)).toEqual({ blocking: 1, needYou: 1, withFerret: 0 });
+  });
+});

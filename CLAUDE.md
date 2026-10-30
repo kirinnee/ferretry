@@ -256,6 +256,12 @@ When a setting reaches a running ferret — live, on restart, or only for new fe
 argv is built (one builder for start, Restart CLI, migrate and revive; a revive never replays):
 [docs/launch-settings.md](docs/launch-settings.md).
 
+`packages/daemon` also owns the **project board**: one board per project (Unfiled for work outside any git
+repository), cards with lanes in six fixed categories, authority from ownership and lineage, staleness, the
+GitHub watcher that moves a card when its PR or release does, and the agenda and dependency links between cards.
+The contract, the CLI verbs and the declared gaps are [docs/board.md](docs/board.md); the one-time import of the
+old per-session task files is [docs/board-import.md](docs/board-import.md). Implement against those documents.
+
 ## Migration context
 
 Mission and phase order: [docs/PROMPT.md](docs/PROMPT.md). Architecture, pairing, and security

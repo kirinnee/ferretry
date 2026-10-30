@@ -42,19 +42,20 @@ const run = (command: string, args: readonly string[]): void => {
   if (result.status !== 0) fail(`${command} exited ${result.status}`);
 };
 
-const html = (theme: string) => `<!doctype html>
+const html = (theme: string, entry = 'agenda-page') => `<!doctype html>
 <html lang="en" data-theme="${theme}">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <link rel="stylesheet" href="/app.css" />
   </head>
-  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/agenda-page.js"></script></body>
+  <body class="bg-bg text-fg"><div id="root"></div><script type="module" src="/${entry}.js"></script></body>
 </html>`;
 
 mkdirSync(buildDir, { recursive: true });
 mkdirSync(outDir, { recursive: true });
 run('bun', ['build', join(harnessDir, 'agenda-page.tsx'), '--outdir', buildDir, '--target', 'browser']);
+run('bun', ['build', join(harnessDir, 'inbox-page.tsx'), '--outdir', buildDir, '--target', 'browser']);
 run('./node_modules/.bin/tailwindcss', [
   '--config',
   'tailwind.config.ts',
@@ -70,9 +71,15 @@ const server = Bun.serve({
   async fetch(request) {
     const url = new URL(request.url);
     if (url.pathname === '/')
-      return new Response(html(url.searchParams.get('theme') ?? 'studio-dark'), {
-        headers: { 'content-type': 'text/html' },
-      });
+      return new Response(
+        html(
+          url.searchParams.get('theme') ?? 'studio-dark',
+          url.searchParams.get('entry') === 'inbox' ? 'inbox-page' : 'agenda-page',
+        ),
+        {
+          headers: { 'content-type': 'text/html' },
+        },
+      );
     const built = Bun.file(join(buildDir, url.pathname));
     return new Response((await built.exists()) ? built : Bun.file(join(packageDir, 'public', url.pathname)));
   },
@@ -166,12 +173,16 @@ const checkSlots = async (page: Page, label: string): Promise<void> => {
     const style = getComputedStyle(row);
     const gap = Number.parseFloat(style.columnGap) || 0;
     const at = row.getBoundingClientRect();
-    const menu = row.querySelector('.fy-attn-menu')?.getBoundingClientRect().width ?? 0;
-    const column = (at.width - menu - 3 * gap) / 3;
-    const starts = [0, 1, 2].map(index => at.left + index * (column + gap));
+    const column = document.querySelector('.fy-item-view__column')?.getBoundingClientRect() ?? null;
+    const kids = [...row.children].map(child => child.getBoundingClientRect());
+    const holes = kids.slice(1).map((box, index) => box.left - (kids[index]?.right ?? box.left) - gap);
     return {
       slotted: row.hasAttribute('data-slots'),
-      starts,
+      holes,
+      edges: column === null ? null : { left: at.left - column.left, right: column.right - at.right },
+      dismissLast:
+        row.querySelector('[data-agenda-dismiss]') === null ||
+        row.lastElementChild?.hasAttribute('data-agenda-dismiss') === true,
       buttons: [...row.querySelectorAll<HTMLElement>('[data-agenda-answer]')].map(button => ({
         direction: button.dataset.agendaAnswer ?? '',
         x: button.getBoundingClientRect().left,
@@ -188,7 +199,17 @@ const checkSlots = async (page: Page, label: string): Promise<void> => {
     order.every((slot, index) => slot !== undefined && (index === 0 || slot > (order[index - 1] ?? -1))),
     `${label}: the row is not in ← ↑ → order: ${found.buttons.map(button => button.direction).join(', ')}`,
   );
-  check(found.starts.length === 3, `${label}: the row has no three slots`);
+  // No holes: a direction with no answer draws nothing, the buttons share the width.
+  check(
+    found.holes.every(hole => hole <= 1.5),
+    `${label}: the row has a hole: ${found.holes.map(hole => Math.round(hole)).join(', ')}px past the gap`,
+  );
+  check(found.dismissLast, `${label}: "Not needed" is not the last thing in the row`);
+  // Inside the content column, on the card body's edges.
+  check(
+    found.edges !== null && Math.abs(found.edges.left) <= 1 && Math.abs(found.edges.right) <= 1,
+    `${label}: the row is off the body's edges by ${JSON.stringify(found.edges)}`,
+  );
 };
 
 /** Nothing in an item view folds: no disclosure, no summary, no toggle, nothing expandable in the body. */
@@ -198,8 +219,10 @@ const checkNoFolds = async (page: Page, label: string): Promise<void> => {
     if (view === null) return ['no item view'];
     const found = [...view.querySelectorAll('details, summary, [data-agenda-history-toggle]')];
     const body = view.querySelector('.fy-item-view__body');
-    const expandable = body === null ? [] : [...body.querySelectorAll('[aria-expanded]')];
-    return [...found, ...expandable].map(node => node.tagName.toLowerCase());
+    // A diagram's own source toggle (fy-render) is a tool on the picture, not a fold of the item.
+    const expandable =
+      body === null ? [] : [...body.querySelectorAll('[aria-expanded]:not(.fy-render-tool):not(.fy-receipt)')];
+    return [...found, ...expandable].map(node => `${node.tagName.toLowerCase()}.${node.className}`);
   });
   check(folds.length === 0, `${label}: the item view folds something: ${folds.join(', ')}`);
 };
@@ -287,7 +310,7 @@ const checkOverlay = async (page: Page, form: Form, label: string, composerRest:
 
 const openItem = async (page: Page, id: string): Promise<void> => {
   await openDrawer(page);
-  await page.locator(`[data-agenda-row="${id}"]`).click();
+  await page.locator(`[data-agenda-drawer] [data-agenda-row="${id}"]`).click();
   await overlay(page).waitFor({ state: 'visible' });
   await page.waitForTimeout(200);
 };
@@ -456,6 +479,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
 
   // v4b: the swipe row by direction — 2, 3 and 5 options, the menu open on five, and the jaeda options item
   const V4B = [
+    { id: 'A8', name: 'todo-2', answers: ['left', 'right'], plain: true },
     { id: 'A62', name: 'options-2', answers: ['left', 'up'] },
     { id: 'A63', name: 'options-3', answers: ['left', 'up', 'right'] },
     { id: 'A64', name: 'options-5', answers: ['left', 'up', 'right'], extras: 2 },
@@ -479,7 +503,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       .locator('.fy-qr__row[data-slots] button[data-agenda-option]:not([data-agenda-answer])')
       .count();
     check(plainChips === 0, `${label}: ${plainChips} option buttons sit outside the three slots`);
-    check((await page.locator('[aria-haspopup="menu"]').count()) === 0, `${label}: a "…" menu is still drawn`);
+    check(
+      (await page.locator('[aria-haspopup="menu"]:not([data-agenda-snooze])').count()) === 0,
+      `${label}: a "…" menu is still drawn`,
+    );
     // Options past the three: the rows under the swipe row, tap only, each row filling the width.
     const more = page.locator('[data-agenda-more-row]');
     const wanted = 'extras' in entry ? entry.extras : 0;
@@ -502,10 +529,24 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
       });
       check(fill, `${label}: a row of extra options does not fill the width`);
     }
-    check(
-      (await page.locator('.fy-qr__row [data-agenda-answer="up"][data-recommended]').count()) === 1,
-      `${label}: the recommended answer is not in the middle slot`,
-    );
+    if (!('plain' in entry))
+      check(
+        (await page.locator('.fy-qr__row [data-agenda-answer="up"][data-recommended]').count()) === 1,
+        `${label}: the recommended answer is not in the middle slot`,
+      );
+    // THE ROOM IT TAKES (owner: "doesn't waste so much god damn space"): the sticky actions and the composer.
+    const qrTop = (await boxOf(page.locator('[data-agenda-quick-replies]'), 'quick replies')).y;
+    const composer = await boxOf(page.locator('[data-agenda-harness-composer]'), 'composer');
+    const actions = Math.round(composer.y + composer.height - qrTop);
+    // One row of actions has a budget; options past three add their own rows on purpose (approved).
+    const room = phone ? 140 : 130;
+    if (wanted === 0)
+      check(actions <= room, `${label}: the actions and the composer take ${actions}px, over ${room}px`);
+    if (phone) {
+      const head = Math.round((await boxOf(page.locator('[data-agenda-top]'), 'head')).height);
+      check(head <= 56, `${label}: the phone head is ${head}px tall, over 56px`);
+      console.log(`📏 ${label} ${form} ${theme}: head ${head}px, actions + composer ${actions}px`);
+    } else console.log(`📏 ${label} ${form} ${theme}: actions + composer ${actions}px`);
     await shot(page, entry.name, form, theme, 'agenda-v4c');
     // a touch swipe, caught mid-drag: ↑ answers the middle one, ↓ skips to the next item (phone only: a mouse does not swipe)
     if (phone && entry.id === 'A63') {
@@ -626,6 +667,111 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await overlay(old).waitFor({ state: 'visible' });
   check((await overlay(old).getAttribute('data-agenda-view')) === 'A3', '?attention=A3 did not open A3');
   await old.close();
+
+  // SNOOZE: the clock in the item view's pager opens a menu that is whole, on top, and reachable by touch
+  const withParked = await open(browserContext, theme, 'view=board&parked=1');
+  const withoutParked = await open(browserContext, theme, 'view=board');
+  const lineText = (await withParked.locator('[data-agenda-line]').textContent()) ?? '';
+  check(
+    lineText === ((await withoutParked.locator('[data-agenda-line]').textContent()) ?? ''),
+    `parked items changed the agenda line: "${lineText}"`,
+  );
+  await withoutParked.close();
+  await openDrawer(withParked);
+  check(
+    (await withParked.locator('[data-agenda-row="A70"], [data-agenda-row="A71"]').count()) === 0,
+    'a parked item is listed in the drawer',
+  );
+  await withParked.close();
+  const parkedBoard = await open(browserContext, theme, 'view=board&parked=1&agenda=A3');
+  await overlay(parkedBoard).waitFor({ state: 'visible' });
+  const clock = parkedBoard.locator('[data-agenda-view="A3"] [data-agenda-snooze]');
+  check((await clock.count()) === 1, 'the item view has no snooze clock');
+  const clockBox = await boxOf(clock, 'the snooze clock');
+  if (phone)
+    check(
+      clockBox.width >= 43.5 || clockBox.height >= 43.5,
+      `the clock is ${Math.round(clockBox.width)}x${Math.round(clockBox.height)}`,
+    );
+  await clock.click();
+  const menu = parkedBoard.locator('[role="menu"]');
+  await menu.waitFor({ state: 'visible' });
+  await parkedBoard.waitForTimeout(150);
+  const items = await menu.locator('[role="menuitem"]').allTextContents();
+  check(
+    JSON.stringify(items.map(text => text.trim())) ===
+      JSON.stringify(['1 hour', '4 hours', 'Tomorrow 9:00', 'Custom…']),
+    `the snooze menu says: ${items.join(' | ')}`,
+  );
+  const menuBox = await boxOf(menu, 'the snooze menu');
+  const screen = parkedBoard.viewportSize();
+  check(
+    menuBox.x >= -1 &&
+      menuBox.y >= -1 &&
+      menuBox.x + menuBox.width <= (screen?.width ?? 0) + 1 &&
+      menuBox.y + menuBox.height <= (screen?.height ?? 0) + 1,
+    `the snooze menu leaves the screen: ${JSON.stringify(menuBox)}`,
+  );
+  const onTop = await menu.locator('[role="menuitem"]').evaluateAll(nodes =>
+    nodes.every(node => {
+      const at = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2);
+      return hit !== null && node.contains(hit);
+    }),
+  );
+  check(onTop, 'something sits over the snooze menu');
+  if (phone)
+    for (const entry of await menu.locator('[role="menuitem"]').all())
+      check(((await entry.boundingBox())?.height ?? 0) >= 43.5, 'a snooze menu item is under 44px');
+  await shot(parkedBoard, 'snooze-menu', form, theme, 'agenda-snooze');
+  await menu.locator('[role="menuitem"]').last().click();
+  const custom = parkedBoard.locator('input[type="datetime-local"]');
+  await custom.waitFor({ state: 'visible' });
+  await custom.fill('2026-10-01T09:00');
+  await parkedBoard.locator('[data-snooze-custom] button[type="submit"]').click();
+  check((await parkedBoard.locator('[role="alert"]').count()) >= 1, 'a past custom time was not refused');
+  await shot(parkedBoard, 'snooze-custom-refused', form, theme, 'agenda-snooze');
+  await parkedBoard.keyboard.press('Escape');
+  await parkedBoard.waitForTimeout(100);
+  check((await parkedBoard.locator('[role="menu"]').count()) === 0, 'Esc did not close the snooze menu');
+  await parkedBoard.locator('[data-agenda-view="A3"] [data-agenda-snooze]').click();
+  await parkedBoard.locator('[role="menuitem"]').first().click();
+  await parkedBoard.waitForTimeout(250);
+  check((await parkedBoard.locator('[data-agenda-view="A3"]').count()) === 0, 'snoozing did not leave the item');
+  await parkedBoard.close();
+
+  // SNOOZED and REPLIED: the Inbox lists each, says where it stands, and the open list never shows them
+  const inbox = await open(browserContext, theme, 'entry=inbox&view=sections');
+  const openRows = await inbox.locator('[data-agenda-row]').count();
+  check(openRows > 0, 'the inbox has no open rows');
+  check((await inbox.locator('[data-agenda-parked]').count()) === 0, 'a parked item is on the open list');
+  check(
+    (await inbox.locator('[data-agenda-filter-option="snoozed"]').textContent()) === 'Snoozed (2)',
+    'the Snoozed filter does not say 2',
+  );
+  check(
+    (await inbox.locator('[data-agenda-filter-option="replied"]').textContent()) === 'Replied (1)',
+    'the Replied filter does not say 1',
+  );
+  for (const [which, rowsWanted, words, button] of [
+    ['snoozed', 2, /^Snoozed until /u, 'Unsnooze'],
+    ['replied', 1, /^Replied .* — waiting on /u, 'Back to my list'],
+  ] as const) {
+    await inbox.locator(`[data-agenda-filter-option="${which}"]`).click();
+    await inbox.waitForTimeout(200);
+    const rows = inbox.locator('[data-agenda-parked]');
+    check((await rows.count()) === rowsWanted, `${which}: ${await rows.count()} rows, wanted ${rowsWanted}`);
+    for (const status of await inbox.locator('[data-agenda-parked-status]').allTextContents())
+      check(words.test(status.trim()), `${which}: a row says "${status}"`);
+    const act = inbox.locator(`[data-agenda-unsnooze="${which}"]`);
+    check((await act.count()) === rowsWanted, `${which}: no "${button}" button on a row`);
+    check(((await act.first().textContent()) ?? '').trim() === button, `${which}: the button is not "${button}"`);
+    const wide = await inbox.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    check(wide <= 0, `${which}: the page scrolls sideways by ${wide}px`);
+    if (phone) check(((await act.first().boundingBox())?.height ?? 0) >= 35.5, `${which}: the button is under 36px`);
+    await shot(inbox, `${which}-filter`, form, theme, 'agenda-snooze');
+  }
+  await inbox.close();
   await browserContext.close();
 };
 

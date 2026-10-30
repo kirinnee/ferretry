@@ -210,7 +210,7 @@ function CompletionRow({
       tabIndex={-1}
       aria-selected={active}
       data-active={active || undefined}
-      className={`group flex min-h-[44px] w-full cursor-pointer select-none items-center gap-sm border-l-heavy border-l-transparent px-control-x py-row-y text-left text-fg outline-none hover:bg-surface-2${active ? ' border-l-accent bg-accent-soft shadow-active' : ''}`}
+      className={`group flex min-h-[44px] w-full cursor-pointer select-none items-center gap-sm px-control-x py-row-y text-left text-fg outline-none hover:bg-surface-2${active ? ' bg-accent-soft shadow-active' : ''}`}
       onPointerDown={event => {
         pointer.current = event.pointerId;
         event.preventDefault();

@@ -1,5 +1,5 @@
 /**
- * A ferret's chat as the agenda sits in it: a header (where the "Agenda" dock button lives), the transcript, and
+ * A ferret's chat as the agenda sits in it: a header, the transcript, and
  * above a composer-shaped box the line, the drawer and the "about" chip. An opened item is an overlay over the
  * message list ONLY: the agenda row and the composer stay visible and typeable. The REAL `useAgenda` drives it;
  * only the data is invented and the answers go nowhere.
@@ -25,9 +25,18 @@ const CONNECTION = daemonConnection({
 });
 
 const noop = async (): Promise<void> => undefined;
-const CLIENT = { respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop };
+const CLIENT = {
+  respond: noop,
+  resolve: noop,
+  dismiss: noop,
+  needsInfo: noop,
+  discuss: noop,
+  snooze: noop,
+  unsnooze: noop,
+  progress: noop,
+};
 
-/** A wide screen with a mouse: the agenda can dock and the card has no swipe arrows. */
+/** A wide screen with a mouse: the card has no swipe arrows and the agenda also shows as a section beside the chat. */
 const harnessIsDesktop = (): boolean => window.innerWidth >= 1_024;
 
 export interface AgendaChatHarnessProps {
@@ -70,7 +79,6 @@ export function AgendaChatHarness({
     agendaMode,
     client: CLIENT,
     connection: CONNECTION,
-    desktop,
     ferret,
     focus: target === null ? null : { target, seq: 1 },
     now,
@@ -163,12 +171,18 @@ export function AgendaChatHarness({
       >
         <span className="text-ui font-semibold">{ferret}</span>
         <span className="text-meta text-faint">ferretry · studio</span>
-        <span className="ml-auto flex items-center gap-2">{agenda.dockButton}</span>
       </header>
       {desktop && agendaMode ? (
-        <div className="fy-agenda-split">
+        <div className="flex min-h-0 flex-1">
           {chat}
-          {agenda.side}
+          <aside
+            aria-label="Info"
+            className="w-80 shrink-0 overflow-y-auto border-l border-border p-panel"
+            data-agenda-harness-info=""
+          >
+            <h2 className="m-0 mb-sm text-meta font-semibold text-faint">Agenda</h2>
+            {agenda.section()}
+          </aside>
         </div>
       ) : (
         chat

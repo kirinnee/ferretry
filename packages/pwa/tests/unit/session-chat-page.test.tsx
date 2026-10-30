@@ -20,7 +20,6 @@ import { AgendaDrawer, AgendaLine } from '../../src/features/agenda/agenda-line.
 import { AgendaRow } from '../../src/features/agenda/agenda-row.tsx';
 import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
 import { BoardSideTab } from '../../src/features/board/board-side-tab.tsx';
-import { ChatCardChip } from '../../src/features/board/chat-card-chip.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
@@ -99,8 +98,6 @@ const route = (input: string | URL | Request): Response => {
     return Response.json({ v: 1, sessionId, root: `/work/${sessionId}`, files: [], coverage: 'complete', skipped: [] });
   if (url.pathname.endsWith('/mcp'))
     return Response.json({ project: { path: `/work/${sessionId}/.mcp.json`, etag: null, servers: [] } });
-  if (url.pathname.includes('/v1/sessions/') && url.pathname.endsWith('/tasks'))
-    return Response.json({ v: 1, sessionId, tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' });
   return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
 };
 
@@ -380,7 +377,7 @@ const fakeDaemon = (options: { readonly migrate?: Error | readonly (Error | unde
 };
 
 describe('SessionChatPage', () => {
-  test('names the ferret that started this one in the header, as a link to it', () => {
+  test('names the ferret that started this one in Info, as a link to it, and not in the header', async () => {
     const parent = sessionView('boss', { config: { teammate: 'hadi' } });
     const child = sessionView('kid', { config: { parent: 'boss' } });
     const opened: string[] = [];
@@ -388,17 +385,22 @@ describe('SessionChatPage', () => {
       <SessionChatPage
         client={client([], child)}
         connection={alpha}
+        context={contextDependencies()}
         daemonSessions={[parent, child]}
         entries={[]}
+        initialInfo="overview"
         onNavigate={to => opened.push(to)}
         onSessionChange={() => undefined}
         presentation="pane"
         session={child}
       />,
+      fakeDaemon().factory,
     );
     try {
-      const link = page.root.findByProps({ 'data-session-started-by': '' });
-      expect(textOf(link)).toBe('Started by Hadi · Session boss');
+      await flush();
+      expect(page.root.findAllByProps({ 'data-session-started-by': '' })).toHaveLength(0);
+      const link = page.root.findByProps({ 'data-info-session-link': 'boss' });
+      expect(textOf(link)).toBe('Hadi');
       run(() => link.props.onClick());
       expect(opened).toEqual(['/d/alpha/session/boss']);
     } finally {
@@ -475,6 +477,7 @@ describe('SessionChatPage', () => {
     // DO is Actions ▾, grouped; the old ⋯ menu is gone.
     expect(page.root.findAllByProps({ 'data-session-more': '' })).toHaveLength(0);
     expect(actionLabels(page.root)).toEqual([
+      'Theme…',
       'Rename…',
       'Fork into a new ferret…',
       'Copy session id',
@@ -946,7 +949,8 @@ describe('SessionChatPage', () => {
       expect(page.root.findAllByProps({ 'data-pane-unavailable': 'browser' })).toHaveLength(0);
       expect(page.root.findAllByProps({ role: 'toolbar' })).toHaveLength(0);
       expect(page.root.findAllByType('button').some(node => node.children.join('').includes('Browser'))).toBe(false);
-      expect(page.root.findByType(SessionTopBar).props.project).toBe('ferretry');
+      // The project moved into Info's Overview; the bar is handed none.
+      expect(page.root.findByType(SessionTopBar).props.project).toBeUndefined();
       // No phone drawer opener on a page that was not handed one.
       expect(page.root.findByType(SessionTopBar).props.onOpenSessions).toBeUndefined();
     } finally {
@@ -1006,7 +1010,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('on a phone ▾ interrupts, opens Info and opens the theme controls — what the bar no longer draws', async () => {
+  test('on a phone ▾ interrupts and opens the theme controls, and ⓘ opens Info — all the bar no longer draws', async () => {
     const calls: string[] = [];
     const page = renderSessionChatPage(
       <SessionChatPage
@@ -1020,7 +1024,8 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      expect(actionLabels(page.root).slice(0, 3)).toEqual(['Interrupt turn', 'Info', 'Theme…']);
+      expect(actionLabels(page.root).slice(0, 2)).toEqual(['Interrupt turn', 'Theme…']);
+      expect(actionLabels(page.root)).not.toContain('Info');
       chooseAction(page.root, 'interrupt');
       await flush();
       expect(calls).toEqual(['interrupt:shared']);
@@ -1035,9 +1040,8 @@ describe('SessionChatPage', () => {
       if (theme?.kind !== 'form') throw new Error('Theme… is not a form in Actions');
       expect((theme.render({} as never) as ReactElement).type).toBe(ThemeSettingsPanel);
 
-      chooseAction(page.root, 'info');
+      run(() => page.root.findByType(SessionTopBar).props.onToggleInfo());
       expect(page.root.findByType(SessionInfo).props.placement.open).toBe(true);
-      expect(actionLabels(page.root)).toContain('Close Info');
     } finally {
       run(() => page.unmount());
     }
@@ -1484,14 +1488,6 @@ describe('SessionChatPage', () => {
           coverage: 'complete',
           skipped: [],
         });
-      if (url.pathname.endsWith('/tasks'))
-        return Response.json({
-          v: 1,
-          sessionId: 'shared',
-          tasks: [],
-          parseErrors: 0,
-          updatedAt: '2026-08-06T00:00:00.000Z',
-        });
       if (url.pathname.endsWith('/fs')) return Response.json({ entries: [{ name: 'needle.ts', type: 'file' }] });
       return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
     }) as typeof fetch;
@@ -1515,10 +1511,8 @@ describe('SessionChatPage', () => {
       await runAsync(async () => {
         for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
       });
-      const bare = seen.filter(row => row.method === 'GET' && row.pathname.endsWith('/tasks') && !row.search.has('q'));
-      expect(bare).toHaveLength(1);
+      expect(seen.filter(row => row.pathname.endsWith('/tasks') || row.pathname.endsWith('/v1/tasks'))).toHaveLength(0);
       expect(seen.filter(row => row.pathname.endsWith('/fs/index'))).toHaveLength(1);
-      expect(seen.filter(row => row.method === 'GET' && /\/tasks\/[^/]+$/u.test(row.pathname))).toHaveLength(0);
       expect(seen.filter(row => row.pathname.endsWith('/fs'))).toHaveLength(0);
 
       const workspace = () => page.root.findByType(SessionWorkspace).props.workspace;
@@ -1542,7 +1536,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('Info opens the real session-scoped analytics sheet; no board means no card chip and no Tasks tab', async () => {
+  test('Info opens the real session-scoped analytics sheet; no board means no Card row and no Tasks tab', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const current = sessionView('shared');
     const page = renderSessionChatPage(
@@ -1567,7 +1561,7 @@ describe('SessionChatPage', () => {
       const sheet = () => page.root.findAll(node => node.type === BottomSheet && node.props.closeLabel === 'Close')[0];
       expect(sheet()?.props.ariaLabel).toBe('Analytics for this session');
       expect(page.root.findByType(SessionInfo).props.card).toBeUndefined();
-      expect(page.root.findAllByType(ChatCardChip)).toHaveLength(0);
+      expect(page.root.findAllByProps({ 'data-info-row': 'Card' })).toHaveLength(0);
       run(() => sheet()?.props.onClose());
       expect(sheet()?.props.open).toBe(false);
       expect(sheet()?.props.ariaLabel).toBe('Session tool');
@@ -1576,7 +1570,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('a board gives the header its card chip, and a task reference opens the card detail', async () => {
+  test('a board gives Info its Card row, and a task reference opens the card detail', async () => {
     const navigated: string[] = [];
     const current = sessionView('shared', { config: { focusTask: { id: 'F18' } } });
     const board = new DaemonBoardStore(
@@ -1606,12 +1600,12 @@ describe('SessionChatPage', () => {
     );
     try {
       await flush();
-      const chip = page.root.findByType(ChatCardChip);
-      expect(chip.props.chip).toMatchObject({ kind: 'card', ref: '&F18', title: 'Card F18' });
-      expect(chip.props.href).toBe('/d/alpha/board/F18');
-      const link = chip.findByType('a');
-      expect(link.props.href).toBe('/d/alpha/board/F18');
-      run(() => link.props.onClick({ button: 0, preventDefault: () => undefined }));
+      const { card } = page.root.findByType(SessionInfo).props;
+      expect(card.chip).toMatchObject({ kind: 'card', ref: '&F18', title: 'Card F18' });
+      // The header no longer carries the chip: the Card row in Info is the way to the card.
+      expect(page.root.findByType(SessionTopBar).props.cardChip).toBeUndefined();
+      const open = page.root.findAll(node => node.type === 'button' && node.props['data-info-card'] === 'F18')[0];
+      run(() => open?.props.onClick());
       expect(navigated).toEqual(['/d/alpha/board/F18']);
       expect(page.root.findAllByType(BoardSideTab)).toHaveLength(0);
       run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F18'));
@@ -1642,6 +1636,7 @@ describe('SessionChatPage', () => {
         connection={alpha}
         context={contextDependencies()}
         entries={[]}
+        initialInfo="overview"
         onSessionChange={() => undefined}
         presentation="pane"
         session={current}
@@ -1650,7 +1645,7 @@ describe('SessionChatPage', () => {
     );
     try {
       await flush();
-      expect(page.root.findByType(ChatCardChip).props.chip).toEqual({ kind: 'none' });
+      expect(page.root.findByType(SessionInfo).props.card.chip).toEqual({ kind: 'none' });
       expect(reads).toBe(0);
       run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F18'));
       await flush();
@@ -3258,7 +3253,7 @@ describe('SessionChatPage Info and Actions', () => {
     const page = renderSessionChatPage(chatPage({ canControl: false, initialInfo: 'overview' }), fakeDaemon().factory);
     try {
       await flush();
-      expect(actionLabels(page.root)).toEqual(['Copy session id']);
+      expect(actionLabels(page.root)).toEqual(['Theme…', 'Copy session id']);
       expect(page.root.findByType(SessionInfo).props.onRename).toBeUndefined();
       expect(page.root.findAllByProps({ 'data-info-rename': '' })).toHaveLength(0);
     } finally {
@@ -3726,14 +3721,17 @@ describe('SessionChatPage Info and Actions', () => {
     }
   });
 
-  test('the header’s switch marks carry the host’s answers, and a tap only for a reader who may control it', async () => {
+  test('Info’s capability marks carry the host’s answers, and a tap only for a reader who may control it', async () => {
     const taps: string[] = [];
     const switches = { hypermedia: true, pack: false, onToggle: (section: string) => taps.push(section) };
     for (const canControl of [true, false]) {
-      const page = renderSessionChatPage(chatPage({ infoLearning: true, switches, canControl }), fakeDaemon().factory);
+      const page = renderSessionChatPage(
+        chatPage({ infoLearning: true, initialInfo: 'overview', switches, canControl }),
+        fakeDaemon().factory,
+      );
       try {
         await flush();
-        const marks = page.root.findByType(SessionTopBar).props.switches;
+        const marks = page.root.findByType(SessionInfo).props.about.switches;
         expect(marks).toMatchObject({ learning: true, hypermedia: true, pack: false });
         expect(marks.onToggle === undefined).toBe(!canControl);
         marks.onToggle?.('hypermedia', false);
@@ -3742,11 +3740,11 @@ describe('SessionChatPage Info and Actions', () => {
       }
     }
     expect(taps).toEqual(['hypermedia']);
-    // A host that hands none leaves the bar to read the record itself.
-    const bare = renderSessionChatPage(chatPage({}), fakeDaemon().factory);
+    // A host that hands none leaves Info to read the record itself.
+    const bare = renderSessionChatPage(chatPage({ initialInfo: 'overview' }), fakeDaemon().factory);
     try {
       await flush();
-      expect(bare.root.findByType(SessionTopBar).props.switches).toBeUndefined();
+      expect(bare.root.findByType(SessionInfo).props.about.switches).toBeUndefined();
     } finally {
       run(() => bare.unmount());
     }

@@ -101,6 +101,26 @@ describe('AgendaBoard', () => {
     ).toBe('retracted by agent sess-agent-7');
   });
 
+  it('leaves a snoozed or replied item off the board', async () => {
+    const parked = {
+      ...item,
+      id: 'A9',
+      subject: 'Parked away',
+      parked: { reason: 'replied' as const, at: '2026-07-31T12:00:00.000Z' },
+    };
+    const { container } = await mount(
+      <AgendaBoard
+        connection={connection}
+        snapshot={snapshot({ items: [item, parked] })}
+        loading={false}
+        error={null}
+        onAction={() => undefined}
+      />,
+    );
+    expect(container.textContent).toContain('Approve the pairing request');
+    expect(container.textContent).not.toContain('Parked away');
+  });
+
   it('falls back to the raising session when an unresolved item carries no agent name', async () => {
     const { container } = await mount(
       <AgendaBoard

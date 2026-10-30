@@ -9,15 +9,9 @@ import {
   useComposerReferenceCatalogs,
 } from '../../src/lib/composer-reference-catalogs.ts';
 import { render, run, runAsync } from '../support/react.ts';
-import { taskSummary } from '../support/tasks.ts';
+import { sessionCard } from '../support/session-cards.ts';
 
-const taskListing = (sessionId = 'session-a') => ({
-  v: 1 as const,
-  sessionId,
-  tasks: [{ ...taskSummary({ id: 'F12', title: 'Ship autocomplete' }), sessionId }],
-  parseErrors: 0,
-  updatedAt: '2026-08-06T00:00:00.000Z',
-});
+const cards = [sessionCard('F12', { title: 'Ship autocomplete' })];
 
 const agendaListing = (sessionId = 'session-a') => ({
   v: 1 as const,
@@ -69,82 +63,56 @@ describe('readComposerReferenceCatalogs', () => {
   test('reads each family once and returns one shared session bundle', async () => {
     const calls: string[] = [];
     const client = reader(path => {
-      if (path.endsWith('/tasks')) return taskListing();
       if (path.endsWith('/attention')) return agendaListing();
       return skillsListing;
     }, calls);
 
     const catalogs = await readComposerReferenceCatalogs(client, 'session-a', new AbortController().signal);
 
-    expect(calls.sort()).toEqual([
-      '/v1/sessions/session-a/attention',
-      '/v1/sessions/session-a/skills',
-      '/v1/sessions/session-a/tasks',
-    ]);
-    expect(catalogs.tasks?.map(task => task.id)).toEqual(['F12']);
+    expect(calls.sort()).toEqual(['/v1/sessions/session-a/attention', '/v1/sessions/session-a/skills']);
+    expect(catalogs.tasks).toBeUndefined();
     expect(catalogs.attention?.map(item => item.id)).toEqual(['A3']);
     expect(catalogs.skills?.skills.map(skill => skill.name)).toEqual(['floop']);
     expect(catalogs.failures).toEqual({});
   });
 
-  test('proves nothing and fails nothing against the daemon compatibility stub', async () => {
-    // The literal body `GET /v1/sessions/:sessionId/tasks` still answers after the per-session task
-    // store was deleted (daemon mounts/legacy-tasks.ts): an empty list in the exact v1 shape.
-    const stub = { v: 1, sessionId: 'session-a', tasks: [], parseErrors: 0, updatedAt: '2026-08-06T00:00:00.000Z' };
-    const client = reader(path => {
-      if (path.endsWith('/tasks')) return stub;
-      if (path.endsWith('/attention')) return agendaListing();
-      return skillsListing;
-    });
-
-    const catalogs = await readComposerReferenceCatalogs(client, 'session-a', new AbortController().signal);
-
-    expect(catalogs.tasks).toEqual([]);
-    expect(catalogs.failures).toEqual({});
-  });
-
   test('keeps valid families when one route fails', async () => {
     const client = reader(path => {
-      if (path.endsWith('/tasks')) return taskListing();
       if (path.endsWith('/attention')) throw new Error('attention unavailable');
       return skillsListing;
     });
 
     const catalogs = await readComposerReferenceCatalogs(client, 'session-a', new AbortController().signal);
 
-    expect(catalogs.tasks).toHaveLength(1);
     expect(catalogs.attention).toBeUndefined();
     expect(catalogs.skills?.harness).toBe('codex');
     expect(catalogs.failures).toEqual({ attention: 'attention unavailable' });
   });
 
-  test('keeps task and Attention proof when the skills route fails', async () => {
+  test('keeps Attention proof when the skills route fails', async () => {
     const client = reader(path => {
-      if (path.endsWith('/tasks')) return taskListing();
       if (path.endsWith('/attention')) return agendaListing();
       throw new Error('skills unavailable');
     });
 
     const catalogs = await readComposerReferenceCatalogs(client, 'session-a', new AbortController().signal);
 
-    expect(catalogs.tasks).toHaveLength(1);
     expect(catalogs.attention).toHaveLength(1);
     expect(catalogs.skills).toBeUndefined();
     expect(catalogs.failures).toEqual({ skills: 'skills unavailable' });
   });
 
-  test('refuses a response about another session without erasing other proof', async () => {
+  test('refuses an Agenda about another session without erasing the skills', async () => {
     const client = reader(path => {
-      if (path.endsWith('/tasks')) return taskListing('session-b');
-      if (path.endsWith('/attention')) return agendaListing();
+      if (path.endsWith('/attention')) return agendaListing('session-b');
       return skillsListing;
     });
 
     const catalogs = await readComposerReferenceCatalogs(client, 'session-a', new AbortController().signal);
 
-    expect(catalogs.tasks).toBeUndefined();
-    expect(catalogs.attention).toHaveLength(1);
-    expect(catalogs.failures.tasks).toContain('session-b');
+    expect(catalogs.attention).toBeUndefined();
+    expect(catalogs.skills?.harness).toBe('codex');
+    expect(catalogs.failures.attention).toContain('session-b');
   });
 });
 
@@ -179,14 +147,13 @@ const flushCatalogs = async (): Promise<void> => {
 describe('useComposerReferenceCatalogs', () => {
   test('publishes a completed bundle and supports a host without the optional reader', async () => {
     const client = reader(path => {
-      if (path.endsWith('/tasks')) return taskListing();
       if (path.endsWith('/attention')) return agendaListing();
       return skillsListing;
     });
     const view = render(<CatalogProbe client={client} sessionId="session-a" />);
 
     await flushCatalogs();
-    expect(output(view)).toBe('1:1:1');
+    expect(output(view)).toBe('-:1:1');
 
     run(() => view.update(<CatalogProbe client={{}} sessionId="session-a" />));
     expect(output(view)).toBe('-:-:-');
@@ -196,30 +163,23 @@ describe('useComposerReferenceCatalogs', () => {
   test('publishes a fast family before slow siblings without issuing a second read', async () => {
     const calls: string[] = [];
     let resolveAgenda: ((value: unknown) => void) | undefined;
-    let resolveSkills: ((value: unknown) => void) | undefined;
     const client = reader(path => {
-      if (path.endsWith('/tasks')) return taskListing();
+      if (path.endsWith('/skills')) return skillsListing;
       return new Promise(resolve => {
-        if (path.endsWith('/attention')) resolveAgenda = resolve;
-        else resolveSkills = resolve;
+        resolveAgenda = resolve;
       });
     }, calls);
     const view = render(<CatalogProbe client={client} sessionId="session-a" />);
 
     await flushCatalogs();
-    expect(output(view)).toBe('1:-:-');
-    expect(calls.sort()).toEqual([
-      '/v1/sessions/session-a/attention',
-      '/v1/sessions/session-a/skills',
-      '/v1/sessions/session-a/tasks',
-    ]);
+    expect(output(view)).toBe('-:-:1');
+    expect(calls.sort()).toEqual(['/v1/sessions/session-a/attention', '/v1/sessions/session-a/skills']);
 
-    if (resolveAgenda === undefined || resolveSkills === undefined) throw new Error('slow catalog reads did not start');
+    if (resolveAgenda === undefined) throw new Error('slow catalog read did not start');
     resolveAgenda(agendaListing());
-    resolveSkills(skillsListing);
     await flushCatalogs();
-    expect(output(view)).toBe('1:1:1');
-    expect(calls).toHaveLength(3);
+    expect(output(view)).toBe('-:1:1');
+    expect(calls).toHaveLength(2);
     run(() => view.unmount());
   });
 
@@ -242,7 +202,7 @@ describe('useComposerReferenceCatalogs', () => {
       calls,
     );
     const sources: ComposerReferenceCatalogSources = {
-      tasks: taskListing().tasks,
+      tasks: cards,
       skills: skillsListing,
       waitForTasks: () => tasksSettled,
       waitForSkills: () => skillsSettled,
@@ -284,7 +244,7 @@ describe('useComposerReferenceCatalogs', () => {
     const calls: string[] = [];
     const client = reader(() => agendaListing(), calls);
     const shared = (items: ComposerReferenceCatalogSources['attention']): ComposerReferenceCatalogSources => ({
-      tasks: taskListing().tasks,
+      tasks: cards,
       skills: skillsListing,
       waitForTasks: () => undefined,
       waitForSkills: () => undefined,
@@ -336,7 +296,7 @@ describe('useComposerReferenceCatalogs', () => {
         }}
         sessionId="session-a"
         sources={{
-          tasks: taskListing().tasks,
+          tasks: cards,
           skills: skillsListing,
           waitForTasks: () => undefined,
           waitForSkills: () => undefined,
@@ -356,7 +316,6 @@ describe('useComposerReferenceCatalogs', () => {
       new Promise(resolve => {
         pending.push(value => resolve(value));
       }).then(() => {
-        if (path.endsWith('/tasks')) return taskListing('session-a');
         if (path.endsWith('/attention')) return agendaListing('session-a');
         return skillsListing;
       }),
@@ -373,7 +332,6 @@ describe('useComposerReferenceCatalogs', () => {
 
 describe('the composer reference catalogs on the agenda wire', () => {
   const answer = (path: string) => {
-    if (path.endsWith('/tasks')) return taskListing();
     if (path.endsWith('/skills')) return skillsListing;
     return agendaListing();
   };
@@ -385,11 +343,7 @@ describe('the composer reference catalogs on the agenda wire', () => {
     await readComposerReferenceCatalogs(reader(answer, newer), 'session-a', new AbortController().signal, 'agenda');
     await readComposerReferenceCatalogs(reader(answer, older), 'session-a', new AbortController().signal);
 
-    expect(newer.sort()).toEqual([
-      '/v1/sessions/session-a/agenda',
-      '/v1/sessions/session-a/skills',
-      '/v1/sessions/session-a/tasks',
-    ]);
+    expect(newer.sort()).toEqual(['/v1/sessions/session-a/agenda', '/v1/sessions/session-a/skills']);
     expect(older).toContain('/v1/sessions/session-a/attention');
     expect(older).not.toContain('/v1/sessions/session-a/agenda');
   });
@@ -405,7 +359,7 @@ describe('the composer reference catalogs on the agenda wire', () => {
     run(() => view.update(<CatalogProbe client={client} sessionId="session-a" wire="agenda" />));
     await flushCatalogs();
     expect(calls).toContain('/v1/sessions/session-a/agenda');
-    expect(output(view)).toBe('1:1:1');
+    expect(output(view)).toBe('-:1:1');
     run(() => view.unmount());
   });
 
@@ -416,7 +370,7 @@ describe('the composer reference catalogs on the agenda wire', () => {
         client={reader(answer, calls)}
         sessionId="session-a"
         sources={{
-          tasks: taskListing().tasks,
+          tasks: cards,
           skills: skillsListing,
           waitForTasks: () => undefined,
           waitForSkills: () => undefined,

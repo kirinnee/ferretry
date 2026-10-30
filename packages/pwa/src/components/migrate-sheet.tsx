@@ -680,7 +680,7 @@ export function MigrateSheet({
 
             {busy ? (
               <div
-                className="flex items-center gap-sm rounded-control border-l-heavy border-warn bg-surface-2 p-3 text-ui font-semibold text-warn"
+                className="flex items-center gap-sm rounded-control border border-warn bg-surface-2 p-3 text-ui font-semibold text-warn"
                 role="alert"
               >
                 <RefreshCw aria-hidden="true" className="shrink-0" size={17} />

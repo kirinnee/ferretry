@@ -53,8 +53,11 @@ const FLEET_PAGE_BUDGET = 4;
  * its request has answered, and whether a sealed session's WebCrypto landed before the clock moved
  * decided how many polls fit. The unit clock now delivers off-thread results in call order and never
  * moves past one in flight, so the count is the app's alone; the processes poll is 3.6 of the 8.8.
+ *
+ * The durable-queue read rides the same beat as the send ledger (GET .../queue, 0.5/min idle), so 8.8 became
+ * 9.3 and the ceiling moved from 9 to 10; the queue is the only thing that can show a message no ledger row has.
  */
-const SESSION_PAGE_BUDGET = 9;
+const SESSION_PAGE_BUDGET = 10;
 
 const WARM_UP_MS = 30_000;
 const IDLE_MS = 10 * 60_000;

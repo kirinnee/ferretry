@@ -2,6 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaMessagePart } from '@ferretry/protocol';
 import { AgendaItemHistory } from '../../../src/features/agenda/agenda-item-history.tsx';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
+import type { TranscriptEntry } from '../../../src/lib/session-screens.ts';
 import { type Mounted, mount, must } from '../../support/dom.ts';
 
 let view: Mounted | null = null;
@@ -20,8 +21,23 @@ const part = (kind: AgendaMessagePart['kind'], text: string, note?: string): Age
     ...(note === undefined ? {} : { note }),
   }) as unknown as AgendaMessagePart;
 
+const ferretSaid = (key: string, at: number, text: string): HistoryEvent => ({
+  kind: 'ferret',
+  key,
+  at,
+  text,
+  entry: { id: key, kind: 'assistant', text, ...(at === 0 ? {} : { at }) } as TranscriptEntry,
+});
+const ownerSaid = (key: string, at: number, text: string): HistoryEvent => ({
+  kind: 'owner-text',
+  key,
+  at,
+  text,
+  entry: { id: key, kind: 'user', text, ...(at === 0 ? {} : { at }) } as TranscriptEntry,
+});
+
 const draw = async (events: readonly HistoryEvent[]): Promise<HTMLElement> => {
-  view = await mount(<AgendaItemHistory events={events} ferret="Zoe" now={NOW} prose={text => <em>{text}</em>} />);
+  view = await mount(<AgendaItemHistory events={events} ferret="Zoe" now={NOW} />);
   return must(view.container, 'the view');
 };
 
@@ -59,15 +75,15 @@ describe('the history of an item', () => {
     expect(row.querySelector('time')).not.toBeNull();
   });
 
-  test('draws what the ferret said through the page’s prose, and what the owner typed as plain text', async () => {
+  test('draws what the ferret said and what the owner typed as the chat’s own message rows', async () => {
     const root = await draw([
-      { kind: 'ferret', key: 'f1', at: NOW - 120_000, text: 'Done — **shipped**.' },
-      { kind: 'owner-text', key: 'o1', at: NOW - 60_000, text: '!A47 thanks' },
+      ferretSaid('f1', NOW - 120_000, 'Done — **shipped**.'),
+      ownerSaid('o1', NOW - 60_000, '!A47 thanks'),
     ]);
     expect(rows(root)).toEqual(['ferret', 'owner']);
-    expect(root.querySelector('[data-history="ferret"] em')?.textContent).toBe('Done — **shipped**.');
-    expect(root.querySelector('[data-history="owner"]')?.textContent).toContain('You');
-    expect(root.querySelector('[data-history="owner"]')?.textContent).toContain('!A47 thanks');
+    const ferretRow = root.querySelector('[data-history="ferret"] article.fy-message-assistant');
+    expect(ferretRow?.textContent).toContain('shipped');
+    expect(root.querySelector('[data-history="owner"] article.fy-message-user')?.textContent).toContain('thanks');
   });
 
   test('draws the owner’s answers with a check and the others plainly, each with its note', async () => {
@@ -91,24 +107,26 @@ describe('the history of an item', () => {
 
   test('is never folded: every event is drawn, in order, with no toggle, count or disclosure', async () => {
     const root = await draw([
-      { kind: 'ferret', key: 'f1', at: NOW - 120_000, text: 'Looking.' },
-      { kind: 'owner-text', key: 'o1', at: NOW - 90_000, text: '!A47 first' },
-      { kind: 'ferret', key: 'f2', at: NOW - 60_000, text: 'Done.' },
+      ferretSaid('f1', NOW - 120_000, 'Looking.'),
+      ownerSaid('o1', NOW - 90_000, '!A47 first'),
+      ferretSaid('f2', NOW - 60_000, 'Done.'),
       { kind: 'owner', key: 'p1', at: NOW - 30_000, part: part('answer', 'SQLite') },
     ]);
     expect(rows(root)).toEqual(['ferret', 'owner', 'ferret', 'owner']);
     expect(root.querySelector('[data-agenda-history]')?.textContent).toContain('History');
-    expect(root.querySelector('button, details, summary, [aria-expanded]')).toBeNull();
+    expect(
+      root.querySelector('button:not(.fy-receipt), details, summary, [aria-expanded]:not(.fy-receipt)'),
+    ).toBeNull();
     expect(root.querySelector('[data-agenda-history-latest]')).toBeNull();
   });
 
   test('draws a run with no owner message too', async () => {
-    const root = await draw([{ kind: 'ferret', key: 'f1', at: NOW - 120_000, text: 'Looking.' }]);
+    const root = await draw([ferretSaid('f1', NOW - 120_000, 'Looking.')]);
     expect(rows(root)).toEqual(['ferret']);
   });
 
   test('leaves the time off an event with no known time', async () => {
-    const root = await draw([{ kind: 'owner-text', key: 'o1', at: 0, text: '!A47 hi' }]);
+    const root = await draw([ownerSaid('o1', 0, '!A47 hi')]);
     expect(root.querySelector('time')).toBeNull();
   });
 });

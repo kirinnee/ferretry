@@ -299,6 +299,16 @@ export class DaemonAgendaClient {
     return this.#mutate(daemon, scope, { action: 'discuss', id, ...(note === undefined ? {} : { note }) });
   }
 
+  /** Parks an item until `until` (an instant): it leaves the owner's list and comes back on its own. */
+  snooze(daemon: DaemonConnection, scope: DaemonSessionScope, id: string, until: string): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'snooze', id, until });
+  }
+
+  /** Puts a parked item (snoozed or replied) back on the owner's list now. */
+  unsnooze(daemon: DaemonConnection, scope: DaemonSessionScope, id: string): Promise<void> {
+    return this.#mutate(daemon, scope, { action: 'unsnooze', id });
+  }
+
   /** Unpair one daemon without perturbing any other daemon's cache or work. */
   clearDaemon(daemonId: DaemonId): void {
     this.#generations.set(daemonId, (this.#generations.get(daemonId) ?? 0) + 1);

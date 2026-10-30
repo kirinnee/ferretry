@@ -465,7 +465,7 @@ describe('a serving relay session', () => {
     const { session, socket, daemon } = await serving();
     const burst = CREDIT_WINDOW_FRAMES + 8;
     const answers = Array.from({ length: burst }, (_, index) =>
-      session.request({ method: 'GET', path: `/v1/sessions/${index}/tasks` }),
+      session.request({ method: 'GET', path: `/v1/sessions/${index}/skills` }),
     );
     await drain();
     should(session.live()).be.true();

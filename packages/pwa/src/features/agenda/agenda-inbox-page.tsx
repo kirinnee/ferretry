@@ -21,7 +21,8 @@
  *   drops the fly-off. NO TEACHING TEXT: no hint line, no banner naming the answer mid-drag, no key caption. A phone
  *   also gets "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter
  *   opens one.
- * - FILTERS: Open / Resolved, a machine filter (once there is more than one machine), Find, and — from
+ * - FILTERS: Open / Snoozed (n) / Replied (n) / Resolved — a snoozed or replied item is parked: off the open list and the
+ *   badge until it wakes, is unsnoozed, or the ferret re-opens it — a machine filter (once there is more than one machine), Find, and — from
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
  *
  * The page renders off the shell's `AgendaInbox` alone, so it render-tests with a fake one; reading a
@@ -29,13 +30,14 @@
  */
 
 import { ArrowLeft, ArrowRight, CheckCheck, ChevronRight, Search, SkipForward, X, Zap } from 'lucide-react';
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Fragment, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
 import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
+import type { TranscriptEntry } from '../../lib/session-screens.ts';
 import {
   actionSentence,
   agendaConversationPath,
@@ -44,6 +46,8 @@ import {
   type InboxCard,
   type InboxResolved,
   RESOLVED_READ_LIMIT,
+  snoozeAction,
+  UNSNOOZE_ACTION,
 } from '../../lib/agenda-inbox.ts';
 import {
   type FerretGroup,
@@ -58,6 +62,8 @@ import {
   inboxSections,
   inboxWho,
   nextSelection,
+  type ParkedReason,
+  parkedBy,
   QUEUE_END,
   skipSelection,
   stepSelection,
@@ -66,6 +72,7 @@ import { agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
 import { daemonSessionScope } from '../../lib/daemon-scope.ts';
+import { escapeCloses } from '../../lib/escape-closes.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { daemonAgendaPath, daemonSessionPath } from '../../lib/pages/routes.ts';
@@ -115,6 +122,7 @@ interface CardHostProps {
   readonly onNavigate: (to: string) => void;
   readonly now: number | undefined;
   readonly readRecent?: ((card: InboxCard) => Promise<readonly RecentMessage[]>) | undefined;
+  readonly readConversation?: ((card: InboxCard) => Promise<readonly TranscriptEntry[]>) | undefined;
   readonly recentOpen?: boolean | undefined;
 }
 
@@ -143,6 +151,7 @@ const renderInboxCard = (
     item={card.item}
     key={card.key}
     onAct={act}
+    onSnooze={until => act(snoozeAction(until))}
     origin={inboxCardOrigin(card, onNavigate)}
     swipeHints={false}
     {...(now === undefined ? {} : { now })}
@@ -230,35 +239,78 @@ interface OpenItemPlace {
 }
 
 /** The open item: who and what, then the SAME full view the chat shows, answering into the undo window. */
-const renderOpenItem = (
-  { inbox, onNavigate, now }: CardHostProps,
+function OpenItem({
+  host: { inbox, onNavigate, now, readConversation },
+  card,
+  act,
+  skip,
+  place,
+}: {
+  readonly host: CardHostProps;
+  readonly card: InboxCard;
+  readonly act: (action: InboxAction) => void;
+  readonly skip: () => void;
+  readonly place: OpenItemPlace;
+}) {
+  const entries = useItemConversation(card, readConversation);
+  const history = useMemo(() => itemHistory(card.item, entries), [card.item, entries]);
+  return (
+    <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
+      <InboxWhoLine card={card} onNavigate={onNavigate} />
+      <AgendaItemView
+        busy={false}
+        closeLabel="Back to the Inbox"
+        error={failureFor(inbox.deferredState.failed, card.key)}
+        ferret={inboxWho(card).ferret}
+        history={history}
+        item={card.item}
+        onAct={act}
+        onClose={place.onClose}
+        onNext={skip}
+        onSnooze={until => act(snoozeAction(until))}
+        position={{ index: place.index, total: place.total }}
+        quoteScope={scopeOf(card)}
+        renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
+        // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
+        // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
+        swipeable={place.swipeable}
+        {...(now === undefined ? {} : { now })}
+        {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
+      />
+    </div>
+  );
+}
+
+const NO_ENTRIES: readonly TranscriptEntry[] = [];
+
+/** What was said about the card's item in its conversation; nothing until it is read, and nothing when it cannot be. */
+function useItemConversation(
   card: InboxCard,
-  act: (action: InboxAction) => void,
-  skip: () => void,
-  place: OpenItemPlace,
-) => (
-  <div className="fy-inbox-open" data-inbox-open={card.key} key={card.key}>
-    <InboxWhoLine card={card} onNavigate={onNavigate} />
-    <AgendaItemView
-      busy={false}
-      closeLabel="Back to the Inbox"
-      error={failureFor(inbox.deferredState.failed, card.key)}
-      ferret={inboxWho(card).ferret}
-      history={itemHistory(card.item, [])}
-      item={card.item}
-      onAct={act}
-      onClose={place.onClose}
-      onNext={skip}
-      position={{ index: place.index, total: place.total }}
-      renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
-      // The SAME row as the chat: on touch its buttons say their arrows and its head and row swipe (↓ going to
-      // "next", the skip); the deck takes a drag that starts on the who-and-what line, and the keys go to the view.
-      swipeable={place.swipeable}
-      {...(now === undefined ? {} : { now })}
-      {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
-    />
-  </div>
-);
+  read: ((card: InboxCard) => Promise<readonly TranscriptEntry[]>) | undefined,
+): readonly TranscriptEntry[] {
+  const [loaded, setLoaded] = useState<{ readonly key: string; readonly entries: readonly TranscriptEntry[] }>({
+    key: '',
+    entries: NO_ENTRIES,
+  });
+  const key = card.key;
+  const latest = useRef({ read, card });
+  latest.current = { read, card };
+  const reads = read !== undefined;
+  useEffect(() => {
+    if (!reads) return;
+    let live = true;
+    latest.current.read?.(latest.current.card).then(
+      entries => {
+        if (live) setLoaded({ key, entries });
+      },
+      () => undefined,
+    );
+    return () => {
+      live = false;
+    };
+  }, [key, reads]);
+  return loaded.key === key ? loaded.entries : NO_ENTRIES;
+}
 
 /**
  * Past the last item: the ones the reader skipped are still open. Said once, with the way back to them —
@@ -361,20 +413,33 @@ function NothingMatches({ onClear }: { readonly onClear: () => void }) {
   );
 }
 
-export type InboxFilter = 'open' | 'resolved';
+export type InboxFilter = 'open' | 'snoozed' | 'replied' | 'resolved';
 
-/** Open / Resolved: two toggle buttons, the chosen one pressed. */
+const FILTER_WORDS: Readonly<Record<InboxFilter, string>> = {
+  open: 'Open',
+  snoozed: 'Snoozed',
+  replied: 'Replied',
+  resolved: 'Resolved',
+};
+
+/** The words on a filter button: the parked ones say how many they hold. */
+const filterWords = (entry: InboxFilter, counts: Readonly<Record<ParkedReason, number>>): string =>
+  entry === 'snoozed' || entry === 'replied' ? `${FILTER_WORDS[entry]} (${counts[entry]})` : FILTER_WORDS[entry];
+
+/** Open / Snoozed / Replied / Resolved: toggle buttons, the chosen one pressed. */
 function InboxFilterBar({
   filter,
+  counts,
   onChange,
 }: {
   readonly filter: InboxFilter;
+  readonly counts: Readonly<Record<ParkedReason, number>>;
   readonly onChange: (next: InboxFilter) => void;
 }) {
   return (
     // biome-ignore lint/a11y/useSemanticElements: a pair of toggle buttons, not a form fieldset
     <div aria-label="Show" className="fy-attn-inbox__filter" data-agenda-filter="" role="group">
-      {(['open', 'resolved'] as const).map(entry => (
+      {(['open', 'snoozed', 'replied', 'resolved'] as const).map(entry => (
         <button
           aria-pressed={filter === entry}
           className="fy-attn-inbox__filter-button"
@@ -383,7 +448,7 @@ function InboxFilterBar({
           onClick={() => onChange(entry)}
           type="button"
         >
-          {entry === 'open' ? 'Open' : 'Resolved'}
+          {filterWords(entry, counts)}
         </button>
       ))}
     </div>
@@ -448,6 +513,99 @@ function InboxResolvedList({
   );
 }
 
+/** One parked row: where it stands, and the one button that brings it back. */
+function ParkedRow({
+  card,
+  filter,
+  inbox,
+  now,
+  onNavigate,
+}: {
+  readonly card: InboxCard;
+  readonly filter: ParkedReason;
+  readonly inbox: AgendaInbox;
+  readonly now: number | undefined;
+  readonly onNavigate: (to: string) => void;
+}) {
+  const who = inboxWho(card);
+  const status = agendaStatus(card.item, who.ferret, now);
+  // A replied row's status already names the ferret it waits on.
+  const more = filter === 'snoozed' ? [who.ferret, agendaReference(card.item.id)] : [agendaReference(card.item.id)];
+  return (
+    <li className="fy-parked-row" data-agenda-parked={card.key}>
+      <RouteLink
+        className="fy-inbox-row fy-parked-row__link"
+        onNavigate={onNavigate}
+        to={agendaConversationPath(card.daemonId, card.view.config.id, card.item.id)}
+      >
+        <span className="fy-inbox-row__top">
+          <span className="fy-inbox-row__title" data-agenda-row-title="">
+            {inboxRowTitle(card.item)}
+          </span>
+        </span>
+        <span className="fy-inbox-row__meta">
+          {status === null ? null : <span data-agenda-parked-status="">{status.label}</span>}
+          {more.map(text => (
+            <Fragment key={text}>
+              <span aria-hidden="true">·</span>
+              <span>{text}</span>
+            </Fragment>
+          ))}
+        </span>
+      </RouteLink>
+      <button
+        className="kt-btn fy-parked-row__back"
+        data-agenda-unsnooze={filter}
+        onClick={() => inbox.deferred.schedule(card, UNSNOOZE_ACTION)}
+        type="button"
+      >
+        {filter === 'snoozed' ? 'Unsnooze' : 'Back to my list'}
+      </button>
+    </li>
+  );
+}
+
+/** The Snoozed and Replied filters: what is parked, each with the way back to the owner's list. */
+function InboxParkedList({
+  inbox,
+  filter,
+  rows,
+  now,
+  onNavigate,
+  onClear,
+}: {
+  readonly inbox: AgendaInbox;
+  readonly filter: ParkedReason;
+  readonly rows: readonly InboxCard[];
+  readonly now: number | undefined;
+  readonly onNavigate: (to: string) => void;
+  readonly onClear: () => void;
+}) {
+  if (rows.length === 0)
+    return inbox.parked.length > 0 ? (
+      <NothingMatches onClear={onClear} />
+    ) : inbox.resolvedReading ? (
+      <InboxReading words="Reading agenda items…" />
+    ) : (
+      <p className="fy-attn-inbox__none" data-agenda-parked-empty={filter}>
+        {filter === 'snoozed' ? 'Nothing is snoozed.' : 'Nothing is waiting on a ferret after your reply.'}
+      </p>
+    );
+  return (
+    <div className="fy-attn-inbox__resolved" data-agenda-parked-pane={filter}>
+      <ul aria-label={FILTER_WORDS[filter]} className="fy-parked-list">
+        {rows.map(card => (
+          <ParkedRow card={card} filter={filter} inbox={inbox} key={card.key} now={now} onNavigate={onNavigate} />
+        ))}
+      </ul>
+      <p className="fy-attn-inbox__hint">
+        From your {RESOLVED_READ_LIMIT} most recent conversations
+        {inbox.resolvedReading ? ' · reading more…' : ''}
+      </p>
+    </div>
+  );
+}
+
 const resolvedOrigin = (row: InboxResolved, onNavigate: (to: string) => void) => {
   const names = sessionsBarNames(row.view);
   return {
@@ -471,6 +629,8 @@ export interface AgendaInboxPageProps {
   readonly banner?: ReactNode;
   /** Reads the last few things the card's ferret said. Absent: the card has no "Last messages" fold. */
   readonly readRecent?: (card: InboxCard) => Promise<readonly RecentMessage[]>;
+  /** Reads what was said about the card's item in its conversation, for the open item's History. Absent: revisions only. */
+  readonly readConversation?: (card: InboxCard) => Promise<readonly TranscriptEntry[]>;
   /** Forces the phone deck's reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
   /** Starts the deck card's "Last messages" fold open (a harness). */
@@ -743,6 +903,7 @@ export function AgendaInboxPage({
   clock,
   banner,
   readRecent,
+  readConversation,
   reducedMotion,
   recentOpen,
   initialOpen,
@@ -763,8 +924,8 @@ export function AgendaInboxPage({
   const focusRow = useRef(false);
 
   const machines = useMemo(
-    () => inboxMachines([...inbox.cards, ...inbox.withFerret], inbox.resolved),
-    [inbox.cards, inbox.withFerret, inbox.resolved],
+    () => inboxMachines([...inbox.cards, ...inbox.withFerret, ...inbox.parked], inbox.resolved),
+    [inbox.cards, inbox.withFerret, inbox.parked, inbox.resolved],
   );
   const machineFilter = machines.some(entry => entry.daemonId === machine) ? machine : null;
   const listFilter: InboxListFilter = { machine: machineFilter, query, from };
@@ -772,6 +933,9 @@ export function AgendaInboxPage({
   const withFerret = filterInboxCards(inbox.withFerret, listFilter);
   const sections = useMemo(() => inboxSections(visible, withFerret), [visible, withFerret]);
   const filtered = machineFilter !== null || query !== '' || from !== null;
+  const snoozed = parkedBy(inbox.parked, 'snoozed');
+  const replied = parkedBy(inbox.parked, 'replied');
+  const parkedCounts = { snoozed: snoozed.length, replied: replied.length };
 
   // The deck deals what waits on the owner, in the order the page lists it.
   const deckCards = groupCards([...sections.stopped, ...sections.needsYou]);
@@ -793,7 +957,7 @@ export function AgendaInboxPage({
 
   const choose = (next: InboxFilter): void => {
     setFilter(next);
-    if (next === 'resolved') inbox.loadResolved();
+    if (next !== 'open') inbox.loadResolved();
   };
   const clearFilters = (): void => {
     setQuery('');
@@ -832,8 +996,11 @@ export function AgendaInboxPage({
   const count = inbox.reading && inbox.cards.length === 0 ? inbox.total : inbox.cards.length;
   const empty = inbox.cards.length === 0 && inbox.withFerret.length === 0;
   const nothingForYou = inbox.cards.length === 0;
-  const updating = filter === 'open' ? inbox.reading && !empty : inbox.resolvedReading && inbox.resolved.length > 0;
-  const host: CardHostProps = { inbox, onNavigate, now, readRecent, recentOpen };
+  const updating =
+    filter === 'open'
+      ? inbox.reading && !empty
+      : inbox.resolvedReading && (filter === 'resolved' ? inbox.resolved.length : inbox.parked.length) > 0;
+  const host: CardHostProps = { inbox, onNavigate, now, readRecent, readConversation, recentOpen };
   const atEnd = deckPlace === QUEUE_END;
   const openAt = (key: string): void => {
     setDeckAt(key);
@@ -871,7 +1038,7 @@ export function AgendaInboxPage({
           <span className="fy-attn-inbox__updating-text">Updating</span>
         </span>
       ) : null}
-      <InboxFilterBar filter={filter} onChange={choose} />
+      <InboxFilterBar counts={parkedCounts} filter={filter} onChange={choose} />
       <div className="fy-attn-inbox__tools">
         {from === 'warden' && onClearFrom !== undefined ? <SourceChip onClear={onClearFrom} /> : null}
         {machines.length > 1 ? (
@@ -981,13 +1148,22 @@ export function AgendaInboxPage({
               renderCard={(card, act, skipCard) => {
                 const index = order.indexOf(card.key);
                 const previous = index > 0 ? order[index - 1] : undefined;
-                return renderOpenItem(host, card, act, skipCard, {
-                  index: Math.max(0, index),
-                  total: order.length,
-                  onClose: () => setDeckOpen(false),
-                  swipeable: phone,
-                  ...(previous === undefined ? {} : { onPrevious: () => setDeckAt(previous) }),
-                });
+                return (
+                  <OpenItem
+                    act={act}
+                    card={card}
+                    host={host}
+                    key={card.key}
+                    place={{
+                      index: Math.max(0, index),
+                      total: order.length,
+                      onClose: () => setDeckOpen(false),
+                      swipeable: phone,
+                      ...(previous === undefined ? {} : { onPrevious: () => setDeckAt(previous) }),
+                    }}
+                    skip={skipCard}
+                  />
+                );
               }}
             />
             <div className="fy-inbox-deck-foot" data-inbox-deck-foot="">
@@ -1002,7 +1178,12 @@ export function AgendaInboxPage({
                 />
               )}
               {deck[0] === undefined || renderComposer === undefined ? null : (
-                <div className="fy-inbox-composer" data-inbox-composer={deck[0].key}>
+                // biome-ignore lint/a11y/noStaticElementInteractions: the keydown only routes an unclaimed Esc in the composer back to the Inbox list
+                <div
+                  className="fy-inbox-composer"
+                  data-inbox-composer={deck[0].key}
+                  onKeyDown={escapeCloses(() => setDeckOpen(false))}
+                >
                   {renderComposer(deck[0])}
                 </div>
               )}
@@ -1019,7 +1200,16 @@ export function AgendaInboxPage({
       {header}
       {banner}
       <OrphanedFailures inbox={inbox} />
-      {filter === 'resolved' ? (
+      {filter === 'snoozed' || filter === 'replied' ? (
+        <InboxParkedList
+          filter={filter}
+          inbox={inbox}
+          now={now}
+          onClear={clearFilters}
+          onNavigate={onNavigate}
+          rows={filterInboxCards(filter === 'snoozed' ? snoozed : replied, listFilter)}
+        />
+      ) : filter === 'resolved' ? (
         <InboxResolvedList
           inbox={inbox}
           onClear={clearFilters}

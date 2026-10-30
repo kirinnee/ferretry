@@ -7,7 +7,6 @@ export * from './errors.ts';
 export * from './graph.ts';
 export * from './lane-facts.ts';
 export * from './lineage.ts';
-export * from './pending-context.ts';
 export * from './ports.ts';
 export * from './pr-cache.ts';
 export * from './query.ts';
