@@ -80,8 +80,11 @@ export type AgendaAsk = z.infer<typeof AgendaAskSchema>;
  * - `review`: look at something and say whether it is good (the `answer-review` ask).
  * - `info`: something the owner should know, acknowledged with Got it (no ask).
  * - `reply`: a question only words answer (the `open-question` ask).
+ * - `input`: a value only the owner can type, for an agent's terminal or browser field (docs/input-requests.md).
+ *   Only the daemon raises one, it has no ask or swipes, and the generic answer routes refuse it: the value
+ *   must never travel as an agenda answer.
  */
-export const AgendaKindSchema = z.enum(['task', 'yesno', 'permission', 'choice', 'review', 'info', 'reply']);
+export const AgendaKindSchema = z.enum(['task', 'yesno', 'permission', 'choice', 'review', 'info', 'reply', 'input']);
 export type AgendaKind = z.infer<typeof AgendaKindSchema>;
 
 /** The way a card is swiped to give one of its answers. Down is never one: the card scrolls that way. */
@@ -551,6 +554,38 @@ export const AgendaConfirmsSchema = z.strictObject({
 });
 export type AgendaConfirms = z.infer<typeof AgendaConfirmsSchema>;
 
+/**
+ * The input request an `input` card presents (docs/input-requests.md). The request itself, its facts and its
+ * deadline live in `input-request.ts`; the id here is the same 128-bit hex.
+ */
+export const AgendaInputRefSchema = z.strictObject({ requestId: z.string().regex(/^[0-9a-f]{32}$/u) });
+export type AgendaInputRef = z.infer<typeof AgendaInputRefSchema>;
+
+/**
+ * What an `input` card may not be, and must be: it carries its request, and no ask, answers, steps or
+ * confirmation of its own (the form answers it), and it is never a notice. Anything but an `input` card
+ * carries no request.
+ */
+export const agendaInputProblems = (value: {
+  readonly kind?: string | undefined;
+  readonly input?: unknown;
+  readonly ask?: unknown;
+  readonly answers?: readonly unknown[] | undefined;
+  readonly steps?: readonly unknown[] | undefined;
+  readonly confirms?: unknown;
+  readonly notice?: true | undefined;
+}): string[] => {
+  if (value.kind !== 'input') return value.input === undefined ? [] : ['only an input card carries an input request'];
+  return [
+    ...(value.input === undefined ? ['an input card names its input request'] : []),
+    ...(value.ask === undefined ? [] : ['an input card has no ask: the form answers it']),
+    ...(value.answers === undefined ? [] : ['an input card has no swipe answers']),
+    ...(value.steps === undefined ? [] : ['an input card has no steps']),
+    ...(value.confirms === undefined ? [] : ['an input card does not confirm a configuration change']),
+    ...(value.notice === undefined ? [] : ['an input card is not a notice']),
+  ];
+};
+
 /** The `409` code of an Allow or Discard that found the held change moved on: the card shows the new one. */
 export const AGENDA_CONFIG_CHANGED_CODE = 'config_changed';
 
@@ -607,6 +642,8 @@ const AgendaItemBaseShape = {
    * that named none. An older app reading a newer board drops the field.
    */
   task: TaskRefSchema.nullable().optional(),
+  /** The input request an `input` card presents; present exactly on that kind (`agendaInputProblems`). */
+  input: AgendaInputRefSchema.optional(),
 };
 
 export const AgendaItemSchema = z
@@ -633,6 +670,9 @@ export const AgendaItemSchema = z
   .superRefine((value, context) => {
     for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
+    for (const problem of agendaInputProblems(value)) {
+      context.addIssue({ code: 'custom', message: problem, path: ['input'] });
     }
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
       context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised agenda items' });
@@ -914,6 +954,13 @@ export const AgendaActionRequestSchema = z
     if (value.action !== 'add') return;
     for (const [path, message] of agendaAnswerProblems(value.answers ?? [], value.ask)) {
       context.addIssue({ code: 'custom', message, path: path.split('.') });
+    }
+    if (value.kind === 'input') {
+      context.addIssue({
+        code: 'custom',
+        message: 'an input card is raised by an input request (terminal_request_input), never by an agenda add',
+        path: ['kind'],
+      });
     }
     for (const problem of [...agendaNoticeProblems(value), ...agendaConfirmsProblems(value)]) {
       context.addIssue({ code: 'custom', message: problem });
