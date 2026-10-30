@@ -1201,10 +1201,23 @@
   padding-right: 16px;
   padding-left: 16px;
 }
-.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-inbox-open {
-  border-right: 0;
-  border-left: 0;
-  border-radius: 0;
+/* The open card keeps a margin from the panel's edges, on a phone and on a wide screen alike: its border and corners
+   are drawn, and it never touches the edge, the composer or the bar above it. The margin is on the deck, so the
+   cards peeking out behind it keep the same edges. */
+.fy-attn-inbox__deck--open > .fy-attn-deck {
+  margin: var(--gap-sm) var(--gap-md) 0;
+}
+.fy-attn-inbox__deck--open > .fy-inbox-deck-foot {
+  margin-right: var(--gap-md);
+  margin-left: var(--gap-md);
+}
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__deck--open > .fy-inbox-deck-foot {
+  margin-right: 0;
+  margin-left: 0;
+}
+.fy-attn-inbox[data-agenda-inbox='card'][data-phone] .fy-attn-inbox__deck--open > .fy-attn-deck {
+  margin-right: 16px;
+  margin-left: 16px;
 }
 /* On a wide screen the open item and its composer share one comfortable measure. */
 @media (min-width: 768px) {
