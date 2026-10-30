@@ -3,10 +3,12 @@ import { CONFIG_COMPONENT_KINDS } from '@ferretry/protocol';
 import should from 'should';
 import {
   AccountModelSchema,
+  agendaNudgeEnabled,
   COMPONENT_KINDS,
   isRuntimeName,
   type LayeredProfile,
   layerReferenceText,
+  MachineSchema,
   parseAccountModel,
   parseLayerReference,
   resolveDefaultRuntime,
@@ -940,5 +942,21 @@ describe('RuntimeSchema.harness (docs/provider-presets.md § One login, both CLI
       profile: 'default',
       agent: false,
     });
+  });
+});
+
+describe('agendaNudgeEnabled', () => {
+  it('should follow the older attentionNudge when agendaNudge is not written', () => {
+    should(agendaNudgeEnabled(MachineSchema.parse({}))).be.true();
+    should(agendaNudgeEnabled(MachineSchema.parse({ attentionNudge: false }))).be.false();
+  });
+
+  it('should let agendaNudge win over attentionNudge in both directions', () => {
+    should(agendaNudgeEnabled(MachineSchema.parse({ attentionNudge: true, agendaNudge: false }))).be.false();
+    should(agendaNudgeEnabled(MachineSchema.parse({ attentionNudge: false, agendaNudge: true }))).be.true();
+  });
+
+  it('should leave agendaNudge out of a machine that never wrote it', () => {
+    should(MachineSchema.parse({})).not.have.property('agendaNudge');
   });
 });

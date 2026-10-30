@@ -6,7 +6,7 @@ import { tryParseSessionId } from '../../lib/session-id.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
 
 /** The journal entry an answer that did not reach its question form leaves. */
-export const HARNESS_ANSWER_FAILED_EVENT = 'attention.harness_answer_failed';
+export const HARNESS_ANSWER_FAILED_EVENT = 'agenda.harness_answer_failed';
 
 /** A session's state document, read for the harness-prompt reconciliation; `undefined` when unreadable. */
 export class StorageHarnessPromptStates {

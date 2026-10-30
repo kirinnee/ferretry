@@ -266,33 +266,63 @@ export function attentionRoutes(
   notifications: DirectNotificationSubsystem,
   replies: AttentionRepliesSubsystem,
 ): readonly ApiRoute[] {
+  // One handler per verb, shared by the agenda route and its older `attention` twin, so the two cannot
+  // answer differently or declare different grants (`agenda.wire.1`, docs/agenda.md § Compatibility).
+  const handleList: ApiRoute['handle'] = async context => await list(attention, replies, context);
+  const handleApply: ApiRoute['handle'] = async context => await apply(attention, notifications, replies, context);
+  const handleReplies: ApiRoute['handle'] = async context => await sendReplies(attention, replies, context);
   return [
+    {
+      method: 'GET',
+      path: '/v1/sessions/:sessionId/agenda',
+      minimum: 'operator',
+      noStore: true,
+      handle: handleList,
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/agenda',
+      minimum: 'operator',
+      noStore: true,
+      handle: handleApply,
+    },
+    {
+      method: 'POST',
+      path: '/v1/sessions/:sessionId/agenda/replies',
+      minimum: 'operator',
+      noStore: true,
+      handle: handleReplies,
+    },
     {
       method: 'GET',
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await list(attention, replies, context),
+      legacy: true,
+      handle: handleList,
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attention',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await apply(attention, notifications, replies, context),
+      legacy: true,
+      handle: handleApply,
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/attention/replies',
       minimum: 'operator',
       noStore: true,
-      handle: async context => await sendReplies(attention, replies, context),
+      legacy: true,
+      handle: handleReplies,
     },
     {
       method: 'POST',
       path: '/v1/sessions/:sessionId/notify',
       minimum: 'operator',
       noStore: true,
+      legacy: true,
       handle: async context => await notify(attention, notifications, context),
     },
   ];

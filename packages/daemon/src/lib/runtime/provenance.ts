@@ -47,6 +47,7 @@ const REPORTED_KEYS = [
   'transcriptReconcileSeconds',
   'sessionWorkers',
   'attention',
+  'agenda',
   'usage',
   'analyticsPricing',
   'projectRoots',

@@ -4,6 +4,7 @@ import should from 'should';
 import { DISCOVERED_RELAY_CARRIER, IMPLIED_TUNNEL_CARRIER } from '../../../src/lib/runtime/carriers.ts';
 import {
   advertisesForeignAddress,
+  attentionBlockNotice,
   configuredAt,
   defaultDaemonConfig,
   defaultDaemonConfigDocument,
@@ -815,5 +816,117 @@ describe('the attention deadline warning', () => {
     should(parseDaemonConfig({ attention: { deadlineWarnHours: 168 } }).attention.deadlineWarnHours).equal(168);
     should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 0.1 } })).throw();
     should(() => parseDaemonConfig({ attention: { deadlineWarnHours: 169 } })).throw();
+  });
+});
+
+describe('the agenda block beside the older attention block', () => {
+  const RESOLVED_DEFAULTS = {
+    replySettleSeconds: 10,
+    replyMaxWaitSeconds: 120,
+    replyComposerWaitSeconds: 600,
+    replyReceiptSeconds: 900,
+    deadlineWarnHours: 3,
+  };
+
+  it('should load the older attention block alone exactly as it always did, and say so', () => {
+    // Act
+    const actual = parseDaemonConfig({ attention: { replySettleSeconds: 30, deadlineWarnHours: 6 } });
+
+    // Assert
+    should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, deadlineWarnHours: 6 });
+    should(actual.attentionSpelling).equal('attention');
+  });
+
+  it('should load the agenda block alone into the value every consumer reads', () => {
+    // Act
+    const actual = parseDaemonConfig({ agenda: { replySettleSeconds: 30, resurfaceAfterMinutes: 45 } });
+
+    // Assert
+    should(actual.attention).deepEqual({ ...RESOLVED_DEFAULTS, replySettleSeconds: 30, resurfaceAfterMinutes: 45 });
+    should(actual.agenda).equal(actual.attention);
+    should(actual.attentionSpelling).equal('agenda');
+  });
+
+  it('should resolve to the defaults, and report neither spelling, when neither is written', () => {
+    // Act
+    const actual = defaultDaemonConfig();
+
+    // Assert
+    should(actual.attention).deepEqual(RESOLVED_DEFAULTS);
+    should(actual.attentionSpelling).equal('none');
+  });
+
+  it('should let the agenda block win key by key and read the attention block for the keys it leaves out', () => {
+    // Act
+    const actual = parseDaemonConfig({
+      attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 60, deadlineWarnHours: 6 },
+      agenda: { replySettleSeconds: 20, resurfaceAfterMinutes: 15 },
+    });
+
+    // Assert
+    should(actual.attention).deepEqual({
+      ...RESOLVED_DEFAULTS,
+      replySettleSeconds: 20,
+      replyMaxWaitSeconds: 60,
+      deadlineWarnHours: 6,
+      resurfaceAfterMinutes: 15,
+    });
+    should(actual.attentionSpelling).equal('both');
+  });
+
+  it('should let an agenda key equal to a default still beat a different attention value', () => {
+    // Act
+    const actual = parseDaemonConfig({ attention: { deadlineWarnHours: 6 }, agenda: { deadlineWarnHours: 3 } });
+
+    // Assert
+    should(actual.attention.deadlineWarnHours).equal(3);
+  });
+
+  it('should ignore an agenda key written as undefined, so the attention value stands', () => {
+    // Act
+    const actual = parseDaemonConfig({ attention: { deadlineWarnHours: 6 }, agenda: { deadlineWarnHours: undefined } });
+
+    // Assert
+    should(actual.attention.deadlineWarnHours).equal(6);
+  });
+
+  it('should refuse an unknown agenda key, as the attention block refuses one', () => {
+    should(() => parseDaemonConfig({ agenda: { replySettleSecond: 5 } })).throw();
+    should(() => parseDaemonConfig({ attention: { replySettleSecond: 5 } })).throw();
+  });
+
+  it('should hold the agenda block to the same bounds', () => {
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 0 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replyComposerWaitSeconds: 5 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { replyReceiptSeconds: 10 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { resurfaceAfterMinutes: 10_081 } })).throw();
+    should(() => parseDaemonConfig({ agenda: { deadlineWarnHours: 0.1 } })).throw();
+  });
+
+  it('should refuse a settle longer than the max wait inside the agenda block, naming the new key', () => {
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
+      /agenda\.replySettleSeconds must not exceed agenda\.replyMaxWaitSeconds/,
+    );
+    should(() => parseDaemonConfig({ agenda: { replySettleSeconds: 30 } })).not.throw();
+    should(() => parseDaemonConfig({ agenda: { replyMaxWaitSeconds: 5 } })).throw(/replySettleSeconds/);
+  });
+
+  it('should refuse a settle and a max wait that only conflict across the two spellings', () => {
+    should(() =>
+      parseDaemonConfig({ attention: { replyMaxWaitSeconds: 20 }, agenda: { replySettleSeconds: 30 } }),
+    ).throw(/agenda\.replySettleSeconds/);
+  });
+
+  it('should keep the attention refusal naming the attention keys when only that block is written', () => {
+    should(() => parseDaemonConfig({ attention: { replySettleSeconds: 30, replyMaxWaitSeconds: 20 } })).throw(
+      /attention\.replySettleSeconds/,
+    );
+  });
+
+  it('should say nothing for a document that never wrote the older block, and name the new key otherwise', () => {
+    should(attentionBlockNotice('none')).be.undefined();
+    should(attentionBlockNotice('agenda')).be.undefined();
+    should(attentionBlockNotice('attention')).match(/renamed to "agenda".*agenda removal release/);
+    should(attentionBlockNotice('both')).match(/"agenda" wins/);
   });
 });
