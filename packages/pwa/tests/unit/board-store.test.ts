@@ -12,6 +12,7 @@ import {
   flush,
   laneSetFor,
   laptop,
+  OTHER_PROJECT,
   PROJECT,
   workstation,
 } from './board-support.ts';
@@ -445,6 +446,73 @@ describe('DaemonBoardStore one card and projects', () => {
     expect(store.projectsState(laptop.daemonId)).toMatchObject({ status: 'error', error: 'later', projects: [] });
     store.clearDaemon(laptop.daemonId);
     expect(store.projectsState(laptop.daemonId).status).toBe('idle');
+  });
+});
+
+describe('DaemonBoardStore lanes', () => {
+  const changed = { ...lanes, version: 2, confirmedBy: null, proposedBy: 'ferret' };
+
+  it('puts the set the daemon answers into the project list and every board showing the project', async () => {
+    const port = fakePort({
+      projects: async () => [
+        { id: PROJECT, name: 'ferretry', path: null, laneSet: lanes },
+        { id: OTHER_PROJECT, name: 'other', path: null, laneSet: null },
+      ],
+      board: async () => boardAnswer([], { projectId: PROJECT, laneSet: lanes }),
+      lanes: async (_daemon, projectId, request) => {
+        port.calls.push(`lanes:${projectId}:${request.action}`);
+        return boardOk({ laneSet: changed, agenda: 'not-needed' });
+      },
+    });
+    const { store } = open(port);
+    const { key } = store.watch(query, [laptop]);
+    store.watchProjects(laptop);
+    await flush();
+    let heard = 0;
+    store.subscribe(() => {
+      heard += 1;
+    });
+    const answer = await store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 });
+    expect(answer.ok).toBe(true);
+    expect(port.calls).toContain(`lanes:${PROJECT}:confirm`);
+    expect(store.projectsState(laptop.daemonId).projects?.map(project => project.laneSet?.version ?? null)).toEqual([
+      2,
+      null,
+    ]);
+    expect(store.view(key)?.slices.get(laptop.daemonId)?.laneSets.get(PROJECT)?.version).toBe(2);
+    expect(heard).toBeGreaterThan(0);
+  });
+
+  it('changes nothing when the daemon refuses, and hands the refusal back', async () => {
+    const port = fakePort({
+      projects: async () => [{ id: PROJECT, name: 'ferretry', path: null, laneSet: lanes }],
+      lanes: async () => boardErr({ status: 409, message: 'moved on', code: 'version-conflict' }),
+    });
+    const { store } = open(port);
+    store.watchProjects(laptop);
+    await flush();
+    const answer = await store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 });
+    expect(!answer.ok && answer.error.code).toBe('version-conflict');
+    expect(store.projectsState(laptop.daemonId).projects?.[0]?.laneSet).toEqual(lanes);
+  });
+
+  it('copes with a machine whose projects were never read, and drops an answer for a forgotten machine', async () => {
+    const gate = deferred<void>();
+    gate.resolve();
+    const port = fakePort({
+      lanes: async () => {
+        await gate.promise;
+        return boardOk({ laneSet: changed, agenda: 'not-needed' });
+      },
+    });
+    const { store } = open(port);
+    expect((await store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 })).ok).toBe(true);
+    expect(store.projectsState(laptop.daemonId).projects).toBeNull();
+    store.watchProjects(laptop);
+    const pending = store.changeLanes(laptop, PROJECT, { action: 'confirm', version: 1 });
+    store.clearDaemon(laptop.daemonId);
+    expect((await pending).ok).toBe(true);
+    expect(store.projectsState(laptop.daemonId).projects).toBeNull();
   });
 });
 

@@ -469,7 +469,7 @@ describe('BoardPage — odd boards', () => {
     );
     await interact(() => flush());
     const heads = [...view.container.querySelectorAll('.fy-board-project__head')].map(node => node.textContent);
-    expect(heads).toEqual([`${PROJECT.slice(0, 8)}laptop`, `${PROJECT.slice(0, 8)}workstation`]);
+    expect(heads).toEqual([`${PROJECT.slice(0, 8)}laptopLanes ✎`, `${PROJECT.slice(0, 8)}workstationLanes ✎`]);
   });
 
   it('refuses a move for a card sitting in a lane the project does not have', async () => {
@@ -483,5 +483,33 @@ describe('BoardPage — odd boards', () => {
   it('keeps its own clock when it is not handed one', async () => {
     const { root } = await open({ props: { now: undefined } });
     expect(titles(root)).toHaveLength(4);
+  });
+});
+
+describe('BoardPage — lane editor entry', () => {
+  it('puts a Lanes ✎ link in the header that opens the lane editor of the one project', async () => {
+    const { root, navigated } = await open();
+    expect(root.querySelector('.fy-board-project__lanes')).toBeNull();
+    await click(root, '[data-board-lanes="header"]');
+    expect(navigated).toEqual([`/d/${encodeURIComponent('daemon/laptop')}/projects/${PROJECT}/lanes`]);
+  });
+
+  it('heads each project with its own Lanes ✎ link when several boards are drawn', async () => {
+    const { root, navigated } = await open({
+      machines: [
+        { connection: laptop, name: 'laptop' },
+        { connection: workstation, name: 'workstation' },
+      ],
+    });
+    expect(root.querySelector('[data-board-lanes="header"]')).toBeNull();
+    const links = [...root.querySelectorAll<HTMLElement>('.fy-board-project__lanes')];
+    expect(links).toHaveLength(2);
+    await interact(() => must(links[1], 'the second link').click());
+    expect(navigated).toEqual([`/d/${encodeURIComponent('daemon/workstation')}/projects/${PROJECT}/lanes`]);
+  });
+
+  it('has no entry while no project has a board', async () => {
+    const { root } = await open({ open: [] });
+    expect(root.querySelector('[data-board-lanes]')).toBeNull();
   });
 });

@@ -275,6 +275,10 @@ packages/pwa/src/hooks/use-chat-card.ts # the chat page's card chip and Tasks ta
 # The project board's data layer (board U10) lands before the pages that read it (board U11–U15).
 packages/pwa/src/hooks/use-board.ts # the board hooks; the board pages import them next (U11–U15)
 packages/pwa/src/lib/board-actions.ts # the board write verbs, reached through use-board.ts
+
+# The lane editor (board U15), imported only from the .tsx app tree that the gate does not root.
+packages/pwa/src/lib/lane-editor-model.ts # the lane editor draft model, used by features/projects/lane-editor.tsx ← App.tsx ← main.tsx
+
 packages/pwa/src/lib/board-move.ts # the Board page's move rules (U11), reached from board-page.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-present.ts # the Board card's meta line (U11), reached from board-card.tsx ← App.tsx ← main.tsx; the gate ignores .tsx roots
 packages/pwa/src/lib/board-phone.ts # the phone Board's lane switching and tab badge (U13), reached from board-phone.tsx and App.tsx ← main.tsx; the gate ignores .tsx roots

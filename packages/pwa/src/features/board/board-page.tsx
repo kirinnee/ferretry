@@ -38,7 +38,7 @@ import {
   parseBoardView,
   parseListSort,
 } from '../../lib/board-view.ts';
-import { daemonBoardCardPath } from '../../lib/pages/routes.ts';
+import { daemonBoardCardPath, daemonProjectLanesPath } from '../../lib/pages/routes.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardCountsBar } from './board-counts.tsx';
@@ -297,6 +297,12 @@ export function BoardPage({
     };
   }, [model, projects, machines, names]);
 
+  const editLanes = useCallback(
+    (group: BoardGroupOf): void => onNavigate(daemonProjectLanesPath(group.daemonId, group.projectId)),
+    [onNavigate],
+  );
+  const onlyGroup = model.groups.length === 1 ? model.groups[0] : undefined;
+
   // A count pressed on a phone opens the matching cards as a list (pressed again, it lifts the filter).
   const pressCount = (activity: BoardActivityFilter | null): void => {
     if (!phone || activity === null) {
@@ -335,6 +341,16 @@ export function BoardPage({
           ))}
         </nav>
         <div className="fy-board__tools">
+          {onlyGroup === undefined ? null : (
+            <button
+              className="fy-board__lanes"
+              data-board-lanes="header"
+              onClick={() => editLanes(onlyGroup)}
+              type="button"
+            >
+              Lanes ✎
+            </button>
+          )}
           <PageThemeSwitch />
         </div>
       </header>
@@ -404,6 +420,7 @@ export function BoardPage({
             hideClosed={hideClosed}
             model={model}
             onDropCard={onDropCard}
+            onEditLanes={editLanes}
             projectName={projectName}
           />
         )

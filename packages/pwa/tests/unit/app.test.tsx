@@ -1344,6 +1344,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('mounts a project’s lane editor from its lanes route', async () => {
+    // Arrange
+    const projectId = '11111111-1111-4111-8111-111111111111';
+
+    // Act
+    const { view } = await renderShell(`/d/${ALPHA}/projects/${projectId}/lanes`, [alpha.daemonId], {});
+    await settle();
+
+    // Assert
+    expect(view.container.querySelector(`[data-lane-page="${projectId}"]`)).not.toBeNull();
+    await view.unmount();
+  });
+
   it('walks from the registry to one project without leaving the app', async () => {
     // Arrange
     const projectId = '11111111-1111-4111-8111-111111111111';
@@ -2698,6 +2711,7 @@ describe('route change accessibility', () => {
         { kind: 'new-session', daemonId: id },
         { kind: 'projects', daemonId: id },
         { kind: 'project-detail', daemonId: id, projectId: '11111111-1111-4111-8111-111111111111' },
+        { kind: 'project-lanes', daemonId: id, projectId: '11111111-1111-4111-8111-111111111111' },
         { kind: 'session', daemonId: id, sessionId: 'shared' },
         { kind: 'settings', daemonId: id },
         { kind: 'warden', daemonId: id },
@@ -2713,6 +2727,7 @@ describe('route change accessibility', () => {
       'Sessions, New',
       'Sessions, Projects',
       'Sessions, Projects, Project',
+      'Sessions, Projects, Project, Lanes',
       'Sessions, shared',
       'Sessions, Settings',
       'Sessions, Warden',

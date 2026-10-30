@@ -117,6 +117,9 @@ export const fakePort = (overrides: Partial<BoardPort> = {}): BoardPort & { read
       return null;
     },
     version: async () => '4.110.0',
+    lanes: async () => {
+      throw new Error('lanes was not expected');
+    },
     act: async () => {
       throw new Error('act was not expected');
     },
