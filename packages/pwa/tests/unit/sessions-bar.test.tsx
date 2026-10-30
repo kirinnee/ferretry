@@ -337,12 +337,12 @@ describe('SessionsBar as a column', () => {
     expect(calls).toEqual(['palette', 'collapse']);
   });
 
-  test('gives a session page its own search, with a silent finder icon beside it', async () => {
+  test('gives a session page its own search, with the finder icon beside it', async () => {
     const { element } = bar({ search: <input aria-label="Search files & tasks" /> });
     view = await mount(element);
     expect(view.container.querySelector('input[aria-label="Search files & tasks"]')).not.toBeNull();
     const finder = must(view.container.querySelector('[data-app-bar-destination-search]'), 'the finder icon');
-    expect(finder.getAttribute('aria-keyshortcuts')).toBeNull();
+    expect(finder.getAttribute('aria-keyshortcuts')).not.toBeNull();
     expect(finder.textContent).toBe('');
   });
 

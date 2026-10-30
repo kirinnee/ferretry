@@ -305,19 +305,12 @@ function AppNavLink({
 }
 
 /** Find, drawn as what it is — a search box — that opens the palette. */
-function FindBox({
-  onOpen,
-  shortcutAvailable = true,
-}: {
-  onOpen: () => void;
-  /** False when Cmd/Ctrl+K belongs to the mounted current-session search. */
-  shortcutAvailable?: boolean;
-}) {
+function FindBox({ onOpen }: { onOpen: () => void }) {
   return (
     <button
       type="button"
       onClick={onOpen}
-      aria-keyshortcuts={shortcutAvailable ? PALETTE_KEYSHORTCUTS : undefined}
+      aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
       aria-label="Find app destinations, settings & sessions"
       title="Find an app destination, setting, or session"
       className="kt-findbox"
@@ -325,7 +318,7 @@ function FindBox({
     >
       <Search size={14} aria-hidden="true" />
       <span>Search</span>
-      {shortcutAvailable ? <kbd>{paletteShortcutLabel()}</kbd> : null}
+      <kbd>{paletteShortcutLabel()}</kbd>
     </button>
   );
 }
@@ -528,7 +521,7 @@ export function AppBar({
             ))}
           </nav>
           <div className="flex shrink-0 items-center self-center pb-xs">
-            <FindBox onOpen={onOpenPalette} shortcutAvailable={currentSessionSearch === undefined} />
+            <FindBox onOpen={onOpenPalette} />
           </div>
         </div>
       )}
