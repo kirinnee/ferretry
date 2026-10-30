@@ -133,15 +133,25 @@ describe('unread conversations', () => {
 });
 
 describe('conversation links', () => {
-  test('a conversation opens at an item through the protocol parameter', () => {
-    expect(attentionConversationPath(STUDIO, 'ses 1', 'A3')).toBe('/d/studio/session/ses%201?attention=A3');
+  test('a conversation link this app builds names the item as ?agenda=', () => {
+    expect(attentionConversationPath(STUDIO, 'ses 1', 'A3')).toBe('/d/studio/session/ses%201?agenda=A3');
   });
 
   test('reads a well-formed item id and refuses anything else', () => {
+    expect(attentionTargetFromSearch('?agenda=A3')).toBe('A3');
+    expect(attentionTargetFromSearch('?agenda=a3')).toBeNull();
+    expect(attentionTargetFromSearch('?agenda=A0')).toBeNull();
+    expect(attentionTargetFromSearch('')).toBeNull();
+  });
+
+  test('still accepts the older ?attention= link from daemon pushes and old bookmarks', () => {
     expect(attentionTargetFromSearch('?attention=A3')).toBe('A3');
     expect(attentionTargetFromSearch('?attention=a3')).toBeNull();
     expect(attentionTargetFromSearch('?attention=A0')).toBeNull();
-    expect(attentionTargetFromSearch('')).toBeNull();
+  });
+
+  test('?agenda= wins when a link carries both', () => {
+    expect(attentionTargetFromSearch('?attention=A1&agenda=A2')).toBe('A2');
   });
 });
 

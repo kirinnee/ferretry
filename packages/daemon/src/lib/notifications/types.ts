@@ -67,7 +67,7 @@ export const AttentionNotificationRequestedRecordSchema = z
     enrolled: NonNegativeIntegerSchema,
   })
   .refine(record => record.key === notificationKey(record), {
-    message: 'the attention notification key does not name its session and item',
+    message: 'the agenda notification key does not name its session and item',
     path: ['key'],
   });
 

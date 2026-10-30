@@ -71,7 +71,7 @@ describe('attention controller reads', () => {
     await controller.list({});
 
     // Assert
-    should(out.messages[0]).startWith(`1 unresolved item in ${SESSION}`);
+    should(out.messages[0]).startWith(`1 open item in ${SESSION}`);
   });
 
   it('should render the resolution audit', async () => {
@@ -193,7 +193,7 @@ describe('attention controller add', () => {
     await controller.add(['ours'], { title: 'Pick a cluster' });
 
     // Assert
-    should(out.messages[0]).startWith('agenda item recorded — 2 unresolved items');
+    should(out.messages[0]).startWith('agenda item recorded — 2 open items');
   });
 
   it('should raise the brief a --json-file body describes', async () => {
@@ -297,7 +297,7 @@ describe('attention controller resolve and dismiss', () => {
         },
       },
     ]);
-    should(out.messages[0]).equal(`resolved !A1 — 0 unresolved items in ${SESSION}`);
+    should(out.messages[0]).equal(`resolved !A1 — 0 open items in ${SESSION}`);
   });
 
   it('should answer a yes or no card with --yes and --no', async () => {
@@ -356,7 +356,7 @@ describe('attention controller resolve and dismiss', () => {
 
     // Assert
     should(gateway.applied[0]?.request).deepEqual({ action: 'dismiss', id: 'A1', note: 'no longer relevant' });
-    should(out.messages[0]).equal(`dismissed !A1 — 0 unresolved items in ${SESSION}`);
+    should(out.messages[0]).equal(`dismissed !A1 — 0 open items in ${SESSION}`);
   });
 
   it('should dismiss without a note', async () => {

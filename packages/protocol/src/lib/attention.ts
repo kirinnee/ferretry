@@ -586,7 +586,7 @@ export const AttentionItemSchema = z
       context.addIssue({ code: 'custom', message, path: path.split('.') });
     }
     if (value.sourceSeq !== undefined && value.source !== 'agent-raised') {
-      context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised attention' });
+      context.addIssue({ code: 'custom', message: 'sourceSeq is valid only for agent-raised agenda items' });
     }
     if ((value.waitingOn === undefined) !== (value.askedAt === undefined)) {
       context.addIssue({ code: 'custom', message: 'waitingOn and askedAt are set together', path: ['askedAt'] });
@@ -727,14 +727,14 @@ export const AttentionSnapshotSchema = z
     }
     const activeIds = new Set(value.items.map(item => item.id));
     if (activeIds.size !== value.items.length) {
-      context.addIssue({ code: 'custom', message: 'active attention ids must be unique', path: ['items'] });
+      context.addIssue({ code: 'custom', message: 'active agenda ids must be unique', path: ['items'] });
     }
     const resolvedIds = value.resolved.map(item => item.id);
     if (new Set(resolvedIds).size !== resolvedIds.length) {
-      context.addIssue({ code: 'custom', message: 'resolved attention ids must be unique', path: ['resolved'] });
+      context.addIssue({ code: 'custom', message: 'resolved agenda ids must be unique', path: ['resolved'] });
     }
     if (resolvedIds.some(id => activeIds.has(id))) {
-      context.addIssue({ code: 'custom', message: 'active and resolved attention ids must be disjoint' });
+      context.addIssue({ code: 'custom', message: 'active and resolved agenda ids must be disjoint' });
     }
   });
 export type AttentionSnapshot = z.infer<typeof AttentionSnapshotSchema>;
@@ -894,7 +894,13 @@ export const SessionAttentionSummarySchema = z.object({
 });
 export type SessionAttentionSummary = z.infer<typeof SessionAttentionSummarySchema>;
 
-/** The query parameter a conversation link names an Attention item by. */
+/** The query parameter a conversation link names an agenda item by: `?agenda=A3`. */
+export const AGENDA_LINK_PARAMETER = 'agenda';
+
+/**
+ * The older spelling, `?attention=A3`. Delivered pushes and bookmarks carry it for good, so a client keeps
+ * reading it; the daemon still WRITES it into pushes until older apps (which read only this one) are gone.
+ */
 export const ATTENTION_LINK_PARAMETER = 'attention';
 
 /**

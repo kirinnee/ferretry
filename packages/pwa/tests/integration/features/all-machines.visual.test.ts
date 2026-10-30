@@ -176,7 +176,7 @@ describe('one session list across two machines, one offline', () => {
       // A laptop row opens the LAPTOP's session.
       await tab.click('[data-machine-reach="offline"] [data-sbar-session="l-pim"]');
       expect((await evidence(tab)).navigations.at(-1)).toBe(
-        `/d/${encodeURIComponent(seen.laptop)}/session/l-pim?attention=A1`,
+        `/d/${encodeURIComponent(seen.laptop)}/session/l-pim?agenda=A1`,
       );
 
       // "+ New" asks which machine: this one first and marked; the laptop is not answering, so it is

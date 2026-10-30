@@ -15,6 +15,7 @@
  */
 
 import {
+  AGENDA_LINK_PARAMETER,
   ATTENTION_LINK_PARAMETER,
   type AttentionBrief,
   type AttentionId,
@@ -145,13 +146,14 @@ export const withFerretSessions = (sources: readonly AttentionInboxSource[]): re
 export const attentionSummaryKey = (summary: SessionAttentionSummary): string =>
   `${summary.open}\u0000${summary.first}\u0000${summary.latestAt}\u0000${summary.discussing ?? 0}\u0000${summary.stopped === true ? 1 : 0}`;
 
-/** Where a conversation opens AT an item: the session's page, naming the item as the protocol says. */
+/** Where a conversation opens AT an item: the session's page, naming the item (`?agenda=A3`). */
 export const attentionConversationPath = (daemonId: DaemonId, sessionId: string, id: AttentionId): string =>
-  `${daemonSessionPath(daemonId, sessionId)}?${ATTENTION_LINK_PARAMETER}=${encodeURIComponent(id)}`;
+  `${daemonSessionPath(daemonId, sessionId)}?${AGENDA_LINK_PARAMETER}=${encodeURIComponent(id)}`;
 
-/** The item a conversation link names (`?attention=A3`), or `null` for none or a malformed one. */
+/** The item a conversation link names (`?agenda=A3` or the older `?attention=A3`), or `null` for none or a malformed one. */
 export const attentionTargetFromSearch = (search: string): AttentionId | null => {
-  const raw = new URLSearchParams(search).get(ATTENTION_LINK_PARAMETER);
+  const params = new URLSearchParams(search);
+  const raw = params.get(AGENDA_LINK_PARAMETER) ?? params.get(ATTENTION_LINK_PARAMETER);
   const parsed = AttentionIdSchema.safeParse(raw);
   return parsed.success ? parsed.data : null;
 };

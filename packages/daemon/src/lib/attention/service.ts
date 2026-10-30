@@ -23,9 +23,9 @@ import {
 
 /** The heading of an item the daemon raised without wording one: plain words, never an id. */
 const DAEMON_TITLES: Readonly<Record<DaemonAttentionCause, string>> = {
-  'source-reconciliation': 'Needs your attention',
+  'source-reconciliation': 'Needs you',
   'warden-escalation': 'A ferret needs a human',
-  system: 'Needs your attention',
+  system: 'Needs you',
   'harness-prompt': 'The ferret is waiting on you',
 };
 
@@ -283,7 +283,7 @@ export class AttentionService {
     const invalid = invalidSession(sessionId);
     if (invalid !== null) return invalid;
     if (actor !== undefined && !agentConfinedTo(actor, sessionId)) {
-      return { code: 'forbidden', message: 'an agent may change attention only in its own session' };
+      return { code: 'forbidden', message: 'an agent may change the agenda only in its own session' };
     }
     return (await this.sessions.has(sessionId)) ? null : { code: 'not-found', message: `no such session ${sessionId}` };
   }
@@ -292,5 +292,5 @@ export class AttentionService {
 function invalidSession(sessionId: string): AttentionFailure | null {
   return isAttentionSessionId(sessionId)
     ? null
-    : { code: 'invalid', message: `not a valid attention session id: ${sessionId}` };
+    : { code: 'invalid', message: `not a valid agenda session id: ${sessionId}` };
 }

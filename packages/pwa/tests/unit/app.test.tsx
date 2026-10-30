@@ -2358,7 +2358,7 @@ describe('AppShell', () => {
     try {
       for (let turn = 0; turn < 6; turn += 1) await settle();
       const row = must(view.container.querySelector<HTMLAnchorElement>('[data-attention-row]'), 'the item row');
-      expect(row.getAttribute('href')).toBe(`/d/${ALPHA}/session/shared?attention=A3`);
+      expect(row.getAttribute('href')).toBe(`/d/${ALPHA}/session/shared?agenda=A3`);
       expect(view.container.querySelector('[data-attention-pane]')).toBeNull();
       expect(view.container.querySelector('[data-attention-chat]')).toBeNull();
     } finally {

@@ -190,6 +190,7 @@ export function AttentionBoard({
   const [background, setBackground] = useState<Record<string, boolean>>({});
   const items = snapshot?.items ?? [];
   const resolved = snapshot?.resolved ?? [];
+  const healthyEmpty = snapshot !== null && !error && items.length === 0 && (snapshot.parseErrors ?? 0) === 0;
   return (
     <section
       className="flex h-full min-h-0 flex-1 flex-col"
@@ -204,14 +205,16 @@ export function AttentionBoard({
           <div className="min-w-0">
             <h1 className="m-0 font-display text-title font-semibold tracking-display text-fg">Inbox</h1>
             <p className="m-0 text-meta text-faint">
-              {items.length} unresolved · oldest first · every clear records who did it
+              {healthyEmpty
+                ? 'Nothing needs you.'
+                : `${items.length} unresolved · oldest first · every clear records who did it`}
             </p>
           </div>
         </div>
       </header>
       {error && (
         <p role="alert" className="m-0 border-b border-err/30 bg-err/5 px-panel py-row-y text-meta text-err">
-          Could not verify attention: {error}
+          Could not verify the agenda: {error}
         </p>
       )}
       {snapshot?.parseErrors !== undefined && snapshot.parseErrors > 0 && !error && (
@@ -224,7 +227,7 @@ export function AttentionBoard({
           {loading && !snapshot ? (
             <p role="status" className="flex items-center justify-center gap-xs py-8 text-cell text-muted">
               <LoaderCircle size={15} className="animate-spin motion-reduce:animate-none" />
-              Loading attention ledger…
+              Loading the agenda…
             </p>
           ) : error && !snapshot ? (
             <AttentionUnavailable />
@@ -233,7 +236,7 @@ export function AttentionBoard({
           ) : items.length === 0 ? (
             <div className="py-10 text-center">
               <Check size={18} className="mx-auto mb-sm text-muted" aria-hidden="true" />
-              <p className="m-0 text-cell font-medium text-fg">Nothing needs attention.</p>
+              <p className="m-0 text-cell font-medium text-fg">Nothing needs you.</p>
               <p className="m-0 mt-xs text-meta text-faint">Resolved items remain in the audit below.</p>
             </div>
           ) : (

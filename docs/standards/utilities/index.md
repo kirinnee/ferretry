@@ -8,7 +8,7 @@ title: Utility Libraries
 Utilities reduce repeated, low-value implementation work for collections, strings, objects,
 functions, parsing, and error handling. The goal in Ferretry is not to collect dependencies; it
 is to use a small, well-understood utility catalog so product code stays focused on sessions,
-tasks, attention, and fleet behavior.
+tasks, the agenda, and fleet behavior.
 
 This standard builds on [Software Design Philosophy](../software-design-philosophy/index.md):
 write less bespoke plumbing when a native feature, existing dependency, or shared utility already

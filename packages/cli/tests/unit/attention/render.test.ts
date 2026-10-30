@@ -38,7 +38,7 @@ describe('attention listing', () => {
     const actual = renderAttentionList(snapshot([humanItem('A1', 'approve the deploy')]));
 
     // Assert
-    should(row(actual, 0)).equal(`1 unresolved item in ${SESSION} — oldest first`);
+    should(row(actual, 0)).equal(`1 open item in ${SESSION} — oldest first`);
   });
 
   it('should render an item as its reference, source and subject', () => {
@@ -57,6 +57,17 @@ describe('attention listing', () => {
     should(row(actual, 3)).equal('      why: nothing else can proceed');
     should(row(actual, 4)).equal('      resolve: answer on the board');
     should(row(actual, 5)).equal('      since 2026-07-31T09:05:00.000Z · raised by agent sol');
+  });
+
+  it('should print a legacy default howToResolve as the current agenda default', () => {
+    // Act
+    const actual = renderAttentionList(
+      snapshot([humanItem('A1', 'approve', { howToResolve: 'Answer this item on the attention board.' })]),
+    );
+
+    // Assert
+    should(actual).containEql('resolve: Answer this item on the agenda (it records who answered).');
+    should(actual).not.containEql('attention board');
   });
 
   it('should not invent a name for an unnamed agent', () => {
@@ -208,7 +219,7 @@ describe('attention listing', () => {
 
     // Assert
     should(row(actual, 0)).equal(
-      'Warning: 2 entries on this board could not be read; the list below may be incomplete.',
+      'Warning: 2 entries on this agenda could not be read; the list below may be incomplete.',
     );
     should(actual).containEql('still urgent');
   });
@@ -218,7 +229,7 @@ describe('attention listing', () => {
     const actual = renderAttentionList(snapshot([], { parseErrors: 1 }));
 
     // Assert
-    should(row(actual, 0)).containEql('Warning: 1 entry on this board');
+    should(row(actual, 0)).containEql('Warning: 1 entry on this agenda');
     should(row(actual, 1)).equal('Nothing on the agenda.');
   });
 
@@ -337,7 +348,7 @@ describe('attention confirmations', () => {
     const actual = renderAttentionMutation('resolved', '!A3', snapshot([humanItem('A1', 'x')]));
 
     // Assert
-    should(actual).equal(`resolved !A3 — 1 unresolved item in ${SESSION}`);
+    should(actual).equal(`resolved !A3 — 1 open item in ${SESSION}`);
   });
 
   it('should report a mutation that names no reference', () => {
@@ -345,7 +356,7 @@ describe('attention confirmations', () => {
     const actual = renderAttentionMutation('attention recorded', undefined, snapshot([]));
 
     // Assert
-    should(actual).equal(`attention recorded — 0 unresolved items in ${SESSION}`);
+    should(actual).equal(`attention recorded — 0 open items in ${SESSION}`);
   });
 
   it('should warn when the raise reached no device, and say nothing when one was enrolled', () => {
@@ -359,7 +370,7 @@ describe('attention confirmations', () => {
 
     // Assert
     should(warned.split('\n')[1]).startWith('Warning: no device will be notified (0 enrolled).');
-    should(quiet).equal(`attention !A1 recorded — 1 unresolved item in ${SESSION}`);
+    should(quiet).equal(`attention !A1 recorded — 1 open item in ${SESSION}`);
   });
 });
 
@@ -376,7 +387,7 @@ describe('writing advice', () => {
 
     // Assert
     should(actual.split('\n')).deepEqual([
-      `attention A4 recorded — 0 unresolved items in ${SESSION}`,
+      `attention A4 recorded — 0 open items in ${SESSION}`,
       "Reads hard for someone who hasn't followed — fix it with `agenda edit !A4`:",
       '  - summary is 120 characters; keep it under 90',
       '  - links ("https://x.example")',

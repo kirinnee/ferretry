@@ -33,7 +33,7 @@ describe('the terminal board', () => {
     should(actual).containEql('F9, F10');
   });
 
-  it('should lift tasks only a human can unstick into an ATTENTION strip', () => {
+  it('should lift tasks only a human can unstick into a NEEDS YOU strip', () => {
     // Arrange — F2 is blocked by another task, so it is not the human's problem.
     const tasks = [
       summary({ id: 'F1' }),
@@ -45,10 +45,10 @@ describe('the terminal board', () => {
     const actual = renderTaskBoard(board(tasks)).split('\n');
 
     // Assert
-    should(actual[0]).equal('ATTENTION');
+    should(actual[0]).equal('NEEDS YOU');
     should(actual[1]).containEql('#F4');
     should(actual.slice(2).join('\n')).containEql('#F2');
-    should(actual.filter(line => line === 'ATTENTION')).have.length(1);
+    should(actual.filter(line => line === 'NEEDS YOU')).have.length(1);
   });
 
   it('should order blocked before stale before quiet, then by id', () => {

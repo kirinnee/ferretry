@@ -106,7 +106,7 @@ describe('attention inbox helpers', () => {
     expect(origin.ferret).toBe('Kai');
     expect(origin.task).toBe('Release train');
     expect(origin.machine).toBe('Laptop');
-    expect(origin.href).toBe('/d/laptop/session/sess-2?attention=A2');
+    expect(origin.href).toBe('/d/laptop/session/sess-2?agenda=A2');
     expect(inboxCardOrigin(bare, () => undefined).ferret).toBe('Moe');
   });
 });
@@ -273,11 +273,11 @@ describe('AttentionInboxPage rows', () => {
     const navigated: string[] = [];
     const mounted = await mount(page(fakeInbox(), [twoWay], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-attention-row]'), 'the item row');
-    expect(link.getAttribute('href')).toBe('/d/laptop/session/sess-2?attention=A2');
+    expect(link.getAttribute('href')).toBe('/d/laptop/session/sess-2?agenda=A2');
     expect(link.textContent).toContain('Ship it?');
     expect(link.textContent).toContain('!A2');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/laptop/session/sess-2?attention=A2']);
+    expect(navigated).toEqual(['/d/laptop/session/sess-2?agenda=A2']);
     await mounted.unmount();
   });
 
@@ -331,7 +331,7 @@ describe('AttentionInboxPage rows', () => {
     expect(lines).toEqual([withItem.key, notice.key]);
     const line = must(group.querySelector('[data-attention-notice]'), 'the notice');
     expect(line.textContent).toContain('The build finished');
-    expect(line.querySelector('a')?.getAttribute('href')).toBe('/d/workshop/session/sess-5?attention=N1');
+    expect(line.querySelector('a')?.getAttribute('href')).toBe('/d/workshop/session/sess-5?agenda=N1');
     expect(line.querySelector('[data-attention-clear]')?.textContent).toBe('Clear');
     await mounted.unmount();
   });
@@ -355,7 +355,7 @@ describe('AttentionInboxPage rows', () => {
     const mounted = await mount(page(fake, [notice], {}, navigated));
     const link = must(mounted.container.querySelector<HTMLAnchorElement>('[data-attention-notice] a'), 'the notice');
     await interact(() => link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 })));
-    expect(navigated).toEqual(['/d/workshop/session/sess-5?attention=N1']);
+    expect(navigated).toEqual(['/d/workshop/session/sess-5?agenda=N1']);
     await advance(fake, 6_000);
     expect(fake.commits.map(commit => commit.card.item.id)).toEqual(['N1']);
     await mounted.unmount();

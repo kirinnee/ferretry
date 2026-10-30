@@ -216,11 +216,13 @@ describe('AttentionBoard', () => {
         onAction={() => undefined}
       />,
     );
-    expect(empty.container.textContent).toContain('Nothing needs attention.');
+    expect(empty.container.textContent).toContain('Nothing needs you.');
+    expect(empty.container.querySelector('header')?.textContent).toContain('Nothing needs you.');
+    expect(empty.container.querySelector('header')?.textContent).not.toContain('oldest first');
     const loading = await mount(
       <AttentionBoard connection={connection} snapshot={null} loading error={null} onAction={() => undefined} />,
     );
-    expect(loading.container.textContent).toContain('Loading attention ledger');
+    expect(loading.container.textContent).toContain('Loading the agenda');
     const audit = await mount(
       <AttentionBoard
         connection={connection}
@@ -255,7 +257,7 @@ describe('AttentionBoard', () => {
       />,
     );
     expect(audit.container.textContent).toContain('offline');
-    expect(audit.container.textContent).toContain('Could not verify attention');
+    expect(audit.container.textContent).toContain('Could not verify the agenda');
     expect(audit.container.textContent).toContain('Resolution audit');
     expect(audit.container.textContent).toContain('done by you');
     expect(audit.container.textContent).toContain('answered by agent sess-agent-7');
@@ -272,7 +274,7 @@ describe('AttentionBoard', () => {
       />,
     );
     expect(unavailable.container.textContent).toContain('The Inbox needs human verification.');
-    expect(unavailable.container.textContent).not.toContain('Nothing needs attention.');
+    expect(unavailable.container.textContent).not.toContain('Nothing needs you.');
 
     const damaged = await mount(
       <AttentionBoard
@@ -285,7 +287,8 @@ describe('AttentionBoard', () => {
     );
     expect(damaged.container.textContent).toContain('The Inbox needs human verification.');
     expect(damaged.container.textContent).toContain('damaged Inbox data');
-    expect(damaged.container.textContent).not.toContain('Nothing needs attention.');
+    expect(damaged.container.textContent).not.toContain('Nothing needs you.');
+    expect(damaged.container.querySelector('header')?.textContent).toContain('0 unresolved · oldest first');
   });
 
   it('fails closed for an attention kind a newer or damaged runtime sends directly to the board', async () => {

@@ -12,7 +12,7 @@ import {
 /** Raised when a durable board cannot safely be supplied to the state machine. */
 export class InvalidAttentionLedgerError extends Error {
   constructor(readonly file: string) {
-    super(`invalid attention ledger: ${file}`);
+    super(`invalid agenda ledger: ${file}`);
   }
 }
 
@@ -93,6 +93,6 @@ export class FileAttentionLedgerRepository implements AttentionLedgerRepository 
   }
 
   private assertSessionId(sessionId: string): void {
-    if (!isAttentionSessionId(sessionId)) throw new Error(`not a valid attention session id: ${sessionId}`);
+    if (!isAttentionSessionId(sessionId)) throw new Error(`not a valid agenda session id: ${sessionId}`);
   }
 }

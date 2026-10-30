@@ -96,7 +96,7 @@ export interface ComposerReferenceTierLegendItem {
 export const COMPOSER_REFERENCE_TIERS: readonly ComposerReferenceTierLegendItem[] = [
   { tier: 1, trigger: '@', label: 'Files' },
   { tier: 2, trigger: '@@', label: 'Agents', direct: ':' },
-  { tier: 3, trigger: '@@@', label: 'Attention', direct: '!' },
+  { tier: 3, trigger: '@@@', label: 'Agenda', direct: '!' },
 ];
 
 /** The reader's choice of keys (`SuggestionKeys`, owned by `lib/controls.ts`), as the switches the providers answer from. */

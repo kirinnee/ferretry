@@ -116,10 +116,10 @@ describe('the sessions page with Attention', () => {
     expect(rowIds(needs, 'data-session-row')).toEqual(['new', 'old']);
     expect(rowIds(view.container, 'data-session-row')).toEqual(['new', 'old', 'calm']);
     const old = must(needs.querySelector('[data-session-row="old"]'), 'the old row');
-    expect(old.getAttribute('href') ?? '').toContain('/session/old?attention=A4');
+    expect(old.getAttribute('href') ?? '').toContain('/session/old?agenda=A4');
     expect(old.querySelector('[data-session-ask]')?.textContent).toBe('Ask of old?');
     await interact(() => (old as HTMLElement).click());
-    expect(calls.at(-1)).toBe('navigate:/d/studio/session/old?attention=A4');
+    expect(calls.at(-1)).toBe('navigate:/d/studio/session/old?agenda=A4');
     expect(view.container.querySelector('[data-session-row="calm"]')?.getAttribute('href')).toBe(
       '/d/studio/session/calm',
     );
@@ -155,7 +155,7 @@ describe('the sessions page with Attention', () => {
         }).element,
       );
       const needs = must(view.container.querySelector('[data-needs-you-group]'), 'the Needs you group');
-      const link = must(needs.querySelector('a[href*="attention=A6"]'), `the ${density} table link`);
+      const link = must(needs.querySelector('a[href*="agenda=A6"]'), `the ${density} table link`);
       expect(link.querySelector('[data-unread-badge]')?.textContent).toContain('3');
       expect(link.querySelector('.sr-only')?.textContent).toBe('3 open Inbox items');
       expect(needs.querySelector('tr[data-session-unread]')).not.toBeNull();
@@ -172,7 +172,7 @@ describe('the sessions page with Attention', () => {
       }).element,
     );
     const needs = must(view.container.querySelector('[data-needs-you-group]'), 'the Needs you group');
-    expect(needs.querySelector('a[href*="attention=A3"]')).not.toBeNull();
+    expect(needs.querySelector('a[href*="agenda=A3"]')).not.toBeNull();
     expect(needs.querySelector('[data-unread-badge]')?.textContent).toContain('2');
   });
 
@@ -206,7 +206,7 @@ describe('the sessions page across every machine', () => {
     const needs = must(view.container.querySelector('[data-needs-you-group]'), 'the Needs you group');
     expect(rowIds(needs, 'data-session-row')).toEqual(['newer', 'older']);
     const newer = must(needs.querySelector('[data-session-row="newer"]'), 'the newer row');
-    expect(newer.getAttribute('href')).toBe('/d/laptop/session/newer?attention=A8');
+    expect(newer.getAttribute('href')).toBe('/d/laptop/session/newer?agenda=A8');
     expect(newer.querySelector('[data-unread-badge]')?.textContent).toContain('4');
     expect(newer.textContent).toContain('laptop');
   });

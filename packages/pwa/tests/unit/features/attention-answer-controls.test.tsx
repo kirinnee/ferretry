@@ -329,7 +329,7 @@ describe('AttentionAnswerControls', () => {
     // `<fieldset>`, not `role="group"`: the repo's a11y gate rejects the role on
     // a generic element, and the group still needs a name.
     const group = must(container.querySelector('fieldset'), 'the answers fieldset');
-    expect(group.getAttribute('aria-label')).toBe('Valid attention answers');
+    expect(group.getAttribute('aria-label')).toBe('Valid agenda answers');
     const action = must(container.querySelector('.kt-attn-swipe-action'), 'a swipe action');
     const hint = must(action.getAttribute('aria-describedby'), 'the action hint id');
     expect(must(container.querySelector(`#${CSS.escape(hint)}`), 'the hint').textContent).toBe(

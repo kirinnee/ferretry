@@ -897,7 +897,7 @@ export class SessionHandoverService {
     } catch (error) {
       await this.ports.receipts.write(
         this.stamp(receipt, receipt.phase, this.ports.clock.now(), {
-          detail: `this handover needs a human and the attention could not be raised: ${detail(error)}`,
+          detail: `this handover needs a human and the agenda item could not be raised: ${detail(error)}`,
         }),
       );
       return false;

@@ -64,7 +64,7 @@ const summaryLine = (task: TaskSummary): string => {
 };
 
 /**
- * The default board. Tasks blocked with no blocking dependency are lifted into an ATTENTION strip,
+ * The default board. Tasks blocked with no blocking dependency are lifted into a NEEDS YOU strip,
  * because those are the ones only a human can unstick.
  */
 export function renderTaskBoard(board: TaskBoard): string {
@@ -73,7 +73,7 @@ export function renderTaskBoard(board: TaskBoard): string {
   const attention = new Set(ordered.filter(task => task.blocked && task.blockedBy.length === 0).map(task => task.id));
   const lines: string[] = [];
   if (attention.size > 0) {
-    lines.push('ATTENTION');
+    lines.push('NEEDS YOU');
     for (const task of ordered) if (attention.has(task.id)) lines.push(summaryLine(task));
     if (attention.size < ordered.length) lines.push('');
   }

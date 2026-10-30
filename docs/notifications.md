@@ -17,7 +17,7 @@ fy notify "<summary>" [--body "<markdown>"] [--ping]
 ```
 
 Tells the owner one thing: a result, a blocker, a decision the ferret made for them. It raises a **notice**
-on the ferret's board (`notice: true`, see [agenda.md § Notices](agenda.md#notices)): no ask, no answers,
+on the ferret's agenda (`notice: true`, see [agenda.md § Notices](agenda.md#notices)): no ask, no answers,
 nobody's turn. The summary is the whole notification; `--body` is the longer reading behind it.
 
 - A notice only moves the **Inbox badge**. It clears when the owner reads it.
