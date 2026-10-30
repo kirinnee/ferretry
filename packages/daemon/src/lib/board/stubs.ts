@@ -4,7 +4,6 @@
  *
  * - {@link StubLaneSetSource} → U3 (projects and lanes)
  * - {@link HistoryActivityDeriver} → U5 (activity and staleness)
- * - {@link NoLaneProposals} → U3 (lane proposals)
  * - {@link NoPendingContext} → U5 (the lead's pending context)
  *
  * They do no IO, which is why they live in the domain tier and are unit tested.
@@ -18,7 +17,7 @@ import {
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import type { PendingContext } from './pending-context.ts';
-import type { ActivityDeriver, CardActivity, LaneProposer, LaneSetSource } from './ports.ts';
+import type { ActivityDeriver, CardActivity, LaneSetSource } from './ports.ts';
 
 /** Who a stub lane set says proposed it. Not a session id: nothing proposed it. */
 export const STUB_LANE_SET_PROPOSER = 'stub';
@@ -66,16 +65,6 @@ export class HistoryActivityDeriver implements ActivityDeriver {
         ] as const;
       }),
     );
-  }
-}
-
-/**
- * STUB, REPLACED BY U3's lane proposals. Proposes nothing: until U3 lands every project reads the stub's
- * lanes, so a start never finds a project without them.
- */
-export class NoLaneProposals implements LaneProposer {
-  async propose(): Promise<LaneSet | null> {
-    return null;
   }
 }
 

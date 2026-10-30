@@ -1,3 +1,4 @@
+export * from './inferred-lane-proposer.ts';
 export * from './lane-proposal-acceptance.ts';
 export * from './lane-proposal-card.ts';
 export * from './lane-set-policy.ts';
