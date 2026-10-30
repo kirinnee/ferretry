@@ -32,6 +32,7 @@
 import { dirname, join } from 'node:path';
 import {
   type AccountModel,
+  activeDisable,
   CLAUDE_SECURE_STORAGE_VARIABLE,
   type ClaudeStoreResolution,
   CODEX_CREDENTIAL_STORE_FILE,
@@ -48,6 +49,7 @@ import {
   type CredentialUsage,
   type CredentialViewOptions,
   credentialHarnesses,
+  type Disabled,
   type FleetUsageWindow,
   type HarnessKind,
   HOST_CLAUDE_SECURE_STORAGE,
@@ -67,6 +69,7 @@ import {
   type FleetCredentialUsageWindow,
   type FleetCredentialView,
   FleetCredentialViewSchema,
+  type FleetDisabled,
   type FleetProviderPresetCatalog,
   type ProviderQuotaReading,
 } from '@ferretry/protocol';
@@ -74,6 +77,7 @@ import type { CallerGovernance } from '../api/capability.ts';
 import { credentialEnvironmentView } from '../provider-probe/environment-view.ts';
 import type { ProviderProbeSubject } from '../provider-probe/service.ts';
 import { withProviderQuota } from '../usage/provider-quota/account.ts';
+import { disabledOf } from './disabled-view.ts';
 
 // ── Refusals ─────────────────────────────────────────────────────────────────────────────────────
 
@@ -735,6 +739,7 @@ export class FleetCredentialsService {
       ...(email === undefined ? {} : { email }),
       ...(entry.credential.label === undefined ? {} : { label: entry.credential.label }),
       needsLabel: needsLabel(entry, email, emails, entries),
+      ...disabledField(entry.credential.disabled, this.deps.listCache?.now() ?? 0),
       ...(entry.credential.clonedFrom === undefined ? {} : { clonedFrom: entry.credential.clonedFrom }),
       ...(entry.credential.clonedFromDaemon === undefined
         ? {}
@@ -763,6 +768,12 @@ export class FleetCredentialsService {
         : { environment: credentialEnvironmentView(entry.credential, environment.presets, environment.held) }),
     });
   }
+}
+
+/** The login's `disabled` field when its block is in effect at `now`, else nothing. */
+function disabledField(block: Disabled | undefined, now: number): { readonly disabled?: FleetDisabled } {
+  const active = activeDisable(block, now);
+  return active === undefined ? {} : { disabled: disabledOf(active, 'login') };
 }
 
 /**

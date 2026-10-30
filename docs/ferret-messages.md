@@ -144,6 +144,9 @@ The Warden reads the board (`board-design.md` §3.4). Both of its board messages
   board decides "orphaned"; the Warden reads its word. The card's **owner ferret**, when it is alive and
   is not the finished ferret, gets one queued message naming the card and the three ways out:
   `fy resume <ferret>`, `fy task assign F412 <ferret>` or `fy task drop F412 --reason "<why>"`.
+  The message is the daemon's (`senderKind: daemon`), never typed into an **interactive** owner ferret —
+  that is the owner's own chat, so it gets the notice below instead — and a message that could not be
+  typed becomes that notice too, rather than being typed again every sweep.
   Otherwise the owner gets a plain notice tied to the card (`task` on the agenda item, source reference
   `warden-orphan:F412`) on the owner ferret's board, else the finished ferret's. Each is sent once per
   card and ferret that left it; a message to an owner ferret that has finished since moves on to the

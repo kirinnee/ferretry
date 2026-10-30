@@ -361,19 +361,24 @@ const DROPPED = [
 const store = new DaemonBoardStore(
   fakePort({
     board: async (_daemon, query) =>
-      boardAnswer(query.state === 'closed' ? CLOSED : query.state === 'dropped' ? DROPPED : OPEN, {
-        projectId: PROJECT,
-        laneSet: laneSetFor(),
-        counts: {
-          ...COUNTS,
-          closedHidden: CLOSED.length,
-          stale: 2,
-          orphaned: 1,
-          active: 8,
-          toTest: 2,
-          waitingOnYou: 1,
+      boardAnswer(
+        (query.state === 'closed' ? CLOSED : query.state === 'dropped' ? DROPPED : OPEN).filter(
+          item => query.ferret === null || item.owner === query.ferret || item.assignee === query.ferret,
+        ),
+        {
+          projectId: PROJECT,
+          laneSet: laneSetFor(),
+          counts: {
+            ...COUNTS,
+            closedHidden: CLOSED.length,
+            stale: 2,
+            orphaned: 1,
+            active: 8,
+            toTest: 2,
+            waitingOnYou: 1,
+          },
         },
-      }),
+      ),
     projects: async () => [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
   }),
   fakeEnvironment(),
@@ -393,6 +398,7 @@ function Harness() {
       <BoardPage
         agenda={{ respond: async () => undefined }}
         callsigns={CALLSIGNS}
+        origin={params.get('from') === null ? null : { daemonId: laptop.daemonId, sessionId: params.get('from') ?? '' }}
         phone={phone}
         machines={[{ connection: laptop, name: 'laptop' }]}
         now={NOW}

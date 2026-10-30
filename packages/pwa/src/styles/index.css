@@ -1,3 +1,4 @@
+@import './theme-fonts.css';
 @import './themes.css';
 @import './highlight.css';
 @import '../components/session-screens.css';
@@ -2186,6 +2187,19 @@ body {
   grid-template-rows: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
+}
+/* THE MESSAGE LIST'S LAYER of the log's one cell: an open agenda item (`.fy-item-view`) and the drawer's scrim take the
+   SAME cell over it. Every layer names the cell; one that did not was auto-placed into a second row, and the row the
+   open item had left was 0px. */
+.fy-chat-log__messages {
+  display: flex;
+  grid-area: 1 / 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.fy-chat-log__messages > .fy-transcript-shell {
+  flex: 1 1 0;
 }
 .kt-chat-surface .fy-transcript-content {
   width: 100%;

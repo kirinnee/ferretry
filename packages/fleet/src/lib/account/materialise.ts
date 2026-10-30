@@ -74,6 +74,7 @@ import {
   credentialLaunchEnvironment,
   resolveCredentialStore,
 } from './credentials.ts';
+import { binaryNameOf, runtimeDisable } from './disabled-runtime.ts';
 import { applyFixedLayer, type FixedLayer, fixedLayerFor } from './fixed-layer.ts';
 import { assignRuntimeIds, type RuntimeIds, runtimeIdsPath, serializeRuntimeIds } from './ids.ts';
 import { HARNESS_DISPLAY_NAMES, resolveProfile } from './layering.ts';
@@ -286,6 +287,8 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     operations.push({ kind: 'directory', path: codexSqliteHome, mode: DIRECTORY_MODE });
   }
 
+  const now = Date.parse(input.generatedAt);
+  const binary = binaryNameOf(input.fyCommand);
   const planned: PlannedRuntime[] = [];
   const homeOwners = new Map<string, string>();
   for (const name of runtimeNames) {
@@ -307,6 +310,7 @@ export function materialiseFleet(input: MaterialiseInput): FleetModelApplyPlan {
     homeOwners.set(home, name);
     const wrapper = joinPath(layout.binDirectory, name);
     const reasons: string[] = [];
+    reasons.push(...(runtimeDisable(model, name, now, binary)?.clauses ?? []));
 
     const store = resolveCredentialStore(runtime.credential, credential, credentialStorePaths, harness);
     if ('unavailable' in store)

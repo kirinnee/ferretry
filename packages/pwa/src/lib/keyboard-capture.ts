@@ -1,9 +1,8 @@
 /**
  * A surface that owns the keyboard (the remote browser view, a terminal).
- *
- * While focus is inside one, every key is the surface's: app shortcuts such as
- * `/` search, Cmd/Ctrl+K, dictation and Escape-to-close must not see it. The one
- * way out is an explicit chord, so a reader is never trapped.
+ * While focus is inside one, keys are the surface's: app shortcuts such as `/` search, dictation and
+ * Escape-to-close must not see them. The deliberate exceptions are Cmd/Ctrl+K (the global finder, handled
+ * by the shell first) and the explicit Shift+Escape way out, so a reader is never trapped.
  */
 
 /** Marker attribute a keyboard-owning surface carries on (or above) its focusable element. */

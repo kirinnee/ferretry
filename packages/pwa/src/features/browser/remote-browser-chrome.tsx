@@ -16,6 +16,7 @@ import {
   Expand,
   Globe2,
   Monitor,
+  Network,
   Plus,
   Power,
   PowerOff,
@@ -24,7 +25,7 @@ import {
   UserRound,
   X,
 } from 'lucide-react';
-import type { BrowserAction, BrowserPageSummary, BrowserStatus } from '@ferretry/protocol';
+import type { BrowserAction, BrowserPageSummary, BrowserProxyStatus, BrowserStatus } from '@ferretry/protocol';
 
 import { remotePageLabel, type RemoteViewportMode } from '../../lib/remote-browser.ts';
 import { Badge, Button } from '../../shell/primitives.tsx';
@@ -37,6 +38,10 @@ export type RemoteBrowserPageStatus = Extract<BrowserStatus, { url: string }>;
 /** The running page snapshot, or null while the daemon reports no live page. */
 export const remoteBrowserPage = (status: BrowserStatus | null): RemoteBrowserPageStatus | null =>
   status !== null && status.state === 'running' && 'url' in status ? status : null;
+
+/** What the "via proxy" chip says when pointed at: the proxy's address and whether it signs in, never a credential. */
+export const remoteBrowserProxyTitle = (proxy: BrowserProxyStatus): string =>
+  `This browser goes through the proxy at ${proxy.url}${proxy.authenticated ? ', signed in with a stored secret' : ''}${proxy.bypassCount === 0 ? '' : `, skipping it for ${proxy.bypassCount} ${proxy.bypassCount === 1 ? 'entry' : 'entries'}`}.`;
 
 export interface RemoteBrowserStatusBarProps {
   readonly status: BrowserStatus | null;
@@ -58,6 +63,17 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
         {lastActor?.kind === 'human' ? <UserRound size={13} /> : <Bot size={13} />}
         {lastActor ? `${lastActor.kind === 'human' ? 'You' : 'Agent'} · ${lastActor.action}` : 'No input yet'}
       </Badge>
+      {status?.state === 'running' && status.proxy !== undefined ? (
+        <Badge
+          tone="accent"
+          className="inline-flex items-center gap-1"
+          title={remoteBrowserProxyTitle(status.proxy)}
+          data-browser-proxy-chip=""
+        >
+          <Network size={13} aria-hidden="true" />
+          via proxy
+        </Badge>
+      ) : null}
       <span className="text-meta text-muted" aria-live="polite">
         {busy ? 'Working…' : loading ? 'Loading page…' : page?.pageState === 'error' ? 'Page failed' : ''}
       </span>

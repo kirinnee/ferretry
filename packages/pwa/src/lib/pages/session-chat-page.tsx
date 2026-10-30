@@ -1,6 +1,6 @@
 import type { AgendaId, AgendaSnapshot, IFyApiClient, SessionView } from '@ferretry/protocol';
 import { WorktreeListResponseSchema } from '@ferretry/protocol';
-import { Pause, Play } from 'lucide-react';
+import { Info, Palette, Pause, Play } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AgendaItemsProvider } from '../../components/agenda-message.tsx';
 import { AttachmentGalleryProvider } from '../../components/attachment-gallery.tsx';
@@ -45,6 +45,8 @@ import { AGENDA_RESOLVED_ACTION_ID, resolvedActionContribution } from '../../fea
 import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
+import { BoardSideTab } from '../../features/board/board-side-tab.tsx';
+import { ChatCardChip } from '../../features/board/chat-card-chip.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -83,7 +85,7 @@ import { readRelaunchSettings } from '../../features/session-info/relaunch-setti
 import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
 import type { SwitchSection } from '../../features/session-info/switch-marks.tsx';
 import { useInfoPlacement } from '../../features/session-info/use-info-placement.ts';
-import { SessionTasksSearchSurface, useSessionSearch } from '../../features/session-search/session-search.tsx';
+import { useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
 import { addSkillInvocationToComposer } from '../../features/skills/skills-composer.ts';
 import type { ConsoleTyper } from '../../features/workspace/console-surface.tsx';
@@ -94,6 +96,7 @@ import { useSessionWorkspace } from '../../features/workspace/use-session-worksp
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
+import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
@@ -104,7 +107,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { type SessionAction, type SessionActionSpec, sessionActionSpecs } from '../../shell/session-actions.ts';
 import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts';
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
-import { ThemeToggle } from '../../shell/theme-toggle.tsx';
+import { ThemeSettingsPanel, ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
 import type { DaemonAgendaClient } from '../agenda-client.ts';
 import { needsYouItems, unreadCount } from '../agenda-inbox.ts';
@@ -113,6 +116,7 @@ import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
+import type { DaemonBoardStore } from '../board-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
@@ -138,7 +142,7 @@ import { terminalIdForSurfaceKey } from '../surface-references.ts';
 import type { DaemonUsageStore } from '../usage-store.ts';
 import { WorkspaceLayoutStore } from '../workspace-layout-store.ts';
 import { type WorkspaceRailPreferenceStore, workspaceRailPreferences } from '../workspace-rail-preferences.ts';
-import { daemonSessionPath } from './routes.ts';
+import { daemonBoardCardPath, daemonSessionPath } from './routes.ts';
 
 /** Only daemon operations this workspace can truthfully invoke. */
 export type SessionChatClient = Pick<IFyApiClient, 'answer' | 'interrupt' | 'resume' | 'send' | 'stop'> &
@@ -335,6 +339,11 @@ export interface SessionChatPageProps {
   };
   /** Info open on this tab from the first frame. Absent: Info starts shut. */
   readonly initialInfo?: InfoTab;
+  /**
+   * The board this ferret's card is read from: the header chip, Info's Card row and the Tasks tab.
+   * Absent: the host has no board, so the chat shows none of the three.
+   */
+  readonly board?: DaemonBoardStore;
 }
 
 /** The app-store bindings the context rail needs, beyond what the page already holds. */
@@ -348,11 +357,10 @@ interface SessionContextDependencies {
 const defaultWorkspaceLayouts = new WorkspaceLayoutStore();
 const defaultWorkspaceRails = workspaceRailPreferences;
 
-/** The two tools Info opens in a sheet of their own: this ferret's tasks and its full analytics. */
-type SessionUtility = 'tasks' | 'analytics';
+/** The one tool Info opens in a sheet of its own: this ferret's full analytics. */
+type SessionUtility = 'analytics';
 
 const UTILITY_LABEL: Readonly<Record<SessionUtility, string>> = {
-  tasks: 'Tasks',
   analytics: 'Analytics for this session',
 };
 
@@ -459,6 +467,7 @@ export function SessionChatPage({
   infoLearning,
   switches,
   initialInfo,
+  board,
 }: SessionChatPageProps) {
   const scope = useMemo(() => daemonSessionScope(connection, session.config.id), [connection, session.config.id]);
   const measuredFormFactor = useWorkspaceFormFactor();
@@ -466,6 +475,14 @@ export function SessionChatPage({
   const formFactor = formFactorOverride ?? (presentation === 'sheet' ? 'phone' : measuredFormFactor);
   const workspace = useSessionWorkspace(workspaceLayouts, scope);
   const info = useInfoPlacement(initialInfo);
+  const cardChat = useChatCard({
+    store: board,
+    connection,
+    machineName: contextDependencies?.machineName ?? connection.daemonName ?? connection.daemonId,
+    session,
+    sessions: daemonSessions,
+    reading: session.config.focusTask !== undefined || (info.open && info.tab === 'tasks'),
+  });
   const [actionForm, setActionForm] = useState<string | null>(null);
   // Who drives which terminal and page, and the session's pages: both through the daemon client, so a
   // relay-only machine answers them as surely as one on the LAN.
@@ -519,8 +536,8 @@ export function SessionChatPage({
   // THE LATEST REQUEST TO SHOW ONE ITEM (a `?attention=` link, a `!A3` click): the agenda opens its card.
   // It belongs to this session and resets with it.
   const [agendaFocus, setAgendaFocus] = useState<AgendaFocus | null>(null);
-  const showAgenda = useCallback((target: AgendaId | null): void => {
-    setAgendaFocus(current => ({ target, seq: (current?.seq ?? 0) + 1 }));
+  const showAgenda = useCallback((target: AgendaId | null, onEntry = false): void => {
+    setAgendaFocus(current => ({ target, seq: (current?.seq ?? 0) + 1, ...(onEntry ? { onEntry } : {}) }));
   }, []);
   // The resolved item a link named, so the list the header menu opens rings it. Cleared with the form.
   const [resolvedTarget, setResolvedTarget] = useState<AgendaId | null>(null);
@@ -560,8 +577,17 @@ export function SessionChatPage({
     showAgentTab('console');
     return true;
   }, [showAgentTab]);
-  const openTasks = useCallback(() => setUtility('tasks'), []);
   const { show: showInfo } = info;
+  const hasBoard = cardChat !== null;
+  const cardHref = cardChat?.chip.kind === 'card' ? daemonBoardCardPath(connection.daemonId, cardChat.chip.id) : '';
+  const callsigns = useMemo(() => {
+    const names = new Map<string, string>();
+    for (const other of daemonSessions ?? []) {
+      if (other.config.teammate !== undefined) names.set(other.config.id, other.config.teammate);
+    }
+    return names;
+  }, [daemonSessions]);
+  const openTasks = useCallback(() => showInfo(hasBoard ? 'tasks' : 'overview'), [showInfo, hasBoard]);
   // Where a proved reference opens: the workspace's tabs, and the context rail for a skill. ONE click
   // behaviour still — Markdown calls the surface — with these as its destinations.
   const referenceDestinations = useMemo(
@@ -690,7 +716,7 @@ export function SessionChatPage({
   // navigation that carries a target, the reset runs first and the new target wins.
   // biome-ignore lint/correctness/useExhaustiveDependencies: the pairing, the session id and the navigation re-arm the same target
   useEffect(() => {
-    if (agendaTarget !== null) showAgenda(agendaTarget);
+    if (agendaTarget !== null) showAgenda(agendaTarget, true);
   }, [agendaTarget, agendaTargetKey, showAgenda, connection, session.config.id]);
 
   const publish = useCallback(
@@ -1136,7 +1162,50 @@ export function SessionChatPage({
     setActionForm(next);
     if (next !== AGENDA_RESOLVED_ACTION_ID) setResolvedTarget(null);
   }, []);
+  // A PHONE'S BAR IS ☰, the name, the card's reference, one status dot and ▾ (`session-top-bar.tsx`): what a
+  // wider bar draws beside the name — Interrupt, ⓘ Info and the theme switch — is the top of ▾ instead.
+  const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
+  const phoneBarActions: readonly SessionActionContribution<CoreActionContext>[] = compact
+    ? [
+        {
+          group: 'session',
+          order: 0,
+          build: () =>
+            interruptSpec === undefined
+              ? null
+              : {
+                  kind: 'run',
+                  id: 'interrupt',
+                  label: interruptSpec.label,
+                  icon: Pause,
+                  ...(pendingAction === null ? {} : { unavailable: 'Another action is still running.' }),
+                  run: () => runAction('interrupt'),
+                },
+        },
+        {
+          group: 'session',
+          order: 1,
+          build: () =>
+            contextDependencies === undefined
+              ? null
+              : { kind: 'run', id: 'info', label: info.open ? 'Close Info' : 'Info', icon: Info, run: info.toggle },
+        },
+        {
+          group: 'session',
+          order: 2,
+          build: () => ({
+            kind: 'form',
+            id: 'theme',
+            label: 'Theme…',
+            title: 'Theme',
+            icon: Palette,
+            render: () => <ThemeSettingsPanel />,
+          }),
+        },
+      ]
+    : NO_CONTRIBUTIONS;
   const contributions: readonly SessionActionContribution<CoreActionContext>[] = [
+    ...phoneBarActions,
     ...CORE_SESSION_ACTIONS,
     resolvedActionContribution(agendaModel?.snapshot?.resolved ?? [], agendaId, resolvedTarget),
     ...actionContributions,
@@ -1262,8 +1331,24 @@ export function SessionChatPage({
               driving={driving}
               name={agentName}
               onOpenAnalytics={() => setUtility('analytics')}
+              {...(cardChat === null
+                ? {}
+                : {
+                    card: {
+                      chip: cardChat.chip,
+                      onOpen: () => onNavigate?.(cardHref),
+                      tasks: (
+                        <BoardSideTab
+                          callsigns={callsigns}
+                          chat={cardChat}
+                          now={Date.now()}
+                          scope={scope}
+                          {...(onNavigate === undefined ? {} : { onNavigate })}
+                        />
+                      ),
+                    },
+                  })}
               onOpenPage={page => openSurface('browser', page.name ?? page.id, browserPageLabel(page))}
-              onOpenTasks={openTasks}
               onOpenTerminal={(id, label) => openSurface('terminal', id, label)}
               placement={info}
               ports={{
@@ -1322,6 +1407,17 @@ export function SessionChatPage({
         }
         turn={turn}
         compact={compact}
+        {...(cardChat === null
+          ? {}
+          : {
+              cardChip: (
+                <ChatCardChip
+                  chip={cardChat.chip}
+                  href={cardHref}
+                  {...(onNavigate === undefined ? {} : { onNavigate })}
+                />
+              ),
+            })}
         infoOpen={info.open}
         menu={actionsMenu}
         trailing={<ThemeToggle iconOnly touch={compact} />}
@@ -1403,8 +1499,10 @@ export function SessionChatPage({
         </div>
       ) : null}
       <div className="fy-chat-log">
-        {/* An open item covers the message list only: the transcript stays mounted, but is hidden from sight and keys. */}
-        <div className="contents" inert={agenda.covered || undefined}>
+        {/* An open item covers the message list only: the transcript stays mounted, but is hidden from sight and keys.
+            The list is a real element in the log's ONE grid cell, like the view over it: a `contents` wrapper let the
+            transcript fall into a second row, which squeezed an open item to 0px under an inert, untouchable list. */}
+        <div className="fy-chat-log__messages" data-chat-messages="" inert={agenda.covered || undefined}>
           {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
           <AgendaItemsProvider snapshot={agendaModel?.snapshot}>
             <Transcript
@@ -1489,6 +1587,7 @@ export function SessionChatPage({
               {...(composerFetch === undefined ? {} : { autocompleteFetcher: composerFetch })}
               {...(daemonSessions === undefined ? {} : { autocompleteSessions: daemonSessions })}
               {...(composerCatalogs.attention === undefined ? {} : { autocompleteAgenda: composerCatalogs.attention })}
+              {...(composerCatalogs.tasks === undefined ? {} : { autocompleteTasks: composerCatalogs.tasks })}
               {...(composerCatalogs.skills?.skills === undefined
                 ? {}
                 : { autocompleteSkills: composerCatalogs.skills })}
@@ -1586,7 +1685,6 @@ export function SessionChatPage({
                 panelClassName="bg-surface"
               >
                 <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-session-utility={utility ?? ''}>
-                  {utility === 'tasks' ? <SessionTasksSearchSurface /> : null}
                   {utility === 'analytics' ? <SessionAnalyticsSurface connection={connection} scope={scope} /> : null}
                 </div>
               </BottomSheet>

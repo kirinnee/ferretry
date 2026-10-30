@@ -298,10 +298,13 @@ describe('composer autocomplete popover', () => {
 
   test('names the keys in the footer and marks an agent’s status as a dot', () => {
     expect(autocompleteFooterHint(undefined, undefined, undefined)).toBe('↑↓ choose · esc');
-    expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 3, undefined)).toBe('↑↓ choose · esc');
+    expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 3, undefined)).toBe(
+      '↑↓ choose · esc · type @ again for tasks',
+    );
+    expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 4, undefined)).toBe('↑↓ choose · esc');
     // A touch screen is told only what one more @ reaches, never keys it does not have.
     expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 0, undefined, true)).toMatch(/^type @ again for /u);
-    expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 3, undefined, true)).toBeNull();
+    expect(autocompleteFooterHint(COMPOSER_REFERENCE_TIERS, 4, undefined, true)).toBeNull();
     expect(agentStatusTone('tool running')).toBe('ok');
     expect(agentStatusTone('awaiting user')).toBe('warn');
     expect(agentStatusTone('completed')).toBe('idle');

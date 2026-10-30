@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { PACK_CLEAN_UP_LABEL } from '@ferretry/protocol';
 import {
   DEFAULT_LIST_FILTER,
+  hasAgenda,
   isGuideBuilder,
   isStopped,
   listedBeforeMode,
@@ -11,7 +12,6 @@ import {
   sessionsBarDirectory,
   sessionsBarNames,
   sessionsBarSubline,
-  hasAgenda,
   sessionsBarView,
   sidebarCompact,
 } from '../../src/shell/sessions-bar-model.ts';
@@ -170,8 +170,24 @@ describe('which sessions the bar lists', () => {
       title: 'Diene Work',
       ferret: 'Hadi',
     });
-    expect(names({ teammate: 'hadi', label: undefined, name: '  ' })).toEqual({ title: 'Hadi', ferret: null });
-    expect(names({ teammate: 'hadi', label: undefined, name: 'Hadi' })).toEqual({ title: 'Hadi', ferret: null });
+    const folder = { cwd: '/work/home-manager' };
+    expect(names({ teammate: 'hadi', label: undefined, name: '  ', ...folder })).toEqual({
+      title: 'home-manager',
+      ferret: 'Hadi',
+    });
+    expect(names({ teammate: 'hadi', label: undefined, name: 'Hadi', ...folder })).toEqual({
+      title: 'home-manager',
+      ferret: 'Hadi',
+    });
+    // The daemon's placeholder for an unnamed interactive session is the mode, never a title.
+    expect(names({ teammate: 'hadi', label: undefined, name: 'interactive', ...folder })).toEqual({
+      title: 'home-manager',
+      ferret: 'Hadi',
+    });
+    expect(names({ teammate: 'hadi', label: undefined, name: 'interactive', cwd: '' })).toEqual({
+      title: 'Hadi',
+      ferret: null,
+    });
     expect(names({ teammate: undefined, label: undefined, name: 'Home Manager' })).toEqual({
       title: 'Home Manager',
       ferret: null,

@@ -84,6 +84,8 @@ export interface KanbanViewProps {
   /** The Closed lane is not drawn (closed is hidden by default); a drop target stands in for it. */
   readonly hideClosed: boolean;
   readonly onDropCard: (groupKey: string, laneId: string) => void;
+  /** Opens a project's lane editor; drawn beside each project heading when there is more than one. */
+  readonly onEditLanes?: (group: BoardGroupOf) => void;
 }
 
 function KanbanBoard({
@@ -143,7 +145,7 @@ function KanbanBoard({
 }
 
 /** One row of lanes per project (and machine); with a single project the heading is left out. */
-export function KanbanView({ model, env, projectName, hideClosed, onDropCard }: KanbanViewProps) {
+export function KanbanView({ model, env, projectName, hideClosed, onDropCard, onEditLanes }: KanbanViewProps) {
   const headed = model.groups.length > 1;
   return (
     <div className="fy-board-rows">
@@ -153,6 +155,16 @@ export function KanbanView({ model, env, projectName, hideClosed, onDropCard }: 
             <h2 className="fy-board-project__head">
               {projectName(group)}
               {model.multiMachine ? <span className="fy-board-project__machine">{group.machine}</span> : null}
+              {onEditLanes === undefined ? null : (
+                <button
+                  className="fy-board-project__lanes"
+                  data-board-lanes={group.key}
+                  onClick={() => onEditLanes(group)}
+                  type="button"
+                >
+                  Lanes ✎
+                </button>
+              )}
             </h2>
           ) : null}
           <KanbanBoard env={env} group={group} hideClosed={hideClosed} onDropCard={onDropCard} />

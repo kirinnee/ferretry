@@ -22,10 +22,17 @@
  *
  * Pure throughout: no filesystem, no environment, no clock.
  */
-import { BrowserModeSchema, CONFIG_COMPONENT_KINDS, isLoopbackHost, SECRET_REFERENCE_SOURCE } from '@ferretry/protocol';
+import {
+  BrowserModeSchema,
+  BrowserProxySettingSchema,
+  CONFIG_COMPONENT_KINDS,
+  isLoopbackHost,
+  SECRET_REFERENCE_SOURCE,
+} from '@ferretry/protocol';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
+import { DisabledSchema } from './disabled.ts';
 import {
   CloudCredentialSchema,
   CodexProviderSchema,
@@ -170,6 +177,13 @@ export const MACHINE_SHAPE = {
    */
   browserMode: BrowserModeSchema.default('headless'),
   /**
+   * "Browser proxy" (docs/browser-proxy.md): where the agent browser sends its traffic — an http, https or socks5
+   * address, an optional bypass list, and credentials only as ${secret:NAME} references. Absent means direct.
+   * Read when the browser STARTS. Setting or changing it is held for the owner when an agent writes it: a proxy
+   * sees where the browser goes, and its credential references would be sent to whatever address is written.
+   */
+  browserProxy: BrowserProxySettingSchema.optional(),
+  /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. On by default; sessions the owner stopped
    * stay stopped. Read when the daemon starts.
@@ -263,6 +277,8 @@ export const CredentialSchema = z
     /** Display only (C9): what tells two logins with one email apart. */
     label: NonEmptyString.optional(),
     ...CLONE_ORIGIN_SHAPE,
+    /** Switched off without deleting it (`./disabled.ts`): every runtime on it refuses to start, ferrets already on it keep going. */
+    disabled: DisabledSchema.optional(),
     /** `store: environment` only. A secret travels as a `${secret:NAME}` reference, never a value. */
     env: EnvSchema.optional(),
     /** `store: environment` only: the provider preset it was made from. Display, Test and quota. */
@@ -682,6 +698,8 @@ export const RuntimeSchema = z.strictObject({
   harness: HarnessKindSchema.optional(),
   /** "Ferretry launches this as an agent" (R3): only these get the fixed layer and start unattended. */
   agent: z.boolean().default(false),
+  /** Switched off without deleting it (`./disabled.ts`). */
+  disabled: DisabledSchema.optional(),
 });
 export type Runtime = z.infer<typeof RuntimeSchema>;
 

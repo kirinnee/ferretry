@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import type { HarnessDialog, PermissionRequest } from '@ferretry/protocol';
+import type { HarnessDialog, PermissionRequest, SessionView } from '@ferretry/protocol';
 import { SessionTopBar, sessionDisplayName, sessionTitle } from '../../src/components/session-top-bar.tsx';
 import '../support/dom.ts';
 import { interact, type Mounted, mount, must } from '../support/dom.ts';
@@ -24,6 +24,7 @@ describe('what titles a chat', () => {
   test('the task it was named, without a callsign prefix, and only then the callsign', () => {
     expect(sessionTitle(sessionView('a', { config: { teammate: 'hadi', name: '[Hadi] Fix it' } }))).toBe('Fix it');
     expect(sessionTitle(sessionView('b', { config: { teammate: 'hadi', name: '' } }))).toBe('Hadi');
+    expect(sessionTitle(sessionView('c', { config: { teammate: 'hadi', name: 'interactive' } }))).toBe('Hadi');
   });
 
   test('the callsign is a secondary line on a desktop, absent on a phone and when it would repeat the title', async () => {
@@ -127,11 +128,8 @@ describe('SessionTopBar', () => {
     expect(bar.querySelector('.fy-session-bar__project')).toBeNull();
     expect(bar.querySelector('.fy-session-bar__who')?.getAttribute('title')).toBe('Hadi');
     expect(bar.querySelector('.fy-session-bar__status .sr-only')?.textContent).toBe('running');
-    // The phone ⓘ is an icon: its name is the aria-label, and it starts unpressed.
-    const info = must(bar.querySelector<HTMLButtonElement>('[data-session-info-toggle]'), 'the ⓘ toggle');
-    expect(info.getAttribute('aria-label')).toBe('Info');
-    expect(info.getAttribute('aria-pressed')).toBe('false');
-    expect(info.textContent).toBe('');
+    // ⓘ is in Actions ▾ on a phone (the page adds it there), never in the bar.
+    expect(bar.querySelector('[data-session-info-toggle]')).toBeNull();
     await interact(() => must(bar.querySelector<HTMLButtonElement>('[data-session-bar-sessions]'), '☰').click());
     expect(opened).toBe(1);
   });
@@ -168,12 +166,58 @@ describe('SessionTopBar', () => {
   });
 });
 
+describe('SessionTopBar on a phone', () => {
+  // The owner's phone (2026-10-30) drew eleven things in one 390px row, and the card chip ran under Interrupt and ▾.
+  test('draws ☰, the name, the card, ONE status dot and ▾ — and none of what a wider bar adds', async () => {
+    const props = {
+      actions: <button data-lifecycle="" type="button" />,
+      agendaOpen: 2,
+      cardChip: (
+        <a data-card-chip="card" href="#card">
+          &amp;F11
+        </a>
+      ),
+      menu: <button data-menu="" type="button" />,
+      onOpenSessions: () => undefined,
+      onToggleInfo: () => undefined,
+      project: 'ferretry',
+      session: { ...sessionView('s1'), outdated: { sections: ['pack'] } } as SessionView,
+      trailing: <button data-trailing-slot="" type="button" />,
+    };
+    view = await mount(<SessionTopBar {...props} compact />);
+    const bar = must(view.container.querySelector('[data-session-bar]'), 'the session bar');
+    for (const absent of [
+      '[data-lifecycle]',
+      '[data-session-actions]',
+      '[data-session-info-toggle]',
+      '[data-trailing-slot]',
+      '.fy-session-bar__agenda',
+      '[data-outdated-mark]',
+    ])
+      expect(bar.querySelector(absent)).toBeNull();
+    for (const present of ['[data-session-bar-sessions]', '.fy-session-bar__name', '[data-card-chip]', '[data-menu]'])
+      expect(bar.querySelector(present)).not.toBeNull();
+    expect(bar.querySelectorAll('.fy-session-bar__status')).toHaveLength(1);
+
+    // A desktop keeps every one of them.
+    await view.render(<SessionTopBar {...props} compact={false} />);
+    for (const present of [
+      '[data-lifecycle]',
+      '[data-session-info-toggle]',
+      '[data-trailing-slot]',
+      '.fy-session-bar__agenda',
+      '[data-outdated-mark]',
+    ])
+      expect(view.container.querySelector(present)).not.toBeNull();
+  });
+});
+
 describe('SessionTopBar trailing slot', () => {
   test('draws the trailing control last, after the Actions menu', async () => {
     view = await mount(
       <SessionTopBar
         actions={null}
-        compact
+        compact={false}
         menu={<button type="button">Actions</button>}
         project={null}
         session={sessionView('s1')}

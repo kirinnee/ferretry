@@ -5,11 +5,13 @@ import {
   composerOccupiedDraft,
   FY_REQUEST_ID_HEADER,
   SEND_UNCONFIRMED_CODE,
+  type QueuedMessage,
   SendListResponseSchema,
   type SendRecord,
   SendRecordSchema,
   SendResultSchema,
   SessionHandoffSchema,
+  SessionQueueSchema,
   SessionViewSchema,
   unconfirmedSendId,
 } from '@ferretry/protocol';
@@ -286,6 +288,34 @@ describe('the session send ledger routes', () => {
     should(SendRecordSchema.parse(JSON.parse(one.body)).fate).equal('timed_out');
     should(missing.status).equal(404);
     should(unusable.status).equal(400);
+  });
+
+  it("should serve the session's durable queue, and refuse a session that is not there", async () => {
+    // Arrange
+    const sessions = new FakeSessionSend();
+    const message: QueuedMessage = {
+      v: 1,
+      id: 'q-1',
+      sender: 'human',
+      text: 'ship it',
+      attachmentIds: [],
+      enqueuedAt: '2026-08-01T12:00:00.000Z',
+      state: 'queued',
+      stateAt: '2026-08-01T12:00:00.000Z',
+      revision: 1,
+      waitReason: 'busy',
+    };
+    sessions.queued = [message];
+    const subject = dispatcher(sessions);
+
+    // Act
+    const found = await subject.dispatch(request({ method: 'GET', path: '/v1/sessions/s1/queue', headers: human }));
+    const absent = await subject.dispatch(request({ method: 'GET', path: '/v1/sessions/s9/queue', headers: human }));
+
+    // Assert
+    should(found.status).equal(200);
+    should(SessionQueueSchema.parse(JSON.parse(found.body)).messages).deepEqual([message]);
+    should(absent.status).equal(404);
   });
 
   it('should retry under the same id, passing a deliberate "send again anyway" through', async () => {

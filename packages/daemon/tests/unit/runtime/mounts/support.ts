@@ -15,6 +15,7 @@ import {
   type Pin,
   type PinSnapshot,
   type SecretName,
+  type QueuedMessage,
   type SendRecord,
   type SendResult,
   SessionConfigSchema,
@@ -1382,6 +1383,7 @@ export class FakeSessionSend implements SessionSendSubsystem {
   readonly interrupts: string[] = [];
   readonly retries: Array<readonly [string, string, boolean]> = [];
   ledger: SendRecord[] = [];
+  queued: QueuedMessage[] = [];
 
   constructor(
     private readonly known: readonly string[] = ['s1'],
@@ -1397,6 +1399,11 @@ export class FakeSessionSend implements SessionSendSubsystem {
   async sends(sessionId: string): Promise<readonly SendRecord[]> {
     this.refuse(sessionId);
     return this.ledger;
+  }
+
+  async queue(sessionId: string): Promise<readonly QueuedMessage[]> {
+    this.refuse(sessionId);
+    return this.queued;
   }
 
   async sendStatus(sessionId: string, sendId: string): Promise<SendRecord> {

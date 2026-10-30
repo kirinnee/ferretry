@@ -2,7 +2,7 @@
  * THE "OUTDATED" MARK: a small refresh glyph on a ferret that runs on older instructions than it would be
  * launched with today. It is an icon, not a word, so a row whose name is long never gives the name up to it;
  * its tooltip and accessible name carry the words and say which sections changed. Drawn on a sidebar row (with
- * the mode icons) and in the session header, and never as a control: the one button is "Restart outdated"
+ * the mode icons) and in the session header, and never as a control: the one action is "Restart outdated" in the sessions bar's ⋯ menu
  * (`restart-outdated-strip.tsx`).
  *
  * After a press the same place answers it: a ferret that restarted drops the mark, and one waiting for its

@@ -1991,20 +1991,24 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
   }
   // The sessions bar keeps a finder icon beside this session's own search.
   await page.locator('[data-app-bar-destination-search]').first().waitFor({ state: 'visible' });
+  // Cmd/Ctrl+K always opens the global finder, so the finder entries claim it and this session's own
+  // search box never does.
   const destinationShortcut = await page.evaluate(() => {
     const finders = Array.from(document.querySelectorAll<HTMLElement>('[data-app-bar-destination-search]'));
+    const own = Array.from(document.querySelectorAll<HTMLElement>('[data-current-session-search] [aria-keyshortcuts]'));
     return {
       finders: finders.length,
-      ariaClaims: finders.filter(finder => finder.hasAttribute('aria-keyshortcuts')).length,
-      physicalLegends: finders.filter(finder => /\bCtrl\s*K\b|⌘\s*K/u.test(finder.textContent ?? '')).length,
+      unclaimed: finders.filter(finder => !finder.hasAttribute('aria-keyshortcuts')).length,
+      ownClaims: own.length,
     };
   });
   if (destinationShortcut.finders === 0)
     fail(`compiled app shell has no clickable global Find entry at ${viewport.name}`);
-  if (destinationShortcut.ariaClaims > 0 || destinationShortcut.physicalLegends > 0)
+  if (destinationShortcut.unclaimed > 0 || destinationShortcut.ownClaims > 0)
     fail(
-      `global Find still claims the current-session shortcut at ${viewport.name}: ` +
-        `${destinationShortcut.ariaClaims} aria claim(s), ${destinationShortcut.physicalLegends} physical legend(s)`,
+      `global Find does not own the Cmd/Ctrl+K shortcut at ${viewport.name}: ` +
+        `${destinationShortcut.unclaimed} finder(s) without aria-keyshortcuts, ` +
+        `${destinationShortcut.ownClaims} claim(s) on the session's own search`,
     );
   const shellField = shell.locator('[data-sessions-bar] [data-current-session-search] input');
   // Programmatic keyboard focus makes the focus-visible ring part of the

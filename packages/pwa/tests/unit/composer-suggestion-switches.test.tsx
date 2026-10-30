@@ -78,7 +78,7 @@ describe('composer suggestion switches', () => {
       />,
     );
 
-    for (const draft of ['@', '@src/api', '@@ott', '@@@A3']) {
+    for (const draft of ['@', '@src/api', '@@ott', '@@@A3', '@@@@F1']) {
       type(view, draft);
       expect(opened(view)).toBe(false);
     }
@@ -97,7 +97,7 @@ describe('composer suggestion switches', () => {
       />,
     );
 
-    for (const draft of [':zel', '!A3']) {
+    for (const draft of [':zel', '!A3', '&F1']) {
       type(view, draft);
       expect(opened(view)).toBe(false);
     }
@@ -141,11 +141,11 @@ describe('composer suggestion switches', () => {
   test('offers the @ ladder and skills when the host knows nothing about the switches', () => {
     const view = mounted(<Composer api={api} daemon={daemon} sessionId="session-a" />);
 
-    for (const draft of [':zel', '!A3']) {
+    for (const draft of [':zel', '!A3', '&F1']) {
       type(view, draft);
       expect(opened(view)).toBe(false);
     }
-    for (const draft of ['@src', '@@ott', '$sum']) {
+    for (const draft of ['@src', '@@ott', '@@@@F1', '$sum']) {
       type(view, draft);
       expect(opened(view)).toBe(true);
     }

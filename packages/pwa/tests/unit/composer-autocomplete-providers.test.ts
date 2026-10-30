@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test';
 import type { SessionView, TerminalListView } from '@ferretry/protocol';
 import {
   type ComposerProviderContext,
+  type ComposerProviderResult,
   type ComposerTrigger,
   type ComposerTriggerMatch,
   composerSuggestionSwitches,
@@ -21,6 +22,7 @@ import {
   splitFileQuery,
   splitFileReferenceQuery,
 } from '../../src/components/composer-autocomplete-providers.ts';
+import type { ComposerReferenceTask } from '../../src/lib/composer-reference-catalogs.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { parseReferenceToken } from '../../src/lib/references.ts';
@@ -689,12 +691,12 @@ describe('composer reference families', () => {
     await provider.candidates(referenceContext(2, ''));
     await provider.candidates(referenceContext(3, ''));
     expect(warmed).toEqual(['attention']);
-    const unsupported = await provider.candidates(referenceContext(4, ''));
+    const unsupported = await provider.candidates(referenceContext(5, ''));
     expect(unsupported.candidates).toEqual([]);
-    expect(unsupported.notice).toContain('one to three @ signs');
-    expect(provider.legend?.map(item => item.label)).toEqual(['Files', 'Agents', 'Agenda']);
-    // No task tier, no pins family, and nothing that could quietly become a template library.
-    expect(provider.legend?.some(item => /task|pin|template/iu.test(item.label))).toBe(false);
+    expect(unsupported.notice).toContain('one to four @ signs');
+    expect(provider.legend?.map(item => item.label)).toEqual(['Files', 'Agents', 'Agenda', 'Tasks']);
+    // No pins family, and nothing that could quietly become a template library.
+    expect(provider.legend?.some(item => /pin|template/iu.test(item.label))).toBe(false);
   });
 
   it('reports a still-warming ladder family as unknown rather than as an empty fact', async () => {
@@ -714,10 +716,10 @@ describe('composer reference families', () => {
     // nothing yet; reporting nothing leaves the engine loading, the honest state.
     expect(provider.initialCandidates?.(referenceContext(3, ''))).toBeUndefined();
 
-    // Tier 2 reads a prop the page already holds and tier 4 is a teaching
+    // Tier 2 reads a prop the page already holds and tier 5 is a teaching
     // notice, so neither waits on anything.
     expect(provider.initialCandidates?.(referenceContext(2, ''))).toBeDefined();
-    expect(provider.initialCandidates?.(referenceContext(4, ''))?.notice).toContain('one to three @ signs');
+    expect(provider.initialCandidates?.(referenceContext(5, ''))?.notice).toContain('one to four @ signs');
 
     const settled = provider.candidates(referenceContext(3, ''));
     liveAgenda = agenda;
@@ -877,7 +879,7 @@ describe('composer reference families', () => {
   it('builds one provider per trigger, refusing crossed scopes at the boundary', () => {
     expect(
       createComposerAutocompleteProviders({ daemon: daemonA, scope: scopeA }).map(provider => provider.trigger),
-    ).toEqual(['/', '$', '@', ':', '!', '%']);
+    ).toEqual(['/', '$', '@', ':', '!', '&', '%']);
     expect(() => createSkillsProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createSkillSigilProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
     expect(() => createFilesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
@@ -886,6 +888,149 @@ describe('composer reference families', () => {
       'composer scope must belong',
     );
     expect(() => createSurfacesProvider({ daemon: daemonA, scope: scopeB })).toThrow('composer scope must belong');
+  });
+});
+
+describe('composer task family', () => {
+  const task = (id: string, patch: Partial<ComposerReferenceTask> = {}): ComposerReferenceTask => ({
+    id,
+    title: `Title of ${id}`,
+    status: 'todo',
+    phase: 'todo',
+    assignee: 'zelda',
+    updatedAt: '2026-10-01T00:00:00.000Z',
+    ...patch,
+  });
+  const tasks: readonly ComposerReferenceTask[] = [
+    task('F1', { updatedAt: '2026-10-02T00:00:00.000Z' }),
+    task('F2', { status: 'in_progress', phase: 'build', updatedAt: '2026-09-01T00:00:00.000Z' }),
+    task('F3', { status: 'done', phase: 'done' }),
+    task('F4', { status: 'dropped', phase: 'dropped' }),
+    task('F5', { updatedAt: '2026-10-03T00:00:00.000Z', assignee: null }),
+  ];
+  const ladder = () => createReferencesProvider({ daemon: daemonA, scope: scopeA, getTasks: () => tasks });
+  const [, , direct] = createDirectReferenceProviders({ daemon: daemonA, scope: scopeA, getTasks: () => tasks });
+  const labels = (result: ComposerProviderResult | undefined) => result?.candidates.map(item => item.label);
+
+  it('offers tasks on tier 4 and on the direct sigil, from one read', () => {
+    expect(direct?.trigger).toBe('&');
+    expect(labels(ladder().initialCandidates?.(referenceContext(4, '')))).toEqual(['&F2', '&F5', '&F1']);
+    expect(labels(direct?.initialCandidates?.(context('&', 'F')))).toEqual(['&F2', '&F5', '&F1']);
+    expect(ladder().initialCandidates?.(referenceContext(4, ''))?.contextLabel).toBe('Tasks');
+    expect(direct?.initialCandidates?.(context('&', 'F'))?.contextLabel).toBe('& tasks');
+  });
+
+  it('puts active work first, then the most recently touched', () => {
+    expect(labels(direct?.initialCandidates?.(context('&', 'F')))).toEqual(['&F2', '&F5', '&F1']);
+  });
+
+  it('hides closed tasks until the reader types one id exactly', () => {
+    expect(labels(direct?.initialCandidates?.(context('&', 'F3')))).toContain('&F3');
+    expect(labels(direct?.initialCandidates?.(context('&', 'f4')))).toContain('&F4');
+    expect(labels(direct?.initialCandidates?.(context('&', 'F')))).not.toContain('&F3');
+    expect(labels(direct?.initialCandidates?.(context('&', 'F')))).not.toContain('&F4');
+  });
+
+  it('says id, title, lane and owner on each row, and inserts the canonical token', () => {
+    const rows = direct?.initialCandidates?.(context('&', 'F'))?.candidates;
+    expect(rows?.[0]).toMatchObject({
+      kind: 'task',
+      label: '&F2',
+      detail: 'Title of F2 · zelda',
+      badge: 'In progress',
+      replacement: '&F2',
+      append: 'space',
+      group: 'Tasks',
+    });
+    expect(rows?.[1]).toMatchObject({ label: '&F5', detail: 'Title of F5 · unassigned', badge: 'To do' });
+    expect(rows?.every(row => decodeURIComponent(row.id).includes('same/session'))).toBe(true);
+  });
+
+  it('names a blocked task as blocked, and falls back to the status when no phase is known', () => {
+    const rows = createDirectReferenceProviders({
+      daemon: daemonA,
+      scope: scopeA,
+      getTasks: () => [
+        task('F6', { blocked: true }),
+        { id: 'F7', title: 'Bare', status: 'researched' },
+        { id: 'F8', title: 'Undated', status: 'todo' },
+        { id: 'F9', title: 'Created only', status: 'todo', createdAt: '2026-10-09T00:00:00.000Z' },
+      ],
+    })[2]?.initialCandidates?.(context('&', 'F'))?.candidates;
+    expect(rows?.find(row => row.label === '&F6')?.badge).toBe('Blocked');
+    expect(rows?.find(row => row.label === '&F7')).toMatchObject({ badge: 'Researched', detail: 'Bare · unassigned' });
+    expect(rows?.map(row => row.label)).toEqual(['&F9', '&F6', '&F7', '&F8']);
+  });
+
+  it('offers nothing, rather than inventing rows, when the host wires no tasks', () => {
+    const bare = createDirectReferenceProviders({ daemon: daemonA, scope: scopeA })[2];
+    expect(bare?.initialCandidates?.(context('&', 'F'))?.candidates).toEqual([]);
+    expect(
+      createReferencesProvider({ daemon: daemonA, scope: scopeA }).initialCandidates?.(referenceContext(4, ''))
+        ?.candidates,
+    ).toEqual([]);
+  });
+
+  it('reports a still-warming task family as unknown, shares one warm-up and honours aborts', async () => {
+    let started = 0;
+    let deliver: () => void = () => undefined;
+    const read = new Promise<void>(resolve => {
+      deliver = resolve;
+    });
+    let live: readonly ComposerReferenceTask[] = [];
+    const provider = createReferencesProvider({
+      daemon: daemonA,
+      scope: scopeA,
+      getTasks: () => live,
+      waitForTasks: () => {
+        started += 1;
+        return read;
+      },
+    });
+    expect(provider.initialCandidates?.(referenceContext(4, ''))).toBeUndefined();
+    const settled = provider.candidates(referenceContext(4, ''));
+    live = tasks;
+    deliver();
+    expect((await settled).candidates[0]?.replacement).toBe('&F2');
+    expect(started).toBe(1);
+
+    const aborted = new AbortController();
+    const [, , warmDirect] = createDirectReferenceProviders({
+      daemon: daemonA,
+      scope: scopeA,
+      waitForTasks: async () => {
+        aborted.abort();
+      },
+    });
+    await expect(warmDirect?.candidates(context('&', 'F', aborted.signal))).rejects.toThrow();
+  });
+
+  it('publishes a new snapshot only when the task store moves', () => {
+    let live: readonly ComposerReferenceTask[] = tasks;
+    const [, , provider] = createDirectReferenceProviders({ daemon: daemonA, scope: scopeA, getTasks: () => live });
+    const before = provider?.snapshotKey;
+    expect(provider?.snapshotKey).toBe(before);
+    live = [task('F10')];
+    expect(provider?.snapshotKey).not.toBe(before);
+    const ladderLive = createReferencesProvider({ daemon: daemonA, scope: scopeA, getTasks: () => live });
+    const ladderBefore = ladderLive.snapshotKey;
+    live = [];
+    expect(ladderLive.snapshotKey).not.toBe(ladderBefore);
+  });
+
+  it('follows the suggestion mode: the ladder opens tier 4, symbols and both open &', () => {
+    const modes = (keys: 'ladder' | 'symbols' | 'both') => ({
+      daemon: daemonA,
+      scope: scopeA,
+      suggestions: composerSuggestionSwitches(keys, true),
+    });
+    const open = (keys: 'ladder' | 'symbols' | 'both') => ({
+      tier4: createReferencesProvider(modes(keys)).shouldOpen?.(match('@', 'F', 4)),
+      sigil: createDirectReferenceProviders(modes(keys))[2]?.shouldOpen?.(match('&', 'F')),
+    });
+    expect(open('ladder')).toEqual({ tier4: true, sigil: false });
+    expect(open('symbols')).toEqual({ tier4: false, sigil: true });
+    expect(open('both')).toEqual({ tier4: true, sigil: true });
   });
 });
 

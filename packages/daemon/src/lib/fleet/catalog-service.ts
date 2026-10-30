@@ -46,6 +46,7 @@ import {
   type MaterialiseBodies,
   type ModelCatalogSources,
   materialiseFleet,
+  nextDisableExpiry,
   type ProviderPreset,
   parseSettings,
   type RuntimeIds,
@@ -409,6 +410,15 @@ export class FleetCatalogService {
     return profileCatalog(reading.model, await this.#facts(reading));
   }
 
+  /** The earliest `disabled.until` still ahead on any login or runtime (ms), or `undefined` when none is. */
+  async nextDisableExpiry(): Promise<number | undefined> {
+    const { model } = await this.#read();
+    return nextDisableExpiry(
+      [...Object.values(model.credentials), ...Object.values(model.runtimes)].map(entry => entry.disabled),
+      this.deps.now(),
+    );
+  }
+
   /** `GET /v1/fleet/runtimes`. */
   async runtimes(): Promise<FleetRuntimeCatalog> {
     const reading = await this.#read();
@@ -607,6 +617,7 @@ export class FleetCatalogService {
       credentialStatus: await this.#credentialStatus(),
       acceptsAutoPermissionMode: this.deps.acceptsAutoPermissionMode,
       lastAutoResume: (await this.deps.lastAutoResume?.()) ?? null,
+      now: this.deps.now(),
       ...(await this.#modelCatalogs()),
     };
   }

@@ -1,16 +1,19 @@
 import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
-import type { BrowserMode } from '@ferretry/protocol';
+import type { BrowserMode, BrowserProxyStatus } from '@ferretry/protocol';
 import {
   agentBrowserArguments,
+  honestChromeUserAgent,
   BrowserControlError,
   type BrowserProfilePort,
   browserEnvironment,
   selectChromeExecutable,
 } from '../../../lib/browser/control/index.ts';
+import { browserProxyStatus, proxyEndpoint, type ResolvedBrowserProxy } from '../../../lib/browser/proxy/index.ts';
 import type { BrowserSessionLauncher, BrowserWorkerProgram } from '../../../lib/browser/runtime/index.ts';
 import type { BrowserAutomation } from '../../../lib/browser/transport/index.ts';
 import type { BrowserDisplayPort } from '../control/login-runtime.ts';
+import { ProxySignInRelay } from '../proxy/sign-in-relay.ts';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../transport/worker-client.ts';
 
 /** Launches the machine's ONE agent Chrome — in the machine's Browser mode (headless by default; a real
@@ -34,6 +37,12 @@ export interface SessionBrowserModeOptions {
   readonly mode?: () => Promise<BrowserMode>;
   /** The private display a Linux `window` browser draws into. */
   readonly display?: BrowserDisplayPort;
+  /**
+   * The proxy the shared browser goes through, read at every launch like the mode. Unlike the mode, a proxy
+   * that cannot be resolved REFUSES the launch: starting without it would send traffic its owner asked to route
+   * elsewhere straight out of this machine. `undefined` means no proxy.
+   */
+  readonly proxy?: () => Promise<ResolvedBrowserProxy | undefined>;
   readonly platform?: NodeJS.Platform;
   /** How long a signalled Chrome gets to exit before the next, harder step. Defaults to the shipped bound. */
   readonly shutdownTimeoutMs?: number;
@@ -62,17 +71,34 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
     // The display is a precondition too: a Linux real window with no Xvfb refuses here, before any lease.
     const platform = this.modes.platform ?? process.platform;
     const mode = await this.mode();
+    const proxy = await this.modes.proxy?.();
+    const version = await chromeVersion(executable);
     const display = mode === 'window' && platform === 'linux' ? await this.privateDisplay() : undefined;
     const lease = await this.profile.acquire({ sessionId: AGENT_BROWSER_HOLDER });
     let chrome: ReturnType<typeof Bun.spawn> | undefined;
+    let relay: ProxySignInRelay | undefined;
     try {
       const port = await freePort();
+      if (proxy?.credentials !== undefined) {
+        relay = await ProxySignInRelay.start(proxyEndpoint(proxy.setting.url), proxy.credentials);
+      }
+      const userAgent = honestChromeUserAgent(version, platform, process.arch);
       chrome = Bun.spawn({
         cmd: [
           // HEADLESS unless the owner chose a real window. A real window keeps every page's window painting
           // while another has focus (`agentBrowserArguments`), because an agent may be driving — and a
           // person watching — any of them at once.
-          ...agentBrowserArguments(executable, lease.profile, port, viewport, platform, mode),
+          ...agentBrowserArguments(executable, lease.profile, port, viewport, platform, mode, {
+            ...(userAgent === undefined ? {} : { userAgent }),
+            ...(proxy === undefined
+              ? {}
+              : {
+                  proxy: {
+                    server: relay === undefined ? proxy.setting.url : `http://127.0.0.1:${relay.port}`,
+                    bypass: proxy.setting.bypass,
+                  },
+                }),
+          }),
         ],
         env: defined(browserEnvironment(display, this.environment)),
         stdin: 'ignore',
@@ -80,7 +106,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         stderr: 'pipe',
       });
       const diagnostics = collectTail(chrome.stderr as ReadableStream<Uint8Array>);
-      await lease.updateChromePid(chrome.pid, await chromeVersion(executable));
+      await lease.updateChromePid(chrome.pid, version);
       const endpoint = `http://127.0.0.1:${port}`;
       await waitForCdp(endpoint, chrome, diagnostics);
       const worker = await this.connectWorker({
@@ -89,7 +115,14 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
         endpoint,
         workerExecutable: this.worker.kind === 'executable',
       });
-      return new LeasedBrowser(worker, chrome, lease, this.modes.shutdownTimeoutMs);
+      return new LeasedBrowser(
+        worker,
+        chrome,
+        lease,
+        this.modes.shutdownTimeoutMs,
+        relay,
+        proxy === undefined ? undefined : browserProxyStatus(proxy.setting),
+      );
     } catch (error) {
       // A failed launch owns the same ordering obligation as a close: the browser it started is still
       // holding this profile, so the lease is released only once that Chrome is CONFIRMED gone — and
@@ -101,6 +134,7 @@ export class NodeSessionBrowserLauncher implements BrowserSessionLauncher {
       if (chrome === undefined || (await reapChrome(chrome, 'SIGKILL', this.modes.shutdownTimeoutMs))) {
         await lease.release().catch(() => undefined);
       }
+      await relay?.close().catch(() => undefined);
       throw error;
     }
   }
@@ -137,6 +171,8 @@ class LeasedBrowser implements BrowserAutomation {
     private readonly chrome: ReturnType<typeof Bun.spawn>,
     private readonly lease: Awaited<ReturnType<BrowserProfilePort['acquire']>>,
     private readonly shutdownTimeoutMs: number = CHROME_SHUTDOWN_TIMEOUT_MS,
+    private readonly relay?: ProxySignInRelay,
+    readonly proxy?: BrowserProxyStatus,
   ) {
     // Either child settling means the SESSION is over: the worker without Chrome drives nothing, and
     // Chrome without its worker is an unreachable window still holding the profile. So both mean the
@@ -183,6 +219,7 @@ class LeasedBrowser implements BrowserAutomation {
     const workerGone = await this.worker.close().then(succeeded, failed);
     // Chrome is reaped either way — a worker that would not die is no reason to leave a browser up.
     const chromeGone = await reapChrome(this.chrome, 'SIGTERM', this.shutdownTimeoutMs);
+    await this.relay?.close().catch(() => undefined);
     // Released LAST and only on BOTH confirmations: a lease that outlives either child by even a
     // moment lets a login window or the next session open a second Chrome over a profile the first one
     // is still writing to. A survivor therefore KEEPS the lease — an unreleased lease costs this

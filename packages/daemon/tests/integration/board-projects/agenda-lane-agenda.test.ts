@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
-import { LANE_TEMPLATES, type LaneSet } from '@ferretry/protocol';
+import { LANE_TEMPLATES, type LaneSet, laneProposalReference } from '@ferretry/protocol';
 import should from 'should';
 import { type AgendaRaiser, AgendaLaneAgenda } from '../../../src/adapters/board-projects/agenda-lane-agenda.ts';
-import { laneProposalCard, laneProposalReference } from '../../../src/lib/board-projects/index.ts';
+import { laneProposalCard } from '../../../src/lib/board-projects/index.ts';
 
 const laneSet: LaneSet = {
   projectId: '0b1f6d1e-6c1b-4f0c-8f4e-2f6f2a3c9a10' as LaneSet['projectId'],

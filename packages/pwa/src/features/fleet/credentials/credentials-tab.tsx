@@ -21,6 +21,7 @@ import { runtimeActionRefusal } from '../runtimes/runtime-actions-model.ts';
 import { AccountStatus, ProviderQuota } from '../shell/account-status.tsx';
 import { changeRefusalSentence } from '../shell/apply-change.ts';
 import { type AccountChanges, ChangeApplyPanel, useAccountChanges } from '../shell/apply-change-panel.tsx';
+import { DisableSwitch } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { AddLogin } from './add-login.tsx';
 import { CredentialEnvironment, environmentChip } from './credential-environment.tsx';
@@ -94,6 +95,11 @@ export function CredentialBadges({ credential }: { readonly credential: FleetCre
       {credential.environment === undefined ? null : (
         <Badge tone="accent" className="max-w-full !whitespace-normal" data-credential-environment-chip="">
           {environmentChip(credential.environment)}
+        </Badge>
+      )}
+      {credential.disabled === undefined ? null : (
+        <Badge tone="warn" data-credential-disabled-badge="">
+          Disabled
         </Badge>
       )}
       {credential.label === undefined ? null : <Badge tone="accent">{credential.label}</Badge>}
@@ -253,6 +259,19 @@ function CredentialPage({
         ) : (
           <ProviderQuota reading={credential.usage.provider} now={now} />
         )}
+      </div>
+
+      <div className="flex flex-col gap-2" data-credential-switch="">
+        <h4 className="m-0 text-meta font-semibold uppercase text-muted">Use for new starts</h4>
+        <DisableSwitch
+          target={{ kind: 'login', id: credential.id }}
+          disabled={credential.disabled}
+          machineName={machineName}
+          online={online}
+          changes={changes}
+          now={() => now}
+          onChanged={reload}
+        />
       </div>
 
       {credential.environment === undefined ? null : (
@@ -446,12 +465,20 @@ function CredentialRow({
   credential,
   href,
   now,
+  machineName,
+  online,
+  changes,
+  reload,
   removeRefusal,
   onRemove,
 }: {
   readonly credential: FleetCredentialView;
   readonly href: string;
   readonly now: number;
+  readonly machineName: string;
+  readonly online: boolean;
+  readonly changes: AccountChanges;
+  readonly reload: () => Promise<unknown>;
   readonly removeRefusal: string | null;
   readonly onRemove: () => void;
 }) {
@@ -484,7 +511,18 @@ function CredentialRow({
         </span>
         <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
       </a>
-      <div className="flex justify-end border-t border-border-soft pt-2">
+      <div className="flex flex-wrap items-start justify-between gap-2 border-t border-border-soft pt-2">
+        <DisableSwitch
+          compact
+          className="min-w-[14rem] flex-1"
+          target={{ kind: 'login', id: credential.id }}
+          disabled={credential.disabled}
+          machineName={machineName}
+          online={online}
+          changes={changes}
+          now={() => now}
+          onChanged={reload}
+        />
         <RemoveLoginButton credential={credential} refusal={removeRefusal} onRemove={onRemove} />
       </div>
     </div>
@@ -652,6 +690,10 @@ export function CredentialsTab({
                       credential={item}
                       href={machineDetailHash(machineName, 'credentials', item.id)}
                       now={now()}
+                      machineName={machineName}
+                      online={online}
+                      changes={changes}
+                      reload={reload}
                       removeRefusal={removeRefusal}
                       onRemove={() => {
                         changes.clear();

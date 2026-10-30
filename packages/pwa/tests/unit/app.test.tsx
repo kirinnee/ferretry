@@ -1344,6 +1344,19 @@ describe('AppShell', () => {
     await view.unmount();
   });
 
+  it('mounts a project’s lane editor from its lanes route', async () => {
+    // Arrange
+    const projectId = '11111111-1111-4111-8111-111111111111';
+
+    // Act
+    const { view } = await renderShell(`/d/${ALPHA}/projects/${projectId}/lanes`, [alpha.daemonId], {});
+    await settle();
+
+    // Assert
+    expect(view.container.querySelector(`[data-lane-page="${projectId}"]`)).not.toBeNull();
+    await view.unmount();
+  });
+
   it('walks from the registry to one project without leaving the app', async () => {
     // Arrange
     const projectId = '11111111-1111-4111-8111-111111111111';
@@ -2698,6 +2711,7 @@ describe('route change accessibility', () => {
         { kind: 'new-session', daemonId: id },
         { kind: 'projects', daemonId: id },
         { kind: 'project-detail', daemonId: id, projectId: '11111111-1111-4111-8111-111111111111' },
+        { kind: 'project-lanes', daemonId: id, projectId: '11111111-1111-4111-8111-111111111111' },
         { kind: 'session', daemonId: id, sessionId: 'shared' },
         { kind: 'settings', daemonId: id },
         { kind: 'warden', daemonId: id },
@@ -2713,6 +2727,7 @@ describe('route change accessibility', () => {
       'Sessions, New',
       'Sessions, Projects',
       'Sessions, Projects, Project',
+      'Sessions, Projects, Project, Lanes',
       'Sessions, shared',
       'Sessions, Settings',
       'Sessions, Warden',
@@ -2816,7 +2831,7 @@ const paletteOpen = (container: HTMLElement): boolean =>
   container.querySelector('[role="dialog"], [data-command-palette]') !== null;
 
 describe('the command palette shortcut', () => {
-  it('reserves Cmd/Ctrl+K for current-session file and task search on a session route', async () => {
+  it('opens the global finder with Cmd/Ctrl+K on a session route, not the session search', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
     const search = must(
@@ -2828,8 +2843,8 @@ describe('the command palette shortcut', () => {
 
     await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
 
-    expect(document.activeElement).toBe(search);
-    expect(paletteOpen(view.container)).toBe(false);
+    expect(paletteOpen(view.container)).toBe(true);
+    expect(document.activeElement).not.toBe(search);
     await view.unmount();
   });
 
@@ -2861,17 +2876,10 @@ describe('the command palette shortcut', () => {
     await view.unmount();
   });
 
-  it('reaches the search from inside the composer, which is where a session reader stands', async () => {
+  it('opens the finder from inside the composer, which is where a session reader stands', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
-    const search = must(
-      view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
-      'the current-session search input',
-    );
 
-    // The REAL COMPOSER field (the live editor, in the default editor style),
-    // not an unrelated element appended by the test: session search
-    // deliberately claims this editable context and no other one.
     const composer = must(
       view.container.querySelector<HTMLElement>('form.fy-composer [data-live-editor]'),
       'the session composer',
@@ -2881,23 +2889,7 @@ describe('the command palette shortcut', () => {
     await interact(() => composer.dispatchEvent(event));
 
     expect(event.defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(search);
-    expect(paletteOpen(view.container)).toBe(false);
-
-    // And from inside the search itself it is the ordinary re-select, not a
-    // keystroke the field swallows.
-    const again = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
-    await interact(() => search.dispatchEvent(again));
-    expect(again.defaultPrevented).toBe(true);
-    expect(document.activeElement).toBe(search);
-
-    // Escape closes the current-session palette and restores the exact opener,
-    // even after Cmd+K was pressed a second time inside the search itself.
-    const escapeKey = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
-    await interact(() => search.dispatchEvent(escapeKey));
-    expect(escapeKey.defaultPrevented).toBe(true);
-    expect(search.getAttribute('aria-expanded')).toBe('false');
-    expect(document.activeElement).toBe(composer);
+    expect(paletteOpen(view.container)).toBe(true);
 
     await view.unmount();
   });
@@ -2910,7 +2902,7 @@ describe('the command palette shortcut', () => {
       'the current-session search input',
     );
 
-    await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+    await interact(() => search.focus());
     const setter = must(Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set, 'input setter');
     await interact(() => {
       setter.call(search, 'needle');
@@ -2930,22 +2922,23 @@ describe('the command palette shortcut', () => {
     await view.unmount();
   });
 
-  it('leaves session-route shortcuts inside unrelated editors and modal contexts', async () => {
+  it('opens the finder from a terminal or remote browser, and leaves only modal dialogs alone', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
-    const search = must(
-      view.container.querySelector<HTMLInputElement>('[data-current-session-search] input'),
-      'the current-session search input',
-    );
 
-    const rename = document.createElement('input');
-    document.body.appendChild(rename);
-    rename.focus();
-    const editable = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true });
-    await interact(() => rename.dispatchEvent(editable));
-    expect(editable.defaultPrevented).toBe(false);
-    expect(document.activeElement).toBe(rename);
-    expect(search.getAttribute('aria-expanded')).toBe('false');
+    // A keyboard-owning surface used to keep Cmd+K for itself; the finder is now reachable from it.
+    const surface = document.createElement('div');
+    surface.setAttribute('data-keyboard-capture', '');
+    surface.tabIndex = -1;
+    document.body.appendChild(surface);
+    surface.focus();
+    const captured = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
+    await interact(() => surface.dispatchEvent(captured));
+    expect(captured.defaultPrevented).toBe(true);
+    expect(paletteOpen(view.container)).toBe(true);
+    await interact(() => pressKey(document.body, 'Escape'));
+    expect(paletteOpen(view.container)).toBe(false);
+    surface.remove();
 
     // Native dialogs are modal contexts even without redundant role/aria
     // attributes, so the structural guard names the element too.
@@ -2959,21 +2952,7 @@ describe('the command palette shortcut', () => {
     await interact(() => action.dispatchEvent(modal));
     expect(modal.defaultPrevented).toBe(false);
     expect(document.activeElement).toBe(action);
-    expect(search.getAttribute('aria-expanded')).toBe('false');
 
-    // A keyboard-owning surface (the remote browser view) gets Cmd+K for the page it shows.
-    const surface = document.createElement('div');
-    surface.setAttribute('data-keyboard-capture', '');
-    surface.tabIndex = -1;
-    document.body.appendChild(surface);
-    surface.focus();
-    const captured = new KeyboardEvent('keydown', { key: 'k', metaKey: true, bubbles: true, cancelable: true });
-    await interact(() => surface.dispatchEvent(captured));
-    expect(captured.defaultPrevented).toBe(false);
-    expect(search.getAttribute('aria-expanded')).toBe('false');
-    surface.remove();
-
-    rename.remove();
     dialog.remove();
     await view.unmount();
   });
@@ -2999,18 +2978,19 @@ describe('the command palette shortcut', () => {
     await view.unmount();
   });
 
-  it('leaves the keystroke to the field the reader is typing in', async () => {
+  it('opens the finder even from inside a field, because one chord means one thing', async () => {
     const { view } = await renderShell(`/d/${ALPHA}`, [alpha.daemonId]);
     await settle();
 
     for (const tag of ['input', 'textarea', 'select'] as const) {
       const field = document.createElement(tag);
       document.body.appendChild(field);
+      field.focus();
       const event = new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true });
       await interact(() => field.dispatchEvent(event));
-      // Not merely "did not open": the field must still RECEIVE the keystroke,
-      // which a `preventDefault` in the capture phase would have taken away.
-      expect(event.defaultPrevented).toBe(false);
+      expect(event.defaultPrevented).toBe(true);
+      expect(paletteOpen(view.container)).toBe(true);
+      await interact(() => pressKey(document.body, 'Escape'));
       expect(paletteOpen(view.container)).toBe(false);
       field.remove();
     }
@@ -3019,7 +2999,7 @@ describe('the command palette shortcut', () => {
     Object.defineProperty(editable, 'isContentEditable', { configurable: true, value: true });
     document.body.appendChild(editable);
     await interact(() => pressKey(editable, 'k', { ctrlKey: true }));
-    expect(paletteOpen(view.container)).toBe(false);
+    expect(paletteOpen(view.container)).toBe(true);
     editable.remove();
 
     await view.unmount();
@@ -3159,21 +3139,16 @@ describe('the global destination and settings finder', () => {
     await view.unmount();
   });
 
-  it('stops promising Cmd/Ctrl+K once a session owns it', async () => {
+  it('advertises Cmd/Ctrl+K on a session route too, because it opens the finder there', async () => {
     const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
     await settle();
 
-    // The keystroke belongs to current-session search here, so the bar must not
-    // advertise it for the finder: an announced shortcut that does something
-    // else is worse than no announcement at all.
     const finder = finderButton(view.container);
-    expect(finder.getAttribute('aria-keyshortcuts')).toBeNull();
-    expect(finder.textContent).not.toContain('K');
+    expect(finder.getAttribute('aria-keyshortcuts')).not.toBeNull();
 
-    // The finder itself still opens, and says who owns the keystroke instead.
     await interact(() => finder.click());
     expect(paletteOpen(view.container)).toBe(true);
-    expect(document.getElementById('fy-palette')?.textContent).toContain('searches this session’s files & tasks');
+    expect(document.getElementById('fy-palette')?.textContent).not.toContain('searches this session’s files & tasks');
     await view.unmount();
   });
 

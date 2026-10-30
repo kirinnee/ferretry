@@ -1,0 +1,166 @@
+/**
+ * Browser proxy, as a person sees it (docs/browser-proxy.md): the Machine tab's "Browser proxy" section with a
+ * saved proxy, and the "via proxy" chip on the browser pane's status bar — at a phone and a desktop width,
+ * light and dark, with no horizontal overflow at either. Set `FY_BROWSER_PROXY_SHOTS_DIR` to keep the
+ * captures; every name and address in them is fake.
+ */
+import { afterAll, beforeAll, describe, it } from 'bun:test';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import type { BrowserStatus, FleetMachineView } from '@ferretry/protocol';
+import type { Browser } from 'playwright-core';
+import { renderToStaticMarkup } from 'react-dom/server';
+import should from 'should';
+
+import { RemoteBrowserStatusBar } from '../../../src/features/browser/remote-browser-chrome.tsx';
+import { BrowserProxySection } from '../../../src/features/fleet/machine/browser-proxy-section.tsx';
+import type { SetupAccess } from '../../../src/features/fleet/setup/setup-access.ts';
+import { sharedChromium } from '../support/chromium.ts';
+
+const packageDir = resolve(import.meta.dir, '../../..');
+const shotsDir = process.env.FY_BROWSER_PROXY_SHOTS_DIR ?? '';
+
+const machine: FleetMachineView = {
+  name: 'studio',
+  format: 'version-2',
+  setUp: true,
+  agentPermissions: 'auto',
+  defaultRuntime: 'claude-default',
+  agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+  browserProxy: {
+    url: 'http://proxy.example.test:8080',
+    bypass: ['*.internal.example.test', '10.0.0.0/8'],
+    username: '${secret:PROXY_USER}',
+    password: '${secret:PROXY_PASSWORD}',
+  },
+  tools: [],
+  runtimeCount: 1,
+  runningSessions: 0,
+  authority: { mayApply: true, applyRefusal: 'granted' },
+};
+
+/** Only `changes` is read while nothing is pending, which is the state a static render shows. */
+const access = {
+  changes: {
+    authority: machine.authority,
+    busy: false,
+    refusal: null,
+    apply: async () => ({ kind: 'refused' }),
+    clear: () => undefined,
+  },
+} as unknown as SetupAccess;
+
+const status = {
+  sessionId: 'session-a',
+  viewport: { width: 1280, height: 800 },
+  viewers: 1,
+  persistentProfile: true,
+  idleTimeoutSeconds: 900,
+  capacity: { running: 1, maximum: 3 },
+  state: 'running',
+  url: 'https://example.test/one',
+  title: 'One',
+  pages: [{ id: 'p1', url: 'https://example.test/one', title: 'One' }],
+  activePageId: 'p1',
+  pageState: 'ready',
+  canGoBack: false,
+  canGoForward: false,
+  proxy: { url: 'http://proxy.example.test:8080', authenticated: true, bypassCount: 2 },
+} as BrowserStatus;
+
+const scene = (): string =>
+  renderToStaticMarkup(
+    <div className="flex min-w-0 flex-col gap-5 bg-bg p-panel">
+      <BrowserProxySection machine={machine} machineName="studio" access={access} onSaved={() => undefined} />
+      <section className="flex min-w-0 flex-col overflow-hidden rounded-panel border border-border bg-surface p-panel">
+        <RemoteBrowserStatusBar status={status} connection="connected" />
+      </section>
+    </div>,
+  );
+
+const documentFor = (css: string, theme: string, body: string): string => `<!doctype html>
+<html data-theme="${theme}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>${css}</style></head>
+<body class="bg-bg"><div id="root">${body}</div></body></html>`;
+
+const viewports = [
+  { name: 'phone', width: 390, height: 844 },
+  { name: 'desktop', width: 1_440, height: 900 },
+] as const;
+const themes = ['light', 'dark'] as const;
+
+let browser: Browser;
+let workspace = '';
+let css = '';
+
+describe('Browser proxy visual contract', () => {
+  beforeAll(async () => {
+    browser = await sharedChromium();
+    workspace = await mkdtemp(join(tmpdir(), 'fy-browser-proxy-visual-'));
+    const stylesheet = join(workspace, 'app.css');
+    const result = spawnSync(
+      './node_modules/.bin/tailwindcss',
+      [
+        '--config',
+        'tailwind.config.ts',
+        '--input',
+        'src/styles/index.css',
+        '--output',
+        stylesheet,
+        '--content',
+        './src/**/*.{ts,tsx},./tests/integration/features/*.tsx',
+      ],
+      { cwd: packageDir, stdio: 'pipe' },
+    );
+    if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
+    css = await readFile(stylesheet, 'utf8');
+    if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
+  }, 120_000);
+
+  afterAll(async () => {
+    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
+  });
+
+  it('shows the section and the via-proxy chip at a phone and a desktop, light and dark, without overflow', async () => {
+    for (const theme of themes) {
+      const pageHtml = documentFor(css, `studio-${theme}`, scene());
+      const server = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        fetch: () => new Response(pageHtml, { headers: { 'content-type': 'text/html; charset=utf-8' } }),
+      });
+      try {
+        for (const viewport of viewports) {
+          const context = await browser.newContext({
+            viewport: { width: viewport.width, height: viewport.height },
+            colorScheme: theme,
+            reducedMotion: 'reduce',
+            deviceScaleFactor: 2,
+          });
+          try {
+            await context.route('**/*', async route =>
+              new URL(route.request().url()).origin === server.url.origin
+                ? await route.continue()
+                : await route.abort(),
+            );
+            const page = await context.newPage();
+            await page.goto(server.url.toString());
+            const metrics = await page.evaluate<{ inner: number; scroll: number }>(
+              '({ inner: innerWidth, scroll: document.documentElement.scrollWidth })',
+            );
+            should(metrics.scroll).be.belowOrEqual(metrics.inner);
+            should(await page.locator('[data-setup-section="browser-proxy"]').isVisible()).be.true();
+            should(await page.locator('[data-browser-proxy-chip]').isVisible()).be.true();
+            const shot = await page.locator('#root').screenshot({ animations: 'disabled' });
+            if (shotsDir !== '') await writeFile(join(shotsDir, `browser-proxy-${viewport.name}-${theme}.png`), shot);
+          } finally {
+            await context.close();
+          }
+        }
+      } finally {
+        server.stop(true);
+      }
+    }
+  }, 120_000);
+});

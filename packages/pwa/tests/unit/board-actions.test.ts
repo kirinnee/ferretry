@@ -4,6 +4,8 @@ import {
   type BoardTaskCreateRequestInput,
   boardErr,
   boardOk,
+  type LaneSetActionRequestInput,
+  LANE_TEMPLATES,
 } from '@ferretry/protocol';
 
 import { type BoardMoveTarget, createBoardActions } from '../../src/lib/board-actions.ts';
@@ -13,11 +15,21 @@ const lanes = laneSetFor();
 
 const harness = (paired = [laptop]) => {
   const sent: { daemonId: string; id: string; request: BoardTaskActionRequestInput }[] = [];
+  const lanesSent: { daemonId: string; projectId: string; request: LaneSetActionRequestInput }[] = [];
   const responses: unknown[][] = [];
   const created: { daemonId: string; request: BoardTaskCreateRequestInput }[] = [];
   let refuse = false;
   const actions = createBoardActions({
     store: {
+      changeLanes: async (machine, projectId, request) => {
+        lanesSent.push({ daemonId: machine.daemonId, projectId, request });
+        return refuse
+          ? boardErr({ status: 409, message: 'moved on', code: 'version-conflict' })
+          : boardOk({
+              laneSet: { ...lanes, version: request.action === 'propose' ? 1 : 2 },
+              agenda: 'not-needed' as const,
+            });
+      },
       act: async (machine, id, request) => {
         sent.push({ daemonId: machine.daemonId, id, request });
         return refuse ? boardErr({ status: 409, message: 'no', boardCode: 'owner-gate' as const }) : boardOk(card(id));
@@ -40,6 +52,7 @@ const harness = (paired = [laptop]) => {
   return {
     actions,
     sent,
+    lanesSent,
     responses,
     created,
     refuse: (value: boolean) => {
@@ -178,6 +191,7 @@ describe('answer', () => {
       store: {
         act: async () => boardErr({ status: 0, message: '', boardCode: null }),
         create: async () => boardErr({ status: 0, message: '', boardCode: null }),
+        changeLanes: async () => boardErr({ status: 0, message: '', code: null }),
       },
       agenda: {
         respond: async () => {
@@ -188,5 +202,49 @@ describe('answer', () => {
     });
     const answer = await actions.answer(laptop.daemonId, ref, { kind: 'yes' } as never);
     expect(!answer.ok && answer.error).toEqual({ status: 0, message: 'plain', boardCode: null });
+  });
+});
+
+describe('lane verbs', () => {
+  it('proposes a template and confirms it at once, because the owner chose it', async () => {
+    const { actions, lanesSent } = harness();
+    const answer = await actions.adoptTemplate(laptop.daemonId, lanes.projectId, 'pr');
+    expect(answer.ok && answer.value.version).toBe(2);
+    expect(lanesSent.map(sent => sent.request)).toEqual([
+      { action: 'propose', template: 'pr', renames: {} },
+      { action: 'confirm', version: 1 },
+    ]);
+  });
+
+  it('stops after a refused proposal', async () => {
+    const { actions, lanesSent, refuse } = harness();
+    refuse(true);
+    const answer = await actions.adoptTemplate(laptop.daemonId, lanes.projectId, 'quick');
+    expect(!answer.ok && answer.error.code).toBe('version-conflict');
+    expect(lanesSent).toHaveLength(1);
+  });
+
+  it('saves an edit against the version it saw', async () => {
+    const { actions, lanesSent } = harness();
+    const layout = LANE_TEMPLATES.quick;
+    const answer = await actions.saveLanes(laptop.daemonId, lanes.projectId, {
+      version: 1,
+      layout,
+      relocate: { review: 'doing' },
+    });
+    expect(answer.ok).toBe(true);
+    expect(lanesSent[0]).toMatchObject({
+      projectId: lanes.projectId,
+      request: { action: 'edit', version: 1, layout, relocate: { review: 'doing' } },
+    });
+  });
+
+  it('accepts a proposed set by its version, and says so when the machine is unpaired', async () => {
+    const { actions, lanesSent } = harness();
+    expect((await actions.acceptLanes(laptop.daemonId, lanes.projectId, 3)).ok).toBe(true);
+    expect(lanesSent[0]?.request).toEqual({ action: 'confirm', version: 3 });
+    const gone = await actions.acceptLanes(workstation.daemonId, lanes.projectId, 3);
+    expect(!gone.ok && gone.error).toMatchObject({ status: 0, code: 'no-machine' });
+    expect(lanesSent).toHaveLength(1);
   });
 });

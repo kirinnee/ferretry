@@ -18,7 +18,8 @@ import { HARNESS_NAMES } from '../components/component-model.ts';
 import { ImportConversations } from '../conversations/conversation-picker.tsx';
 import { credentialEmail } from '../credentials/credentials-model.ts';
 import { AccountStatus } from '../shell/account-status.tsx';
-import { useAccountChanges } from '../shell/apply-change-panel.tsx';
+import { type AccountChanges, useAccountChanges } from '../shell/apply-change-panel.tsx';
+import { DisableSwitch } from '../shell/disable-switch.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
 import { AddRuntime } from './add-runtime.tsx';
 import { type MachineData, machineDetailHash, useMachineData, useMachineDetail } from './machine-data.ts';
@@ -93,6 +94,41 @@ interface RuntimePageProps {
   /** Why this browser may not rename or remove it, or `null`. */
   readonly refusal: string | null;
   readonly onAct: (act: RuntimeAct) => void;
+  readonly changes: AccountChanges;
+  readonly reload: () => Promise<unknown>;
+}
+
+/** The switch on a runtime: its own, or its login's when that is what holds it off. */
+function RuntimeSwitch({
+  runtime,
+  machineName,
+  online,
+  changes,
+  reload,
+  compact,
+  className,
+}: {
+  readonly runtime: FleetRuntimeView;
+  readonly machineName: string;
+  readonly online: boolean;
+  readonly changes: AccountChanges;
+  readonly reload: () => Promise<unknown>;
+  readonly compact?: boolean;
+  readonly className?: string;
+}) {
+  return (
+    <DisableSwitch
+      {...(compact === undefined ? {} : { compact })}
+      {...(className === undefined ? {} : { className })}
+      target={{ kind: 'runtime', name: runtime.name }}
+      disabled={runtime.disabled}
+      login={{ id: runtime.credential.id, href: machineDetailHash(machineName, 'credentials', runtime.credential.id) }}
+      machineName={machineName}
+      online={online}
+      changes={changes}
+      onChanged={reload}
+    />
+  );
 }
 
 function RuntimePage({
@@ -105,6 +141,8 @@ function RuntimePage({
   onBack,
   refusal,
   onAct,
+  changes,
+  reload,
 }: RuntimePageProps) {
   const installed = harnessInstalled(machine, runtime.harness);
   const word = runtimeWord(runtime);
@@ -145,6 +183,10 @@ function RuntimePage({
           )}
         </div>
       </div>
+
+      <Section title="Use for new starts">
+        <RuntimeSwitch runtime={runtime} machineName={machineName} online={online} changes={changes} reload={reload} />
+      </Section>
 
       {installed ? null : (
         <div role="status" className="kt-panel flex flex-col gap-1 p-panel" data-runtime-note="missing">
@@ -331,15 +373,21 @@ function RuntimeRow({
   data,
   machine,
   machineName,
+  online,
   refusal,
   onAct,
+  changes,
+  reload,
 }: {
   readonly runtime: FleetRuntimeView;
   readonly data: MachineData;
   readonly machine: FleetMachineView | null;
   readonly machineName: string;
+  readonly online: boolean;
   readonly refusal: string | null;
   readonly onAct: (act: RuntimeAct) => void;
+  readonly changes: AccountChanges;
+  readonly reload: () => Promise<unknown>;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -359,15 +407,29 @@ function RuntimeRow({
               <span className="font-mono">{loginLine(runtime, data)}</span> · {runtime.profile} profile ·{' '}
               {runtimeDefaultModel(runtime)}
             </span>
-            {runtime.agent ? (
-              <span>
-                <Badge tone="accent">Agent</Badge>
+            {runtime.agent || runtime.disabled !== undefined ? (
+              <span className="flex flex-wrap gap-1">
+                {runtime.agent ? <Badge tone="accent">Agent</Badge> : null}
+                {runtime.disabled === undefined ? null : (
+                  <Badge tone="warn" data-runtime-disabled-badge="">
+                    Disabled
+                  </Badge>
+                )}
               </span>
             ) : null}
           </span>
           <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0 text-muted" />
         </a>
-        <div className="flex justify-end border-t border-border-soft pt-2">
+        <div className="flex flex-wrap items-start justify-between gap-2 border-t border-border-soft pt-2">
+          <RuntimeSwitch
+            compact
+            className="min-w-[14rem] flex-1"
+            runtime={runtime}
+            machineName={machineName}
+            online={online}
+            changes={changes}
+            reload={reload}
+          />
           <RuntimeActionButtons
             runtime={runtime}
             refusal={refusal}
@@ -522,6 +584,8 @@ export function RuntimesTab({
           onBack={() => openDetail(null)}
           refusal={refusal}
           onAct={open}
+          changes={changes}
+          reload={reload}
         />
         {dialog}
       </>
@@ -574,8 +638,11 @@ export function RuntimesTab({
                   data={data}
                   machine={machine}
                   machineName={machineName}
+                  online={online}
                   refusal={refusal}
                   onAct={open}
+                  changes={changes}
+                  reload={reload}
                 />
               </li>
             ))}

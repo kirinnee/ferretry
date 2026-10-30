@@ -231,6 +231,38 @@ describe('runtimeRefusal', () => {
       'model_unavailable',
     ]);
   });
+
+  it('should refuse a runtime that is switched off with its own code and the reason it gave', () => {
+    // Arrange
+    const off = runtime('claude-main', {
+      catalogId: 'anthropic',
+      choices: [choice('opus', 'Opus')],
+      launch: { available: false, reason: 'runtime "claude-main" is disabled (spend limit). Use "other" instead' },
+      disabled: { reason: 'spend limit', source: 'runtime' },
+    });
+    const known = facts({ runtimes: [off], credentials: [credential('claude-main-login')], tools: [claudeTool] });
+
+    // Act
+    const refusal = runtimeRefusal(off, 'opus', known);
+
+    // Assert
+    should(refusal).deepEqual({
+      code: 'disabled',
+      message: 'claude-main cannot launch: runtime "claude-main" is disabled (spend limit). Use "other" instead.',
+      remedy: 'Pick another model.',
+    });
+  });
+
+  it('should say a switched-off runtime is disabled when it somehow still reads as launchable', () => {
+    // Arrange
+    const off = runtime('claude-main', { disabled: { source: 'login' } });
+
+    // Act
+    const refusal = runtimeRefusal(off, undefined, facts({ credentials: [credential('claude-main-login')] }));
+
+    // Assert
+    should(refusal?.message).equal('claude-main cannot launch: it is disabled.');
+  });
 });
 
 describe('offers', () => {
@@ -501,5 +533,33 @@ describe('automaticOrder', () => {
   it('should fall back to the one with the most headroom when the prompt names nothing ready', () => {
     should(automaticOrder([option('a'), option('b')]).map(row => row.model)).deepEqual(['a']);
     should(automaticOrder([option('x', { ready: false })])).deepEqual([]);
+  });
+});
+
+describe('runtimeRefusal for a login a pane proved spent', () => {
+  it('should refuse out_of_quota for the limited login only', () => {
+    // Arrange
+    const known = facts({
+      runtimes: [readyClaude],
+      credentials: [credential('claude-main-login')],
+      tools: [tool('claude', true)],
+      paneLimits: new Map([
+        ['claude-main-login', { notice: "You've hit your org's monthly spend limit", spend: true }],
+      ]),
+    });
+    const free = facts({
+      runtimes: [readyClaude],
+      credentials: [credential('claude-main-login')],
+      tools: [tool('claude', true)],
+    });
+
+    // Act
+    const refusal = runtimeRefusal(readyClaude, 'opus', known);
+    const ready = runtimeRefusal(readyClaude, 'opus', free);
+
+    // Assert
+    should(refusal?.code).equal('out_of_quota');
+    should(refusal?.message).containEql('spend limit');
+    should(ready).be.undefined();
   });
 });

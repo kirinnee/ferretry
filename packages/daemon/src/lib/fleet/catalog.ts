@@ -40,6 +40,7 @@ import {
   type ResolvedProfile,
   resolveDefaultRuntime,
   resolveProfile,
+  runtimeDisable,
   runtimeHarness,
   runtimeModels,
   type SettingsObject,
@@ -70,6 +71,7 @@ import type {
   FleetStackView,
 } from '@ferretry/protocol';
 import { claudeFastSupport } from '../session/harness/fast-mode.ts';
+import { runtimeDisabledView } from './disabled-view.ts';
 import { resolvedEntries } from './resolved-view.ts';
 
 const byName = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
@@ -181,6 +183,8 @@ export interface CatalogFacts {
   readonly modelCatalogs?: ModelCatalogSources;
   /** What the last auto-resume pass did, or `null`/absent when none has run. */
   readonly lastAutoResume?: AutoResumeSummary | null;
+  /** The instant (ms) a `disabled.until` is read against; absent, no switch has expired. */
+  readonly now?: number;
 }
 
 const HARNESSES: readonly HarnessKind[] = ['claude', 'codex'];
@@ -203,6 +207,7 @@ export function machineView(
     defaultRuntime: resolveDefaultRuntime(model) ?? null,
     agentControl: { ...model.machine.agentControl },
     browserMode: model.machine.browserMode,
+    browserProxy: model.machine.browserProxy ?? null,
     autoResume: model.machine.autoResume,
     agendaMode: model.machine.agendaMode,
     lastAutoResume: facts.lastAutoResume ?? null,
@@ -677,14 +682,17 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
         const stack = stackView(resolved, harness);
         const fixed = runtime.agent ? fixedLayerView(model, harness, resolved, facts) : {};
         const status = facts.credentialStatus?.[runtime.credential];
+        const off = runtimeDisable(model, name, facts.now ?? 0, VIEW_FY_COMMAND);
         const blocked =
-          facts.tools[harness] === undefined
-            ? `Install ${HARNESS_DISPLAY_NAMES[harness]} to launch`
-            : status === 'needs_sign_in'
-              ? 'Sign in to launch'
-              : stack.available.available
-                ? fixed.refusal
-                : stack.available.reason;
+          off !== undefined
+            ? off.clauses.join('. ')
+            : facts.tools[harness] === undefined
+              ? `Install ${HARNESS_DISPLAY_NAMES[harness]} to launch`
+              : status === 'needs_sign_in'
+                ? 'Sign in to launch'
+                : stack.available.available
+                  ? fixed.refusal
+                  : stack.available.reason;
         return [
           {
             // A runtime whose apply never landed has no id yet; its name stands in, and it cannot have
@@ -707,6 +715,7 @@ export function runtimeCatalog(model: AccountModel, facts: CatalogFacts): FleetR
             ...modelsView(resolved, harness, credential, facts.modelCatalogs),
             ...(fixed.view === undefined ? {} : { fixedLayer: fixed.view }),
             launch: act(blocked),
+            ...(off === undefined ? {} : { disabled: runtimeDisabledView(off) }),
             sameAs: Object.entries(model.runtimes)
               .filter(
                 ([other, peer]) =>

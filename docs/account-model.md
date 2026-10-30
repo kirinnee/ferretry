@@ -86,8 +86,8 @@ Settings. The link is `#machines/<name>/<tab>`.
 | `fy daemon setup` / `fy daemon import claude\|codex [--name <runtime>]`                    | the first run and "import again", asked; or one tool, unasked              |
 | `fy machine` / `fy machine set agent-permissions auto\|skip` / `fy machine install <tool>` | facts, Agent permissions, installing Claude Code or Codex                  |
 | `fy machine export` / `fy machine clone <file> [--replace]`                                | copy a setup to another machine (a sign-in is never copied: an empty slot) |
-| `fy runtimes` / `fy runtime add\|show\|set\|rename\|rm`                                    | runtimes                                                                   |
-| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|rm`                  | logins, their status and usage (`fy logins` / `fy login …` too)            |
+| `fy runtimes` / `fy runtime add\|show\|set\|rename\|disable\|enable\|rm`                   | runtimes                                                                   |
+| `fy credentials` / `fy credential add\|check\|signin\|signout\|label\|disable\|enable\|rm` | logins, their status and usage (`fy logins` / `fy login …` too)            |
 | `fy profiles` / `fy profile ls\|show\|build\|edit\|rm`                                     | profiles, each with its scope                                              |
 | `fy components [kind]` / `fy component show\|add\|edit\|rm <kind>/<name>`                  | components                                                                 |
 | `fy start --agent <runtime>`                                                               | launch an agent runtime                                                    |

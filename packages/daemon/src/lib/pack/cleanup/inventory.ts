@@ -33,6 +33,7 @@ const quotaFor = (runtime: FleetRuntimeView, facts: PackFleetFacts, now: string)
   quotaOf(
     facts.credentials.find(credential => credential.id === runtime.credential.id),
     now,
+    facts.paneLimits?.get(runtime.credential.id),
   );
 
 /** The model ids a runtime offers: its catalog's, else its model set's available ones. */

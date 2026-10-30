@@ -105,7 +105,6 @@ import HOSTED_APP_RELEASE_KEY from '../../pwa/release-signing-key.pub' with { ty
 import pkg from '../package.json' with { type: 'json' };
 import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
 import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
-import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
 import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
 import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
@@ -124,6 +123,7 @@ import {
   StorageHarnessQuestionAnswerer,
 } from '../src/adapters/agenda/storage-harness-prompt.ts';
 import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
+import { StorageCredentialedSessions } from '../src/adapters/agent-tools/index.ts';
 import {
   BunSqliteAnalyticsStoreFactory,
   HttpAnalyticsPricingFeed,
@@ -341,7 +341,7 @@ import {
 } from '../src/adapters/mcp-oauth/index.ts';
 import { FileConversationFiles } from '../src/adapters/migrate/file-conversation-files.ts';
 import { FileMigrationReportStore } from '../src/adapters/migrate/file-migration-report.ts';
-import { FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
+import { AutoTitlingSendChannel, FileNameClaimStore, FileSystemCallsignCounters } from '../src/adapters/names/index.ts';
 import { FileNotificationDeliveryLedger } from '../src/adapters/notifications/index.ts';
 import {
   bunProbeSpawn,
@@ -428,6 +428,7 @@ import {
   readAskedQuestion,
   TmuxStructuredQuestionDriver,
 } from '../src/adapters/session/question/index.ts';
+import { FileSessionQueueStore } from '../src/adapters/session/queue/index.ts';
 import {
   FileResumeTurnStore,
   FileSelfRestartStampStore,
@@ -468,7 +469,7 @@ import {
   storedSessionStart,
   storedTranscriptProvenance,
 } from '../src/adapters/session/transcript/index.ts';
-import { StorageTurnPorts } from '../src/adapters/session/turn/index.ts';
+import { StorageTurnPorts, storagePaneLimits } from '../src/adapters/session/turn/index.ts';
 import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.ts';
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
@@ -570,6 +571,7 @@ import {
   createFleetCredentialsSubsystem,
   FleetCredentialCatalog,
 } from '../src/lib/fleet/credentials-service.ts';
+import { DisableExpiryWatch } from '../src/lib/fleet/disable-expiry.ts';
 import { createFleetSetupSubsystem } from '../src/lib/fleet/setup-service.ts';
 import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/start-resolution.ts';
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
@@ -829,6 +831,7 @@ import {
   type LoopWatchdogPort,
   launchGuardActive,
   launchReasoningEffort,
+  limitedCredentials,
   locateHarnessCommand,
   lookBeforeReading,
   type ManagedWorktreeOperations,
@@ -874,6 +877,7 @@ import {
   PairedPushDevices,
   PairingDeviceRegistry,
   type PairingService,
+  type PaneLimit,
   PassTrigger,
   type PassTriggerTimers,
   PinService,
@@ -948,6 +952,7 @@ import {
   renderDoctorReport,
   renderHarnessPreflight,
   renderInitialAttachmentSection,
+  resolveBrowserProxy,
   resolveResumePolicy,
   resolveStateHome,
   retireOperatorPassword,
@@ -1010,6 +1015,7 @@ import {
   SessionProjects,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
+  SessionQueueService,
   SessionRenameError,
   SessionRenameService,
   type SessionRenameSubsystem,
@@ -1018,7 +1024,6 @@ import {
   type SessionResumeSubsystem,
   type SessionRootPinner,
   SessionRoster,
-  SessionStatusTally,
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
@@ -1027,6 +1032,7 @@ import {
   SessionSignalError,
   SessionSignalService,
   type SessionSignalSubsystem,
+  SessionStatusTally,
   SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   SessionTranscriptReader,
@@ -1115,10 +1121,10 @@ import {
   WARDEN_ESCALATION_SOURCE,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
+  type WardenBoardPort,
   WardenCallsignTakenError,
   type WardenFleetSession,
   type WardenJournal,
-  type WardenBoardPort,
   WardenLivenessMonitor,
   type WardenRevivePorts,
   WardenReviveService,
@@ -1151,9 +1157,9 @@ import {
   GuideFileService,
   isScratchPath,
   JevPackRanker,
+  PACK_ROUTING_MAX_AGE_MS,
   type PackParent,
   type PackProbeRequest,
-  PACK_ROUTING_MAX_AGE_MS,
   PackRoutingKeep,
   PackService,
   PackStartRefused,
@@ -3184,6 +3190,8 @@ function createSessionSendSubsystem(
   sessions: SessionDirectorySubsystem,
   service: SessionSendService,
   ledger: Pick<SendLedger, 'list'>,
+  /** The session's durable queue, read here; delivery does not ride it yet. */
+  queue: Pick<SessionQueueService, 'list'>,
   tracker: Pick<SendTracker, 'check' | 'watching'>,
   /** Copies each named attachment out where the agent can open it by path; see `lib/attachments/delivery.ts`. */
   deliverAttachments: (
@@ -3284,6 +3292,7 @@ function createSessionSendSubsystem(
         .map(sendRecordView)
         .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt));
     },
+    queue: async reference => await queue.list(require(reference)),
     sendStatus: async (reference, sendId) => {
       const id = require(reference);
       await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
@@ -3782,6 +3791,7 @@ function createSessionRenameSubsystem(
         const { teammate: _replaced, ...retained } = jsonObject(current) ?? {};
         return {
           ...retained,
+          ...(next.name === retained.name ? {} : { nameSource: 'owner' }),
           ...(next.teammate === undefined ? {} : { teammate: next.teammate }),
           name: next.name,
           updatedAt: at,
@@ -4226,8 +4236,15 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
       redactor: parts.redactor,
       jevChecks: new FileWardenJevCheckLog(parts.jevChecksDirectory, () => Date.now()),
       remedies: {
+        // The daemon is the sender: recorded as a person's, every Warden notice was a "human" send, kept
+        // and retried as the owner's own messages are, and counted against them.
         nudge: async (sessionId, message) => {
-          await parts.sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+          await parts.sends.send({
+            id: parseSessionId(sessionId),
+            sendId: crypto.randomUUID(),
+            message,
+            origin: 'daemon',
+          });
         },
         // A message is the turn the ferret is handed (its focus card, `focus-card.ts`); without one the resume
         // domain hands its own default turn.
@@ -7218,6 +7235,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
    */
   let credentialList: (() => Promise<FleetCredentialList>) | undefined;
   /**
+   * The limits live sessions' panes prove ("You've hit your org's monthly spend limit"), once storage is
+   * open. The usage feed lays them over its rows; until then it has none.
+   */
+  let paneLimits: (() => Promise<ReadonlyMap<string, PaneLimit>>) | undefined;
+  /**
    * Environment logins' provider quotas (docs/provider-quotas.md), once the subsystems are mounted. The
    * usage feed is built before them and lays these readings over its rows; until then it has none.
    */
@@ -8257,6 +8279,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                 if (credentialList === undefined) throw new Error('the credentials surface is not mounted yet');
                 return await credentialList();
               },
+              limits: async () => (paneLimits === undefined ? new Map() : await paneLimits()),
             }),
             ...(config.usage.url === undefined ? [] : [new HttpUsageSource(config.usage.url)]),
           ],
@@ -8431,6 +8454,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // Read at every launch, so a switch applies the next time the browser starts. An unreadable
         // configuration launches headless rather than not at all.
         mode: async () => (await declaredAccountModel())?.machine.browserMode ?? 'headless',
+        // Read at every launch too, but a proxy the owner asked for is never dropped quietly: a secret the vault
+        // does not hold refuses the launch (resolveBrowserProxy) rather than sending traffic around the proxy.
+        proxy: async () => {
+          const setting = (await declaredAccountModel())?.machine.browserProxy;
+          return setting === undefined ? undefined : resolveBrowserProxy(setting, await secretVault.values());
+        },
         display: agentBrowserDisplay,
       },
     ),
@@ -8863,7 +8892,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           ledger: sendLedger,
           terminal: sendTerminal,
           turns: sendTurns,
-          channel: new FileSendChannel(id => createSessionPaths(paths, id).directory),
+          channel: new AutoTitlingSendChannel(
+            new FileSendChannel(id => createSessionPaths(paths, id).directory),
+            storage,
+          ),
           gate: launchGate,
           reviver: new ResumeSendReviver(resume),
           peerWaits: signals,
@@ -10067,6 +10099,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // SETTLED: the feed caches this list for an interval, so a login being read right now is listed
       // with its last known word rather than a "Checking" that would outlive the read.
       credentialList = async () => await fleetCredentials.list({ settled: true });
+      paneLimits = async () => await storagePaneLimits(storage, Date.now());
       const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
@@ -10226,6 +10259,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         executors: fleetSetup.executors,
         presets: async () => await providerPresets.presets(),
       });
+      // A login or runtime disabled `until` a time switches itself back on (docs/disabling.md): one timer,
+      // set for the earliest `until`, republishes the fleet when it falls due. A load re-arms it.
+      const disableExpiry = new DisableExpiryWatch({
+        next: async () => await fleetCatalog.nextDisableExpiry(),
+        now: () => Date.now(),
+        republish: async () => {
+          await fleetCatalog.republish();
+        },
+        setTimer: (run, ms) => {
+          const handle = setTimeout(asActivity(activities, 'disable expiry', run), ms);
+          handle.unref();
+          return () => clearTimeout(handle);
+        },
+      });
       /**
        * Pack mode (docs/pack-mode.md): over the same runtimes, logins and catalogs every picker reads, and
        * the same session start every surface uses — so its limits, its callsigns and its launch are the
@@ -10297,6 +10344,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             credentials: credentials.credentials,
             tools: machine.tools,
             unlaunchable,
+            paneLimits: limitedCredentials(
+              await storagePaneLimits(storage, Date.now()),
+              runtimes.runtimes.map(runtime => ({ agent: runtime.wrapper, credential: runtime.credential.id })),
+            ),
             now: clock.now(),
           };
         },
@@ -10717,6 +10768,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           sessions,
           sends,
           sendLedger,
+          new SessionQueueService({
+            store: new FileSessionQueueStore(id => createSessionPaths(paths, id).directory),
+            clock,
+            serial: new KeyedSerialExecutor(),
+          }),
           sendTracker,
           async (sessionId, attachmentIds) => {
             // Each copy sits beside its stored original, under the file's own name, written once: the
@@ -10862,6 +10918,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                   `could not republish the fleet for its model catalogs: ${error instanceof Error ? error.message : String(error)}`,
                 ),
             );
+            await disableExpiry.rearm();
           },
         }),
         names: createNameSubsystem(storage),

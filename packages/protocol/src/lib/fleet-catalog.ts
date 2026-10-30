@@ -33,7 +33,7 @@
  */
 import { z } from 'zod';
 import { AutoResumeSummarySchema } from './auto-resume.ts';
-import { BrowserModeSchema } from './browser.ts';
+import { BrowserModeSchema, BrowserProxySettingSchema } from './browser.ts';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema } from './common.ts';
 import {
   FleetApplyOutcomeSchema,
@@ -45,6 +45,7 @@ import {
   FleetCredentialStatusWordSchema,
   FleetCredentialStoreSchema,
   FleetCredentialViewSchema,
+  FleetDisabledSchema,
 } from './fleet-credentials.ts';
 import { GrantRefusalSchema } from './grants.ts';
 import { LocalModelsSchema } from './models.ts';
@@ -165,6 +166,11 @@ export const FleetMachineViewSchema = z.strictObject({
    * daemon, which has no such setting and runs headless.
    */
   browserMode: BrowserModeSchema.optional(),
+  /**
+   * "Browser proxy": where the agent browser sends its traffic (docs/browser-proxy.md), or `null` for direct.
+   * Credentials are only ever `${secret:NAME}` references here. Optional so a newer app can read an older daemon.
+   */
+  browserProxy: BrowserProxySettingSchema.nullable().optional(),
   /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. Optional only so a newer app can read an
@@ -530,6 +536,8 @@ export const FleetRuntimeViewSchema = z.strictObject({
   fixedLayer: FleetFixedLayerViewSchema.optional(),
   /** Whether it can launch now; when not, `reason` is the button's words ("Sign in to launch"). */
   launch: FleetCatalogActSchema,
+  /** Switched off — by its own switch or its login's. Running ferrets are untouched; new starts refuse. */
+  disabled: FleetDisabledSchema.optional(),
   /** Other runtimes on the same login and profile (R4). */
   sameAs: z.array(NonEmptyStringSchema).readonly(),
 });
@@ -716,6 +724,24 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     defaultRuntime: NonEmptyStringSchema.optional(),
   }),
   z.strictObject({ kind: z.literal('credential.signout'), id: NonEmptyStringSchema }),
+  /**
+   * Switch a login off without deleting it (docs/disabling.md). A tightening: it needs no confirmation.
+   * `until` is an instant; the login switches itself back on then.
+   */
+  z.strictObject({
+    kind: z.literal('credential.disable'),
+    id: NonEmptyStringSchema,
+    reason: NonEmptyStringSchema.max(200).optional(),
+    until: InstantSchema.optional(),
+  }),
+  z.strictObject({ kind: z.literal('credential.enable'), id: NonEmptyStringSchema }),
+  z.strictObject({
+    kind: z.literal('runtime.disable'),
+    name: NonEmptyStringSchema,
+    reason: NonEmptyStringSchema.max(200).optional(),
+    until: InstantSchema.optional(),
+  }),
+  z.strictObject({ kind: z.literal('runtime.enable'), name: NonEmptyStringSchema }),
   z.strictObject({
     kind: z.literal('machine.settings'),
     agentPermissions: z.enum(['auto', 'skip']),
@@ -729,6 +755,8 @@ export const FleetAccountChangeSchema = z.discriminatedUnion('kind', [
     agentControl: FleetAgentControlSchema.extend({ ferretrySettings: z.boolean().optional() }),
     /** Left out by a client that predates it, and then left as it is. */
     browserMode: BrowserModeSchema.optional(),
+    /** Left out by a client that predates it, and then left as it is; `null` turns the proxy off. */
+    browserProxy: BrowserProxySettingSchema.nullable().optional(),
     /** Left out by a client that predates it, and then left as it is. */
     autoResume: z.boolean().optional(),
     /** Left out by a client that predates it, and then left as it is. */

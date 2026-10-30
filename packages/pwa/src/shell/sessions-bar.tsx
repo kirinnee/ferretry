@@ -5,11 +5,11 @@
  * box. What is on it, top to bottom:
  *
  *   - the machine this page belongs to, which is also the machine switcher, and ＋ for a new session;
- *   - ONE search: the finder (⌘K) everywhere, or this session's own file search on a session page;
+ *   - the finder (⌘K, every page); on a session page also that session's own file search;
  *   - ATTENTION, a door to the inbox with the open-item count as an accent badge (always reachable, calm
  *     at zero) — given by the host as `agendaHref` and `agendaTotal`, so it is the count across
  *     EVERY machine;
- *   - Interactive · All · Agents, each with the count choosing it would show, and "Show stopped";
+ *   - Interactive · All · Agents, each with the count choosing it would show, and the "⋯" menu holds "Show stopped", "Restart outdated" and the row density;
  *   - "Needs you" first: every session with open Attention, newest first, each bold with an accent count
  *     badge that opens the conversation at the item (see `sessions-bar-model.ts` for how that relates to the
  *     quieter "waiting" word);
@@ -28,7 +28,11 @@ import type { RestartRequest, RestartResult, SessionView } from '@ferretry/proto
 import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { MachineLearners } from '../features/learning/passive-learning.tsx';
-import { RestartOutdatedStrip } from '../features/restart-outdated/restart-outdated-strip.tsx';
+import {
+  RestartOutdatedResult,
+  type RestartOutdated,
+  useRestartOutdated,
+} from '../features/restart-outdated/restart-outdated-strip.tsx';
 import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
@@ -53,7 +57,7 @@ import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.t
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
 import { SessionsBarAgenda } from './sessions-bar-agenda.tsx';
-import { SessionsBarOptions } from './sessions-bar-density.tsx';
+import { SessionsBarOptions } from './sessions-bar-options.tsx';
 import { SessionsRailDot } from './sessions-bar-dot.tsx';
 import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
@@ -293,22 +297,11 @@ function MachineSwitcher(
   );
 }
 
-/**
- * The finder's opener. It claims Cmd/Ctrl+K only where the chord opens it: on a session page the
- * chord belongs to that session's own search, so the icon beside it stays silent about a key.
- */
-function FindButton({
-  onOpen,
-  iconOnly,
-  shortcut,
-}: {
-  readonly onOpen: () => void;
-  readonly iconOnly: boolean;
-  readonly shortcut: boolean;
-}) {
+/** The finder's opener. Cmd/Ctrl+K opens it on every page, so every copy says so. */
+function FindButton({ onOpen, iconOnly }: { readonly onOpen: () => void; readonly iconOnly: boolean }) {
   return (
     <button
-      aria-keyshortcuts={shortcut ? PALETTE_KEYSHORTCUTS : undefined}
+      aria-keyshortcuts={PALETTE_KEYSHORTCUTS}
       aria-label="Find sessions, settings and places"
       className={iconOnly ? 'fy-sbar__icon' : 'kt-findbox fy-sbar__find'}
       data-app-bar-destination-search=""
@@ -320,7 +313,7 @@ function FindButton({
       {iconOnly ? null : (
         <>
           <span>Find</span>
-          {shortcut ? <kbd>{paletteShortcutLabel()}</kbd> : null}
+          <kbd>{paletteShortcutLabel()}</kbd>
         </>
       )}
     </button>
@@ -331,6 +324,8 @@ function FindButton({
 interface ListFilterProps {
   readonly listFilter: SessionsListFilter;
   readonly onListFilterChange: (next: SessionsListFilter) => void;
+  /** "Restart outdated", kept once by the bar: the ⋯ menu presses it, the body shows its answer. */
+  readonly restart: RestartOutdated;
 }
 
 /** The open session stays listed whatever the filter says: a bar that drops the page on screen reads as broken. */
@@ -381,11 +376,11 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
       )}
       <div className="fy-sbar__search">
         {props.search === undefined ? (
-          <FindButton iconOnly={false} onOpen={props.onOpenPalette} shortcut />
+          <FindButton iconOnly={false} onOpen={props.onOpenPalette} />
         ) : (
           <>
             <div className="min-w-0 flex-1">{props.search}</div>
-            <FindButton iconOnly onOpen={props.onOpenPalette} shortcut={false} />
+            <FindButton iconOnly onOpen={props.onOpenPalette} />
           </>
         )}
       </div>
@@ -400,16 +395,8 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
           />
         </div>
       )}
-      <SessionsBarFilters
-        counts={counts}
-        filter={listFilter}
-        hiddenStopped={hiddenStopped}
-        onChange={props.onListFilterChange}
-      />
-      <RestartOutdatedStrip
-        sessions={sessions}
-        {...(props.onRestartOutdated === undefined ? {} : { onRestart: props.onRestartOutdated })}
-      />
+      <SessionsBarFilters counts={counts} filter={listFilter} onChange={props.onListFilterChange} />
+      <RestartOutdatedResult restart={props.restart} />
       <div className="fy-sbar__list scroll-thin">
         {machineView !== null ? (
           !machineView.loaded ? (
@@ -538,8 +525,19 @@ function NewSessionControl({
   );
 }
 
-function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: string) => void }) {
+function SessionsBarTop(props: SessionsBarProps & ListFilterProps & { readonly navigate: (to: string) => void }) {
   const drawer = props.presentation === 'drawer';
+  const { listFilter } = props;
+  const hiddenStopped = (
+    allMachinesFor(props, listFilter) ??
+    sessionsBarView(
+      props.sessions ?? [],
+      props.projects,
+      listFilter,
+      isOpen(props.activeSessionId),
+      props.groupNeedsYou ?? true,
+    )
+  ).hiddenStopped;
   return (
     <div className="fy-sbar__top">
       {drawer ? (
@@ -566,9 +564,15 @@ function SessionsBarTop(props: SessionsBarProps & { readonly navigate: (to: stri
         onNavigate={props.navigate}
         {...(props.onPairPhone === undefined ? {} : { onPairPhone: props.onPairPhone })}
       />
-      {props.onDensityChange === undefined ? null : (
-        <SessionsBarOptions compact={sidebarCompact(props.density)} onChange={props.onDensityChange} />
-      )}
+      <SessionsBarOptions
+        hiddenStopped={hiddenStopped}
+        onShowStoppedChange={showStopped => props.onListFilterChange({ ...listFilter, showStopped })}
+        restart={props.restart}
+        showStopped={listFilter.showStopped}
+        {...(props.onDensityChange === undefined
+          ? {}
+          : { density: { compact: sidebarCompact(props.density), onChange: props.onDensityChange } })}
+      />
       <NewSessionControl marked navigate={props.navigate} props={props} />
     </div>
   );
@@ -600,7 +604,7 @@ function SessionsRail(props: SessionsBarProps & ListFilterProps) {
         </button>
       )}
       <NewSessionControl marked={false} navigate={onNavigate} props={props} />
-      <FindButton iconOnly onOpen={props.onOpenPalette} shortcut />
+      <FindButton iconOnly onOpen={props.onOpenPalette} />
       {props.agendaHref === undefined ? null : (
         <SessionsBarAgenda
           current={active === 'attention'}
@@ -780,7 +784,8 @@ export function SessionsBar(props: SessionsBarProps) {
     if (next.mode !== listFilter.mode) props.onModeChange?.(next.mode);
   };
   const { menu, open, close } = useSessionMenu(props.renderSessionMenu !== undefined);
-  const filtered = { ...props, listFilter, onListFilterChange };
+  const restart = useRestartOutdated(props.sessions, props.onRestartOutdated);
+  const filtered = { ...props, listFilter, onListFilterChange, restart };
   const bar =
     props.presentation === 'drawer' ? (
       <SessionsDrawer {...filtered} />

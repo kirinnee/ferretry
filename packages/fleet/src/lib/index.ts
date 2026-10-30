@@ -5,6 +5,8 @@ export * from './account/adapt.ts';
 export * from './account/clone.ts';
 export * from './account/credential-status.ts';
 export * from './account/credentials.ts';
+export * from './account/disabled.ts';
+export * from './account/disabled-runtime.ts';
 export * from './account/document.ts';
 export * from './account/environment.ts';
 export * from './account/fixed-layer.ts';

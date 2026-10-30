@@ -185,6 +185,25 @@ const lowered = (before: number, after: number, what: string): readonly string[]
 const switchedOn = (before: boolean, after: boolean, what: string): readonly string[] =>
   !before && after ? [what] : [];
 
+/**
+ * A proxy newly set, or pointed somewhere else, or given other credentials, is held for the owner: the proxy sees
+ * every host the browser visits, and its credential references are sent to whatever address is written — an agent
+ * able to write the file could otherwise aim a stored secret at a server of its choosing. Removing a proxy, or
+ * editing only its bypass list, hands an agent nothing it did not have.
+ */
+function browserProxyLoosening(
+  before: MachineFileValue['machine']['browserProxy'],
+  after: MachineFileValue['machine']['browserProxy'],
+): readonly string[] {
+  if (after === undefined) return [];
+  const same =
+    before !== undefined &&
+    before.url === after.url &&
+    before.username === after.username &&
+    before.password === after.password;
+  return same ? [] : [`the agent browser now sends its traffic through the proxy at ${after.url}`];
+}
+
 function machineLoosening(before: MachineFileValue, after: MachineFileValue): readonly string[] {
   return [
     ...(Object.keys(AGENT_CONTROL_WORDS) as (keyof AgentControl)[]).flatMap(kind =>
@@ -197,6 +216,7 @@ function machineLoosening(before: MachineFileValue, after: MachineFileValue): re
     ...(before.machine.agentPermissions === 'auto' && after.machine.agentPermissions === 'skip'
       ? ['agents now skip every permission prompt']
       : []),
+    ...browserProxyLoosening(before.machine.browserProxy, after.machine.browserProxy),
   ];
 }
 

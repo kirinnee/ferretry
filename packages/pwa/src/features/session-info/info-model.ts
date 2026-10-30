@@ -20,12 +20,16 @@ import {
 } from '@ferretry/protocol';
 import { launchedModel } from '../../components/composer-runtime.tsx';
 
-export type InfoTab = 'overview' | 'runtime' | 'usage' | 'folder' | 'signals' | 'surfaces';
+export type InfoTab = 'overview' | 'tasks' | 'runtime' | 'usage' | 'folder' | 'signals' | 'surfaces';
 
-export const INFO_TABS: readonly InfoTab[] = ['overview', 'runtime', 'usage', 'folder', 'signals', 'surfaces'];
+export const INFO_TABS: readonly InfoTab[] = ['overview', 'tasks', 'runtime', 'usage', 'folder', 'signals', 'surfaces'];
+
+/** The tabs a host without a board shows: Tasks is the board filtered to this ferret, so it needs one. */
+export const INFO_TABS_WITHOUT_BOARD: readonly InfoTab[] = INFO_TABS.filter(tab => tab !== 'tasks');
 
 export const INFO_TAB_LABEL: Readonly<Record<InfoTab, string>> = {
   overview: 'Overview',
+  tasks: 'Tasks',
   runtime: 'Runtime',
   usage: 'Usage',
   // The id stays `folder` (links and remembered sub-tabs name it); what a person reads is Context.
@@ -221,4 +225,11 @@ export const packLabel = (on: boolean): string => (on ? 'On · may delegate to s
 export const remoteControlLabel = (view: SessionView): string => {
   if (view.config.harness === 'codex') return 'Not available on Codex';
   return view.config.remoteControl ? 'On · another device can drive this session' : 'Off';
+};
+
+/** Where a sideways-scrolling tab row should sit so the tab at `[left, left + width)` is fully shown. */
+export const scrollToShow = (scrollLeft: number, left: number, width: number, view: number): number => {
+  if (left < scrollLeft) return left;
+  if (left + width > scrollLeft + view) return left + width - view;
+  return scrollLeft;
 };

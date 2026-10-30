@@ -166,17 +166,17 @@ Each prints what restarted now, then what is queued and why. `--json` prints the
 
 ### In the app
 
-An **Outdated** mark sits on the sidebar row and in the session header of every outdated ferret, and one
-**Restart outdated (N)** button heads the sessions list. It sends the same request as `fy restart
+An **Outdated** mark sits on the sidebar row and in the session header of every outdated ferret, and a
+**Restart outdated (N)** row in the sessions bar's **⋯** menu (the ⋯ wears the count as a badge while any ferret is outdated, so it is found without hunting) offers the restart. It sends the same request as `fy restart
 --outdated` and shows the same result, restarted now and queued, until it is dismissed. Nothing restarts
 automatically: a restart interrupts a ferret, so the owner presses it.
 
 The rows answer the press at once, before the list refreshes: a ferret that restarted now drops its mark, one
-that is queued reads **Queued** in a muted chip, and the button's count falls by both (it disappears at 0,
+that is queued reads **Queued** in a muted chip, and the count falls by both (the row and the badge disappear at 0,
 leaving the result line). **Dismiss** forgets the answer and the rows go back to what the daemon says. The
 daemon's `outdated` flag stays the source of truth: the page's memory of the press only bridges the gap.
 
-The button is in the sessions bar rather than the header or Settings because the owner scans that list to
+The action is in the sessions bar rather than the header or Settings because the owner scans that list to
 choose a ferret and sees the marks there, so the action is beside the thing it acts on and shows its own
 count. It covers the ferrets of the machine whose page it is, even in the all-machines view.
 

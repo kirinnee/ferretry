@@ -1,3 +1,53 @@
+## [4.128.1](https://github.com/kirinnee/ferretry/compare/v4.128.0...v4.128.1) (2026-10-30)
+
+### Fixes
+
+* **sessions:** never title a session with the mode word ([#1001](https://github.com/kirinnee/ferretry/issues/1001)) ([f87e7e1](https://github.com/kirinnee/ferretry/commit/f87e7e16614804edb313cafd3376ab265390b03d))
+
+## [4.128.0](https://github.com/kirinnee/ferretry/compare/v4.127.0...v4.128.0) (2026-10-30)
+
+### Features
+
+* **daemon:** durable per-session message queue — model, owner-first order, log store, and a read route (S1) ([#997](https://github.com/kirinnee/ferretry/issues/997)) ([8f5973c](https://github.com/kirinnee/ferretry/commit/8f5973c29cca15bbdf4e9ade420c4225fb26b719))
+* **fleet:** switch a login or runtime off without deleting it ([#995](https://github.com/kirinnee/ferretry/issues/995)) ([32948b5](https://github.com/kirinnee/ferretry/commit/32948b52439310b572a68478634d5c1954065a2d))
+* **pwa:** add a tasks tier to the composer reference menus ([#965](https://github.com/kirinnee/ferretry/issues/965)) ([04a35bd](https://github.com/kirinnee/ferretry/commit/04a35bd4ead6ee11514112e6432b6c6c060fe24a))
+* **pwa:** add full screen and a slim control row to shared surfaces ([#968](https://github.com/kirinnee/ferretry/issues/968)) ([b2f8116](https://github.com/kirinnee/ferretry/commit/b2f8116f897709bcf1c8a67237757fd429c01440))
+* **pwa:** open the Board on the chat's ferret with an All cards toggle ([#996](https://github.com/kirinnee/ferretry/issues/996)) ([912f172](https://github.com/kirinnee/ferretry/commit/912f1726928fb04b1538269ae040338ca3260e93))
+* **pwa:** sidebar ⋯ menu holds Show stopped and Restart outdated ([#989](https://github.com/kirinnee/ferretry/issues/989)) ([169ceea](https://github.com/kirinnee/ferretry/commit/169ceeafc25617f775be0b300538a17f42ea3ab6))
+
+### Fixes
+
+* **daemon:** keep a person's refused send open and type it first; never type Warden notices into an owner's chat ([#992](https://github.com/kirinnee/ferretry/issues/992)) ([5e2b15c](https://github.com/kirinnee/ferretry/commit/5e2b15c69b4fb0ca991218b16eba644e1183f09f))
+* **daemon:** treat the Claude usage-limit dialog as a spent login ([#990](https://github.com/kirinnee/ferretry/issues/990)) ([309da16](https://github.com/kirinnee/ferretry/commit/309da16f083cc2ad67cc6b2551cd1c98bb81933e))
+* **pwa:** Cmd/Ctrl+K always opens the global finder ([#993](https://github.com/kirinnee/ferretry/issues/993)) ([a52e269](https://github.com/kirinnee/ferretry/commit/a52e26955288c553fbad9e4f934c498780fa60b3))
+* **pwa:** phone chat header is name · card · one status dot · menu ([#994](https://github.com/kirinnee/ferretry/issues/994)) ([84e26a9](https://github.com/kirinnee/ferretry/commit/84e26a9f2db18aa85926246515740b487db61a67))
+* **pwa:** self-host each theme's fonts so themes stop sharing one typeface ([#970](https://github.com/kirinnee/ferretry/issues/970)) ([0317ca9](https://github.com/kirinnee/ferretry/commit/0317ca90c627365bc6bdecb34b9d115b3c351f15))
+* **pwa:** stop re-opening resolved agenda items on chat entry ([#966](https://github.com/kirinnee/ferretry/issues/966)) ([6bfc3cc](https://github.com/kirinnee/ferretry/commit/6bfc3cce82d55cc87fefbbb10b4e096c298fa4a6))
+
+## [4.127.0](https://github.com/kirinnee/ferretry/compare/v4.126.0...v4.127.0) (2026-10-30)
+
+### Features
+
+* **browser:** honest user agent and a per-machine browser proxy ([#971](https://github.com/kirinnee/ferretry/issues/971)) ([09b501d](https://github.com/kirinnee/ferretry/commit/09b501d86c8e297981246de5796c3c395e3b9f46))
+
+### Fixes
+
+* **daemon:** read a multi-paragraph Claude draft whole, so it never blocks every send as unreadable ([#987](https://github.com/kirinnee/ferretry/issues/987)) ([ab81bcb](https://github.com/kirinnee/ferretry/commit/ab81bcbd13d986bf9d6766c1eb15fb353552f7dc))
+* **pwa:** give the chat's message list the log's one grid cell, so an open agenda item shows and the chat scrolls ([#988](https://github.com/kirinnee/ferretry/issues/988)) ([99d849b](https://github.com/kirinnee/ferretry/commit/99d849b640dde0c942b389f743aa5bac4a582beb))
+
+## [4.126.0](https://github.com/kirinnee/ferretry/compare/v4.125.0...v4.126.0) (2026-10-30)
+
+### Features
+
+* **pwa:** lane editor, template picker and lane-proposal Edit deep link (U15) ([#986](https://github.com/kirinnee/ferretry/issues/986)) ([5862c18](https://github.com/kirinnee/ferretry/commit/5862c188c1d5922291b033c748852f59bdfe5d65))
+
+## [4.125.0](https://github.com/kirinnee/ferretry/compare/v4.124.0...v4.125.0) (2026-10-30)
+
+### Features
+
+* **board:** enforce the board — Board prompt section, turn-end check, fy task skip, fy ps CARD (U8) ([#985](https://github.com/kirinnee/ferretry/issues/985)) ([f558009](https://github.com/kirinnee/ferretry/commit/f558009733df41ce31ca126f814028ed8208e9b2))
+* **pwa:** per-chat card chip, Tasks side tab and Info card row (U14) ([#984](https://github.com/kirinnee/ferretry/issues/984)) ([8dce512](https://github.com/kirinnee/ferretry/commit/8dce512f8d40fc031a1eaeb3525e07fc5ff32827))
+
 ## [4.124.0](https://github.com/kirinnee/ferretry/compare/v4.123.0...v4.124.0) (2026-10-30)
 
 ### Features

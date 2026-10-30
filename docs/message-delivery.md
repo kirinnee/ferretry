@@ -8,12 +8,38 @@ show, and what a person can do about a message that did not get through.
 The send ledger and its fates are in `packages/protocol/src/lib/session.ts` (`SendRecordSchema`); the
 decisions are in `packages/daemon/src/lib/tmux/` and `packages/daemon/src/lib/session/send/`.
 
+## The durable queue (being built)
+
+Every message to a session is moving onto ONE durable queue per session, owned by one deliverer, in
+slices (owner-approved 2026-10-30). Until delivery rides it, the queue is written and read but nothing
+is typed from it; the rest of this page is still how a message reaches the pane.
+
+- **Model** — `packages/protocol/src/lib/session-queue.ts` (`QueuedMessageSchema`): ✓ `queued` on accept,
+  ✓✓ `delivered` once typed and submitted (pane proof), ✓✓✓ `read` once the transcript shows it as a user
+  turn; `cancelled` and `failed` are final. A waiting message carries a `waitReason` a person can act on.
+- **Log** — `channel/queue.jsonl` beside the session, append-only and flushed to disk before an accept
+  answers (`FileSessionQueueStore`). The queue is the fold of that log (`foldQueue`), which applies only a
+  move that is legal from where the message stands, so a replayed or stale line changes nothing.
+- **Order** — a person's message first, then a ferret's, then the daemon's; acceptance order within each;
+  one message typing at a time (`nextToDeliver`). A daemon notice to an interactive session is never in the
+  delivery order (`boardOnly`): that session is the owner's own chat, and the notice goes on its board.
+- **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
+  included (the harness queues it itself). It holds only for a draft in the box, a question, dialog or
+  permission form on screen, or a pane it cannot read, and says which as the `waitReason`.
+- **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
+- **Edit or cancel** — only while `queued` (`SessionQueueService.edit` / `.cancel`): once a key has gone to
+  the pane, the words are the agent's.
+
 ## The composer is read, never searched for
 
 Every proof reads **the composer itself** — the last prompt-glyph line (`›`, `❯`, `>`) and the indented
 lines a multi-line draft wraps onto, up to the first blank row — together with the cursor tmux reports
 beside the capture (`lib/tmux/composer-screen.ts`). It never asks whether the message's words appear
-somewhere on screen.
+somewhere on screen. A Claude composer (`❯`/`>`) that its rule closes runs to that rule, blank rows
+included: a multi-paragraph draft (a Warden notice is three paragraphs) draws its blank lines inside the
+composer, and ending it at the first one put the cursor below it, read the composer `unreadable`, and
+refused every later send — the owner's included — while the notice itself was never proven landed, so
+never submitted.
 
 That search was the bug the owner hit on Codex ("sometimes Enter doesn't work, and then the message is
 stuck forever"):
@@ -245,10 +271,17 @@ attributes could be captured, and the status lines change nothing. It is also wh
 stalled pane, every look still showed the suggestion — empty — and each fill typed again. The one-fill
 rule and the stretching window above are the fix; the reader was right.
 
-A composer that cannot be read is refused before a key: a fresh send is withdrawn and answered `409`
-(`send_refused`: "nothing was typed; send it again in a moment"), a released held message goes back to
-held, and a tracker re-attempt is withheld (`unreadable`) and settled `unaccounted`
-(`pane_unreadable`) — never retyped.
+A composer that cannot be read is refused before a key. A **person's** fresh send is kept open rather
+than withdrawn: it stays `accepted` and `untyped` (journal `control.send_deferred`), and the tracker
+tries it every `untypedLookMs` (5 s), ahead of every other send in the same look, until the pane reads
+clear and it is typed — its first typing, so still attempt 1. Nothing was typed, so none of the duplicate
+guards (a turn taken since, a busy-pane typing, an unreadable transcript) hold it back; a re-read that
+still cannot prove the composer empty, or a draft in the way, only waits. Never typed by the hold
+ceiling, it is `timed_out` (`not_delivered`) and retryable. This is what the owner's message lacked:
+withdrawn a second after it was accepted, it was never tried again. A ferret's or the daemon's fresh
+send is still withdrawn and answered `409` (`send_refused`: "nothing was typed; send it again in a
+moment"), a released held message goes back to held, and a tracker re-attempt of a TYPED send is
+withheld (`unreadable`) and settled `unaccounted` (`pane_unreadable`) — never retyped.
 
 A send first reads the composer. If it already holds input, **nothing is typed onto it**. What happens
 next depends on whose text it is.

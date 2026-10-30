@@ -17,6 +17,7 @@ import type {
   WardenVerdict,
 } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
+import type { ChatChip } from '../../lib/board-chat.ts';
 import type { ResolvedQuota } from '../../lib/usage.ts';
 import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/context-rail-body.tsx';
 import { FOLDER_TABS, loadedSkillCount } from '../context-rail/context-rail-model.ts';
@@ -26,6 +27,7 @@ import { useContextSignals } from '../context-rail/context-rail-signals.tsx';
 import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
 import type { SurfaceDriving } from '../workspace/use-surface-driving.ts';
 import { InfoOverview } from './info-overview.tsx';
+import { INFO_TABS } from './info-model.ts';
 import { InfoPanel } from './info-panel.tsx';
 import type { InfoRelaunchRead } from './info-relaunch.tsx';
 import { type InfoListRead, InfoRuntime } from './info-runtime.tsx';
@@ -65,7 +67,8 @@ export interface SessionInfoProps {
   readonly onOpenPage: (page: BrowserPageSummary) => void;
   readonly onRename?: () => void;
   readonly onOpenSession?: (sessionId: string) => void;
-  readonly onOpenTasks?: () => void;
+  /** This ferret's card, when the host has a board: the Overview's Card row and the Tasks tab. */
+  readonly card?: { readonly chip: ChatChip; readonly onOpen: () => void; readonly tasks: ReactNode };
   readonly onOpenAnalytics?: () => void;
   /** The model and effort pickers, when the host has them (another surface owns them). */
   readonly runtimeControls?: ReactNode;
@@ -118,7 +121,7 @@ export function SessionInfo({
   onOpenPage,
   onRename,
   onOpenSession,
-  onOpenTasks,
+  card,
   onOpenAnalytics,
   runtimeControls,
   learning,
@@ -156,6 +159,7 @@ export function SessionInfo({
       openSignals={signals.snapshot?.count ?? 0}
       tab={tab}
       titleId={titleId}
+      {...(card === undefined ? {} : { tabs: INFO_TABS })}
       {...(presentation === 'sheet'
         ? { sheetSize: placement.sheetSize, onSheetSizeChange: placement.setSheetSize }
         : {})}
@@ -171,9 +175,10 @@ export function SessionInfo({
             {...(sessions === undefined ? {} : { sessions })}
             {...(onRename === undefined ? {} : { onRename })}
             {...(onOpenSession === undefined ? {} : { onOpenSession })}
-            {...(onOpenTasks === undefined ? {} : { onOpenTasks })}
+            {...(card === undefined ? {} : { card: { chip: card.chip, onOpen: card.onOpen } })}
           />
         ),
+        tasks: () => card?.tasks ?? null,
         runtime: () => (
           <InfoRuntime
             instructions={listRead(docs.load, value => value.map(doc => doc.name))}

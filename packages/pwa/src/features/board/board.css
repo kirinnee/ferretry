@@ -56,6 +56,57 @@
   background: var(--accent-soft);
   color: var(--accent);
 }
+.fy-board__scope {
+  display: inline-flex;
+  min-width: 0;
+  margin: 0;
+  gap: 2px;
+  padding: 2px;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+}
+.fy-board__scope-option {
+  min-height: 26px;
+  max-width: 12rem;
+  overflow: hidden;
+  padding: 0 var(--gap-md);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.fy-board__scope-option:hover {
+  color: var(--fg);
+}
+.fy-board__scope-option[aria-pressed='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.fy-board__lanes,
+.fy-board-project__lanes {
+  min-height: 24px;
+  padding: 0 var(--gap-sm);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.fy-board__lanes:hover,
+.fy-board-project__lanes:hover {
+  color: var(--fg);
+}
+.fy-board-project__lanes {
+  margin-left: auto;
+}
 .fy-board__tools {
   display: flex;
   margin-left: auto;
@@ -864,4 +915,140 @@
   .fy-board__scrim[data-phone] .fy-board-reason {
     animation: none;
   }
+}
+
+/* ---- Per-chat card chip and Tasks tab ------------------------------------------------------------- */
+.fy-card-chip {
+  display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 6px;
+  padding: 1px var(--gap-sm);
+  overflow: hidden;
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  text-decoration: none;
+  white-space: nowrap;
+}
+a.fy-card-chip:hover {
+  border-color: var(--border);
+  color: var(--fg);
+}
+.fy-card-chip[data-tone='warn'] {
+  border-color: var(--warn);
+  background: var(--warn-bg);
+  color: var(--warn);
+}
+.fy-card-chip__ref {
+  flex: none;
+  color: var(--accent);
+  font-family: var(--font-mono);
+  font-weight: var(--weight-medium);
+}
+.fy-card-chip__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--fg);
+  text-overflow: ellipsis;
+}
+.fy-card-chip__lane,
+.fy-card-chip__activity {
+  flex: none;
+}
+.fy-card-chip__lane::before,
+.fy-card-chip__activity::before {
+  margin-right: 6px;
+  color: var(--faint);
+  content: '·';
+}
+.fy-card-chip__activity {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.fy-card-chip__dot {
+  font-size: 0.7em;
+}
+.fy-card-chip__activity[data-tone='ok'] {
+  color: var(--ok);
+}
+.fy-card-chip__activity[data-tone='warn'] {
+  color: var(--warn);
+}
+.fy-card-chip__activity[data-tone='err'] {
+  color: var(--err);
+}
+/* ON A PHONE THE CHIP IS ITS REFERENCE ALONE, and it gives way before anything else in the bar does. Its title, lane
+   and activity left it no room: an unshrinkable "&F11 · ● active" ran under Interrupt and ▾, and the bar's one status
+   dot already says how the ferret is doing. "No card" is a nudge for a wide screen, not worth a phone's row. */
+.fy-session-bar[data-compact] .fy-card-chip__title,
+.fy-session-bar[data-compact] .fy-card-chip__lane,
+.fy-session-bar[data-compact] .fy-card-chip__activity,
+.fy-session-bar[data-compact] .fy-card-chip[data-card-chip='none'] {
+  display: none;
+}
+/* A link's 44px touch floor made the pill a fat circle round four characters: on a phone the reference is drawn as
+   the link it is, with no outline, and keeps the whole floor as its target. */
+.fy-session-bar[data-compact] .fy-card-chip {
+  flex: 0 1 auto;
+  align-self: center;
+  justify-content: center;
+  padding: 0 2px;
+  border-color: transparent;
+  background: transparent;
+}
+.fy-session-bar[data-compact] .fy-card-chip__ref {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.fy-board-side {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+}
+.fy-board-side__status {
+  margin: 0;
+  padding: var(--gap-xs) var(--gap-sm);
+  border-radius: var(--radius-control);
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-board-card__chat {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+.fy-board-card__chat:hover {
+  background: var(--surface-2);
+  color: var(--fg);
+}
+@media (pointer: coarse) {
+  .fy-board-card__chat {
+    width: 36px;
+    height: 36px;
+  }
+}
+.fy-board-lane[data-density='side'] {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  flex: none;
 }

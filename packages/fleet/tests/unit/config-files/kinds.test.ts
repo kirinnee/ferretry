@@ -278,6 +278,57 @@ describe('configLoosening: machine', () => {
   });
 });
 
+describe('configLoosening: browser proxy', () => {
+  const proxy = { url: 'http://proxy.example:8080', bypass: [] as string[] };
+  const signedIn = { ...proxy, username: '${secret:PROXY_USER}', password: '${secret:PROXY_PASSWORD}' };
+
+  it("should hold a proxy that is newly set: it could send a stored secret to a server of an editor's choosing", () => {
+    // Act
+    const actual = configLoosening('machine', machineWith({}), machineWith({ browserProxy: signedIn }));
+
+    // Assert
+    should(actual).deepEqual([
+      'the agent browser now sends its traffic through the proxy at http://proxy.example:8080',
+    ]);
+  });
+
+  it('should hold a proxy whose address or credentials change', () => {
+    // Act + Assert
+    should(
+      configLoosening(
+        'machine',
+        machineWith({ browserProxy: proxy }),
+        machineWith({ browserProxy: { ...proxy, url: 'http://other.example:8080' } }),
+      ),
+    ).have.length(1);
+    should(
+      configLoosening(
+        'machine',
+        machineWith({ browserProxy: signedIn }),
+        machineWith({ browserProxy: { ...signedIn, password: '${secret:OTHER}' } }),
+      ),
+    ).have.length(1);
+    should(
+      configLoosening('machine', machineWith({ browserProxy: proxy }), machineWith({ browserProxy: signedIn })),
+    ).have.length(1);
+  });
+
+  it('should apply at once a proxy turned off or a bypass list edited, which hand over nothing new', () => {
+    // Act + Assert
+    should(configLoosening('machine', machineWith({ browserProxy: signedIn }), machineWith({}))).deepEqual([]);
+    should(
+      configLoosening(
+        'machine',
+        machineWith({ browserProxy: signedIn }),
+        machineWith({ browserProxy: { ...signedIn, bypass: ['*.internal.example'] } }),
+      ),
+    ).deepEqual([]);
+    should(
+      configLoosening('machine', machineWith({ browserProxy: proxy }), machineWith({ browserProxy: proxy })),
+    ).deepEqual([]);
+  });
+});
+
 describe('configLoosening: warden', () => {
   const wardenWith = (changes: Partial<WardenConfig>): WardenConfig => ({ ...DEFAULT_WARDEN_CONFIG, ...changes });
 

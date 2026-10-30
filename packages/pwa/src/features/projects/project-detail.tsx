@@ -3,7 +3,7 @@ import { ArrowLeft, Bot, FolderTree, LayoutList } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useProjectsSlice } from '../../hooks/use-projects.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { daemonProjectsPath, daemonSessionPath } from '../../lib/pages/routes.ts';
+import { daemonProjectLanesPath, daemonProjectsPath, daemonSessionPath } from '../../lib/pages/routes.ts';
 import { useRouter } from '../../lib/router.tsx';
 import { useAppStore } from '../../lib/store.tsx';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
@@ -81,6 +81,14 @@ function ProjectDetailView({
           <h1 className="m-0 font-display text-display font-bold tracking-display">{project.name}</h1>
         </div>
         <div className="flex flex-wrap items-start gap-md">
+          <button
+            className="kt-btn kt-btn--sm"
+            type="button"
+            data-project-lanes-link={project.id}
+            onClick={() => navigate(daemonProjectLanesPath(connection.daemonId, project.id))}
+          >
+            Lanes ✎
+          </button>
           <ProjectLaunch project={project} onLaunch={onLaunch} />
           <PageThemeSwitch />
         </div>

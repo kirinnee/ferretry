@@ -129,8 +129,25 @@ describe('BrowserSurfaceList', () => {
     );
   });
 
-  test('should render the trailing marker after the pages', () => {
+  test('should put the trailing controls at the end of the first row, once, so no second bar is needed', () => {
     const { renderer } = mount({ trailing: <span data-marker="" /> });
     expect(renderer.root.findAllByProps({ 'data-marker': '' })).toHaveLength(1);
+    const controls = renderer.root.findAllByProps({ className: 'fy-ws-pages-controls' });
+    expect(controls).toHaveLength(1);
+    const firstHead = renderer.root.findAllByProps({ className: 'fy-ws-pages-head' })[0];
+    expect(firstHead?.findAllByProps({ className: 'fy-ws-pages-controls' })).toHaveLength(1);
+  });
+
+  test('should still carry the trailing controls when there are no pages to list', () => {
+    const { renderer } = mount({ status: status([]), trailing: <span data-marker="" /> });
+    expect(renderer.root.findAllByProps({ className: 'fy-ws-pages-controls' })).toHaveLength(1);
+    expect(renderer.root.findAllByProps({ 'data-marker': '' })).toHaveLength(1);
+    const none = mount({ status: null, trailing: <span data-marker="" /> });
+    expect(none.renderer.root.findAllByProps({ className: 'fy-ws-pages-controls' })).toHaveLength(1);
+  });
+
+  test('should draw no controls wrapper without trailing controls', () => {
+    const { renderer } = mount();
+    expect(renderer.root.findAllByProps({ className: 'fy-ws-pages-controls' })).toHaveLength(0);
   });
 });

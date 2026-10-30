@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test';
-import type { ResolvedAgendaItem } from '@ferretry/protocol';
+import { LANE_PROPOSAL_ANSWERS, laneProposalReference, type ResolvedAgendaItem } from '@ferretry/protocol';
 import { AgendaCard } from '../../../src/features/agenda/agenda-card.tsx';
 import { AgendaDetail } from '../../../src/features/agenda/agenda-detail.tsx';
 import {
@@ -918,5 +918,106 @@ describe('AgendaInboxPage Resolved filter', () => {
     await interact(() => option(none.container, 'resolved').click());
     expect(none.container.querySelector('[data-agenda-resolved-empty]')?.textContent).toContain('Nothing resolved');
     await none.unmount();
+  });
+});
+
+describe('a lane-proposal card', () => {
+  const PROJECT_ID = '00000000-0000-4000-8000-000000000001';
+  const proposal = inboxCard(
+    agendaItem('L1', {
+      subject: 'Lanes for ferretry: Todo → Implement → Review → Merged',
+      ask: choices(LANE_PROPOSAL_ANSWERS.accept, LANE_PROPOSAL_ANSWERS.edit),
+      sourceRef: laneProposalReference(PROJECT_ID, 2),
+    }),
+  );
+  const editPath = `/d/${proposal.daemonId}/projects/${PROJECT_ID}/lanes`;
+
+  const answerBy = (mounted: Mounted, label: string): HTMLButtonElement =>
+    must(
+      [...mounted.container.querySelectorAll<HTMLButtonElement>('[data-agenda-card="L1"] button')].find(
+        node => (node.textContent ?? '').trim() === label,
+      ),
+      `the ${label} answer`,
+    );
+
+  it('opens the lane editor on Edit and still sends the answer', async () => {
+    // Arrange
+    const fake = fakeInbox();
+    const navigated: string[] = [];
+    const mounted = await mount(
+      <InboxHarness
+        cards={[proposal]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={proposal.daemonId}
+            inbox={inbox}
+            now={NOW}
+            onNavigate={to => navigated.push(to)}
+          />
+        )}
+      />,
+    );
+
+    // Act
+    await interact(() => answerBy(mounted, LANE_PROPOSAL_ANSWERS.edit).click());
+    await advance(fake, 10_000);
+
+    // Assert
+    expect(navigated).toEqual([editPath]);
+    expect(fake.commits.map(commit => commit.card.item.id)).toEqual(['L1']);
+    await mounted.unmount();
+  });
+
+  it('answers Accept in place, without opening the editor', async () => {
+    // Arrange
+    const fake = fakeInbox();
+    const navigated: string[] = [];
+    const mounted = await mount(
+      <InboxHarness
+        cards={[proposal]}
+        fake={fake}
+        render={inbox => (
+          <AgendaNeedsYou
+            clock={fake.clock.now}
+            daemonId={proposal.daemonId}
+            inbox={inbox}
+            now={NOW}
+            onNavigate={to => navigated.push(to)}
+          />
+        )}
+      />,
+    );
+
+    // Act
+    await interact(() => answerBy(mounted, LANE_PROPOSAL_ANSWERS.accept).click());
+    await advance(fake, 10_000);
+
+    // Assert
+    expect(navigated).toEqual([]);
+    expect(fake.commits.map(commit => commit.card.item.id)).toEqual(['L1']);
+    await mounted.unmount();
+  });
+
+  it('opens the lane editor on Edit from the inbox deck too', async () => {
+    // Arrange
+    const fake = fakeInbox();
+    const navigated: string[] = [];
+    const mounted = await mount(page(fake, [proposal], { phone: true, initialOpen: proposal.key }, navigated));
+
+    // Act
+    await interact(() =>
+      must(
+        mounted.container.querySelector<HTMLButtonElement>(
+          `.fy-attn-deck__top [data-agenda-option="${LANE_PROPOSAL_ANSWERS.edit}"]`,
+        ),
+        'the Edit answer',
+      ).click(),
+    );
+
+    // Assert
+    expect(navigated).toEqual([editPath]);
+    await mounted.unmount();
   });
 });

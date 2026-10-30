@@ -1,8 +1,10 @@
+import { disabledPhrase } from '@ferretry/fleet';
 import type {
   FleetAccountChangeOutcome,
   FleetAccountChangeView,
   FleetApplyOutcome,
   FleetCatalogAct,
+  FleetDisabled,
 } from '@ferretry/protocol';
 import type { AccountHarness } from './account-ports.ts';
 
@@ -27,6 +29,10 @@ export const listOrNone = (items: readonly string[], none = 'none'): string =>
 
 /** An act's reason when it is not offered, or nothing. */
 export const unavailable = (act: FleetCatalogAct): string | undefined => (act.available ? undefined : act.reason);
+
+/** "disabled (spend limit reached) until 2026-11-01" for a switch that is off, or nothing when it is on. */
+export const disabledWords = (disabled: FleetDisabled | undefined): string | undefined =>
+  disabled === undefined ? undefined : disabledPhrase(disabled);
 
 /** What one staged change would do, for the person deciding whether to apply it. */
 export function renderChangeView(view: FleetAccountChangeView): string {

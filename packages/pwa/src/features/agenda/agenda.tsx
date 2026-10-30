@@ -34,6 +34,8 @@ import { withComposerNote } from '../../lib/agenda-reply.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
+import { laneEditDestination } from '../../lib/lane-proposal-link.ts';
+import { useOptionalRouter } from '../../lib/router.tsx';
 import { type DaemonSessionScope, daemonSessionKey } from '../../lib/daemon-scope.ts';
 import { composerQuoteTarget } from '../../lib/quote.ts';
 import type { TranscriptEntry } from '../../lib/session-screens.ts';
@@ -54,6 +56,11 @@ export type AgendaActionClient = Pick<
 export interface AgendaFocus {
   readonly target: AgendaId | null;
   readonly seq: number;
+  /**
+   * The request arrived WITH the page (a `?agenda=` link, a notification tap), not from the owner clicking a
+   * reference. Entering a chat shows only what is open: such a request never opens the resolved list.
+   */
+  readonly onEntry?: boolean;
 }
 
 /** Where an id sits on a board: answerable, on the record, absent, or not known until the board is read. */
@@ -177,6 +184,7 @@ export const useAgenda = ({
   now,
 }: UseAgendaInput): Agenda => {
   const domId = useId();
+  const router = useOptionalRouter();
   const drawerId = `${domId}-drawer`;
   const scopeKey = daemonSessionKey(scope);
   const board = snapshot?.items ?? NO_ITEMS;
@@ -234,6 +242,9 @@ export const useAgenda = ({
         // The answer is a message in the conversation: the view closes and the chat returns to it.
         update(current => (current.card === item.id ? { card: null, plain: false } : {}));
         onAnswered?.();
+        // Edit on a lane proposal: the answer is sent, now the editor opens.
+        const editor = laneEditDestination(connection.daemonId, item, action);
+        if (editor !== undefined) router?.navigate(editor);
       },
       (reason: unknown) => setCard(item.id, failure(reason)),
     );
@@ -252,10 +263,15 @@ export const useAgenda = ({
     if (focusTarget === null || focusSeq === null || handled.current === focusSeq) return;
     if (location === 'pending') return;
     handled.current = focusSeq;
-    if (location === 'resolved') onOpenResolved?.(focusTarget);
-    else if (location === 'open' && inAgenda) update(() => ({ card: focusTarget, drawer: false, plain: false }));
-  }, [focusTarget, focusSeq, location, inAgenda, onOpenResolved, update]);
-  const missing = agendaMode && focusTarget !== null && location === 'unknown' && !isNotice;
+    if (location === 'resolved') {
+      if (focus?.onEntry !== true) onOpenResolved?.(focusTarget);
+    } else if (location === 'open' && inAgenda) update(() => ({ card: focusTarget, drawer: false, plain: false }));
+  }, [focusTarget, focusSeq, focus?.onEntry, location, inAgenda, onOpenResolved, update]);
+  const missing =
+    agendaMode &&
+    focusTarget !== null &&
+    (location === 'unknown' || (location === 'resolved' && focus?.onEntry === true)) &&
+    !isNotice;
 
   const delivering = useMemo(() => deliveringIds(snapshot), [snapshot]);
   const sendingHeadings = [...delivering].flatMap(id => {

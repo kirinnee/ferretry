@@ -33,6 +33,12 @@ export interface SendTrackerSettings {
   readonly reviveLaunchMs: number;
   /** How long a re-check is pushed out when the harness is still visibly holding the message. */
   readonly busyExtensionMs: number;
+  /**
+   * How often a person's send that nothing has been typed for yet (`untyped`) is tried again. Short,
+   * because it is the owner's message waiting, and a try that finds the pane still unreadable costs
+   * one capture and types nothing.
+   */
+  readonly untypedLookMs: number;
   /** The ceiling on waiting behind a busy agent, after which a held send is reported unconfirmed. */
   readonly holdLimitMs: number;
   /**
@@ -67,6 +73,7 @@ export const defaultSendTrackerSettings: SendTrackerSettings = {
   },
   reviveLaunchMs: 90_000,
   busyExtensionMs: 60_000,
+  untypedLookMs: 5_000,
   holdLimitMs: 2 * 60 * 60_000,
   repairLimitMs: 3 * 24 * 60 * 60_000,
   matchSlackMs: 5_000,
@@ -132,6 +139,7 @@ export function attemptsAllowed(record: SendRecord, settings: SendTrackerSetting
 /** The instant this send is next looked at, in epoch milliseconds. */
 export function deadlineOf(record: SendRecord, settings: SendTrackerSettings): number {
   if (record.deadlineAt !== undefined) return Date.parse(record.deadlineAt);
+  if (record.untyped === true) return Date.parse(record.attemptAt ?? record.acceptedAt) + settings.untypedLookMs;
   // A revive that has not reported what it typed is still relaunching, or cannot say: either way the
   // first attempt's window cannot have started yet.
   if (record.path === 'revive' && record.matchText === undefined)

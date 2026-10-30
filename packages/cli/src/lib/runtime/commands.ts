@@ -3,6 +3,7 @@ import type { Command } from 'commander';
 import { runChange } from '../fleet/account-change.ts';
 import { readOptions, writeFlags, writeOptions } from '../fleet/account-commands.ts';
 import { type AccountCommandDeps, AccountCommandError } from '../fleet/account-ports.ts';
+import { parseReason, parseUntil } from '../fleet/disable-until.ts';
 import { renderRuntime, renderRuntimeList } from './render.ts';
 
 /** One runtime by name, or a refusal naming the list command. */
@@ -93,6 +94,39 @@ export function registerRuntimeCommands(program: Command, deps: AccountCommandDe
         create: false,
       },
       destructive: true,
+      options: writeFlags(options),
+    });
+  });
+
+  writeOptions(
+    runtime
+      .command('disable')
+      .description('switch a runtime off without deleting it: nothing new starts on it; running ferrets keep going')
+      .argument('<name>', 'the runtime')
+      .option('--until <when>', 'switch back on by itself: a date (2026-11-01), a time or a wait (3d, 12h)')
+      .option('--reason <text>', 'why, shown beside the switch and in every refusal'),
+  ).action(async (name: string, options: { until?: string; reason?: string } & Record<string, unknown>) => {
+    await findRuntime(deps, name);
+    const reason = parseReason(options.reason);
+    await runChange(deps, {
+      change: {
+        kind: 'runtime.disable',
+        name,
+        ...(reason === undefined ? {} : { reason }),
+        ...(options.until === undefined ? {} : { until: parseUntil(options.until, deps.now()) }),
+      },
+      destructive: false,
+      options: writeFlags(options),
+    });
+  });
+
+  writeOptions(
+    runtime.command('enable').description('switch a disabled runtime back on').argument('<name>', 'the runtime'),
+  ).action(async (name: string, options: Record<string, unknown>) => {
+    await findRuntime(deps, name);
+    await runChange(deps, {
+      change: { kind: 'runtime.enable', name },
+      destructive: false,
       options: writeFlags(options),
     });
   });

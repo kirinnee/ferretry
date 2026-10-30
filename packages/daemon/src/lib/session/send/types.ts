@@ -151,6 +151,15 @@ export interface SendRecord {
    * is what `typedIntoBusyPane` reads, and the daemon's own bookkeeping: it never leaves the daemon.
    */
   readonly busyTyped?: boolean | undefined;
+  /**
+   * A PERSON'S send that NOTHING has been typed for yet: the composer could not be read to prove it
+   * empty, so the transport refused before its first key. It used to be withdrawn, and nothing ever
+   * tried again — the owner's message sat as a payload file while Warden notices kept arriving. It is
+   * kept open instead, and the tracker types it, ahead of every other send, the first time the pane
+   * reads clear. Nothing typed means no copy can exist, so none of the duplicate guards apply until the
+   * first key. The daemon's own bookkeeping: it never leaves the daemon.
+   */
+  readonly untyped?: boolean | undefined;
   /** What a `cancelled` fate did to the agent's screen. */
   readonly cancelEffect?: SendCancelEffect | undefined;
 }
@@ -172,6 +181,7 @@ export type SendSettlement = Partial<
     | 'typedNotSent'
     | 'submitNudges'
     | 'busyTyped'
+    | 'untyped'
     | 'cancelEffect'
     | 'held'
     | 'path'

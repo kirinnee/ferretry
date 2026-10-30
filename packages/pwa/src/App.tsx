@@ -39,6 +39,7 @@ import type { SendDismiss, SendExpand } from './components/settled-send-note.tsx
 import { useAgendaSessionActions } from './features/agenda/agenda-session-actions.tsx';
 import { GlobalAnalyticsPage } from './features/analytics/global-analytics-page.tsx';
 import { AgendaInboxPage } from './features/agenda/agenda-inbox-page.tsx';
+import { BoardOriginProvider, useBoardOrigin } from './features/board/board-origin.tsx';
 import { BoardPage } from './features/board/board-page.tsx';
 import { LinkBehaviourProvider } from './features/browser/external-link.tsx';
 import { useLocalComputer } from './features/browser/use-local-computer.ts';
@@ -82,6 +83,7 @@ import { PACK_SETTINGS_TAB } from './features/pack/pack-settings.tsx';
 import { DeviceRefusedNotice } from './features/pairing/device-refused-notice.tsx';
 import { PairingScreen } from './features/pairing/pairing-screen.tsx';
 import { ProjectDetailPage } from './features/projects/project-detail.tsx';
+import { LaneEditorPage } from './features/projects/lane-editor.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { RestartOverlayProvider } from './features/restart-outdated/restart-overlay.tsx';
@@ -172,11 +174,10 @@ import { boardPorts } from './lib/board-ports.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
-import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
+import { type DaemonSessionScope, daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
 import { browserFleetFeedEnvironment } from './lib/fleet-feed.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
-import { isKeyboardCaptured } from './lib/keyboard-capture.ts';
 import { placeLedgerRows } from './lib/ledger-placement.ts';
 import { createLiveActivityHub } from './lib/live-activity-feed.ts';
 import { moveMachine } from './lib/machine-order.ts';
@@ -200,6 +201,7 @@ import {
   connectionPickerPath,
   daemonAgendaPath,
   daemonLearningPath,
+  daemonProjectPath,
   daemonSessionsPath,
   daemonSettingsPath,
   daemonWardenPath,
@@ -232,6 +234,7 @@ import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
+  type AppStore,
   createAppStore,
   StoreProvider,
   useAppStore,
@@ -331,21 +334,6 @@ const isModalShortcutTarget = (target: EventTarget | null): boolean => {
   if (target === null || typeof target !== 'object') return false;
   const closest = (target as ShortcutTargetLike).closest;
   return typeof closest === 'function' && closest.call(target, 'dialog, [role="dialog"], [aria-modal="true"]') !== null;
-};
-
-/**
- * The two text-entry places where current-session Cmd/Ctrl+K is intentional.
- *
- * The composer is where a session reader normally stands, and the search box
- * itself supports the ordinary re-select gesture. Every other editable field
- * keeps its native chord even on a session route.
- */
-const isSessionSearchShortcutTarget = (target: EventTarget | null): boolean => {
-  if (target === null || typeof target !== 'object') return false;
-  const closest = (target as ShortcutTargetLike).closest;
-  return (
-    typeof closest === 'function' && closest.call(target, 'form.fy-composer, [data-current-session-search]') !== null
-  );
 };
 
 const notificationPermission = (): NotificationPermissionState =>
@@ -466,6 +454,13 @@ const pageCrumbs = (route: PageRoute): readonly Crumb[] => {
         { href: sessions, label: 'Sessions' },
         { href: `${sessions}/projects`, label: 'Projects' },
         { label: 'Project' },
+      ];
+    case 'project-lanes':
+      return [
+        { href: sessions, label: 'Sessions' },
+        { href: `${sessions}/projects`, label: 'Projects' },
+        { href: daemonProjectPath(route.daemonId, route.projectId), label: 'Project' },
+        { label: 'Lanes' },
       ];
     case 'session':
       return [{ href: sessions, label: 'Sessions' }, { label: route.sessionId }];
@@ -856,6 +851,7 @@ export const sessionsBarPlace = (route: PageRoute): SessionsBarPlace | null => {
   switch (route.kind) {
     case 'projects':
     case 'project-detail':
+    case 'project-lanes':
       return 'projects';
     case 'analytics':
     case 'warden':
@@ -1554,6 +1550,7 @@ function SessionRoute({
       {session !== undefined && client !== null ? (
         <SessionChatPage
           accountPicker={store.accountPicker}
+          board={store.board}
           actionContributions={sessionActions}
           infoLearning={learningActions.passiveFor(scope.sessionId)}
           switches={{
@@ -1987,6 +1984,23 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** Every ferret's callsign by session id, from the sessions every paired machine reports. */
+function useFerretCallsigns(store: AppStore): ReadonlyMap<string, string> {
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  return useMemo(() => {
+    const names = new Map<string, string>();
+    for (const slice of fleet.daemons.values()) {
+      for (const session of slice.sessions ?? []) {
+        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
+      }
+    }
+    return names;
+  }, [fleet]);
+}
+
 /**
  * The Board across every paired machine. The query string carries the filters and the view, so a view is a
  * link; a change replaces the entry (the back button leaves the board, it does not walk every filter).
@@ -2020,20 +2034,9 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
   const store = useAppStore();
   const { navigate } = useRouter();
   const machines = useBoardMachines();
-  const fleet = useSyncExternalStore(
-    listener => store.fleet.subscribe(listener),
-    () => store.fleet.getSnapshot(),
-  );
-  const callsigns = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const slice of fleet.daemons.values()) {
-      for (const session of slice.sessions ?? []) {
-        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
-      }
-    }
-    return names;
-  }, [fleet]);
+  const callsigns = useFerretCallsigns(store);
   const phone = useLayoutMode() === 'drawer';
+  const origin = useBoardOrigin();
   const onSearch = useCallback(
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
     [navigate],
@@ -2049,6 +2052,7 @@ function BoardRoute({ connection, taskId }: BoardPageProps) {
       onSearch={onSearch}
       openCard={taskId === undefined ? null : { daemonId: connection.daemonId, taskId }}
       ports={ports}
+      origin={origin}
       search={window.location.search}
       store={store.board}
     />
@@ -2105,6 +2109,11 @@ function ProjectDetailRoute({ connection, projectId }: ProjectDetailPageProps) {
   return <ProjectDetailPage connection={connection} projectId={projectId} />;
 }
 
+function ProjectLanesRoute({ connection, projectId }: ProjectDetailPageProps) {
+  const callsigns = useFerretCallsigns(useAppStore());
+  return <LaneEditorPage callsigns={callsigns} connection={connection} projectId={projectId} />;
+}
+
 const PAGE_SLOTS: PageHostSlots = {
   ConnectionPicker,
   Setup: SetupGuide,
@@ -2112,6 +2121,7 @@ const PAGE_SLOTS: PageHostSlots = {
   NewSession: NewSessionRoute,
   Projects: ProjectsRoute,
   ProjectDetail: ProjectDetailRoute,
+  ProjectLanes: ProjectLanesRoute,
   SessionChat: SessionRoute,
   Settings: SettingsRoute,
   Warden: WardenRoute,
@@ -2439,7 +2449,6 @@ export function AppShell() {
   const fleetSnapshot = useCallback(() => store.fleet.getSnapshot(), [store.fleet]);
   const fleet = useSyncExternalStore(subscribeFleet, fleetSnapshot);
   const [palette, setPalette] = useState({ open: false, focusSignal: 0 });
-  const [sessionSearchFocusSignal, setSessionSearchFocusSignal] = useState(0);
   const openPalette = useCallback(
     () => setPalette(current => ({ open: true, focusSignal: current.focusSignal + 1 })),
     [],
@@ -2509,7 +2518,7 @@ export function AppShell() {
    */
   /**
    * WHERE THIS SESSION'S SEARCH IS MOUNTED: in the sessions bar's full column, on a session page. A rail
-   * and a phone have no room for it, so there Cmd/Ctrl+K opens the finder instead of focusing nothing.
+   * and a phone have no room for it.
    */
   const barSessionSearch = currentSessionScope !== null && layout !== 'drawer' && !sidebarCollapsed;
   const pageKey = routePageKey(effectiveRoute);
@@ -2524,36 +2533,39 @@ export function AppShell() {
     routeAnnouncer.current?.focus();
   }, [pageKey]);
 
+  // The last chat the reader stood in, so the Board opens on that ferret's cards.
+  const [boardOrigin, setBoardOrigin] = useState<DaemonSessionScope | null>(null);
+  useEffect(() => {
+    if (currentSessionScope !== null) setBoardOrigin(currentSessionScope);
+  }, [currentSessionScope]);
+
   /**
-   * THE SHORTCUT YIELDS TO A FIELD ONLY WHERE THERE IS SOMETHING TO YIELD FOR.
+   * Cmd/Ctrl+K OPENS THE GLOBAL FINDER, ON EVERY PAGE, FROM ANY FOCUS.
    *
-   * Off a session route the chord opens the global palette, and yielding to a
-   * focused field is deliberate — see the test that presses it inside an input,
-   * a textarea, a select and a contenteditable and requires the keystroke to
-   * survive.
+   * It was once split by context — the finder off a session route, the session's own file search on
+   * one — and it yielded to inputs and to a terminal, so the same chord opened different things (or
+   * nothing) depending on where focus happened to be. One chord, one meaning now. The listener is a
+   * capture-phase window listener so the composer, a terminal's keyboard capture and a remote
+   * browser's cannot eat it. The only exception is an open modal dialog, which owns its keyboard
+   * interaction and must not be escaped through by a global listener.
    *
-   * ON a session route it is item #6's current-session search, and the field the
-   * reader is almost always in is the composer — a `<textarea>`. That one field,
-   * and the search itself, deliberately reach the palette. Other editable and
-   * modal contexts keep the chord: a rename field or an open dialog owns its
-   * keyboard interaction and must not be escaped through by a global listener.
+   * COST, deliberately accepted: inside a terminal Ctrl+K is no longer readline's kill-to-end-of-line;
+   * the finder wins. The finder itself and the in-session file search are one click away from the
+   * app bar and the sessions bar.
    */
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.isComposing || event.keyCode === 229) return;
       if (event.key !== 'k' && event.key !== 'K') return;
       if (event.shiftKey || event.altKey || (!event.metaKey && !event.ctrlKey)) return;
-      const sessionScoped = barSessionSearch;
-      if (isKeyboardCaptured(event.target)) return;
       if (isModalShortcutTarget(event.target)) return;
-      if (isTextEntryTarget(event.target) && (!sessionScoped || !isSessionSearchShortcutTarget(event.target))) return;
       event.preventDefault();
-      if (sessionScoped) setSessionSearchFocusSignal(current => current + 1);
-      else openPalette();
+      event.stopPropagation();
+      openPalette();
     };
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [barSessionSearch, openPalette]);
+  }, [openPalette]);
 
   let content: ReactNode;
   if (effectiveRoute.kind === 'setup') {
@@ -2614,127 +2626,128 @@ export function AppShell() {
         onOpenPalette={openPalette}
         presentation={presentation}
         route={pageRoute}
-        // ONE SEARCH. On a session page it is that session's own file search, which Cmd/Ctrl+K focuses;
-        // everywhere else the bar's box opens the finder.
-        search={barSessionSearch ? <SessionSearchControl shortcutTarget /> : undefined}
+        // On a session page the bar's box is that session's own file search; everywhere else it opens the finder.
+        // Cmd/Ctrl+K is the finder on both.
+        search={barSessionSearch ? <SessionSearchControl /> : undefined}
         updateReady={updateReady}
         onApplyUpdate={applyUpdate}
         onPairPhone={pairPhoneAllowed ? openPairPhone : undefined}
       />
     );
     content = (
-      <SessionSearchProvider connection={connection} focusSignal={sessionSearchFocusSignal} scope={currentSessionScope}>
-        <WhatsNewProvider value={whatsNew.entry}>
-          <RestartOverlayProvider>
-            <SessionsDrawerContext.Provider value={phone ? openSessionsDrawer : null}>
-              <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`}>
-                {/* EXPANDED BY DEFAULT at every width above a phone: the column folds to its icon rail only
+      <SessionSearchProvider connection={connection} scope={currentSessionScope}>
+        <BoardOriginProvider value={boardOrigin}>
+          <WhatsNewProvider value={whatsNew.entry}>
+            <RestartOverlayProvider>
+              <SessionsDrawerContext.Provider value={phone ? openSessionsDrawer : null}>
+                <div className={`kt-shell flex overflow-hidden ${phone ? 'flex-col' : 'flex-row'}`}>
+                  {/* EXPANDED BY DEFAULT at every width above a phone: the column folds to its icon rail only
                 when the reader folds it (remembered per device), never because the window is narrow. */}
-                {phone ? null : sessionsBar('column')}
-                <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
-                  {/* A phone keeps its top bar off the session page only: there the session's own bar
+                  {phone ? null : sessionsBar('column')}
+                  <div data-shell-main="" className="flex min-h-0 min-w-0 flex-1 flex-col">
+                    {/* A phone keeps its top bar off the session page only: there the session's own bar
                   carries ☰, and every other page still needs a way to the drawer and the finder. */}
-                  {phone && pageRoute.kind !== 'session' ? (
-                    <AppBar
-                      crumbs={pageCrumbs(pageRoute)}
-                      daemon={connection.daemonId}
-                      onOpenPalette={openPalette}
-                      onOpenSidebar={openSessionsDrawer}
-                      sessionCount={sessions.length}
-                      updateReady={updateReady}
-                      onApplyUpdate={applyUpdate}
-                      active={appBarDestinationForRoute(pageRoute)}
-                      onNavigate={navigate}
-                      tabBarShown={showsTabBar(pageRoute)}
-                      agendaCount={agendaInbox.total}
-                      themeToggle={<ThemeToggle touch />}
-                    />
-                  ) : null}
-                  <ConnectionHealthNotice health={store.connectionHealth} machines={noticeMachines} />
-                  <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
-                  {pageRoute.kind === 'settings' ? null : (
-                    <PasskeyNudge
-                      key={String(connection.daemonId)}
-                      connection={connection}
-                      onOpenSecurity={() => navigate(`${daemonSettingsPath(connection.daemonId)}#security`)}
-                    />
-                  )}
-                  {/*
+                    {phone && pageRoute.kind !== 'session' ? (
+                      <AppBar
+                        crumbs={pageCrumbs(pageRoute)}
+                        daemon={connection.daemonId}
+                        onOpenPalette={openPalette}
+                        onOpenSidebar={openSessionsDrawer}
+                        sessionCount={sessions.length}
+                        updateReady={updateReady}
+                        onApplyUpdate={applyUpdate}
+                        active={appBarDestinationForRoute(pageRoute)}
+                        onNavigate={navigate}
+                        tabBarShown={showsTabBar(pageRoute)}
+                        agendaCount={agendaInbox.total}
+                        themeToggle={<ThemeToggle touch />}
+                      />
+                    ) : null}
+                    <ConnectionHealthNotice health={store.connectionHealth} machines={noticeMachines} />
+                    <NewDeviceNotices connections={connectionSnapshot.connections} clients={store.clients} />
+                    {pageRoute.kind === 'settings' ? null : (
+                      <PasskeyNudge
+                        key={String(connection.daemonId)}
+                        connection={connection}
+                        onOpenSecurity={() => navigate(`${daemonSettingsPath(connection.daemonId)}#security`)}
+                      />
+                    )}
+                    {/*
                 The finder's touch affordance wraps the page area rather than one
                 page: a phone has no Cmd/Ctrl+K. The region is passive and
                 discovers the touched page scroller, so ordinary scrolling stays
                 browser-owned and a transcript — where the same movement loads history
                 — can explicitly decline it.
               */}
-                  <PullToPaletteRegion
-                    className={`relative min-h-0 min-w-0 flex-1 px-1 sm:px-3${phone && showsTabBar(pageRoute) ? ' overflow-clip' : ''}`}
-                    enabled={touchAffected}
-                    onOpen={openPalette}
-                  >
-                    <DeviceRefusedGate connection={connection}>
-                      <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
-                        <PageScrollRegion entryKey={entryKey} memory={store.scrollMemory}>
-                          <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
-                        </PageScrollRegion>
-                      </ChunkErrorBoundary>
-                    </DeviceRefusedGate>
-                  </PullToPaletteRegion>
-                  {/* The phone's level one sits under the page, above the home indicator. */}
-                  {phone && showsTabBar(pageRoute) ? (
-                    <PhoneTabBar
-                      daemon={connection.daemonId}
-                      agendaCount={agendaInbox.total}
-                      active={appBarDestinationForRoute(pageRoute)}
-                      onNavigate={navigate}
-                      onOpenPalette={openPalette}
-                    />
-                  ) : null}
+                    <PullToPaletteRegion
+                      className={`relative min-h-0 min-w-0 flex-1 px-1 sm:px-3${phone && showsTabBar(pageRoute) ? ' overflow-clip' : ''}`}
+                      enabled={touchAffected}
+                      onOpen={openPalette}
+                    >
+                      <DeviceRefusedGate connection={connection}>
+                        <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate}>
+                          <PageScrollRegion entryKey={entryKey} memory={store.scrollMemory}>
+                            <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
+                          </PageScrollRegion>
+                        </ChunkErrorBoundary>
+                      </DeviceRefusedGate>
+                    </PullToPaletteRegion>
+                    {/* The phone's level one sits under the page, above the home indicator. */}
+                    {phone && showsTabBar(pageRoute) ? (
+                      <PhoneTabBar
+                        daemon={connection.daemonId}
+                        agendaCount={agendaInbox.total}
+                        active={appBarDestinationForRoute(pageRoute)}
+                        onNavigate={navigate}
+                        onOpenPalette={openPalette}
+                      />
+                    ) : null}
+                  </div>
+                  {phone && sessionsDrawer ? sessionsBar('drawer', closeSessionsDrawer) : null}
+                  <CommandPalette
+                    open={palette.open}
+                    focusSignal={palette.focusSignal}
+                    onClose={closePalette}
+                    daemon={connection.daemonId}
+                    sessions={paletteSearch.sessions}
+                    sessionsNote={paletteSearch.note}
+                    onNavigate={navigate}
+                    settings={paletteSettings}
+                    touchAffected={touchAffected}
+                    commands={[
+                      ...(pairPhoneAllowed
+                        ? [
+                            pairPhonePaletteCommand(
+                              pairPhoneLabel(machineName),
+                              PAIR_PHONE_DESCRIPTION,
+                              QrCode,
+                              openPairPhone,
+                            ),
+                          ]
+                        : []),
+                      whatsNewPaletteCommand(Sparkles, whatsNew.entry.open),
+                    ]}
+                  />
+                  {/* After the finder, so the finder hands focus back to its opener before this captures it. */}
+                  <PairPhoneSheet
+                    connection={connection}
+                    machineName={machineName}
+                    onClose={closePairPhone}
+                    open={pairPhoneAllowed && pairPhoneFor === connection.daemonId}
+                    presentation={phone ? 'sheet' : 'dialog'}
+                  />
+                  <WhatsNewSheet
+                    fresh={whatsNew.fresh}
+                    onClose={whatsNew.close}
+                    open={whatsNew.open}
+                    presentation={phone ? 'sheet' : 'dialog'}
+                    releases={whatsNew.releases}
+                  />
                 </div>
-                {phone && sessionsDrawer ? sessionsBar('drawer', closeSessionsDrawer) : null}
-                <CommandPalette
-                  open={palette.open}
-                  focusSignal={palette.focusSignal}
-                  onClose={closePalette}
-                  daemon={connection.daemonId}
-                  sessions={paletteSearch.sessions}
-                  sessionsNote={paletteSearch.note}
-                  onNavigate={navigate}
-                  settings={paletteSettings}
-                  touchAffected={touchAffected}
-                  shortcutAvailable={!barSessionSearch}
-                  commands={[
-                    ...(pairPhoneAllowed
-                      ? [
-                          pairPhonePaletteCommand(
-                            pairPhoneLabel(machineName),
-                            PAIR_PHONE_DESCRIPTION,
-                            QrCode,
-                            openPairPhone,
-                          ),
-                        ]
-                      : []),
-                    whatsNewPaletteCommand(Sparkles, whatsNew.entry.open),
-                  ]}
-                />
-                {/* After the finder, so the finder hands focus back to its opener before this captures it. */}
-                <PairPhoneSheet
-                  connection={connection}
-                  machineName={machineName}
-                  onClose={closePairPhone}
-                  open={pairPhoneAllowed && pairPhoneFor === connection.daemonId}
-                  presentation={phone ? 'sheet' : 'dialog'}
-                />
-                <WhatsNewSheet
-                  fresh={whatsNew.fresh}
-                  onClose={whatsNew.close}
-                  open={whatsNew.open}
-                  presentation={phone ? 'sheet' : 'dialog'}
-                  releases={whatsNew.releases}
-                />
-              </div>
-            </SessionsDrawerContext.Provider>
-          </RestartOverlayProvider>
-        </WhatsNewProvider>
+              </SessionsDrawerContext.Provider>
+            </RestartOverlayProvider>
+          </WhatsNewProvider>
+        </BoardOriginProvider>
       </SessionSearchProvider>
     );
   }

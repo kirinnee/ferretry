@@ -188,11 +188,12 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
       if (destinations.openFile !== undefined) destinations.openFile(reference.path, selection);
       else openSidePaneFileTab(scope, reference.path, selection);
     },
-    // `&F412` opens the card on THIS machine's board (the Board's detail, which a link and Back both
-    // reach). A host with no router has no such place, so it keeps the session's Tasks sheet.
+    // A host with its own Tasks destination (the chat's Tasks tab) keeps it. Otherwise `&F412` opens the
+    // card on THIS machine's board, which a link and Back both reach; with no router either, the Tasks sheet.
     onTaskOpen: id => {
-      if (onNavigate !== undefined) onNavigate(daemonBoardCardPath(scope.daemonId, id.toUpperCase()));
-      else (destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')))();
+      if (destinations.openTasks !== undefined) destinations.openTasks();
+      else if (onNavigate !== undefined) onNavigate(daemonBoardCardPath(scope.daemonId, id.toUpperCase()));
+      else openSidePaneTab(scope, 'tasks');
     },
     // Attention is deliberately NOT a side-pane tab (handover #35). A proved
     // id opens the Agenda panel at the top of the conversation, at that item;

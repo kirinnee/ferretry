@@ -276,7 +276,7 @@ describe('SessionInfo — Surfaces', () => {
 });
 
 describe('SessionInfo — Overview wiring and optional callbacks', () => {
-  it('passes sessions, onRename, onOpenSession and onOpenTasks through when the host hands them in', async () => {
+  it('passes sessions, onRename, onOpenSession and the card through when the host hands them in', async () => {
     const parent = sessionView('parent-a');
     const child = sessionView('session-a', { config: { parent: 'parent-a' } });
     const renamed: boolean[] = [];
@@ -285,16 +285,17 @@ describe('SessionInfo — Overview wiring and optional callbacks', () => {
       sessions: [parent, child],
       onRename: () => renamed.push(true),
       onOpenSession: () => undefined,
-      onOpenTasks: () => undefined,
+      card: { chip: { kind: 'none' }, onOpen: () => undefined, tasks: <p data-fake-tasks="">tasks body</p> },
     });
     expect(root.querySelector('[data-info-rename]')).not.toBeNull();
-    expect(root.querySelector('[data-info-open-tasks]')).not.toBeNull();
+    expect(root.querySelector('[data-info-card="none"]')).not.toBeNull();
+    expect([...root.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).toContain('Tasks');
   });
 
-  it('draws no Rename, Open-session link or Open-tasks control when the host hands none in', async () => {
+  it('draws no Rename, Open-session link or Card row when the host hands none in', async () => {
     const root = await show({ view: sessionView('session-a', { config: { parent: undefined } }) });
     expect(root.querySelector('[data-info-rename]')).toBeNull();
-    expect(root.querySelector('[data-info-open-tasks]')).toBeNull();
+    expect(root.querySelector('[data-info-row="Card"]')).toBeNull();
   });
 });
 

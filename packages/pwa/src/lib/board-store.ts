@@ -40,8 +40,16 @@ import {
   boardOk,
   type FyEvent,
   type LaneSet,
+  type LaneSetActionRequestInput,
+  type LaneSetChangeResponse,
 } from '@ferretry/protocol';
-import { type BoardPort, type BoardRead, type BoardWriteError, readWholeBoard } from './board-client.ts';
+import {
+  type BoardPort,
+  type BoardRead,
+  type BoardWriteError,
+  type LaneWriteError,
+  readWholeBoard,
+} from './board-client.ts';
 import { type BoardServerQuery, cardMatchesQuery, serverQueryKey } from './board-model.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
 
@@ -618,6 +626,38 @@ export class DaemonBoardStore {
       }
     }
     return boardOk(answer.value.task);
+  }
+
+  /**
+   * Proposes, edits or confirms one project's lanes on the machine that owns them and, when the daemon
+   * accepts it, puts the set as the daemon now holds it into the project list and every board showing the
+   * project. A refusal changes nothing and comes back as a value.
+   */
+  async changeLanes(
+    machine: DaemonConnection,
+    projectId: BoardProjectId,
+    request: LaneSetActionRequestInput,
+  ): Promise<BoardResult<LaneSetChangeResponse, LaneWriteError>> {
+    const { daemonId } = machine;
+    const generation = this.#generation(daemonId);
+    const answer = await this.#port.lanes(machine, projectId, request);
+    if (!answer.ok || this.#generation(daemonId) !== generation) return answer;
+    const { laneSet } = answer.value;
+    const listed = this.projectsState(daemonId);
+    if (listed.projects !== null) {
+      this.#projects.set(daemonId, {
+        ...listed,
+        projects: listed.projects.map(project => (project.id === projectId ? { ...project, laneSet } : project)),
+      });
+    }
+    for (const view of this.#views.values()) {
+      const slice = view.state.slices.get(daemonId);
+      if (view.machines.has(daemonId) && slice !== undefined) {
+        this.#setSlice(view, daemonId, { ...slice, laneSets: new Map(slice.laneSets).set(projectId, laneSet) });
+      }
+    }
+    this.#publish();
+    return answer;
   }
 
   // -------------------------------------------------------------------------------------------------

@@ -32,6 +32,8 @@ export const HarnessDialogKindSchema = z.enum([
   'settings-error',
   /** Either: "Do you trust this folder?". */
   'directory-trust',
+  /** Claude: `/rate-limit-options` after "You've hit your … limit" — the login is out of spend or usage. */
+  'usage-limit',
   'other',
 ]);
 export type HarnessDialogKind = z.infer<typeof HarnessDialogKindSchema>;

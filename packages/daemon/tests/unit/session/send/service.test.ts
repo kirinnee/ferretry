@@ -1008,14 +1008,41 @@ describe('a composer that already holds unsent text', () => {
     should([...idle.ledger.withdrawn, ...busy.ledger.withdrawn]).eql(['send-1', 'send-1']);
   });
 
-  it('withdraws a fresh send the terminal could not read the composer for, typing nothing, on both transports', async () => {
+  it("keeps a person's send open and untyped when the composer could not be read, on both transports", async () => {
+    // The owner's message was withdrawn a second after it was accepted, behind a composer the reader
+    // could not place, and nothing ever tried it again. It is the tracker's to type now.
     const idle = parts(target(), [pane({ promptReady: true })]);
     idle.terminal.unreadable = true;
     const busy = parts(target(), [pane({ activeWork: true })]);
     busy.terminal.unreadable = true;
 
-    const idleRefusal = await idle.service.send(request()).catch((error: unknown) => error);
-    const busyRefusal = await busy.service.send(request()).catch((error: unknown) => error);
+    const answers = [await idle.service.send(request()), await busy.service.send(request())];
+
+    for (const [built, answer] of [
+      [idle, answers[0]],
+      [busy, answers[1]],
+    ] as const) {
+      should(answer?.record.fate).equal('accepted');
+      should(built.ledger.records.get('send-1')).containEql({ fate: 'accepted', untyped: true, senderKind: 'human' });
+      should(built.ledger.withdrawn).be.empty();
+      should(built.terminal.typed).be.empty();
+      should(built.tracked).eql([ID]);
+      should(built.repository.events).containEql('control.send_deferred');
+      // Nothing landed, so no turn started and nothing was said to be queued.
+      should(built.repository.transitions).be.empty();
+      should(built.repository.events).not.containEql('control.send_queued');
+    }
+  });
+
+  it("withdraws a ferret's send the terminal could not read the composer for, typing nothing, on both transports", async () => {
+    const sender = { id: PEER, status: 'running', mode: 'auto', turn: 2 } as SendTarget;
+    const idle = parts(target(), [pane({ promptReady: true })], { [PEER]: sender });
+    idle.terminal.unreadable = true;
+    const busy = parts(target(), [pane({ activeWork: true })], { [PEER]: sender });
+    busy.terminal.unreadable = true;
+
+    const idleRefusal = await idle.service.send(request({ senderReference: PEER })).catch((error: unknown) => error);
+    const busyRefusal = await busy.service.send(request({ senderReference: PEER })).catch((error: unknown) => error);
 
     should(idleRefusal).be.instanceof(SendRefused);
     should((busyRefusal as Error).message).match(

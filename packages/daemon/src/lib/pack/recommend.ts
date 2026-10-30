@@ -23,6 +23,7 @@ import type {
   PackRefusal,
 } from '@ferretry/protocol';
 import { modelVocabulary, namedModels } from '@ferretry/protocol';
+import type { PaneLimit } from '../usage/pane-limit.ts';
 import { QUOTA_RANK, quotaOf } from './quota.ts';
 
 /** Everything recommend reads about this machine. */
@@ -35,6 +36,11 @@ export interface PackFleetFacts {
    * the published launcher, so "ready" here is a runtime `fy new` can actually launch. Absent: launchable.
    */
   readonly unlaunchable: Readonly<Record<string, string>>;
+  /**
+   * The logins whose sessions' panes say they are out of quota, by credential id. Absent: none are. Read
+   * from the panes because a spend limit is something only the pane announces.
+   */
+  readonly paneLimits?: ReadonlyMap<string, PaneLimit>;
   /** Now, so a quota window whose reset time has passed counts as fresh. Absent: no reset is assumed. */
   readonly now?: string;
 }
@@ -50,6 +56,7 @@ const runtimeQuota = (runtime: FleetRuntimeView, facts: PackFleetFacts): PackQuo
   quotaOf(
     facts.credentials.find((candidate: FleetCredentialView) => candidate.id === runtime.credential.id),
     facts.now,
+    facts.paneLimits?.get(runtime.credential.id),
   );
 
 /**
@@ -78,6 +85,12 @@ export function runtimeRefusal(
   const unlaunchable = facts.unlaunchable[runtime.wrapper];
   if (unlaunchable !== undefined)
     return refusal('cli_missing', `${name} cannot be launched: ${unlaunchable}`, 'Pick another runtime.');
+  if (runtime.disabled !== undefined)
+    return refusal(
+      'disabled',
+      `${name} cannot launch: ${runtime.launch.available ? 'it is disabled' : runtime.launch.reason}.`,
+      'Pick another model.',
+    );
   const credential = facts.credentials.find(candidate => candidate.id === runtime.credential.id);
   const missing = credential?.environment?.missingSecrets ?? [];
   if (missing.length > 0)
@@ -92,7 +105,8 @@ export function runtimeRefusal(
       `${name}'s login (${runtime.credential.id}) needs signing in.`,
       'Pick another model.',
     );
-  const quota = credential === undefined ? undefined : quotaOf(credential, facts.now);
+  const quota =
+    credential === undefined ? undefined : quotaOf(credential, facts.now, facts.paneLimits?.get(runtime.credential.id));
   if (quota?.state === 'exhausted')
     return refusal(
       'out_of_quota',

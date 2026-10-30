@@ -11,6 +11,8 @@ import type {
   BrowserPageActionSnapshot,
   BrowserPageSnapshot,
   BrowserPageSummary,
+  BrowserProxySetting,
+  BrowserProxyStatus,
   BrowserScreencastFrame,
   BrowserStatus,
   BrowserViewport,
@@ -55,6 +57,13 @@ const agentPage = {
   action: 'navigate',
   at: LATER_INSTANT,
 } satisfies BrowserAgentPage;
+const proxySetting = {
+  url: 'socks5://proxy.example:1080',
+  bypass: ['*.internal.example', '10.0.0.0/8'],
+  username: '${secret:PROXY_USER}',
+  password: '${secret:PROXY_PASSWORD}',
+} satisfies BrowserProxySetting;
+const proxyStatus = { url: proxySetting.url, authenticated: true, bypassCount: 2 } satisfies BrowserProxyStatus;
 const capacity = { running: 1, maximum: browser.BROWSER_MAX_INSTANCES } satisfies BrowserCapacity;
 
 const statusBase = {
@@ -150,6 +159,8 @@ const browserCases: SchemaCase[] = [
   { name: 'page action snapshot', schema: browser.BrowserPageActionSnapshotSchema, value: actionSnapshot },
   { name: 'agent page', schema: browser.BrowserAgentPageSchema, value: agentPage },
   { name: 'capacity', schema: browser.BrowserCapacitySchema, value: capacity },
+  { name: 'proxy setting', schema: browser.BrowserProxySettingSchema, value: proxySetting },
+  { name: 'proxy status', schema: browser.BrowserProxyStatusSchema, value: proxyStatus },
   { name: 'status', schema: browser.BrowserStatusSchema, value: runningStatus },
   { name: 'action', schema: browser.BrowserActionSchema, value: { action: 'navigate', url: homePage.url } },
   { name: 'action result', schema: browser.BrowserActionResultSchema, value: navigateResult },
@@ -688,5 +699,72 @@ describe('browser schemas', () => {
     ).be.true();
     should(browser.BrowserScreencastFrameSchema.safeParse({ ...screencastFrame, pageId: maxPageId }).success).be.true();
     assertRejects(rejected);
+  });
+});
+
+describe('browser proxy setting', () => {
+  const parse = (value: unknown) => browser.BrowserProxySettingSchema.safeParse(value);
+
+  it('should accept an http, https or socks5 address with an optional bypass list', () => {
+    // Act + Assert
+    for (const url of ['http://p.example:8080', 'https://p.example', 'socks5://10.0.0.1:1080', 'socks5://[::1]:1080']) {
+      should(parse({ url }).success).be.true();
+    }
+    should(parse({ url: 'http://p.example' }))
+      .have.property('data')
+      .eql({ url: 'http://p.example', bypass: [] });
+  });
+
+  it('should refuse an address that is not a scheme, a host and a port', () => {
+    // Arrange
+    const cases: SchemaCase[] = [
+      { name: 'no scheme', schema: browser.BrowserProxySettingSchema, value: { url: 'p.example:8080' } },
+      { name: 'unsupported scheme', schema: browser.BrowserProxySettingSchema, value: { url: 'ftp://p.example' } },
+      { name: 'socks4', schema: browser.BrowserProxySettingSchema, value: { url: 'socks4://p.example' } },
+      { name: 'no host', schema: browser.BrowserProxySettingSchema, value: { url: 'http://:8080' } },
+      { name: 'a path', schema: browser.BrowserProxySettingSchema, value: { url: 'http://p.example/pac' } },
+      { name: 'a query', schema: browser.BrowserProxySettingSchema, value: { url: 'http://p.example?x=1' } },
+      { name: 'empty', schema: browser.BrowserProxySettingSchema, value: { url: '  ' } },
+    ];
+
+    // Act + Assert
+    assertRejects(cases);
+  });
+
+  it('should never take a credential in the address, and say to use a secret reference instead', () => {
+    // Act
+    const result = parse({ url: 'http://alice:s3cret@p.example:8080' });
+
+    // Assert
+    should(result.success).be.false();
+    should(JSON.stringify(result.error?.issues)).containEql('secret');
+    should(JSON.stringify(result.error?.issues)).not.containEql('s3cret');
+  });
+
+  it('should take a username and password only as secret references, and only together', () => {
+    // Act + Assert
+    should(parse({ url: 'http://p', username: '${secret:U}', password: '${secret:P}' }).success).be.true();
+    should(parse({ url: 'http://p', username: 'alice', password: '${secret:P}' }).success).be.false();
+    should(parse({ url: 'http://p', username: '${secret:U}', password: 'hunter2' }).success).be.false();
+    should(parse({ url: 'http://p', username: '${secret:U}' }).success).be.false();
+    should(parse({ url: 'http://p', password: '${secret:P}' }).success).be.false();
+    should(parse({ url: 'http://p', username: 'a-${secret:U}', password: '${secret:P}' }).success).be.false();
+  });
+
+  it('should bound the bypass list and refuse an entry that is not a host, domain or network', () => {
+    // Act + Assert
+    should(
+      parse({ url: 'http://p', bypass: ['*.internal.example', '10.0.0.0/8', '<local>', '[::1]'] }).success,
+    ).be.true();
+    should(parse({ url: 'http://p', bypass: ['has space'] }).success).be.false();
+    should(parse({ url: 'http://p', bypass: ['a;b'] }).success).be.false();
+    should(
+      parse({ url: 'http://p', bypass: Array.from({ length: 65 }, (_, i) => `h${String(i)}.example`) }).success,
+    ).be.false();
+  });
+
+  it('should refuse an unknown field', () => {
+    // Act + Assert
+    should(parse({ url: 'http://p', token: 'x' }).success).be.false();
   });
 });

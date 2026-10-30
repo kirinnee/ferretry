@@ -33,11 +33,11 @@ interface KeysCopy {
 const KEYS_COPY = {
   ladder: {
     label: '@ ladder',
-    detail: '@ files · @@ agents · @@@ agenda. Typing : or ! in normal text never pops a menu.',
+    detail: '@ files · @@ agents · @@@ agenda · @@@@ tasks. Typing : ! or & in normal text never pops a menu.',
   },
   symbols: {
     label: 'Symbols',
-    detail: '@ files · : agents · ! agenda · % terminals. Faster once you know them.',
+    detail: '@ files · : agents · ! agenda · & tasks · % terminals. Faster once you know them.',
   },
   both: { label: 'Both', detail: 'Either way works.' },
 } as const satisfies Record<SuggestionKeys, KeysCopy>;

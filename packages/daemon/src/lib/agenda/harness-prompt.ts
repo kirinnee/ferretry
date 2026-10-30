@@ -57,7 +57,16 @@ const HarnessStateSchema = z.object({
     .optional()
     .catch(undefined),
   harnessDialog: z
-    .object({ id: z.string().min(1), title: z.string().min(1) })
+    .object({
+      id: z.string().min(1),
+      title: z.string().min(1),
+      kind: z.string().optional().catch(undefined),
+      body: z.string().optional().catch(undefined),
+    })
+    .optional()
+    .catch(undefined),
+  quota: z
+    .object({ resetAt: z.number().finite().positive().optional().catch(undefined) })
     .optional()
     .catch(undefined),
 });
@@ -139,10 +148,48 @@ export function harnessQuestionRequest(pending: PendingQuestion, failed = false)
   };
 }
 
+/** When a limit resets, in words a reader anywhere agrees on: `Nov 1, 00:00 UTC`. */
+function resetWords(resetAt: number): string {
+  const at = new Date(resetAt);
+  const month = at.toLocaleString('en-US', { month: 'short', timeZone: 'UTC' });
+  return `${month} ${String(at.getUTCDate())}, ${at.toISOString().slice(11, 16)} UTC`;
+}
+
+/** The item a session parked on "You've hit your … limit" raises: the login is spent, and it says until when. */
+function usageLimitWait(state: HarnessState, sourceRef: string): HarnessWait {
+  const dialog = state.harnessDialog;
+  const notice = dialog?.body?.split('\n')[0]?.trim() || "The ferret's login hit its usage limit";
+  const spend = /\bspend\b/iu.test(notice);
+  const resets = state.quota?.resetAt === undefined ? undefined : resetWords(state.quota.resetAt);
+  return {
+    sourceRef,
+    request: {
+      source: 'question',
+      sourceRef,
+      title: spend ? 'Login hit its spend limit' : 'Login hit its usage limit',
+      kind: 'info',
+      subject: spend
+        ? `The ferret's login hit its spend limit${resets === undefined ? '' : ` and resets ${resets}`}. Raise the limit or switch logins.`
+        : `The ferret's login hit its usage limit${resets === undefined ? '' : ` and resets ${resets}`}. Wait or switch logins.`,
+      why: "The ferret stopped on its harness's rate-limit dialog and cannot go on until the limit resets or someone chooses what to do.",
+      context: toBullets([
+        `It says: ${clip(notice, 200)}`,
+        ...(resets === undefined ? ['The harness gave no reset time.'] : [`The limit resets ${resets}.`]),
+        'Nothing was chosen for you: the dialog still waits in the Console.',
+        'This clears by itself once the limit is gone and the dialog closes.',
+      ]),
+      howToResolve:
+        'Ask your admin for more usage, or open the Console tab and pick what the ferret should do. Failover to another login follows your quota-failover settings.',
+      ...(state.turnStateAt === undefined ? {} : { waitingSince: state.turnStateAt }),
+    },
+  };
+}
+
 /** The item a console prompt (a permission prompt, a dialog) raises: the owner answers it in the Console. */
 function consolePromptWait(state: HarnessState): HarnessWait {
   const id = state.permissionRequest?.id ?? state.harnessDialog?.id ?? state.turnStateAt ?? 'current';
   const sourceRef = `${PROMPT_REF_PREFIX}${id}`.slice(0, MAX_AGENDA_SOURCE_REF_LENGTH);
+  if (state.harnessDialog?.kind === 'usage-limit') return usageLimitWait(state, sourceRef);
   const asks = state.permissionRequest?.question ?? state.turnPrompt ?? state.harnessDialog?.title;
   const permission = state.permissionRequest !== undefined;
   return {

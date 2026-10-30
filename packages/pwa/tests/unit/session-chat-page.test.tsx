@@ -1,12 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
-import {
-  type HarnessDialog,
-  MCP_OAUTH_PATH,
-  matchesSessionSearchQuery,
-  type PermissionRequest,
-  type SessionView,
-  sessionSearchTaskHaystack,
-} from '@ferretry/protocol';
+import { type HarnessDialog, MCP_OAUTH_PATH, type PermissionRequest, type SessionView } from '@ferretry/protocol';
 import { type FyApiClient, FyHttpError } from '@ferretry/protocol/client';
 import { Copy } from 'lucide-react';
 import { type ComponentProps, cloneElement, type ReactElement } from 'react';
@@ -22,10 +15,12 @@ import { ReferenceSurfaceProvider } from '../../src/components/reference-surface
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
-import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
+import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine, AgendaReferenceChips } from '../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../src/features/agenda/agenda-row.tsx';
-import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
+import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
+import { BoardSideTab } from '../../src/features/board/board-side-tab.tsx';
+import { ChatCardChip } from '../../src/features/board/chat-card-chip.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
@@ -35,15 +30,17 @@ import { AddMcpForm } from '../../src/features/session-actions/add-mcp-form.tsx'
 import { ConvertSheet } from '../../src/features/session-actions/convert-sheet.tsx';
 import type { CoreActionContext } from '../../src/features/session-actions/core-actions.ts';
 import { ForkForm } from '../../src/features/session-actions/fork-form.tsx';
-import type { SessionActionContribution } from '../../src/features/session-actions/registry.ts';
+import type { SessionActionContribution, SessionActionSection } from '../../src/features/session-actions/registry.ts';
 import { RenameForm } from '../../src/features/session-actions/rename-form.tsx';
 import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
-import { SessionSearchProvider, SessionTasksSearchSurface } from '../../src/features/session-search/session-search.tsx';
+import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
+import { ThemeSettingsPanel } from '../../src/shell/theme-toggle.tsx';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
+import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
@@ -62,12 +59,12 @@ import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-prefe
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
+import { boardAnswer, card as boardCard, fakeEnvironment, fakePort, laneSetFor, PROJECT } from './board-support.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
 import { sessionView } from '../support/sessions.ts';
 import { settleUntil } from '../support/settle.ts';
-import { taskSummary } from '../support/tasks.ts';
 
 const alpha = daemonConnection({
   daemonId: 'alpha',
@@ -957,7 +954,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('keeps Interrupt on a phone bar and moves Stop into Actions, behind an inline confirmation', async () => {
+  test('on a phone puts Interrupt, Theme and Stop in Actions — Stop behind an inline confirmation', async () => {
     const calls: string[] = [];
     let opened = 0;
     const page = renderSessionChatPage(
@@ -974,8 +971,14 @@ describe('SessionChatPage', () => {
       />,
     );
     try {
-      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
+      // The owner's phone (2026-10-30): the bar is ☰ · name · card · dot · ▾, and nothing else — so the bar's
+      // Interrupt, ⓘ and theme switch are the top of ▾ (this host has no Info, so no Info row).
+      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(false);
       expect(hasBarAction(page.root, 'Stop session')).toBe(false);
+      expect(page.root.findAllByProps({ 'data-session-info-toggle': '' })).toHaveLength(0);
+      expect(page.root.findAllByProps({ 'data-theme-trigger': '' })).toHaveLength(0);
+      expect(actionLabels(page.root).slice(0, 2)).toEqual(['Interrupt turn', 'Theme…']);
+      expect(actionLabels(page.root)).not.toContain('Info');
       expect(actionLabels(page.root).at(-1)).toBe('Stop ferret…');
       // On a phone the trigger is an icon, named for a screen reader.
       expect(actionsTrigger(page.root).props['aria-label']).toBe('Actions');
@@ -998,7 +1001,63 @@ describe('SessionChatPage', () => {
       });
       await flush();
       expect(calls).toEqual(['stop:shared:stopped from the PWA session workspace']);
-      expect(hasBarAction(page.root, 'Interrupt turn')).toBe(true);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('on a phone ▾ interrupts, opens Info and opens the theme controls — what the bar no longer draws', async () => {
+    const calls: string[] = [];
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client(calls, sessionView('shared'))}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="sheet"
+        session={sessionView('shared')}
+      />,
+    );
+    try {
+      expect(actionLabels(page.root).slice(0, 3)).toEqual(['Interrupt turn', 'Info', 'Theme…']);
+      chooseAction(page.root, 'interrupt');
+      await flush();
+      expect(calls).toEqual(['interrupt:shared']);
+
+      // The form's sheet is portalled on a phone (the real controls are proved in harness/phone-chat-screenshot.ts).
+      chooseAction(page.root, 'theme');
+      const menu = page.root.findByType(ActionsMenu);
+      expect(menu.props.form).toBe('theme');
+      const theme = (menu.props.sections as readonly SessionActionSection[])
+        .flatMap(section => section.entries)
+        .find(entry => entry.id === 'theme');
+      if (theme?.kind !== 'form') throw new Error('Theme… is not a form in Actions');
+      expect((theme.render({} as never) as ReactElement).type).toBe(ThemeSettingsPanel);
+
+      chooseAction(page.root, 'info');
+      expect(page.root.findByType(SessionInfo).props.placement.open).toBe(true);
+      expect(actionLabels(page.root)).toContain('Close Info');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('on a phone offers no Interrupt in ▾ for a ferret that is not running', () => {
+    const stopped = sessionView('shared', { state: { status: 'stopped' } });
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        client={client([], stopped)}
+        connection={alpha}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="sheet"
+        session={stopped}
+      />,
+    );
+    try {
+      expect(actionLabels(page.root)).not.toContain('Interrupt turn');
+      expect(actionLabels(page.root)[0]).toBe('Theme…');
     } finally {
       run(() => page.unmount());
     }
@@ -1408,23 +1467,7 @@ describe('SessionChatPage', () => {
     run(() => page.unmount());
   });
 
-  test('renders each supported pane surface and current-session task search', async () => {
-    // THE SUMMARY AND THE PROSE ARE SEPARATE RECORDS ON PURPOSE.
-    //
-    // `ScopedTaskSummarySchema` is non-strict, so a fixture that hung
-    // `description`/`ask`/`clarifications` on the summary would have them
-    // silently stripped and would keep passing while proving nothing about
-    // prose. Keeping the prose here, and answering `?q=` with the protocol's own
-    // matcher over it, is what makes this page prove the daemon-side search
-    // rather than an unfiltered stub that returns the row whatever is typed.
-    const searchSummary = { ...taskSummary({ id: 'F6', title: 'Needle task' }), sessionId: 'shared' };
-    const searchProse = {
-      id: 'F6',
-      title: 'Needle task',
-      description: 'A task used to prove the current-session search action.',
-      ask: { text: 'Find the needle' },
-      clarifications: [],
-    };
+  test('renders each supported pane surface', async () => {
     const seen: Array<{ method: string; pathname: string; search: URLSearchParams }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = new URL(String(input));
@@ -1441,20 +1484,14 @@ describe('SessionChatPage', () => {
           coverage: 'complete',
           skipped: [],
         });
-      if (url.pathname.endsWith('/tasks')) {
-        const query = url.searchParams.get('q');
-        const rows =
-          query === null || matchesSessionSearchQuery(sessionSearchTaskHaystack(searchProse), query)
-            ? [searchSummary]
-            : [];
+      if (url.pathname.endsWith('/tasks'))
         return Response.json({
           v: 1,
           sessionId: 'shared',
-          tasks: rows,
+          tasks: [],
           parseErrors: 0,
           updatedAt: '2026-08-06T00:00:00.000Z',
         });
-      }
       if (url.pathname.endsWith('/fs')) return Response.json({ entries: [{ name: 'needle.ts', type: 'file' }] });
       return Response.json(url.pathname.endsWith('/changes') ? { repo: false, changes: [] } : { entries: [] });
     }) as typeof fetch;
@@ -1494,42 +1531,7 @@ describe('SessionChatPage', () => {
       await runAsync(async () => await Promise.resolve());
       expect(JSON.stringify(page.toJSON())).toContain('paired snapshot');
 
-      // A `&task` reference opens this ferret's tasks in their sheet.
-      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F6'));
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
-      await runAsync(async () => {
-        for (let turn = 0; turn < 8; turn += 1) await Promise.resolve();
-      });
-      expect(page.root.findByType(ReferenceSurfaceProvider).props.surface.taskReferenceResolver?.('F6')).toBe(true);
-      const input = page.root.findByProps({ 'data-session-utility': 'tasks' }).findByType('input');
-      run(() => input.props.onChange({ target: { value: 'needle' } }));
-      // The task half is network-bound now. Reading the popup on the very next
-      // line would see the file row alone and count 1 — a failure that looks
-      // like a missing result and is really a missing wait.
-      //
-      // GATED ON THE ANSWER, NOT ON A DURATION. A single sleep of the query debounce plus a margin is
-      // enough on an idle machine and measurably is not under full-suite load, where the timer fires
-      // late and the fetch still has to resolve behind it. Waiting for the response this test is
-      // about removes the race instead of widening it — and the shared wait FAILS when its budget
-      // runs out, so an answer that never arrives is reported as the expired wait it is rather than
-      // as one popup row too few.
-      const popupRows = () =>
-        page.root.find(node => String(node.props.className).includes('z-[80]')).findAllByType('button');
-      const answered = () => seen.some(row => row.pathname.endsWith('/tasks') && row.search.get('q') === 'needle');
-      await settleUntil(
-        () => answered() && popupRows().length === 2,
-        'the narrowed task search to answer and both rows to render',
-        runAsync,
-      );
-
-      const results = popupRows();
-      expect(results).toHaveLength(2);
-      // Exactly one narrowing request, and the daemon decided what it returned.
-      expect(seen.filter(row => row.pathname.endsWith('/tasks') && row.search.get('q') === 'needle')).toHaveLength(1);
-      // By KIND, not by position: results are ranked, so a file and a task can
-      // trade places as the scoring changes.
-      run(() => results.find(row => row.props['data-result-kind'] === 'file')?.props.onClick());
-
+      run(() => workspace().openFile('needle.ts'));
       // ONE TAB PER FILE (#35): a file tab renders ITS file, not the picker.
       await runAsync(async () => await Promise.resolve());
       expect(page.root.findAllByType(FileInstanceSurface)).toHaveLength(1);
@@ -1540,7 +1542,7 @@ describe('SessionChatPage', () => {
     }
   });
 
-  test('Info opens the real session-scoped tasks and analytics sheets', async () => {
+  test('Info opens the real session-scoped analytics sheet; no board means no card chip and no Tasks tab', async () => {
     const scope = daemonSessionScope(alpha, 'shared');
     const current = sessionView('shared');
     const page = renderSessionChatPage(
@@ -1564,13 +1566,101 @@ describe('SessionChatPage', () => {
       expect(analytics.props.scope).toEqual(scope);
       const sheet = () => page.root.findAll(node => node.type === BottomSheet && node.props.closeLabel === 'Close')[0];
       expect(sheet()?.props.ariaLabel).toBe('Analytics for this session');
-      run(() => page.root.findByType(SessionInfo).props.onOpenTasks());
-      expect(page.root.findAllByType(SessionAnalyticsSurface)).toHaveLength(0);
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
-      expect(sheet()?.props.ariaLabel).toBe('Tasks');
+      expect(page.root.findByType(SessionInfo).props.card).toBeUndefined();
+      expect(page.root.findAllByType(ChatCardChip)).toHaveLength(0);
       run(() => sheet()?.props.onClose());
       expect(sheet()?.props.open).toBe(false);
       expect(sheet()?.props.ariaLabel).toBe('Session tool');
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a board gives the header its card chip, and a task reference opens the Tasks tab on this ferret’s cards', async () => {
+    const navigated: string[] = [];
+    const current = sessionView('shared', { config: { focusTask: { id: 'F18' } } });
+    const board = new DaemonBoardStore(
+      fakePort({
+        board: async () =>
+          boardAnswer([boardCard('F18', { owner: 'shared' }), boardCard('F19', { owner: 'other' })], {
+            projectId: PROJECT,
+            laneSet: laneSetFor(),
+          }),
+      }),
+      fakeEnvironment(),
+    );
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        board={board}
+        client={client([], current)}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        initialInfo="overview"
+        onNavigate={to => void navigated.push(to)}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={current}
+      />,
+      fakeDaemon().factory,
+    );
+    try {
+      await flush();
+      const chip = page.root.findByType(ChatCardChip);
+      expect(chip.props.chip).toMatchObject({ kind: 'card', ref: '&F18', title: 'Card F18' });
+      expect(chip.props.href).toBe('/d/alpha/board/F18');
+      const link = chip.findByType('a');
+      expect(link.props.href).toBe('/d/alpha/board/F18');
+      run(() => link.props.onClick({ button: 0, preventDefault: () => undefined }));
+      expect(navigated).toEqual(['/d/alpha/board/F18']);
+      expect(page.root.findAllByType(BoardSideTab)).toHaveLength(0);
+      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F18'));
+      await flush();
+      const tab = page.root.findByType(BoardSideTab);
+      expect(tab.props.chat.cards.focus?.task.id).toBe('F18');
+      expect(tab.props.chat.cards.total).toBe(1);
+    } finally {
+      run(() => page.unmount());
+    }
+  });
+
+  test('a chat with no focus card and no Tasks tab open never reads the board', async () => {
+    let reads = 0;
+    const board = new DaemonBoardStore(
+      fakePort({
+        board: async () => {
+          reads += 1;
+          return boardAnswer([boardCard('F18', { owner: 'shared' })], { projectId: PROJECT, laneSet: laneSetFor() });
+        },
+      }),
+      fakeEnvironment(),
+    );
+    const current = sessionView('shared');
+    const page = renderSessionChatPage(
+      <SessionChatPage
+        board={board}
+        client={client([], current)}
+        connection={alpha}
+        context={contextDependencies()}
+        entries={[]}
+        onSessionChange={() => undefined}
+        presentation="pane"
+        session={current}
+      />,
+      fakeDaemon().factory,
+    );
+    try {
+      await flush();
+      expect(page.root.findByType(ChatCardChip).props.chip).toEqual({ kind: 'none' });
+      expect(reads).toBe(0);
+      run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onTaskOpen?.('F18'));
+      await flush();
+      expect(reads).toBeGreaterThan(0);
+      expect(
+        page.root
+          .findByType(BoardSideTab)
+          .props.chat.cards.owned.flatMap((group: { readonly cards: readonly unknown[] }) => group.cards),
+      ).toHaveLength(1);
     } finally {
       run(() => page.unmount());
     }
@@ -1733,7 +1823,6 @@ describe('SessionChatPage', () => {
       expect(JSON.stringify(page.toJSON())).toContain('Terminals are not available on this page.');
 
       run(() => surface().onTaskOpen?.('F1'));
-      expect(page.root.findAllByType(SessionTasksSearchSurface)).toHaveLength(1);
       await runAsync(async () => await Promise.resolve());
     } finally {
       run(() => page.unmount());
@@ -2594,7 +2683,8 @@ describe('SessionChatPage', () => {
     test('covers the messages, never the composer, while an item shows, and gives them back when it closes', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
-        const hidden = () => page.root.find(node => node.type === 'div' && node.props.className === 'contents');
+        const hidden = () =>
+          page.root.find(node => node.type === 'div' && node.props.className === 'fy-chat-log__messages');
         expect(hidden().props.inert).toBeUndefined();
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
         expect(hidden().props.inert).toBe(true);

@@ -10,20 +10,13 @@ import {
   type AgendaAsk,
   type AgendaCardAnswer,
   type BoardProjectId,
-  BoardProjectIdSchema,
   clipAtWord,
+  LANE_PROPOSAL_ANSWERS,
   type LaneSet,
   MAX_AGENDA_SUBJECT_LENGTH,
+  parseLaneProposalReference,
   type ResolvedAgendaItem,
 } from '@ferretry/protocol';
-
-/** The option labels ARE the decision, so a client that knows nothing of lanes answers correctly by choosing. */
-export const LANE_PROPOSAL_ANSWERS = { accept: 'Accept', edit: 'Edit' } as const;
-
-const REFERENCE_PREFIX = 'lanes:';
-
-export const laneProposalReference = (projectId: BoardProjectId, version: number): string =>
-  `${REFERENCE_PREFIX}${projectId}:${String(version)}`;
 
 export interface LaneProposalCard {
   readonly subject: string;
@@ -65,12 +58,6 @@ export const acceptedProposal = (
   addressed: ResolvedAgendaItem,
 ): { readonly projectId: BoardProjectId; readonly version: number } | undefined => {
   const { sourceRef, response } = addressed;
-  if (sourceRef === null || !sourceRef.startsWith(REFERENCE_PREFIX)) return undefined;
   if (response?.kind !== 'multiple-choice' || response.choice.trim() !== LANE_PROPOSAL_ANSWERS.accept) return undefined;
-  const separator = sourceRef.lastIndexOf(':');
-  const version = Number(sourceRef.slice(separator + 1));
-  const projectId = sourceRef.slice(REFERENCE_PREFIX.length, separator);
-  if (!Number.isSafeInteger(version) || version < 1 || projectId === '') return undefined;
-  const parsed = BoardProjectIdSchema.safeParse(projectId);
-  return parsed.success ? { projectId: parsed.data, version } : undefined;
+  return parseLaneProposalReference(sourceRef);
 };

@@ -165,6 +165,22 @@ describe('CORE_SESSION_ACTIONS — status decides restart vs. resume vs. stop', 
     expect(entries.find(entry => entry.id === SESSION_ACTION_IDS.restart)?.danger).toBeUndefined();
   });
 
+  it('says an outdated ferret is outdated on Restart, its remedy — a phone bar has no room for the mark', () => {
+    const restartOf = (ctx: CoreActionContext) =>
+      sessionActionSections(CORE_SESSION_ACTIONS, ctx)
+        .flatMap(section => section.entries)
+        .find(entry => entry.id === SESSION_ACTION_IDS.restart);
+    const outdated = { ...sessionView('a1', { state: { status: 'running' } }), outdated: { sections: ['pack'] } };
+    const restart = restartOf(context('running', { view: outdated as CoreActionContext['view'] }));
+    expect(restart?.detail).toBe('Outdated');
+    expect(restart?.kind === 'confirm' ? restart.consequence : '').toContain('loads the new instructions (Pack mode)');
+    const upToDate = restartOf(context('running'));
+    expect(upToDate?.detail).toBeUndefined();
+    expect(upToDate?.kind === 'confirm' ? upToDate.consequence : '').toBe(
+      'It relaunches on the same login and resumes the conversation.',
+    );
+  });
+
   it('completed (terminal, not kill_failed) behaves exactly like stopped', () => {
     const ids = idsFor(context('completed'));
     expect(ids).toContain(SESSION_ACTION_IDS.resume);

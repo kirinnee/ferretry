@@ -145,8 +145,6 @@ export interface CommandPaletteProps {
    * on-screen keyboard over the results they opened the palette to read.
    */
   readonly touchAffected?: boolean;
-  /** False on a session route, where Cmd/Ctrl+K belongs to file/task search. */
-  readonly shortcutAvailable?: boolean;
 }
 
 export function CommandPalette({
@@ -162,7 +160,6 @@ export function CommandPalette({
   settings = NO_SETTINGS,
   destinations = APP_BAR_DESTINATIONS,
   touchAffected = false,
-  shortcutAvailable = true,
 }: CommandPaletteProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -444,7 +441,7 @@ export function CommandPalette({
 
         {/* Key hints are for a keyboard. A phone opened this with a tap and has no ↑↓, ↵ or esc; a touch
             laptop (touch-affected, but wide) still has its keyboard, so it keeps them. */}
-        {latchedTouch.current && layout === 'drawer' ? null : <Footer shortcutAvailable={shortcutAvailable} />}
+        {latchedTouch.current && layout === 'drawer' ? null : <Footer />}
 
         {/* Spoken, never shown. `sr-only` and not `hidden`, which would take it
             straight back out of the accessibility tree. */}
@@ -643,7 +640,7 @@ function SessionOption({
  * sibling feature (find inside a transcript) and readers will try it here; say so
  * rather than letting them discover a browser find bar over a dialog.
  */
-function Footer({ shortcutAvailable }: { readonly shortcutAvailable: boolean }) {
+function Footer() {
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-sm border-t border-border-soft px-panel py-row-y text-meta text-muted">
       <span className="inline-flex items-center gap-xs">
@@ -659,11 +656,7 @@ function Footer({ shortcutAvailable }: { readonly shortcutAvailable: boolean }) 
         <span className="mono">esc</span>
         close
       </span>
-      <span className="ml-auto text-faint">
-        {shortcutAvailable
-          ? `${paletteShortcutLabel()} outside text fields · reopen finder`
-          : `${paletteShortcutLabel()} searches this session’s files & tasks`}
-      </span>
+      <span className="ml-auto text-faint">{`${paletteShortcutLabel()} from anywhere · reopen finder`}</span>
     </div>
   );
 }

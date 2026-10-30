@@ -1,8 +1,8 @@
 /**
- * Screenshots of the "Outdated" mark and the one "Restart outdated (N)" button, as the app draws them: the
- * sessions bar (a column on a desktop, the drawer on a phone) with outdated ferrets marked and the button at
- * the head of the list, before a press (`list`) and after it, showing what restarted now and what is queued
- * (`result`), under the REAL session header. Light and dark studio themes. Review evidence for
+ * Screenshots of the "Outdated" mark and the "Restart outdated (N)" row of the bar's ⋯ menu, as the app
+ * draws them: the sessions bar (a column on a desktop, the drawer on a phone) with outdated ferrets marked and
+ * the count badge on the ⋯ (`list`), the menu open (`menu`), and after a press, showing what restarted now
+ * and what is queued (`result`), under the REAL session header. Light and dark studio themes. Review evidence for
  * `docs/launch-settings.md`; nothing compares the PNGs.
  *
  *   bun harness/restart-outdated-screenshot.tsx [--out <dir>]    # writes restart-outdated-*.png
@@ -160,7 +160,7 @@ try {
         });
         const page = await context.newPage();
         await page.goto(`${server.url}?theme=studio-${scheme}`);
-        await page.locator('[data-restart-outdated-button]').waitFor({ state: 'visible' });
+        await page.locator('[data-sbar-options-badge]').waitFor({ state: 'visible' });
         const shoot = async (scene: string): Promise<void> => {
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
           if (overflow > 0) fail(`${scene} at ${viewport.name}/${scheme} scrolls sideways by ${overflow}px`);
@@ -169,7 +169,10 @@ try {
           process.stdout.write(`📸 ${target}\n`);
         };
         await shoot('list');
-        await page.locator('[data-restart-outdated-button]').click();
+        await page.locator('[data-sbar-options]').click();
+        await page.locator('[data-menu-key="restart-outdated"]').waitFor({ state: 'visible' });
+        await shoot('menu');
+        await page.locator('[data-menu-key="restart-outdated"]').click();
         await page.locator('[data-restart-outdated-result]').waitFor({ state: 'visible' });
         await shoot('result');
       } finally {

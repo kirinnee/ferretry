@@ -398,3 +398,33 @@ export const isBlockerDone = (category: LaneCategory, until: DependencyUntil, re
   if (category !== 'shipped') return false;
   return until === 'shipped' || released;
 };
+
+// ---------------------------------------------------------------------------------------------------
+// The lane-proposal card: the one agenda choice a proposal raises for the owner.
+// ---------------------------------------------------------------------------------------------------
+
+/** The option labels ARE the decision, so a client that knows nothing of lanes answers correctly by choosing. */
+export const LANE_PROPOSAL_ANSWERS = { accept: 'Accept', edit: 'Edit' } as const;
+
+const LANE_PROPOSAL_REFERENCE_PREFIX = 'lanes:';
+
+/** The project and version a lane-proposal card is about. */
+export interface LaneProposalTarget {
+  readonly projectId: z.infer<typeof BoardProjectIdSchema>;
+  readonly version: number;
+}
+
+/** The agenda `sourceRef` of a proposal's card, keyed by project AND version so a set proposed again gets its own. */
+export const laneProposalReference = (projectId: LaneProposalTarget['projectId'], version: number): string =>
+  `${LANE_PROPOSAL_REFERENCE_PREFIX}${projectId}:${String(version)}`;
+
+/** The project and version a `sourceRef` names, or `undefined` for any other reference. */
+export const parseLaneProposalReference = (sourceRef: string | null): LaneProposalTarget | undefined => {
+  if (sourceRef === null || !sourceRef.startsWith(LANE_PROPOSAL_REFERENCE_PREFIX)) return undefined;
+  const separator = sourceRef.lastIndexOf(':');
+  const version = Number(sourceRef.slice(separator + 1));
+  const projectId = sourceRef.slice(LANE_PROPOSAL_REFERENCE_PREFIX.length, separator);
+  if (!Number.isSafeInteger(version) || version < 1 || projectId === '') return undefined;
+  const parsed = BoardProjectIdSchema.safeParse(projectId);
+  return parsed.success ? { projectId: parsed.data, version } : undefined;
+};

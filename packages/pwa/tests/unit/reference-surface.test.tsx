@@ -208,7 +208,6 @@ describe('sessionReferenceSurface', () => {
       scope,
       fetcher: browserFetch,
       onNavigate: to => visited.push(to),
-      destinations: { openTasks: () => visited.push('tasks') },
     });
 
     // Act
@@ -217,6 +216,24 @@ describe('sessionReferenceSurface', () => {
     // Assert
     should(visited).deepEqual(['/d/daemon-a/board/F412']);
     should(readSidePaneTabsState(scope).active).equal(null);
+  });
+
+  test("should keep the host's own Tasks destination over the board when it has one", () => {
+    // Arrange
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+      destinations: { openTasks: () => visited.push('tasks') },
+    });
+
+    // Act
+    surface.onTaskOpen?.('f412');
+
+    // Assert
+    should(visited).deepEqual(['tasks']);
   });
 
   // Attention is deliberately NOT a side-pane tab (handover #35); its home is
