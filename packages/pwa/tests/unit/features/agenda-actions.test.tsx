@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'bun:test';
 import { AgendaActions, type AgendaActionsProps } from '../../../src/features/agenda/agenda-actions.tsx';
-import { interact, mount, must } from '../../support/dom.ts';
+import { interact, mount, must, pressKey } from '../../support/dom.ts';
 
 const props = (overrides: Partial<AgendaActionsProps>): AgendaActionsProps => ({
   answers: [],
@@ -83,6 +83,29 @@ describe('AgendaActions in flight', () => {
       <AgendaActions {...props({ busy: true, answers: [{ direction: 'right', does: 'approve', label: 'Allow' }] })} />,
     );
     expect(view.container.querySelector<HTMLButtonElement>('[data-agenda-answer="right"]')?.disabled).toBe(true);
+    await view.unmount();
+  });
+});
+
+describe('the ⋯ menu', () => {
+  it('opens on Not needed…, moves with ↓ and ↑ (wrapping), and Esc closes it back to its button', async () => {
+    let dismissed = 0;
+    const view = await mount(<AgendaActions {...props({ dismissInMenu: true, onDismiss: () => (dismissed += 1) })} />);
+    const trigger = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-more]'), 'the ⋯ button');
+    await interact(() => trigger.click());
+    const item = must(view.container.querySelector<HTMLElement>('[role="menuitem"]'), 'Not needed…');
+    expect(item.textContent).toContain('Not needed');
+    expect(document.activeElement).toBe(item);
+    await interact(() => pressKey(item, 'ArrowDown'));
+    expect(document.activeElement).toBe(item);
+    await interact(() => pressKey(item, 'ArrowUp'));
+    expect(document.activeElement).toBe(item);
+    await interact(() => pressKey(item, 'Escape'));
+    expect(view.container.querySelector('[role="menu"]')).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+    await interact(() => trigger.click());
+    await interact(() => must(view.container.querySelector<HTMLElement>('[role="menuitem"]'), 'again').click());
+    expect(dismissed).toBe(1);
     await view.unmount();
   });
 });

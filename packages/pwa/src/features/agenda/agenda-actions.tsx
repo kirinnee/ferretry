@@ -44,26 +44,11 @@ function RecommendedTag() {
   );
 }
 
-/** An option the answer row has no button for: it lives in the menu as "D — label". */
-interface MenuChoice {
-  readonly label: string;
-  readonly letter: string | undefined;
-  readonly onPick: () => void;
-}
-
 /**
- * A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. It holds the
- * options past the row's three (`extras`) and, unless `onDismiss` is absent, "Not needed…".
+ * A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. It holds
+ * "Not needed…" (the Inbox card's answer bar; the agenda item view has no menu).
  */
-function ActionMenu({
-  busy,
-  onDismiss,
-  extras = [],
-}: {
-  readonly busy: boolean;
-  readonly onDismiss?: () => void;
-  readonly extras?: readonly MenuChoice[];
-}) {
+function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDismiss?: () => void }) {
   const menuId = useId();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -114,22 +99,6 @@ function ActionMenu({
       </button>
       {open ? (
         <div aria-label="More actions" className="fy-attn-menu__list" id={menuId} role="menu">
-          {extras.map(extra => (
-            <button
-              className="fy-attn-menu__item"
-              data-agenda-extra={extra.label}
-              key={extra.label}
-              onClick={() => {
-                setOpen(false);
-                extra.onPick();
-              }}
-              role="menuitem"
-              tabIndex={-1}
-              type="button"
-            >
-              {extra.letter === undefined ? extra.label : `${extra.letter} — ${extra.label}`}
-            </button>
-          ))}
           {onDismiss === undefined ? null : (
             <button
               className="fy-attn-menu__item"
