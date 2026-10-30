@@ -16,7 +16,8 @@
         "tests/integration/support/housekeeping-run.ts",
         "tests/integration/support/slow-index-writer.worker.ts",
         "tests/integration/support/slow-analytics-writer.worker.ts",
-        "tests/integration/support/worker-rss.ts"
+        "tests/integration/support/worker-rss.ts",
+        "tests/integration/support/session-worker-rss.ts"
       ],
       "project": ["src/**/*.ts", "bin/**/*.ts", "tests/**/*.ts"]
     },

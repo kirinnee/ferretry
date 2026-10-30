@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url';
 import should from 'should';
 
 const ENTRY = join(import.meta.dir, '../../../../bin/session.worker.ts');
+const RSS = join(import.meta.dir, '../../support/session-worker-rss.ts');
 /** Bytes of the unminified bundle: about 160 KB today, and an order of magnitude under the 15 MB worker. */
 const BUDGET_BYTES = 256 * 1024;
 /**
@@ -24,6 +25,30 @@ const BUDGET_BYTES = 256 * 1024;
  */
 const WORKER_MEMORY_BUDGET_MB = 15;
 const WORKERS = 5;
+/**
+ * Every process this file starts is killed by then. A test's own timeout cannot end a child, and a
+ * child it waits on forever is a run that never finishes: a deadline here is a failure that says why.
+ */
+const CHILD_DEADLINE_MS = 30_000;
+
+/** Runs `argv` to its end, or kills it at {@link CHILD_DEADLINE_MS}, and throws unless it exited 0. */
+async function run(argv: readonly string[], what: string): Promise<string> {
+  const child = Bun.spawn([...argv], {
+    stdout: 'pipe',
+    stderr: 'pipe',
+    timeout: CHILD_DEADLINE_MS,
+    killSignal: 'SIGKILL',
+  });
+  const [text, errors, code] = await Promise.all([
+    new Response(child.stdout).text(),
+    new Response(child.stderr).text(),
+    child.exited,
+  ]);
+  if (child.signalCode === 'SIGKILL')
+    throw new Error(`${what} was still running after ${String(CHILD_DEADLINE_MS)} ms: ${errors}`);
+  if (code !== 0) throw new Error(`${what} failed (${String(code)}): ${errors}`);
+  return text;
+}
 
 const scratch: string[] = [];
 afterAll(async () => {
@@ -47,13 +72,7 @@ const FORBIDDEN: readonly RegExp[] = [
  * test runner cannot resolve the daemon's relative imports (Bun 1.3.13).
  */
 async function bundled(): Promise<{ readonly text: string; readonly modules: readonly string[] }> {
-  const child = Bun.spawn([process.execPath, 'build', ENTRY, '--target=bun'], { stdout: 'pipe', stderr: 'pipe' });
-  const [text, errors, code] = await Promise.all([
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-    child.exited,
-  ]);
-  if (code !== 0) throw new Error(`bun build failed: ${errors}`);
+  const text = await run([process.execPath, 'build', ENTRY, '--target=bun'], 'bun build');
   // Bun marks each bundled module with a `// <path>` line: the bundle's own table of contents.
   const modules = [...text.matchAll(/^\/\/ (\S+\.(?:ts|js|mjs|cjs))$/gmu)].map(match => match[1] as string);
   return { text, modules };
@@ -86,33 +105,16 @@ describe('the session worker bundle', () => {
     const directory = await mkdtemp(join(tmpdir(), 'fy-worker-diet-'));
     scratch.push(directory);
     const outfile = join(directory, 'session.worker.js');
-    const built = Bun.spawn([process.execPath, 'build', ENTRY, '--target=bun', '--outfile', outfile], {
-      stdout: 'ignore',
-      stderr: 'ignore',
-    });
-    should(await built.exited).equal(0);
-    const resident = (): number => {
-      Bun.gc(true);
-      return process.memoryUsage().rss / (1024 * 1024);
-    };
-    const probe = async (worker: Worker): Promise<void> =>
-      await new Promise(resolve => {
-        worker.onmessage = () => resolve();
-        worker.postMessage({ probe: true });
-      });
-    const before = resident();
+    await run([process.execPath, 'build', ENTRY, '--target=bun', '--outfile', outfile], 'bun build');
 
-    // Act
-    const workers = Array.from({ length: WORKERS }, () => new Worker(pathToFileURL(outfile).href, { type: 'module' }));
-    try {
-      for (const worker of workers) await probe(worker);
-      await Bun.sleep(200);
-      const perWorker = (resident() - before) / WORKERS;
+    // Act — in a process of its own (see `support/session-worker-rss.ts`): this one never hosts the threads.
+    const out = await run(
+      [process.execPath, RSS, pathToFileURL(outfile).href, String(WORKERS)],
+      'measuring the workers',
+    );
+    const { perWorkerMb } = JSON.parse(out) as { perWorkerMb: number };
 
-      // Assert
-      should(perWorker).be.below(WORKER_MEMORY_BUDGET_MB);
-    } finally {
-      for (const worker of workers) worker.terminate();
-    }
+    // Assert
+    should(perWorkerMb).be.below(WORKER_MEMORY_BUDGET_MB);
   }, 60_000);
 });
