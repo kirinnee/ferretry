@@ -14,6 +14,8 @@ describe('WorkerLoopWatchdog', () => {
     const watchdog = new WorkerLoopWatchdog({ limitMs: 60_000, checkMs: 10, prefix: 'fyd ' });
 
     // Act — the same label twice, then a different one, then a label longer than the shared buffer.
+    // The two pauses only let the watchdog thread look while the loop is healthy. They assert nothing about
+    // time, so they cannot fail a correct build: a longer pause could only make the check stricter.
     watchdog.beat(['analytics ingest']);
     watchdog.beat(['analytics ingest']);
     await Bun.sleep(50);
@@ -32,6 +34,7 @@ describe('WorkerLoopWatchdog', () => {
       import { WorkerLoopWatchdog } from ${JSON.stringify(resolve(import.meta.dir, '../../../src/adapters/runtime/loop-watchdog.ts'))};
       const watchdog = new WorkerLoopWatchdog({ limitMs: 500, checkMs: 50, prefix: 'fyd ' });
       watchdog.beat(['session listing']);
+      // The watchdog is a thread on the real clock with no seam: this pause lets it start before the block.
       await Bun.sleep(100);
       const until = Date.now() + 60_000;
       while (Date.now() < until) {}
@@ -39,11 +42,12 @@ describe('WorkerLoopWatchdog', () => {
     const child = Bun.spawn({ cmd: [process.execPath, '--eval', program], stderr: 'pipe', stdout: 'ignore' });
 
     // Act
-    const exited = await Promise.race([child.exited.then(() => true), Bun.sleep(15_000).then(() => false)]);
-    const said = await new Response(child.stderr).text();
+    // The test's own timeout is the safety net; a watchdog that never fires leaves the child to be killed here.
+    const stderr = new Response(child.stderr).text();
+    await child.exited.finally(() => child.kill());
+    const said = await stderr;
 
     // Assert
-    should(exited).be.true();
     should(child.signalCode).equal('SIGKILL');
     should(said).match(/^fyd \S+ ! watchdog: the event loop has not run for \d+s \(during session listing\)/mu);
   }, 30_000);

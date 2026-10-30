@@ -78,7 +78,9 @@ function serve(answer: Answer): { readonly origin: string; stop(): Promise<void>
         case 'html-403':
           return new Response(`<html>${echoed}</html>`, { status: 403, headers: { 'content-type': 'text/html' } });
         case 'slow':
-          await Bun.sleep(400);
+          // Never answers until the caller has given up on it (its timeout is `usageTimeoutMs`), so the case
+          // is "too slow" however fast the machine is.
+          await new Promise<void>(resolve => request.signal.addEventListener('abort', () => resolve(), { once: true }));
           return Response.json(reading);
       }
     },

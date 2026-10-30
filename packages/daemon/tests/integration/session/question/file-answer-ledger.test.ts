@@ -6,6 +6,7 @@ import should from 'should';
 import { FileAnswerLedger } from '../../../../src/adapters/session/question/index.ts';
 import type { AnswerOperationRecord } from '../../../../src/lib/session/question/answer-ledger.ts';
 import { parseSessionId } from '../../../../src/lib/session-id.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * The durable answer receipt against a real filesystem.
@@ -296,7 +297,7 @@ describe('the answer ledger’s append hook', () => {
     // Act
     await ledger.append(ID, record());
     await ledger.append(OTHER, record({ requestId: 'request-2' }));
-    await Bun.sleep(5);
+    await waitFor(() => told.length === 2, 'the append hook to have named both sessions');
 
     // Assert
     should(told).deepEqual([`${ID}:1`, `${OTHER}:1`]);

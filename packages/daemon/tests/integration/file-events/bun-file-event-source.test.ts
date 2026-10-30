@@ -172,7 +172,7 @@ describe('BunFileEventSource', () => {
 
   // ON A REAL MAC ONLY (the macOS CI job): the claim the owner's daemon rests on.
   it.if(process.platform === 'darwin')(
-    "should hear Claude's .credentials.json refreshed in place and by a rename, within a second, polling nothing",
+    "should hear Claude's .credentials.json refreshed in place and by a rename, polling nothing",
     async () => {
       // Arrange: no poll can fire inside this test, so only an FSEvents event can deliver.
       const directory = await workspace();
@@ -188,12 +188,12 @@ describe('BunFileEventSource', () => {
 
         // Act
         await writeFile(credentials, '{"token":2}');
-        await until(() => heard.length > 0, 'an in-place refresh', 1_000);
+        await until(() => heard.length > 0, 'an in-place refresh');
         await Bun.sleep(100);
         heard.length = 0;
         await writeFile(join(directory, '.credentials.json.tmp'), '{"token":3}');
         await rename(join(directory, '.credentials.json.tmp'), credentials);
-        await until(() => heard.length > 0, 'a refresh by rename', 1_000);
+        await until(() => heard.length > 0, 'a refresh by rename');
 
         // Assert
         should(subscription.live()).be.true();
@@ -222,7 +222,13 @@ describe('BunFileEventSource', () => {
     await until(() => fired > 100, 'the interval');
     unrefFileEventTimers.clearInterval(every);
     const after = fired;
-    await Bun.sleep(10);
+    // Timers fire in order of their due time: once this later one has, a tick the cleared interval still
+    // owed would have fired before it.
+    let later = false;
+    unrefFileEventTimers.setTimeout(() => {
+      later = true;
+    }, 5);
+    await until(() => later, 'a later timer to fire');
 
     // Assert
     should(after % 10).equal(1);

@@ -95,7 +95,7 @@ describe('AsyncActivityScope', () => {
 
     // Act
     await scope.within('fleet refresh', async () => {
-      await Bun.sleep(1);
+      await new Promise<void>(resolve => setImmediate(resolve));
       inside = scope.current();
     });
 

@@ -27,6 +27,7 @@ import {
   SessionTurnWatcher,
   TmuxController,
 } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * Whose turn it is, read from REAL evidence: a real tmux server whose panes draw what each harness
@@ -92,6 +93,7 @@ interface Fixture {
   readonly journal: () => Promise<readonly { type: string; data: unknown }[]>;
   readonly events: () => Promise<readonly (string | null)[]>;
   readonly settle: () => Promise<void>;
+  readonly tmuxSession: string;
 }
 
 async function fixture(harness: 'claude' | 'codex', initialFrame: string, width = 100): Promise<Fixture> {
@@ -114,6 +116,7 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string, width 
 
   const frameFile = join(home, 'frame.txt');
   const transcriptFile = join(home, harness === 'claude' ? 'transcript.jsonl' : 'rollout.jsonl');
+  let latestFrame = initialFrame;
   await writeFile(frameFile, initialFrame);
   await writeFile(transcriptFile, '');
   // Redraw on change; print the frame, then put the cursor back on its last line, column zero.
@@ -155,7 +158,9 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string, width 
     watcher: new SessionTurnWatcher(ports),
     ports,
     id,
+    tmuxSession,
     frame: async text => {
+      latestFrame = text;
       await writeFile(frameFile, text);
     },
     transcript: async text => {
@@ -174,39 +179,57 @@ async function fixture(harness: 'claude' | 'codex', initialFrame: string, width 
       (await opened.storage.replay(id)).events
         .filter(event => event.type === 'turn.state')
         .map(event => (event.data as { to: string | null }).to),
-    // Long enough for the player's 50ms poll to redraw and tmux to show it.
-    settle: async () => await Bun.sleep(400),
+    // Until the pane shows the latest frame: the player redraws on its own poll, and a terminal paints bytes
+    // in order, so the frame's last rows on screen mean the rows above them are too.
+    settle: async () => {
+      const wanted = lastRows(latestFrame);
+      await waitFor(async () => {
+        const screen = await controller.visible(tmuxSession);
+        const shown = screen === undefined ? undefined : lastRows(screen);
+        return shown?.length === wanted.length && shown.every((row, index) => row === wanted[index]);
+      }, 'the pane to draw the latest frame');
+    },
   };
 }
+
+/** The last non-blank rows of a frame or a capture, without trailing spaces, to tell whether a pane has drawn it. */
+const lastRows = (text: string, count = 3): readonly string[] =>
+  text
+    .split('\n')
+    .map(row => row.trimEnd())
+    .filter(row => row !== '')
+    .slice(-count);
 
 /** A real pane captured from a harness, from `tests/fixtures/permission-prompts`. */
 const prompt = async (name: string): Promise<string> =>
   await readFile(join(import.meta.dir, '../../../fixtures/permission-prompts', `${name}.txt`), 'utf8');
 
 /** Ticks until the recorded permission request is `id`. */
-async function untilRequest(subject: Fixture, id: string | undefined, budgetMs = 6_000): Promise<void> {
-  const started = Date.now();
-  while (Date.now() - started < budgetMs) {
-    await subject.watcher.tick();
-    if (((await subject.permissionRequest()) as { id?: string } | undefined)?.id === id) return;
-    await Bun.sleep(200);
-  }
-  throw new Error(`permissionRequest never became ${String(id)}`);
+async function untilRequest(subject: Fixture, id: string | undefined): Promise<void> {
+  await waitFor(
+    async () => {
+      await subject.watcher.tick();
+      return ((await subject.permissionRequest()) as { id?: string } | undefined)?.id === id;
+    },
+    `permissionRequest to become ${String(id)}`,
+    { every: 200 },
+  );
 }
 
 /** A real pane captured from a harness, from `tests/fixtures/harness-dialogs`. */
 const dialogPane = async (name: string): Promise<string> =>
   await readFile(join(import.meta.dir, '../../../fixtures/harness-dialogs', `${name}.txt`), 'utf8');
 
-/** Ticks until the record reads `expected` or the budget runs out, and answers how long it took. */
-async function until(subject: Fixture, expected: unknown, budgetMs = 6_000): Promise<number> {
-  const started = Date.now();
-  while (Date.now() - started < budgetMs) {
-    await subject.watcher.tick();
-    if ((await subject.turnState()) === expected) return Date.now() - started;
-    await Bun.sleep(200);
-  }
-  throw new Error(`turnState never became ${String(expected)}; it is ${String(await subject.turnState())}`);
+/** Ticks until the record reads `expected`. */
+async function until(subject: Fixture, expected: unknown): Promise<void> {
+  await waitFor(
+    async () => {
+      await subject.watcher.tick();
+      return (await subject.turnState()) === expected;
+    },
+    `turnState to become ${String(expected)}`,
+    { every: 200 },
+  );
 }
 
 describe('the turn watcher over real panes and transcripts', () => {
@@ -382,12 +405,14 @@ describe('the turn watcher over real panes and transcripts', () => {
       await subject.frame(await dialogPane(second));
       await subject.settle();
       const next = parseHarnessDialog(await dialogPane(second));
-      const started = Date.now();
-      while (((await subject.harnessDialog()) as { id?: string } | undefined)?.id !== next?.id) {
-        if (Date.now() - started > 6_000) throw new Error('harnessDialog never became the next dialog');
-        await subject.watcher.tick();
-        await Bun.sleep(200);
-      }
+      await waitFor(
+        async () => {
+          await subject.watcher.tick();
+          return ((await subject.harnessDialog()) as { id?: string } | undefined)?.id === next?.id;
+        },
+        'harnessDialog to become the next dialog',
+        { every: 200 },
+      );
 
       // Answered: the dialog is gone, and so is the record.
       await subject.frame(harness === 'claude' ? CLAUDE_IDLE : CODEX_IDLE);
@@ -482,7 +507,10 @@ describe('the turn watcher over real panes and transcripts', () => {
       { now: () => new Date().toISOString() },
     );
     // Past the second the pane last drew in, so a capture now is certainly newer than its last output.
-    await Bun.sleep(1_100);
+    await waitFor(async () => {
+      const drawnAt = (await controller.activity(subject.tmuxSession))?.activityAt;
+      return drawnAt !== undefined && Math.floor(Date.now() / 1_000) > drawnAt;
+    }, 'the wall clock to pass the second the pane last drew in');
 
     // Act
     const first = await counted.paneState(subject.id);

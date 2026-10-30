@@ -43,8 +43,9 @@ async function fixture(label: string, wrap: (files: StateFileSystem) => StoreFil
   return { files, path, store: new StatePasskeyStore(paths, wrap(files)) };
 }
 
-const sleep = async (ms: number): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, ms));
+/** Yield one turn of the event loop, no time: enough for a second caller to interleave with an unserialized one. */
+const nextTurn = async (): Promise<void> => {
+  await new Promise<void>(resolve => setImmediate(resolve));
 };
 
 describe('StatePasskeyStore', () => {
@@ -212,7 +213,7 @@ describe('StatePasskeyStore', () => {
     const { store } = await fixture('passkeys-concurrent', files => ({
       readText: async path => {
         const text = await files.readText(path);
-        await sleep(15);
+        await nextTurn();
         return text;
       },
       writeTextAtomic: async (path, text) => await files.writeTextAtomic(path, text),

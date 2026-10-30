@@ -112,6 +112,7 @@ import {
 import { deviceSession, newTestDevice, pairOverSession, TestSession } from '../../support/session-client.ts';
 import { OS_CHOSEN_PORT, recordedPort } from '../support/os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor, waitForValue } from '../support/wait-for.ts';
 import { FakeHostedService, fakeCloudflared, removeTempDirectories } from '../tunnel/support.ts';
 
 /**
@@ -257,12 +258,12 @@ function buildIntegrationWorld(seams: WorldSeams = { userHome: ABSENT_USER_HOME 
   };
 }
 
-async function waitUntil(predicate: () => boolean, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    if (predicate()) return;
-    await Bun.sleep(25);
-  }
-  throw new Error(`timed out waiting for ${what}`);
+/** Resolve with the first answering `/healthz` response: the listener is up. */
+async function awaitHealthy(healthz: string): Promise<Response> {
+  return await waitForValue(async () => {
+    const answer = await fetch(healthz).catch(() => undefined);
+    return answer?.ok === true ? answer : undefined;
+  }, `${healthz} to answer`);
 }
 
 /** A `config/daemon.json` body. A boot imports nothing, so no case needs to opt out of an import. */
@@ -914,14 +915,8 @@ describe('daemon boot lifecycle', () => {
     // Act
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    // The server is listening once /healthz answers; the poll bounds how long boot may take.
-    let health: Response | undefined;
-    for (let attempt = 0; attempt < 100 && health === undefined; attempt += 1) {
-      health = await fetch(`http://127.0.0.1:${port}/healthz`)
-        .then(answer => (answer.ok ? answer : undefined))
-        .catch(() => undefined);
-      if (health === undefined) await Bun.sleep(50);
-    }
+    // The server is listening once /healthz answers.
+    const health = await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const usage = await fetch(`http://127.0.0.1:${port}/usage`);
     const unauthorized = await fetch(`http://127.0.0.1:${port}/v1/usage`);
     // A mounted subsystem, reached with the token the boot minted. The session does not exist, so a
@@ -937,8 +932,8 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(0);
-    should(health?.status).equal(200);
-    should((await health!.json()) as { status: string }).have.property('status', 'ok');
+    should(health.status).equal(200);
+    should((await health.json()) as { status: string }).have.property('status', 'ok');
     should(usage.status).equal(200);
     should((await usage.json()) as { ready: boolean }).have.property('ready', false);
     should(unauthorized.status).equal(401);
@@ -1005,10 +1000,7 @@ describe('daemon boot lifecycle', () => {
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
     const base = `http://127.0.0.1:${String(port)}`;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`${base}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const response = await fetch(`${base}/v1/sessions/${SESSION_ID}/messages?limit=1`, {
       headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
@@ -1094,10 +1086,7 @@ describe('daemon boot lifecycle', () => {
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
     const base = `http://127.0.0.1:${port}`;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`${base}/healthz`);
     const adminToken = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const admin = { authorization: `Bearer ${adminToken}` };
     const origin = 'https://ferretry.pages.dev';
@@ -1254,10 +1243,7 @@ describe('daemon boot lifecycle', () => {
     const port = await recordedPort(home);
     const base = `http://127.0.0.1:${port}`;
     const origin = 'https://ferretry.pages.dev';
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`${base}/healthz`);
     const adminToken = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const minted = PairingCodeMintResponseSchema.parse(
       await (
@@ -1280,15 +1266,15 @@ describe('daemon boot lifecycle', () => {
     const beforeOptIn = await tunnelView();
     const provisionedBeforeOptIn = service.provisions.length;
     const switchedOn = await switchTunnel(true);
-    await waitUntil(() => service.provisions.length > 0, 'the tunnel to be provisioned');
+    await waitFor(() => service.provisions.length > 0, 'the tunnel to be provisioned');
     const originPort = service.provisions[0]?.originPort ?? 0;
     const tunnelBase = `http://127.0.0.1:${String(originPort)}`;
     const carriersOf = async (session: TestSession) =>
       DaemonCarriersViewSchema.parse(JSON.parse((await session.request('GET', '/v1/carriers')).body)).carriers;
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await carriersOf(direct)).some(carrier => carrier.kind === 'tunnel')) break;
-      await Bun.sleep(25);
-    }
+    await waitFor(
+      async () => (await carriersOf(direct)).some(carrier => carrier.kind === 'tunnel'),
+      'the tunnel carrier to be listed',
+    );
 
     // Act — the same device, through the tunnel's own listener.
     const tunnelled = await deviceSession(tunnelBase, minted.daemonId, pairing.response.deviceId, device, { origin });
@@ -1427,8 +1413,8 @@ describe('daemon boot lifecycle', () => {
 
     // Act
     const exit = start(world, cleanups);
-    await waitUntil(() => service.releases.length > 0, 'the held tunnel to be released');
-    await waitUntil(
+    await waitFor(() => service.releases.length > 0, 'the held tunnel to be released');
+    await waitFor(
       () => said.stated.some(line => line.startsWith('tunnel carrier off (opt-in) — released')),
       'the release to be said',
     );
@@ -1474,10 +1460,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const afterBoot = await readdir(join(home, 'state'));
     release();
     const code = await exit;
@@ -1497,10 +1480,7 @@ describe('daemon boot lifecycle', () => {
     };
     const secondExit = start(secondWorld, secondCleanups);
     const secondPort = await recordedPort(secondHome);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${secondPort}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${secondPort}/healthz`);
     secondRelease();
     const secondCode = await secondExit;
     await runCleanups(secondCleanups);
@@ -1538,10 +1518,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, at);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const base = `http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/tasks`;
@@ -1676,10 +1653,7 @@ describe('daemon boot lifecycle', () => {
     });
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -1773,10 +1747,7 @@ describe('daemon boot lifecycle', () => {
     const executable = await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -1972,10 +1943,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = {
       authorization: `Bearer ${token}`,
@@ -2063,10 +2031,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = {
       authorization: `Bearer ${token}`,
@@ -2146,10 +2111,7 @@ describe('daemon boot lifecycle', () => {
     await writeFile(join(home, 'config', 'pack.yaml'), 'limits:\n  autoChildren: 1\n', { mode: 0o600 });
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = {
       authorization: `Bearer ${token}`,
@@ -2264,10 +2226,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -2375,10 +2334,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -2506,10 +2462,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -2593,10 +2546,7 @@ describe('daemon boot lifecycle', () => {
     await seeded.storage.close();
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = {
       authorization: `Bearer ${token}`,
@@ -2695,10 +2645,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     // Corrupt the reservation ledger AFTER boot: a missing file is an empty ledger, so the damage must
@@ -2767,10 +2714,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -2905,10 +2849,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -3011,10 +2952,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
     const cli = { ...headers, 'x-ferretry-client': 'cli' };
@@ -3150,10 +3088,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const cli = {
       authorization: `Bearer ${token}`,
@@ -3295,10 +3230,7 @@ describe('daemon boot lifecycle', () => {
     await seedMigrationFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -3739,10 +3671,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -3945,10 +3874,7 @@ describe('daemon boot lifecycle', () => {
     );
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -4194,10 +4120,7 @@ describe('daemon boot lifecycle', () => {
     );
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -4400,10 +4323,7 @@ describe('daemon boot lifecycle', () => {
     await seedMigrationFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const cli = { authorization: `Bearer ${token}`, 'content-type': 'application/json', 'x-ferretry-client': 'cli' };
     const sessions = `http://127.0.0.1:${port}/v1/sessions`;
@@ -4524,10 +4444,7 @@ describe('daemon boot lifecycle', () => {
     ]);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
     const body = JSON.stringify({ task: 'port the remaining command groups and their tests', usage: false });
@@ -4621,24 +4538,18 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z', 'wire-live');
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const analytics = `http://127.0.0.1:${port}/v1/analytics`;
 
     // Act
-    let settled = false;
-    for (let attempt = 0; attempt < 200 && !settled; attempt += 1) {
+    await waitFor(async () => {
       const settling = AnalyticsResponseSchema.parse(
         await fetch(analytics, { headers }).then(async response => await response.json()),
       );
-      settled = settling.index.sessions === 1 && !settling.index.refreshing;
-      if (!settled) await Bun.sleep(50);
-    }
-    should(settled).be.true();
+      return settling.index.sessions === 1 && !settling.index.refreshing;
+    }, 'the analytics index to settle on the one live session');
     const grouped = await fetch(`${analytics}?q=${encodeURIComponent('sum by (id)')}`, { headers });
     const raw = await fetch(`${analytics}?q=${encodeURIComponent('{status=completed}')}`, { headers });
     const refused = await fetch(`${analytics}?q=${encodeURIComponent('sum by (nonsense)')}`, { headers });
@@ -4762,23 +4673,17 @@ describe('daemon boot lifecycle', () => {
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
     const base = `http://127.0.0.1:${String(port)}`;
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`${base}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const analytics = `${base}/v1/analytics?q=${encodeURIComponent('sum by (id)')}`;
-    const settledAnalytics = async () => {
-      for (let attempt = 0; attempt < 200; attempt += 1) {
+    const settledAnalytics = async () =>
+      await waitForValue(async () => {
         const current = AnalyticsResponseSchema.parse(
           await fetch(analytics, { headers }).then(async response => await response.json()),
         );
-        if (current.index.sessions === 1 && !current.index.refreshing) return current;
-        await Bun.sleep(50);
-      }
-      throw new Error('the analytics index did not settle on the finished transcript');
-    };
+        return current.index.sessions === 1 && !current.index.refreshing ? current : undefined;
+      }, 'the analytics index to settle on the finished transcript');
 
     // Act
     const before = await settledAnalytics();
@@ -4873,10 +4778,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const base = `http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/terminals`;
@@ -4941,10 +4843,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const base = `http://127.0.0.1:${port}/v1/sessions/${SESSION_ID}/terminals`;
     const opened = TerminalViewSchema.parse(
@@ -4978,10 +4877,10 @@ describe('daemon boot lifecycle', () => {
       viewer.addEventListener('open', () => resolve());
       viewer.addEventListener('error', () => reject(new Error('the terminal socket never opened')));
     });
-    for (let attempt = 0; attempt < 200 && frames.length === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => frames.length > 0, 'the terminal socket to deliver its first frame');
     viewer.send(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
     viewer.send(new TextEncoder().encode('echo hi\r'));
-    for (let attempt = 0; attempt < 200 && runtime.written.length === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => runtime.written.length > 0, 'the keystrokes to reach the terminal runtime');
     const resized = TerminalViewSchema.parse(
       await (
         await fetch(`${base}/${opened.id}`, {
@@ -4992,7 +4891,7 @@ describe('daemon boot lifecycle', () => {
     release();
     const code = await exit;
     await runCleanups(cleanups);
-    for (let attempt = 0; attempt < 200 && closes.length === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => closes.length > 0, 'the socket to close once the daemon shut down');
 
     // Assert
     should(code).equal(0);
@@ -5043,10 +4942,7 @@ describe('daemon boot lifecycle', () => {
     await seedFleet(home);
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     // A real started session, so the live half has a lifecycle the daemon can actually transition.
@@ -5100,7 +4996,7 @@ describe('daemon boot lifecycle', () => {
 
     const fleet = await follow('');
     const follower = await follow(`&sessionId=${live}`);
-    for (let attempt = 0; attempt < 200 && fleet.frames.length < 2; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => fleet.frames.length >= 2, 'the fleet stream to deliver its backlog');
     const fleetBacklog = delivered(fleet.frames);
     const followerBacklog = delivered(follower.frames);
     // A journal append the DAEMON makes, with both sockets already open.
@@ -5109,17 +5005,23 @@ describe('daemon boot lifecycle', () => {
       headers: { ...headers, 'content-type': 'application/json' },
       body: JSON.stringify({ reason: 'the stream has what it needs' }),
     });
-    for (let attempt = 0; attempt < 200 && delivered(fleet.frames).length <= fleetBacklog.length; attempt += 1)
-      await Bun.sleep(10);
-    for (let attempt = 0; attempt < 200 && delivered(follower.frames).length <= followerBacklog.length; attempt += 1)
-      await Bun.sleep(10);
+    await waitFor(
+      () => delivered(fleet.frames).length > fleetBacklog.length,
+      'the fleet stream to deliver the journal append the stop made',
+    );
+    await waitFor(
+      () => delivered(follower.frames).length > followerBacklog.length,
+      'the session follower to deliver the journal append the stop made',
+    );
     const fleetFinal = delivered(fleet.frames);
     const followerFinal = delivered(follower.frames);
     release();
     const code = await exit;
     await runCleanups(cleanups);
-    for (let attempt = 0; attempt < 200 && (fleet.closes.length === 0 || follower.closes.length === 0); attempt += 1)
-      await Bun.sleep(10);
+    await waitFor(
+      () => fleet.closes.length > 0 && follower.closes.length > 0,
+      'both streams to close once the daemon shut down',
+    );
 
     // Assert
     should(code).equal(0);
@@ -5170,12 +5072,11 @@ describe('daemon boot lifecycle', () => {
     const port = await recordedPort(home);
     // READY, not merely serving: the hand edits below must land after the configuration watcher's first
     // load, or a load that runs between two of the writes splits one edit across two frames.
-    for (let attempt = 0; attempt < 200; attempt += 1) {
+    await waitFor(async () => {
       const liveness = await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined);
       const body = (await liveness?.json().catch(() => undefined)) as { boot?: { phase?: string } } | undefined;
-      if (body?.boot?.phase === 'ready') break;
-      await Bun.sleep(25);
-    }
+      return body?.boot?.phase === 'ready';
+    }, 'the daemon boot to reach the ready phase');
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const socket = new WebSocket(`ws://127.0.0.1:${port}/v1/events?token=${token}&topic=config`);
@@ -5189,17 +5090,14 @@ describe('daemon boot lifecycle', () => {
       socket.addEventListener('open', () => resolve());
       socket.addEventListener('error', () => reject(new Error('the config socket never opened')));
     });
-    for (let attempt = 0; attempt < 200 && frames.length === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => frames.length > 0, 'the config stream to deliver its first frame');
     type Change = Extract<ConfigChangeFrame, { readonly kind: 'config' }>;
     /** Wait for a change frame naming `kind`, past the watcher's one-second fingerprint and its debounce. */
-    const changeNaming = async (kind: ConfigChangeKind): Promise<Change | undefined> => {
-      for (let attempt = 0; attempt < 500; attempt += 1) {
-        const found = frames.find((frame): frame is Change => frame.kind === 'config' && frame.kinds.includes(kind));
-        if (found !== undefined) return found;
-        await Bun.sleep(10);
-      }
-      return undefined;
-    };
+    const changeNaming = async (kind: ConfigChangeKind): Promise<Change> =>
+      await waitForValue(
+        () => frames.find((frame): frame is Change => frame.kind === 'config' && frame.kinds.includes(kind)),
+        `a config change frame naming ${kind}`,
+      );
 
     // Act — a person saves three files by hand, the way `fy` or an editor would write them.
     const config = join(home, 'config');
@@ -5223,7 +5121,7 @@ describe('daemon boot lifecycle', () => {
     release();
     const code = await exit;
     await runCleanups(cleanups);
-    for (let attempt = 0; attempt < 200 && closes.length === 0; attempt += 1) await Bun.sleep(10);
+    await waitFor(() => closes.length > 0, 'the socket to close once the daemon shut down');
 
     // Assert
     should(code).equal(0);
@@ -5264,10 +5162,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, '2026-07-31T09:00:00.000Z');
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const attach = `http://127.0.0.1:${port}/v1/sessions`;
@@ -5309,10 +5204,7 @@ describe('daemon boot lifecycle', () => {
     await seedSession(home, new Date().toISOString());
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
 
@@ -5420,10 +5312,7 @@ describe('daemon boot lifecycle', () => {
     );
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const learning = `http://127.0.0.1:${port}/v1/learning`;
@@ -5551,10 +5440,7 @@ describe('daemon boot lifecycle', () => {
     };
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const json = { ...headers, 'content-type': 'application/json' };
@@ -5645,10 +5531,7 @@ describe('daemon boot lifecycle', () => {
     });
     const exit = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
 
     // Act
@@ -5664,13 +5547,13 @@ describe('daemon boot lifecycle', () => {
     let view = HealthViewSchema.parse(await answered.json());
     // `/healthz` proves the socket is live, not that every post-bind loop is armed. Wait for the
     // supervision fact this journey asserts so the request cannot race the final boot step.
-    for (let attempt = 0; attempt < 100 && !view.wardenTimerArmed; attempt += 1) {
-      await Bun.sleep(10);
+    await waitFor(async () => {
       answered = await fetch(`http://127.0.0.1:${port}/v1/health`, {
         headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
       });
       view = HealthViewSchema.parse(await answered.json());
-    }
+      return view.wardenTimerArmed;
+    }, 'the warden timer to be armed');
     shutdown.resolve();
     const code = await exit;
     await runCleanups(cleanups);
@@ -5736,10 +5619,7 @@ describe('daemon boot lifecycle', () => {
     const enhancer = new RecordingSttEnhancer();
     const exit = start({ ...base, sttEnhancement: enhancer }, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 100; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${port}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(50);
-    }
+    await awaitHealthy(`http://127.0.0.1:${port}/healthz`);
     const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
     const headers = { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' };
     const body = JSON.stringify({ text: 'ship the protocall package', provider: 'groq' });
@@ -5939,13 +5819,7 @@ describe('daemon boot lifecycle', () => {
     );
 
     // Act — the daemon answers on the address it took, which is not the one it preferred.
-    let health: Response | undefined;
-    for (let attempt = 0; attempt < 200 && health === undefined; attempt += 1) {
-      health = await fetch(`http://127.0.0.1:${String(preferredPort + 1)}/healthz`)
-        .then(answer => (answer.ok ? answer : undefined))
-        .catch(() => undefined);
-      if (health === undefined) await Bun.sleep(25);
-    }
+    const health = await awaitHealthy(`http://127.0.0.1:${String(preferredPort + 1)}/healthz`);
     const recorded = JSON.parse(await readFile(join(home, 'config', 'daemon.json'), 'utf8')) as Record<string, unknown>;
     release();
     const code = await booting;
@@ -5954,7 +5828,7 @@ describe('daemon boot lifecycle', () => {
 
     // Assert
     should(code).equal(0);
-    should(health?.status).equal(200);
+    should(health.status).equal(200);
     // RECORDED, so it is the same address next time: a daemon whose address moves on its own is
     // worse than one that fails, and every client that learned where it lived would be wrong.
     should(recorded).have.property('port', preferredPort + 1);
@@ -5980,13 +5854,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const booting = start(world, cleanups);
     const port = await recordedPort(home);
-    let health: Response | undefined;
-    for (let attempt = 0; attempt < 200 && health === undefined; attempt += 1) {
-      health = await fetch(`http://127.0.0.1:${String(port)}/healthz`)
-        .then(answer => (answer.ok ? answer : undefined))
-        .catch(() => undefined);
-      if (health === undefined) await Bun.sleep(25);
-    }
+    const health = await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
     release();
     const code = await booting;
     await runCleanups(cleanups);
@@ -5994,7 +5862,7 @@ describe('daemon boot lifecycle', () => {
     // Assert — IT STARTS. Someone may install a harness minutes after the daemon comes up, and a
     // daemon that refused until they had would be strictly worse than one that says what is missing.
     should(code).equal(0);
-    should(health?.status).equal(200);
+    should(health.status).equal(200);
     // But it says so at startup rather than leaving a person to discover it as a confusing failure
     // the first time they try to launch an agent.
     should(said.steps.join('\n')).match(/harnesses checked — claude: none; codex: none/u);
@@ -6040,10 +5908,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const booting = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(25);
-    }
+    await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
     release();
     const code = await booting;
     await runCleanups(cleanups);
@@ -6094,10 +5959,7 @@ describe('daemon boot lifecycle', () => {
     // Act
     const booting = start(world, cleanups);
     const port = await recordedPort(home);
-    for (let attempt = 0; attempt < 200; attempt += 1) {
-      if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-      await Bun.sleep(25);
-    }
+    await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
     release();
     const code = await booting;
     await runCleanups(cleanups);
@@ -6137,10 +5999,7 @@ describe('daemon boot lifecycle', () => {
       // Act
       const booting = start(world, cleanups);
       const port = await recordedPort(home);
-      for (let attempt = 0; attempt < 200; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-        await Bun.sleep(25);
-      }
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
       release();
       const code = await booting;
       await runCleanups(cleanups);
@@ -6218,11 +6077,11 @@ describe('daemon boot lifecycle', () => {
         };
 
         const booting = start(world, cleanups);
-        await waitUntil(() => relays.every(relay => relay.opened() === 1), 'both relay WebSockets to open');
+        await waitFor(() => relays.every(relay => relay.opened() === 1), 'both relay WebSockets to open');
         release();
         const code = await booting;
         await runCleanups(cleanups);
-        await waitUntil(() => relays.every(relay => relay.closed() === 1), 'both relay WebSockets to close');
+        await waitFor(() => relays.every(relay => relay.closed() === 1), 'both relay WebSockets to close');
 
         should(code).equal(0);
         should(relays.map(relay => relay.opened())).deepEqual([1, 1]);
@@ -6487,7 +6346,7 @@ describe('daemon boot lifecycle', () => {
       const booting = start(world, cleanups);
       const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
-      await waitUntil(
+      await waitFor(
         () => said.steps.some(step => step.startsWith('ready')),
         'the wildcard-bound daemon to become ready',
       );
@@ -6549,7 +6408,7 @@ describe('daemon boot lifecycle', () => {
       const booting = start(world, cleanups);
       const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
-      await waitUntil(() => said.steps.some(step => step.startsWith('ready')), 'the proxy-path daemon to become ready');
+      await waitFor(() => said.steps.some(step => step.startsWith('ready')), 'the proxy-path daemon to become ready');
       const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
       const response = await fetch(`${base}/v1/carriers`, {
         headers: { authorization: `Bearer ${token}`, 'x-ferretry-client': 'cli' },
@@ -6610,7 +6469,7 @@ describe('daemon boot lifecycle', () => {
       const booting = start(world, cleanups);
       const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
-      await waitUntil(
+      await waitFor(
         () => said.steps.some(step => step.startsWith('ready')),
         'the operator-wildcard daemon to become ready',
       );
@@ -6681,10 +6540,7 @@ describe('daemon boot lifecycle', () => {
       // Act
       const booting = start(world, cleanups);
       const port = await recordedPort(home);
-      for (let attempt = 0; attempt < 200; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-        await Bun.sleep(25);
-      }
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
       release();
       const code = await booting;
       await runCleanups(cleanups);
@@ -6721,10 +6577,7 @@ describe('daemon boot lifecycle', () => {
       // Act
       const booting = start(world, cleanups);
       const port = await recordedPort(home);
-      for (let attempt = 0; attempt < 200; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-        await Bun.sleep(25);
-      }
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
       release();
       const code = await booting;
       await runCleanups(cleanups);
@@ -6785,10 +6638,7 @@ describe('daemon boot lifecycle', () => {
       // Act
       const booting = start(world, cleanups);
       const port = await recordedPort(home);
-      for (let attempt = 0; attempt < 200; attempt += 1) {
-        if ((await fetch(`http://127.0.0.1:${String(port)}/healthz`).catch(() => undefined))?.ok === true) break;
-        await Bun.sleep(25);
-      }
+      await awaitHealthy(`http://127.0.0.1:${String(port)}/healthz`);
       release();
       const code = await booting;
       await runCleanups(cleanups);
@@ -6885,10 +6735,7 @@ describe('daemon boot lifecycle', () => {
       const booting = start({ ...world, notices: said.port, untilShutdown: async () => await stopped }, cleanups);
       const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
-        await Bun.sleep(25);
-      }
+      await awaitHealthy(`${base}/healthz`);
       let answer: T;
       try {
         const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
@@ -7084,13 +6931,10 @@ describe('daemon boot lifecycle', () => {
       const exit = start(world, cleanups);
       const port = await recordedPort(home);
       const base = `http://127.0.0.1:${String(port)}`;
-      for (let attempt = 0; attempt < 400; attempt += 1) {
-        if ((await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true) break;
-        await Bun.sleep(25);
-      }
+      await awaitHealthy(`${base}/healthz`);
       // The boot pass and then a REGISTERED TICK. Nothing in this test reads usage, so every one of
       // these is the daemon collecting on its own schedule.
-      await waitUntil(() => usageReads >= 2, 'a scheduled fleet refresh tick after the boot pass');
+      await waitFor(() => usageReads >= 2, 'a scheduled fleet refresh tick after the boot pass');
       const unattendedElapsedMs = Date.now() - bootAt;
       const unattendedReads = usageReads;
       const wrapperAfterUnattended = await Bun.file(wrapperLog).exists();

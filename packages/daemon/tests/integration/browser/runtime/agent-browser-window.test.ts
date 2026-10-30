@@ -7,6 +7,7 @@ import should from 'should';
 import { BrowserProfileStore, XvfbDisplay } from '../../../../src/adapters/browser/control/index.ts';
 import { NodeSessionBrowserLauncher } from '../../../../src/adapters/browser/runtime/index.ts';
 import { BrowserSessionService } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * BROWSER MODE "REAL WINDOW", AGAINST A REAL HEADED CHROME ON A REAL XVFB (docs/browser-mode.md).
@@ -88,7 +89,7 @@ describe.if(process.platform === 'linux')('the agent browser as a real window, i
     // Act
     const header = await browser.actOnPage('s1', 'who', { action: 'read', selector: '#header' });
     const script = await browser.actOnPage('s1', 'who', { action: 'read', selector: '#script' });
-    await Bun.sleep(1_000);
+    await waitFor(() => frames.length > 0, 'the viewer to receive a screencast frame');
     viewer.detach();
 
     // Assert

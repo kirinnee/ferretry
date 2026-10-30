@@ -2,6 +2,7 @@ import {
   classifyDaemonUnreachable,
   type DaemonAttempt,
   type DaemonRestartPatience,
+  daemonStartingOf,
   isRepeatableAgentTool,
   waitOutDaemonRestart,
 } from '@ferretry/protocol';
@@ -47,7 +48,9 @@ function repeatable(init: RequestInit): boolean {
  *
  * A RESTART IS WAITED OUT. The MCP tools an agent calls mid-turn are exactly the calls a daemon
  * restart would otherwise fail, so with `restart` given a call the daemon refused is sent again until
- * it is back (`daemon-restart.ts`), and one it dropped mid-request is sent again only when it reads.
+ * it is back (`daemon-restart.ts`), and one it dropped mid-request is sent again only when it reads. A
+ * daemon that answers it is still STARTING is not back yet: that answer is waited out like a refusal,
+ * so a call made across a restart lands once the new daemon serves rather than failing a boot step early.
  */
 export class SessionCredentialGateway implements IAgentToolsGateway {
   constructor(
@@ -70,7 +73,11 @@ export class SessionCredentialGateway implements IAgentToolsGateway {
     const attempt = async (): Promise<DaemonAttempt<Response>> => {
       try {
         const signal = AbortSignal.timeout(timeoutMs);
-        return { kind: 'answered', value: await this.fetcher(`${base}${path}`, { ...init, headers, signal }) };
+        const response = await this.fetcher(`${base}${path}`, { ...init, headers, signal });
+        // A daemon that has bound its address but not mounted its routes ran nothing: still away.
+        const starting = await daemonStartingOf(response);
+        if (starting !== undefined) throw starting;
+        return { kind: 'answered', value: response };
       } catch (error) {
         const how = classifyDaemonUnreachable(error);
         return how === undefined ? { kind: 'failed', error } : { kind: 'unreachable', how, error };

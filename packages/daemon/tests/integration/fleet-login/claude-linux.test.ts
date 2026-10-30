@@ -23,6 +23,7 @@ import { harnessLoginTimer, spawnHarnessLoginChild } from '../../../src/adapters
 import type { CallerGovernance } from '../../../src/lib/api/capability.ts';
 import { FleetCredentialCatalog } from '../../../src/lib/fleet/credentials-service.ts';
 import { HarnessLoginService } from '../../../src/lib/fleet-login/service.ts';
+import { waitForValue } from '../support/wait-for.ts';
 
 const FAKE_CLAUDE = resolve(import.meta.dir, '../../../../../scripts/test/fake-claude-tui.sh');
 
@@ -82,14 +83,12 @@ async function linuxMachine(binary: string = FAKE_CLAUDE): Promise<Machine> {
   return { service, home };
 }
 
-/** Poll as the browser does, until the flow leaves `from` or the deadline passes. */
+/** Poll as the browser does, until the flow leaves `from`. */
 async function pollPast(service: HarnessLoginService, flowId: string, from: string): Promise<HarnessLoginFlow> {
-  const deadline = Date.now() + 10_000;
-  for (;;) {
+  return await waitForValue(async () => {
     const flow = await service.status(flowId);
-    if (flow.state !== from || Date.now() > deadline) return flow;
-    await Bun.sleep(25);
-  }
+    return flow.state !== from ? flow : undefined;
+  }, `the login flow to leave ${from}`);
 }
 
 describe('signing the host Claude Code login in on Linux', () => {
@@ -121,12 +120,10 @@ describe('signing the host Claude Code login in on Linux', () => {
 
     // Act — a code with no `#state`, which the real CLI refuses and keeps prompting after.
     await service.submit(started.flowId, { code: 'half-a-code' });
-    const deadline = Date.now() + 10_000;
-    let flow = await service.status(started.flowId);
-    while (!('lastCode' in flow) && Date.now() < deadline) {
-      await Bun.sleep(25);
-      flow = await service.status(started.flowId);
-    }
+    const flow = await waitForValue(async () => {
+      const read = await service.status(started.flowId);
+      return 'lastCode' in read ? read : undefined;
+    }, 'the flow to report the refused code');
 
     // Assert
     should(flow).have.property('state', 'awaiting-code');
@@ -144,7 +141,6 @@ describe('signing the host Claude Code login in on Linux', () => {
 
     // Act
     const started = await service.start({ credentialId: HOST_LOGIN }, PHONE);
-    await Bun.sleep(300);
     const waiting = await service.status(started.flowId);
     const cancelled = await service.cancel(started.flowId);
 

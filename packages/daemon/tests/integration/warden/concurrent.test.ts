@@ -1,6 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { DEFAULT_READ_CONCURRENCY, mapWithConcurrency } from '../../../src/adapters/warden/index.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /** Resolves only once released, so a test can hold every worker open at once. */
 function gate(): { wait: () => Promise<void>; release: () => void } {
@@ -18,7 +19,8 @@ describe('bounded fan-out', () => {
 
     // Act
     const results = await mapWithConcurrency(items, async value => {
-      await Bun.sleep(value);
+      // The smaller the value the later it finishes: completion order is the reverse of input order.
+      for (let turn = 0; turn < 10 - value; turn += 1) await Promise.resolve();
       return value * 10;
     });
 
@@ -38,7 +40,7 @@ describe('bounded fan-out', () => {
       async () => {
         running += 1;
         peak = Math.max(peak, running);
-        await Bun.sleep(1);
+        await Promise.resolve();
         running -= 1;
       },
       4,
@@ -63,7 +65,7 @@ describe('bounded fan-out', () => {
       },
       8,
     );
-    while (started < 2) await Bun.sleep(1);
+    await waitFor(() => started >= 2, 'both workers to start');
     opened.release();
 
     // Assert

@@ -23,6 +23,7 @@ import { foldAnalyticsTranscript } from '../../../src/lib/analytics/usage-fold.t
 import { ClaudeTranscriptParser } from '../../../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../../../src/lib/transcript/codex.ts';
 import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const FIXTURES = join(import.meta.dir, '../../fixtures/transcript');
 const ALIASES: readonly AnalyticsModelAliasGroup[] = [{ modelId: 'claude-opus-4-1', aliases: ['opus'] }];
@@ -93,7 +94,7 @@ describe('WorkerTranscriptFolds with the real worker', () => {
     // Act
     const idle = folds.inFlight;
     const asked = Promise.all([folds.foldFor('a', 'claude', ALIASES), folds.foldFor('b', 'codex', ALIASES)]);
-    await Bun.sleep(0);
+    await new Promise<void>(resolve => setImmediate(resolve));
     const held = folds.inFlight;
     const [first, second] = await asked;
     const settled = folds.inFlight;
@@ -232,11 +233,11 @@ describe('WorkerTranscriptFolds with a worker that misbehaves', () => {
 
     // Act — one fold, then idle past the limit; then one left waiting when the source is closed.
     await folds.foldFor('s', 'claude', ALIASES);
-    await Bun.sleep(30);
+    await waitFor(() => workers[0]?.terminated === true, 'the idle worker to be ended');
     const endedWhenIdle = workers[0]?.terminated;
     hold = true;
     const waiting = folds.foldFor('s', 'claude', ALIASES).catch((error: Error) => error.message);
-    await Bun.sleep(1);
+    await waitFor(() => workers[1]?.sent.length === 1, 'the second fold to reach its worker');
     folds.close();
 
     // Assert

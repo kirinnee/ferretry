@@ -9,11 +9,13 @@ import { join, resolve } from 'node:path';
 import { buildWorld } from '../../../bin/fyd.ts';
 import { OS_CHOSEN_PORT, recordedPort } from './os-port.ts';
 import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from './repository.ts';
+import { waitForValue } from './wait-for.ts';
 
 const modulePath = (relative: string): string => JSON.stringify(resolve(import.meta.dir, relative));
 
 /**
- * The child's whole program. `slow` waits four seconds without blocking, as a boot over a large fleet
+ * The child's whole program. The sleeps in it are the fixture, not a wait: they ARE the slow boot step
+ * the journeys observe from outside. `slow` waits four seconds without blocking, as a boot over a large fleet
  * does; `hiccup` blocks the loop for 1.2 seconds after a moment and carries on; `stall` blocks it for a
  * minute, which the watchdog must end.
  */
@@ -125,11 +127,8 @@ export async function until<T>(
   done: (value: T) => boolean,
   what: string,
 ): Promise<T> {
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
+  return await waitForValue(async () => {
     const value = await read();
-    if (value !== undefined && done(value)) return value;
-    await Bun.sleep(20);
-  }
-  throw new Error(`timed out waiting for ${what}`);
+    return value !== undefined && done(value) ? value : undefined;
+  }, what);
 }

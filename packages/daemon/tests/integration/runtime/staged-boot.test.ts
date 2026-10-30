@@ -81,10 +81,8 @@ describe('a daemon whose event loop has stopped', () => {
     );
 
     // Act
-    const exitedAtMs = await Promise.race([
-      daemon.child.exited.then(() => Date.now()),
-      Bun.sleep(15_000).then(() => undefined),
-    ]);
+    // A watchdog that never fires leaves this to the test's own timeout, which names the case.
+    const exitedAtMs = await daemon.child.exited.then(() => Date.now());
 
     // Assert — the stall lasts a minute; the watchdog ended it in seconds, and said why first.
     should(exitedAtMs).not.be.undefined();

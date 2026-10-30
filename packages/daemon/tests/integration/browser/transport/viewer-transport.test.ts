@@ -1,18 +1,19 @@
 import { describe, it } from 'bun:test';
-import should from 'should';
 import {
   assembleBrowserStream,
   type BrowserInputEvent,
   type BrowserScreencastFrame,
   EMPTY_BROWSER_STREAM_ASSEMBLY,
 } from '@ferretry/protocol';
+import should from 'should';
 import { SocketViewerDownstream, SystemFrameClock, type ViewerSocket } from '../../../../src/adapters/index.ts';
 import {
-  BrowserViewerStream,
   type BrowserViewerHost,
-  type ViewerAttachment,
+  BrowserViewerStream,
   decodeFrameEnvelope,
+  type ViewerAttachment,
 } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 class FakeSocket implements ViewerSocket {
   sent: Array<{ readonly bytes: Uint8Array; readonly compress?: boolean }> = [];
@@ -78,7 +79,7 @@ describe('system frame clock', () => {
     clock.schedule(() => {
       fired += 1;
     }, 5);
-    await Bun.sleep(30);
+    await waitFor(() => fired > 0, 'the scheduled callback to fire');
 
     // Assert
     should(elapsed).be.aboveOrEqual(0);
@@ -89,14 +90,19 @@ describe('system frame clock', () => {
     // Arrange
     const clock = new SystemFrameClock();
     let fired = 0;
+    let sentinel = false;
 
-    // Act
+    // Act — timers of one delay fire in the order they were set, so once a later one has fired the
+    // cancelled one would have.
     clock
       .schedule(() => {
         fired += 1;
       }, 5)
       .cancel();
-    await Bun.sleep(30);
+    clock.schedule(() => {
+      sentinel = true;
+    }, 5);
+    await waitFor(() => sentinel, 'the later timer to fire');
 
     // Assert
     should(fired).equal(0);
@@ -200,7 +206,7 @@ describe('viewer stream over a real socket adapter', () => {
     // Act
     host.publish?.({ dataBase64: btoa('jpeg'), width: 800, height: 600, pageId: 'page-7' });
     socket.result = 1;
-    await Bun.sleep(40);
+    await waitFor(() => socket.sent.length >= 2, 'the dropped frame to be retried until the socket took it');
 
     // Assert
     should(socket.sent.length).be.aboveOrEqual(2);

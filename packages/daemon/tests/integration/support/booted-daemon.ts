@@ -10,6 +10,7 @@ import { join, resolve } from 'node:path';
 import { buildWorld } from '../../../bin/fyd.ts';
 import { OS_CHOSEN_PORT, recordedPort } from './os-port.ts';
 import { ABSENT_USER_HOME, tempDirectory } from './repository.ts';
+import { waitFor } from './wait-for.ts';
 
 const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
 
@@ -60,12 +61,12 @@ export async function bootDaemon(label: string, options: BootOptions = {}): Prom
   });
   children.push(child);
   const base = `http://127.0.0.1:${String(await recordedPort(home))}`;
-  let healthy = false;
-  for (let attempt = 0; attempt < 400 && !healthy; attempt += 1) {
-    healthy = (await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true;
-    if (!healthy) await Bun.sleep(50);
-  }
-  if (!healthy) throw new Error(`the ${label} daemon never answered: ${await readFile(join(home, 'fyd.err'), 'utf8')}`);
+  await waitFor(async () => {
+    if (child.exitCode !== null) throw new Error(`the ${label} daemon exited (${child.exitCode}) before it answered`);
+    return (await fetch(`${base}/healthz`).catch(() => undefined))?.ok === true;
+  }, `the ${label} daemon to answer /healthz`).catch(async (error: Error) => {
+    throw new Error(`${error.message}: ${await readFile(join(home, 'fyd.err'), 'utf8')}`, { cause: error });
+  });
   const token = (await readFile(join(home, 'api-token'), 'utf8')).trim();
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
   return {

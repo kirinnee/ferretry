@@ -1,7 +1,7 @@
+import { afterAll, describe, it, spyOn } from 'bun:test';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterAll, describe, it, spyOn } from 'bun:test';
 import should from 'should';
 import { CodexAppServerCatalog } from '../../../../src/adapters/index.ts';
 
@@ -71,16 +71,25 @@ const responder = (replies: readonly string[]) =>
  *
  * Without it, the regression these cases exist to catch — a deadline that bounds nothing — presents
  * as a hung tier rather than a failed assertion, and the tier's own budget is a `--timeout` flag
- * this file cannot rely on. Generous against the 200ms deadlines below: the point is to fail, not to
+ * this file cannot rely on. A safety net far past the 200ms deadlines below: the point is to fail, not to
  * measure.
  */
-const bounded = async <Value>(work: Promise<Value>): Promise<Value> =>
-  await Promise.race([
-    work,
-    Bun.sleep(4_000).then(() => {
-      throw new Error('the probe never settled — its deadline is not bounding the read');
-    }),
-  ]);
+const bounded = async <Value>(work: Promise<Value>): Promise<Value> => {
+  let net: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      work,
+      new Promise<never>((_, reject) => {
+        net = setTimeout(
+          () => reject(new Error('the probe never settled — its deadline is not bounding the read')),
+          30_000,
+        );
+      }),
+    ]);
+  } finally {
+    clearTimeout(net);
+  }
+};
 
 const subject = (timeoutMs = 5_000) =>
   new CodexAppServerCatalog({

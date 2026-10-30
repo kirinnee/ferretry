@@ -233,8 +233,9 @@ describe('the MCP check transports', () => {
 
   it('should time out an HTTP server that never answers', async () => {
     // Arrange
-    const origin = serve(async () => {
-      await Bun.sleep(2_000);
+    // Answers only once the prober has given up, so it is "never answers" however fast the machine is.
+    const origin = serve(async request => {
+      await new Promise<void>(resolve => request.signal.addEventListener('abort', () => resolve(), { once: true }));
       return new Response();
     });
 

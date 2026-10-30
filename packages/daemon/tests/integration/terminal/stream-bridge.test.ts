@@ -8,14 +8,21 @@ import {
 } from '../../../src/adapters/index.ts';
 import {
   TERMINAL_INPUT_REDRAW_LADDER_MS,
+  TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
   TERMINAL_MAX_INPUT_FRAME_BYTES,
   TERMINAL_MAX_QUEUED_INPUT_BYTES,
-  TERMINAL_MAX_BUFFERED_OUTPUT_BYTES,
   TERMINAL_POLL_HISTORY_LINES,
   TERMINAL_REATTACH_LINES,
   TERMINAL_REDRAW_POLL_MS,
   type TerminalCapture,
 } from '../../../src/lib/index.ts';
+
+/**
+ * Let everything already queued run. The service and scheduler here are fakes that settle in microtasks,
+ * and a macrotask never starts before the microtask queue is empty — so one turn of the event loop is the
+ * event "the bridge has finished reacting", with no wall-clock time in it.
+ */
+const turn = async (): Promise<void> => await new Promise<void>(resolve => setImmediate(resolve));
 
 const ESC = '\u001b';
 /** A pane of `lines`, all of them visible, at the size a 100×N viewer reports. */
@@ -98,9 +105,9 @@ describe('TerminalStreamBridge', () => {
     await bridge.open();
     bridge.fromClient(Uint8Array.of(13));
     bridge.fromClient(JSON.stringify({ type: 'resize', cols: 120, rows: 40 }));
-    await Bun.sleep(1);
+    await turn();
     scheduler.callback?.();
-    await Bun.sleep(1);
+    await turn();
 
     // Assert
     // Both complete: the first because nothing came before it, the second because the resize reflowed
@@ -171,7 +178,7 @@ describe('TerminalStreamBridge', () => {
     // Act
     service.fail = true;
     bridge.fromClient(Uint8Array.of(13));
-    await Bun.sleep(1);
+    await turn();
 
     // Assert
     should(closed).deepEqual([[1011, 'terminal operation failed']]);
@@ -198,7 +205,7 @@ describe('TerminalStreamBridge', () => {
     );
     service.holding = true;
     const opening = bridge.open();
-    await Bun.sleep(1);
+    await turn();
 
     // Act — the viewer leaves while the pane is still being captured, and only then does it resolve.
     bridge.close();
@@ -239,7 +246,7 @@ describe('TerminalStreamBridge', () => {
     const whileBehind = [sent.length, service.calls.length] as const;
     buffered = TERMINAL_MAX_BUFFERED_OUTPUT_BYTES;
     scheduler.callback?.();
-    await Bun.sleep(1);
+    await turn();
 
     // Assert
     should(whileBehind).deepEqual([0, 0]);
@@ -273,7 +280,7 @@ describe('TerminalStreamBridge', () => {
     );
     const poll = async (): Promise<void> => {
       scheduler.callback?.();
-      await Bun.sleep(1);
+      await turn();
     };
 
     // Act — the first redraw is dropped, so the next poll must send the very same picture again.
@@ -285,7 +292,7 @@ describe('TerminalStreamBridge', () => {
     await poll();
     const unchanged = sent.length;
     bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 30 }));
-    await Bun.sleep(1);
+    await turn();
     await poll();
 
     // Assert
@@ -310,9 +317,9 @@ describe('TerminalStreamBridge', () => {
     // Act
     await bridge.open();
     bridge.fromClient(Uint8Array.of(97));
-    await Bun.sleep(1);
+    await turn();
     scheduler.callback?.();
-    await Bun.sleep(1);
+    await turn();
 
     // Assert — the armed tick was replaced by the first rung, the next capture by the second, and the
     // poll after the last rung is ordinary again.
@@ -320,7 +327,7 @@ describe('TerminalStreamBridge', () => {
     should(scheduler.delays).deepEqual([TERMINAL_REDRAW_POLL_MS, ...TERMINAL_INPUT_REDRAW_LADDER_MS.slice(0, 2)]);
     for (let rung = 2; rung <= TERMINAL_INPUT_REDRAW_LADDER_MS.length; rung += 1) {
       scheduler.callback?.();
-      await Bun.sleep(1);
+      await turn();
     }
     should(scheduler.delays).deepEqual([
       TERMINAL_REDRAW_POLL_MS,
@@ -348,14 +355,14 @@ describe('TerminalStreamBridge', () => {
     // Act — the viewer says its size (the pane's), the first redraw lands, then one character is typed.
     await bridge.open();
     bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
-    await Bun.sleep(1);
+    await turn();
     scheduler.callback?.();
-    await Bun.sleep(1);
+    await turn();
     service.screen = pane(['$ a', '', '', '', ''], 3);
     bridge.fromClient(Uint8Array.of(97));
-    await Bun.sleep(1);
+    await turn();
     scheduler.callback?.();
-    await Bun.sleep(1);
+    await turn();
 
     // Assert — after the two complete redraws (attach, then the resize), one row and a cursor move; and
     // only the complete redraws read the whole history, the keystroke's capture a window of it.
@@ -380,22 +387,22 @@ describe('TerminalStreamBridge', () => {
     );
     const poll = async (): Promise<void> => {
       scheduler.callback?.();
-      await Bun.sleep(1);
+      await turn();
     };
 
     // Act — the viewer reports its size and receives that redraw, then reports the SAME size again and
     // one character is typed.
     await bridge.open();
     bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
-    await Bun.sleep(1);
+    await turn();
     await poll();
     bridge.fromClient(JSON.stringify({ type: 'resize', cols: 100, rows: 5 }));
-    await Bun.sleep(1);
+    await turn();
     service.screen = pane(['$ a', '', '', '', ''], 3);
     await poll();
     const beforeChange = text(sent);
     bridge.fromClient(JSON.stringify({ type: 'resize', cols: 90, rows: 5 }));
-    await Bun.sleep(1);
+    await turn();
     await poll();
 
     // Assert — attach and the first resize are complete redraws; the repeat leaves the next poll a one-row
@@ -428,7 +435,7 @@ describe('TerminalStreamBridge', () => {
     await bridge.open();
     service.screen = pane(['$ a', '', '', '', ''], 3);
     scheduler.callback?.();
-    await Bun.sleep(1);
+    await turn();
 
     // Assert
     should(service.depths).deepEqual([TERMINAL_REATTACH_LINES, TERMINAL_POLL_HISTORY_LINES, TERMINAL_REATTACH_LINES]);
@@ -457,10 +464,10 @@ describe('TerminalStreamBridge', () => {
 
     // Act
     scheduler.callback?.();
-    await Bun.sleep(1);
+    await turn();
     bridge.close();
     service.release();
-    await Bun.sleep(1);
+    await turn();
 
     // Assert — the attach's redraw only; the complete redraw the second capture was for went nowhere.
     should(text(sent)).deepEqual([PROMPT_REDRAW]);

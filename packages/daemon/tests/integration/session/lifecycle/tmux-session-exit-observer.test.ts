@@ -34,6 +34,7 @@ import {
   TmuxController,
   UNNAMED_SELF_CHECK_STAGES,
 } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * A session whose agent exits must stop reading `running` on the self-check's own tick.
@@ -206,16 +207,9 @@ function selfCheck(subject: ExitFixture): SessionHealthService {
   );
 }
 
-/**
- * Waits on the condition itself, never on a fixed sleep. The deadline is generous because a loaded
- * CI host is exactly where these moments stretch; a healthy run returns in milliseconds.
- */
+/** Waits on the condition itself, never on a fixed sleep; the deadline is a safety net, not a budget. */
 async function until(check: () => Promise<boolean>, what: string): Promise<void> {
-  for (let attempt = 0; attempt < 600; attempt += 1) {
-    if (await check()) return;
-    await Bun.sleep(25);
-  }
-  throw new Error(`timed out waiting for ${what}`);
+  await waitFor(check, what);
 }
 
 async function exitHarness(subject: ExitFixture): Promise<void> {

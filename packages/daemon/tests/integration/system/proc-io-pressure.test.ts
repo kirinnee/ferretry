@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { ProcIoPressure } from '../../../src/adapters/system/proc-io-pressure.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 const BUSY = 'some avg10=52.00 avg60=51.00 avg300=51.00 total=1\nfull avg10=46.00 avg60=45.00 avg300=44.00 total=1\n';
 const CALM = 'some avg10=0.50 avg60=0.40 avg300=0.30 total=1\nfull avg10=0.00 avg60=0.00 avg300=0.00 total=1\n';
@@ -71,14 +72,16 @@ describe('ProcIoPressure', () => {
 
     // Act
     const stop = pressure.start();
-    await Bun.sleep(60);
+    await waitFor(() => pressure.current()?.full?.avg10 === 46, 'the timer to refresh the first reading');
     const first = pressure.current();
     await writeFile(path, CALM);
-    await Bun.sleep(80);
+    await waitFor(() => pressure.current()?.some.avg10 === 0.5, 'the timer to follow the file to calm');
     const second = pressure.current();
     stop();
     await writeFile(path, BUSY);
-    await Bun.sleep(60);
+    // Negative wait: nothing may read after stop. 50 ms is five 10 ms periods; a late timer could only make
+    // this fail, never pass falsely, so a short settle is safe.
+    await Bun.sleep(50);
     const afterStop = pressure.current();
 
     // Assert

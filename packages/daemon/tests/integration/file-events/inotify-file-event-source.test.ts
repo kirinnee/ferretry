@@ -14,6 +14,7 @@ import {
 import type { StampPrimitives } from '../../../src/adapters/file-events/node-stamps.ts';
 import { platformFileEventSource } from '../../../src/adapters/file-events/platform.ts';
 import type { DirectoryWatchOpen } from '../../../src/lib/file-events/ports.ts';
+import { waitFor } from '../support/wait-for.ts';
 import { describeRealFileEvents, until, workspace } from './real-file-system.ts';
 
 describeRealFileEvents('inotify', () => new InotifyFileEventSource(loadInotifySyscalls));
@@ -101,8 +102,6 @@ function watching(source: InotifyFileEventSource, directory: string) {
   return { heard, opened, close: () => (opened.kind === 'watching' ? opened.handle.close() : undefined) };
 }
 
-const tick = async (): Promise<void> => await Bun.sleep(1);
-
 describe('InotifyFileEventSource, against the kernel', () => {
   it('should hold ONE descriptor for a directory of thousands of files, and release it on close', async () => {
     // Arrange
@@ -115,7 +114,7 @@ describe('InotifyFileEventSource, against the kernel', () => {
 
     // Act
     const watch = watching(source, directory);
-    await tick();
+    await waitFor(() => readdirSync('/proc/self/fd').length > before, 'the watch to hold a descriptor');
     const during = readdirSync('/proc/self/fd').length;
     watch.close();
     await until(() => readdirSync('/proc/self/fd').length <= before, 'the descriptors to be released');
@@ -151,7 +150,7 @@ describe('InotifyFileEventSource', () => {
     a.close();
     a.close();
     b.close();
-    await tick();
+    await waitFor(() => fake.calls.includes('close 7'), 'the instance to be closed with the last watch');
 
     // Assert
     should(fake.calls).deepEqual(['init', 'add 7 /a true', 'add 7 /b true', 'rm 7 1', 'rm 7 2', 'cancel', 'close 7']);
@@ -174,10 +173,10 @@ describe('InotifyFileEventSource', () => {
       inotifyEvent(99, IN_MODIFY),
       event.subarray(0, 20),
     );
-    await tick();
+    await waitFor(() => a.heard.events >= 1, 'directory /a to be told of the whole events');
     const midway = { a: a.heard.events, b: b.heard.events };
     fake.feed(event.subarray(20));
-    await tick();
+    await waitFor(() => b.heard.events >= 1, 'directory /b to be told once its partial event completed');
 
     // Assert
     should(midway).deepEqual({ a: 1, b: 0 });
@@ -193,7 +192,7 @@ describe('InotifyFileEventSource', () => {
 
     // Act
     fake.feed(inotifyEvent(-1, IN_Q_OVERFLOW));
-    await tick();
+    await waitFor(() => a.heard.events >= 1 && b.heard.events >= 1, 'both directories to be told of the overflow');
 
     // Assert
     should([a.heard.events, b.heard.events]).deepEqual([1, 1]);
@@ -208,12 +207,12 @@ describe('InotifyFileEventSource', () => {
 
     // Act: the directory is deleted; the kernel drops wd 1 and later hands it to a new directory.
     fake.feed(inotifyEvent(1, IN_IGNORED));
-    await tick();
+    await waitFor(() => gone.heard.events >= 1, 'the dropped directory to be told');
     fake.nextWd = 1;
     const reused = watching(source, '/new');
     gone.close();
     fake.feed(inotifyEvent(1, IN_MODIFY));
-    await tick();
+    await waitFor(() => reused.heard.events >= 1, 'the directory that reused the number to be told');
 
     // Assert
     should(gone.heard.events).equal(1);
@@ -248,10 +247,10 @@ describe('InotifyFileEventSource', () => {
 
     // Act
     fake.controller?.close();
-    await tick();
+    await waitFor(() => ended.heard.errors.length >= 1, 'the first watch to be told the stream ended');
     const failed = watching(source, '/b');
     fake.controller?.error(new Error('EBADF'));
-    await tick();
+    await waitFor(() => failed.heard.errors.length >= 1, 'the second watch to be told the stream failed');
 
     // Assert
     should(ended.heard.errors).deepEqual(['the inotify event stream ended']);

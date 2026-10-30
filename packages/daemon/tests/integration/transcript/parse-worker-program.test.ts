@@ -17,9 +17,9 @@ import {
   WINDOW_LOST,
 } from '../../../src/adapters/transcript/parse-worker/protocol.ts';
 import type { ConversationDescriber } from '../../../src/lib/imports/conversation-describer.ts';
-import { ConversationDigestError, type PortableConversationRow } from '../../../src/lib/session/transcript/digest.ts';
 import { NO_HANDOFF_SCOPE } from '../../../src/lib/imports/conversation-text.ts';
 import type { ForeignTranscriptRead } from '../../../src/lib/imports/foreign-history.ts';
+import { ConversationDigestError, type PortableConversationRow } from '../../../src/lib/session/transcript/digest.ts';
 import { TranscriptImageError, type TranscriptImageReader } from '../../../src/lib/session/transcript/image-reader.ts';
 import type {
   TranscriptBatch,
@@ -27,6 +27,7 @@ import type {
   TranscriptRawRecord,
   TranscriptWindowStep,
 } from '../../../src/lib/transcript/types.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 type Message = Parameters<NonNullable<TranscriptParseScope['onmessage']>>[0]['data'];
 
@@ -471,13 +472,13 @@ describe('serveTranscriptParse', () => {
       fake.send({ id: 1, op: 'window-next', window: 1, open: opening });
       fake.send({ id: 2, op: 'window-next', window: 1 });
       fake.send({ id: 3, op: 'window-next', window: 2, open: opening });
-      await Bun.sleep(0);
+      await waitFor(() => log.length === 2, "window 2 to start beside window 1's first step");
 
       // Assert — window 2 started beside window 1's first step; window 1's second step waits for it.
       should(log).deepEqual(['start w1.1', 'start w2.1']);
       gates[0]?.();
       await fake.settled(1);
-      await Bun.sleep(0);
+      await waitFor(() => log.length === 4, "window 1's second step to start once its first ended");
       should(log).deepEqual(['start w1.1', 'start w2.1', 'end w1.1', 'start w1.2']);
       gates[1]?.();
       gates[2]?.();

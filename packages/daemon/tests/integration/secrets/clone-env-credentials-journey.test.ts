@@ -40,6 +40,7 @@ import should from 'should';
 import { writeModelFiles } from '../fleet/config-files-fixture.ts';
 import { type BootedDaemon, bootDaemon, stopBootedDaemons } from '../support/booted-daemon.ts';
 import { cleanupTempDirectories } from '../support/repository.ts';
+import { waitForValue } from '../support/wait-for.ts';
 
 const KEY_NAME = 'LITELLM_API_KEY';
 const KEY_VALUE = 'sk-litellm-clone-journey-0123456789';
@@ -131,12 +132,10 @@ async function testLogin(daemon: BootedDaemon, id: string) {
  * and no answer about the sign-in's slot. Waiting is on the daemon's own word for "no read is running".
  */
 async function settledCredentials(daemon: BootedDaemon) {
-  for (let attempt = 0; attempt < 400; attempt += 1) {
+  return await waitForValue(async () => {
     const listed = FleetCredentialListSchema.parse(await (await daemon.get('/v1/fleet/credentials')).json());
-    if (listed.credentials.every(credential => credential.status.word !== 'checking')) return listed;
-    await Bun.sleep(25);
-  }
-  throw new Error('a credential was still being checked ten seconds after the copy');
+    return listed.credentials.every(credential => credential.status.word !== 'checking') ? listed : undefined;
+  }, 'no credential to be checked any more after the copy');
 }
 
 describe('cloning an API-key login between two booted daemons', () => {

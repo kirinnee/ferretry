@@ -36,6 +36,7 @@ import {
   type SessionId,
   TmuxController,
 } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 /**
  * The durable and terminal sides of a send: the record it reads, the ledger it appends to, the logs
@@ -906,6 +907,18 @@ describe('the tmux send terminal, as the tracker reads it', () => {
   });
 });
 
+/**
+ * Waits until a sentinel look, scheduled LAST with the same delay on its own session, has run. Timers of equal delay
+ * expire in the order they were set, so every look that was going to run has run by then.
+ */
+async function afterTheLooks(scheduler: TimerSendScheduler): Promise<void> {
+  let reached = false;
+  scheduler.schedule(parseSessionId('session-sentinel'), 5, () => {
+    reached = true;
+  });
+  await waitFor(() => reached, 'the sentinel look, scheduled after the others, to run');
+}
+
 describe('the timer send scheduler', () => {
   it('should keep one pending look per session, replace it, and cancel them all', async () => {
     // Arrange
@@ -916,10 +929,10 @@ describe('the timer send scheduler', () => {
     subject.schedule(ID, 5, () => void ran.push('replaced'));
     subject.schedule(ID, 5, () => void ran.push('kept'));
     subject.schedule(parseSessionId('session-2'), 5, () => void ran.push('other session'));
-    await Bun.sleep(20);
+    await afterTheLooks(subject);
     subject.schedule(ID, 5, () => void ran.push('cancelled'));
     subject.cancelAll();
-    await Bun.sleep(20);
+    await afterTheLooks(subject);
 
     // Assert
     should(ran.sort()).deepEqual(['kept', 'other session']);

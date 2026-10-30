@@ -2,10 +2,11 @@ import { afterEach, describe, it } from 'bun:test';
 import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import should from 'should';
 import type { BrowserScreencastFrame } from '@ferretry/protocol';
-import type { FrameClock } from '../../../../src/lib/index.ts';
+import should from 'should';
 import { BrowserWorkerClient, type WorkerClientOptions } from '../../../../src/adapters/browser/transport/index.ts';
+import type { FrameClock } from '../../../../src/lib/index.ts';
+import { waitFor } from '../../support/wait-for.ts';
 
 const WORKER_ENTRY = join(import.meta.dir, 'fixtures', 'fake-worker.mjs');
 const VIEWPORT = { width: 800, height: 600 } as const;
@@ -40,10 +41,10 @@ function alive(pid: number): boolean {
   }
 }
 
-/** Waits briefly for a reaped child to leave the process table before judging it alive. */
+/** Waits for a reaped child to leave the process table, and says so only once it has. */
 async function settledDead(pid: number): Promise<boolean> {
-  for (let attempt = 0; attempt < 50 && alive(pid); attempt += 1) await Bun.sleep(10);
-  return !alive(pid);
+  await waitFor(() => !alive(pid), `process ${String(pid)} to leave the process table`);
+  return true;
 }
 
 /** Reads the params the worker actually received back out of the snapshot it reported. */

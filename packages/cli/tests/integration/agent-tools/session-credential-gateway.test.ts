@@ -118,6 +118,46 @@ describe('the agent’s way to the daemon, through a restart', () => {
     should(told.count).equal(1);
   });
 
+  it('should wait out a daemon that answers it is still starting, and land the call once it serves', async () => {
+    // Arrange — the restarted daemon has bound its address but is still on a boot step, then serves.
+    const starting = {
+      error: 'the daemon is starting (reading capability grants); ask again shortly',
+      code: 'daemon_starting',
+    };
+    const answers = [
+      () => Promise.reject(Object.assign(new Error('refused'), { code: 'ConnectionRefused' })),
+      () => Promise.resolve(Response.json(starting, { status: 503 })),
+      () => Promise.resolve(Response.json(starting, { status: 503 })),
+      () => Promise.resolve(Response.json({ summary: 'listed' })),
+    ];
+    let calls = 0;
+    const fetcher = (): Promise<Response> => {
+      calls += 1;
+      return (answers.shift() ?? (() => Promise.reject(new Error('asked too often'))))();
+    };
+    const told = { count: 0 };
+    const patient = new SessionCredentialGateway(async () => 'http://127.0.0.1:9', fetcher, {
+      ...restart(told),
+      sleep: async () => undefined,
+    });
+    const impatient = new SessionCredentialGateway(
+      async () => 'http://127.0.0.1:9',
+      async () => Response.json(starting, { status: 503 }),
+    );
+    const call = { method: 'POST', body: JSON.stringify({ tool: 'terminal.list' }) };
+
+    // Act
+    const answer = await patient.request('/v1/agent/tools', Answer, call);
+    const refused = await impatient.request('/v1/agent/tools', Answer, call).catch((error: unknown) => error);
+
+    // Assert — the starting answers were waited through, not handed back as the tool's failure.
+    should(answer).deepEqual({ summary: 'listed' });
+    should(calls).equal(4);
+    should(told.count).equal(1);
+    should(refused).be.instanceOf(Error);
+    should((refused as Error).message).equal(starting.error);
+  });
+
   it('should repeat a read the daemon dropped mid-request, and never a send that may already have typed', async () => {
     // Arrange — the first request of each kind arrives, and the daemon goes down holding it.
     const dropped = Object.assign(new Error('socket closed'), { code: 'ECONNRESET' });
