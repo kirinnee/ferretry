@@ -129,95 +129,101 @@ describe('the sessions list', () => {
   });
 
   it('hides stopped sessions until ticked, counts each kind, and never clips a label', async () => {
-    for (const view of ['column', 'drawer'] as const) {
-      const { context, tab } = await open(view, 'one', 'studio-light');
-      try {
-        const live = (await rowIds(tab)).slice().sort();
-        expect(live).toEqual(['s-hadi', 's-ivo', 's-lea', 's-ora']);
-        expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
-        expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 3']);
-        expect(await clippedControls(tab)).toEqual([]);
-        await shot(tab, `sessions-list-${view}-hidden`);
+    await Promise.all(
+      (['column', 'drawer'] as const).map(async view => {
+        const { context, tab } = await open(view, 'one', 'studio-light');
+        try {
+          const live = (await rowIds(tab)).slice().sort();
+          expect(live).toEqual(['s-hadi', 's-ivo', 's-lea', 's-ora']);
+          expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
+          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 3']);
+          expect(await clippedControls(tab)).toEqual([]);
+          await shot(tab, `sessions-list-${view}-hidden`);
 
-        await tab.click('[data-sbar-show-stopped]');
-        expect((await rowIds(tab)).slice().sort()).toEqual([
-          's-hadi',
-          's-ivo',
-          's-kai',
-          's-lea',
-          's-noa',
-          's-ora',
-          's-rue',
-        ]);
-        expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
-        expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped']);
-        await shot(tab, `sessions-list-${view}-stopped`);
+          await tab.click('[data-sbar-show-stopped]');
+          expect((await rowIds(tab)).slice().sort()).toEqual([
+            's-hadi',
+            's-ivo',
+            's-kai',
+            's-lea',
+            's-noa',
+            's-ora',
+            's-rue',
+          ]);
+          expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
+          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped']);
+          await shot(tab, `sessions-list-${view}-stopped`);
 
-        await tab.click('[data-sbar-filter="auto"]');
-        expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-kai', 's-lea', 's-noa']);
-        // Choosing a kind leaves the other segments' numbers alone.
-        expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
-        await tab.click('[data-sbar-show-stopped]');
-        expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-lea']);
-        expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 2']);
-        await shot(tab, `sessions-list-${view}-agents`);
-      } finally {
-        await context.close();
-      }
-    }
+          await tab.click('[data-sbar-filter="auto"]');
+          expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-kai', 's-lea', 's-noa']);
+          // Choosing a kind leaves the other segments' numbers alone.
+          expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
+          await tab.click('[data-sbar-show-stopped]');
+          expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-lea']);
+          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 2']);
+          await shot(tab, `sessions-list-${view}-agents`);
+        } finally {
+          await context.close();
+        }
+      }),
+    );
   }, 120_000);
 
   it('opens a new device on Interactive, listed first, and remembers a chosen kind', async () => {
-    for (const view of ['column', 'drawer'] as const) {
-      for (const theme of ['studio-light', 'studio-dark']) {
-        const { context, tab } = await open(view, 'one', theme, false, '&mode=default');
-        try {
-          expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
-          expect(await tab.getAttribute('[data-sbar-filter="interactive"]', 'aria-pressed')).toBe('true');
-          expect((await rowIds(tab)).slice().sort()).toEqual(['s-hadi', 's-ora']);
-          expect(await clippedControls(tab)).toEqual([]);
-          await shot(tab, `sessions-filter-default-${view}-${theme.replace('studio-', '')}`);
-        } finally {
-          await context.close();
-        }
-      }
-    }
+    await Promise.all(
+      (['column', 'drawer'] as const).flatMap(view =>
+        ['studio-light', 'studio-dark'].map(async theme => {
+          const { context, tab } = await open(view, 'one', theme, false, '&mode=default');
+          try {
+            expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
+            expect(await tab.getAttribute('[data-sbar-filter="interactive"]', 'aria-pressed')).toBe('true');
+            expect((await rowIds(tab)).slice().sort()).toEqual(['s-hadi', 's-ora']);
+            expect(await clippedControls(tab)).toEqual([]);
+            await shot(tab, `sessions-filter-default-${view}-${theme.replace('studio-', '')}`);
+          } finally {
+            await context.close();
+          }
+        }),
+      ),
+    );
   }, 120_000);
 
   it('nests a pack under its lead: a fold with a rollup, a faint stub when the lead is filtered out', async () => {
-    for (const view of ['column', 'drawer'] as const) {
-      for (const theme of ['studio-light', 'studio-dark']) {
-        const { context, tab } = await open(view, 'one', theme, true);
-        try {
-          const tag = `${view}-${theme.replace('studio-', '')}`;
-          expect(await rowIds(tab)).toEqual(['p-lead', 'p-pim', 'p-ula', 'p-ada', 'p-kai', 'p-ora']);
-          expect(await texts(tab, '[data-sbar-fold]')).toEqual([
-            '4 sub-ferrets 1 needs you · 3 running',
-            '1 sub-ferret 1 running',
-          ]);
-          const indent = await tab.$$eval('[data-sbar-session]', nodes =>
-            nodes.map(node => Math.round(node.getBoundingClientRect().left)),
-          );
-          expect(indent[1]).toBeGreaterThan(indent[0] as number);
-          expect(indent[4]).toBeGreaterThan(indent[1] as number);
-          expect(await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
-          await shot(tab, `sessions-tree-${tag}-expanded`);
+    await Promise.all(
+      (['column', 'drawer'] as const).flatMap(view =>
+        ['studio-light', 'studio-dark'].map(async theme => {
+          const { context, tab } = await open(view, 'one', theme, true);
+          try {
+            const tag = `${view}-${theme.replace('studio-', '')}`;
+            expect(await rowIds(tab)).toEqual(['p-lead', 'p-pim', 'p-ula', 'p-ada', 'p-kai', 'p-ora']);
+            expect(await texts(tab, '[data-sbar-fold]')).toEqual([
+              '4 sub-ferrets 1 needs you · 3 running',
+              '1 sub-ferret 1 running',
+            ]);
+            const indent = await tab.$$eval('[data-sbar-session]', nodes =>
+              nodes.map(node => Math.round(node.getBoundingClientRect().left)),
+            );
+            expect(indent[1]).toBeGreaterThan(indent[0] as number);
+            expect(indent[4]).toBeGreaterThan(indent[1] as number);
+            expect(await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(0);
+            await shot(tab, `sessions-tree-${tag}-expanded`);
 
-          await tab.click('[data-sbar-fold="p-lead"]');
-          expect(await rowIds(tab)).toEqual(['p-lead', 'p-ora']);
-          expect(await texts(tab, '[data-sbar-fold]')).toEqual(['4 sub-ferrets 1 needs you · 3 running']);
-          await shot(tab, `sessions-tree-${tag}-collapsed`);
+            await tab.click('[data-sbar-fold="p-lead"]');
+            expect(await rowIds(tab)).toEqual(['p-lead', 'p-ora']);
+            expect(await texts(tab, '[data-sbar-fold]')).toEqual(['4 sub-ferrets 1 needs you · 3 running']);
+            await shot(tab, `sessions-tree-${tag}-collapsed`);
 
-          await tab.click('[data-sbar-fold="p-lead"]');
-          await tab.click('[data-sbar-filter="auto"]');
-          expect(await rowIds(tab)).toEqual(['p-pim', 'p-ula', 'p-ada', 'p-kai']);
-          expect(await texts(tab, '.fy-sbar__stub-link')).toContain('Ivo · Session p-lead');
-          await shot(tab, `sessions-tree-${tag}-filtered`);
-        } finally {
-          await context.close();
-        }
-      }
-    }
+            await tab.click('[data-sbar-fold="p-lead"]');
+            await tab.click('[data-sbar-filter="auto"]');
+            expect(await rowIds(tab)).toEqual(['p-pim', 'p-ula', 'p-ada', 'p-kai']);
+            expect(await texts(tab, '.fy-sbar__stub-link')).toContain('Ivo · Session p-lead');
+            await shot(tab, `sessions-tree-${tag}-filtered`);
+          } finally {
+            await context.close();
+          }
+        }),
+      ),
+    );
   }, 180_000);
 
   it('keeps every label whole in a column dragged narrow, wrapping before it would clip', async () => {
@@ -272,45 +278,51 @@ describe('the sessions list', () => {
   }, 60_000);
 
   it('lists two machines as Needs you, then each machine, then its folders', async () => {
-    for (const view of ['column', 'drawer'] as const) {
-      const { context, tab } = await open(view, 'two', 'studio-light');
-      try {
-        expect(await texts(tab, '[data-sbar-needs-you-group] [data-sbar-session]')).toHaveLength(2);
-        expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
-        expect((await texts(tab, '[data-sbar-machine-group="studio-daemon"] h3')).map(h => h.toLowerCase())).toEqual([
-          'ferretry 2',
-          'notes 1',
-        ]);
-        expect((await texts(tab, '[data-sbar-machine-group="laptop-daemon"] h3')).map(h => h.toLowerCase())).toEqual([
-          'site 1',
-        ]);
-        // Stopped sessions on either machine are hidden, and the segment counts both.
-        expect(await segments(tab)).toEqual(['Interactive 3', 'All 6', 'Agents 3']);
-        expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 4']);
-        await shot(tab, `sessions-list-${view}-machines`);
+    await Promise.all(
+      (['column', 'drawer'] as const).map(async view => {
+        const { context, tab } = await open(view, 'two', 'studio-light');
+        try {
+          expect(await texts(tab, '[data-sbar-needs-you-group] [data-sbar-session]')).toHaveLength(2);
+          expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
+          expect((await texts(tab, '[data-sbar-machine-group="studio-daemon"] h3')).map(h => h.toLowerCase())).toEqual([
+            'ferretry 2',
+            'notes 1',
+          ]);
+          expect((await texts(tab, '[data-sbar-machine-group="laptop-daemon"] h3')).map(h => h.toLowerCase())).toEqual([
+            'site 1',
+          ]);
+          // Stopped sessions on either machine are hidden, and the segment counts both.
+          expect(await segments(tab)).toEqual(['Interactive 3', 'All 6', 'Agents 3']);
+          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 4']);
+          await shot(tab, `sessions-list-${view}-machines`);
 
-        await tab.click('[data-sbar-show-stopped]');
-        expect(await rowIds(tab)).toContain('l-ada');
-        await shot(tab, `sessions-list-${view}-machines-stopped`);
-      } finally {
-        await context.close();
-      }
-    }
+          await tab.click('[data-sbar-show-stopped]');
+          expect(await rowIds(tab)).toContain('l-ada');
+          await shot(tab, `sessions-list-${view}-machines-stopped`);
+        } finally {
+          await context.close();
+        }
+      }),
+    );
   }, 120_000);
 
   it('never scrolls sideways, light or dark, in two theme families', async () => {
-    for (const theme of ['studio', 'neo'])
-      for (const mode of ['light', 'dark'])
-        for (const view of ['column', 'drawer'] as const) {
-          const { context, tab } = await open(view, 'two', `${theme}-${mode}`);
-          try {
-            const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-            expect(wide).toBeLessThanOrEqual(0);
-            expect(await clippedControls(tab)).toEqual([]);
-            await shot(tab, `sessions-list-${view}-${theme}-${mode}`);
-          } finally {
-            await context.close();
-          }
-        }
+    await Promise.all(
+      ['studio', 'neo'].flatMap(theme =>
+        ['light', 'dark'].flatMap(mode =>
+          (['column', 'drawer'] as const).map(async view => {
+            const { context, tab } = await open(view, 'two', `${theme}-${mode}`);
+            try {
+              const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+              expect(wide).toBeLessThanOrEqual(0);
+              expect(await clippedControls(tab)).toEqual([]);
+              await shot(tab, `sessions-list-${view}-${theme}-${mode}`);
+            } finally {
+              await context.close();
+            }
+          }),
+        ),
+      ),
+    );
   }, 180_000);
 });
