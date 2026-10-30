@@ -45,6 +45,7 @@ describe('parseContinueAt', () => {
     should(parseContinueAt('continue automatically at Nov 40, 12am', NOW)).be.undefined();
     should(parseContinueAt('continue automatically at Xyz 1, 12am', NOW)).be.undefined();
     should(parseContinueAt('continue automatically at Nov 1, 13am', NOW)).be.undefined();
+    should(parseContinueAt('continue automatically at Feb 31, 9am', NOW)).be.undefined();
   });
 });
 

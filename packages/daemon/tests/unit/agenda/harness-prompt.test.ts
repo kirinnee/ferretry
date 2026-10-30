@@ -687,3 +687,28 @@ describe('harnessWait for a login that hit its limit', () => {
     should(wait?.request.title).equal('Ferret stuck on a prompt');
   });
 });
+
+describe('harnessWait for a usage window limit', () => {
+  it('should say usage limit, with the reset when known', () => {
+    // Act
+    const wait = harnessWait(
+      running({
+        status: 'rate_limited',
+        turnState: 'needs-input',
+        quota: { atLimit: true, resetAt: Date.parse('2026-11-01T00:00:00.000Z') },
+        harnessDialog: {
+          id: 'd3',
+          kind: 'usage-limit',
+          title: 'What do you want to do?',
+          body: "You've hit your session limit",
+        },
+      }),
+    );
+
+    // Assert
+    should(wait?.request.title).equal('Login hit its usage limit');
+    should(wait?.request.subject).equal(
+      "The ferret's login hit its usage limit and resets Nov 1, 00:00 UTC. Wait or switch logins.",
+    );
+  });
+});
