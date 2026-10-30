@@ -153,7 +153,6 @@ export class InputRequestService {
           : 'that target cannot take an input request',
       );
     }
-    this.guardScope(raise);
     const shown = await this.project(sessionId, seen.facts, [target.key, ...(seen.names ?? [])]);
     const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
     const requestId = this.deps.ids.requestId();
@@ -200,18 +199,6 @@ export class InputRequestService {
     this.noteRaise(sessionId, now);
     await this.record(request, 'input.requested', { kind: 'agent' }, auditDetail(request));
     return this.view(held);
-  }
-
-  /**
-   * A request is never refused for a risky target: the card carries a {@link riskOf risk flag} and the owner
-   * decides. The one scope refusal is a code that echoes (`private`), which is not typed into a terminal yet.
-   */
-  private guardScope(raise: InputRaise): void {
-    if (raise.sensitivity === 'private')
-      throw new InputRequestError(
-        'bad_request',
-        'a code that shows on screen cannot be typed for you into a terminal yet; ask the owner in chat to type it there',
-      );
   }
 
   /** What the agent reads about its request: where it stands, never the value. Waits up to `waitMs` for a final state. */
@@ -604,7 +591,7 @@ export class InputRequestService {
       if (!seen.ok) return await fail('target_gone', targetChanged());
       if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', targetChanged());
       held.names = [...new Set([...held.names, request.target.key, ...(seen.names ?? [])])];
-      if (request.sensitivity === 'secret') hold = await this.holdFor(request, held.names);
+      if (request.sensitivity !== 'plain') hold = await this.holdFor(request, held.names);
       try {
         await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
       } catch {
@@ -612,7 +599,7 @@ export class InputRequestService {
         hold = undefined;
         throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
       }
-      if (request.sensitivity === 'secret') this.deps.values.hold(request.sessionId, value, request.agendaItemId);
+      if (request.sensitivity !== 'plain') this.deps.values.hold(request.sessionId, value, request.agendaItemId);
       const typed: TypeResult = await this.deps.target
         .type(request.sessionId, request.target, value, submitted, seen.facts)
         .catch((): TypeResult => 'uncertain');
@@ -856,13 +843,15 @@ function targetChanged(): InputRequestError {
 }
 
 const PLAIN_FLAG = 'Not secret: the ferret can see this value.';
+const PRIVATE_FLAG = 'This code will show on screen while the terminal is hidden from the ferret for 2 minutes.';
 
 /**
  * The flag a card carries, from what was seen at the target: it is never a refusal, the owner decides. The
  * sentence is fixed text (no program name, nothing the terminal showed), so it is safe to show and to log.
  */
 function riskOf(sensitivity: InputRequest['sensitivity'], facts: InputTargetFacts): InputRisk {
-  if (sensitivity !== 'secret') return { level: 'red', reason: PLAIN_FLAG };
+  if (sensitivity === 'plain') return { level: 'red', reason: PLAIN_FLAG };
+  if (sensitivity === 'private') return { level: 'amber', reason: PRIVATE_FLAG };
   if (facts.kind !== 'terminal') return { level: 'amber', reason: 'Ferretry cannot check this target before typing.' };
   if (facts.echo === 'on')
     return {

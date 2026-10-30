@@ -77,9 +77,9 @@ through the input tool; the generic add refuses it.
 | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `secret`  | A password or passphrase. The bridge never carries it to the agent, a log or disk; what the target prints afterwards is held back (quarantine) and then only masked best effort. | Never refused for its target: the card flags the risk (green, amber or red) and Send stays available. Hard refusals: a control character or line break in the value, a changed target (409 `target_changed`), and a caller who is not the owner. |
 | `plain`   | A username, email, hostname or `y`. **Not secret.**                                                                                                                              | Target binding only. The card says "Not secret: the ferret can see this value." and flags it.                                                                                                                                                    |
-| `private` | A code that echoes (a 2FA code typed into a terminal). **Deferred.**                                                                                                             | Refused at raise (400 `bad_request`) until it has a design: masking cannot make an echo safe.                                                                                                                                                    |
+| `private` | A code that echoes (a 2FA code typed into a terminal).                                                                                                                           | Never refused: the card flags it amber ("This code will show on screen while the terminal is hidden from the ferret for 2 minutes."). Quarantine and masking apply exactly as for `secret`. Same hard refusals as `secret`.                      |
 
-`secret` values (and the deferred `private`) containing a control character or a line break are refused
+`secret` and `private` values containing a control character or a line break are refused
 ("this would press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
 
 A `plain` value is typed the same way and is not held in the redaction window, so the agent's next read
@@ -133,16 +133,17 @@ card draws what the **daemon** observed (`sudo` is reading it, typing is hidden)
 **agent** wrote small, and carries a **risk flag** with one fixed sentence that says what the risk is
 (`request.risk`: a level and a reason; the sentence never contains terminal text):
 
-| Level | When                                                                                                              |
-| ----- | ----------------------------------------------------------------------------------------------------------------- |
-| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                  |
-| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell. |
-| red   | A `plain` value: "Not secret: the ferret can see this value."                                                     |
+| Level | When                                                                                                                      |
+| ----- | ------------------------------------------------------------------------------------------------------------------------- |
+| green | A `secret`, echo off, and a recognised program (`sudo`, `ssh`, `gpg` and so on).                                          |
+| amber | A `secret` with echo on (the value will show on screen), echo unknown, an unrecognised program or the bare shell.         |
+| amber | A `private` code (it echoes): "This code will show on screen while the terminal is hidden from the ferret for 2 minutes." |
+| red   | A `plain` value: "Not secret: the ferret can see this value."                                                             |
 
 The flag is computed from what the daemon observed, when the request is raised and again when it is
 restored. Send is available at every level. The only refusals are a control character or line break in
-a `secret` ("this would press keys"), a target that changed since the card was drawn (`target_changed`),
-a caller who is not the owner, and the deferred `private` sensitivity.
+a `secret` or `private` value ("this would press keys"), a target that changed since the card was drawn (`target_changed`),
+and a caller who is not the owner. A `private` code is always flagged amber.
 
 **`sudo` always goes through the app.** The agent instruction makes `terminal_request_input` the only way
 to answer a `sudo` password prompt: the agent never types it and never asks for it in chat.
@@ -206,7 +207,7 @@ the write:
 - **A terminal is known by every name** (its key, name and id), so a read by any of them is refused.
 - **Raise-time rules**: nothing is refused for its target. A `secret` on a terminal that echoes, or whose
   echo is unknown, is allowed and flagged amber; the quarantine hides the pane, including what echoed, and
-  the facts are checked again at delivery (the compare-and-enqueue check below). `private` is refused.
+  the facts are checked again at delivery (the compare-and-enqueue check below). A `private` code is allowed and flagged amber, with the same quarantine.
 
 The daemon holds each delivered `secret` in RAM, for the window above, and masks it as
 `[redacted:input !A7]` wherever it scrubs text: the operator's screen, transcript and journal reads,

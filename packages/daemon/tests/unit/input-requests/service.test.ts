@@ -578,8 +578,24 @@ describe('InputRequestService.deliver', () => {
     }
   });
 
-  it('should refuse a private code, which a terminal would echo', async () => {
-    const error = await refused(build().service.raise(SESSION, { ...RAISE, sensitivity: 'private' }));
+  it('should accept a private code, flag it amber and quarantine the terminal like a secret', async () => {
+    const { w, service, values, id, digest, view } = await raised({}, { ...RAISE, sensitivity: 'private' });
+    const [card] = await service.list(HOST);
+    const done = await service.deliver(SESSION, id, bodyFor(digest), HOST);
+
+    should(view.state).equal('pending');
+    should(card?.risk?.level).equal('amber');
+    should(card?.risk?.reason).containEql('show on screen');
+    should(card?.risk?.reason).containEql('2 minutes');
+    should(done.state).equal('delivered');
+    should(w.writes).eql([{ text: VALUE, submit: true }]);
+    should(values.scrub(SESSION, VALUE)).equal('[redacted:input A1]');
+    should(w.quarantineEvents.length).be.above(0);
+  });
+
+  it('should still refuse a private code with a control character', async () => {
+    const { service, id, digest } = await raised({}, { ...RAISE, sensitivity: 'private' });
+    const error = await refused(service.deliver(SESSION, id, bodyFor(digest, {}, '12\n34'), HOST));
 
     should(error.code).equal('bad_request');
   });

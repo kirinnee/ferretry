@@ -28,6 +28,15 @@ describe('docs/input-requests.md says what the bridge does and does not promise'
     should(DOC).containEql('Send is available at every level');
   });
 
+  it('should describe a private code as allowed and flagged amber, never refused', () => {
+    const sensitivity = row('| `private`');
+
+    should(sensitivity).containEql('Never refused');
+    should(sensitivity).containEql('amber');
+    should(DOC).not.containEql('Refused at raise');
+    should(DOC).not.containEql('deferred `private`');
+  });
+
   it('should say sudo goes through the app', () => {
     should(DOC).containEql('terminal_request_input');
   });
