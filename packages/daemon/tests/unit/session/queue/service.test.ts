@@ -3,8 +3,8 @@ import should from 'should';
 import {
   type QueueEvent,
   QueueRefused,
-  type SessionQueueStore,
   SessionQueueService,
+  type SessionQueueStore,
 } from '../../../../src/lib/index.ts';
 import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
 
@@ -50,6 +50,7 @@ describe('accepting a message', () => {
     should(created).be.true();
     should(message).containEql({ state: 'queued', revision: 1, sender: 'agent', from: 'session-2', fromName: 'ada' });
     should(message.attachmentIds).eql(['att-1']);
+    should(message).not.have.property('by');
     should(store.logs.get(ID)).have.length(1);
     should(await service.list(ID)).deepEqual([message]);
   });
@@ -77,19 +78,37 @@ describe('a message whose sender waits for the reply', () => {
     should(message.replyExpected).be.true();
   });
 
-  it('should keep that a daemon notice was made for the owner’s chat', async () => {
+  it('should keep who a message is from as metadata, beside words it leaves as they are', async () => {
     const { service } = subject();
 
     const { message } = await service.enqueue(ID, {
       id: 'b1',
       sender: 'daemon',
-      chat: true,
-      text: '[board] &F1 → Merged',
+      by: { kind: 'ferretry', feature: 'Board' },
+      text: '&F1 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.',
     });
     const plain = await service.enqueue(ID, { id: 'b2', sender: 'daemon', text: 'nudge' });
 
-    should(message.chat).be.true();
+    should(message.by).eql({ kind: 'ferretry', feature: 'Board' });
+    should(message.text).equal('&F1 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.');
+    should(plain.message).not.have.property('by');
     should(plain.message).not.have.property('chat');
+  });
+});
+
+describe('who a message is from', () => {
+  it('should keep it as data on the message, for the app’s sender chip', async () => {
+    const { service } = subject();
+
+    const { message } = await service.enqueue(ID, {
+      id: 'm2',
+      sender: 'agent',
+      by: { kind: 'ferret', name: 'ada' },
+      text: 'hi',
+    });
+
+    should(message.by).deepEqual({ kind: 'ferret', name: 'ada' });
+    should(message.text).equal('hi');
   });
 });
 

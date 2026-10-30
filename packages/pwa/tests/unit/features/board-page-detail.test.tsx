@@ -28,6 +28,7 @@ afterEach(unmount);
 interface Options {
   readonly withPorts?: boolean;
   readonly withAgenda?: boolean;
+  readonly agenda?: BoardPageProps['agenda'];
   readonly openCard?: BoardPageProps['openCard'];
   readonly machines?: BoardPageProps['machines'];
   readonly phone?: boolean;
@@ -54,9 +55,11 @@ const open = async (options: Options = {}) => {
   });
   const store = new DaemonBoardStore(port, fakeEnvironment());
   const agenda: BoardPageProps['agenda'] =
-    options.withAgenda === false
-      ? { respond: async () => undefined }
-      : { respond: async () => undefined, hydrate: async () => undefined, store: new DaemonAgendaStore() };
+    options.agenda !== undefined
+      ? options.agenda
+      : options.withAgenda === false
+        ? { respond: async () => undefined }
+        : { respond: async () => undefined, hydrate: async () => undefined, store: new DaemonAgendaStore() };
   const props: BoardPageProps = {
     store,
     agenda,
@@ -89,6 +92,30 @@ const open = async (options: Options = {}) => {
 
 const CARD = { daemonId: laptop.daemonId, taskId: 'F1' };
 
+/**
+ * An agenda shaped like the app's real one: a CLASS whose methods read its own private fields, so a method
+ * copied off it and called bare throws "Receiver must be an instance of class" — exactly what took every card
+ * down on 2026-10-30. A plain object, which every other case here passes, cannot catch that.
+ */
+class PrivateFieldAgenda {
+  readonly #sessions: string[] = [];
+  readonly store = new DaemonAgendaStore();
+
+  hydrate(_daemon: unknown, scope: { readonly sessionId: string }): Promise<void> {
+    this.#sessions.push(scope.sessionId);
+    return Promise.resolve();
+  }
+
+  respond(): Promise<void> {
+    this.#sessions.push('respond');
+    return Promise.resolve();
+  }
+
+  hydrated(): readonly string[] {
+    return [...this.#sessions];
+  }
+}
+
 describe('BoardPage — the card detail', () => {
   it('draws no detail without an open card', async () => {
     const { root } = await open();
@@ -100,6 +127,14 @@ describe('BoardPage — the card detail', () => {
     expect(root.querySelector('aside .fy-board-detail__title')?.textContent).toBe('Build it');
     expect(root.querySelector('aside')?.getAttribute('data-mode')).toBe('drawer');
     expect(root.querySelector('.fy-board-detail__meta')?.textContent).toContain('ferretry');
+  });
+
+  it('opens a card over an agenda client that is a class with private fields, calling it on itself', async () => {
+    const agenda = new PrivateFieldAgenda();
+    const { root } = await open({ openCard: CARD, agenda: agenda as unknown as BoardPageProps['agenda'] });
+    expect(root.querySelector('aside .fy-board-detail__title')?.textContent).toBe('Build it');
+    expect(root.querySelector('[role="alert"]')).toBeNull();
+    expect(agenda.hydrated()).toEqual(['mvuc7tsf-0c3d50df']);
   });
 
   it('is a page on a phone', async () => {

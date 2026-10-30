@@ -16,6 +16,7 @@ import { type BrowserContext, chromium, type Page } from 'playwright-core';
 import {
   pullDown,
   readBoardDensity,
+  readBoardReadable,
   readBoardScroll,
   scrollBoardTo,
 } from '../tests/integration/support/board-scroll.ts';
@@ -119,13 +120,18 @@ const shot = async (page: Page, name: string, prefix = 'board-u11'): Promise<voi
   process.stdout.write(`📸 ${path}\n`);
 };
 
-const openScene = async (context: BrowserContext, theme: string, scene: 'phone' | 'desktop'): Promise<Page> => {
+const openScene = async (
+  context: BrowserContext,
+  theme: string,
+  scene: 'phone' | 'desktop',
+  extra = '',
+): Promise<Page> => {
   const page = await context.newPage();
   await page.route('**/*', route =>
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
   page.on('pageerror', error => process.stderr.write(`page error: ${error.message}\n`));
-  await page.goto(`${server.url}scroll?theme=${theme}&scene=${scene}`);
+  await page.goto(`${server.url}scroll?theme=${theme}&scene=${scene}${extra}`);
   await page.locator('.fy-board-card').first().waitFor({ state: 'visible' });
   await page.waitForTimeout(300);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
@@ -152,6 +158,21 @@ const scrollShots = async (): Promise<void> => {
       await page.close();
     } finally {
       await phone.close();
+    }
+  }
+  for (const scheme of ['light', 'dark'] as const) {
+    const phone = await browser.newContext({ ...PHONE, colorScheme: scheme });
+    const desktop = await browser.newContext({ ...DESKTOP, colorScheme: scheme, deviceScaleFactor: 2 });
+    try {
+      const small = await openScene(phone, `studio-${scheme}`, 'phone');
+      await shot(small, `${scheme}-phone`, 'board-readable');
+      process.stdout.write(`readable phone: ${JSON.stringify(await readBoardReadable(small))}\n`);
+      const wide = await openScene(desktop, `studio-${scheme}`, 'desktop', '&cols=200');
+      await shot(wide, `${scheme}-desktop`, 'board-readable');
+      process.stdout.write(`readable desktop: ${JSON.stringify(await readBoardReadable(wide))}\n`);
+    } finally {
+      await phone.close();
+      await desktop.close();
     }
   }
   const desktop = await browser.newContext({ ...DESKTOP, colorScheme: 'light' });

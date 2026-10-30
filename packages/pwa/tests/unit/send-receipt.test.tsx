@@ -4,6 +4,7 @@ import { MessageFooter } from '../../src/components/send-receipt.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
 import { clockOfInstant } from '../../src/lib/message-clock.ts';
 import type { LedgerSendRecord } from '../../src/lib/send-ledger.ts';
+import { sendBadge } from '../../src/lib/send-badge.ts';
 import { RECEIPT_LEGEND, type SendReceiptKind, sendReceipt } from '../../src/lib/send-receipt.ts';
 import { type TranscriptEntry, transcriptItems } from '../../src/lib/session-screens.ts';
 import { render, runAsync } from '../support/react.ts';
@@ -16,6 +17,8 @@ const record = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => 
   fate: 'accepted',
   ...overrides,
 });
+
+const STATE_AT = '2026-07-31T10:00:05.000Z';
 
 const textOf = (renderer: ReactTestRenderer): string => {
   const walk = (node: unknown): string => {
@@ -130,6 +133,7 @@ describe('the legend', () => {
       'typed',
       'delivered',
       'answered',
+      'read',
       'unconfirmed',
       'failed',
       'cancelled',
@@ -140,6 +144,7 @@ describe('the legend', () => {
       [record({ typedNotSent: true }), false],
       [record({ fate: 'delivered' }), false],
       [record({ fate: 'delivered' }), true],
+      [record({ fate: 'delivered', queue: { state: 'read', stateAt: STATE_AT, revision: 1 } }), false],
       [record({ fate: 'unaccounted' }), false],
       [record({ fate: 'timed_out' }), false],
       [record({ fate: 'cancelled' }), false],
@@ -301,5 +306,115 @@ describe('MessageFooter with a lead', () => {
     expect(footer.root.findAllByProps({ 'data-message-footer': '' })).toHaveLength(1);
     expect(footer.root.findAllByProps({ 'data-lead': '' })).toHaveLength(1);
     expect(footer.root.findAllByProps({ 'data-lead-detail': '' })).toHaveLength(1);
+  });
+});
+
+describe('a message the durable queue holds', () => {
+  const queued = (
+    state: 'queued' | 'typing' | 'delivered' | 'read' | 'cancelled' | 'failed',
+    extra: Partial<NonNullable<LedgerSendRecord['queue']>> = {},
+    overrides: Partial<LedgerSendRecord> = {},
+  ): LedgerSendRecord => record({ queue: { state, stateAt: STATE_AT, revision: 1, ...extra }, ...overrides });
+
+  test('queued is one tick, and says in plain words why it waits for every reason', () => {
+    const reasons = {
+      launching: 'it is still starting',
+      busy: 'the ferret is busy',
+      question: 'a question is open',
+      dialog: 'a dialog is on its screen',
+      draft: 'its box holds a draft',
+      unreadable: 'its screen can’t be read',
+      stopped: 'it is not running',
+    } as const;
+    for (const [waitReason, words] of Object.entries(reasons)) {
+      const receipt = sendReceipt(queued('queued', { waitReason: waitReason as keyof typeof reasons }));
+      expect(receipt).toEqual({
+        kind: 'queued',
+        name: 'Queued',
+        detail: `waiting: ${words}`,
+        chip: `waiting: ${words}`,
+      });
+    }
+    expect(sendReceipt(queued('queued')).detail).toBe('waiting for its turn');
+  });
+
+  test('typing is one tick that says it is sending', () => {
+    expect(sendReceipt(queued('typing'))).toMatchObject({ kind: 'queued', name: 'Sending' });
+    expect(sendReceipt(queued('typing')).detail).toContain('being typed into the agent now');
+  });
+
+  test('delivered is two ticks and read is three', () => {
+    expect(sendReceipt(queued('delivered', {}, { fate: 'delivered' })).kind).toBe('delivered');
+    expect(sendReceipt(queued('read', {}, { fate: 'delivered' }))).toMatchObject({ kind: 'read', name: 'Read' });
+  });
+
+  test('failed says the failure sentence, never the ledger’s "not delivered" or a retry', () => {
+    const receipt = sendReceipt(queued('failed', { failure: 'the pane never came back' }, { fate: 'timed_out' }));
+    expect(receipt).toEqual({
+      kind: 'failed',
+      name: 'Failed',
+      detail: 'the pane never came back',
+      chip: 'failed',
+    });
+    expect(sendReceipt(queued('failed', {}, { fate: 'timed_out' })).detail).toBe('it could not be delivered');
+  });
+
+  test('a queue failure over an unaccounted ledger row is unconfirmed, never failed, with the failure sentence', () => {
+    const maybe = 'nothing proves it reached the agent, though it may have';
+    const row = queued('failed', { failure: maybe }, { fate: 'unaccounted' });
+    expect(sendReceipt(row)).toEqual({ kind: 'unconfirmed', name: 'Unconfirmed', detail: maybe, chip: 'unconfirmed' });
+    expect(sendBadge(row)).toMatchObject({ label: 'unconfirmed', detail: maybe });
+    expect(sendBadge(queued('failed', {}, { fate: 'unaccounted' })).detail).toBe(maybe);
+    expect(sendBadge(queued('failed', {}, { fate: 'timed_out' })).label).toBe('failed');
+  });
+
+  test('cancelled before it was typed says the agent never saw it', () => {
+    const receipt = sendReceipt(queued('cancelled', {}, { fate: 'cancelled' }));
+    expect(receipt).toMatchObject({ kind: 'cancelled', chip: 'cancelled' });
+    expect(receipt.detail).toContain('the agent never saw it');
+    expect(sendReceipt(queued('cancelled', {}, { fate: 'cancelled', cancelEffect: 'cleared' })).detail).toContain(
+      'erased from the agent’s composer',
+    );
+  });
+
+  test('a ledger that already says delivered outranks a queue that has not caught up', () => {
+    for (const state of ['queued', 'typing', 'failed'] as const)
+      expect(sendReceipt(queued(state, {}, { fate: 'delivered' })).kind).toBe('delivered');
+  });
+
+  test('a person’s own ledger cancel outranks a queue that is still typing', () => {
+    for (const state of ['queued', 'typing', 'failed'] as const)
+      expect(sendReceipt(queued(state, {}, { fate: 'cancelled' })).kind).toBe('cancelled');
+  });
+
+  test('the ledger being unreadable does not turn a queued message into "status unknown"', () => {
+    const unread = { since: '2026-07-31T10:01:00.000Z', reason: 'offline' };
+    expect(sendReceipt(queued('queued', { waitReason: 'busy' }, { unread })).kind).toBe('queued');
+  });
+
+  test('a row with no queue view keeps the ledger mapping', () => {
+    expect(sendReceipt(record({ fate: 'queued' })).detail).toContain('its own queue');
+  });
+});
+
+describe('a session that ended is never "not delivered"', () => {
+  test('a ledger timeout with session_ended reads unconfirmed, quietly and without the red mark', () => {
+    const ended = record({ fate: 'timed_out', unaccountedReason: 'session_ended', retryable: true });
+    const receipt = sendReceipt(ended);
+    expect(receipt).toMatchObject({ kind: 'unconfirmed', name: 'Unconfirmed', chip: 'unconfirmed' });
+    expect(receipt.detail).toBe('unconfirmed — the session ended before it arrived; it may still have landed');
+    expect(sendBadge(ended).tone).not.toContain('err');
+  });
+
+  test('every other timeout still reads not delivered', () => {
+    const receipt = sendReceipt(record({ fate: 'timed_out', unaccountedReason: 'timeout' }));
+    expect(receipt).toMatchObject({ kind: 'failed', name: 'Not delivered' });
+  });
+});
+
+describe('a queue state the ledger fate has not caught up to', () => {
+  test('falls back to the ledger’s own words instead of inventing a tick', () => {
+    const row = record({ fate: 'accepted', queue: { state: 'cancelled', stateAt: STATE_AT, revision: 2 } });
+    expect(sendBadge(row).label).toBe('sending');
   });
 });

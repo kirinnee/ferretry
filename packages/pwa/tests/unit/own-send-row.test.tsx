@@ -267,3 +267,35 @@ describe('the transcript the page draws', () => {
     await view.unmount();
   });
 });
+
+describe('a Ferretry notice is never the owner’s bubble', () => {
+  const NOTICE = '[ferretry] [board] The staging deploy is queued behind mine.';
+  const labelOf = (view: Mounted): string[] =>
+    [...view.container.querySelectorAll('.fy-system-label')].map(node => node.textContent ?? '');
+
+  it('draws a daemon send that is still travelling under the Ferretry label, not as the reader’s bubble', async () => {
+    for (const send of [record({ senderKind: 'daemon', message: 'plain words' }), record({ message: NOTICE })]) {
+      const view = await mount(<TranscriptRow entry={travelling(send)} />);
+      expect(labelOf(view)).toEqual(['Ferretry']);
+      expect(view.container.querySelector('[data-transcript-kind="user"]')).toBeNull();
+      await view.unmount();
+    }
+  });
+
+  it('draws a landed daemon send, or one whose text reads as a notice, as a Ferretry notice', async () => {
+    for (const send of [record({ senderKind: 'daemon' }), record({ message: NOTICE })]) {
+      const view = await mount(<TranscriptRow entry={landed(send, { text: NOTICE })} />);
+      expect(labelOf(view)).toEqual(['Ferretry · Board']);
+      expect(view.container.querySelector('[data-transcript-kind="system"]')).not.toBeNull();
+      expect(view.container.textContent).toContain('The staging deploy is queued behind mine.');
+      expect(view.container.textContent).not.toContain('[ferretry]');
+      await view.unmount();
+    }
+  });
+
+  it('keeps the reader’s own words as their bubble', async () => {
+    const view = await mount(<TranscriptRow entry={travelling(record())} />);
+    expect(labelOf(view)).toEqual([]);
+    await view.unmount();
+  });
+});

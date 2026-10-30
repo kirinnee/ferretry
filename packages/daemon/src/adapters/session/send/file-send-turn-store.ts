@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
-import type { SessionId } from '../../../lib/session-id.ts';
+import { type QueueAuthor, QueueAuthorSchema } from '@ferretry/protocol';
 import type { ResumeTurnStore } from '../../../lib/session/resume/types.ts';
 import type { SendTurnStore } from '../../../lib/session/send/types.ts';
+import type { SessionId } from '../../../lib/session-id.ts';
 
 /**
  * Where a send leaves the documents an agent and a supervisor read.
@@ -25,8 +26,8 @@ export class FileSendTurnStore implements SendTurnStore {
     private readonly uniqueId: () => string = randomUUID,
   ) {}
 
-  async writeTurn(id: SessionId, turn: number, document: string): Promise<string> {
-    return await this.turns.writeTurn(id, turn, document);
+  async writeTurn(id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<string> {
+    return await this.turns.writeTurn(id, turn, document, by);
   }
 
   async clearMarkers(id: SessionId): Promise<void> {
@@ -42,6 +43,23 @@ export class FileSendTurnStore implements SendTurnStore {
     const folder = name.startsWith('queued-') ? 'channel' : 'turns';
     try {
       return await readFile(join(this.sessionDirectory(id), folder, `${name}.md`), 'utf8');
+    } catch {
+      return undefined;
+    }
+  }
+
+  /**
+   * Who a hand-off document is from, when Ferretry wrote it and said so beside it; `undefined` for a person's
+   * own turn, an older document, or one whose author file cannot be read.
+   */
+  async readHandoffAuthor(id: SessionId, name: string): Promise<QueueAuthor | undefined> {
+    const folder = name.startsWith('queued-') ? 'channel' : 'turns';
+    try {
+      const raw: unknown = JSON.parse(
+        await readFile(join(this.sessionDirectory(id), folder, `${name}.by.json`), 'utf8'),
+      );
+      const parsed = QueueAuthorSchema.safeParse(raw);
+      return parsed.success ? parsed.data : undefined;
     } catch {
       return undefined;
     }

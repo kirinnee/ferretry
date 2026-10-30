@@ -50,6 +50,20 @@ export const QueueWaitReasonSchema = z.enum([
 ]);
 export type QueueWaitReason = z.infer<typeof QueueWaitReasonSchema>;
 
+/**
+ * WHO A MESSAGE IS FROM, AS DATA. The owner (2026-10-30): "there should not be any append or prepend on any
+ * feature". Who sent a message and which feature it came from are never text in its body: the app reads
+ * them from here and shows a sender chip — "Ferretry · Board", a ferret's name, nothing for the owner.
+ */
+export const QueueAuthorSchema = z.strictObject({
+  kind: z.enum(['owner', 'ferret', 'ferretry']),
+  /** A ferret's name (its callsign), for a ferret's message. */
+  name: z.string().min(1).optional(),
+  /** The part of Ferretry that sent it: Board, Warden, Agenda, Monitor, Lessons. */
+  feature: z.string().min(1).optional(),
+});
+export type QueueAuthor = z.infer<typeof QueueAuthorSchema>;
+
 /** The caller's own id for a message, the idempotency key a retried request is answered from. */
 export const QueuedMessageIdSchema = z.string().min(1).max(128);
 
@@ -62,15 +76,12 @@ export const QueuedMessageSchema = z.object({
   /** The sending ferret's session, for a ferret's message. */
   from: z.string().optional(),
   fromName: z.string().optional(),
+  /** Who it is from, for the app's sender chip. Absent on a message queued before it existed. */
+  by: QueueAuthorSchema.optional(),
   text: z.string(),
   attachmentIds: z.array(z.string()),
   /** The sender is parked awaiting the reply, so the agent is told how to unblock them. */
   replyExpected: z.boolean().optional(),
-  /**
-   * A daemon notice that may be typed into the owner's own chat, as a message of its own: the board's
-   * news for a lead. Any other daemon message is never typed into an interactive session.
-   */
-  chat: z.boolean().optional(),
   enqueuedAt: InstantSchema,
   state: QueuedMessageStateSchema,
   /** When it reached `state`. */

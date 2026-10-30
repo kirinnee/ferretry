@@ -63,7 +63,6 @@ import {
   DORMANT_AGENT_STATUSES,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
-  ferretryNotice,
   type Harness,
   ioPressureView,
   type LearningConfig,
@@ -134,6 +133,7 @@ import {
   WorkerAnalyticsPersister,
   WorkerTranscriptFolds,
 } from '../src/adapters/analytics/index.ts';
+import { KeyedSerialExecutor as LearningSerialExecutor } from '../src/adapters/atomic-file/index.ts';
 import {
   decryptPdfInMemory,
   FileAttachmentOriginals,
@@ -142,7 +142,7 @@ import {
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
-import { FilePendingContext, FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
+import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
@@ -480,7 +480,6 @@ import { FileMcpProjectFiles } from '../src/adapters/session-mcp/project-files.t
 import type { DaemonStorage } from '../src/adapters/storage/session-storage.ts';
 import { BunDetachedLauncher } from '../src/adapters/system/detached-launcher.ts';
 import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
-import { KeyedSerialExecutor as LearningSerialExecutor } from '../src/adapters/atomic-file/index.ts';
 import {
   ManagedTerminalService,
   systemLoginShell,
@@ -549,8 +548,6 @@ import {
   BoardSweep,
   BoardTurnCheck,
   LivenessActivityDeriver,
-  type PendingContext,
-  PendingContextDelivery,
   ReopenDeliveryLadder,
   SessionCards,
   type SessionLivenessSource,
@@ -1910,8 +1907,7 @@ interface BoardWorld {
  *
  * Lanes and projects are U3's `LaneSetService`; a start in a project with no lanes is proposed the template its
  * folder suggests (`InferredLaneProposer`).
- * Activity is derived from the session roster with the Warden's liveness ledger laid over it, and the
- * lead's quiet lines wait in its pending context for its next turn. The agenda link reads each ferret's
+ * Activity is derived from the session roster with the Warden's liveness ledger laid over it. The agenda link reads each ferret's
  * agenda through the agenda service, and a reopen is delivered through the ordinary send path. The
  * machine id is the pairing identity's daemon id, which a write waits for rather than inventing one.
  */
@@ -1929,8 +1925,6 @@ function createBoardWorld(
   bin: string,
   /** Every session's life-signs, with the Warden's liveness ledger laid over them, for "last touched". */
   sessions: SessionLivenessSource,
-  /** Where a lead's quiet lines wait for its next turn (`lib/board/pending-context.ts`). */
-  pending: PendingContext,
   /** Registers a folder as a project: the catalog `POST /v1/projects` writes through, so both share its dedupe. */
   registrar: ProjectRegistrar,
   /** The folders a ferret's repository is registered from (`projectRoots`), read per adoption. */
@@ -1983,9 +1977,6 @@ function createBoardWorld(
     // The name the board list shows: a registered project's, `Unfiled`, or the id of one no longer listed.
     projects: { nameOf: async projectId => (await lanes.project(projectId))?.name ?? projectId },
     focus,
-    parents,
-    pending,
-    clock,
     diagnostics,
     bin,
   });
@@ -3171,12 +3162,6 @@ function createSessionSendSubsystem(
    * triggers it, and the person's words are never changed.
    */
   instructions: Pick<InstructionRefresh, 'queueIfStale'>,
-  /**
-   * The quiet board events held for the ferret (`lib/board/pending-context.ts`), put on top of the next
-   * message it receives here — the owner's or a teammate's — so they reach it with a turn it was going
-   * to take anyway and never start one.
-   */
-  pending: PendingContextDelivery,
 ): SessionSendSubsystem {
   const require = (reference: string): SessionId => {
     const id = tryParseSessionId(reference);
@@ -3184,6 +3169,12 @@ function createSessionSendSubsystem(
       throw new SessionSendError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
     if (storage.findSession(id) === undefined) throw new SessionSendError('not_found', `no session ${reference}`);
     return id;
+  };
+  /** A sending ferret's callsign, for the sender chip; nothing when it cannot be read. */
+  const ferretName = async (reference: string | undefined): Promise<{ readonly name?: string }> => {
+    const id = reference === undefined ? undefined : tryParseSessionId(reference);
+    const teammate = id === undefined ? undefined : (await sessions.get(id).catch(() => undefined))?.config.teammate;
+    return teammate === undefined ? {} : { name: teammate };
   };
   const view = async (id: SessionId, what: string): Promise<SessionView> => {
     const current = await sessions.get(id).catch(() => undefined);
@@ -3218,16 +3209,12 @@ function createSessionSendSubsystem(
             id: request.sendId,
             sender: person ? 'human' : 'agent',
             ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
+            by: person ? { kind: 'owner' } : { kind: 'ferret', ...(await ferretName(request.senderSessionId)) },
             text: messageWithAttachments(turn.message, delivered),
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
           })
           .catch((error: unknown) => sendRefusal(error));
-        // The board's held news goes as Ferretry's own message, never on top of the sender's words: the
-        // queue types it after theirs, and the app shows it as a notice, not as the owner speaking.
-        await pending.sendSeparately(id, async line =>
-          queue.enqueue(id, { id: crypto.randomUUID(), sender: 'daemon', chat: true, text: ferretryNotice(line) }),
-        );
         // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
         // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
         await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
@@ -3241,22 +3228,16 @@ function createSessionSendSubsystem(
           fate: answer.fate,
         };
       }
-      const outcome = await pending
-        .send(
+      const outcome = await service
+        .send({
           id,
-          turn.message,
-          async message =>
-            await service.send({
-              id,
-              sendId: request.sendId,
-              message: messageWithAttachments(message, delivered),
-              ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
-              ...(request.now === undefined ? {} : { now: request.now }),
-              ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
-              ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
-            }),
-          (sent, line) => sent.record.message.includes(line),
-        )
+          sendId: request.sendId,
+          message: messageWithAttachments(turn.message, delivered),
+          ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+          ...(request.now === undefined ? {} : { now: request.now }),
+          ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+          ...(request.senderSessionId === undefined ? {} : { senderReference: request.senderSessionId }),
+        })
         .catch((error: unknown) => sendRefusal(error));
       // Only once the words were accepted: an item must never close as replied for a message the
       // ferret was not given.
@@ -8939,8 +8920,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         sleep: async (milliseconds: number) => await Bun.sleep(milliseconds),
       };
-      const daemonSends = delivery.queue ? new QueueingSends(queueingPorts, 'daemon') : sends;
-      const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human') : sends;
+      // One front per producer, so the app can say which part of Ferretry a message came from — as a sender
+      // chip, never as text in the message.
+      const producerSends = (feature: string) =>
+        delivery.queue ? new QueueingSends(queueingPorts, 'daemon', feature) : sends;
+      const boardSends = producerSends('Board');
+      const agendaNudgeSends = producerSends('Agenda');
+      const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human', 'Agenda') : sends;
       /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
        *
@@ -8957,7 +8943,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         {
           waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
-          nudge: new SendMonitorNudge(daemonSends),
+          nudge: new SendMonitorNudge(producerSends('Monitor')),
           // The session observer's question part over every live session, one at a time — see
           // `InlineObserverHost.questions` for why it hands the loop back between them.
           questions: { reconcile: async () => await sessionObserver.questions() },
@@ -9018,12 +9004,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // ledger is published when the Warden builds its monitor, further down, and reads nothing until then.
       const wardenLedgers: { read: LivenessLedgerReader } = { read: () => undefined };
       const boardSessions = new StorageSessionRoster(storage, sessionId => wardenLedgers.read(sessionId));
-      const boardPending = new FilePendingContext(
-        join(paths.state, 'board'),
-        stateFiles,
-        new KeyedSerialExecutor(),
-        boardDiagnostics,
-      );
       const boardWorld = createBoardWorld(
         paths,
         stateFiles,
@@ -9031,7 +9011,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         () => attachmentDaemonId,
         laneSets,
-        daemonSends,
+        boardSends,
         async sessionId => {
           const listed = await agenda.list(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
@@ -9039,7 +9019,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         CLIENT_NAME,
         boardSessions,
-        boardPending,
         { register: async request => await catalogs.registerProject(request) },
         async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.projectRoots ?? [],
         userHome,
@@ -9048,7 +9027,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after
       // the bind with the other loops, and stopped with the daemon.
       const boardSessionFacts = new StorageSessionFacts(storage);
-      const boardNudgeDelivery = new PendingContextDelivery(boardPending);
       const boardGitHub = new GitHubWatcher({
         board: boardWorld.board,
         gh: new GhCliRunner(),
@@ -9056,12 +9034,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         sessions: { cwdOf: async sessionId => (await boardSessionFacts.read(sessionId))?.cwd ?? null },
         projects: { projects: async () => await catalogs.projects() },
         transcripts: createSessionTranscriptTail(storage),
-        // The board's nudge path (U5): the recipient's pending board context rides on top of the nudge.
+        // The board's nudge path (U5): the message as it is, from "Ferretry · Board" as metadata.
         nudges: {
           send: async (sessionId, message) => {
-            await boardNudgeDelivery.send(sessionId, message, async composed => {
-              await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
-            });
+            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
           },
         },
         timers: {
@@ -9501,17 +9477,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       });
       setInterval(sweepDeadlines, AGENDA_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
-      // The board's own sweep (`lib/board/sweep.ts`): each minute a stale card's ferret is nudged through the
-      // ordinary send path, and a lead's quiet events wait in its pending context for its next turn.
+      // The board's own sweep (`lib/board/sweep.ts`): each minute a stale card's ferret is nudged, and a dependent
+      // card's assignee told it can go ahead, through the ordinary send path. Nobody is sent board news.
       const boardSweep = new BoardSweep({
         board: boardWorld.board,
         sessions: boardSessions,
         memory: new FileSweepMemory(join(paths.state, 'board'), stateFiles, boardDiagnostics),
-        quiet: boardPending,
-        context: boardPending,
         nudges: {
           send: async (sessionId, message) => {
-            await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
           },
         },
         clock,
@@ -9617,7 +9591,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await daemonSends.send({ id, sendId, message });
+            if (id !== undefined) await agendaNudgeSends.send({ id, sendId, message });
           },
           record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
         },
@@ -9644,7 +9618,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           card: async ref => await boardWorld.board.task(ref.id),
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await daemonSends.send({ id, sendId, message });
+            if (id !== undefined) await boardSends.send({ id, sendId, message });
           },
           record: async (sessionId, seen) => await boardChecks.record(sessionId, seen),
           now: () => Date.parse(clock.now()),
@@ -10250,7 +10224,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         send: async (sessionId, message, sendId) => {
           const id = tryParseSessionId(sessionId);
           if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
-          await daemonSends.send({ id, sendId, message });
+          await producerSends('Lessons').send({ id, sendId, message });
         },
         userHome,
         pricing: async () => {
@@ -10832,10 +10806,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             const document = await sendTurns.readHandoff(sessionId, name);
             return document === undefined
               ? undefined
-              : handoffView(name, document, {
-                  reminder: defaultSessionResumeSettings.turnProtocolReminder,
-                  attachmentRoot: attachmentOriginals(sessionId),
-                });
+              : handoffView(
+                  name,
+                  document,
+                  {
+                    reminder: defaultSessionResumeSettings.turnProtocolReminder,
+                    attachmentRoot: attachmentOriginals(sessionId),
+                  },
+                  await sendTurns.readHandoffAuthor(sessionId, name),
+                );
           },
           new AgendaConversation(agenda),
           new InstructionRefresh({
@@ -10860,7 +10839,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               });
             },
           }),
-          new PendingContextDelivery(boardPending),
         ),
         sessionAnswer,
         sessionAttachments,
@@ -11103,7 +11081,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ...(settings.endpoint === undefined ? {} : { endpoint: settings.endpoint }),
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
-          sends: daemonSends,
+          sends: producerSends('Warden'),
           resume,
           revive: {
             events: {

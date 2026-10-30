@@ -29,7 +29,6 @@ import {
   AGENDA_PUSH_TITLE_LENGTH,
   type BoardTaskId,
   type BoardTaskView,
-  ferretryNotice,
   formatTaskRef,
   MAX_AGENDA_DETAIL_LENGTH,
   MAX_AGENDA_REASON_LENGTH,
@@ -208,10 +207,10 @@ export function orphanOwnerMessage(
   cli: string,
 ): string {
   const assignee = effectiveAssignee(view);
-  return ferretryNotice(
-    `The Warden: your card ${formatTaskRef(view)} “${view.title}” has nobody on it. It is in ${laneName(board, view)}, ` +
-      `but its ferret ${ferretRef(assignee, fleet)} is ${endedAs(assignee, fleet)} and nothing under it is alive.\n\n` +
-      `This notice is from Ferretry, not from the owner. You own the card, so pick it up: ${remedies(view, assignee, cli)}`,
+  return (
+    `Your card ${formatTaskRef(view)} “${view.title}” has nobody on it. It is in ${laneName(board, view)}, ` +
+    `but its ferret ${ferretRef(assignee, fleet)} is ${endedAs(assignee, fleet)} and nothing under it is alive. ` +
+    `You own the card, so pick it up: ${remedies(view, assignee, cli)}`
   );
 }
 

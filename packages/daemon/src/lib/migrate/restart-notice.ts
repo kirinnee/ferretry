@@ -1,5 +1,4 @@
-import { ferretryNotice } from '@ferretry/protocol';
-import { isBusyStatus, type InflightReport } from './inflight-report.ts';
+import { type InflightReport, isBusyStatus } from './inflight-report.ts';
 
 /**
  * How many things the restart interrupted that are NOT known safe to lose: open tool calls and
@@ -13,16 +12,12 @@ export function interruptedCount(report: InflightReport): number {
 }
 
 function quietNotice(): string {
-  return ferretryNotice(
-    'Restarted — nothing was interrupted.\n\n' +
-      'This notice is from Ferretry, not from the owner. Your conversation was resumed as it was; ' +
-      'there is nothing to re-run.',
-  );
+  return 'Ferretry restarted you, and nothing was interrupted. Your conversation was resumed as it was; there is nothing to re-run.';
 }
 
 function headline(interrupted: number): string {
-  if (interrupted === 0) return 'Restarted mid-turn — what was running could not be checked.';
-  return `Restarted mid-turn — ${interrupted} ${interrupted === 1 ? 'command was' : 'commands were'} interrupted.`;
+  if (interrupted === 0) return 'Ferretry restarted you mid-turn, and what was running could not be checked.';
+  return `Ferretry restarted you mid-turn, and ${interrupted} ${interrupted === 1 ? 'command was' : 'commands were'} interrupted.`;
 }
 
 /**
@@ -31,8 +26,8 @@ function headline(interrupted: number): string {
  * Restart and same-harness migrate resume the same conversation, so the agent already knows what it
  * was doing. It is told only when the session was mid-turn AND the inventory holds something not
  * known safe to lose — a blind spot counts, because "could not look" is not "nothing there". It is
- * a Ferretry notice, so the transcript draws it as a system row and the agent reads that it did not
- * come from the owner.
+ * Ferretry's own sentence — Ferretry is its subject, with no tag or footer — and the turn it rides carries
+ * who it is from as metadata, so the app draws it as Ferretry's, never as the owner's words.
  *
  * AN AUTO SESSION IS THE ONE EXCEPTION to "send nothing": a resume with no message makes the resume
  * domain type its default "continue the assigned task" prompt, which would restart work an idle
@@ -46,9 +41,5 @@ export function restartNotice(
   const interrupted = interruptedCount(report);
   if (!isBusyStatus(report.status) || (interrupted === 0 && report.blindSpots.length === 0))
     return mode === 'auto' ? quietNotice() : undefined;
-  return ferretryNotice(
-    `${headline(interrupted)}\n\n` +
-      `This notice is from Ferretry, not from the owner. Before re-running anything, read ${reportPath}: ` +
-      'it lists what was running and what to check.',
-  );
+  return `${headline(interrupted)} Before re-running anything, read ${reportPath}: it lists what was running and what to check.`;
 }

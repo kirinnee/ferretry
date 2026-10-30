@@ -7,7 +7,7 @@
  * Two machines: `laptop` answers with a LONG board (72 cards across four lanes) and `studio` does not,
  * so the page draws its one-line machine notice. Nothing leaves the page. Every name in it is fake.
  *
- * `?scene=phone|desktop`, `?theme=<family>-<mode>`, `?at=<lane id>` (the phone's lane). Built by
+ * `?scene=phone|desktop`, `?theme=<family>-<mode>`, `?at=<lane id>` (the phone's lane), `?cols=<px>` (a desktop lane's width). Built by
  * `scripts/build-composer-integration-fixture.ts --entry` in a child process, never inside the test runner;
  * `harness/board-screenshot.ts --scroll-only` bundles the same file for the review frames.
  */
@@ -28,16 +28,22 @@ const FERRET = 'mvuc7tsf-0c3d50df';
 const params = new URLSearchParams(location.search);
 const phone = params.get('scene') !== 'desktop';
 document.documentElement.dataset.theme = params.get('theme') ?? 'studio-light';
+const columns = Number(params.get('cols') ?? 0);
+if (columns > 0) {
+  const style = document.createElement('style');
+  style.textContent = `.fy-board-lane { flex: 0 0 ${columns}px; min-width: ${columns}px; max-width: ${columns}px; }`;
+  document.head.append(style);
+}
 
 const TITLES = [
-  'One scroll for the board',
+  'Inbox v2 rich swipe actions',
   'Lane tabs stay put',
-  'Fold notice to one line',
+  'Surface full screen gallery',
   'Rename the drawer label',
-  'Pull to find at top',
+  'Browser user agent and viewport',
   'Stop the list trapping fingers',
   'Compact the filter row',
-  'First card higher up',
+  'Namespace billing report',
 ];
 const LANES: readonly (readonly [string, number])[] = [
   ['todo', 36],
@@ -53,6 +59,8 @@ const CARDS = LANES.flatMap(([laneId, count]) =>
       laneId,
       title: TITLES[index % TITLES.length],
       owner: FERRET,
+      assignee: index % 3 === 0 ? 'mvudnuly-ec442385' : null,
+      activity: index % 4 === 0 ? 'idle' : 'active',
       machineId: 'laptop',
     }),
   ),

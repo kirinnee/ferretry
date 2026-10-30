@@ -1,4 +1,9 @@
-import { type IFyApiClient, type SessionView, splitTranscriptImageMarkers } from '@ferretry/protocol';
+import {
+  type IFyApiClient,
+  type QueuedMessage,
+  type SessionView,
+  splitTranscriptImageMarkers,
+} from '@ferretry/protocol';
 import { projectPackCalls } from '../lib/pack-calls.ts';
 import { projectDeliveries } from '../lib/peer-delivery.ts';
 import { isTerminalSessionStatus, type TranscriptEntry } from '../lib/session-screens.ts';
@@ -334,6 +339,8 @@ export const transcriptEntriesFromLog = (
 type SessionWorkspaceReadApi = Pick<IFyApiClient, 'get' | 'logs'> & {
   /** The session's send ledger. Optional: a reader that does not show sends never asks. */
   readonly sends?: (id: string) => Promise<readonly unknown[]>;
+  /** The session's durable queue. Optional, and an older daemon without one answers an empty list. */
+  readonly queue?: (id: string) => Promise<readonly QueuedMessage[]>;
 };
 
 export interface SessionWorkspaceRefreshEnvironment {
@@ -401,6 +408,8 @@ export interface SessionWorkspaceRefreshInput {
    * leaves on screen go on claiming a fate nobody is reading any more (`markLedgerUnread`).
    */
   readonly onSendsFailed?: (reason: string) => void;
+  /** Every refresh's durable queue. A failed read keeps the previous messages: the queue is an overlay too. */
+  readonly onQueue?: (messages: readonly QueuedMessage[]) => void;
   readonly onError: (message: string | null) => void;
   /**
    * Whether the daemon refused the transcript because it can prove no file is this session's own —
@@ -472,9 +481,12 @@ export const startSessionWorkspaceRefresh = (input: SessionWorkspaceRefreshInput
       input.api.get(input.sessionId),
       // A daemon that cannot answer the ledger still shows its transcript: the sends are an overlay.
       input.api.sends?.(input.sessionId) ?? Promise.resolve(undefined),
+      // Read on the same beat as the ledger; the queue is an overlay too, so its failure never blanks the chat.
+      input.api.queue?.(input.sessionId) ?? Promise.resolve(undefined),
     ])
-      .then(([logs, session, sends]) => {
+      .then(([logs, session, sends, queue]) => {
         if (stopped) return;
+        if (queue.status === 'fulfilled' && queue.value !== undefined) input.onQueue?.(queue.value);
         if (sends.status === 'fulfilled' && sends.value !== undefined) input.onSends?.(sends.value);
         if (sends.status === 'rejected') input.onSendsFailed?.(errorMessage(sends.reason));
         const errors: string[] = [];

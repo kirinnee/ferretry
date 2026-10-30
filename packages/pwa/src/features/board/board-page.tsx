@@ -382,10 +382,20 @@ export function BoardPage({
     [model.cards, places, openCard],
   );
   const composeMachine = detailMachine ?? machines[0];
-  const detailAgenda =
-    agenda.hydrate !== undefined && agenda.store !== undefined
-      ? { hydrate: agenda.hydrate, respond: agenda.respond, store: agenda.store }
-      : null;
+  // CALLED ON `agenda`, NEVER COPIED OFF IT. The app passes the agenda client itself, a class whose methods
+  // read its own private fields; `{ hydrate: agenda.hydrate }` detached them from it, so the drawer's first
+  // hydrate threw "Receiver must be an instance of class" during render and every card — opened from the
+  // Board or a chat's `&task` — fell to "reload to recover" (2026-10-30). Memoised as well: a new object each
+  // render re-ran the drawer's hydrate effect on every render.
+  const detailAgenda = useMemo((): BoardAgenda | null => {
+    const { hydrate, store: agendaStore } = agenda;
+    if (hydrate === undefined || agendaStore === undefined) return null;
+    return {
+      hydrate: (daemon, scope) => hydrate.call(agenda, daemon, scope),
+      respond: (...args) => agenda.respond(...args),
+      store: agendaStore,
+    };
+  }, [agenda]);
   const closeDetail = useCallback(() => {
     if (openCard !== null) onNavigate(daemonBoardPath(openCard.daemonId));
   }, [openCard, onNavigate]);

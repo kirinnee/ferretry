@@ -50,6 +50,12 @@ export interface SendEvidenceReading {
   readonly readable: boolean;
   /** The session has no transcript the daemon can prove is its own, which no amount of waiting fixes. */
   readonly unbound?: true;
+  /**
+   * Not unreadable — still reading. A look reads a bounded amount and keeps its place, so a huge
+   * transcript is read across several looks; until the window reaches the end, absence is not yet
+   * provable, and that is a reason to look again, never to call a message unconfirmed.
+   */
+  readonly catchingUp?: true;
   readonly inputs: readonly ObservedHumanInput[];
 }
 
@@ -370,6 +376,10 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     now: number,
   ): Promise<SendRecord> {
     if (record.untyped === true) return await this.typeUntyped(id, record, now);
+    // Still reading a long transcript is waiting, not unreadable: the lead's 369 MB transcript was called
+    // unreadable on every look, each send to it settled "unconfirmed" and its sender was told it may need
+    // sending again — though every one had arrived. The hold ceiling still ends a read that never finishes.
+    if (!reading.readable && reading.catchingUp === true) return await this.wait(id, record, now);
     if (!reading.readable) {
       // A harness parked on a dialog writes no transcript at all, so "unreadable" was true and useless:
       // the screen says what is wrong, and the person can fix it. A transcript that was never PROVEN

@@ -1,6 +1,7 @@
-import { type SessionLaunchInstructions, SessionStatusSchema, type SessionStatus } from '@ferretry/protocol';
+import type { QueueAuthor } from '@ferretry/protocol';
+import { type SessionLaunchInstructions, type SessionStatus, SessionStatusSchema } from '@ferretry/protocol';
 import { z } from 'zod';
-import { SessionIdSchema, type SessionId } from '../../session-id.ts';
+import { type SessionId, SessionIdSchema } from '../../session-id.ts';
 
 /**
  * Which statuses a resume can act on: EVERY status the protocol's state document may hold.
@@ -269,8 +270,11 @@ export interface ResumeAnswerAgenda {
 
 /** Where a revived agent reads its new turn. */
 export interface ResumeTurnStore {
-  /** Persists the turn document and returns the absolute file the agent must open. */
-  writeTurn(id: SessionId, turn: number, document: string): Promise<string>;
+  /**
+   * Persists the turn document and returns the absolute file the agent must open. `by`, when given, is
+   * kept beside it as metadata — who the turn is from — and never written into the document.
+   */
+  writeTurn(id: SessionId, turn: number, document: string, by?: QueueAuthor): Promise<string>;
   /** Clears the completion markers a previous turn left, so a stale one cannot end the new one. */
   clearMarkers(id: SessionId): Promise<void>;
 }

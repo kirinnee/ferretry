@@ -67,7 +67,7 @@ describe('BoardCard', () => {
     const root = await draw();
     expect(root.querySelector('.fy-board-card__title')?.textContent).toBe('Wire the board page');
     const segments = [...root.querySelectorAll('.fy-board-seg')].map(node => node.getAttribute('data-seg'));
-    expect(segments).toEqual(['ref', 'people', 'activity']);
+    expect(segments).toEqual(['ref', 'activity', 'people']);
     expect(root.querySelector('[data-seg="ref"]')?.textContent).toBe('&F412');
     const li = must(root.querySelector('li'), 'the card');
     expect(li.dataset.activity).toBe('active');
@@ -90,8 +90,8 @@ describe('BoardCard', () => {
     expect([...root.querySelectorAll('.fy-board-seg')].map(node => node.getAttribute('data-seg'))).toEqual([
       'lane',
       'ref',
-      'people',
       'activity',
+      'people',
       'machine',
     ]);
     const li = must(root.querySelector('li'), 'the card');
