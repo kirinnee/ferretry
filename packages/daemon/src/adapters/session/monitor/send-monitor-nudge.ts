@@ -19,7 +19,7 @@ import type { SessionId } from '../../../lib/session-id.ts';
  * session's own park.
  */
 export class SendMonitorNudge implements MonitorNudge {
-  constructor(private readonly sends: SessionSendService) {}
+  constructor(private readonly sends: Pick<SessionSendService, 'send'>) {}
 
   async deliver(id: SessionId, sendId: string, message: string): Promise<void> {
     await this.sends.send({ id, sendId, message });

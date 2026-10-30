@@ -914,6 +914,7 @@ import {
   previousConversation,
   publishableDirectCarrier,
   QueueDeliverer,
+  QueueingSends,
   QueueRefused,
   type QuotaFailoverLoop,
   QuotaFailoverService,
@@ -8987,6 +8988,21 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       storage.subscribeStates(id => void queueDeliverer.changed(id).catch(() => undefined));
       void queueDeliverer.arm().catch(() => undefined);
       /**
+       * What every producer inside this daemon sends through: with the queue on, its message is enqueued and
+       * the deliverer types it — the Warden, the board, the declared-wait watcher as the daemon's, the owner's
+       * agenda answers as the owner's. Off, the direct send path, as before. The deliverer itself, a revive's
+       * release and the send route keep the direct path: each IS a step of delivery, not a producer.
+       */
+      const queueingPorts = {
+        queue: sessionQueue,
+        deliverer: queueDeliverer,
+        direct: sends,
+        target: async (id: SessionId) => await sendRepository.read(id),
+        clock,
+      };
+      const daemonSends = delivery.queue ? new QueueingSends(queueingPorts, 'daemon') : sends;
+      const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human') : sends;
+      /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
        *
        * IT ENDS PARKS THROUGH THE SIGNAL SERVICE and wakes teammates through the SEND, rather than
@@ -9002,7 +9018,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         {
           waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
-          nudge: new SendMonitorNudge(sends),
+          nudge: new SendMonitorNudge(daemonSends),
           // The session observer's question part over every live session, one at a time — see
           // `InlineObserverHost.questions` for why it hands the loop back between them.
           questions: { reconcile: async () => await sessionObserver.questions() },
@@ -9076,7 +9092,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         () => attachmentDaemonId,
         laneSets,
-        sends,
+        daemonSends,
         async sessionId => {
           const listed = await agenda.list(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
@@ -9102,7 +9118,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         nudges: {
           send: async (sessionId, message) => {
             await boardNudgeDelivery.send(sessionId, message, async composed => {
-              await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
+              await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
             });
           },
         },
@@ -9413,13 +9429,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           undefined,
           agendaFilesMigrated,
         ),
-        new SendAgendaMessenger(sends),
+        new SendAgendaMessenger(answerSends),
         new KeyedAgendaReplyTimers(),
         new KeyedSerialExecutor(),
         { now: () => clock.now() },
+        // With the queue on, an answer is not held for a batch, a working ferret or a draft: the queue orders
+        // it, holds it for a draft and types it into an empty box mid-turn (&C38). Its receipt and reopen
+        // still come from here.
         {
-          settleMs: agendaConfig.replySettleSeconds * 1_000,
-          capMs: agendaConfig.replyMaxWaitSeconds * 1_000,
+          settleMs: delivery.queue ? 0 : agendaConfig.replySettleSeconds * 1_000,
+          capMs: delivery.queue ? 0 : agendaConfig.replyMaxWaitSeconds * 1_000,
           composerWaitMs: agendaConfig.replyComposerWaitSeconds * 1_000,
           receiptMs: agendaConfig.replyReceiptSeconds * 1_000,
         },
@@ -9427,6 +9446,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // is not busy, so a damaged document never holds an answer.
         {
           busy: async sessionId => {
+            if (delivery.queue) return false;
             const id = tryParseSessionId(sessionId);
             if (id === undefined) return false;
             const state = SessionStateSchema.safeParse(await storage.readState(id));
@@ -9434,7 +9454,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         {
-          composer: new PaneAgendaComposer(sendTerminal),
+          composer: delivery.queue ? { state: async () => 'empty' as const } : new PaneAgendaComposer(sendTerminal),
           receipts: new LedgerAgendaReceipts(sendLedger),
           undelivered: new AgendaBoardUndelivered({
             undelivered: async (...parameters) => await agenda.undelivered(...parameters),
@@ -9549,7 +9569,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         context: boardPending,
         nudges: {
           send: async (sessionId, message) => {
-            await sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
           },
         },
         clock,
@@ -9655,7 +9675,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await sends.send({ id, sendId, message });
+            if (id !== undefined) await daemonSends.send({ id, sendId, message });
           },
           record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
         },
@@ -9682,7 +9702,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           card: async ref => await boardWorld.board.task(ref.id),
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await sends.send({ id, sendId, message });
+            if (id !== undefined) await daemonSends.send({ id, sendId, message });
           },
           record: async (sessionId, seen) => await boardChecks.record(sessionId, seen),
           now: () => Date.parse(clock.now()),
@@ -10288,7 +10308,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         send: async (sessionId, message, sendId) => {
           const id = tryParseSessionId(sessionId);
           if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
-          await sends.send({ id, sendId, message });
+          await daemonSends.send({ id, sendId, message });
         },
         userHome,
         pricing: async () => {
@@ -11140,7 +11160,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ...(settings.endpoint === undefined ? {} : { endpoint: settings.endpoint }),
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
-          sends,
+          sends: daemonSends,
           resume,
           revive: {
             events: {

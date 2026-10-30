@@ -10,9 +10,9 @@ decisions are in `packages/daemon/src/lib/tmux/` and `packages/daemon/src/lib/se
 
 ## The durable queue (being built)
 
-Every message to a session is moving onto ONE durable queue per session, owned by one deliverer, in
-slices (owner-approved 2026-10-30). Until delivery rides it, the queue is written and read but nothing
-is typed from it; the rest of this page is still how a message reaches the pane.
+Every message to a session goes through ONE durable queue per session, owned by one deliverer
+(owner-approved 2026-10-30). The deliverer hands each message to the send path described in the rest of
+this page, which is still how a message reaches the pane.
 
 - **Model** — `packages/protocol/src/lib/session-queue.ts` (`QueuedMessageSchema`): ✓ `queued` on accept,
   ✓✓ `delivered` once typed and submitted (pane proof), ✓✓✓ `read` once the transcript shows it as a user
@@ -37,11 +37,21 @@ is typed from it; the rest of this page is still how a message reaches the pane.
   in it is still waiting or unproven. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
   shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
-- **Switch** — `"delivery": { "queue": true }` in `config/daemon.json` (off by default until every producer
-  rides the queue; read at start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES: the person's agenda
+- **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
+  start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES: the person's agenda
   context, any held board events and the attachment paths are baked into the text at that moment, the
   answer is `disposition: "queued"` with the message id as `sendId` as soon as it is on disk, and the
   deliverer types it. `--now` (stop the running turn first) still goes straight down the send path.
+- **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
+  re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
+  own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the
+  agenda answers, the owner's. A daemon message to an INTERACTIVE session still takes the direct path:
+  the queue never types into the owner's own chat, and those producers do not post to its board yet. The
+  owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
+  does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
+  failure told back to a ferret, and a held message released after a revive, keep the direct path.
+- **Until the app shows ticks** — a queued message has no send-ledger row until it is handed over, so the
+  app keeps its own "sending" bubble for it until then.
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
   `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
