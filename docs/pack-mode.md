@@ -50,7 +50,10 @@ Stop sub-ferrets you no longer need (`fy stop children <your id> --yes`).
 
 The Pack section then ends with the **whole routing prompt** ([The routing prompt](#the-routing-prompt)) as
 one line of its own, `Routing: …` — the same text Jev decides with. The daemon renders it into
-`FY_PACK_ROUTING` at **every launch** and never stores it, so a restart hears the prompt saved now: each line is
+`FY_PACK_ROUTING` at **every launch** and never stores it, so a restart hears the prompt saved now. The rendered
+line is shared, not re-derived per ferret: it is kept while the configuration load in effect holds (a saved
+file replaces it) and for 30 s at most, because every running ferret's "outdated" mark builds the environment a
+relaunch would, and deriving the line reads the whole runtime catalogue. Each line is
 trimmed and its bullet dropped, lines are joined with a space after a sentence's end and `; ` otherwise, a
 double quote becomes a single one, and a backslash or control character is deleted. The wrapper appends it
 only when `FY_PACK=1`, and deletes any quote, backslash or control character again first, so a value nobody

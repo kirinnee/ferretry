@@ -1162,6 +1162,8 @@ import {
   JevPackRanker,
   type PackParent,
   type PackProbeRequest,
+  PACK_ROUTING_MAX_AGE_MS,
+  PackRoutingKeep,
   PackService,
   PackStartRefused,
   ProbeCache,
@@ -9134,8 +9136,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
       // A new ferret's agenda-mode default (docs/agenda.md), assigned once the agenda switch below exists.
       let adoptAgenda: (sessionId: SessionId, eligible: boolean) => Promise<void> = async () => undefined;
-      // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
-      const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
+      // Pack mode (docs/pack-mode.md): the load in effect, which the watcher replaces the moment a file changes
+      // and a write through the daemon replaces before it answers — so a saved pack.yaml applies to the next
+      // start. Never a load of its own: every running ferret's view builds a relaunch environment, which reads
+      // this, and a load rescans and reparses the whole configuration tree.
+      const packConfig = async (): Promise<PackConfig> => (await configFiles.inEffect()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
       // The routing line comes from Pack's service, composed further down; until then a launch carries none.
       let packRouting = async (): Promise<string | undefined> => undefined;
@@ -10291,7 +10296,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }).catalogs;
       const packService = new PackService({
         settings: async () => {
-          const effective = (await configFiles.load()).evaluation.effective;
+          const effective = (await configFiles.inEffect()).evaluation.effective;
           return {
             config: effective.pack,
             guideFile: effective.modelsGuide,
@@ -10376,7 +10381,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         bin: CLIENT_NAME,
         now: () => clock.now(),
       });
-      packRouting = async () => await packService.routingLine();
+      // Derived once per configuration load and shared by every ferret: each running ferret's "outdated" mark
+      // builds the environment a relaunch would, routing line included, and deriving it reads the fleet's
+      // runtime catalogue, which reads every session's state (see `PackRoutingKeep`).
+      const packRoutingKeep = new PackRoutingKeep({
+        generation: async () => await configFiles.inEffect(),
+        derive: async () => await packService.routingLine(),
+        now: () => millisecondClock.now(),
+        maxAgeMs: PACK_ROUTING_MAX_AGE_MS,
+      });
+      packRouting = async () => await packRoutingKeep.line();
       /**
        * Clean up (docs/pack-mode.md § Clean up): the routing prompt's ONE generator, a short-lived hidden ferret
        * started through the session start every surface uses and probed like any sub-ferret, and the writes of
@@ -10391,7 +10405,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ? undefined
             : { wrapper: runtime.wrapper, harness: runtime.harness, defaultModel: runtime.models?.default };
         },
-        probeSettings: async () => (await configFiles.load()).evaluation.effective.pack.probe,
+        probeSettings: async () => (await configFiles.inEffect()).evaluation.effective.pack.probe,
         probe: packProbe,
         start: async request =>
           await withSystemCallsign(sessionControl, systemCallsigns, 'pack').start(
