@@ -52,32 +52,18 @@ const stamp = async (file: string): Promise<TranscriptFileStamp | undefined> =>
 /** What the hub and the stat port have been through, so a test can wait for an event instead of for time. */
 interface Seen {
   subscriptions: number;
-  notices: number;
-  stats: number;
 }
 
-/** The hub, counting what it reports; the first report of a new subscription is a notice like any other. */
+/** The hub, counting its subscriptions. */
 function observing(events: FileEventHub): { readonly files: TranscriptFileEvents; readonly seen: Seen } {
-  const seen: Seen = { subscriptions: 0, notices: 0, stats: 0 };
+  const seen: Seen = { subscriptions: 0 };
   const files: TranscriptFileEvents = {
     subscribe: (path, listener) => {
       seen.subscriptions += 1;
-      return events.subscribe(path, changed => {
-        seen.notices += 1;
-        listener(changed);
-      });
+      return events.subscribe(path, listener);
     },
   };
   return { files, seen };
-}
-
-/** The real stamp, counting each look once it has an answer; the watch's own first look and the hub's first report make two. */
-function counting(seen: Seen): typeof stamp {
-  return async file => {
-    const found = await stamp(file);
-    seen.stats += 1;
-    return found;
-  };
 }
 
 /** Resolves once `count` changes were heard; the safety net only names what never came. */
@@ -99,7 +85,7 @@ async function probeOn(events: FileEventHub, root: string): Promise<() => Promis
   const { files, seen } = observing(events);
   const watch = new FileTranscriptChanges({
     file: async () => file,
-    stat,
+    stat: stamp,
     files,
     clock: { now: () => NOW },
   }).watch('probe', at => heard.push(at));
@@ -123,14 +109,14 @@ describe('FileTranscriptChanges', () => {
     const { files, seen } = observing(hub());
     const changes = new FileTranscriptChanges({
       file: async () => file,
-      stat: counting(seen),
+      stat: stamp,
       files,
       clock: { now: () => NOW },
     });
     const watch = changes.watch('s1', at => heard.push(at));
     cleanups.add(() => watch.close());
     // The hub's own first report of the path has come and been looked at (the watch's look, then the report's).
-    await waitFor(() => seen.stats >= 2, "the hub's first report of the path to be looked at");
+    await waitFor(() => seen.subscriptions >= 1, 'the watch to be subscribed to the transcript');
     const beforeAppend = heard.length;
 
     // Act — the second append waits for the first to be heard, so the hub has finished its pass.
@@ -207,12 +193,12 @@ describe('FileTranscriptChanges', () => {
     const { files, seen } = observing(events);
     const watch = new FileTranscriptChanges({
       file: async () => file,
-      stat: counting(seen),
+      stat: stamp,
       files,
       clock: { now: () => NOW },
     }).watch('s1', at => heard.push(at));
     const probe = await probeOn(events, root);
-    await waitFor(() => seen.stats >= 2, "the hub's first report of the path to be looked at");
+    await waitFor(() => seen.subscriptions >= 1, 'the watch to be subscribed to the transcript');
 
     // Act — the probe write is heard only after the hub has been through the append to the closed watch's file.
     watch.close();

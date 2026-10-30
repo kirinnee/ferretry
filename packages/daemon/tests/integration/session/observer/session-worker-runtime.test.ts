@@ -163,7 +163,10 @@ async function rig() {
     harness: inner.harness,
     read: async (file, options) => await counted(async () => await inner.read(file, options)),
     follow: (file, options) => inner.follow(file, options),
-    window: (file, options) => inner.window(file, options),
+    window: (file, options) => {
+      const window = inner.window(file, options);
+      return { file: window.file, next: async () => await counted(async () => await window.next()) };
+    },
   });
   let now = 1_000;
   let timers: Timer[] = [];

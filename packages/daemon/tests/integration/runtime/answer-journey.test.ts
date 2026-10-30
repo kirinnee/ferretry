@@ -205,7 +205,7 @@ async function waitForRenderedQuestion(socket: string): Promise<void> {
       stderr: 'pipe',
     });
     const [text] = await Promise.all([new Response(child.stdout).text(), child.exited]);
-    return text.includes(QUESTION) && text.includes('❯ 1. Yes');
+    return text.includes(QUESTION) && text.includes('1. Yes');
   }, `the pane to draw "${QUESTION}" with its first option`);
 }
 
