@@ -24,6 +24,8 @@ interface Cell {
   readonly prefix: string;
   readonly char: string;
   readonly width: number;
+  /** Whether this cell is drawn on a background (or reversed): a blank one is paint, not padding. */
+  readonly painted: boolean;
 }
 
 interface Row {
@@ -32,11 +34,31 @@ interface Row {
   readonly tail: string;
 }
 
+const SGR = new RegExp(`${ESC}\\[([0-9;:]*)m`, 'gu');
+
+/** The painted state after `codes`: a background colour or reverse video on, given whether it was on before. */
+function paintedAfter(codes: string, before: boolean): boolean {
+  let painted = before;
+  for (const [, params = ''] of codes.matchAll(SGR)) {
+    const list = params === '' ? ['0'] : params.split(/[;:]/u);
+    for (let at = 0; at < list.length; at += 1) {
+      const code = Number(list[at]);
+      if (code === 38 || code === 48) {
+        painted = code === 48 || painted;
+        at += list[at + 1] === '5' ? 2 : 4;
+      } else if (code === 0 || code === 49 || code === 27) painted = false;
+      else if (code === 7 || (code >= 40 && code <= 47) || (code >= 100 && code <= 107)) painted = true;
+    }
+  }
+  return painted;
+}
+
 const widthOf = (char: string): number => (NO_WIDTH.test(char) ? 0 : WIDE.test(char) ? 2 : 1);
 
 function cellsOf(line: string): Row {
   const cells: Cell[] = [];
   let prefix = '';
+  let painted = false;
   let at = 0;
   while (at < line.length) {
     ESCAPE.lastIndex = at;
@@ -47,7 +69,8 @@ function cellsOf(line: string): Row {
       continue;
     }
     const char = String.fromCodePoint(line.codePointAt(at) ?? 0);
-    cells.push({ prefix, char, width: widthOf(char) });
+    painted = paintedAfter(prefix, painted);
+    cells.push({ prefix, char, width: widthOf(char), painted });
     prefix = '';
     at += char.length;
   }
@@ -70,7 +93,7 @@ function redactRows(capture: TerminalCapture, ranges: (text: string) => readonly
         range = covered[next];
       }
       if (range === undefined || range.start >= offset)
-        return { text: cell.prefix + cell.char, blank: cell.char === ' ' };
+        return { text: cell.prefix + cell.char, blank: cell.char === ' ' && !cell.painted };
       touched = true;
       return { text: cell.prefix + FILL.repeat(cell.width), blank: false };
     });
@@ -80,7 +103,12 @@ function redactRows(capture: TerminalCapture, ranges: (text: string) => readonly
       ? cells
           .slice(0, keep)
           .map(cell => cell.text)
-          .join('') + row.tail
+          .join('') +
+          row.cells
+            .slice(keep)
+            .map(cell => cell.prefix)
+            .join('') +
+          row.tail
       : line;
   });
   return lines.every((line, index) => line === capture.lines[index]) ? capture : { ...capture, lines };

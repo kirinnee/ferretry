@@ -124,3 +124,26 @@ describe('redactCapture', () => {
     );
   });
 });
+
+describe('redactCapture row padding', () => {
+  const cases: readonly [string, string, string][] = [
+    ['plain padding', `ready $${' '.repeat(10)}`, 'ready $'],
+    ['padding after a reset', `${ESC}[31mred${ESC}[39m${' '.repeat(5)}`, `${ESC}[31mred${ESC}[39m`],
+    ['padding after a bare reset', `a${ESC}[m${'   '}`, `a${ESC}[m`],
+    ['a background fill', `${ESC}[44mbar${' '.repeat(4)}${RESET}`, `${ESC}[44mbar${' '.repeat(4)}${RESET}`],
+    ['a reversed fill', `${ESC}[7mbar${' '.repeat(2)}${RESET}`, `${ESC}[7mbar${' '.repeat(2)}${RESET}`],
+    ['a bright background fill', `${ESC}[102mx  ${RESET}`, `${ESC}[102mx  ${RESET}`],
+    ['a 256-colour background fill', `${ESC}[48;5;7mx  ${RESET}`, `${ESC}[48;5;7mx  ${RESET}`],
+    ['a truecolour background fill', `${ESC}[48;2;1;2;3mx  ${RESET}`, `${ESC}[48;2;1;2;3mx  ${RESET}`],
+    ['a foreground-only colour', `${ESC}[38;5;7mx${ESC}[39m  `, `${ESC}[38;5;7mx${ESC}[39m`],
+    ['a truecolour foreground', `${ESC}[38;2;7;7;7mx  `, `${ESC}[38;2;7;7;7mx`],
+    ['a background ended by default', `${ESC}[44mx${ESC}[49m  `, `${ESC}[44mx${ESC}[49m`],
+    ['a reverse ended', `${ESC}[7mx${ESC}[27m  `, `${ESC}[7mx${ESC}[27m`],
+  ];
+
+  it.each(cases)('should treat %s', async (_name, row, expected) => {
+    const out = await redactCapture(captureOf([row]), redactorOf('nothing-here'));
+
+    should(out.lines[0]).equal(expected);
+  });
+});
