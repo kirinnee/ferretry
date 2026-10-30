@@ -143,7 +143,7 @@ const PACES = [
  * overlap instead of queueing: every path and harness starts with the file, `CONCURRENT_RUNS` timelines at a
  * time, each in its own context so no run sees another's page. A test then reads its own runs' probes.
  */
-const CONCURRENT_RUNS = 6;
+const CONCURRENT_RUNS = 12;
 const inTurn = gate(CONCURRENT_RUNS);
 const playInTurn = async (query: string): Promise<Probe> => await inTurn(async () => await play(query));
 
