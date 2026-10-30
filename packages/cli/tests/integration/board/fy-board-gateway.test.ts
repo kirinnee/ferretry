@@ -64,6 +64,21 @@ describe('the board gateway', () => {
     should(JSON.parse(String(calls[0]?.init?.body))).eql({ action: 'move', to: 'doing' });
   });
 
+  it('should post a skip as the acting session', async () => {
+    const { client: fake, calls } = client({
+      sessionId: 'session-7',
+      skip: { reason: 'chat', at: '2026-10-30T10:00:00.000Z' },
+    });
+
+    const recorded = await new FyBoardGateway(fake).skip('session-7', { reason: 'chat' });
+
+    should(recorded.skip.reason).equal('chat');
+    should(calls[0]?.path).equal('/v1/board/skip');
+    should(calls[0]?.init?.method).equal('POST');
+    should(headersOf(calls[0]?.init)).have.property('x-ferretry-session-id', 'session-7');
+    should(JSON.parse(String(calls[0]?.init?.body))).eql({ reason: 'chat' });
+  });
+
   it('should ask for the projects as the acting session, so the daemon can name its board', async () => {
     const { client: fake, calls } = client(listing());
 

@@ -2,6 +2,9 @@ import {
   BoardProjectsResponseSchema,
   type BoardQueryInput,
   BoardResponseSchema,
+  type BoardSkipRequest,
+  BoardSkipRequestSchema,
+  BoardSkipResponseSchema,
   type BoardTaskActionRequestInput,
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
@@ -67,6 +70,14 @@ export class FyBoardGateway implements IBoardGateway {
       taskPath(id),
       BoardTaskResponseSchema,
       post(BoardTaskActionRequestSchema, request, as),
+    );
+  }
+
+  async skip(as: string | undefined, request: BoardSkipRequest) {
+    return await this.client.request(
+      '/v1/board/skip',
+      BoardSkipResponseSchema,
+      post(BoardSkipRequestSchema, request, as),
     );
   }
 

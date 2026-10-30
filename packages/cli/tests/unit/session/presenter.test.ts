@@ -28,6 +28,18 @@ describe('SessionPresenter', () => {
     should(io.out.join('\n')).match(/^\{\n {2}"config"/);
   });
 
+  it('should print a report on stdout without the success paint', () => {
+    // Arrange
+    const { io, presenter } = capturedPresenter();
+
+    // Act
+    presenter.report(['TEAMMATE  ID', '-  ses-1']);
+
+    // Assert — stdout, but through the seam that leaves the renderer's own colour in place.
+    should(io.reported).deepEqual(['TEAMMATE  ID', '-  ses-1']);
+    should(io.err).be.empty();
+  });
+
   it('should keep notes on stderr so stdout stays machine-readable', () => {
     // Arrange
     const { io, presenter } = capturedPresenter();

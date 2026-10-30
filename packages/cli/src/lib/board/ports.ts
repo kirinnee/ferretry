@@ -2,6 +2,8 @@ import type {
   BoardProjectsResponse,
   BoardQueryInput,
   BoardResponse,
+  BoardSkipRequest,
+  BoardSkipResponse,
   BoardTaskActionRequestInput,
   BoardTaskCreateRequestInput,
   BoardTaskResponse,
@@ -23,6 +25,8 @@ export interface IBoardGateway {
   task(id: string): Promise<BoardTaskResponse>;
   create(as: string | undefined, request: BoardTaskCreateRequestInput): Promise<BoardTaskResponse>;
   act(as: string | undefined, id: string, request: BoardTaskActionRequestInput): Promise<BoardTaskResponse>;
+  /** `fy task skip`: records on `as` why its work has no card. The daemon refuses an owner, who has no session. */
+  skip(as: string | undefined, request: BoardSkipRequest): Promise<BoardSkipResponse>;
   /** `current` is the project of `as`, so the caller's session rides along. */
   projects(as: string | undefined): Promise<BoardProjectsResponse>;
   sessions(): Promise<readonly SessionDirectoryEntry[]>;

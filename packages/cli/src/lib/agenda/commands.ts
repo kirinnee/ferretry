@@ -61,21 +61,21 @@ JSON body (title and ask are required; questions and options may be plain string
                   "recommended": "Defaults", "why": "Matches what runs today"}],
    "recommendation": {"decision": "Defaults", "why": "Lowest risk"},
    "impact": "You stay logged out of work accounts", "urgency": "today",
-   "links": [{"label": "Plan", "target": "#F12"}],
+   "links": [{"label": "Plan", "target": "&F12"}],
    "steps": ["Open **Settings** and choose Logins", "Run \`fy login work\` and paste the code it prints"],
    "body": "Anything longer than a list, as Markdown"}`;
 
 const ASK_KINDS = `--kind says what the human DOES, and the answers the card swipes with (left · up · right):
-  task         do something: ← Need more info · → Done      (--up "Skip" adds ↑ Skip)
+  todo         do something: ← Need more info · → Done      (--up "Skip" adds ↑ Skip)
   yesno        a yes-or-no question: ← No · → Yes            (it brings its own options)
   permission   approve or reject: ← Deny · → Allow          (--up "Always allow" adds ↑, which approves)
   choice       pick one of 2 or 3 --option labels; the --recommend option (else the first) is →
   review       say the answer is good, or ask for a clarification: ← Needs changes · → Looks good
   info         nothing to decide, only to read: → Got it
   reply        write a full answer (the default); no swipes
-(open, multiple-choice and answer-review are still accepted as older names.) More than 3 options is
+(task, open, multiple-choice and answer-review are still accepted as older names.) More than 3 options is
 refused: split the item, or use --kind reply. --up-why "<line>" describes the --up answer.
-Without --kind, steps with no question are a task, --option makes a choice (exactly Yes and No, a yesno),
+Without --kind, steps with no question are a todo, --option makes a choice (exactly Yes and No, a yesno),
 one --question with options is a choice, and several questions are answered in words.`;
 
 const DISMISS_POLICY = `Agents may dismiss only agenda items they raised themselves.
@@ -148,7 +148,7 @@ function mountVerbs(
       .option('--ask <line>', 'the ask, when it is not given as words')
       .option('--summary <line>', 'the same as --ask (the older name)')
       .option(`-k, --kind <kind>`, `what the human does: ${ASK_KIND_NAMES.join(', ')}`)
-      .option('--up <label>', 'the extra up-swipe answer of a task (dismisses, e.g. "Skip") or a permission (approves)')
+      .option('--up <label>', 'the extra up-swipe answer of a todo (dismisses, e.g. "Skip") or a permission (approves)')
       .option('--up-why <line>', 'one line that describes the --up answer')
       .option(
         '--task [card]',
