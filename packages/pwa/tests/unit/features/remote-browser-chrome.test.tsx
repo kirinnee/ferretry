@@ -97,6 +97,33 @@ describe('remote browser status bar', () => {
       ),
     ).toContain('error');
   });
+
+  it('shows a "via proxy" chip for a running browser that goes through one, and never a credential', () => {
+    const proxy = { url: 'http://proxy.example:8080', authenticated: true, bypassCount: 2 };
+    const tree = render(<RemoteBrowserStatusBar status={running({ proxy })} connection="connected" />).root;
+    expect(texts(tree)).toContain('via proxy');
+    const chip = tree.find(node => node.props['data-browser-proxy-chip'] === '');
+    expect(chip.props.title).toBe(
+      'This browser goes through the proxy at http://proxy.example:8080, signed in with a stored secret, skipping it for 2 entries.',
+    );
+    const plain = render(
+      <RemoteBrowserStatusBar
+        status={running({ proxy: { url: 'socks5://p.example:1080', authenticated: false, bypassCount: 1 } })}
+        connection="connected"
+      />,
+    ).root;
+    expect(plain.find(node => node.props['data-browser-proxy-chip'] === '').props.title).toBe(
+      'This browser goes through the proxy at socks5://p.example:1080, skipping it for 1 entry.',
+    );
+  });
+
+  it('shows no chip when direct, stopped or not yet known', () => {
+    for (const status of [running(), stopped, null]) {
+      const tree = render(<RemoteBrowserStatusBar status={status} connection="connected" />).root;
+      expect(tree.findAll(node => node.props['data-browser-proxy-chip'] === '')).toHaveLength(0);
+      expect(texts(tree)).not.toContain('via proxy');
+    }
+  });
 });
 
 describe('remote browser page tabs', () => {

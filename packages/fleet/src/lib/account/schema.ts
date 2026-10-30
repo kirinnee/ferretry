@@ -22,7 +22,13 @@
  *
  * Pure throughout: no filesystem, no environment, no clock.
  */
-import { BrowserModeSchema, CONFIG_COMPONENT_KINDS, isLoopbackHost, SECRET_REFERENCE_SOURCE } from '@ferretry/protocol';
+import {
+  BrowserModeSchema,
+  BrowserProxySettingSchema,
+  CONFIG_COMPONENT_KINDS,
+  isLoopbackHost,
+  SECRET_REFERENCE_SOURCE,
+} from '@ferretry/protocol';
 import { z } from 'zod';
 import { AliasSchema, EnvSchema, SafeNameSchema, UsageSchema } from '../config.ts';
 import { HarnessKindSchema } from '../manifest.ts';
@@ -169,6 +175,13 @@ export const MACHINE_SHAPE = {
    * Not a loosening: it changes how the one browser draws, not what an agent may do with it.
    */
   browserMode: BrowserModeSchema.default('headless'),
+  /**
+   * "Browser proxy" (docs/browser-proxy.md): where the agent browser sends its traffic — an http, https or socks5
+   * address, an optional bypass list, and credentials only as ${secret:NAME} references. Absent means direct.
+   * Read when the browser STARTS. Setting or changing it is held for the owner when an agent writes it: a proxy
+   * sees where the browser goes, and its credential references would be sent to whatever address is written.
+   */
+  browserProxy: BrowserProxySettingSchema.optional(),
   /**
    * "Auto-resume after restart": when the daemon boots and finds ferrets that were running when the host
    * went down, it resumes them with their conversation intact. On by default; sessions the owner stopped

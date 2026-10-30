@@ -5,6 +5,7 @@
  * - **Agent permissions** — Auto mode or Skip all permission checks, each with a plain sentence. It
  *   applies to new sessions; with sessions running, the tab says how many keep the old mode (E32).
  * - **Browser mode** — Headless, or a Real window an owner browses through (docs/browser-mode.md).
+ * - **Browser proxy** — where the shared browser sends its traffic, with secret-store credentials (docs/browser-proxy.md).
  * - **Auto-resume after restart** — On (the default) or Off, and what the last restart resumed.
  * - **Agenda mode** — On (the default) or Off for ferrets started from now on (docs/agenda.md).
  * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
@@ -36,6 +37,8 @@ import { CheckChoices, RadioChoices, SetupNote, SetupRow, SetupSection } from '.
 import { countWords } from '../setup/setup-words.ts';
 import { ChangeApplyPanel } from '../shell/apply-change-panel.tsx';
 import type { MachineTabProps } from '../shell/machines-surface.tsx';
+import { BrowserProxySection } from './browser-proxy-section.tsx';
+import { machineSettings } from './machine-settings.ts';
 import { KEEP_IN_SYNC_EXPLANATION, MACHINE_FILE, readKeepInSync, withKeepInSync } from './conversations-setting.ts';
 
 type AgentPermissions = FleetMachineView['agentPermissions'];
@@ -61,27 +64,7 @@ export const AGENT_CONTROL_WORDS: Readonly<
   },
 };
 
-/** The things a `machine.settings` change always carries, unchanged unless the caller means
- *  to change one of them — so a section that edits only one never clobbers the other two. */
-export const machineSettings = (
-  machine: FleetMachineView,
-  edit: Partial<{
-    readonly agentPermissions: AgentPermissions;
-    readonly defaultRuntime: string | null;
-    readonly agentControl: FleetAgentControl;
-    readonly browserMode: BrowserMode;
-    readonly autoResume: boolean;
-    readonly agendaMode: boolean;
-  }>,
-) => ({
-  kind: 'machine.settings' as const,
-  agentPermissions: machine.agentPermissions,
-  defaultRuntime: machine.defaultRuntime,
-  agentControl: machine.agentControl,
-  // Sent only to a daemon that has the setting: an older one refuses a field it does not know.
-  ...(machine.browserMode === undefined ? {} : { browserMode: machine.browserMode }),
-  ...edit,
-});
+export { machineSettings } from './machine-settings.ts';
 
 /** E32: what happens to sessions already running when the mode changes. */
 export const runningSessionsSentence = (running: number, old: AgentPermissions): string =>
@@ -733,6 +716,13 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
 
       <BrowserModeSection
         key={machine.browserMode ?? 'headless'}
+        machine={machine}
+        machineName={machineName}
+        access={access}
+        onSaved={onSaved}
+      />
+      <BrowserProxySection
+        key={JSON.stringify(machine.browserProxy ?? null)}
         machine={machine}
         machineName={machineName}
         access={access}

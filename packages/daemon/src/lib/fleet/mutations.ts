@@ -655,6 +655,21 @@ function putMachineSettings(
     );
   }
 
+  // A client that predates Browser proxy leaves it out, and leaves it as it is; `null` turns the proxy off.
+  if (change.browserProxy !== undefined) {
+    const previous = model.machine.browserProxy ?? null;
+    if (JSON.stringify(change.browserProxy) !== JSON.stringify(previous)) {
+      if (change.browserProxy === null) delete draft.machine.browserProxy;
+      else draft.machine.browserProxy = change.browserProxy;
+      parts.push(
+        change.browserProxy === null ? 'the browser proxy off' : `the browser proxy to ${change.browserProxy.url}`,
+      );
+      consequences.push(
+        'Applies the next time the browser starts; a browser already running keeps its network route until it stops.',
+      );
+    }
+  }
+
   // A client that predates Auto-resume leaves it out, and leaves it as it is.
   const autoResume = change.autoResume ?? model.machine.autoResume;
   if (autoResume !== model.machine.autoResume) {

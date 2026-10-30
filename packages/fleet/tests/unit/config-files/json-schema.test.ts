@@ -29,6 +29,7 @@ describe('configJsonSchema', () => {
       'attentionNudge',
       'autoResume',
       'browserMode',
+      'browserProxy',
       'conversations',
       'defaultRuntime',
     ]);

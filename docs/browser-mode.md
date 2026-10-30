@@ -17,7 +17,8 @@ browser draws, not what an agent may do with it, so it applies at once.
 ## What Real window changes
 
 - **No `--headless`.** A site sees Chrome's own user agent, not `HeadlessChrome`, and the page renders
-  the way a desktop Chrome does.
+  the way a desktop Chrome does. (A headless browser is given the same honest user agent — see
+  [browser-proxy.md](browser-proxy.md).)
 - **The installed Google Chrome first.** In either mode the daemon prefers a real Google Chrome over a
   Chromium wherever each was found (`/usr/bin`, `/opt/google/chrome`, `PATH`, `~/Applications`).
 - **Every window keeps painting.** Each page has its own window, and an agent may be driving, and a
