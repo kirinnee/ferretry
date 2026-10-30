@@ -47,6 +47,7 @@
         "harness/board-page.tsx",
         "harness/board-detail-screenshot.ts",
         "harness/board-table-screenshot.ts",
+        "harness/board-kanban-screenshot.ts",
         "harness/board-detail.tsx",
         "harness/lane-editor-screenshot.ts",
         "harness/lane-editor-page.tsx",
