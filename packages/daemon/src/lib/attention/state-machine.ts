@@ -25,6 +25,7 @@ import {
   MAX_ATTENTION_RESOLUTIONS,
   type ResolvedAttentionItem,
   ResolvedAttentionItemSchema,
+  type TaskRef,
 } from '@ferretry/protocol';
 
 /** Agent-raised requests are capped separately so automatic sources retain board capacity. */
@@ -85,6 +86,8 @@ export interface RaiseAttentionRequest extends AttentionBrief, AttentionCardFiel
    * (never taken from the caller): the file, the held edit's digest and its words.
    */
   readonly confirms?: AttentionConfirms;
+  /** The board card the item belongs to, kept on the item as sent (`DAEMON_FEATURES.agendaTask`). */
+  readonly task?: TaskRef;
 }
 
 /** The writing an edit may change: never the ask, the kind, the answers, the reason or who raised the item. */
@@ -465,6 +468,7 @@ function raise(ledger: AttentionLedger, command: RaiseCommand): AttentionMutatio
       ...(request.notice === true ? { notice: true as const } : {}),
       ...(request.ping === true ? { ping: true as const } : {}),
       ...(request.confirms === undefined ? {} : { confirms: request.confirms }),
+      ...(request.task === undefined ? {} : { task: request.task }),
     },
     actor,
   );
