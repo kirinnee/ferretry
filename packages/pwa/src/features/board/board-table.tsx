@@ -101,26 +101,28 @@ function TableRow({ row, env }: RowProps) {
       data-touch={env.touch === true ? '' : undefined}
     >
       <div className="fy-board-table__what">
-        <RouteLink className="fy-board-table__title" onNavigate={env.onNavigate} to={href}>
-          <span className="fy-board-table__ref">{formatTaskRef({ id: task.id })}</span>{' '}
-          <span className="fy-board-table__title-text">{task.title}</span>
-        </RouteLink>
-        {extras.length === 0 ? null : (
-          <span className="fy-board-table__extras">
-            {extras.map(entry => (
-              <span
-                className="fy-board-seg"
-                data-seg={entry.key}
-                data-tone={entry.tone}
-                key={entry.key}
-                title={entry.title}
-              >
-                {entry.icon === null ? null : <BoardIcon name={entry.icon} />}
-                {entry.text}
-              </span>
-            ))}
-          </span>
-        )}
+        <div className="fy-board-table__line">
+          <RouteLink className="fy-board-table__title" onNavigate={env.onNavigate} to={href}>
+            <span className="fy-board-table__ref">{formatTaskRef({ id: task.id })}</span>{' '}
+            <span className="fy-board-table__title-text">{task.title}</span>
+          </RouteLink>
+          {extras.length === 0 ? null : (
+            <span className="fy-board-table__extras">
+              {extras.map(entry => (
+                <span
+                  className="fy-board-seg"
+                  data-seg={entry.key}
+                  data-tone={entry.tone}
+                  key={entry.key}
+                  title={entry.title}
+                >
+                  {entry.icon === null ? null : <BoardIcon name={entry.icon} />}
+                  {entry.text}
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
         {task.summary === '' ? null : <Summary href={href} onNavigate={env.onNavigate} text={task.summary} />}
       </div>
       <div className="fy-board-table__cell" data-col="people">
