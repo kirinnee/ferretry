@@ -14,6 +14,8 @@ import {
 } from '../../../src/features/board/detail/board-detail-sections.tsx';
 import { laneNameOf, laneStepper } from '../../../src/lib/board-detail.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
+const text = (root: Element, selector: string): string | undefined =>
+  root.querySelector(selector)?.textContent ?? undefined;
 import { agendaItem } from '../../support/agenda-inbox.tsx';
 import { card, laneSetFor, laptop, workstation } from '../board-support.ts';
 import { HELPER, LEAD, names, NOW } from './board-detail-support.tsx';
@@ -115,16 +117,35 @@ describe('Prose', () => {
 describe('AskSection', () => {
   it('quotes the ask and where it was said, without a clarification list when there are none', async () => {
     const task = card('F1', { ask: { text: 'Ship the board', source: 'chat' } });
-    const root = await show(<AskSection names={names} task={task} />);
+    const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     expect(root.querySelector('blockquote')?.textContent).toBe('Ship the board');
-    expect(root.textContent).toContain('Said in chat.');
+    expect(text(root, '[data-kind="ask-origin"]')).toMatch(/^From Denisha, via chat · \d+/u);
     expect(root.querySelector('ul')).toBeNull();
   });
 
-  it('names the ferret a session source points at', async () => {
-    const task = card('F1', { ask: { text: 'Ship the board', source: 'session:mvuc7tsf-0c3d50df' } });
-    const root = await show(<AskSection names={() => 'denisha'} task={task} />);
-    expect(root.textContent).toContain('Said in denisha.');
+  it('says who and where, and links the chat when the source is a session', async () => {
+    const opened: string[] = [];
+    const task = card('F1', {
+      createdBy: { kind: 'owner' },
+      ask: { text: 'Ship the board', source: 'session:mvuc7tsf-0c3d50df' },
+    });
+    const root = await show(
+      <AskSection names={() => 'denisha'} now={NOW} onOpenSession={id => void opened.push(id)} task={task} />,
+    );
+    expect(text(root, '[data-kind="ask-origin"]')).toMatch(/^The owner, in denisha's chat · \d+/u);
+    await interact(() =>
+      (must(root.querySelector('[data-kind="ask-origin"] button'), 'the chat link') as HTMLElement).click(),
+    );
+    expect(opened).toEqual(['mvuc7tsf-0c3d50df']);
+  });
+
+  it('leaves the source off when it is the owner speaking and the card has no age', async () => {
+    const task = {
+      ...card('F1', { createdBy: { kind: 'owner' }, ask: { text: 'Ship the board', source: 'owner (board)' } }),
+      createdAt: 'never' as BoardTaskView['createdAt'],
+    };
+    const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
+    expect(text(root, '[data-kind="ask-origin"]')).toBe('The owner');
   });
 
   it('credits each clarification to you or to the ferret by name', async () => {
@@ -139,7 +160,7 @@ describe('AskSection', () => {
         },
       ],
     });
-    const root = await show(<AskSection names={names} task={task} />);
+    const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     const lines = [...root.querySelectorAll('li')].map(item => item.textContent);
     expect(lines).toEqual(['Clarified by you: Only on phones', 'Clarified by a ferret (Denisha): Behind a flag']);
   });

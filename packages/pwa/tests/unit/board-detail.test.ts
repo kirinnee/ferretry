@@ -4,6 +4,7 @@ import { MAX_BOARD_NOTE_LENGTH } from '@ferretry/protocol';
 
 import {
   activityText,
+  askOrigin,
   assignedMessage,
   askSessions,
   collectAsks,
@@ -12,6 +13,7 @@ import {
   FOLD_MINIMUM,
   ferretComment,
   foldHistory,
+  hasLinks,
   type HistoryContext,
   historyRows,
   isWebLink,
@@ -28,6 +30,7 @@ import {
   type SessionAgenda,
   startBrief,
   verdictLanes,
+  written,
 } from '../../src/lib/board-detail.ts';
 import { card, laneSetFor } from './board-support.ts';
 
@@ -455,5 +458,58 @@ describe('askSessions', () => {
 
   it('leaves out an assignee the card does not have', () => {
     expect(askSessions({ openAsks: [], owner: 's1', assignee: null })).toEqual(['s1']);
+  });
+});
+
+describe('written and hasLinks', () => {
+  it('counts only non-blank prose as written', () => {
+    expect(written('')).toBe(false);
+    expect(written('  \n ')).toBe(false);
+    expect(written('why')).toBe(true);
+  });
+
+  it('has links for a PR, a branch, a doc or a release, and none otherwise', () => {
+    const bare = card('F1', {});
+    expect(hasLinks(bare)).toBe(false);
+    const links = bare.links;
+    expect(hasLinks({ ...bare, links: { ...links, branch: 'feat/x' } })).toBe(true);
+    expect(hasLinks({ ...bare, links: { ...links, docs: ['a.md'] } })).toBe(true);
+    expect(hasLinks({ ...bare, links: { ...links, prs: [{} as PrLink] } })).toBe(true);
+    expect(hasLinks({ ...bare, shippedIn: { version: '1.0.0', tag: 'v1.0.0', at: '2026-08-01T09:50:00.000Z' } })).toBe(
+      true,
+    );
+  });
+});
+
+describe('askOrigin', () => {
+  const names = (id: string): string => (id === 's1' ? 'denisha' : 'ottilie');
+  const base = { createdAt: '2026-08-01T09:00:00.000Z' } as const;
+
+  it('says the owner, in the chat the ask came from', () => {
+    const origin = askOrigin(
+      { ...base, createdBy: { kind: 'owner' }, ask: { text: 't', source: 'session:s1' } },
+      names,
+      '3h',
+    );
+    expect(origin).toEqual({ who: 'The owner', sessionId: 's1', chat: "denisha's chat", via: null, age: '3h' });
+  });
+
+  it('says a ferret by name, and keeps a source that is neither a session nor the owner', () => {
+    const origin = askOrigin(
+      { ...base, createdBy: { kind: 'ferret', sessionId: 's2' }, ask: { text: 't', source: 'cli' } },
+      names,
+      null,
+    );
+    expect(origin).toEqual({ who: 'From ottilie', sessionId: null, chat: null, via: 'cli', age: null });
+  });
+
+  it('drops the owner’s own source label and names the daemon when it opened the card', () => {
+    const origin = askOrigin(
+      { ...base, createdBy: { kind: 'daemon' }, ask: { text: 't', source: 'owner (board)' } },
+      names,
+      null,
+    );
+    expect(origin.who).toBe('The daemon');
+    expect(origin.via).toBeNull();
   });
 });

@@ -140,6 +140,7 @@
   padding: 0 var(--gap-sm) var(--gap-sm);
   font-size: var(--text-sm);
   overflow-wrap: anywhere;
+  --md-font-size: var(--text-sm);
 }
 .fy-board-detail__quiet {
   margin: 0;
@@ -282,7 +283,13 @@ fieldset.fy-board-detail__actions {
   gap: var(--gap-sm);
 }
 .fy-board-detail__big {
-  min-height: 48px;
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  white-space: nowrap;
+  min-height: 44px;
   flex: 1 1 0;
   padding: 0 var(--gap-sm);
   border: var(--stroke) solid var(--border-soft);
@@ -374,4 +381,18 @@ fieldset.fy-board-detail__actions {
   flex-direction: row !important;
   align-items: center;
   gap: var(--gap-xs) !important;
+}
+.fy-board-detail__link {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.fy-board-detail__titled {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }

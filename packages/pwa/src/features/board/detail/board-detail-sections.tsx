@@ -5,6 +5,7 @@ import { ChevronRight, ExternalLink, GitBranch } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Markdown } from '../../../components/markdown.tsx';
 import {
+  askOrigin,
   type CardAsks,
   foldHistory,
   type HistoryContext,
@@ -20,7 +21,7 @@ import { BoardIcon } from '../board-icons.tsx';
 
 export interface DetailSectionProps {
   readonly id: string;
-  readonly title: string;
+  readonly title: ReactNode;
   readonly count?: number;
   readonly defaultOpen?: boolean;
   readonly children: ReactNode;
@@ -62,13 +63,37 @@ export function Prose({ text, empty }: { readonly text: string; readonly empty: 
   return text.trim() === '' ? <p className="fy-board-detail__quiet">{empty}</p> : <Markdown text={text} />;
 }
 
-export function AskSection({ task, names }: { readonly task: BoardTaskView; readonly names: FerretNames }) {
+export function AskSection({
+  task,
+  names,
+  now,
+  onOpenSession,
+}: {
+  readonly task: BoardTaskView;
+  readonly names: FerretNames;
+  readonly now: number;
+  readonly onOpenSession: (sessionId: string) => void;
+}) {
+  const origin = askOrigin(task, names, ageLabel(task.createdAt, now));
   return (
     <>
       <blockquote className="fy-board-detail__ask">{task.ask.text}</blockquote>
-      <p className="fy-board-detail__quiet">
-        Said in{' '}
-        {task.ask.source.startsWith('session:') ? names(task.ask.source.slice('session:'.length)) : task.ask.source}.
+      <p className="fy-board-detail__quiet" data-kind="ask-origin">
+        {origin.who}
+        {origin.sessionId === null ? null : (
+          <>
+            {', in '}
+            <button
+              className="fy-board-detail__link"
+              onClick={() => onOpenSession(origin.sessionId as string)}
+              type="button"
+            >
+              {origin.chat}
+            </button>
+          </>
+        )}
+        {origin.via === null ? null : `, via ${origin.via}`}
+        {origin.age === null ? null : ` · ${origin.age}`}
       </p>
       {task.clarifications.length === 0 ? null : (
         <ul className="fy-board-detail__list">

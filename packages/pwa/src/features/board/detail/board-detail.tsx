@@ -16,7 +16,7 @@ import {
   parseTaskRef,
   type TaskRef,
 } from '@ferretry/protocol';
-import { ArrowLeft, ChevronDown, MessageSquare, X } from 'lucide-react';
+import { ArrowLeft, Check, ChevronDown, MessageSquare, X } from 'lucide-react';
 import { type FormEvent, useId, useMemo, useState } from 'react';
 import { type BoardMachine, useBoardTask } from '../../../hooks/use-board.ts';
 import { useBoardAsks } from '../../../hooks/use-board-asks.ts';
@@ -28,11 +28,13 @@ import {
   collectAsks,
   commentNote,
   ferretComment,
+  hasLinks,
   kindLabel,
   laneCategoryOf,
   laneNameOf,
   laneStepper,
   verdictLanes,
+  written,
 } from '../../../lib/board-detail.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../../lib/board-move.ts';
@@ -297,10 +299,12 @@ function DetailBody({
               className="fy-board-detail__big"
               data-verdict="works"
               disabled={busy}
+              title="Works → Close"
               onClick={() => requestMove(verdict.closeLaneId as string)}
               type="button"
             >
-              ✓ Works → Close
+              <Check aria-hidden="true" size={14} />
+              Close
             </button>
           )}
           {verdict.reworkLaneId === null ? null : (
@@ -308,6 +312,7 @@ function DetailBody({
               className="fy-board-detail__big"
               data-verdict="not-good"
               disabled={busy}
+              title={`Not good → back to ${laneNameOf(laneSet, verdict.reworkLaneId)}, with a reason`}
               onClick={() => {
                 setProblem(null);
                 const to = verdict.reworkLaneId as string;
@@ -315,7 +320,8 @@ function DetailBody({
               }}
               type="button"
             >
-              ✗ Not good → {laneNameOf(laneSet, verdict.reworkLaneId)}
+              <X aria-hidden="true" size={14} />
+              Not good
             </button>
           )}
         </fieldset>
@@ -330,7 +336,15 @@ function DetailBody({
       </DetailSection>
 
       {task.waitingOnOwner.length === 0 ? null : (
-        <DetailSection count={task.waitingOnOwner.length} id="waiting" title="🚧 Waiting on you">
+        <DetailSection
+          count={task.waitingOnOwner.length}
+          id="waiting"
+          title={
+            <span className="fy-board-detail__titled">
+              <BoardIcon name="waiting-on-you" size={12} /> Waiting on you
+            </span>
+          }
+        >
           <WaitingOnYou
             asks={asks}
             names={names}
@@ -343,25 +357,40 @@ function DetailBody({
       )}
 
       <DetailSection id="ask" title="Ask">
-        <AskSection names={names} task={task} />
+        <AskSection
+          names={names}
+          now={now}
+          onOpenSession={sessionId => onNavigate(daemonSessionPath(machine.connection.daemonId, sessionId))}
+          task={task}
+        />
       </DetailSection>
 
-      <DetailSection defaultOpen={false} id="premise" title="Premise">
-        <Prose empty="No premise written." text={task.premise} />
-      </DetailSection>
-      <DetailSection defaultOpen={false} id="context" title="Context">
-        <Prose empty="No context written." text={task.context} />
-      </DetailSection>
-      <DetailSection count={task.terms.length} defaultOpen={false} id="terms" title="Terms">
-        <TermsTable terms={task.terms} />
-      </DetailSection>
-      <DetailSection defaultOpen={false} id="brief" title="Brief">
-        <Prose empty="No brief written." text={task.brief} />
-      </DetailSection>
+      {written(task.premise) ? (
+        <DetailSection defaultOpen={false} id="premise" title="Premise">
+          <Prose empty="" text={task.premise} />
+        </DetailSection>
+      ) : null}
+      {written(task.context) ? (
+        <DetailSection defaultOpen={false} id="context" title="Context">
+          <Prose empty="" text={task.context} />
+        </DetailSection>
+      ) : null}
+      {task.terms.length === 0 ? null : (
+        <DetailSection count={task.terms.length} defaultOpen={false} id="terms" title="Terms">
+          <TermsTable terms={task.terms} />
+        </DetailSection>
+      )}
+      {written(task.brief) ? (
+        <DetailSection defaultOpen={false} id="brief" title="Brief">
+          <Prose empty="" text={task.brief} />
+        </DetailSection>
+      ) : null}
 
-      <DetailSection count={children.length} id="children" title="Sub-cards">
-        <ChildrenList lines={children} now={now} onOpen={open} />
-      </DetailSection>
+      {children.length === 0 ? null : (
+        <DetailSection count={children.length} id="children" title="Sub-cards">
+          <ChildrenList lines={children} now={now} onOpen={open} />
+        </DetailSection>
+      )}
 
       <DetailSection id="depends" title="Depends on and blocks">
         <DependencyChips
@@ -379,13 +408,17 @@ function DetailBody({
         />
       </DetailSection>
 
-      <DetailSection id="links" title="Links">
-        <LinksSection runningOn={here?.runningOn ?? []} task={task} />
-      </DetailSection>
+      {hasLinks(task) ? (
+        <DetailSection id="links" title="Links">
+          <LinksSection runningOn={here?.runningOn ?? []} task={task} />
+        </DetailSection>
+      ) : null}
 
-      <DetailSection count={asks.open.length + asks.resolved.length} id="asks" title="Asks">
-        <AsksList asks={asks} names={names} />
-      </DetailSection>
+      {asks.open.length + asks.resolved.length === 0 ? null : (
+        <DetailSection count={asks.open.length + asks.resolved.length} id="asks" title="Asks">
+          <AsksList asks={asks} names={names} />
+        </DetailSection>
+      )}
 
       <DetailSection id="history" title="History">
         <HistorySection context={historyContext} now={now} task={task} />

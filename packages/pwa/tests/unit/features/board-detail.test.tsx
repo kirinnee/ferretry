@@ -103,19 +103,41 @@ describe('BoardDetail — reading', () => {
       'stepper',
       'summary',
       'ask',
+      'depends',
+      'history',
+    ]);
+    expect(root.querySelector('[data-section="summary"] strong')?.textContent).toBe('builds');
+    expect(root.querySelector('[data-section="waiting"]')).toBeNull();
+  });
+
+  it('draws the written sections folded, and none for what the card does not have', async () => {
+    const { root } = await open({
+      task: card('F1', {
+        ...IMPLEMENT,
+        premise: 'Why',
+        context: 'Where',
+        brief: 'How',
+        terms: [{ term: 'Lane', meaning: 'A column.' }],
+        links: { prs: [], branch: 'feat/x', commits: [], docs: [] },
+      }),
+    });
+    const sections = [...root.querySelectorAll('[data-section]')].map(section => section.getAttribute('data-section'));
+    expect(sections).toEqual([
+      'header',
+      'stepper',
+      'summary',
+      'ask',
       'premise',
       'context',
       'terms',
       'brief',
-      'children',
       'depends',
       'links',
-      'asks',
       'history',
     ]);
-    expect(root.querySelector('[data-section="summary"] strong')?.textContent).toBe('builds');
     expect(root.querySelector('[data-section="premise"]')?.hasAttribute('open')).toBe(false);
-    expect(root.querySelector('[data-section="waiting"]')).toBeNull();
+    expect(root.querySelector('[data-section="children"]')).toBeNull();
+    expect(root.querySelector('[data-section="asks"]')).toBeNull();
   });
 
   it('says what a card in each activity is doing', async () => {
@@ -298,8 +320,13 @@ describe('BoardDetail — the verdict', () => {
 
   it('offers Works → Close and Not good → the last working lane on a card to try', async () => {
     const { root } = await open({ task: card('F1', tested) });
-    expect(text(root, '[data-verdict="works"]')).toBe('✓ Works → Close');
-    expect(text(root, '[data-verdict="not-good"]')).toBe('✗ Not good → Implement');
+    expect(text(root, '[data-verdict="works"]')).toBe('Close');
+    expect(root.querySelector('[data-verdict="works"]')?.getAttribute('title')).toBe('Works → Close');
+    expect(text(root, '[data-verdict="not-good"]')).toBe('Not good');
+    expect(root.querySelector('[data-verdict="not-good"]')?.getAttribute('title')).toBe(
+      'Not good → back to Implement, with a reason',
+    );
+    expect(root.querySelectorAll('[data-verdict] svg')).toHaveLength(2);
   });
 
   it('closes the card with Works, with no words asked', async () => {

@@ -401,3 +401,51 @@ export const askSessions = (task: Pick<BoardTaskView, 'openAsks' | 'owner' | 'as
     ...(task.assignee === null ? [] : [task.assignee]),
   ]),
 ];
+
+// ---------------------------------------------------------------------------------------------------
+// What is worth a section, and who said the ask
+// ---------------------------------------------------------------------------------------------------
+
+/** A prose field the card actually has; an empty one earns no section. */
+export const written = (text: string): boolean => text.trim() !== '';
+
+/** The card has a PR, a branch, a doc or a release to show. */
+export const hasLinks = (task: Pick<BoardTaskView, 'links' | 'shippedIn'>): boolean =>
+  task.links.prs.length > 0 || task.links.branch !== null || task.links.docs.length > 0 || task.shippedIn !== null;
+
+/** Who said the ask and where, in the parts the section strings together. */
+export interface AskOrigin {
+  /** "The owner" or "From ottilie". */
+  readonly who: string;
+  /** The session the ask was said in, to link to; `null` when the source is not a session. */
+  readonly sessionId: string | null;
+  /** "denisha's chat", set when `sessionId` is. */
+  readonly chat: string | null;
+  /** A source that is neither a session nor the owner's own words, kept verbatim. */
+  readonly via: string | null;
+  readonly age: string | null;
+}
+
+const SESSION_SOURCE = 'session:';
+
+export const askOrigin = (
+  task: Pick<BoardTaskView, 'ask' | 'createdBy' | 'createdAt'>,
+  names: FerretNames,
+  age: string | null,
+): AskOrigin => {
+  const { source } = task.ask;
+  const sessionId = source.startsWith(SESSION_SOURCE) ? source.slice(SESSION_SOURCE.length) : null;
+  const author = task.createdBy;
+  return {
+    who:
+      author.kind === 'owner'
+        ? 'The owner'
+        : author.kind === 'ferret'
+          ? `From ${names(author.sessionId)}`
+          : 'The daemon',
+    sessionId,
+    chat: sessionId === null ? null : `${names(sessionId)}'s chat`,
+    via: sessionId === null && !/^owner/iu.test(source) ? source : null,
+    age,
+  };
+};

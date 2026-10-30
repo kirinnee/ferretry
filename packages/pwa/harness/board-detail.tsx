@@ -104,6 +104,7 @@ const BLOCKING_ASK = {
 } as unknown as AgendaItem;
 
 const REVIEW_CARD = card('F2', {
+  createdAt: ago(900),
   title: 'Card detail drawer and page',
   laneId: 'review',
   owner: DENISHA,
@@ -178,6 +179,7 @@ const REVIEW_CARD = card('F2', {
 });
 
 const TESTED_CARD = card('F10', {
+  createdAt: ago(4000),
   title: 'Device tokens stay on host',
   laneId: 'tested',
   owner: DENISHA,
@@ -212,6 +214,7 @@ const TESTED_CARD = card('F10', {
 });
 
 const WAITING_CARD = card('F8', {
+  createdAt: ago(30),
   title: 'Choose the finished-items database',
   laneId: 'plan',
   owner: DENISHA,
