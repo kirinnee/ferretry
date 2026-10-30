@@ -687,6 +687,7 @@ import {
   createMountedDispatcher,
   createMountedSocketDispatcher,
   createSessionPaths,
+  createSessionDirectory,
   createWardenPaths,
   currentLaunchEffort,
   currentLaunchModel,
@@ -781,6 +782,7 @@ import {
   outdatedSections,
   RestartBusy,
   RestartService,
+  type RestartSubject,
   withContext,
   withOutdated,
   type IoPressurePort,
@@ -981,7 +983,6 @@ import {
   SessionPlanner,
   SessionProvenanceRecorder,
   SessionProvenanceStamper,
-  SessionReadError,
   SessionRenameError,
   SessionRenameService,
   type SessionRenameSubsystem,
@@ -2005,12 +2006,8 @@ async function assigneeCandidates(storage: DaemonStorage): Promise<readonly Task
 }
 
 /**
- * The session read, over the authoritative index and the documents in the state home.
- *
- * BOTH DOCUMENTS ARE PARSED, and a session whose pair does not parse is left out of the list rather
- * than reported with holes: a view assembled from a config the protocol schema rejected is a view
- * whose fields nobody can vouch for. The single read refuses that same session instead of omitting
- * it, so the gap in the list is answerable rather than silent.
+ * The session read, over the authoritative index and the documents in the state home — paced, and projecting
+ * only what can still change (see `createSessionDirectory`).
  *
  * The DIRECTORY is derived from the layout, never from the request: `createSessionPaths` takes a
  * parsed id, so a path-unsafe reference is refused in the reader's own taxonomy before it can become
@@ -2021,39 +2018,16 @@ function createSessionDirectorySubsystem(
   storage: DaemonStorage,
   project?: (id: SessionId, config: SessionConfig) => Promise<void>,
 ): SessionDirectorySubsystem {
-  /** The pair of documents for one indexed session, parsed, or `undefined` when either is unusable. */
-  const view = async (id: SessionId): Promise<SessionView | undefined> => {
-    // Read BEFORE the documents: a reader starting its live feed after this sequence is replayed every
-    // event the documents might not reflect yet, and misses none they do not.
-    const journalSequence = storage.findSession(id)?.lastSequence;
-    const rawConfig = await storage.readConfig(id);
-    const config = SessionConfigSchema.safeParse(rawConfig);
-    if (config.success) await project?.(id, config.data);
-    const state = SessionStateSchema.safeParse(await storage.readState(id));
-    if (!config.success || !state.success) return undefined;
-    return {
-      config: config.data,
-      state: state.data,
-      directory: createSessionPaths(paths, id).directory,
-      ...(journalSequence === undefined ? {} : { journalSequence }),
-    };
-  };
-  return {
-    list: async () => {
-      const views = await Promise.all(storage.listSessions().map(async session => await view(session.id)));
-      return views.filter((session): session is SessionView => session !== undefined);
-    },
-    get: async reference => {
-      const id = tryParseSessionId(reference);
-      if (id === undefined)
-        throw new SessionReadError('invalid', `${JSON.stringify(reference)} is not a usable session id`);
-      if (storage.findSession(id) === undefined) return undefined;
-      const found = await view(id);
-      if (found === undefined)
-        throw new SessionReadError('unusable', `the documents for session ${reference} do not satisfy the protocol`);
-      return found;
-    },
-  };
+  return createSessionDirectory({
+    sessions: () => storage.listSessions(),
+    find: id => storage.findSession(id),
+    readConfig: async id => await storage.readConfig(id),
+    readState: async id => await storage.readState(id),
+    directory: id => createSessionPaths(paths, id).directory,
+    project,
+    ended: session => session.status !== undefined && ENDED_SESSION_STATUSES.has(session.status),
+    yieldToLoop: () => new Promise(resolve => setImmediate(resolve)),
+  });
 }
 
 /**
@@ -9489,14 +9463,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       };
       // A restart is the same-login migrate with the conversation resumed and NEVER forced: the in-flight gate
       // is the one a person's Restart meets, and a ferret it refuses is queued until it is idle.
+      // The revision is what the in-flight gate reads of the ferret's own record, so a refused restart is asked
+      // again as soon as any of it moves rather than on every tick of the drain.
+      const restartSubject = (view: SessionView): RestartSubject => ({
+        id: view.config.id,
+        name: view.config.name,
+        running: !DORMANT_AGENT_STATUSES.has(view.state.status),
+        idle: view.state.turnState === 'your-turn' || view.state.waiting !== undefined,
+        revision: JSON.stringify([
+          view.state.status,
+          view.state.turn,
+          view.state.turnState ?? null,
+          view.state.waiting ?? null,
+          view.state.openTools ?? [],
+          view.state.subprocessSince ?? null,
+        ]),
+      });
       const sessionRestartService = new RestartService({
-        subjects: async () =>
-          (await sessions.list()).map(view => ({
-            id: view.config.id,
-            name: view.config.name,
-            running: !DORMANT_AGENT_STATUSES.has(view.state.status),
-            idle: view.state.turnState === 'your-turn' || view.state.waiting !== undefined,
-          })),
+        subjects: async () => (await sessions.list()).map(restartSubject),
+        // ONE session, never the list: the drain runs on a 10 s tick, and the list projects every session.
+        subject: async id => {
+          const view = await sessions.get(id).catch(() => undefined);
+          return view === undefined ? undefined : restartSubject(view);
+        },
         outdated: outdatedFor,
         restart: async id => {
           const view = await sessions.get(id);

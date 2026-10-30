@@ -2,6 +2,8 @@ import { describe, it } from 'bun:test';
 import type { LaunchInstructionSectionId, RestartQueueEntry } from '@ferretry/protocol';
 import should from 'should';
 import {
+  RESTART_RETRY_BASE_MS,
+  RESTART_RETRY_CAP_MS,
   RestartBusy,
   RestartService,
   type RestartPorts,
@@ -19,6 +21,12 @@ interface World {
   gaveUp: Array<[string, string]>;
   queue: RestartQueueEntry[];
   saves: number;
+  loads: number;
+  listed: number;
+  looked: string[];
+  clock: { now: number };
+  /** When each restart was asked for, in ms since AT. */
+  attempts: number[];
 }
 
 const world = (subjects: RestartSubject[], stale: World['stale'] = {}): World => ({
@@ -30,16 +38,29 @@ const world = (subjects: RestartSubject[], stale: World['stale'] = {}): World =>
   gaveUp: [],
   queue: [],
   saves: 0,
+  loads: 0,
+  listed: 0,
+  looked: [],
+  clock: { now: Date.parse(AT) },
+  attempts: [],
 });
 
 const make = (w: World): RestartService => {
   const ports: RestartPorts = {
-    subjects: async () => w.subjects,
+    subjects: async () => {
+      w.listed += 1;
+      return w.subjects;
+    },
+    subject: async id => {
+      w.looked.push(id);
+      return w.subjects.find(subject => subject.id === id);
+    },
     outdated: async id => {
       if (id === 'throws') throw new Error('unreadable');
       return w.stale[id] ?? [];
     },
     restart: async id => {
+      w.attempts.push(w.clock.now - Date.parse(AT));
       if (w.busy.has(id)) throw new RestartBusy('a test run is open');
       const broken = w.broken.get(id);
       if (broken !== undefined) throw new Error(broken);
@@ -50,13 +71,16 @@ const make = (w: World): RestartService => {
       w.gaveUp.push([id, reason]);
     },
     queue: {
-      load: async () => w.queue,
+      load: async () => {
+        w.loads += 1;
+        return w.queue;
+      },
       save: async entries => {
         w.saves += 1;
         w.queue = [...entries];
       },
     },
-    now: () => AT,
+    now: () => new Date(w.clock.now).toISOString(),
   };
   return new RestartService(ports);
 };
@@ -146,6 +170,7 @@ describe('RestartService.restart', () => {
     w.queue = [{ id: 'a', since: AT, reason: 'mid-turn', onlyIfOutdated: false }];
     const service = new RestartService({
       subjects: async () => w.subjects,
+      subject: async id => w.subjects.find(subject => subject.id === id),
       outdated: async () => [],
       restart: async () => {
         throw 'plain text';
@@ -249,5 +274,86 @@ describe('RestartService.drain', () => {
     await first;
     should(w.restarted).eql(['throws']);
     await service.drain();
+  });
+});
+
+/**
+ * The stall budget of the drain (the EC2 stalls of 2026-10-30): it runs on a 10 s tick for the daemon's whole
+ * life, so what one pass may cost is pinned here on a fake clock — nothing when the queue is empty, one read per
+ * QUEUED ferret rather than the fleet, and no repeat of a refused preflight until the backoff ends or the
+ * ferret's record moves.
+ */
+describe('RestartService.drain stall budget', () => {
+  const entry = (id: string): RestartQueueEntry => ({ id, since: AT, reason: 'mid-turn', onlyIfOutdated: true });
+  const fleet = (size: number): RestartSubject[] =>
+    Array.from({ length: size }, (_, n) => ({ id: `f${n}`, running: n % 10 === 0, idle: true }));
+
+  it('should read the queue once and nothing at all on later ticks while it stays empty', async () => {
+    const w = world(fleet(500));
+    const service = make(w);
+    for (let tick = 0; tick < 50; tick += 1) await service.drain();
+    should(w.loads).equal(1);
+    should(w.listed).equal(0);
+    should(w.looked).eql([]);
+    should(w.saves).equal(0);
+  });
+
+  it('should look up only the queued ferret, never list the fleet, and not rewrite an unchanged queue', async () => {
+    const w = world([...fleet(500), working('busy')]);
+    w.queue = [entry('busy')];
+    const service = make(w);
+    for (let tick = 0; tick < 5; tick += 1) await service.drain();
+    should(w.listed).equal(0);
+    should(w.looked).eql(['busy', 'busy', 'busy', 'busy', 'busy']);
+    should(w.saves).equal(0);
+    should(w.loads).equal(1);
+  });
+
+  it('should not ask the inventory again before the backoff ends, and double it while nothing moves', async () => {
+    const w = world([{ ...idle('a'), revision: 'r1' }], { a: ['tools'] });
+    w.busy.add('a');
+    w.queue = [entry('a')];
+    const service = make(w);
+    // Ten minutes of 10 s ticks.
+    for (let second = 0; second <= 600; second += 10) {
+      w.clock.now = Date.parse(AT) + second * 1000;
+      await service.drain();
+    }
+    // Without the backoff that is 61 migrate preflights; with it: 10 s, 20 s, 40 s, 80 s, then the cap.
+    should(w.attempts.slice(0, 5)).eql([0, 10_000, 30_000, 70_000, 150_000]);
+    should(w.attempts.length).be.below(10);
+    const gaps = w.attempts.slice(1).map((at, n) => at - (w.attempts[n] ?? 0));
+    should(Math.max(...gaps)).equal(RESTART_RETRY_CAP_MS);
+    should(w.queue).eql([{ ...entry('a'), reason: 'in-flight' }]);
+    should(w.saves).equal(1);
+  });
+
+  it('should ask again at once when the ferret record moves, and restart it then', async () => {
+    const w = world([{ ...idle('a'), revision: 'r1' }], { a: ['tools'] });
+    w.busy.add('a');
+    w.queue = [entry('a')];
+    const service = make(w);
+    await service.drain();
+    w.clock.now += RESTART_RETRY_BASE_MS / 2;
+    w.busy.delete('a');
+    await service.drain();
+    should(w.restarted).eql([]);
+    w.subjects = [{ ...idle('a'), revision: 'r2' }];
+    await service.drain();
+    should(w.restarted).eql(['a']);
+    should(w.queue).eql([]);
+  });
+
+  it('should start the backoff over when a person asks for the same ferret again', async () => {
+    const w = world([idle('a')], { a: ['tools'] });
+    w.busy.add('a');
+    w.queue = [entry('a')];
+    const service = make(w);
+    await service.drain();
+    w.busy.delete('a');
+    await service.restart({ scope: 'ids', ids: ['a'] });
+    should(w.restarted).eql(['a']);
+    should(w.queue).eql([]);
+    should(RESTART_RETRY_BASE_MS).be.below(RESTART_RETRY_CAP_MS);
   });
 });

@@ -30,6 +30,7 @@ class FakeAttachments implements SessionAttachmentSubsystem {
   unlocked: Array<{ readonly id: string; readonly attachmentId: string; readonly password: string }> = [];
   locked: Array<{ readonly id: string; readonly attachmentId: string }> = [];
   failure: Error | undefined;
+  content = new Uint8Array([1, 2, 3]);
 
   async upload(
     id: string,
@@ -47,7 +48,7 @@ class FakeAttachments implements SessionAttachmentSubsystem {
     if (this.failure !== undefined) throw this.failure;
     should(id).equal('session-1');
     should(attachmentId).equal(attachment.id);
-    return { attachment, bytes: new Uint8Array([1, 2, 3]) };
+    return { attachment, bytes: this.content };
   }
 
   async unlock(id: string, attachmentId: string, password: string): Promise<AttachmentView> {
@@ -97,6 +98,42 @@ describe('the session attachment mount', () => {
 
     should(response.status).equal(200);
     should(JSON.parse(response.body)).deepEqual({ attachment, base64: 'AQID' });
+  });
+
+  /**
+   * The stall budget of a download (the EC2 stalls of 2026-10-30): the largest attachment the daemon keeps is
+   * encoded with the loop handed back between slices, so a timer armed beside it keeps firing — before, the
+   * whole file was one `String.fromCharCode` loop and the loop ran nothing else until it ended.
+   */
+  it('hands the loop back while it encodes the largest attachment, and spells the same JSON', async () => {
+    const attachments = new FakeAttachments();
+    attachments.content = new Uint8Array(32 * 1024 * 1024);
+    for (let index = 0; index < attachments.content.length; index += 4093) attachments.content[index] = index % 251;
+    let turns = 0;
+    let worstGapMs = 0;
+    let last = performance.now();
+    let running = true;
+    const turn = (): void => {
+      const now = performance.now();
+      worstGapMs = Math.max(worstGapMs, now - last);
+      last = now;
+      turns += 1;
+      if (running) setImmediate(turn);
+    };
+    setImmediate(turn);
+    const response = await dispatcher(attachments).dispatch(
+      request({ method: 'GET', path: path(`/${attachment.id}`), headers: human }),
+    );
+    running = false;
+
+    should(response.status).equal(200);
+    should(response.body).equal(
+      JSON.stringify({ attachment, base64: Buffer.from(attachments.content).toString('base64') }),
+    );
+    // One turn of the loop per 768 KiB slice at least: 32 MiB is 43 of them.
+    should(turns).be.aboveOrEqual(40);
+    // Generous for a loaded CI host; the old encoder held the loop for about 700 ms on this size.
+    should(worstGapMs).be.below(200);
   });
 
   it('unlocks with a body password and locks via DELETE without putting either in the URL', async () => {
