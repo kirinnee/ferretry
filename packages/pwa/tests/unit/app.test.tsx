@@ -4787,6 +4787,20 @@ describe('pairing a phone from the machine menu and the finder', () => {
     }
   });
 
+  it('offers "Board for <ferret>" on a chat and opens the board narrowed to that ferret', async () => {
+    const { view } = await renderShell(`/d/${ALPHA}/session/s1`, [alpha.daemonId]);
+    try {
+      await settle();
+      await interact(() => pressKey(document.body, 'k', { ctrlKey: true }));
+      await pressPaletteRow('command-board-for-ferret');
+      await settle();
+      expect(window.location.pathname).toBe(`/d/${ALPHA}/board`);
+      expect(new URLSearchParams(window.location.search).get('ferret')).toBe('s1');
+    } finally {
+      await view.unmount();
+    }
+  });
+
   it('opens it as a bottom sheet on a phone, over the sessions drawer', async () => {
     const restore = patchGlobal(window, 'innerWidth', 390);
     try {

@@ -158,6 +158,14 @@ describe('Info › About this ferret', () => {
     expect(restart().disabled).toBe(false);
   });
 
+  it('re-enables Restart when the restart is refused', async () => {
+    const root = await draw({ onRestart: () => Promise.reject(new Error('refused')) });
+    const restart = () => must(root.querySelector<HTMLButtonElement>('[data-info-restart]'), 'restart button');
+    await interact(() => restart().click());
+    expect(restart().textContent).toBe('Restart');
+    expect(restart().disabled).toBe(false);
+  });
+
   it('has no Restart button for a reader who may not restart the ferret', async () => {
     const root = await draw();
     expect(root.querySelector('[data-info-restart]')).toBeNull();
