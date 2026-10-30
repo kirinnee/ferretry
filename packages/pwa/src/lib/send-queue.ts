@@ -8,6 +8,7 @@
 import { type IFyApiClient, type QueuedMessage, QueueEditRequestSchema, SessionQueueSchema } from '@ferretry/protocol';
 import { z } from 'zod';
 import type { LedgerSendRecord } from './send-ledger.ts';
+import { type OutboxEntry, type SendOutbox, WAITING_REASON } from './send-outbox.ts';
 
 interface QueueSender {
   readonly kind: 'owner' | 'ferret' | 'ferretry';
@@ -225,6 +226,7 @@ export const queueActions = (
   client: Pick<IFyApiClient, 'request'> | null,
   sessionId: string,
   refresh: () => void,
+  outbox?: Pick<SendOutbox, 'edit' | 'cancel'>,
 ): QueueActions => {
   const run = async (id: string, init: RequestInit): Promise<boolean> => {
     if (client === null) return false;
@@ -238,12 +240,71 @@ export const queueActions = (
     return true;
   };
   return {
-    edit: (record, text) =>
-      run(record.sendId, {
+    edit: async (record, text) => {
+      if ((await outbox?.edit(record.sendId, text)) === 'edited') {
+        refresh();
+        return true;
+      }
+      return await run(record.sendId, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(QueueEditRequestSchema.parse({ text })),
-      }),
-    cancel: record => run(record.sendId, { method: 'DELETE' }),
+      });
+    },
+    cancel: async record => {
+      if ((await outbox?.cancel(record.sendId)) === 'cancelled') {
+        refresh();
+        return true;
+      }
+      return await run(record.sendId, { method: 'DELETE' });
+    },
   };
+};
+
+/** What this device's outbox says about a message that has not reached the machine's queue yet. */
+export interface OutboxView {
+  /** Why it still waits, in plain words ("waiting for connection"), or why the machine refused it. */
+  readonly reason: string;
+  /** A machine answered "no": it will not leave on its own, so the person must edit or cancel it. */
+  readonly refused?: true;
+  /** Its place among this session's entries that are still on the device (1-based), and how many there are. */
+  readonly position: number;
+  readonly of: number;
+}
+
+/**
+ * Adds the messages still on this device to the rows a session shows.
+ *
+ * An entry the machine already knows (a row with its id) is dropped here: the outbox forgets an entry only
+ * after the machine answered, so for a moment both exist, and the machine's word is the later tick. An
+ * entry with no row becomes one, wearing a `queued` queue view so the bubble offers Edit and Cancel exactly
+ * as it does for a message on the machine's queue — `outbox` is what makes its tick the first one.
+ */
+export const joinOutbox = (
+  rows: readonly LedgerSendRecord[],
+  entries: readonly OutboxEntry[],
+): readonly LedgerSendRecord[] => {
+  const known = new Set(rows.map(row => row.sendId));
+  const waiting = entries.filter(entry => !known.has(entry.id));
+  if (waiting.length === 0) return rows;
+  return [
+    ...rows,
+    ...waiting.map(
+      (entry, index): LedgerSendRecord => ({
+        sendId: entry.id,
+        acceptedAt: entry.createdAt,
+        message: entry.message,
+        attachmentIds: [...entry.attachmentIds],
+        fate: 'accepted',
+        senderKind: 'human',
+        queue: { state: 'queued', stateAt: entry.createdAt, revision: 0 },
+        outbox: {
+          reason: entry.reason ?? WAITING_REASON,
+          ...(entry.refused === true ? { refused: true as const } : {}),
+          position: index + 1,
+          of: waiting.length,
+        },
+      }),
+    ),
+  ];
 };

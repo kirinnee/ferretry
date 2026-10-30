@@ -23,6 +23,7 @@ import { isSessionEndedTimeout, type LedgerSendRecord } from './send-ledger.ts';
 
 export type SendReceiptKind =
   | 'sending'
+  | 'saved'
   | 'held'
   | 'queued'
   | 'typed'
@@ -46,8 +47,20 @@ export interface SendReceipt {
 const ANSWERED_DETAIL = 'the agent has replied since this message arrived';
 
 /**
- * A message the durable queue holds draws the queue's tick: ✓ queued (with the plain reason it waits), ✓ while
- * it is being typed, ✓✓ delivered, ✓✓✓ read. A delivered ledger fate outranks a queue that has not caught up.
+ * A message still in this device's outbox is tick one: ✓ saved here, with "waiting for connection" (and its place
+ * in line when several wait). One a machine refused is not waiting — it needs the person, so it wears the red mark.
+ */
+const outboxReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | undefined => {
+  const outbox = record.outbox;
+  if (outbox === undefined) return undefined;
+  if (outbox.refused === true) return { kind: 'failed', name: 'Not sent', detail: outbox.reason, chip: 'not sent' };
+  const chip = outbox.of > 1 ? `${outbox.reason} · ${outbox.position} of ${outbox.of}` : outbox.reason;
+  return { kind: 'saved', name: 'Saved on this device', detail: `${detail}; ${outbox.reason}`, chip };
+};
+
+/**
+ * A message the durable queue holds draws the queue's tick: ✓✓ queued (with the plain reason it waits), ✓✓ while
+ * it is being typed, ✓✓✓ delivered, ✓✓✓✓ read. A delivered ledger fate outranks a queue that has not caught up.
  * Failed and cancelled keep their own marks. `undefined` leaves a row to the ledger mapping below.
  */
 const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | undefined => {
@@ -103,6 +116,8 @@ const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | u
  */
 export const sendReceipt = (record: LedgerSendRecord, answered = false): SendReceipt => {
   const { detail } = sendBadge(record);
+  const saved = outboxReceipt(record, detail);
+  if (saved !== undefined) return saved;
   const queue = queueReceipt(record, detail);
   if (queue !== undefined) return queue;
   switch (record.fate) {
@@ -143,19 +158,29 @@ export interface ReceiptLegendRow {
 export const RECEIPT_LEGEND: readonly ReceiptLegendRow[] = [
   { kind: 'sending', name: 'Sending', meaning: 'On its way, or kept until the session is revived.' },
   {
+    kind: 'saved',
+    name: 'Saved on this device',
+    meaning:
+      'One tick: it is kept on this phone or computer and goes to the machine as soon as there is a connection. You can edit or cancel it until then.',
+  },
+  {
     kind: 'queued',
     name: 'Queued',
     meaning:
-      'Saved and waiting to be typed in. The message says why when it has to wait: the ferret is busy, its box holds a draft, a question or dialog is open.',
+      'Two ticks: it is on the machine’s queue and waiting to be typed in. The message says why when it has to wait: the ferret is busy, its box holds a draft, a question or dialog is open.',
   },
   {
     kind: 'typed',
     name: 'Typed, not sent',
     meaning: 'It is sitting in the agent’s composer. Press Enter on the message to send it, or cancel it.',
   },
-  { kind: 'delivered', name: 'Delivered', meaning: 'It was typed into the agent and submitted.' },
+  { kind: 'delivered', name: 'Delivered', meaning: 'Three ticks: it was typed into the agent and submitted.' },
   { kind: 'answered', name: 'Answered', meaning: 'The agent replied after it.' },
-  { kind: 'read', name: 'Read', meaning: 'The agent’s transcript shows it as a message from you.' },
+  {
+    kind: 'read',
+    name: 'Read',
+    meaning: 'Four ticks: the agent took a turn on it, and its transcript shows it as a message from you.',
+  },
   { kind: 'unconfirmed', name: 'Unconfirmed', meaning: 'It could not be proven either way.' },
   { kind: 'failed', name: 'Not delivered', meaning: 'It never arrived. Retry is offered on the message.' },
   {

@@ -64,14 +64,15 @@ this page, which is still how a message reaches the pane.
   (`readSessionQueue`; an older daemon's 404 is "no queue", never an error, and a failed read keeps the last
   queue) and joins the two BY ID (`joinQueue`, `packages/pwa/src/lib/send-queue.ts`). One message is one
   bubble for its whole life: a queue message with no ledger row yet becomes a bubble of its own, and the
-  ledger row of the same id wears the queue's view once it exists. The ticks:
+  ledger row of the same id wears the queue's view once it exists. The ticks (a fourth, ✓ first, is this
+  device's own outbox, below):
 
   | Queue state | Mark           | Words under the bubble                                                                                                                                                                  |
   | ----------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-  | `queued`    | ✓              | `waiting: <reason>` — it is still starting / the ferret is busy / a question is open / a dialog is on its screen / its box holds a draft / its screen can’t be read / it is not running |
-  | `typing`    | ✓              | `sending`                                                                                                                                                                               |
-  | `delivered` | ✓✓             | `delivered`                                                                                                                                                                             |
-  | `read`      | ✓✓✓            | `read`                                                                                                                                                                                  |
+  | `queued`    | ✓✓             | `waiting: <reason>` — it is still starting / the ferret is busy / a question is open / a dialog is on its screen / its box holds a draft / its screen can’t be read / it is not running |
+  | `typing`    | ✓✓             | `sending`                                                                                                                                                                               |
+  | `delivered` | ✓✓✓            | `delivered`                                                                                                                                                                             |
+  | `read`      | ✓✓✓✓           | `read`                                                                                                                                                                                  |
   | `failed`    | failed mark    | the daemon's failure sentence                                                                                                                                                           |
   | `cancelled` | cancelled mark | `taken back before it was typed; the agent never saw it`                                                                                                                                |
 
@@ -83,6 +84,23 @@ this page, which is still how a message reaches the pane.
   before the proof arrived, so the message may well have landed. While a message is `queued` its bubble menu
   offers **Edit** (an inline editor that PATCHes) and **Cancel** (DELETE). A `409` says "it was just typed into
   the agent" and a `404` says the queue no longer has it; both refresh the row.
+
+- **The device outbox is tick 1** — a message is written to a durable per-device IndexedDB outbox
+  (`ferretry-outbox`, `packages/pwa/src/lib/send-outbox.ts`, keyed by the request id) BEFORE the machine hears of
+  it, so "thank you" can be typed offline and survives a reload. Ticks: ✓ saved on this device → ✓✓ on the
+  machine's queue → ✓✓✓ typed → ✓✓✓✓ read. The first attempt goes straight away; if it cannot reach the
+  machine the bubble reads `waiting for connection` (with `n of m` when several wait). Each session drains in
+  order, one flight at a time, on the browser coming online and on the machine's connection recovering
+  (`watchOutbox`), and again after a reload. The send is idempotent: the request id is the queue id, and the
+  daemon answers a repeat from its first record, so a retry never types twice. Attachments are uploaded during
+  the drain, before the send; a failed upload keeps the message in the outbox with the plain reason
+  (`attachmentErrorMessage`) and holds the ones behind it. A message the machine refuses outright is not
+  retried. **Edit** and **Cancel** act on the outbox copy locally; once the message has left they fall through
+  to the daemon queue's PATCH/DELETE. The `now` flag rides the outbox untouched.
+- **Queue views** — the chat header's ⋯ menu has **Message queue** (that ferret: `/d/<id>/queue/<session>`), and
+  **All queues** (`/d/<id>/queue`, also in Find / ⌘K) lists every ferret with something waiting across every
+  paired machine, longest-waiting first. Both read `GET …/queue` every five seconds plus the outbox, one row per
+  message with its tick, sender chip (never tag text in a body) and reason, with Edit and Cancel.
 
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
@@ -493,6 +511,10 @@ transcript, the same row (`send:<id>`) becomes the ordinary delivered bubble in 
 
 ## Declared gaps
 
+- **A drain after the first attempt loses the agenda reference prefix.** The composer wraps its client with
+  `withReferencePrefix` (the `[re !A3 …]` line). The outbox carries that sender for the first attempt only; a
+  message drained later, after a reload or a reconnect, goes through the plain client and arrives without the
+  prefix. The reference is not stored in the entry yet.
 - **Claude's on-screen queue is measured on 2.1.281 only.** An earlier or later rendering that moves or
   rewords the `ctrl+x ctrl+s to send now` hint reads as `unknown` while the queued placeholder shows
   (unconfirmed, never retyped), and as no queue at all once it does not — where the mid-turn guard above

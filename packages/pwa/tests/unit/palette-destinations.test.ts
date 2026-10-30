@@ -161,9 +161,13 @@ describe('destinationPaletteEntries', () => {
 });
 
 describe('SHELL_DESTINATIONS', () => {
-  it('carries the two routes the top bar deliberately does not', () => {
-    expect(SHELL_DESTINATIONS.map(destination => destination.id)).toEqual(['sessions', 'new-session']);
-    expect(SHELL_DESTINATIONS.map(destination => destination.path(alpha))).toEqual(['/d/alpha', '/d/alpha/new']);
+  it('carries the routes the top bar deliberately does not', () => {
+    expect(SHELL_DESTINATIONS.map(destination => destination.id)).toEqual(['sessions', 'new-session', 'queue']);
+    expect(SHELL_DESTINATIONS.map(destination => destination.path(alpha))).toEqual([
+      '/d/alpha',
+      '/d/alpha/new',
+      '/d/alpha/queue',
+    ]);
   });
 });
 

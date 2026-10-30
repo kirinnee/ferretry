@@ -7,6 +7,7 @@ import { render } from '../support/react.ts';
 const KINDS: readonly SendReceiptKind[] = [
   'sending',
   'held',
+  'saved',
   'queued',
   'typed',
   'delivered',
@@ -36,27 +37,38 @@ describe('ReceiptMark', () => {
     }
   });
 
-  test('one tick is one clean check; two ticks are the SAME check twice, offset by 35% of its width', () => {
-    const single = draw('queued').findAllByType('path');
-    const double = draw('delivered').findAllByType('path');
+  test('saved is one clean check; each later mark is the SAME check again, offset by 35% of its width', () => {
+    const single = draw('saved').findAllByType('path');
+    const double = draw('queued').findAllByType('path');
     expect(single).toHaveLength(1);
     expect(double).toHaveLength(2);
     expect(double[0]?.props.d).toBe(single[0]?.props.d);
     // The check spans x 2..12, so its width is 10 and 35% of it is 3.5.
     expect(double[1]?.props.d).toBe('M5.5 8.5 9 12 15.5 4.5');
+    expect(draw('delivered').findAllByType('path')).toHaveLength(3);
     expect(
       draw('answered')
         .findAllByType('path')
         .map(path => path.props.d),
-    ).toEqual(double.map(path => path.props.d));
+    ).toEqual(
+      draw('delivered')
+        .findAllByType('path')
+        .map(path => path.props.d),
+    );
   });
 
-  test('read is the same check three times, one more step to the right each, in a box that holds them', () => {
+  test('read is the same check four times, one more step to the right each, in a box that holds them', () => {
     const paths = draw('read')
       .findAllByType('path')
       .map(path => path.props.d);
-    expect(paths).toEqual(['M2 8.5 5.5 12 12 4.5', 'M5.5 8.5 9 12 15.5 4.5', 'M9 8.5 12.5 12 19 4.5']);
+    expect(paths).toEqual([
+      'M2 8.5 5.5 12 12 4.5',
+      'M5.5 8.5 9 12 15.5 4.5',
+      'M9 8.5 12.5 12 19 4.5',
+      'M12.5 8.5 16 12 22.5 4.5',
+    ]);
     expect(draw('read').props.width).toBeGreaterThan(draw('delivered').props.width);
+    expect(draw('delivered').props.width).toBeGreaterThan(draw('queued').props.width);
     expect(draw('read').props.height).toBe(14);
   });
 
@@ -74,8 +86,8 @@ describe('ReceiptMark', () => {
   });
 
   test('the double tick is wider than the single so the box holds the offset, at the same height', () => {
-    expect(draw('delivered').props.width).toBeGreaterThan(draw('queued').props.width);
-    expect(draw('delivered').props.height).toBe(draw('queued').props.height);
+    expect(draw('queued').props.width).toBeGreaterThan(draw('saved').props.width);
+    expect(draw('queued').props.height).toBe(draw('saved').props.height);
   });
 });
 
@@ -85,6 +97,7 @@ describe('MessageMarksLegend', () => {
     const rows = legend.root.findAllByType('dt');
     expect(rows.map(row => row.findByType('svg').props['data-receipt-mark'])).toEqual([
       'sending',
+      'saved',
       'queued',
       'typed',
       'delivered',
@@ -94,7 +107,7 @@ describe('MessageMarksLegend', () => {
       'failed',
       'cancelled',
     ]);
-    expect(legend.root.findAllByType('dd')).toHaveLength(9);
-    expect(JSON.stringify(legend.toJSON())).toContain('Saved and waiting to be typed in.');
+    expect(legend.root.findAllByType('dd')).toHaveLength(10);
+    expect(JSON.stringify(legend.toJSON())).toContain('it is on the machine’s queue and waiting to be typed in.');
   });
 });
