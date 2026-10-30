@@ -451,15 +451,19 @@ const file = (
 
 /**
  * Where a refiled card lands on the other board: the named lane, else the first lane there of the
- * category it is in now, else that board's first backlog lane.
+ * category it is in now, else that board's first backlog lane. A closed card stays closed: it lands in a
+ * closed lane of the other board even when its workflow does not walk one, rather than being reopened.
  */
 const refileLane = (card: BoardTask, from: LaneSet, target: LaneSet, laneId: string | undefined): Lane => {
   if (laneId !== undefined) return requireLane(target, laneId);
   const category = categoryOf(from, card.laneId);
   const same = category.ok ? firstLaneOfCategory(target, card.workflow, category.value) : undefined;
   if (same?.ok === true) return same.value;
-  return entryLane(target, card.workflow);
+  const closed = category.ok && category.value === 'closed' ? target.lanes.find(isClosedLane) : undefined;
+  return closed ?? entryLane(target, card.workflow);
 };
+
+const isClosedLane = (lane: Lane): boolean => lane.category === 'closed';
 
 /** The first backlog lane a workflow walks, else its first lane: where a new card goes. */
 const entryLane = (laneSet: LaneSet, workflow: BoardTask['workflow']): Lane => {
@@ -483,7 +487,11 @@ const refile = (
     );
   }
   const lane = refileLane(card, context.laneSet, target, action.laneId);
-  requireOwnerForClosed(lane, context.standing, card);
+  // A refile keeps the card's state. The owner already closed a card that is closed here, so carrying it
+  // into the other board's closed lane is no closing; the gate is for a card that is not closed yet.
+  const source = categoryOf(context.laneSet, card.laneId);
+  const alreadyClosed = source.ok && source.value === 'closed';
+  if (!(alreadyClosed && isClosedLane(lane))) requireOwnerForClosed(lane, context.standing, card);
   const fromProject: BoardProjectId = card.projectId;
   return {
     task: {

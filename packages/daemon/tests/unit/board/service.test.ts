@@ -987,6 +987,53 @@ describe('refiling a card', () => {
     // Assert
     should(error.code).equal('owner-gate');
   });
+
+  it.each([
+    { name: 'into the closed lane of its category', laneId: undefined },
+    { name: 'into the closed lane it names', laneId: 'closed' },
+  ])('should carry a card that is already closed $name, past the gate', async ({ laneId }) => {
+    // Arrange: Merged closes on the `pr` board, so the card is closed there already.
+    const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'refile', projectId: PROJECT, ...(laneId ? { laneId } : {}) }), lead);
+
+    // Assert
+    should(stored(ports)).match({ projectId: PROJECT, laneId: 'closed' });
+    should(lastEvent(ports)).match({ type: 'refiled', toProject: PROJECT, toLane: 'closed' });
+  });
+
+  it("should keep a closed card closed when its workflow's lanes on the other board skip the closed lane", async () => {
+    // Arrange
+    const target = lanes(PROJECT);
+    const variants = { ...target.variants, 'design-first': ['todo', 'plan', 'implement'] };
+    const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })], {
+      lanes: new FakeLanes(
+        new Map([
+          [PROJECT, { ...target, variants }],
+          [OTHER_PROJECT, lanes(OTHER_PROJECT, 'pr')],
+        ]),
+      ),
+    });
+
+    // Act
+    await service.act('F1', action({ action: 'refile', projectId: PROJECT }), lead);
+
+    // Assert
+    should(stored(ports).laneId).equal('closed');
+  });
+
+  it('should still keep the gate for a ferret moving a card into Closed after a refile', async () => {
+    // Arrange
+    const { service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
+    await service.act('F1', action({ action: 'refile', projectId: PROJECT, laneId: 'released' }), lead);
+
+    // Act
+    const error = await refusal(service.act('F1', action({ action: 'move', to: 'closed' }), lead));
+
+    // Assert
+    should(error.code).equal('owner-gate');
+  });
 });
 
 describe('a daemon trigger', () => {
