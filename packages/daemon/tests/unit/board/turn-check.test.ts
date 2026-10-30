@@ -4,7 +4,6 @@ import should from 'should';
 import { BoardError } from '../../../src/lib/board/errors.ts';
 import {
   BOARD_CHECK_INTERVAL_MS,
-  BOARD_CHECK_MARK,
   BOARD_CHECK_TAIL,
   BoardTurnCheck,
   type BoardTurnCheckPorts,
@@ -130,23 +129,25 @@ describe('mutatingWork', () => {
     should(mutatingWork([call('Write', {}), said('done')], 'zz')).eql(['Write']);
   });
 
-  it('should never check a turn the nudge itself started', () => {
+  it('should never check a turn the nudge itself started, nor one an older tagged nudge started', () => {
     // Arrange
-    const events = [owner(`${BOARD_CHECK_MARK} You changed code…`), call('Edit', {})];
+    const events = [owner(boardCheckMessage('zz')), call('Edit', {})];
+    const older = [owner('[board] You changed code this turn without a card. Create one…'), call('Edit', {})];
 
     // Act + Assert
     should(mutatingWork(events, 'zz')).eql([]);
+    should(mutatingWork(older, 'zz')).eql([]);
   });
 });
 
 describe('the board check words', () => {
-  it('should name the create and skip verbs with the binary name, starting with the mark', () => {
+  it('should name the create and skip verbs with the binary name, as a plain sentence with no tag', () => {
     // Act
     const message = boardCheckMessage('zz');
 
     // Assert
     should(message).equal(
-      '[board] You changed code this turn without a card. Create one (zz task create …) or record why not: zz task skip "<why>"',
+      'You changed code this turn without a card. Create one (zz task create …) or record why not: zz task skip "<why>"',
     );
   });
 

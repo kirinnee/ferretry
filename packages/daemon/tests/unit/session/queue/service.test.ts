@@ -3,8 +3,8 @@ import should from 'should';
 import {
   type QueueEvent,
   QueueRefused,
-  type SessionQueueStore,
   SessionQueueService,
+  type SessionQueueStore,
 } from '../../../../src/lib/index.ts';
 import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
 
@@ -78,18 +78,20 @@ describe('a message whose sender waits for the reply', () => {
     should(message.replyExpected).be.true();
   });
 
-  it('should keep that a daemon notice was made for the owner’s chat', async () => {
+  it('should keep who a message is from as metadata, beside words it leaves as they are', async () => {
     const { service } = subject();
 
     const { message } = await service.enqueue(ID, {
       id: 'b1',
       sender: 'daemon',
-      chat: true,
-      text: '[board] &F1 → Merged',
+      by: { kind: 'ferretry', feature: 'Board' },
+      text: '&F1 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.',
     });
     const plain = await service.enqueue(ID, { id: 'b2', sender: 'daemon', text: 'nudge' });
 
-    should(message.chat).be.true();
+    should(message.by).eql({ kind: 'ferretry', feature: 'Board' });
+    should(message.text).equal('&F1 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.');
+    should(plain.message).not.have.property('by');
     should(plain.message).not.have.property('chat');
   });
 });

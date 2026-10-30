@@ -99,9 +99,9 @@ export interface SignalDoneOutcome {
 /** The serial key every dependency write shares. */
 export const DEPENDENCY_SECTION = 'board:dependencies';
 
-/** The line a reopened card's ferret is told (§2.9). */
+/** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
 export const reopenMessage = (task: Pick<BoardTask, 'id'>, by: BoardActor, reason: string): string =>
-  `[reopened ${formatTaskRef(task)} by ${by.kind === 'owner' ? 'owner' : (by.sessionId ?? by.kind)}: ${reason}]`;
+  `${formatTaskRef(task)} was reopened by ${by.kind === 'owner' ? 'the owner' : (by.sessionId ?? `the ${by.kind}`)}: ${reason}`;
 
 /** The board actor a caller is recorded as. */
 export const actorOf = (caller: BoardCaller): BoardActor => {

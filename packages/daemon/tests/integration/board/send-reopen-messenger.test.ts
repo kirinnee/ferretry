@@ -26,12 +26,12 @@ describe('a reopen through the send path', () => {
     const typed = sends('delivered');
 
     // Act
-    const how = await typed.messenger.deliver('child', '[reopened &F1 by owner: no]', 'board-reopen-F1-3');
+    const how = await typed.messenger.deliver('child', '&F1 was reopened by the owner: no', 'board-reopen-F1-3');
 
     // Assert
     should(how).equal('delivered');
     should(typed.sent).deepEqual([
-      { id: 'child', sendId: 'board-reopen-F1-3', message: '[reopened &F1 by owner: no]' },
+      { id: 'child', sendId: 'board-reopen-F1-3', message: '&F1 was reopened by the owner: no' },
     ]);
     should(await sends('queued').messenger.deliver('child', 'x', 'k')).equal('delivered');
     should(await sends('sent').messenger.deliver('child', 'x', 'k')).equal('delivered');

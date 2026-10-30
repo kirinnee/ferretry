@@ -1,5 +1,4 @@
 import { describe, it } from 'bun:test';
-import { parseFerretryNotice } from '@ferretry/protocol';
 import should from 'should';
 import {
   detectOrphanedCards,
@@ -144,8 +143,10 @@ describe('planOrphanEscalations', () => {
     const tell = result.tell[0];
     if (tell?.kind !== 'message') throw new Error('expected a message');
     should(tell).containDeep({ taskId: 'F1', assignee: 'worker', sessionId: 'lead' });
-    const text = parseFerretryNotice(tell.message);
-    should(text).startWith('The Warden: your card &F1 “Ship the thing” has nobody on it. It is in Implement');
+    const text = tell.message;
+    should(text).startWith('Your card &F1 “Ship the thing” has nobody on it. It is in Implement');
+    should(text).not.containEql('[ferretry]');
+    should(text).not.containEql('This notice is from Ferretry');
     should(text).containEql('its ferret worker is stopped and nothing under it is alive');
     should(text).containEql('`fy resume worker`');
     should(text).containEql('`fy task assign F1 <ferret>`');

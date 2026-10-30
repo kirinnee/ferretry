@@ -13,7 +13,6 @@ import {
   cardFooterLine,
   cardTitle,
   type DelegationRequest,
-  type QuietItem,
   SessionCards,
   type SessionCardsPorts,
 } from '../../../src/lib/board/index.ts';
@@ -45,7 +44,6 @@ interface Options {
   readonly projects?: Readonly<Record<string, BoardProjectId>>;
   /** What a proposal answers; absent proposes nothing. */
   readonly proposed?: LaneSet | 'fail';
-  readonly pendingFails?: boolean;
   readonly world?: Partial<ServiceWorld>;
   readonly adoption?: SessionCardsPorts['adoption'];
 }
@@ -68,7 +66,6 @@ const build = (options: Options = {}) => {
   });
   const board = new BoardService(ports);
   const proposals: Array<readonly [BoardProjectId, string]> = [];
-  const pending: Array<readonly [string, readonly QuietItem[]]> = [];
   const warnings: string[] = [];
   const cardsPorts: SessionCardsPorts = {
     board,
@@ -82,19 +79,11 @@ const build = (options: Options = {}) => {
     },
     projects: { nameOf: async projectId => NAMES[projectId] ?? projectId },
     focus,
-    parents: new FakeParents({ child: 'lead' }),
-    pending: {
-      append: async (sessionId, items) => {
-        if (options.pendingFails === true) throw new Error('pending context is full');
-        pending.push([sessionId, items]);
-      },
-    },
-    clock: { now: () => NOW },
     diagnostics: { warn: message => warnings.push(message) },
     bin: 'fy',
     ...(options.adoption === undefined ? {} : { adoption: options.adoption }),
   };
-  return { subject: new SessionCards(cardsPorts), ports, focus, proposals, pending, warnings };
+  return { subject: new SessionCards(cardsPorts), ports, focus, proposals, warnings };
 };
 
 const stored = (ports: ServiceWorld, id: string): BoardTask => ports.store.cards.get(id) as BoardTask;
@@ -450,9 +439,6 @@ describe('a session started with a brief', () => {
       },
       projects: { nameOf: async projectId => NAMES[projectId] ?? projectId },
       focus: new FakeFocus(),
-      parents: new FakeParents(),
-      pending: { append: async () => undefined },
-      clock: { now: () => NOW },
       diagnostics: { warn: () => undefined },
       bin: 'fy',
     });
@@ -566,9 +552,9 @@ describe('a session started with a brief', () => {
 });
 
 describe("a ferret's done on the board", () => {
-  it("should tell the card's owner, when it is the lead, through its pending context", async () => {
+  it('should note it and move the card, and tell nobody: the done reaches the lead through fy wait', async () => {
     // Arrange
-    const { subject, ports, focus, pending } = build({
+    const { subject, ports, focus, warnings } = build({
       cards: [card({ id: 'F2', owner: 'lead', assignee: 'child', laneId: 'implement', workflow: 'quick' })],
     });
     focus.focused.set('child', { id: 'F2' });
@@ -579,43 +565,23 @@ describe("a ferret's done on the board", () => {
     // Assert
     should(outcome?.moved?.id).equal('review');
     should(stored(ports, 'F2').laneId).equal('review');
-    should(pending).deepEqual([['lead', [{ key: 'F2:done', text: '&F2 → Review/CI · done: shipped it', at: NOW }]]]);
+    should(stored(ports, 'F2').history.map(event => event.type)).containDeep(['note', 'moved']);
+    should(warnings).be.empty();
   });
 
-  it("should tell the session's own parent when it owns its card, and nobody when it has none", async () => {
-    // Arrange
-    const owned = build({ cards: [card({ id: 'F2', owner: 'child', laneId: 'todo' })] });
-    owned.focus.focused.set('child', { id: 'F2' });
-    const top = build({ cards: [card({ id: 'F1', owner: 'lead', laneId: 'todo' })] });
-    top.focus.focused.set('lead', { id: 'F1' });
-
-    // Act
-    await owned.subject.signalled('child', undefined);
-    await top.subject.signalled('lead', 'done');
-
-    // Assert
-    should(owned.pending).deepEqual([['lead', [{ key: 'F2:done', text: '&F2 signalled done', at: NOW }]]]);
-    should(top.pending).be.empty();
-  });
-
-  it('should never fail the signal: no card, a refused write or a lost quiet line is only said', async () => {
+  it('should never fail the signal: no card or a refused write is only said', async () => {
     // Arrange
     const none = build();
     const refused = build({ cards: [card({ id: 'F1', owner: 'lead' })] });
     refused.focus.focused.set('stranger', { id: 'F1' });
-    const lost = build({ cards: [card({ id: 'F2', owner: 'lead', assignee: 'child' })], pendingFails: true });
-    lost.focus.focused.set('child', { id: 'F2' });
 
     // Act
     const nothing = await none.subject.signalled('child', 'done');
     const forbidden = await refused.subject.signalled('stranger', 'done');
-    const told = await lost.subject.signalled('child', 'done');
 
     // Assert
     should(nothing).be.null();
     should(forbidden).be.null();
     should(refused.warnings[0]).startWith("could not record stranger's done on its card: only");
-    should(told?.task.id).equal('F2');
-    should(lost.warnings).deepEqual(['could not tell lead that &F2 is done: pending context is full']);
   });
 });

@@ -6,8 +6,8 @@ import {
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
-  UNFILED_PROJECT_ID,
   type PrLink,
+  UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -1452,9 +1452,9 @@ describe('what follows a write', () => {
 
 describe('the reopen message and actors', () => {
   it.each([
-    { by: { kind: 'owner' as const }, expected: '[reopened &F412 by owner: not good]' },
-    { by: { kind: 'ferret' as const, sessionId: 'lead' }, expected: '[reopened &F412 by lead: not good]' },
-    { by: { kind: 'daemon' as const }, expected: '[reopened &F412 by daemon: not good]' },
+    { by: { kind: 'owner' as const }, expected: '&F412 was reopened by the owner: not good' },
+    { by: { kind: 'ferret' as const, sessionId: 'lead' }, expected: '&F412 was reopened by lead: not good' },
+    { by: { kind: 'daemon' as const }, expected: '&F412 was reopened by the daemon: not good' },
   ])('should say who reopened it', ({ by, expected }) => {
     // Assert
     should(reopenMessage({ id: 'F412' }, by, 'not good')).equal(expected);

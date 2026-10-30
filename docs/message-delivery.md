@@ -45,14 +45,13 @@ this page, which is still how a message reaches the pane.
   start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
   structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
   path says them, and nothing is queued. The person's agenda context and the attachment paths are baked
-  into the text; the board's held events are NOT — they go as a message of their own, Ferretry's
-  (`[ferretry] [board] …`, `chat: true`), never on top of the sender's words. The route then waits, up to
+  into the text, and nothing else is: no board news rides on it, on top or as a message of its own. The route then waits, up to
   `QUEUE_ANSWER_WAIT_MS` (20 s), for the deliverer's first look and answers what the send ledger says the
   hand-over did (`answerOf`), so a message into an empty box is answered exactly as the direct path
   answered it; one held for a draft or a question is answered `queued` at once, with the message id as
   `sendId`. `--now` (stop the running turn first) still goes straight down the send path.
-- **A daemon notice made for the chat** (`chat: true`) is typed into an interactive session as a message of
-  its own: the board's news for a lead. Every other daemon message stays out of the owner's chat.
+- **No daemon notice is typed into the owner's own chat** (an interactive session): there is no exception
+  for board news, which is not sent at all ([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
   re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
   own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the
