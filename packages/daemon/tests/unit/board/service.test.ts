@@ -6,6 +6,7 @@ import {
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
+  UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -19,6 +20,7 @@ import {
   OWNER_MOVE_SOURCE,
   reopenMessage,
 } from '../../../src/lib/board/index.ts';
+import { unfiledLaneSet } from '../../../src/lib/board-projects/index.ts';
 import {
   card,
   FakeChanges,
@@ -987,6 +989,53 @@ describe('refiling a card', () => {
     // Assert
     should(error.code).equal('owner-gate');
   });
+
+  it.each([
+    { name: 'into the closed lane of its category', laneId: undefined },
+    { name: 'into the closed lane it names', laneId: 'closed' },
+  ])('should carry a card that is already closed $name, past the gate', async ({ laneId }) => {
+    // Arrange: Merged closes on the `pr` board, so the card is closed there already.
+    const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
+
+    // Act
+    await service.act('F1', action({ action: 'refile', projectId: PROJECT, ...(laneId ? { laneId } : {}) }), lead);
+
+    // Assert
+    should(stored(ports)).match({ projectId: PROJECT, laneId: 'closed' });
+    should(lastEvent(ports)).match({ type: 'refiled', toProject: PROJECT, toLane: 'closed' });
+  });
+
+  it("should keep a closed card closed when its workflow's lanes on the other board skip the closed lane", async () => {
+    // Arrange
+    const target = lanes(PROJECT);
+    const variants = { ...target.variants, 'design-first': ['todo', 'plan', 'implement'] };
+    const { ports, service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })], {
+      lanes: new FakeLanes(
+        new Map([
+          [PROJECT, { ...target, variants }],
+          [OTHER_PROJECT, lanes(OTHER_PROJECT, 'pr')],
+        ]),
+      ),
+    });
+
+    // Act
+    await service.act('F1', action({ action: 'refile', projectId: PROJECT }), lead);
+
+    // Assert
+    should(stored(ports).laneId).equal('closed');
+  });
+
+  it('should still keep the gate for a ferret moving a card into Closed after a refile', async () => {
+    // Arrange
+    const { service } = serviceWith([card({ projectId: OTHER_PROJECT, laneId: 'merged' })]);
+    await service.act('F1', action({ action: 'refile', projectId: PROJECT, laneId: 'released' }), lead);
+
+    // Act
+    const error = await refusal(service.act('F1', action({ action: 'move', to: 'closed' }), lead));
+
+    // Assert
+    should(error.code).equal('owner-gate');
+  });
 });
 
 describe('a daemon trigger', () => {
@@ -1193,6 +1242,75 @@ describe('what follows a write', () => {
 
     // Assert
     should(response.task.projectId).equal(OTHER_PROJECT);
+  });
+
+  describe('for a ferret on the Unfiled board', () => {
+    const unfiledLead = () =>
+      new FakeLanes(
+        new Map([
+          [OTHER_PROJECT, lanes(OTHER_PROJECT, 'pr')],
+          [UNFILED_PROJECT_ID, unfiledLaneSet()],
+        ]),
+        new Map([['lead', UNFILED_PROJECT_ID]]),
+      );
+
+    it('should put the card on the board of the repository it registers, proposing as the ferret', async () => {
+      // Arrange
+      const adopted: string[] = [];
+      const { service } = serviceWith([], {
+        lanes: unfiledLead(),
+        adoption: {
+          adopt: async (sessionId, proposer) => {
+            adopted.push(`${sessionId}:${proposer ?? sessionId}`);
+            return { projectId: OTHER_PROJECT, proposed: true };
+          },
+        },
+      });
+
+      // Act
+      const response = await service.create(create(), lead);
+
+      // Assert
+      should(response.task.projectId).equal(OTHER_PROJECT);
+      should(adopted).eql(['lead:lead']);
+    });
+
+    it('should keep the card Unfiled when nothing is registered, and say why when registering failed', async () => {
+      // Arrange
+      const quiet = serviceWith([], { lanes: unfiledLead(), adoption: { adopt: async () => null } });
+      const failing = serviceWith([], {
+        lanes: unfiledLead(),
+        adoption: { adopt: () => Promise.reject(new Error('registry is damaged')) },
+      });
+
+      // Act
+      const kept = await quiet.service.create(create(), lead);
+      const fallen = await failing.service.create(create(), lead);
+
+      // Assert
+      should([kept.task.projectId, fallen.task.projectId]).eql([UNFILED_PROJECT_ID, UNFILED_PROJECT_ID]);
+      should(failing.ports.warnings).containEql('could not register the repository of lead: registry is damaged');
+    });
+
+    it('should not register anything for a card that names its board, or for a ferret already on one', async () => {
+      // Arrange
+      const adopted: string[] = [];
+      const adoption = {
+        adopt: async (sessionId: string) => {
+          adopted.push(sessionId);
+          return null;
+        },
+      };
+      const named = serviceWith([], { lanes: unfiledLead(), adoption });
+      const filed = serviceWith([], { adoption });
+
+      // Act
+      await named.service.create(create({ projectId: OTHER_PROJECT }), lead);
+      await filed.service.create(create(), lead);
+
+      // Assert
+      should(adopted).be.empty();
+    });
   });
 });
 

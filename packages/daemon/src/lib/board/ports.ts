@@ -168,6 +168,17 @@ export interface LaneProposer {
   propose(projectId: BoardProjectId, sessionId: string): Promise<LaneSet | null>;
 }
 
+/**
+ * Registers the git repository a ferret on the Unfiled board stands in and moves the ferret onto that project's
+ * board, proposing its lanes as `proposer` when it has none (U3's `ProjectAdoption`). `null` leaves it Unfiled.
+ */
+export interface ProjectAdopter {
+  adopt(
+    sessionId: string,
+    proposer?: string,
+  ): Promise<{ readonly projectId: BoardProjectId; readonly proposed: boolean } | null>;
+}
+
 /** Publishes `board.changed` on the fleet feed, journalled on `sessionId`'s event log. */
 export interface BoardChangeSink {
   changed(sessionId: string, event: BoardChangedEvent): Promise<void>;

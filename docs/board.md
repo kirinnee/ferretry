@@ -13,11 +13,46 @@ ferret launched with older words is told the new ones on the owner's next messag
 name for `fy`:
 
 ```text
-Board: all work is a card (&F412) on its project's board; agenda items are !A48. Before your first edit for a new ask, have one: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"` (fy new and fy start make one). Move it as work changes: `fy task move <id> <lane> --reason "<why>"`. Blocked on the owner: `fy agenda add --task <id>`; a card: `fy task depend`; outside: `fy task block`. Abandoned: `fy task drop --reason`; switched: `fy task focus <id>`. Owner reports a problem: `fy task reopen <id> --to <lane> --ask "<their words>"`. Never move what a PR or release moves; only the owner closes.
+Board: all work is a card (&F412) on its project's board (new repo: `fy project add .`); agenda items are !A48. Before your first edit for a new ask, have one: `fy task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"` (fy new/start make one). Move it: `fy task move <id> <lane> --reason "<why>"`. Blocked on owner: `fy agenda add --task <id>`; a card: `fy task depend`; outside: `fy task block`. Dropped: `fy task drop --reason`; switched: `fy task focus <id>`. Owner finds a problem: `fy task reopen <id> --to <lane> --ask "<their words>"`. Never move what a PR or release moves; only the owner closes.
 ```
 
 Tasks are `&F412` and agenda items are `!A48`; nothing prints the retired `#F412`
 ([reference-standard.md](reference-standard.md)).
+
+## Which board a card is on, and how a project gets one
+
+A board is a registered project (`<state home>/projects.json`). A session's board is decided when it starts
+(`config.projectId`): its parent's when it works inside that project, else the project its git repository
+belongs to (worktrees included), else the registered folder that contains it, else **Unfiled**.
+
+**The owner never has to register a project.** Projects get registered in two ways:
+
+1. **Automatically, by a ferret's first card.** When a ferret on the Unfiled board makes a card (`fy task create`,
+   or the card `fy start` / `fy new` makes) while it stands in a **git repository** whose main checkout is inside
+   one of the daemon's `projectRoots` (`config/daemon.json`; default `~/Workspace` and `~/.config`), the daemon
+   registers that repository, moves the ferret onto its board, and proposes the project's lanes from what the folder
+   suggests. The proposal is live at once; the owner gets one agenda choice to accept or edit it. A linked
+   worktree registers the checkout it was made from. This is `ProjectAdoption`
+   (`packages/daemon/src/lib/board-projects/project-adoption.ts`).
+2. **By hand, with `fy project add <path> [--name <name>]`.** It registers a folder (`fy project add .` for the one
+   you are in) and prints the project's name, id and folder. A folder, or a git repository, that is already
+   registered prints the project it already is and changes nothing. `fy project ls` lists every project. Use it for
+   a folder the automatic path leaves alone: one that is not a git repository, or a repository outside every
+   project root.
+
+The automatic path never registers the home folder itself, a temp or scratch folder (`/tmp`, a harness's sandbox),
+a folder that is not a git repository, or a repository outside every project root. Those stay Unfiled. It is
+idempotent and safe under races: the registry dedupes on the folder and on the repository, one repository is
+adopted one session at a time, and a project that already has lanes is never proposed again, so two ferrets in the
+same repository at once make one project and one proposal. A failure leaves the card Unfiled, as before.
+
+**Unfiled is only for work outside any git repository** (an ad-hoc chat in `~` or `/tmp`). A card that belongs on a
+project's board moves there with `fy task refile <id> --project <name>`. A refile keeps the card's state: a card that
+is already closed lands in the other board's closed lane without the owner's gate, because the owner already closed
+it; moving an open card into Closed stays the owner's.
+
+`fy board lanes show|propose|edit --project <name|id>` and `fy board --project <name|id|all>` name a board by its
+name or id, wherever the flag is written on the line.
 
 ## The turn-end check
 
