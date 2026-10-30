@@ -283,7 +283,7 @@ export const TRANSPORT_NOT_WIRED_NOTE =
   'been on its network can still pair — as long as the daemon dials a relay of its own. One that dials none ' +
   'has to be reachable from here: same network, a VPN, a tailnet, or a public address. Live updates and ' +
   'terminals travel the relay too, each on its own session. Some panels still go straight to the daemon, so ' +
-  'over a relay files, skills, pins, attention, the remote browser and dictation correction are unavailable.';
+  'over a relay files, skills, pins, the agenda, the remote browser and dictation correction are unavailable.';
 
 /**
  * The hosted carrier's cost, in the terms somebody actually cares about.

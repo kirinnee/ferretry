@@ -73,7 +73,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     label: 'Group Needs you at the top',
     description:
       'Lift the sessions with open Inbox items into a Needs you group at the top of the sessions list. Off leaves them in their project, with just the Inbox badge. Applies to this device.',
-    keywords: ['inbox', 'attention', 'needs you', 'pin', 'group', 'top', 'sessions', 'sidebar'],
+    keywords: ['inbox', 'agenda', 'attention', 'needs you', 'pin', 'group', 'top', 'sessions', 'sidebar'],
   },
   {
     id: 'chat-width',
@@ -151,7 +151,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'composer-suggestions',
     label: 'Open suggestions with',
     description:
-      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ attention), the direct symbols (@ files, :agent, !attention), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
+      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ agenda), the direct symbols (@ files, :agent, !agenda), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
     keywords: [
       'composer',
       'suggestion',
@@ -171,6 +171,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'file',
       'agent',
       'task',
+      'agenda',
       'attention',
       'skill',
       'quiet',
@@ -242,6 +243,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'push',
       'buzz',
       'awaiting',
+      'needs you',
       'needs attention',
       'question',
       'background',

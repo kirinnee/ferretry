@@ -214,7 +214,7 @@ export const summaryNotification = (
   eventKey = fleetNotificationEventKey(daemonId, [String(count)]),
 ): NotificationSpec => ({
   title: 'ferretry',
-  body: `${count} sessions need your attention.`,
+  body: `${count} sessions need you.`,
   tag: `fy-summary:${encodeURIComponent(daemonId)}`,
   url: daemonSessionsPath(daemonId),
   eventKey,

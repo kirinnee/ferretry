@@ -15,7 +15,7 @@ describe('sessionReferenceHost', () => {
     expect(destinations).toEqual([
       '/d/daemon-a/session/same-session',
       '/d/daemon-a/session/same-session',
-      '/d/daemon-a/session/same-session?attention=A3',
+      '/d/daemon-a/session/same-session?agenda=A3',
     ]);
   });
 

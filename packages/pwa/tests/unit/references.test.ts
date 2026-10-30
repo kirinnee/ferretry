@@ -618,7 +618,7 @@ describe('remarkReferences', () => {
       kids(kids(tree)[0])
         .filter(node => node.type === 'link')
         .map(node => node.title),
-    ).deepEqual(["Open :zelda's session", 'Open attention !A3']);
+    ).deepEqual(["Open :zelda's session", 'Open agenda item !A3']);
   });
 
   test('should never rewrite inside code, inline code, raw HTML or an existing link', () => {

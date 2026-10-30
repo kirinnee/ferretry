@@ -303,7 +303,7 @@ describe('SessionsBar as a column', () => {
     await click(view.container.querySelector('[data-sbar-place="settings"]'), 'Settings');
     await click(view.container.querySelector('[data-sbar-new]'), 'New session');
     expect(calls).toEqual([
-      'navigate:/d/alpha/session/maryah-1?attention=A1',
+      'navigate:/d/alpha/session/maryah-1?agenda=A1',
       'navigate:/d/alpha/settings',
       'navigate:/d/alpha/new',
     ]);
@@ -547,7 +547,7 @@ describe('SessionsBar as a rail', () => {
     await click(dots[0] ?? null, 'a dot');
     await click(view.container.querySelector('[data-sbar-expand]'), 'Expand');
     await click(view.container.querySelector('[data-app-bar-destination-search]'), 'the finder');
-    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1?attention=A1', 'expand', 'palette']);
+    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1?agenda=A1', 'expand', 'palette']);
   });
 
   test('draws no expand control when its host offers none', async () => {
@@ -568,7 +568,7 @@ describe('SessionsBar as a phone drawer', () => {
     expect(drawer.querySelector('[data-sbar-collapse]')).toBeNull();
 
     await click(drawer.querySelector('[data-sbar-session="maryah-1"]'), 'a row');
-    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1?attention=A1']);
+    expect(calls).toEqual(['navigate:/d/alpha/session/maryah-1?agenda=A1']);
     expect(closed).toBe(1);
 
     await click(drawer.querySelector('.fy-sbar__top button[aria-label="Close sessions"]'), 'the close button');
@@ -765,6 +765,6 @@ describe('SessionsBar across every machine', () => {
     expect(dots.map(dot => dot.getAttribute('aria-current'))).toEqual([null, null, 'page', null, null]);
     expect(view.container.querySelector('[data-new-session-menu]')).not.toBeNull();
     await click(dots[0] ?? null, 'a dot');
-    expect(calls.at(-1)).toBe('navigate:/d/beta/session/ask-1?attention=A1');
+    expect(calls.at(-1)).toBe('navigate:/d/beta/session/ask-1?agenda=A1');
   });
 });

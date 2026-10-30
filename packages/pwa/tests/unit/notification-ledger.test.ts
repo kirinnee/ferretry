@@ -183,7 +183,7 @@ describe('notification planning', () => {
     const summary = planNotifications(daemonA, changed, ledger, enabledPrefs, allowAll, 2_000);
     should(summary).have.length(1);
     should(summary[0]?.tag).equal('fy-summary:daemon-a');
-    should(summary[0]?.body).equal(`${NOTIFY_BURST_LIMIT + 2} sessions need your attention.`);
+    should(summary[0]?.body).equal(`${NOTIFY_BURST_LIMIT + 2} sessions need you.`);
   });
 
   it('should plan same session ids independently for paired daemons', () => {
