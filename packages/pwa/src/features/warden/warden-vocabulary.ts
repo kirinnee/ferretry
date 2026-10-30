@@ -33,6 +33,7 @@ export const ANOMALY_CHIPS: Readonly<Record<WardenAnomalyKind, WardenChip>> = {
   peer_wait_unanswerable: chip('waiting on nobody', 'warn'),
   bootstrap_degraded: chip('setup broken', 'err'),
   owner_request: chip('you asked', 'accent'),
+  orphaned_card: chip('card orphaned', 'err'),
 };
 
 /**

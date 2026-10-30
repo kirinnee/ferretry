@@ -127,6 +127,7 @@ import { detectAnomalies, fingerprintAnomalies, isWardenScannableStatus } from '
 import {
   planWardenEscalations,
   planWardenRemedy,
+  WARDEN_ESCALATION_SOURCE,
   type WardenEscalationBoard,
   type WardenEscalationRaise,
   type WardenEscalationVerdict,
@@ -166,7 +167,15 @@ import {
   rememberJevBefore,
   type WardenJevCheckLog,
 } from './jev-checks.ts';
+import { type WardenFocusCard, wardenResumeMessage } from './focus-card.ts';
 import { leftoverBrowserCandidates } from './leftovers.ts';
+import {
+  detectOrphanedCards,
+  type OrphanTold,
+  planOrphanEscalations,
+  type WardenBoardRead,
+  type WardenCardNotice,
+} from './orphans.ts';
 import { wardenOwnerRoutes } from './owner-routes.ts';
 import { REFLEX_NUDGE_MESSAGE } from './liveness.ts';
 import type { ReflexEvent } from './liveness-monitor.ts';
@@ -370,6 +379,8 @@ export type WardenAgendaWrite = 'created' | 'refreshed' | 'unchanged' | 'rejecte
 export interface WardenAgendaPort {
   board(sessionId: string): Promise<WardenEscalationBoard | undefined>;
   raise(sessionId: string, request: WardenEscalationRaise): Promise<WardenAgendaWrite>;
+  /** A plain notice to the owner tied to a board card (`orphans.ts`), deduped by its `sourceRef`. */
+  notice(sessionId: string, notice: WardenCardNotice): Promise<WardenAgendaWrite>;
   resolveSource(sessionId: string, source: AgendaSource, sourceRef: string, note: string): Promise<boolean>;
 }
 
@@ -381,6 +392,17 @@ export interface WardenTriageEvidenceReader {
 /** A finished warden's own cost, priced from its transcript. `undefined` until analytics can price it. */
 export interface WardenInvestigationCostReader {
   costUsd(wardenSessionId: string): Promise<number | undefined>;
+}
+
+/**
+ * The project boards, as the Warden reads them (`board-design.md` §3.4): the cards it reports orphaned, and
+ * the card a ferret it starts again is told to carry on with. Every method is total.
+ */
+export interface WardenBoardPort {
+  /** Every card as the board derives it; `undefined` when the board could not be read. */
+  read(): Promise<WardenBoardRead | undefined>;
+  /** A session's focus card, in full; `undefined` when it has none or it could not be read. */
+  focusCard(sessionId: string): Promise<WardenFocusCard | undefined>;
 }
 
 /** One session's agenda board, in the view's shape, for reading the Warden's own notifications back. */
@@ -412,6 +434,8 @@ export interface WardenSweepPorts {
   readonly journal: WardenJournal;
   /** Auto-revive of sessions that died abnormally (`revive-service.ts`). Absent: nothing is revived. */
   readonly revive?: WardenReviveService;
+  /** The project boards. Absent: no card is reported orphaned, and a resumed ferret is told no card. */
+  readonly board?: WardenBoardPort;
   /** Jev's checks, one record each, kept beside the reports (`jev-checks.ts`). */
   readonly jevChecks: WardenJevCheckLog;
   /** Wall-clock milliseconds. */
@@ -1002,6 +1026,12 @@ export class WardenSweepService {
         : undefined;
     const collapsed = collapseUnwatchedFleet(raw.anomalies, unwatched);
     const detected: WardenDetectResult = { anomalies: collapsed, fingerprint: fingerprintAnomalies(collapsed) };
+    // ORPHANED CARDS are flagged beside the ferrets' anomalies and shown with them, but they are about a card,
+    // not a ferret: they never reach Jev, an investigation or the spawn fingerprint, which stay the ferrets'
+    // own. A card left for a week must not hold the recovery edge of every unrelated anomaly closed.
+    const board = await this.readBoard();
+    const orphans = board === undefined ? [] : detectOrphanedCards(board, fleet, nowMs);
+    const flagged = [...detected.anomalies, ...orphans];
 
     let state = parseWardenRuntimeState(await this.ports.state.read());
     const today = triageDayFor(state.triageDay, nowMs);
@@ -1010,14 +1040,16 @@ export class WardenSweepService {
     state = {
       ...state,
       lastSweepAt: at,
-      lastAnomalies: detected.anomalies,
-      triageDay: { ...today, flags: today.flags + newFlagCount(state.lastAnomalies ?? [], detected.anomalies) },
+      lastAnomalies: flagged,
+      triageDay: { ...today, flags: today.flags + newFlagCount(state.lastAnomalies ?? [], flagged) },
     };
     await this.ports.state.write(state);
     state = await this.closeLeftovers(state, fleet, config, nowMs);
     const reviveRun = await this.reviveDead(state, fleet, config, nowMs);
     state = reviveRun.state;
     const anomalies = detected.anomalies.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
+    // A card whose ferret was just started again has a ferret on it.
+    const orphaned = orphans.filter(anomaly => !reviveRun.revived.has(anomaly.sessionId));
 
     const assigned = await this.runAssigned({
       anomalies: anomalies.filter(anomaly => anomaly.assignedWarden === true),
@@ -1039,7 +1071,19 @@ export class WardenSweepService {
       at,
       force: options.force,
     });
-    const final = await this.priceInvestigations(escalated.state, fleet, at);
+    const priced = await this.priceInvestigations(escalated.state, fleet, at);
+    const final =
+      board === undefined
+        ? priced
+        : await this.escalateOrphans({
+            orphans: orphaned,
+            board,
+            fleet,
+            state: priced,
+            config,
+            at,
+            force: options.force,
+          });
     await this.ports.state.write(final);
 
     // LAST, and deliberately so. Everything above — detection, the report
@@ -1057,7 +1101,7 @@ export class WardenSweepService {
 
     return {
       sweptAt: at,
-      anomalies: anomalies.map(wireAnomaly),
+      anomalies: [...anomalies, ...orphaned].map(wireAnomaly),
       ...escalated.outcome,
       ...(assigned.spawned.length === 0 ? {} : { assignedWardens: [...assigned.spawned] }),
     };
@@ -2097,9 +2141,14 @@ export class WardenSweepService {
     try {
       if (act.action === 'failover') await this.ports.remedies.failover(targetId, act.agent);
       else if (act.action === 'nudge') await this.ports.remedies.nudge(targetId, words.nudge);
-      else if (act.action === 'resume') await this.ports.remedies.resume(targetId);
-      else if (act.action === 'restart') await this.ports.remedies.restart(targetId);
-      else await this.ports.remedies.stop(targetId, words.stopReason);
+      else if (act.action === 'resume' || act.action === 'restart') {
+        // The ferret started again carries on with its card (`focus-card.ts`). Only an auto one is handed
+        // a turn: an interactive one is somebody's terminal, and keeps the resume domain's own behaviour.
+        const card = target.config.mode === 'auto' ? await this.focusCard(targetId) : undefined;
+        const message = card === undefined ? undefined : wardenResumeMessage(act.action, act.reason, card);
+        if (act.action === 'resume') await this.ports.remedies.resume(targetId, message);
+        else await this.ports.remedies.restart(targetId, message);
+      } else await this.ports.remedies.stop(targetId, words.stopReason);
     } catch (error) {
       const message = failureMessage(error);
       this.ports.journal.record('fleet.warden_action_failed', {
@@ -2123,6 +2172,87 @@ export class WardenSweepService {
       ...(base.reason === undefined ? {} : { reason: base.reason }),
     });
     return { state: this.recordAction(state, { ...base, outcome: 'done', detail: words.detail('done') }), done: true };
+  }
+
+  /** A ferret's focus card, or `undefined` when there is no board, no card, or it cannot be read. */
+  private async focusCard(sessionId: string): Promise<WardenFocusCard | undefined> {
+    return await this.ports.board?.focusCard(sessionId).catch(() => undefined);
+  }
+
+  /** The board, once per sweep; `undefined` without one, or when it cannot be read — which is said out loud. */
+  private async readBoard(): Promise<WardenBoardRead | undefined> {
+    if (this.ports.board === undefined) return undefined;
+    const board = await this.ports.board.read().catch(() => undefined);
+    if (board === undefined)
+      this.ports.journal.record('fleet.warden_board_blind', {
+        reason: 'the board could not be read, so no card was reported orphaned or cleared this sweep',
+      });
+    return board;
+  }
+
+  /**
+   * Tell somebody about each orphaned card, once per episode, and clear the notices of cards that recovered
+   * (`orphans.ts`). A message that could not be queued or a notice the agenda refused is journalled and not
+   * remembered, so the next sweep tries again. Clearing runs with the Warden off, as escalations' does.
+   */
+  private async escalateOrphans(input: {
+    readonly orphans: readonly WardenAnomaly[];
+    readonly board: WardenBoardRead;
+    readonly fleet: readonly WardenFleetSession[];
+    readonly state: WardenRuntimeState;
+    readonly config: WardenConfig;
+    readonly at: string;
+    readonly force: boolean;
+  }): Promise<WardenRuntimeState> {
+    const machine = this.settings.machineName?.();
+    const plan = planOrphanEscalations({
+      orphans: input.orphans,
+      board: input.board,
+      fleet: input.fleet,
+      memory: input.state.orphans ?? {},
+      enabled: input.force || input.config.enabled,
+      clientName: this.settings.clientName,
+      ...(machine === undefined || machine === '' ? {} : { machine }),
+    });
+    for (const resolution of plan.resolve) {
+      const cleared = await this.ports.attention
+        .resolveSource(resolution.sessionId, WARDEN_ESCALATION_SOURCE, resolution.sourceRef, resolution.note)
+        .catch(() => false);
+      if (cleared)
+        this.ports.journal.record('fleet.warden_orphan_cleared', {
+          taskId: resolution.taskId,
+          sessionId: resolution.sessionId,
+        });
+    }
+    for (const taskId of plan.unreported)
+      this.ports.journal.record('fleet.warden_orphan_unreported', {
+        taskId,
+        reason: 'neither the card’s owner nor its ferret is on this machine, so no board can hold a notice',
+      });
+    const memory: Record<string, OrphanTold> = { ...plan.memory };
+    for (const tell of plan.tell) {
+      const landed =
+        tell.kind === 'message'
+          ? await this.ports.remedies.nudge(tell.sessionId, tell.message).then(
+              () => true,
+              () => false,
+            )
+          : (await this.ports.attention.notice(tell.sessionId, tell.notice).catch(() => 'rejected' as const)) !==
+            'rejected';
+      if (!landed) {
+        this.ports.journal.record('fleet.warden_orphan_failed', {
+          taskId: tell.taskId,
+          via: tell.kind,
+          sessionId: tell.sessionId,
+        });
+        continue;
+      }
+      const via = tell.kind === 'message' ? 'owner' : 'notice';
+      memory[tell.taskId] = { assignee: tell.assignee, via, to: tell.sessionId, at: input.at };
+      this.ports.journal.record('fleet.warden_orphan_told', { taskId: tell.taskId, via, sessionId: tell.sessionId });
+    }
+    const { orphans: _previous, ...rest } = input.state;
+    return Object.keys(memory).length === 0 ? rest : { ...rest, orphans: memory };
   }
 
   /**

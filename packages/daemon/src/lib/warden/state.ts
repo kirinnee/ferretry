@@ -21,6 +21,7 @@
 
 import {
   SessionStatusSchema,
+  TaskRefSchema,
   type WardenAction,
   WardenActionSchema,
   WardenClearedBySchema,
@@ -40,6 +41,7 @@ import type { BackoffStore, InvestigationBackoff } from './backoff.ts';
 import type { Blessing, BlessingStore, ClearStreak, ClearStreakStore } from './bless.ts';
 import type { WardenAnomaly, WardenAnomalyKind } from './detect.ts';
 import type { WardenFailoverState } from './failover.ts';
+import type { OrphanMemory } from './orphans.ts';
 import type { ReviveState } from './revive.ts';
 import { WardenFailoverPolicySchema, WardenSelectionReasonSchema } from './provenance.ts';
 import type { WardenCostAverage, WardenGuardHealth, WardenInvestigationRecord, WardenTriageDay } from './triage.ts';
@@ -67,6 +69,7 @@ export const WARDEN_ANOMALY_KINDS = [
   'agent_frozen',
   'provider_unavailable',
   'owner_request',
+  'orphaned_card',
 ] as const satisfies readonly WardenAnomalyKind[];
 
 const AnomalyKindSchema = z.enum(WARDEN_ANOMALY_KINDS);
@@ -97,6 +100,7 @@ const AnomalySchema = z.object({
   assignedWarden: z.boolean().optional(),
   ledger: LedgerSchema.optional(),
   subject: z.string().min(1).optional(),
+  task: TaskRefSchema.optional(),
 }) satisfies z.ZodType<unknown, WardenAnomaly>;
 
 const BackoffSchema = z.object({
@@ -387,6 +391,11 @@ export interface WardenRuntimeState {
   readonly investigatorSequence?: number;
   /** What auto-revive remembers: who was revived and when, the breaker, the deaths already explained. */
   readonly revive?: ReviveState;
+  /**
+   * The orphaned cards the Warden told somebody about (`orphans.ts`), keyed by card id, kept while each
+   * card stays orphaned by the same ferret: what stops it telling them again every sweep.
+   */
+  readonly orphans?: OrphanMemory;
 }
 
 /**
@@ -438,6 +447,17 @@ const RuntimeStateSchema = z.object({
   daily: DailySchema.optional(),
   investigatorSequence: z.number().int().min(0).max(WARDEN_INVESTIGATOR_MAX_SEQUENCE).optional(),
   revive: ReviveStateSchema.optional(),
+  orphans: z
+    .record(
+      z.string(),
+      z.object({
+        assignee: z.string().min(1),
+        via: z.enum(['owner', 'notice']),
+        to: z.string().min(1),
+        at: Instant,
+      }),
+    )
+    .optional(),
 });
 
 export const EMPTY_WARDEN_STATE: WardenRuntimeState = {};

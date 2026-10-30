@@ -1123,11 +1123,13 @@ import {
   usageProbeUrls,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
+  WARDEN_ESCALATION_SOURCE,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
   WardenCallsignTakenError,
   type WardenFleetSession,
   type WardenJournal,
+  type WardenBoardPort,
   WardenLivenessMonitor,
   type WardenRevivePorts,
   WardenReviveService,
@@ -1896,6 +1898,8 @@ interface BoardWorld {
   readonly store: FileBoardStore;
   readonly board: BoardService;
   readonly cards: SessionCards;
+  /** Which card each session works on (`config.focusTask`): what the Warden tells a ferret it starts again. */
+  readonly focus: StorageSessionFocus;
 }
 
 /**
@@ -1959,7 +1963,7 @@ function createBoardWorld(
     diagnostics,
     bin,
   });
-  return { store, board, cards };
+  return { store, board, cards, focus };
 }
 
 /**
@@ -4158,6 +4162,8 @@ interface WardenParts {
   readonly ledgers: { read: LivenessLedgerReader };
   /** What auto-revive reaches the rest of the daemon through: the journal, the resume, the tmux probe, the clock. */
   readonly revive: Pick<WardenRevivePorts, 'events' | 'resume' | 'tmuxReady' | 'sleep'>;
+  /** The project boards: the cards the Warden reports orphaned, and the card a ferret it starts again carries on. */
+  readonly board: WardenBoardPort;
 }
 
 /**
@@ -4215,6 +4221,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const revive = new WardenReviveService({
     ...parts.revive,
     journal: wardenJournal,
+    focusCard: async sessionId => await parts.board.focusCard(sessionId),
     // The breaker's one notice lands on the session that tripped it, as a plain notification that buzzes.
     notifyOwner: async notice => {
       await parts.attention
@@ -4243,6 +4250,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const service = new WardenSweepService(
     {
       revive,
+      board: parts.board,
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
       // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
@@ -4266,17 +4274,24 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         nudge: async (sessionId, message) => {
           await parts.sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
         },
-        resume: async sessionId => {
-          await parts.resume.resume({ id: parseSessionId(sessionId), actor: 'warden' });
+        // A message is the turn the ferret is handed (its focus card, `focus-card.ts`); without one the resume
+        // domain hands its own default turn.
+        resume: async (sessionId, message) => {
+          await parts.resume.resume({
+            id: parseSessionId(sessionId),
+            actor: 'warden',
+            ...(message === undefined ? {} : { message }),
+          });
         },
         // A restart is the resume path told to replace the pane even when it looks alive: a frozen process
         // is still "alive", and typing into it would hand the turn to the very thing that is stuck. The
         // conversation is resumed in the new process, and the warden policy keeps every automatic guard.
-        restart: async sessionId => {
+        restart: async (sessionId, message) => {
           await parts.resume.resume({
             id: parseSessionId(sessionId),
             actor: 'warden',
             policy: { ...resolveResumePolicy('warden'), replaceLiveTerminal: true },
+            ...(message === undefined ? {} : { message }),
           });
         },
         stop: async (sessionId, reason) => {
@@ -4403,6 +4418,31 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
                 kind: 'info',
                 premise: request.premise,
                 ...(request.terms === undefined ? {} : { terms: [...request.terms] }),
+              },
+              WARDEN_ESCALATION_ACTOR,
+            )
+            .catch(() => undefined);
+          if (mutation === undefined || !mutation.ok) return 'rejected';
+          return mutation.change === 'created' || mutation.change === 'refreshed' ? mutation.change : 'unchanged';
+        },
+        // A plain notice about a CARD (an orphaned one): tied to it, so the card and the Inbox name each other.
+        notice: async (sessionId, notice) => {
+          const mutation = await parts.attention
+            .raise(
+              sessionId,
+              {
+                source: WARDEN_ESCALATION_SOURCE,
+                sourceRef: notice.sourceRef,
+                subject: notice.subject,
+                why: notice.why,
+                context: notice.context,
+                waitingSince: notice.waitingSince,
+                howToResolve: notice.howToResolve,
+                notice: true,
+                title: notice.title,
+                kind: 'info',
+                premise: notice.premise,
+                task: notice.task,
               },
               WARDEN_ESCALATION_ACTOR,
             )
@@ -11008,6 +11048,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         warden: createWardenSubsystem({
           machineName: () => analyticsMachineName ?? hostname(),
           ledgers: wardenLedgers,
+          // The board as the Warden reads it: every card with its derived activity (the orphans), and the card
+          // a session works on (what a ferret it starts again carries on). Each read is total.
+          board: {
+            read: async () => await boardWorld.board.sweepBoard().catch(() => undefined),
+            focusCard: async sessionId => {
+              const ref = await boardWorld.focus.focusOf(sessionId).catch(() => null);
+              if (ref === null || (ref.machineId !== undefined && ref.machineId !== attachmentDaemonId))
+                return undefined;
+              const found = await boardWorld.board.task(ref.id).catch(() => undefined);
+              return found === undefined ? undefined : { task: found.task, laneSet: found.laneSet };
+            },
+          },
           activities,
           sessions,
           documents: createSessionDirectorySubsystem(paths, storage),

@@ -16,6 +16,8 @@ import {
   reviveMessage,
   signalName,
 } from '../../../src/lib/warden/index.ts';
+import { lanes, PROJECT } from '../board/support.ts';
+import { cardView } from './board-fixtures.ts';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 const ago = (seconds: number): string => new Date(NOW - seconds * 1000).toISOString();
@@ -148,6 +150,20 @@ describe('the plain words for a death', () => {
     should(message).startWith('[ferretry] Your terminal ended because it was killed by a signal (SIGKILL) at ');
     should(message).containEql('2026-10-30 11:59 UTC; it was started again.');
     should(message).containEql('Re-read your last turn file and continue');
+  });
+
+  it('should name the focus card an auto session carries on with, and give an interactive one none', () => {
+    // Arrange
+    const card = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
+
+    // Act
+    const auto = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'auto', card);
+    const interactive = reviveMessage({ kind: 'tmux_crashed' }, '2026-10-30T11:59:00.000Z', 'interactive', card);
+
+    // Assert
+    should(auto).containEql('continue where you left off, on the card below.\n\nYour card: &F1 — Ship the thing');
+    should(auto).containEql('The ask, verbatim (owner):\nbuild the board');
+    should(interactive).not.containEql('Your card');
   });
 
   it('should tell an interactive session the notice and nothing to do', () => {
