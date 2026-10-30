@@ -25,6 +25,7 @@ import {
   hostCodexCredentialFile,
   hostCodexHome,
   InMemoryCredentialStatusStore,
+  launchInstructions,
   type ModelCatalog,
   manifestRuntimes,
   PACK_ENV,
@@ -50,6 +51,7 @@ import {
 } from '@ferretry/fleet/adapters';
 import {
   type Advertisement,
+  DORMANT_AGENT_STATUSES,
   type AnalyticsPricingRate,
   type AutoResumeSummary,
   CONFIG_ACCEPTED_FILE,
@@ -202,6 +204,7 @@ import {
   FileModelCatalogCache,
   FileProjectCatalog,
   FileQuotaFailoverConfigStore,
+  FileRestartQueue,
   FileQuotaFailoverStateStore,
   FileRoutingCatalog,
   FileScratchCollector,
@@ -742,6 +745,10 @@ import {
   InitialAttachmentError,
   InstructionRefresh,
   InvalidDeadlineRefused,
+  outdatedSections,
+  RestartBusy,
+  RestartService,
+  withOutdated,
   type IoPressurePort,
   type IoPressureSourcePort,
   instructionsReplyKey,
@@ -9269,6 +9276,46 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: new KeyedSerialExecutor(),
         launch: createSessionLaunch(storage),
       });
+      // What a launch now would say to a ferret, against what it was launched with: the very renderer a relaunch
+      // uses, over the very environment a relaunch builds, so "outdated" cannot disagree with what a restart fixes.
+      const outdatedFor = async (id: string): Promise<ReturnType<typeof outdatedSections>> => {
+        const parsed = tryParseSessionId(id);
+        if (parsed === undefined) return [];
+        const state = SessionStateSchema.safeParse(await storage.readState(parsed));
+        if (!state.success) return [];
+        return outdatedSections(
+          state.data.launchInstructions,
+          launchInstructions(CLIENT_NAME, await launchEnvironments.read(parsed)),
+        );
+      };
+      // A restart is the same-login migrate with the conversation resumed and NEVER forced: the in-flight gate
+      // is the one a person's Restart meets, and a ferret it refuses is queued until it is idle.
+      const sessionRestartService = new RestartService({
+        subjects: async () =>
+          (await sessions.list()).map(view => ({
+            id: view.config.id,
+            name: view.config.name,
+            running: !DORMANT_AGENT_STATUSES.has(view.state.status),
+            idle: view.state.turnState === 'your-turn' || view.state.waiting !== undefined,
+          })),
+        outdated: outdatedFor,
+        restart: async id => {
+          const view = await sessions.get(id);
+          if (view === undefined) throw new Error(`no session ${id}`);
+          await sessionMigrate
+            .migrate(id, { agent: view.config.agent, allowContextDowngrade: false, forceInflight: false })
+            .catch((error: unknown) => {
+              if (error instanceof SessionMigrateError && error.failure === 'refused')
+                throw new RestartBusy(error.message);
+              throw error;
+            });
+        },
+        gaveUp: async (id, reason) => {
+          await storage.append(parseSessionId(id), 'session.restart_abandoned', { reason });
+        },
+        queue: new FileRestartQueue(paths.state),
+        now: () => new Date(clock.now()).toISOString(),
+      });
       // The SAME durable registration ledger the reap sweep reads, over the storage this boot
       // opened. Resource limits and the reap both need "which panes does this daemon own, and which
       // of their sessions are provably over" — two readers of one ledger, never two ledgers.
@@ -10139,7 +10186,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // next process would restart.
           { next: () => crypto.randomUUID() },
         ),
-        sessions,
+        sessions: withOutdated(sessions, { outdated: outdatedFor, now: () => Date.parse(clock.now()), ttlMs: 5_000 }),
         // A name in any `:sessionId` is resolved over the same candidates the send and signal domains read,
         // so a route, the attribution on a message and a declared wait agree on which agent a name means.
         sessionAddresses: {
@@ -10280,6 +10327,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         monitor: new MonitorTickRunner(monitor, join(paths.home, 'monitor.json'), defaultSessionMonitorSettings),
         observer: sessionObserver,
         sessionMigrate,
+        sessionRestart: sessionRestartService,
         sessionFork,
         quotaFailover: createQuotaFailoverSubsystem({
           root: quotaFailoverRoot(paths.home),
@@ -11439,6 +11487,13 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     clearInterval(waitTicks);
     await subsystems.monitor.close();
   });
+  // Queued restarts: a busy ferret is restarted at its next idle moment, so the queue is looked at on a short tick.
+  // Nothing happens when it is empty, and the tick never forces: the in-flight gate decides every time.
+  const restartTicks = setInterval(() => {
+    void activities.run('restart queue', async () => await subsystems.sessionRestart.drain()).catch(() => undefined);
+  }, 10_000);
+  restartTicks.unref?.();
+  cleanups.push(() => clearInterval(restartTicks));
   /**
    * The quota-failover tick, armed beside the other background loops and after the bind, because a
    * tick can migrate a session and a migration relaunches an agent.

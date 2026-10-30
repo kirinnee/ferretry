@@ -1,0 +1,51 @@
+/* "Outdated" mark (outdated-mark.tsx) and the one "Restart outdated (N)" strip (restart-outdated-strip.tsx).
+   Warn tokens: the word means "act when you can", not "something is broken". */
+.fy-outdated-mark {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  padding: 0 6px;
+  border: var(--stroke-control) solid var(--warn-border);
+  border-radius: var(--radius-control);
+  background: var(--warn-bg);
+  color: var(--warn);
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+.fy-sbar__session[aria-current='page'] .fy-outdated-mark {
+  border-color: currentColor;
+  background: transparent;
+  color: var(--nav-sel-fg, var(--warn));
+}
+.fy-restart-outdated {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-sm) var(--gap-sm);
+}
+.fy-restart-outdated__button {
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  min-height: var(--target-floor);
+}
+.fy-restart-outdated__result {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap-sm);
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.fy-restart-outdated__dismiss {
+  flex-shrink: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}

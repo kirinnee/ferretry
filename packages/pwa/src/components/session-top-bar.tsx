@@ -28,6 +28,7 @@ import { displaySystemCallsign, type SessionView } from '@ferretry/protocol';
 import { Info, Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
+import { OutdatedMark } from '../features/restart-outdated/outdated-mark.tsx';
 import { SwitchMarks, type SwitchMarksProps } from '../features/session-info/switch-marks.tsx';
 import { displayCallsign } from '../lib/callsign.ts';
 import { harnessWord } from '../lib/harness-dialogs.ts';
@@ -142,6 +143,7 @@ export function SessionTopBar({
       <div className="fy-session-bar__who" title={task === undefined ? name : `${name} — ${task}`}>
         <h1 className="fy-session-bar__name">{name}</h1>
         {attentionOpen > 0 ? <UnreadBadge className="fy-session-bar__attention" count={attentionOpen} /> : null}
+        <OutdatedMark view={session} />
         {compact ? null : (
           <SwitchMarks
             {...{

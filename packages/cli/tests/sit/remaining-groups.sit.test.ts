@@ -32,7 +32,19 @@ describe(`remaining command groups (SIT, ${useInProcess ? 'in-process' : 'compil
 
     // Assert — the composition root actually constructs each group, not just its tests
     should(actual.code).equal(0);
-    for (const group of ['learning', 'stt', 'worktree', 'fleet', 'fs', 'migrate', 'gc', 'signal', 'stream', 'wait']) {
+    for (const group of [
+      'learning',
+      'stt',
+      'worktree',
+      'fleet',
+      'fs',
+      'migrate',
+      'restart',
+      'gc',
+      'signal',
+      'stream',
+      'wait',
+    ]) {
       should(actual.out).containEql(group);
     }
   });

@@ -223,6 +223,7 @@ const sessionCases: SchemaCase[] = [
     value: { id: 'tools', chars: 512 },
   },
   { name: 'launch instructions', schema: session.SessionLaunchInstructionsSchema, value: launchInstructions },
+  { name: 'outdated instructions', schema: session.SessionOutdatedSchema, value: { sections: ['tools', 'pack'] } },
   {
     name: 'session state with launch instructions',
     schema: session.SessionStateSchema,

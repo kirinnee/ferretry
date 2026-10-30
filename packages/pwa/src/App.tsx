@@ -84,6 +84,7 @@ import { ProjectDetailPage } from './features/projects/project-detail.tsx';
 import { ProjectsPage } from './features/projects/projects-page.tsx';
 import { ActionToast } from './features/session-actions/action-toast.tsx';
 import { sessionRowMenuRenderer } from './features/session-actions/row-actions-host.tsx';
+import { restartFerrets } from './features/restart-outdated/restart-outdated-api.ts';
 import { switchTapper } from './features/session-info/switch-marks.tsx';
 import { SessionSearchControl, SessionSearchProvider } from './features/session-search/session-search.tsx';
 import { aboutSettingsTab } from './features/settings/about-machine.tsx';
@@ -905,7 +906,8 @@ function ShellSessionsBar({
   // Which ferrets are instructed to learn, for their "Learning: passive" chip — on EVERY machine the bar
   // lists, each read through its own pairing, so a learner on the second machine is marked too.
   const learnersOn = useMemo(() => allMachines?.connections ?? [connection], [allMachines, connection]);
-  const machineLearners = useMachinesPassiveLearning(learnersOn, useDaemonFetch());
+  const daemonFetch = useDaemonFetch();
+  const machineLearners = useMachinesPassiveLearning(learnersOn, daemonFetch);
   // The machine menu's update dot: each paired machine asked once, through the app's client pool.
   const updates = useMachineUpdates({
     connections,
@@ -963,6 +965,7 @@ function ShellSessionsBar({
       onOpenPalette={onOpenPalette}
       presentation={shape}
       renderSessionMenu={rowMenuRenderer}
+      onRestartOutdated={request => restartFerrets(connection, daemonFetch, request)}
       learningPassive={machineLearners.get(connection.daemonId) ?? NO_LEARNERS}
       {...(allMachines === undefined ? {} : { machineLearners })}
       projects={projects}
