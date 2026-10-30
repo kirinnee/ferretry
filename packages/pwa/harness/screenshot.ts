@@ -138,8 +138,9 @@ const PHONE_CONTEXT = {
 const SCHEME: 'light' | 'dark' = process.argv.includes('--light') ? 'light' : 'dark';
 
 const SETTINGS_ONLY = process.argv.includes('--settings-only');
-const TASK_BOARD_ONLY = process.argv.includes('--task-board-only');
 const SEARCH_ONLY = process.argv.includes('--search-only');
+/** A chat that mentions cards: the `&` menu, a new and an old reference, each tapped, and the card beside the chat. */
+const CARD_REFS_ONLY = process.argv.includes('--card-refs-only');
 const AGENDA_ONLY = process.argv.includes('--agenda-only');
 const PROJECTS_ONLY = process.argv.includes('--projects-only');
 /** Settings › Warden's "What Jev may do alone" rows and the Warden page's Recent actions, nothing else. */
@@ -199,9 +200,9 @@ const VIEWPORT_MATRIX_ONLY = process.argv.includes('--viewport-matrix-only');
  */
 const WALKS_SETTINGS = !(
   SEARCH_ONLY ||
+  CARD_REFS_ONLY ||
   AGENDA_ONLY ||
   FILES_ONLY ||
-  TASK_BOARD_ONLY ||
   PROJECTS_ONLY ||
   WARDEN_ONLY ||
   PAIRING_FAILURES_ONLY ||
@@ -399,8 +400,6 @@ const SECTIONS = [
   'harness-pending-sends',
   'harness-skills',
   'harness-thinking-indicator',
-  'harness-task-board',
-  'harness-task-list-refs',
   // The install stage is deliberately absent: it is taller than a phone, and an
   // element capture inside this fixed gallery clips its top away. It gets a
   // page of its own below instead.
@@ -1793,11 +1792,10 @@ const SEARCH_SESSION_ID = 'harness-session';
 const SEARCH_PARTIAL_SESSION_ID = 'harness-partial-session';
 
 /**
- * A task whose SUMMARY contains no `port` — only its original ask does.
+ * A card whose TITLE contains no `port` — only its summary line does.
  *
- * It is the whole point of the mixed-results assertion: a client matching
- * locally against summaries cannot produce this row, so its presence is the
- * evidence that the daemon answered the query.
+ * It is the whole point of the mixed-results assertion: a search that read only titles cannot produce this
+ * row, so its presence is the evidence that the card's summary is searched too.
  */
 const SEARCH_PROSE_ONLY_TASK = 'Retire the legacy state path';
 
@@ -1819,14 +1817,11 @@ function sessionRequestLedger(requests: readonly string[], sessionId: string) {
   const routes = scoped.map(entry => entry.slice(entry.indexOf(prefix) + prefix.length));
   return {
     scoped,
-    /** The bare board read: no query string at all. */
-    board: routes.filter(route => route === 'tasks').length,
-    /** Every `q` the reader actually sent, DECODED — so `a+b` cannot pass as `a b`. */
-    queries: routes.flatMap(route => {
-      if (!route.startsWith('tasks?')) return [];
-      const value = new URLSearchParams(route.slice(route.indexOf('?') + 1)).get('q');
-      return value === null ? [] : [value];
-    }),
+    /** This ferret's slice of the board: the one read that serves the search, the `&` menu and the proof. */
+    board: requests.filter(entry => entry.startsWith('GET /v1/board?') && entry.includes(`ferret=${sessionId}&`))
+      .length,
+    /** The deleted per-session task API: nothing in the PWA may ask for it any more. */
+    legacyTasks: routes.filter(route => route === 'tasks' || route.startsWith('tasks?')).length,
     index: routes.filter(route => route === 'fs/index').length,
     /** The deleted N+1: one detail read per row. */
     detail: routes.filter(route => /^tasks\/[^?]/.test(route)).length,
@@ -1836,28 +1831,96 @@ function sessionRequestLedger(requests: readonly string[], sessionId: string) {
 }
 
 /**
- * Wait until the typed query has actually been SENT for this session.
+ * Wait until the board read for this ferret has been SENT.
  *
- * Rows can be on screen before it has: files are filtered from the index the
- * page already holds, while the task half is a debounced request. Inspecting on
- * the rows alone photographs a half-settled popup and reads back `q=[]` — which
- * is a race in the driver, not a finding about the product. If the reader never
- * sends one, this is where that shows up.
+ * Rows can be on screen before it has: files are filtered from the index the page already holds, while the
+ * task half waits for the ferret's cards. Inspecting on the rows alone photographs a half-settled popup, which
+ * is a race in the driver, not a finding about the product.
  */
-async function waitForSettledQuery(page: Page, sessionId: string): Promise<void> {
+async function waitForBoardRead(page: Page, sessionId: string): Promise<void> {
   await page.waitForFunction(
-    prefix => {
+    ferret => {
       const requests = (window as unknown as { __harnessRequests?: readonly string[] }).__harnessRequests ?? [];
-      return requests.some(entry => entry.includes(`${prefix}tasks?`));
+      return requests.some(entry => entry.startsWith('GET /v1/board?') && entry.includes(`ferret=${ferret}&`));
     },
-    `/v1/sessions/${sessionId}/`,
+    sessionId,
     { timeout: 10_000 },
   );
 }
 
+/**
+ * A chat that mentions two cards, through the real workspace shell with the board wired: the `&` menu, the
+ * references as the transcript draws them, each one tapped (the card it opens), and the Info rail's Tasks tab.
+ * The ledger proves nothing in the journey asked for a per-session task list.
+ */
+async function captureCardReferences(page: Page, viewport: HarnessViewport, rootUrl: string): Promise<void> {
+  const shot = async (name: string): Promise<void> => {
+    const target = join(outDir, `${viewport.name}-card-refs-${name}.png`);
+    await page.screenshot({ path: target });
+    process.stdout.write(`📸 ${viewport.name} card refs ${name} -> ${target}\n`);
+  };
+  page.on('pageerror', error => process.stdout.write(`   page error: ${error.message}\n`));
+  const open = async (query: string): Promise<void> => {
+    await page.goto(`${rootUrl}?cards${query}#session-workspace`);
+    await page.reload();
+    await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+  };
+  const refs = (): ReturnType<Page['locator']> => page.locator('[data-fy-reference^="task"]');
+
+  await open('');
+  await refs().first().waitFor({ state: 'visible' });
+  const written = await refs().evaluateAll(nodes => nodes.map(node => node.textContent ?? ''));
+  process.stdout.write(`   references drawn: ${written.join(' ')}\n`);
+  if (!written.includes('&B21') || !written.includes('&F12'))
+    fail(`the chat did not draw both card references at ${viewport.name}: ${written.join(' ')}`);
+  await page.waitForFunction(
+    () => document.querySelectorAll('[data-fy-reference^="task"]:not([data-fy-reference-closed])').length >= 2,
+  );
+  await shot('refs');
+
+  const composer = page.locator('[data-live-editor], textarea').last();
+  await composer.click();
+  await page.keyboard.press('ControlOrMeta+A');
+  await page.keyboard.press('Backspace');
+  await page.keyboard.type('@@@@');
+  await page.locator('[data-composer-autocomplete]').waitFor({ state: 'visible' });
+  await page.locator('[data-kind="task"]').first().waitFor({ state: 'visible' });
+  await shot('amp-menu');
+
+  for (const [name, text] of [
+    ['new', '&B21'],
+    ['legacy', '&F12'],
+  ] as const) {
+    await open('');
+    await refs().first().waitFor({ state: 'visible' });
+    const target = page.locator('[data-fy-reference^="task"]', { hasText: text }).first();
+    await target.scrollIntoViewIfNeeded();
+    await target.click();
+    await page.locator('[data-harness-card-detail]').waitFor({ state: 'visible' });
+    const opened = await page.locator('[data-harness-card-detail]').getAttribute('data-harness-card-detail');
+    process.stdout.write(`   ${text} opened card ${String(opened)}\n`);
+    const expected = name === 'new' ? 'B21' : 'F96';
+    if (opened !== expected) fail(`tapping ${text} opened ${String(opened)}, wanted ${expected}, at ${viewport.name}`);
+    await page.locator('.fy-board-detail h2, .fy-board-detail h1').first().waitFor({ state: 'visible' });
+    await page.waitForTimeout(300);
+    await shot(`clicked-${name}`);
+  }
+
+  await open('&info=tasks');
+  await page.getByText('Chat reference opens wrong pane').first().waitFor({ state: 'visible' });
+  await shot('card-from-chat');
+
+  const stray = await page.evaluate(() => {
+    const requests = (window as unknown as { __harnessRequests?: readonly string[] }).__harnessRequests ?? [];
+    return requests.filter(entry => /\/v1\/sessions\/[^/]+\/tasks|\/v1\/tasks/.test(entry));
+  });
+  if (stray.length > 0)
+    fail(`the card chat asked for a per-session task list at ${viewport.name}: ${stray.join(', ')}`);
+}
+
 function describeLedger(ledger: ReturnType<typeof sessionRequestLedger>): string {
   return (
-    `tasks=${ledger.board} q=[${ledger.queries.join('|')}] fs/index=${ledger.index} ` +
+    `board=${ledger.board} tasks=${ledger.legacyTasks} fs/index=${ledger.index} ` +
     `tasks/:id=${ledger.detail} fs?path=${ledger.listing}`
   );
 }
@@ -1891,7 +1954,7 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
       await cardRegion.getByText('No current-session files or tasks match', { exact: false }).waitFor();
     else if (card === 'unavailable') await cardRegion.getByText('unavailable:', { exact: false }).waitFor();
     else if (card === 'partial-coverage') await cardRegion.locator('[data-search-coverage]').waitFor();
-    if (answers) await waitForSettledQuery(page, ledgerSession);
+    if (answers) await waitForBoardRead(page, ledgerSession);
     const state = await inspectSessionSearch(page, selector);
     assertSessionSearchGeometry(state, `session search ${card}`, viewport);
     // The `indexing` and `unavailable` cards read hosts this ledger deliberately
@@ -1921,10 +1984,10 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
         `the ${card} session-search card still walks the filesystem at ${viewport.name}: ` +
           `${ledger.listing} \`/fs?path=\` request(s)`,
       );
-    if (answers && ledger.queries.join('|') !== typed)
+    if (ledger.legacyTasks > 0)
       fail(
-        `the ${card} session-search card did not send exactly one settled query at ${viewport.name}: ` +
-          `${JSON.stringify(ledger.queries)}`,
+        `the ${card} session-search card still requests the deleted per-session task API at ${viewport.name}: ` +
+          `${ledger.legacyTasks} request(s)`,
       );
 
     if (card === 'results') {
@@ -1935,9 +1998,9 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
       if (state.active === null) fail(`the results card points aria-activedescendant at nothing at ${viewport.name}`);
       if (!state.text.includes(SEARCH_PROSE_ONLY_TASK))
         fail(
-          `the results card lost its ask-prose-only task at ${viewport.name}: ` +
-            `${JSON.stringify(SEARCH_PROSE_ONLY_TASK)} matches \`port\` in no summary field, so its absence ` +
-            `means the query was answered locally rather than by the daemon`,
+          `the results card lost its summary-only card at ${viewport.name}: ` +
+            `${JSON.stringify(SEARCH_PROSE_ONLY_TASK)} matches \`port\` in its summary only, so its absence ` +
+            `means the search stopped reading the card summary`,
         );
       // A COMPLETE index still names what it deliberately left out — the
       // fixture's denied, excluded and unsupported entries — and must not borrow
@@ -2026,7 +2089,7 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
   await shellField.focus();
   await shellField.fill('port');
   await shell.locator('[role="option"]').nth(1).waitFor({ state: 'visible' });
-  await waitForSettledQuery(page, SEARCH_SESSION_ID);
+  await waitForBoardRead(page, SEARCH_SESSION_ID);
   const shellState = await inspectSessionSearch(page, shellSelector);
   assertSessionSearchGeometry(shellState, 'compiled app-shell session search', viewport);
   if (!shellState.focusVisible) fail(`compiled app-shell search has no keyboard focus ring at ${viewport.name}`);
@@ -2036,19 +2099,19 @@ async function captureSessionSearchEvidence(page: Page, viewport: HarnessViewpor
   /**
    * The exact ledger, and the only place it can be exact.
    *
-   * One provider holds `harness-session` on this page, and `/v1/sessions/:id/tasks`
-   * is dialled from exactly one place in the PWA — so `1` is a count, not a floor.
-   * The page's own Files tab and reference reads are `harness-workspace` and are
-   * filtered out by prefix rather than by hoping they did not fire.
+   * One provider holds `harness-session` on this page. Its board read is a floor rather than a count (the store
+   * refreshes a watched board), but the retired per-session task read must be exactly zero, and so must
+   * the per-row detail reads and the browser-side walk. The page's own Files tab and reference reads are
+   * `harness-workspace` and are filtered out by prefix rather than by hoping they did not fire.
    */
   const shellLedger = sessionRequestLedger(shellState.requests, SEARCH_SESSION_ID);
   process.stdout.write(
     `   compiled shell @ ${viewport.name} ledger[${SEARCH_SESSION_ID}]: ${describeLedger(shellLedger)}\n`,
   );
-  const shellExpected = { board: 1, queries: 'port', index: 1, detail: 0, listing: 0 };
+  const shellExpected = { board: true, legacyTasks: 0, index: 1, detail: 0, listing: 0 };
   const shellActual = {
-    board: shellLedger.board,
-    queries: shellLedger.queries.join('|'),
+    board: shellLedger.board >= 1,
+    legacyTasks: shellLedger.legacyTasks,
     index: shellLedger.index,
     detail: shellLedger.detail,
     listing: shellLedger.listing,
@@ -2342,6 +2405,10 @@ try {
             await captureSessionSearchEvidence(page, viewport, server.url.toString());
             return;
           }
+          if (CARD_REFS_ONLY) {
+            await captureCardReferences(page, viewport, server.url.toString());
+            return;
+          }
           if (AGENDA_ONLY) {
             // Pressing the real line is the point — this proves the journey (the line → the open drawer),
             // not just that the component renders.
@@ -2406,14 +2473,6 @@ try {
           }
           if (AGENT_CLIS_ONLY) {
             await captureAgentClis(page, viewport.name);
-            return;
-          }
-          if (TASK_BOARD_ONLY) {
-            const target = join(outDir, `task-board-${viewport.name}.png`);
-            const taskBoard = page.locator('#harness-task-board');
-            await taskBoard.scrollIntoViewIfNeeded();
-            await captureElement(page, taskBoard, target);
-            process.stdout.write(`📸 task board ${viewport.name} ${viewport.width}x${viewport.height} -> ${target}\n`);
             return;
           }
           if (PROJECTS_ONLY) {
@@ -3730,12 +3789,6 @@ try {
               process.stdout.write(`📸 Add a device ${name} ${viewport.name} -> ${target}\n`);
             }
             await page.setViewportSize({ width: viewport.width, height: viewport.height });
-            const taskDagTarget = join(outDir, `task-dag-${viewport.name}.png`);
-            await captureElement(page, page.locator('[data-task-graph]'), taskDagTarget);
-            process.stdout.write(`📸 Task dependency graph -> ${taskDagTarget}\n`);
-            const sessionTasksTarget = join(outDir, `session-tasks-${viewport.name}.png`);
-            await captureElement(page, page.getByLabel('Session task board'), sessionTasksTarget);
-            process.stdout.write(`📸 Session task board -> ${sessionTasksTarget}\n`);
             const taskNameTarget = join(outDir, `task-name-${viewport.name}.png`);
             await captureElement(page, page.getByLabel('Task name'), taskNameTarget);
             process.stdout.write(`📸 Task name -> ${taskNameTarget}\n`);

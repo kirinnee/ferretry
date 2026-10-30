@@ -282,6 +282,22 @@ describe('DaemonBoardStore cadence', () => {
     expect(environment.pending()).toBe(0);
   });
 
+  it('holds a view asked for without a beat by events alone, and a beat from any watcher keeps it', async () => {
+    const { store, port, environment } = open(fakePort());
+    const quiet = store.watch(query, [laptop], { beat: false });
+    await flush();
+    expect(environment.pending()).toBe(0);
+    const beating = store.watch(query, [laptop]);
+    expect(environment.pending()).toBe(1);
+    environment.advance(BOARD_DERIVE_MS);
+    environment.fire();
+    await flush();
+    expect(port.calls.filter(call => call.startsWith('board:'))).toHaveLength(2);
+    beating.release();
+    quiet.release();
+    expect(environment.pending()).toBe(0);
+  });
+
   it('reads nothing while the page is hidden and the next beat after it is shown', async () => {
     const { store, port, environment } = open(fakePort());
     store.watch(query, [laptop]);

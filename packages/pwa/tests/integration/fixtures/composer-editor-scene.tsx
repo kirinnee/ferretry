@@ -17,7 +17,7 @@
  *   ?runtime=your-turn|working   the model and effort chips, for a session whose last send left
  *                         `promptReady: false` behind (see below)
  *   ?entries=1            every Add to chat / quote entry point beside the composer — the shipped
- *                         transcript, terminal list, task row and skills surface, each delivering
+ *                         transcript, terminal list and skills surface, each delivering
  *                         through its own production path, inside a reference surface that proves
  *                         the tokens they add (so a chip is a link, as in the app)
  *   ?host=1              a location host is present, so "+" opens the add menu (attach, camera on touch, location)
@@ -52,17 +52,15 @@ import { isPromptKnownBusy, RuntimeModelControls } from '../../../src/components
 import { SessionSurfaceReferences } from '../../../src/components/session-surface-references.tsx';
 import { Transcript } from '../../../src/components/transcript.tsx';
 import { SessionSkillsSurface } from '../../../src/features/skills/session-skills-surface.tsx';
-import { TaskRow } from '../../../src/features/tasks/task-row.tsx';
 import { useAppViewport } from '../../../src/hooks/use-app-viewport.ts';
 import { LocationShareContext } from '../../../src/hooks/use-location-share.ts';
-import { addReferenceToComposer } from '../../../src/lib/composer-references.ts';
+import type { SessionCard } from '../../../src/lib/session-cards.ts';
 import { daemonConnection } from '../../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../../src/lib/daemon-scope.ts';
 import { DaemonDraftStore } from '../../../src/lib/drafts.ts';
 import type { LocationFix, LocationShareHost } from '../../../src/lib/location-share.ts';
 import { writeMdComposePref } from '../../../src/lib/md-compose.ts';
 import type { RuntimeModelCatalog } from '../../../src/lib/runtime-models.ts';
-import { taskSummary } from '../../support/tasks.ts';
 
 const parameters = new URLSearchParams(location.search);
 const editor = parameters.get('editor');
@@ -120,7 +118,17 @@ const TERMINALS: TerminalListView = {
   ],
   limits: { perSession: 6, global: 24, runningGlobal: 1, idleTimeoutSeconds: 900, scrollbackLines: 5_000 },
 };
-const TASK = taskSummary({ id: 'F12' });
+const TASK: SessionCard = {
+  id: 'F12',
+  title: 'Fix the transcript scroller',
+  summary: '',
+  lane: 'Implement',
+  closed: false,
+  active: true,
+  assignee: null,
+  touchedAt: '2026-07-02T00:00:00.000Z',
+  legacyId: null,
+};
 const SKILLS = {
   harness: 'claude' as const,
   skills: [
@@ -138,13 +146,6 @@ function EntryPoints() {
         sessionId={scope.sessionId}
       />
       <SessionSurfaceReferences connection={daemon} listTerminals={async () => TERMINALS} scope={scope} />
-      {/* The session search's own Add to chat, verbatim: the row hands its task up, the host adds it. */}
-      <TaskRow
-        daemonId={daemon.daemonId}
-        onAddToChat={task => addReferenceToComposer({ kind: 'task', id: task.id }, scope)}
-        onOpen={() => undefined}
-        task={TASK}
-      />
       <SessionSkillsSurface connection={daemon} loadCatalog={async () => SKILLS} scope={scope} />
     </section>
   );

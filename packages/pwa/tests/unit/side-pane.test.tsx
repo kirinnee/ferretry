@@ -183,7 +183,7 @@ describe('SidePaneWorkspace', () => {
 
   it('wires desktop tab switching and removal to the daemon-scoped model', async () => {
     openSidePaneTab(scopeA, 'files');
-    openSidePaneTab(scopeA, 'tasks');
+    openSidePaneTab(scopeA, 'skills');
     const view = await mount(workspace());
 
     await interact(() => (view.container.querySelector('[aria-label="Files"]') as HTMLButtonElement).click());
@@ -193,17 +193,17 @@ describe('SidePaneWorkspace', () => {
       (view.container.querySelector('[aria-label="Add or remove tabs"]') as HTMLButtonElement).click(),
     );
     await interact(() =>
-      (view.container.querySelector('[aria-label="Remove Tasks tab"]') as HTMLButtonElement).click(),
+      (view.container.querySelector('[aria-label="Remove Skills tab"]') as HTMLButtonElement).click(),
     );
-    expect(readSidePaneTabsState(scopeA).open).not.toContain('tasks');
+    expect(readSidePaneTabsState(scopeA).open).not.toContain('skills');
     await view.unmount();
   });
 
   it('wires phone tab switching and removal to the daemon-scoped model', async () => {
     openSidePaneTab(scopeA, 'files');
-    openSidePaneTab(scopeA, 'tasks');
+    openSidePaneTab(scopeA, 'skills');
     const view = await mount(workspace(scopeA, 'sheet'));
-    const trigger = view.container.querySelector('[aria-label="Switch tab — Tasks is showing"]') as HTMLButtonElement;
+    const trigger = view.container.querySelector('[aria-label="Switch tab — Skills is showing"]') as HTMLButtonElement;
 
     await interact(() => trigger.click());
     await interact(() => (view.container.querySelector('[aria-label="Files"]') as HTMLButtonElement).click());
@@ -213,9 +213,9 @@ describe('SidePaneWorkspace', () => {
       (view.container.querySelector('[aria-label="Switch tab — Files is showing"]') as HTMLButtonElement).click(),
     );
     await interact(() =>
-      (view.container.querySelector('[aria-label="Remove Tasks tab"]') as HTMLButtonElement).click(),
+      (view.container.querySelector('[aria-label="Remove Skills tab"]') as HTMLButtonElement).click(),
     );
-    expect(readSidePaneTabsState(scopeA).open).not.toContain('tasks');
+    expect(readSidePaneTabsState(scopeA).open).not.toContain('skills');
     await view.unmount();
   });
 

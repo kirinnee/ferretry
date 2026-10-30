@@ -45,4 +45,4 @@ daemon start and never writes to the old `tasks.json`.
 ## Finding the card an old reference became
 
 `GET /v1/board/tasks?legacyRef=<session>:<oldId>` answers the card, or 404. The old id may carry a sigil and any
-case (`abc123:&f12`). A malformed value is 400. Rendering old `&F12` references with this lookup is the PWA's job.
+case (`abc123:&f12`). A malformed value is 400. The PWA does not call it per reference: it resolves old `&F12` text from the `legacyRef` of the cards in a chat's own board slice ([reference-standard.md](reference-standard.md)).

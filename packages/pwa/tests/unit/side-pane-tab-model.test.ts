@@ -67,7 +67,7 @@ describe('instance identity', () => {
   });
 
   it('does not mistake a singleton id containing a colon for an instance', () => {
-    expect(parseSidePaneInstanceTabId('tasks')).toBeNull();
+    expect(parseSidePaneInstanceTabId('skills')).toBeNull();
     expect(parseSidePaneInstanceTabId('skills:groups')).toBeNull();
     expect(parseSidePaneInstanceTabId('file:')).toBeNull();
   });
@@ -75,7 +75,7 @@ describe('instance identity', () => {
 
 describe('the default strip', () => {
   it('starts every fresh strip on the human-chosen defaults, in strip order', () => {
-    expect(readSidePaneTabsState(scopeA).open).toEqual(['tasks', 'skills', 'lineage', 'mcp', 'analytics']);
+    expect(readSidePaneTabsState(scopeA).open).toEqual(['skills', 'lineage', 'mcp', 'analytics']);
     expect(readSidePaneTabsState(scopeA).active).toBeNull();
     expect(readSidePaneTabsState(scopeA).instances).toEqual({});
   });
@@ -128,7 +128,7 @@ describe('pins and attention are not side-pane tabs', () => {
 
   it('still opens an instance tab that is already live, which is not registered either', () => {
     const id = openSidePaneFileTab(scopeA, 'src/api.ts');
-    activateSidePaneTab(scopeA, 'tasks');
+    activateSidePaneTab(scopeA, 'skills');
 
     openSidePaneTab(scopeA, id);
 
@@ -157,7 +157,6 @@ describe('registry', () => {
     expect(getSidePaneTabDefinition('lineage')?.shortLabel).toBe('Lineage');
     expect(getSidePaneTabDefinition('nope')).toBeUndefined();
     expect(getSidePaneTabDefinitions().map(def => def.id)).toEqual([
-      'tasks',
       'skills',
       'lineage',
       'mcp',
@@ -324,7 +323,7 @@ describe('opening singleton tabs', () => {
 
   it('re-activates an already open tab without duplicating it', () => {
     openSidePaneTab(scopeA, 'files');
-    openSidePaneTab(scopeA, 'tasks');
+    openSidePaneTab(scopeA, 'skills');
     openSidePaneTab(scopeA, 'files');
 
     const state = readSidePaneTabsState(scopeA);
@@ -487,29 +486,29 @@ describe('retitling a live instance', () => {
 
 describe('activation', () => {
   it('switches between open tabs', () => {
-    activateSidePaneTab(scopeA, 'tasks');
+    activateSidePaneTab(scopeA, 'skills');
 
-    expect(readSidePaneTabsState(scopeA).active).toBe('tasks');
+    expect(readSidePaneTabsState(scopeA).active).toBe('skills');
   });
 
   it('refuses to activate a tab outside the strip and re-activating the current one', () => {
-    activateSidePaneTab(scopeA, 'tasks');
+    activateSidePaneTab(scopeA, 'skills');
     const before = getSidePaneTabsVersion();
 
     activateSidePaneTab(scopeA, 'files');
-    activateSidePaneTab(scopeA, 'tasks');
+    activateSidePaneTab(scopeA, 'skills');
 
     expect(getSidePaneTabsVersion()).toBe(before);
-    expect(readSidePaneTabsState(scopeA).active).toBe('tasks');
+    expect(readSidePaneTabsState(scopeA).active).toBe('skills');
   });
 
   it('closes the pane but keeps the strip the reader chose', () => {
-    activateSidePaneTab(scopeA, 'tasks');
+    activateSidePaneTab(scopeA, 'skills');
     deactivateSidePane(scopeA);
 
     const state = readSidePaneTabsState(scopeA);
     expect(state.active).toBeNull();
-    expect(state.open).toContain('tasks');
+    expect(state.open).toContain('skills');
 
     const before = getSidePaneTabsVersion();
     deactivateSidePane(scopeA);
@@ -527,11 +526,11 @@ describe('removal', () => {
   });
 
   it('activates the following tab when the active one is removed', () => {
-    activateSidePaneTab(scopeA, 'tasks');
+    activateSidePaneTab(scopeA, 'skills');
 
-    removeSidePaneTab(scopeA, 'tasks');
+    removeSidePaneTab(scopeA, 'skills');
 
-    expect(readSidePaneTabsState(scopeA).active).toBe('skills');
+    expect(readSidePaneTabsState(scopeA).active).toBe('lineage');
   });
 
   it('falls back to the preceding tab when the removed one was last', () => {
@@ -543,9 +542,9 @@ describe('removal', () => {
   });
 
   it('closes the pane when the last tab goes', () => {
-    writeSidePaneTabsState(scopeA, { open: ['tasks'], active: 'tasks', instances: {} });
+    writeSidePaneTabsState(scopeA, { open: ['skills'], active: 'skills', instances: {} });
 
-    removeSidePaneTab(scopeA, 'tasks');
+    removeSidePaneTab(scopeA, 'skills');
 
     const state = readSidePaneTabsState(scopeA);
     expect(state.open).toEqual([]);
@@ -553,11 +552,11 @@ describe('removal', () => {
   });
 
   it('leaves the other tabs alone when an inactive tab is removed', () => {
-    activateSidePaneTab(scopeA, 'skills');
+    activateSidePaneTab(scopeA, 'lineage');
 
-    removeSidePaneTab(scopeA, 'tasks');
+    removeSidePaneTab(scopeA, 'skills');
 
-    expect(readSidePaneTabsState(scopeA).active).toBe('skills');
+    expect(readSidePaneTabsState(scopeA).active).toBe('lineage');
   });
 
   it('disposes an instance and tells its owner, leaving no phantom tab behind', () => {
@@ -608,7 +607,7 @@ describe('strip order', () => {
   });
 
   it('sorts an unknown tab last without inventing a position for it', () => {
-    expect(sortSidePaneTabs(['ghost', 'analytics', 'tasks'])).toEqual(['tasks', 'analytics', 'ghost']);
+    expect(sortSidePaneTabs(['ghost', 'analytics', 'skills'])).toEqual(['skills', 'analytics', 'ghost']);
     expect(sortSidePaneTabs(['ghost-b', 'ghost-a'])).toEqual(['ghost-a', 'ghost-b']);
   });
 
@@ -633,18 +632,18 @@ describe('whole-state writes', () => {
       notifications += 1;
     });
 
-    writeSidePaneTabsState(scopeA, { open: ['analytics', 'tasks'], active: 'tasks', instances: {} });
+    writeSidePaneTabsState(scopeA, { open: ['analytics', 'skills'], active: 'skills', instances: {} });
 
-    expect(readSidePaneTabsState(scopeA).open).toEqual(['tasks', 'analytics']);
+    expect(readSidePaneTabsState(scopeA).open).toEqual(['skills', 'analytics']);
     expect(notifications).toBe(1);
 
     unsubscribe();
-    writeSidePaneTabsState(scopeA, { open: ['tasks'], active: 'tasks', instances: {} });
+    writeSidePaneTabsState(scopeA, { open: ['skills'], active: 'skills', instances: {} });
     expect(notifications).toBe(1);
   });
 
   it('treats a missing instances map as no instances', () => {
-    writeSidePaneTabsState(scopeA, { open: ['tasks'], active: null } as never);
+    writeSidePaneTabsState(scopeA, { open: ['skills'], active: null } as never);
 
     expect(readSidePaneTabsState(scopeA).instances).toEqual({});
   });

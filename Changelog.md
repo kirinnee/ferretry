@@ -1,3 +1,17 @@
+## [4.136.0](https://github.com/kirinnee/ferretry/compare/v4.135.0...v4.136.0) (2026-10-30)
+
+### Features
+
+* **pwa:** agenda card acts like the chat (quote, History bubbles, Esc) ([#1031](https://github.com/kirinnee/ferretry/issues/1031)) ([167a9a3](https://github.com/kirinnee/ferretry/commit/167a9a3f40b08d833a5f92b9f9d6b6845c86144e))
+* **pwa:** declutter the chat top bar ([#1032](https://github.com/kirinnee/ferretry/issues/1032)) ([eae6af7](https://github.com/kirinnee/ferretry/commit/eae6af7874964039c28fd2643ccc2305bb73c05c))
+* **pwa:** read a chat's tasks from the board; retire per-session task code ([#1030](https://github.com/kirinnee/ferretry/issues/1030)) ([06c80b8](https://github.com/kirinnee/ferretry/commit/06c80b83da817cb0a08b64ef795570119883c88f))
+
+### Fixes
+
+* **board:** type no board news into chats; keep only actionable nudges, as plain sentences ([#1026](https://github.com/kirinnee/ferretry/issues/1026)) ([92a69a0](https://github.com/kirinnee/ferretry/commit/92a69a0630a667ba2388d529b5b5464407466d2c))
+* **pwa:** a queue message typed and not proven reads unconfirmed, never 'sending' ([#1038](https://github.com/kirinnee/ferretry/issues/1038)) ([725267f](https://github.com/kirinnee/ferretry/commit/725267f801a5be6fe30bfdbc0a5e3de923fb4012))
+* **pwa:** remove left accent rails everywhere ([#1036](https://github.com/kirinnee/ferretry/issues/1036)) ([dd41c0d](https://github.com/kirinnee/ferretry/commit/dd41c0ddf91dbb65633102ff1609bcc21d6d77b3))
+
 ## [4.135.0](https://github.com/kirinnee/ferretry/compare/v4.134.1...v4.135.0) (2026-10-30)
 
 ### Features

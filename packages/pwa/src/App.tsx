@@ -2707,7 +2707,7 @@ export function AppShell() {
       />
     );
     content = (
-      <SessionSearchProvider connection={connection} scope={currentSessionScope}>
+      <SessionSearchProvider board={store.board} connection={connection} scope={currentSessionScope}>
         <BoardOriginProvider value={boardOrigin}>
           <WhatsNewProvider value={whatsNew.entry}>
             <RestartOverlayProvider>

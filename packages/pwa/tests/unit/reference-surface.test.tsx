@@ -187,17 +187,32 @@ describe('sessionReferenceSurface', () => {
     should(readSidePaneTabsState(scope).instances[id]?.selection).deepEqual({ line: 4 });
   });
 
-  test('should send task and skill clicks to their own pane', () => {
-    // Arrange
+  test('should send a skill click to the skills pane and leave a task click alone with no card route to open', () => {
     const surface = sessionReferenceSurface({ connection, scope, fetcher: browserFetch });
 
-    // Act
     surface.onTaskOpen?.('F12');
     const afterTask = readSidePaneTabsState(scope).active;
     surface.onSkillOpen?.('summary');
 
-    // Assert
-    should([afterTask, readSidePaneTabsState(scope).active]).deepEqual(['tasks', 'skills']);
+    should([afterTask, readSidePaneTabsState(scope).active]).deepEqual([null, 'skills']);
+  });
+
+  test('should open the card an old task reference was imported as, and prefer a card on the slice with that id', () => {
+    const visited: string[] = [];
+    const surface = sessionReferenceSurface({
+      connection,
+      scope,
+      fetcher: browserFetch,
+      onNavigate: to => visited.push(to),
+      tasks: [{ id: 'F12' }, { id: 'F96', legacyId: 'F12' }, { id: 'F97', legacyId: 'F7' }],
+    });
+
+    surface.onTaskOpen?.('f7');
+    surface.onTaskOpen?.('f12');
+
+    should(visited).deepEqual(['/d/daemon-a/board/F97', '/d/daemon-a/board/F12']);
+    should(surface.taskReferenceResolver?.('f7')).be.true();
+    should(surface.taskReferenceResolver?.('F8')).be.false();
   });
 
   test("should open a task on this machine's board when the host can navigate, not the Tasks sheet", () => {

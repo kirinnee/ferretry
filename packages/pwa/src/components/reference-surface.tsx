@@ -32,6 +32,7 @@ import type { DaemonSessionScope } from '../lib/daemon-scope.ts';
 import type { ResolvedSurfaceReference } from '../lib/references.ts';
 import type { DaemonFetch } from '../lib/runtime-models.ts';
 import { createSurfaceReferenceResolver, terminalIdForSurfaceKey } from '../lib/surface-references.ts';
+import { resolveCardReference } from '../lib/session-cards.ts';
 import { createTaskReferenceResolver } from '../lib/task-reference-context.tsx';
 import { daemonBoardCardPath } from '../lib/pages/routes.ts';
 import {
@@ -81,8 +82,8 @@ export interface SessionReferenceSurfaceOptions {
    * reported as a fleet with nobody in it.
    */
   readonly sessions?: readonly SessionView[];
-  /** This session's task board, when the host already holds it. */
-  readonly tasks?: readonly { readonly id: string }[];
+  /** This ferret's slice of the board (its cards, old ids included), when the host already holds it. */
+  readonly tasks?: readonly { readonly id: string; readonly legacyId?: string | null }[];
   /**
    * This session's Agenda LEDGER — open and resolved ids — when the host already holds it. An
    * answered item is still on the record, so its `!A3` stays a link.
@@ -193,10 +194,11 @@ export function sessionReferenceSurface(options: SessionReferenceSurfaceOptions)
     },
     // ONE click behaviour: `&F412` opens the card detail on THIS machine's board, which a link and Back both
     // reach, in a chat as anywhere. Only a host with no card route (an older daemon, or no router) falls
-    // back to its own Tasks destination, then to the side pane's Tasks sheet.
-    onTaskOpen: id => {
+    // back to its own Tasks destination, when it has one.
+    onTaskOpen: written => {
+      const id = tasks === undefined ? written : (resolveCardReference(tasks, written) ?? written);
       if (cardRoute && onNavigate !== undefined) onNavigate(daemonBoardCardPath(scope.daemonId, id.toUpperCase()));
-      else (destinations.openTasks ?? (() => openSidePaneTab(scope, 'tasks')))();
+      else destinations.openTasks?.();
     },
     // Attention is deliberately NOT a side-pane tab (handover #35). A proved
     // id opens the Agenda panel at the top of the conversation, at that item;
