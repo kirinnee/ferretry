@@ -24,8 +24,8 @@ import {
 import {
   AgendaChangeFanout,
   AgendaService,
-  HarnessPromptAnswerDelivery,
   HarnessPromptAgenda,
+  HarnessPromptAnswerDelivery,
 } from '../../../src/lib/agenda/index.ts';
 import { parseSessionId } from '../../../src/lib/index.ts';
 
@@ -109,11 +109,21 @@ async function open(outcome: 'answer' | 'reject') {
   );
   const harness = new HarnessPromptAgenda(service, new KeyedSerialExecutor(), new StorageHarnessPromptStates(storage));
   const settling: Promise<void>[] = [];
-  storage.subscribeStates((sessionId, state) => void settling.push(harness.stateWritten(sessionId, state)));
+  const unsubscribe = storage.subscribeStates(
+    (sessionId, state) => void settling.push(harness.stateWritten(sessionId, state)),
+  );
   const settled = async () => {
     while (settling.length > 0) await Promise.all(settling.splice(0));
   };
-  return { home, storage, boards, service, harness, driven, settled };
+  /**
+   * The daemon goes DOWN: its live subscription stops hearing state writes, after what it already heard
+   * has settled. A write made after this is one no running daemon saw, which is what a restart reconciles.
+   */
+  const down = async () => {
+    await settled();
+    unsubscribe();
+  };
+  return { home, storage, boards, service, harness, driven, settled, down };
 }
 
 afterEach(async () => {
@@ -176,10 +186,13 @@ describe('harness prompts on the board', () => {
       turn: 1,
       pendingQuestion: QUESTION,
     });
-    await first.settled();
+    await first.down();
     const states = new StorageHarnessPromptStates(first.storage);
 
     // Act
+    // The first daemon is down, so nothing but the restarted one's reconcile reads these writes. Its
+    // subscription used to stay live here and race the reconcile on the same board file, from an
+    // executor of its own, so the stop was sometimes seen twice and sometimes raised again.
     const restarted = new HarnessPromptAgenda(first.service, new KeyedSerialExecutor(), states);
     await restarted.reconcile(['session-1', 'not a session']);
     const kept = await first.service.list('session-1');
