@@ -45,12 +45,21 @@ export type DaemonAgendaCause = 'source-reconciliation' | 'warden-escalation' | 
  */
 export type AgendaActor =
   | { readonly kind: 'human' }
-  | { readonly kind: 'agent'; readonly sessionId: string; readonly name: string | null }
+  | {
+      readonly kind: 'agent';
+      readonly sessionId: string;
+      readonly name: string | null;
+      /**
+       * Set only by the agenda service, after it proved by lineage that this session started the session
+       * whose board it is changing: the lead may then edit, surface, resolve or dismiss that board's items.
+       */
+      readonly overSubFerret?: true;
+    }
   | { readonly kind: 'daemon'; readonly cause: DaemonAgendaCause };
 
 /** Whether an agent actor is confined to the board or session it is trying to change. */
 export function agentConfinedTo(actor: AgendaActor, sessionId: string): boolean {
-  return actor.kind !== 'agent' || actor.sessionId === sessionId;
+  return actor.kind !== 'agent' || actor.sessionId === sessionId || actor.overSubFerret === true;
 }
 
 export type AgendaEntry =
@@ -298,6 +307,7 @@ export function isWardenEscalationAgenda(entry: AgendaEntry): boolean {
 export function canDismissAgenda(actor: AgendaActor, entry: AgendaEntry): boolean {
   if (actor.kind === 'human') return true;
   if (actor.kind === 'agent') {
+    if (actor.overSubFerret === true) return !isWardenEscalationAgenda(entry);
     return entry.origin.kind === 'agent' && entry.origin.sessionId === actor.sessionId;
   }
   return entry.origin.kind === 'daemon';

@@ -14,7 +14,7 @@ import type {
 
 const SESSION_FLAG = '-s, --session <id>';
 const SESSION_HELP =
-  'target another session; an agent may mutate only its own session (defaults to the current session)';
+  'target another session; an agent may mutate only its own session; a lead may also edit, surface, done or dismiss in a sub-ferret it started (defaults to the current session)';
 const JSON_FLAG = '--json';
 const JSON_HELP = 'print the protocol payload instead of the human rendering';
 
