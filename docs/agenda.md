@@ -10,10 +10,16 @@ the wire contract is `packages/protocol/src/lib/attention.ts`. This page says wh
 ## Agenda mode is a switch
 
 A ferret keeps an agenda only while its **Agenda mode** switch is on. It is a recorded per-session setting
-like Hypermedia and Pack mode (`config.agenda`, `sessionAgendaEnabled`; OFF unless set), switched from the
+like Hypermedia and Pack mode (`config.agenda`, `sessionAgendaEnabled`; absent means OFF, but a new ferret records ON
+from the machine default below), switched from the
 ferret's **Actions › Agenda mode** toggle or `fy notify agenda on|off`, and it takes effect at the ferret's
 next launch. With it off the ferret is told only the notify rule and the session summary carries no
-`agendaMode`, so the chat draws no agenda line or drawer. The whole contract is
+`agendaMode`, so the chat draws no agenda line or drawer.
+
+**The machine default** is `agendaMode` in `machine.yaml`, on unless turned off in Settings › Machines, with
+`fy machine set agenda-mode on|off`. It only decides what a ferret records when it starts and has recorded
+nothing; a stored per-ferret value always wins and ferrets that already exist are not touched. It is not a
+loosening, so it needs no `fy config confirm`. The whole contract is
 [notifications.md § Agenda mode](notifications.md#agenda-mode).
 
 ## Turns

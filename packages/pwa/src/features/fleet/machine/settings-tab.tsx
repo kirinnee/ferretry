@@ -6,6 +6,7 @@
  *   applies to new sessions; with sessions running, the tab says how many keep the old mode (E32).
  * - **Browser mode** — Headless, or a Real window an owner browses through (docs/browser-mode.md).
  * - **Auto-resume after restart** — On (the default) or Off, and what the last restart resumed.
+ * - **Agenda mode** — On (the default) or Off for ferrets started from now on (docs/agenda.md).
  * - **Tools on <machine>** — Claude Code and Codex, installed or not, with **Install**.
  * - **Setup** — **Set up <machine>** while it is not set up, otherwise **Import again**; **Clone from
  *   another machine**.
@@ -60,7 +61,7 @@ export const AGENT_CONTROL_WORDS: Readonly<
   },
 };
 
-/** The three things a `machine.settings` change always carries, unchanged unless the caller means
+/** The things a `machine.settings` change always carries, unchanged unless the caller means
  *  to change one of them — so a section that edits only one never clobbers the other two. */
 export const machineSettings = (
   machine: FleetMachineView,
@@ -70,6 +71,7 @@ export const machineSettings = (
     readonly agentControl: FleetAgentControl;
     readonly browserMode: BrowserMode;
     readonly autoResume: boolean;
+    readonly agendaMode: boolean;
   }>,
 ) => ({
   kind: 'machine.settings' as const,
@@ -574,6 +576,74 @@ export function AutoResumeSection({
   );
 }
 
+/** "Agenda mode" for new ferrets: each choice's words. */
+export const AGENDA_MODE_WORDS: Readonly<Record<'on' | 'off', { readonly title: string; readonly detail: string }>> = {
+  on: {
+    title: 'On',
+    detail:
+      'New ferrets keep an agenda: what only you can decide or do becomes an item you answer from the Inbox. A ferret you already have keeps its own switch.',
+  },
+  off: {
+    title: 'Off',
+    detail:
+      'New ferrets send plain notices only. Turn Agenda mode on for one ferret from its Actions menu; a ferret you already have keeps its own switch.',
+  },
+};
+
+export function AgendaModeSection({
+  machine,
+  machineName,
+  access,
+  onSaved,
+}: {
+  readonly machine: FleetMachineView;
+  readonly machineName: string;
+  readonly access: SetupAccess;
+  readonly onSaved: () => void;
+}) {
+  const { changes } = access;
+  const current = machine.agendaMode === false ? 'off' : 'on';
+  const [draft, setDraft] = useState<'on' | 'off'>(current);
+  const pending = draft !== current;
+  const save = (): void => {
+    void changes.apply(machineSettings(machine, { agendaMode: draft === 'on' })).then(result => {
+      if (result.kind === 'refused') return;
+      onSaved();
+    });
+  };
+  // A daemon that predates the default starts every ferret off and cannot be asked to do otherwise.
+  if (machine.agendaMode === undefined) return null;
+  return (
+    <SetupSection title="Agenda mode" name="agenda-mode">
+      <RadioChoices
+        legend="Agenda mode for new ferrets"
+        legendHidden
+        name="agenda-mode"
+        value={draft}
+        onChoose={value => {
+          setDraft(value);
+          changes.clear();
+        }}
+        options={(['on', 'off'] as const).map(choice => ({ id: choice, ...AGENDA_MODE_WORDS[choice] }))}
+      />
+      {pending ? (
+        <ChangeApplyPanel
+          machineName={machineName}
+          authority={changes.authority}
+          busy={changes.busy}
+          refusal={changes.refusal}
+          submitLabel="Save agenda mode"
+          onSubmit={save}
+        >
+          <Button type="button" data-agenda-mode-undo="" onClick={() => setDraft(current)}>
+            Keep {AGENDA_MODE_WORDS[current].title}
+          </Button>
+        </ChangeApplyPanel>
+      ) : null}
+    </SetupSection>
+  );
+}
+
 export function MachineSettingsTab(props: MachineSettingsTabProps) {
   const { machine, machineName, online, checking, connection, createClient, onRetry, sources, browser } = props;
   // After a save here the machine is read again QUIETLY: a loud re-check swapped every section for
@@ -670,6 +740,13 @@ export function MachineSettingsTab(props: MachineSettingsTabProps) {
       />
       <AutoResumeSection
         key={String(machine.autoResume)}
+        machine={machine}
+        machineName={machineName}
+        access={access}
+        onSaved={onSaved}
+      />
+      <AgendaModeSection
+        key={`agenda-${String(machine.agendaMode)}`}
         machine={machine}
         machineName={machineName}
         access={access}

@@ -519,6 +519,59 @@ describe('MachineSettingsTab', () => {
     );
   });
 
+  it('hides Agenda mode for a daemon that predates it, and never sends it one', async () => {
+    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
+      expect(q('[data-setup-section="agenda-mode"]')).toBeNull();
+      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
+      await click(q('[data-change-submit]'), 'save');
+      const staged = must(
+        calls.find(call => call.path === '/v1/fleet/proposals'),
+        'the staged change call',
+      );
+      expect(JSON.stringify(staged.body)).not.toContain('agendaMode');
+    });
+  });
+
+  it('shows Agenda mode On, and Save sends Off with a way to Keep On', async () => {
+    await withTab(
+      {
+        machine: machineView({ agendaMode: true }),
+        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
+      },
+      async ({ q, calls, retried }) => {
+        const section = must(q('[data-setup-section="agenda-mode"]'), 'agenda-mode');
+        expect(section.querySelector('[data-setup-choice="on"]')?.textContent).toContain('keep an agenda');
+        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="on"] input')?.checked).toBe(true);
+        await click(section.querySelector('[data-setup-choice="off"] input'), 'off radio');
+        expect(q('[data-change-submit]')?.textContent).toBe('Save agenda mode');
+        expect(q('[data-agenda-mode-undo]')?.textContent).toBe('Keep On');
+        await click(q('[data-change-submit]'), 'save');
+        const staged = must(
+          calls.find(call => call.path === '/v1/fleet/proposals'),
+          'the staged change call',
+        );
+        expect(JSON.stringify(staged.body)).toContain('"agendaMode":false');
+        expect(retried.count).toBe(1);
+      },
+    );
+  });
+
+  it('shows Agenda mode Off and undoes a pending switch', async () => {
+    await withTab(
+      {
+        machine: machineView({ agendaMode: false }),
+        answers: { '/v1/fleet/proposals': new Error('unreachable') },
+      },
+      async ({ q }) => {
+        const section = must(q('[data-setup-section="agenda-mode"]'), 'agenda-mode');
+        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="off"] input')?.checked).toBe(true);
+        await click(section.querySelector('[data-setup-choice="on"] input'), 'on radio');
+        await click(q('[data-agenda-mode-undo]'), 'keep');
+        expect(q('[data-change-submit]')).toBeNull();
+      },
+    );
+  });
+
   it('lists the tools and offers Install only for one that is missing', async () => {
     await withTab({}, async ({ q, browser }) => {
       const tools = must(q('[data-setup-section="tools"]'), 'tools');

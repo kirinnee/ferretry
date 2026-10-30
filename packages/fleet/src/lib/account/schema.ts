@@ -182,6 +182,13 @@ export const MACHINE_SHAPE = {
    * what a ferret is reminded of, never what it may do or spend. Read at every turn end.
    */
   attentionNudge: z.boolean().default(true),
+  /**
+   * "Agenda mode for new ferrets" (docs/agenda.md § The machine default): whether a ferret that is started or adopted
+   * from now on is told to keep an agenda. On by default. It is recorded on the new ferret once, as `config.agenda`, so
+   * a ferret that already exists is never touched and an owner's explicit per-ferret switch always wins. Not a
+   * loosening either way: it changes what a ferret is told, never what it may do or spend. Read at every start.
+   */
+  agendaMode: z.boolean().default(true),
 };
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});
