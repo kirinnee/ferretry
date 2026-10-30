@@ -25,6 +25,7 @@ import {
 import { initialVimState, normalVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
+import { referencesOf } from '../lib/answer-chip.ts';
 import { useSendOutbox } from '../lib/store.tsx';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
@@ -767,7 +768,15 @@ export function Composer({
       } else {
         // Saved on this device first; the machine hears of it second. Offline, it stays and goes later.
         const { entry, outcome } = await outbox.submit(
-          { daemonId: daemon.daemonId, sessionId, message, attachmentIds: input.attachmentIds ?? [], now: interrupt },
+          {
+            daemonId: daemon.daemonId,
+            sessionId,
+            message,
+            attachmentIds: input.attachmentIds ?? [],
+            now: interrupt,
+            // The "re" chips, kept with the message so a later attempt is still about the same item.
+            references: referencesOf(api),
+          },
           { send: (target, body, requestId) => api.send(target, body, requestId) },
         );
         if (outcome.kind === 'refused') {

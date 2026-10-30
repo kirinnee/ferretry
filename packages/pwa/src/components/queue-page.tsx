@@ -82,7 +82,7 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
           />
           <div className="flex gap-2">
             <button
-              className="rounded-control border border-border px-3 py-2"
+              className="kt-btn kt-btn--sm"
               disabled={text.trim().length === 0}
               onClick={() => void act(() => handlers.edit(row, text.trim())).then(done => done && setEditing(false))}
               type="button"
@@ -90,7 +90,7 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
               Save
             </button>
             <button
-              className="rounded-control border border-border px-3 py-2"
+              className="kt-btn kt-btn--sm"
               onClick={() => {
                 setText(row.text);
                 setEditing(false);
@@ -110,9 +110,10 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
         </p>
       )}
       {row.editable && !editing ? (
-        <div className="flex gap-2">
+        <div className="flex gap-1">
           <button
-            className="rounded-control border border-border px-3 py-2"
+            className="kt-btn kt-btn--sm kt-btn--flush-start"
+            data-variant="ghost"
             onClick={() => {
               setText(row.text);
               setEditing(true);
@@ -122,7 +123,8 @@ function QueueRowView({ row, handlers }: { readonly row: QueueRow; readonly hand
             Edit
           </button>
           <button
-            className="rounded-control border border-border px-3 py-2"
+            className="kt-btn kt-btn--sm"
+            data-variant="ghost"
             onClick={() => void act(() => handlers.cancel(row))}
             type="button"
           >
