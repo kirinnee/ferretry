@@ -48,6 +48,12 @@ class Sink implements BuzzSink {
   async raised(_session: string, item: AgendaItem): Promise<void> {
     this.notices.push(item.id);
   }
+
+  readonly woken: string[] = [];
+
+  async woke(_session: string, item: AgendaItem): Promise<void> {
+    this.woken.push(item.id);
+  }
 }
 
 const ASK = {

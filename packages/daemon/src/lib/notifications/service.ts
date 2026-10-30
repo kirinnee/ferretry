@@ -9,6 +9,7 @@ import {
   pingNotificationPayload,
   type SessionNotificationPayload,
   stoppedNotificationPayload,
+  wokeNotificationPayload,
 } from './policy.ts';
 import {
   type NotificationClock,
@@ -82,6 +83,13 @@ export class NotificationService implements AgendaRaisedObserver {
   async deadline(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
     await this.announce({ sessionId, agendaId: item.id, deadline: true }, item, () =>
       deadlineNotificationPayload(sessionId, item, snapshot, this.options.clock.now()),
+    );
+  }
+
+  /** A snoozed item woke and it blocks or has a deadline: its one push for this wake. Total. */
+  async woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
+    await this.announce({ sessionId, agendaId: item.id, woke: item.waitingSince }, item, () =>
+      wokeNotificationPayload(sessionId, item, snapshot),
     );
   }
 

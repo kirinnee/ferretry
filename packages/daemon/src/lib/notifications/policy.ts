@@ -28,6 +28,8 @@ export interface NotificationIdentity {
   readonly deadline?: boolean;
   /** The one push a stop makes, named by the instant the ferret's turn boundary was recorded. */
   readonly stoppedAt?: string;
+  /** The one push a snoozed item makes when it wakes, named by the instant it woke. */
+  readonly woke?: string;
   /** @deprecated retired; ledgers written before the buzz policy carry it. */
   readonly infoRequest?: number;
   /** @deprecated retired; ledgers written before the buzz policy carry it. */
@@ -53,6 +55,7 @@ export function notificationKey(identity: NotificationIdentity): string {
   // the stop, and the key must not.
   if (identity.stoppedAt !== undefined) return `${KEY_PREFIX}${identity.sessionId}:stopped:${identity.stoppedAt}`;
   const base = `${KEY_PREFIX}${identity.sessionId}:${identity.agendaId}`;
+  if (identity.woke !== undefined) return `${base}:woke:${identity.woke}`;
   if (identity.ping === true) return `${base}:ping`;
   if (identity.deadline === true) return `${base}:deadline`;
   return `${base}${identity.infoRequest === undefined ? '' : `:info-${identity.infoRequest}`}${identity.surfaced === true ? ':surfaced' : ''}`;
@@ -97,6 +100,25 @@ export function deadlineNotificationPayload(
     kind: 'attention',
     title: agendaNotificationTitle(agendaTitle(item)),
     body: clipAtWord(`${timeLeftPhrase(item.neededBy, now)}: ${oneLine(item.subject)}`, AGENDA_PUSH_BODY_LENGTH),
+    tag: `attention-${sessionId}`,
+    url: agendaNotificationPath(sessionId, item.id),
+    count: snapshot.count,
+  }) as SessionNotificationPayload;
+}
+
+/** What a snoozed item says when it wakes and it blocks or has a deadline: "Back from snooze: <ask>". */
+export function wokeNotificationPayload(
+  sessionId: string,
+  item: AgendaItem,
+  snapshot: AgendaSnapshot,
+): SessionNotificationPayload {
+  return PushNotificationPayloadSchema.parse({
+    version: 1,
+    eventKey: `attention-woke:${item.id}`,
+    sessionId,
+    kind: 'attention',
+    title: agendaNotificationTitle(agendaTitle(item)),
+    body: clipAtWord(`Back from snooze: ${oneLine(item.subject)}`, AGENDA_PUSH_BODY_LENGTH),
     tag: `attention-${sessionId}`,
     url: agendaNotificationPath(sessionId, item.id),
     count: snapshot.count,

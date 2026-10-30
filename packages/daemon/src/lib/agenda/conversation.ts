@@ -136,7 +136,8 @@ export function inDiscussion(item: Pick<AgendaItem, 'waitingOn' | 'waitingFor'>)
  * them out of the needs-you count while every device still re-reads the board when one starts or ends.
  */
 export function sessionAgendaSummary(snapshot: AgendaSnapshot): SessionAgendaSummary | undefined {
-  const items = snapshot.items.filter(item => item.notice !== true);
+  // A parked item (snoozed, or replied to) waits on nobody: it is neither open nor unread until it comes back.
+  const items = snapshot.items.filter(item => item.notice !== true && item.parked === undefined);
   const [oldest] = items;
   if (oldest === undefined) return undefined;
   const first = items.find(item => !inDiscussion(item)) ?? oldest;
