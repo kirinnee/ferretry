@@ -340,12 +340,12 @@ export function useSessionSearch(): SessionSearchContextValue {
 export function SessionSearchProvider({
   connection,
   scope,
-  focusSignal,
+  focusSignal = 0,
   children,
 }: {
   readonly connection: DaemonConnection;
   readonly scope: DaemonSessionScope | null;
-  readonly focusSignal: number;
+  readonly focusSignal?: number;
   readonly children: ReactNode;
 }) {
   const fetcher = useDaemonFetch();
@@ -698,9 +698,9 @@ export function SessionSearchControl({
 }: {
   readonly className?: string;
   /**
-   * The ONE mount a global Cmd/Ctrl+K focuses. Pane copies stay fully usable,
-   * but a shared focus signal may not make every mounted input race to claim
-   * focus and presentation; the app-bar copy owns that global entry point.
+   * The ONE mount a provider `focusSignal` focuses. The shell no longer sends one
+   * (Cmd/Ctrl+K opens the global finder), but a host that does still reaches one
+   * input rather than every mounted copy racing to claim focus and presentation.
    */
   readonly shortcutTarget?: boolean;
   /**
