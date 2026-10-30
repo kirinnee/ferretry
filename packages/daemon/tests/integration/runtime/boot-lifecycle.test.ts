@@ -59,6 +59,7 @@ import {
   BrowserLoginWindowService,
   BrowserProfileStore,
   type BunRelayCarrier,
+  DaemonHealthProbe,
 } from '../../../src/adapters/index.ts';
 import { FileSessionEnvironmentStore } from '../../../src/adapters/session/lifecycle/index.ts';
 import {
@@ -5780,7 +5781,13 @@ describe('daemon boot lifecycle', () => {
     const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data: () => {} } });
     const cleanups: Array<() => void | Promise<void>> = [];
     const said = recordingNotices();
-    const world = { ...(await worldAt(home, silent.port, async () => {})), notices: said.port };
+    const shipped = await worldAt(home, silent.port, async () => {});
+    // The shipped probe gives a silent address two seconds; this one gives it a tenth of that, against
+    // the same real listener, so the case proves the refusal without waiting the full window out.
+    const probe = new DaemonHealthProbe({
+      fetch: (url, init) => fetch(url, { ...init, signal: AbortSignal.timeout(150) }),
+    });
+    const world = { ...shipped, boot: { ...shipped.boot, probe }, notices: said.port };
 
     // Act
     const code = await start(world, cleanups);
