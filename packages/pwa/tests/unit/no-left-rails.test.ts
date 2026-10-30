@@ -51,7 +51,7 @@ const scanTs = (source: string): Finding[] =>
  *
  * - A markdown / quote bar is a blockquote, not a rail on a card.
  * - The HUD bracket is the top-left CORNER of a bracket drawn with a top border, not a bar.
- * - The ferret message card's rail is removed by the peer-message change; its entry goes with it.
+ * - The list may only shrink: an entry that no longer matches a real line fails (see below).
  */
 const ALLOWED: readonly { readonly file: string; readonly includes: string; readonly why: string }[] = [
   {
@@ -64,21 +64,20 @@ const ALLOWED: readonly { readonly file: string; readonly includes: string; read
     includes: 'border-left: var(--stroke-heavy) solid var(--accent);',
     why: 'the top-left corner of the mission HUD bracket, paired with a top border',
   },
-  {
-    file: 'components/session-screens.css',
-    includes: 'border-left: var(--card-edge) solid var(--fy-accent);',
-    why: 'the ferret message card, whose rail is being removed in its own change',
-  },
 ];
 
 const allowed = (file: string, finding: Finding): boolean =>
   ALLOWED.some(entry => entry.file === file && finding.text.includes(entry.includes));
 
-const scanFile = (file: string): string[] => {
+const findingsIn = (file: string): Finding[] => {
   const source = readFileSync(join(SRC, file), 'utf8');
-  const findings = file.endsWith('.css') ? scanCss(source) : scanTs(source);
-  return findings.filter(finding => !allowed(file, finding)).map(finding => `${file}:${finding.line} ${finding.text}`);
+  return file.endsWith('.css') ? scanCss(source) : scanTs(source);
 };
+
+const scanFile = (file: string): string[] =>
+  findingsIn(file)
+    .filter(finding => !allowed(file, finding))
+    .map(finding => `${file}:${finding.line} ${finding.text}`);
 
 const files = (pattern: string): string[] => [...new Glob(pattern).scanSync(SRC)];
 
@@ -127,6 +126,13 @@ describe('the rail scanner itself', () => {
 describe('the app draws no left accent rail', () => {
   it('stylesheets carry no accent, status or reserved left border', () => {
     expect(files('**/*.css').flatMap(scanFile)).toEqual([]);
+  });
+
+  it('keeps no allowlist entry that no longer matches a real line, so the list only shrinks', () => {
+    const stale = ALLOWED.filter(
+      entry => !findingsIn(entry.file).some(finding => finding.text.includes(entry.includes)),
+    ).map(entry => `${entry.file}: ${entry.includes}`);
+    expect(stale).toEqual([]);
   });
 
   it('TS/TSX carries no border-l accent, status or heavy class', () => {
