@@ -1157,15 +1157,30 @@ let machinesGeometryChecks = 0;
  */
 let terminalGeometryChecks = 0;
 
-const assertTerminalGeometry = async (page: Page, rootUrl: string, family: string, where: string): Promise<void> => {
-  await page.evaluate(
-    ([id, scheme]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode: scheme })),
-    [family, SCHEME] as const,
-  );
-  // A query per family, so every family is a full load: `pre-paint.js` resolves the theme only then,
-  // and a hash-only change to the same URL would keep the previous family on screen.
-  await page.goto(`${rootUrl}?split&family=${family}#session-workspace`);
-  await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+const assertTerminalGeometry = async (
+  page: Page,
+  rootUrl: string,
+  family: string,
+  where: string,
+  loaded: boolean,
+): Promise<void> => {
+  if (loaded) {
+    // The terminal deck watches `<html data-theme>` and puts the family's own monospace stack on xterm in
+    // place — the path a person takes when they change theme — so the next family is a flip, not a load.
+    await page.evaluate(next => {
+      document.documentElement.dataset.theme = next;
+    }, `${family}-${SCHEME}`);
+    await settleTransitions(page);
+  } else {
+    await page.evaluate(
+      ([id, scheme]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode: scheme })),
+      [family, SCHEME] as const,
+    );
+    // The first family is a full load: `pre-paint.js` resolves the theme only then, and a hash-only
+    // change to the same URL would keep the previous family on screen.
+    await page.goto(`${rootUrl}?split&family=${family}#session-workspace`);
+    await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+  }
   const theme = await page.evaluate(() => document.documentElement.dataset.theme);
   if (theme !== `${family}-${SCHEME}`)
     fail(`the terminal geometry pass asked for ${family}-${SCHEME} and got ${theme}`);
@@ -3649,8 +3664,8 @@ try {
             await page.goto(settingsUrl.toString());
 
             // EVERY THEME FAMILY'S TERMINAL, measured: one cell per character, in a monospace face.
-            for (const family of THEME_FAMILIES)
-              await assertTerminalGeometry(page, server.url.toString(), family.id, viewport.name);
+            for (const [index, family] of THEME_FAMILIES.entries())
+              await assertTerminalGeometry(page, server.url.toString(), family.id, viewport.name, index > 0);
             await page.evaluate(() => localStorage.removeItem('fy-theme-v1'));
             await page.goto(settingsUrl.toString());
           }
