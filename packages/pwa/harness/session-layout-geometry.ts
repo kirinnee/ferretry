@@ -131,7 +131,7 @@ const read = async (page: Page): Promise<Reading> =>
   });
 
 export function planSessionLayoutGeometry(run: SessionLayoutRun): {
-  readonly steps: ReadonlyArray<() => Promise<void>>;
+  readonly steps: ReadonlyArray<{ readonly weight: number; readonly run: () => Promise<void> }>;
   readonly checks: () => number;
 } {
   const { browser, rootUrl, scheme } = run;
@@ -140,13 +140,24 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
   let checks = 0;
   const near = (a: number, b: number, tolerance = EPSILON): boolean => Math.abs(a - b) <= tolerance;
 
-  const open = async (
-    viewport: { readonly width: number; readonly height: number } | 'phone',
-    family: string,
+  type Viewport = { readonly width: number; readonly height: number } | 'phone';
+
+  /**
+   * ONE COLD LOAD PER SCENARIO, THEN ONE THEME FLIP PER FAMILY. The harness page reads the theme only from
+   * `pre-paint.js` (it mounts no `useTheme`), which sets `<html data-theme>` and the default text scale; the
+   * layout is a function of the CSS under that attribute. So a page loaded once and flipped through the
+   * families measures what a page loaded once per family would, without paying the 6.6MB bundle's parse and
+   * mount eleven times. `work` still runs once per family, against that family's own `where`.
+   */
+  const openEach = async (
+    viewport: Viewport,
+    families: readonly string[],
     query: string,
-    work: (page: Page, where: string) => Promise<void>,
+    work: (page: Page, where: string, family: string) => Promise<void>,
   ): Promise<void> => {
-    const where = `${family}-${scheme} ${viewport === 'phone' ? 'phone' : `${viewport.width}px`} ?${query}`;
+    const first = families[0];
+    if (first === undefined) return;
+    const label = viewport === 'phone' ? 'phone' : `${viewport.width}px`;
     const context = await timed('layout.newContext', () =>
       browser.newContext({
         ...(viewport === 'phone' ? run.phone : { viewport }),
@@ -161,35 +172,57 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
       });
       await context.addInitScript(
         ([id, mode]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode })),
-        [family, scheme] as const,
+        [first, scheme] as const,
       );
       const page = await timed('layout.newPage', () => context.newPage());
-      await timed('layout.goto', () => page.goto(`${rootUrl}?${query}&family=${family}#session-workspace`));
+      await timed('layout.goto', () => page.goto(`${rootUrl}?${query}&family=${first}#session-workspace`));
       await timed('layout.mount', async () => {
         await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
         await page.locator('#harness-session-workspace-page .kt-chat-surface').waitFor({ state: 'attached' });
       });
-      await page.evaluate(async () => {
-        await document.fonts.ready;
-        // An infinite busy mark (a spinner's pulse) has no end; `finish()` throws on one.
-        for (const animation of document.getAnimations())
-          if (animation.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY) animation.finish();
-        await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-      });
-      const theme = await page.evaluate(() => document.documentElement.dataset.theme);
-      if (theme !== `${family}-${scheme}`)
-        fail(`the session layout pass asked for ${family}-${scheme} and got ${theme}`);
-      await timed('layout.work', () => work(page, where));
-      const families = run.captureFamilies ?? [];
-      if (run.captureDir !== undefined && families.includes(family)) {
-        const name = `session-layout-${family}-${scheme}-${viewport === 'phone' ? 'phone' : viewport.width}-${query.replaceAll(/[=&]/gu, '-')}.png`;
-        await page.screenshot({ path: join(run.captureDir, name), animations: 'disabled' });
-        process.stdout.write(`📸 session layout ${where} -> ${name}\n`);
+      for (const family of families) {
+        const where = `${family}-${scheme} ${label} ?${query}`;
+        await timed('layout.settle', () =>
+          page.evaluate(async next => {
+            // Back to the state a fresh load starts in: no focus left over from the previous family's pass.
+            if (document.documentElement.dataset.theme !== next) {
+              if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+              document.documentElement.dataset.theme = next;
+            }
+            const frames = async (): Promise<void> =>
+              await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+            await frames();
+            await document.fonts.ready;
+            // An infinite busy mark (a spinner's pulse) has no end; `finish()` throws on one.
+            for (const animation of document.getAnimations())
+              if (animation.effect?.getTiming().iterations !== Number.POSITIVE_INFINITY) animation.finish();
+            await frames();
+          }, `${family}-${scheme}`),
+        );
+        const theme = await page.evaluate(() => document.documentElement.dataset.theme);
+        if (theme !== `${family}-${scheme}`)
+          fail(`the session layout pass asked for ${family}-${scheme} and got ${theme}`);
+        await timed('layout.work', () => work(page, where, family));
+        const captured = run.captureFamilies ?? [];
+        if (run.captureDir !== undefined && captured.includes(family)) {
+          const name = `session-layout-${family}-${scheme}-${label.replace('px', '')}-${query.replaceAll(/[=&]/gu, '-')}.png`;
+          await page.screenshot({ path: join(run.captureDir, name), animations: 'disabled' });
+          process.stdout.write(`📸 session layout ${where} -> ${name}\n`);
+        }
       }
     } finally {
       await timed('layout.close', () => context.close());
     }
   };
+
+  const FAMILY_IDS: readonly string[] = THEME_FAMILIES.map(family => family.id);
+
+  const open = async (
+    viewport: Viewport,
+    family: string,
+    query: string,
+    work: (page: Page, where: string) => Promise<void>,
+  ): Promise<void> => await openEach(viewport, [family], query, work);
 
   /** 1. The text column is the mode's measure, and the composer's column has its exact edges. */
   const assertColumn = async (page: Page, where: string, mode: ChatWidth): Promise<void> => {
@@ -347,15 +380,15 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
         })(),
       };
     });
-  const assertPhoneComfort = async (family: string): Promise<void> => {
-    let idle: Awaited<ReturnType<typeof readComfort>> | null = null;
-    await open('phone', family, 'turn=your-turn&pickers&chat-width=readable', async page => {
-      idle = await readComfort(page);
+  const assertPhoneComfort = async (): Promise<void> => {
+    const idle = new Map<string, Awaited<ReturnType<typeof readComfort>>>();
+    await openEach('phone', FAMILY_IDS, 'turn=your-turn&pickers&chat-width=readable', async (page, _where, family) => {
+      idle.set(family, await readComfort(page));
     });
-    await open('phone', family, 'turn=working&pickers&chat-width=readable', async (page, where) => {
+    await openEach('phone', FAMILY_IDS, 'turn=working&pickers&chat-width=readable', async (page, where, family) => {
       const r = await readComfort(page);
-      const before = idle as Awaited<ReturnType<typeof readComfort>> | null;
-      if (before === null) fail(`${where}: the idle comfort reading never ran`);
+      const before = idle.get(family);
+      if (before === undefined) fail(`${where}: the idle comfort reading never ran`);
       const { composer, field, start, end, attach, send, interrupt, status, barAction, info, tabs, firstTab, text } = r;
       if (composer === null || field === null || start === null || end === null || attach === null || send === null)
         fail(`${where}: the phone composer is not kteam's two-column row`);
@@ -396,32 +429,40 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
     });
   };
 
-  // Every open below is its own context and its own page, so each is a step that can run beside the
-  // others. They are LISTED in the order the pass has always run them, and that is the order they print in.
-  const steps: Array<() => Promise<void>> = [];
-  for (const { id: family } of THEME_FAMILIES) {
-    steps.push(
-      () => assertPhoneComfort(family),
-      () => open('phone', family, 'wide&chat-width=readable', assertPhoneFits),
-      () =>
-        open(DESKTOP, family, 'chat-width=readable', async (page, where) => {
+  // Every step below is its own context and its own page, so each can run beside the others. A scenario
+  // loads once and is measured in every theme family (see `openEach`); the studio-only widths load once each.
+  // They are LISTED in this order, and that is the order they print in. The weight only orders the starts.
+  const steps: Array<{ readonly weight: number; readonly run: () => Promise<void> }> = [
+    { weight: 4, run: assertPhoneComfort },
+    { weight: 3, run: () => openEach('phone', FAMILY_IDS, 'wide&chat-width=readable', assertPhoneFits) },
+    {
+      weight: 2,
+      run: () =>
+        openEach(DESKTOP, FAMILY_IDS, 'chat-width=readable', async (page, where) => {
           await assertColumn(page, where, 'readable');
           await assertTabs(page, where);
         }),
-      () =>
-        open(NARROW, family, 'split&info&chat-width=readable', async (page, where) => {
+    },
+    {
+      weight: 2,
+      run: () =>
+        openEach(NARROW, FAMILY_IDS, 'split&info&chat-width=readable', async (page, where) => {
           await assertNoOverlap(page, where);
           await assertTabs(page, where);
         }),
-    );
-  }
+    },
+  ];
   for (const mode of ['readable', 'balanced', 'full'] as const)
-    steps.push(() =>
-      open(WIDE, 'studio', `chat-width=${mode}`, async (page, where) => await assertColumn(page, where, mode)),
-    );
-  steps.push(() =>
-    open('phone', 'studio', 'chat-width=readable', async (page, where) => await assertColumn(page, where, 'readable')),
-  );
+    steps.push({
+      weight: 1,
+      run: () =>
+        open(WIDE, 'studio', `chat-width=${mode}`, async (page, where) => await assertColumn(page, where, mode)),
+    });
+  steps.push({
+    weight: 1,
+    run: () =>
+      open('phone', 'studio', 'chat-width=readable', async (page, where) => assertColumn(page, where, 'readable')),
+  });
 
   // EVIDENCE ONLY, never counted: the frames a reviewer compares — every width option where they differ,
   // the split pane with Info open at a common desktop size, and the phone with a pane open.
@@ -429,10 +470,12 @@ export function planSessionLayoutGeometry(run: SessionLayoutRun): {
   if (run.captureDir !== undefined)
     for (const family of run.captureFamilies ?? []) {
       for (const mode of ['readable', 'balanced', 'full'] as const)
-        if (family !== 'studio') steps.push(() => open(WIDE, family, `chat-width=${mode}`, nothing));
-      steps.push(() => open(DESKTOP, family, 'split&info&chat-width=readable', nothing));
-      if (family !== 'studio') steps.push(() => open('phone', family, 'chat-width=readable', nothing));
-      steps.push(() => open('phone', family, 'split&chat-width=readable', nothing));
+        if (family !== 'studio')
+          steps.push({ weight: 1, run: () => open(WIDE, family, `chat-width=${mode}`, nothing) });
+      steps.push({ weight: 1, run: () => open(DESKTOP, family, 'split&info&chat-width=readable', nothing) });
+      if (family !== 'studio')
+        steps.push({ weight: 1, run: () => open('phone', family, 'chat-width=readable', nothing) });
+      steps.push({ weight: 1, run: () => open('phone', family, 'split&chat-width=readable', nothing) });
     }
   return { steps, checks: () => checks };
 }
