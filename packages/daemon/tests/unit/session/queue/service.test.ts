@@ -50,6 +50,7 @@ describe('accepting a message', () => {
     should(created).be.true();
     should(message).containEql({ state: 'queued', revision: 1, sender: 'agent', from: 'session-2', fromName: 'ada' });
     should(message.attachmentIds).eql(['att-1']);
+    should(message).not.have.property('by');
     should(store.logs.get(ID)).have.length(1);
     should(await service.list(ID)).deepEqual([message]);
   });
@@ -90,6 +91,22 @@ describe('a message whose sender waits for the reply', () => {
 
     should(message.chat).be.true();
     should(plain.message).not.have.property('chat');
+  });
+});
+
+describe('who a message is from', () => {
+  it('should keep it as data on the message, for the app’s sender chip', async () => {
+    const { service } = subject();
+
+    const { message } = await service.enqueue(ID, {
+      id: 'm2',
+      sender: 'agent',
+      by: { kind: 'ferret', name: 'ada' },
+      text: 'hi',
+    });
+
+    should(message.by).deepEqual({ kind: 'ferret', name: 'ada' });
+    should(message.text).equal('hi');
   });
 });
 

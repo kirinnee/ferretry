@@ -1,4 +1,4 @@
-import type { SendSenderKind } from '@ferretry/protocol';
+import type { QueueAuthor, SendSenderKind } from '@ferretry/protocol';
 import type { ClockPort } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SendMessageRequest, SendOutcome } from '../send/service.ts';
@@ -55,7 +55,16 @@ export class QueueingSends {
     private readonly ports: QueueingSendsPorts,
     /** Whose a request that does not say is: this producer's own kind. */
     private readonly kind: SendSenderKind,
+    /** The part of Ferretry this producer is — Board, Warden, Agenda… — shown as the sender chip. */
+    private readonly feature?: string,
   ) {}
+
+  /** Who a message is from, as data: the app's sender chip, never text in the body. */
+  private authorOf(sender: SendSenderKind): QueueAuthor {
+    const feature = this.feature === undefined ? {} : { feature: this.feature };
+    if (sender === 'agent') return { kind: 'ferret' };
+    return sender === 'daemon' ? { kind: 'ferretry', ...feature } : { kind: 'owner', ...feature };
+  }
 
   async send(request: SendMessageRequest): Promise<SendOutcome> {
     const target = await this.ports.target(request.id);
@@ -68,6 +77,7 @@ export class QueueingSends {
       id: request.sendId,
       sender,
       ...(request.senderReference === undefined ? {} : { from: request.senderReference }),
+      by: this.authorOf(sender),
       text: request.message,
       ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
       ...(request.replyExpected === true ? { replyExpected: true } : {}),

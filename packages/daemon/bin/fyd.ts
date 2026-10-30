@@ -3185,6 +3185,12 @@ function createSessionSendSubsystem(
     if (storage.findSession(id) === undefined) throw new SessionSendError('not_found', `no session ${reference}`);
     return id;
   };
+  /** A sending ferret's callsign, for the sender chip; nothing when it cannot be read. */
+  const ferretName = async (reference: string | undefined): Promise<{ readonly name?: string }> => {
+    const id = reference === undefined ? undefined : tryParseSessionId(reference);
+    const teammate = id === undefined ? undefined : (await sessions.get(id).catch(() => undefined))?.config.teammate;
+    return teammate === undefined ? {} : { name: teammate };
+  };
   const view = async (id: SessionId, what: string): Promise<SessionView> => {
     const current = await sessions.get(id).catch(() => undefined);
     if (current === undefined)
@@ -3218,6 +3224,7 @@ function createSessionSendSubsystem(
             id: request.sendId,
             sender: person ? 'human' : 'agent',
             ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
+            by: person ? { kind: 'owner' } : { kind: 'ferret', ...(await ferretName(request.senderSessionId)) },
             text: messageWithAttachments(turn.message, delivered),
             ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
             ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
@@ -8939,8 +8946,13 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         sleep: async (milliseconds: number) => await Bun.sleep(milliseconds),
       };
-      const daemonSends = delivery.queue ? new QueueingSends(queueingPorts, 'daemon') : sends;
-      const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human') : sends;
+      // One front per producer, so the app can say which part of Ferretry a message came from — as a sender
+      // chip, never as text in the message.
+      const producerSends = (feature: string) =>
+        delivery.queue ? new QueueingSends(queueingPorts, 'daemon', feature) : sends;
+      const boardSends = producerSends('Board');
+      const agendaNudgeSends = producerSends('Agenda');
+      const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human', 'Agenda') : sends;
       /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
        *
@@ -8957,7 +8969,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         {
           waits: new StorageMonitorWaits(storage, signalRepository, signals, defaultSessionMonitorSettings),
           heartbeats: new FileWaitHeartbeat(id => createSessionPaths(paths, id).directory),
-          nudge: new SendMonitorNudge(daemonSends),
+          nudge: new SendMonitorNudge(producerSends('Monitor')),
           // The session observer's question part over every live session, one at a time — see
           // `InlineObserverHost.questions` for why it hands the loop back between them.
           questions: { reconcile: async () => await sessionObserver.questions() },
@@ -9031,7 +9043,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         clock,
         () => attachmentDaemonId,
         laneSets,
-        daemonSends,
+        boardSends,
         async sessionId => {
           const listed = await agenda.list(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
@@ -9060,7 +9072,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         nudges: {
           send: async (sessionId, message) => {
             await boardNudgeDelivery.send(sessionId, message, async composed => {
-              await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
+              await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message: composed });
             });
           },
         },
@@ -9511,7 +9523,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         context: boardPending,
         nudges: {
           send: async (sessionId, message) => {
-            await daemonSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
+            await boardSends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
           },
         },
         clock,
@@ -9617,7 +9629,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await daemonSends.send({ id, sendId, message });
+            if (id !== undefined) await agendaNudgeSends.send({ id, sendId, message });
           },
           record: async (sessionId, asks) => await nudgeSessions.record(sessionId, asks),
         },
@@ -9644,7 +9656,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           card: async ref => await boardWorld.board.task(ref.id),
           send: async (sessionId, sendId, message) => {
             const id = tryParseSessionId(sessionId);
-            if (id !== undefined) await daemonSends.send({ id, sendId, message });
+            if (id !== undefined) await boardSends.send({ id, sendId, message });
           },
           record: async (sessionId, seen) => await boardChecks.record(sessionId, seen),
           now: () => Date.parse(clock.now()),
@@ -10250,7 +10262,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         send: async (sessionId, message, sendId) => {
           const id = tryParseSessionId(sessionId);
           if (id === undefined) throw new Error(`${JSON.stringify(sessionId)} is not a usable session id`);
-          await daemonSends.send({ id, sendId, message });
+          await producerSends('Lessons').send({ id, sendId, message });
         },
         userHome,
         pricing: async () => {
@@ -11103,7 +11115,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
               ...(settings.endpoint === undefined ? {} : { endpoint: settings.endpoint }),
               usdPerMillionInputTokens: settings.usdPerMillionInputTokens,
             }),
-          sends: daemonSends,
+          sends: producerSends('Warden'),
           resume,
           revive: {
             events: {
