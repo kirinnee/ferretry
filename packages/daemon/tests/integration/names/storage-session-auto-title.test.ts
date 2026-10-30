@@ -118,3 +118,24 @@ describe('AutoTitlingSendChannel over real storage', () => {
     should(await storage.readConfig(broken)).containEql({ name: 'interactive' });
   });
 });
+
+describe('AutoTitlingSendChannel outbound', () => {
+  it('should pass the sender copy straight through to the channel it wraps', async () => {
+    const storage = await openTemporaryStorage();
+    const seen: string[] = [];
+    const channel = new AutoTitlingSendChannel(
+      { ...inner, recordOutbound: async (_id, entry) => void seen.push(entry.message) },
+      storage,
+    );
+
+    await channel.recordOutbound(parseSessionId('20261030-first'), {
+      at: NOW,
+      to: '20261030-first',
+      from: 'hadi',
+      disposition: 'delivered',
+      message: 'ship it',
+    });
+
+    should(seen).eql(['ship it']);
+  });
+});
