@@ -218,6 +218,10 @@ export interface SendTarget {
   readonly pendingQuestion?: { readonly toolUseId: string } | undefined;
   /** The session's own ceiling on a verbatim composer send, from its configuration. */
   readonly directSendMaxChars?: number | undefined;
+  /** The whose-turn watcher's last word: `working` once the agent has picked something up. */
+  readonly turnState?: string | undefined;
+  /** When `turnState` last CHANGED, so a boundary after a send was typed can be told from an older one. */
+  readonly turnStateAt?: string | undefined;
   /** A declared wait, so a reply from the session it names can end it. */
   readonly waiting?: { readonly peer?: string | undefined; readonly peerName?: string | undefined } | undefined;
 }
