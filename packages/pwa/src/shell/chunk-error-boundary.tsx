@@ -53,6 +53,14 @@ export interface ChunkErrorBoundaryProps {
    */
   readonly onChunkError: (error: unknown) => void;
   /**
+   * Called when a page renders cleanly after a CHANGE — a new `resetKey`, or the
+   * page this boundary had failed on being replaced — so the app-bar chip can be
+   * withdrawn once the tab has shown it is not stuck. Never on first mount: a
+   * pane that has only ever worked has nothing to withdraw, and must not clear a
+   * failure raised elsewhere before anything was tried again.
+   */
+  readonly onRecovered?: () => void;
+  /**
    * The chip's own action — the service-worker update's `applyUpdate`. Passed in
    * rather than reimplemented here so the fallback button takes the SAME guarded
    * no-waiter branch: one reload per press, no `SKIP_WAITING` posted to a
@@ -89,8 +97,16 @@ export class ChunkErrorBoundary extends Component<ChunkErrorBoundaryProps, Chunk
     return { failed: true };
   }
 
-  override componentDidUpdate(previous: ChunkErrorBoundaryProps): void {
-    if (this.state.failed && previous.resetKey !== this.props.resetKey) this.setState({ failed: false });
+  override componentDidUpdate(previous: ChunkErrorBoundaryProps, before: ChunkErrorBoundaryState): void {
+    const changed = previous.resetKey !== this.props.resetKey;
+    if (this.state.failed) {
+      if (changed) this.setState({ failed: false });
+      return;
+    }
+    // Committed without a throw: either a new page drew, or the page that replaced
+    // a failed one did. A child that throws in this same pass never gets here —
+    // the boundary commits as failed instead, and `componentDidCatch` re-raises.
+    if (changed || before.failed) this.props.onRecovered?.();
   }
 
   override componentDidCatch(error: unknown, info: ErrorInfo): void {

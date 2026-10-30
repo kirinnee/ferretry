@@ -14,7 +14,8 @@ import {
   applyDecision,
   browserApplyDeps,
   canRegister,
-  nextUpdateReason,
+  chipReason,
+  isStylesheetPreloadMiss,
   runApplyUpdate,
   startPreloadErrorWatch,
   startWorkerLifecycle,
@@ -162,13 +163,15 @@ describe('workerScope and workerUrl', () => {
   });
 });
 
-describe('nextUpdateReason', () => {
+describe('chipReason', () => {
+  it('shows nothing while nothing is waiting and nothing is broken', () => {
+    expect(chipReason(false, false)).toBeNull();
+  });
+
   it('never downgrades recovery and always upgrades to it', () => {
-    expect(nextUpdateReason(null, 'update')).toBe('update');
-    expect(nextUpdateReason('update', 'update')).toBe('update');
-    expect(nextUpdateReason('recovery', 'update')).toBe('recovery');
-    expect(nextUpdateReason('update', 'recovery')).toBe('recovery');
-    expect(nextUpdateReason(null, 'recovery')).toBe('recovery');
+    expect(chipReason(true, false)).toBe('update');
+    expect(chipReason(true, true)).toBe('recovery');
+    expect(chipReason(false, true)).toBe('recovery');
   });
 });
 
@@ -435,8 +438,34 @@ describe('startPreloadErrorWatch', () => {
 
     expect(prevented).toBe(1);
     expect(raised).toBe(1);
+
+    // A stylesheet miss is claimed, but the module still loads after it: not a stuck tab.
+    events.fire(PRELOAD_ERROR_EVENT, {
+      preventDefault: () => {
+        prevented += 1;
+      },
+      payload: new Error('Unable to preload CSS for /assets/fy-render-map-engine-x.css'),
+    } as Partial<Event>);
+    expect(prevented).toBe(2);
+    expect(raised).toBe(1);
+
+    // The module's own failure still raises it.
+    events.fire(PRELOAD_ERROR_EVENT, {
+      preventDefault: () => undefined,
+      payload: new TypeError('Failed to fetch dynamically imported module: /assets/xterm-x.js'),
+    } as Partial<Event>);
+    expect(raised).toBe(2);
     stop();
     expect(events.count(PRELOAD_ERROR_EVENT)).toBe(0);
+  });
+});
+
+describe('isStylesheetPreloadMiss', () => {
+  it('names only the bundler stylesheet failure', () => {
+    expect(isStylesheetPreloadMiss(new Error('Unable to preload CSS for /assets/a.css'))).toBe(true);
+    expect(isStylesheetPreloadMiss(new TypeError('Failed to fetch dynamically imported module'))).toBe(false);
+    expect(isStylesheetPreloadMiss('Unable to preload CSS for /assets/a.css')).toBe(false);
+    expect(isStylesheetPreloadMiss(undefined)).toBe(false);
   });
 });
 
@@ -571,6 +600,28 @@ describe('useServiceWorkerUpdate', () => {
     run(() => probe.hook().raiseRecovery());
     run(() => probe.hook().raiseUpdate());
     expect(probe.hook().updateReady).toBe('recovery');
+    await probe.unmount();
+  });
+
+  it('withdraws recovery once cleared, and keeps an update that arrived meanwhile', async () => {
+    const probe = mount({
+      release: 'verified',
+      container: null,
+      doc: visibilityTarget().doc,
+      win: listenerTarget().target,
+      reload: () => undefined,
+      onError: () => undefined,
+    });
+    await settle();
+
+    run(() => probe.hook().raiseRecovery());
+    run(() => probe.hook().clearRecovery());
+    expect(probe.hook().updateReady).toBeNull();
+
+    run(() => probe.hook().raiseRecovery());
+    run(() => probe.hook().raiseUpdate());
+    run(() => probe.hook().clearRecovery());
+    expect(probe.hook().updateReady).toBe('update');
     await probe.unmount();
   });
 

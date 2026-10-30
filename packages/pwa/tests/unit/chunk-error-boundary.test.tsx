@@ -131,6 +131,41 @@ describe('ChunkErrorBoundary', () => {
     await mounted.unmount();
   });
 
+  it('says it recovered when a page renders cleanly after a change, and never on first mount', async () => {
+    let recovered = 0;
+    const page = (resetKey: string, explode: boolean) => (
+      <ChunkErrorBoundary
+        onChunkError={() => undefined}
+        onRecovered={() => {
+          recovered += 1;
+        }}
+        onReload={() => undefined}
+        onReport={() => undefined}
+        resetKey={resetKey}
+      >
+        <Boom explode={explode} />
+      </ChunkErrorBoundary>
+    );
+    const mounted = await mount(page('sessions', false));
+    expect(recovered).toBe(0);
+
+    // A page that fails says nothing; the one after it, drawn cleanly, does.
+    await mounted.render(page('chat', true));
+    expect(recovered).toBe(0);
+    await mounted.render(page('board', false));
+    expect(recovered).toBe(1);
+    expect(mounted.container.querySelector('[data-testid="pane"]')).not.toBeNull();
+
+    // Moving on from a healthy page also counts: a failure raised elsewhere is withdrawn by a clean render.
+    await mounted.render(page('settings', false));
+    expect(recovered).toBe(2);
+
+    // A re-render of the same healthy page is not news.
+    await mounted.render(page('settings', false));
+    expect(recovered).toBe(2);
+    await mounted.unmount();
+  });
+
   it('derives the failed state purely, so the re-render after the throw stays side-effect free', () => {
     expect(ChunkErrorBoundary.getDerivedStateFromError()).toEqual({ failed: true });
   });
