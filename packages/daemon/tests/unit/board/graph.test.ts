@@ -2,20 +2,21 @@ import { describe, it } from 'bun:test';
 import type { BoardTask, PrLink } from '@ferretry/protocol';
 import should from 'should';
 import {
+  type ActivityDeriver,
+  type ActivityInputs,
   BoardIndex,
   blockedBy,
   cardCategory,
-  deriveView,
   type DerivationInputs,
   dependencyCycle,
+  deriveView,
   gatherDerivation,
-  HistoryActivityDeriver,
   rollupOf,
   shippedIn,
   suggestedLaneOf,
   UNOBSERVED,
 } from '../../../src/lib/board/index.ts';
-import { card, lanes, MACHINE, NO_ASKS, NOW, OTHER_PROJECT, PROJECT } from './support.ts';
+import { card, lanes, MACHINE, NOW, OTHER_PROJECT, PROJECT } from './support.ts';
 
 const laneSets = new Map([
   [PROJECT, lanes(PROJECT)],
@@ -397,19 +398,31 @@ describe('the derived view', () => {
     should(blockerView.openAsks).eql([]);
   });
 
-  it('should ask both derivation ports once for the whole board', async () => {
+  it('should ask both derivation ports once for the whole board, handing the agenda answer to activity', async () => {
     // Arrange
-    const cards = [card({ id: 'F1', blocked: { on: 'external', reason: 'vendor', since: NOW } }), card({ id: 'F2' })];
+    const cards = [card({ id: 'F1' }), card({ id: 'F2' })];
+    const ask = { sessionId: 'lead', id: 'A9' };
+    const asks = new Map([['F1', { open: [ask], blocking: [ask] }]]);
+    const seen: ActivityInputs[] = [];
+    const activity: ActivityDeriver = {
+      derive: async received => {
+        seen.push(received);
+        return new Map([['F1', { lastTouchedAt: NOW, touchedBy: 'lead', activity: 'waiting' as const }]]);
+      },
+    };
 
     // Act
     const gathered = await gatherDerivation(cards, new BoardIndex(cards, MACHINE), laneSets, {
-      activity: new HistoryActivityDeriver(),
-      agenda: NO_ASKS,
+      activity,
+      agenda: { asksFor: async () => asks },
     });
 
     // Assert
+    should(seen).have.length(1);
+    should(seen[0]?.cards).equal(cards);
+    should(seen[0]?.laneSets).equal(laneSets);
+    should(seen[0]?.asks).equal(asks);
     should(gathered.activity.get('F1')?.activity).equal('waiting');
-    should(gathered.activity.get('F2')).eql({ lastTouchedAt: NOW, touchedBy: 'lead', activity: 'idle' });
-    should(gathered.asks.size).equal(0);
+    should(gathered.asks).equal(asks);
   });
 });

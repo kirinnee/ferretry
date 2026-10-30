@@ -1,3 +1,20 @@
+## [4.122.0](https://github.com/kirinnee/ferretry/compare/v4.121.0...v4.122.0) (2026-10-30)
+
+### Features
+
+* **daemon:** board activity, staleness nudges and quiet events to the lead ([#945](https://github.com/kirinnee/ferretry/issues/945)) ([89bdc97](https://github.com/kirinnee/ferretry/commit/89bdc97530271613d1be81c88b021a9f56ecab7e))
+
+## [4.121.0](https://github.com/kirinnee/ferretry/compare/v4.120.2...v4.121.0) (2026-10-30)
+
+### Features
+
+* **daemon:** import per-session tasks.json and open agenda items into the project board ([#957](https://github.com/kirinnee/ferretry/issues/957)) ([3da9d6a](https://github.com/kirinnee/ferretry/commit/3da9d6a75d8ae4e3f8ba42a3f43ed7c75f0f39e3))
+* **pwa:** Board page with shared compact task cards (U11) ([#972](https://github.com/kirinnee/ferretry/issues/972)) ([a7413c4](https://github.com/kirinnee/ferretry/commit/a7413c40805eb3f5c9ad76fe449b95b2f05dcbf6))
+
+### Fixes
+
+* **daemon:** never re-send a message the agent already took a turn on ([#974](https://github.com/kirinnee/ferretry/issues/974)) ([59b43e9](https://github.com/kirinnee/ferretry/commit/59b43e9e76975c168a4d8b365694efb302fd17a8)), closes [#N](https://github.com/kirinnee/ferretry/issues/N) [#N](https://github.com/kirinnee/ferretry/issues/N)
+
 ## [4.120.2](https://github.com/kirinnee/ferretry/compare/v4.120.1...v4.120.2) (2026-10-30)
 
 ### Performance

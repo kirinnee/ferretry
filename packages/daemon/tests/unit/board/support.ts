@@ -5,8 +5,8 @@ import {
   type BoardQuarantinedCard,
   type BoardTask,
   type BoardTaskId,
-  type LaneSet,
   LANE_TEMPLATES,
+  type LaneSet,
   type LaneTemplateName,
   type TaskKind,
   type TaskRef,
@@ -19,16 +19,19 @@ import {
   type BoardStore,
   type BoardWrite,
   type AgendaLinkSource,
-  HistoryActivityDeriver,
   type LaneSetSource,
+  LivenessActivityDeriver,
   type ReopenNotice,
   type ReopenNotifier,
   type SessionFocus,
+  type SessionLiveness,
+  type SessionLivenessSource,
   type SessionParents,
+  type SessionRoster,
 } from '../../../src/lib/board/index.ts';
 
 /** An agenda that names no card. */
-export const NO_ASKS: AgendaLinkSource = { asksFor: async () => new Map() };
+const NO_ASKS: AgendaLinkSource = { asksFor: async () => new Map() };
 
 export const MACHINE = 'machine-1';
 export const NOW = '2026-10-30T10:00:00.000Z';
@@ -152,6 +155,38 @@ export class FakeParents implements SessionParents {
   }
 }
 
+/** A session as the activity tests see it: alive, idle at its prompt and focused on nothing, unless told otherwise. */
+export const liveSession = (id: string, overrides: Partial<SessionLiveness> = {}): SessionLiveness => ({
+  id,
+  status: 'running',
+  turnState: 'your-turn',
+  focusTask: null,
+  declaredWait: false,
+  ...overrides,
+});
+
+/** A roster holding these sessions, plus any held ids that could not be read. */
+export const rosterOf = (sessions: readonly SessionLiveness[], unreadable: readonly string[] = []): SessionRoster => ({
+  held: new Set([...sessions.map(session => session.id), ...unreadable]),
+  sessions: new Map(sessions.map(session => [session.id, session])),
+});
+
+/** The sessions the service tests name, every one alive and idle; counts its reads. */
+export class FakeSessions implements SessionLivenessSource {
+  reads = 0;
+
+  constructor(
+    public current: SessionRoster = rosterOf(
+      ['lead', 'child', 'grandchild', 'stranger', 'worker'].map(id => liveSession(id)),
+    ),
+  ) {}
+
+  async roster(): Promise<SessionRoster> {
+    this.reads += 1;
+    return this.current;
+  }
+}
+
 export class FakeFocus implements SessionFocus {
   readonly focused = new Map<string, TaskRef>();
 
@@ -213,7 +248,7 @@ export const world = (overrides: Partial<ServiceWorld> = {}): ServiceWorld => {
     parents: new FakeParents({ child: 'lead', grandchild: 'child' }),
     focus: new FakeFocus(),
     reopen: new FakeReopen(),
-    activity: new HistoryActivityDeriver(),
+    activity: new LivenessActivityDeriver({ sessions: new FakeSessions(), clock: { now: () => NOW } }),
     agenda: NO_ASKS,
     changes: new FakeChanges(),
     clock: { now: () => NOW },
