@@ -1051,6 +1051,72 @@ describe('a send the harness recorded with a placeholder in it', () => {
   });
 });
 
+/**
+ * The shape Claude Code 2.1.281 recorded on 2026-10-30 for a ferret's message the lead read four times: the
+ * typed text wrapped in `<pasted_content>`, re-wrapped across lines, the one path that named a real file
+ * lifted out as an image with its `[Image #N]` in FRONT, and the templated paths that named no file left in.
+ */
+describe('a send the harness recorded as a paste it lifted an image out of', () => {
+  const SHOT = '/tmp/claude-1000/mobile-inbox-after-390-neo-dark-end.png';
+  const typed = [
+    '[message from ferret kenton (session mvuq4mdo-e8151ebb) — not from the owner]',
+    'No reply needed. To reply: fy send kenton "<reply>"',
+    '',
+    'Bug B23 fix is up: https://github.com/kirinnee/ferretry/pull/967',
+    '',
+    'Screenshots (390 and 412 wide; top and end of the list):',
+    '  before: /tmp/claude-1000/mobile-inbox-before-<390|412>-<theme>-<top|end>.png',
+    '  owner original: /tmp/claude-1000/owner-mobile-inbox.png',
+    `Example: ${SHOT}`,
+  ].join('\n');
+  const recorded = (body: string, n = 7) =>
+    [`[Image #${n}]`, '', '<pasted_content id="703a">', body, '</pasted_content id="703a">'].join('\n');
+  const lifted = recorded(
+    typed
+      .replace(`Example: ${SHOT}`, 'Example:')
+      .replace('  before: /tmp/', '  before:\n/tmp/')
+      .replace('  owner original: /tmp/', '  owner original:\n/tmp/'),
+  );
+  const sent = () => record({ message: typed, matchText: typed, path: 'native-inline' });
+
+  it('is proven by the record, wrapper, moved placeholder and re-wrapped lines and all', async () => {
+    const world = new World(sent());
+    world.evidence(new ClaudeObservedInputObserver(), [claude.user(lifted, 400, 'pasted')]);
+
+    await world.checkAt(1_000);
+
+    should(world.only).match({ fate: 'delivered', evidence: { key: 'pasted' } });
+  });
+
+  it('is proven through a drained queue entry of that shape', async () => {
+    const world = new World(sent());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.enqueue(lifted, 200),
+      claude.remove(lifted, 4_900),
+      claude.drained(lifted, 5_000),
+    ]);
+
+    await world.checkAt(6_000);
+
+    should(world.only).match({ fate: 'delivered', evidence: { kind: 'queued_command' } });
+  });
+
+  it('is NOT proven by a paste with an image whose words differ, or by one with no image lifted', async () => {
+    const world = new World(sent());
+    world.evidence(new ClaudeObservedInputObserver(), [
+      claude.user(recorded(typed.replace('Bug B23 fix is up', 'Bug B24 fix is up').replace(` ${SHOT}`, '')), 400),
+      claude.user(
+        ['<pasted_content id="9">', typed.replace(` ${SHOT}`, ''), '</pasted_content id="9">'].join('\n'),
+        500,
+      ),
+    ]);
+
+    await world.checkAt(1_000);
+
+    should(world.only.fate).not.equal('delivered');
+  });
+});
+
 describe('a send the agent already started working on', () => {
   const agentSend = (overrides: Partial<SendRecord> = {}) =>
     record({ senderKind: 'agent', from: SENDER, fromName: 'kenton', path: 'native-inline', ...overrides });
