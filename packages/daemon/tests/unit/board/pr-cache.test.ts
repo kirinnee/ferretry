@@ -174,15 +174,15 @@ describe('applyPrUpdate', () => {
       links: { prs: [link({ url: second, number: 941 }), link()], branch: null, commits: [], docs: [] },
     });
     const { task } = apply(subject, { observed: [merged(), observed({ url: second })] });
-    // #941 is still open and newer than the merged #940, so the facts end with the card back in review.
+    // #941 is still open beside the merged #940, so the facts end with the card back in review.
     should(moves(task)).deepEqual([
       ['review', 'pr.opened', 'PR #941 opened'],
       ['merged', 'pr.merged', 'PR #940 merged'],
-      ['review', 'pr.ready', 'moved back to Review/CI: PR #941 opened after #940 shipped'],
+      ['review', 'pr.ready', 'moved back to Review/CI: PR #941 ready for review'],
     ]);
   });
 
-  it('should pull a shipped card back to review for a PR that opens after it, and write it down as the facts', () => {
+  it('should pull a shipped card back to review for an open PR, and write it down as the facts', () => {
     const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/941';
     const subject = card({
@@ -203,7 +203,7 @@ describe('applyPrUpdate', () => {
       auto: true,
       trigger: 'pr.ready',
       actor: { kind: 'daemon' },
-      reason: 'moved back to Review/CI: PR #941 opened after #940 shipped',
+      reason: 'moved back to Review/CI: PR #941 ready for review',
     });
     // The next poll agrees with the card: nothing more to write.
     should(
@@ -215,7 +215,7 @@ describe('applyPrUpdate', () => {
     ).be.null();
   });
 
-  it('should keep a shipped card where it is for an older PR, and cache when that PR was opened', () => {
+  it('should pull a shipped card back for a parallel PR opened before the merge, and cache when it was opened', () => {
     const shipped = link({ state: 'merged', mergedAt: MERGED_AT, mergeSha: SHA, releasedIn: RELEASE, polledAt: NOW });
     const second = 'https://github.com/kirinnee/ferretry/pull/939';
     const subject = card({
@@ -224,7 +224,7 @@ describe('applyPrUpdate', () => {
       links: { prs: [shipped, link({ url: second, number: 939 })], branch: null, commits: [], docs: [] },
     });
     const { task } = apply(subject, { observed: [observed({ url: second, createdAt: '2026-10-30T08:00:00Z' })] });
-    should(task?.laneId).equal('tested');
+    should(task?.laneId).equal('review');
     should(task?.links.prs[1]?.createdAt).equal('2026-10-30T08:00:00Z');
   });
 

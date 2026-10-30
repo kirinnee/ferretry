@@ -137,96 +137,66 @@ describe('laneFromFacts: never backward, never sideways', () => {
   });
 });
 
-describe('laneFromFacts: newer work pulls a shipped card back', () => {
-  const OPENED_LATE = '2026-10-30T10:00:00Z';
-  const OPENED_EARLY = '2026-10-30T08:00:00Z';
+describe('laneFromFacts: an open PR pulls a shipped card back', () => {
   const shipped = merged(1008, release('4.110.0'));
-  const openedAt = (number: number, createdAt: string | null | undefined, overrides: Partial<PrLink> = {}) =>
-    pr(number, { state: 'open', createdAt, ...overrides });
+  const open = (number: number, overrides: Partial<PrLink> = {}) => pr(number, { state: 'open', ...overrides });
   const move = (subject: BoardTask, runningVersion: string | null = null) =>
     laneFromFacts(subject, lanes(), subject.workflow, { prs: subject.links.prs, runningVersion });
 
-  it.each(['merged', 'released', 'tested'])(
-    'should move a card in %s back to review for a PR opened after the merge',
-    lane => {
-      const subject = at(lane, [shipped, openedAt(1013, OPENED_LATE)]);
-      should(move(subject, '4.110.0')).match({
-        lane: { id: 'review' },
-        trigger: 'pr.ready',
-        backward: true,
-        reason: 'moved back to Review/CI: PR #1013 opened after #1008 shipped',
-      });
-    },
-  );
+  it.each(['merged', 'released', 'tested'])('should move a card in %s back to review for an open PR', lane => {
+    const subject = at(lane, [shipped, open(1013)]);
+    should(move(subject, '4.110.0')).match({
+      lane: { id: 'review' },
+      trigger: 'pr.ready',
+      backward: true,
+      reason: 'moved back to Review/CI: PR #1013 ready for review',
+    });
+  });
+
+  it('should pull a card back for a parallel PR that was opened before the merge', () => {
+    should(move(at('tested', [shipped, open(1005, { createdAt: '2026-10-30T08:00:00Z' })]))).match({
+      lane: { id: 'review' },
+      backward: true,
+    });
+    should(move(at('tested', [shipped, open(1013, { createdAt: null })]))?.backward).be.true();
+    should(move(at('tested', [shipped, open(1013, { repo: 'kirinnee/other' })]))?.backward).be.true();
+  });
 
   it('should go back through an owner gate, because a fact is leaving To test, not deciding it', () => {
-    should(move(at('tested', [shipped, openedAt(1013, OPENED_LATE, { draft: true })]))).match({
+    should(move(at('tested', [shipped, open(1013, { draft: true })]))).match({
       lane: { id: 'review' },
       trigger: 'pr.opened',
       backward: true,
+      reason: 'moved back to Review/CI: PR #1013 open',
     });
   });
 
-  it('should leave a card alone for a PR opened before the merge, however long it has been open', () => {
-    should(move(at('tested', [shipped, openedAt(1005, OPENED_EARLY)]))).be.null();
-    should(move(at('tested', [shipped, openedAt(1005, OPENED_EARLY, { draft: true })]))).be.null();
-  });
-
-  it('should read the open time over the number: a lower number opened later is newer, a higher one opened earlier is not', () => {
-    should(move(at('tested', [shipped, openedAt(1003, OPENED_LATE)]))?.backward).be.true();
-    should(move(at('tested', [shipped, openedAt(1013, OPENED_EARLY)]))).be.null();
-  });
-
-  it.each([undefined, null])(
-    'should fall back to the number in the same repository when the open time is %s',
-    createdAt => {
-      should(move(at('tested', [shipped, openedAt(1013, createdAt)]))?.backward).be.true();
-      should(move(at('tested', [shipped, openedAt(1005, createdAt)]))).be.null();
-      const elsewhere = openedAt(1013, createdAt, {
-        repo: 'kirinnee/other',
-        url: 'https://github.com/kirinnee/other/pull/1013',
-      });
-      should(move(at('tested', [shipped, elsewhere]))).be.null();
-      const cased = openedAt(1013, createdAt, { repo: 'KirinNee/Ferretry' });
-      should(move(at('tested', [shipped, cased]))?.backward).be.true();
-    },
-  );
-
-  it('should need the PR to be newer than every merge, not only the first', () => {
-    const later = { ...merged(1010), mergedAt: '2026-10-30T10:30:00Z' };
-    should(move(at('tested', [shipped, later, openedAt(1013, OPENED_LATE)]))).be.null();
-    should(move(at('tested', [shipped, later, openedAt(1013, '2026-10-30T11:00:00Z')]))?.reason).equal(
-      'moved back to Review/CI: PR #1013 opened after #1010 shipped',
+  it('should name every open PR, and fall to the draft lane when only drafts are open', () => {
+    should(move(at('tested', [shipped, open(1013), open(1014, { draft: true })]))?.reason).equal(
+      'moved back to Review/CI: PR #1013 ready for review',
+    );
+    should(move(at('tested', [shipped, open(1013, { draft: true }), open(1014, { draft: true })]))?.reason).equal(
+      'moved back to Review/CI: PR #1013, #1014 open',
     );
   });
 
-  it('should name only the newer PRs among several, ignoring a closed one and an older open one', () => {
-    const subject = at('tested', [
-      shipped,
-      pr(1009, { state: 'closed' }),
-      openedAt(1005, OPENED_EARLY),
-      openedAt(1013, OPENED_LATE),
-    ]);
-    should(move(subject)?.reason).equal('moved back to Review/CI: PR #1013 opened after #1008 shipped');
+  it('should ignore a PR closed unmerged, among several mixed PRs', () => {
+    const closedOnly = at('tested', [shipped, pr(1009, { state: 'closed' })]);
+    should(move(closedOnly, '4.110.0')).be.null();
+    const mixed = at('tested', [shipped, pr(1009, { state: 'closed' }), open(1013), merged(1010, release('4.111.0'))]);
+    should(move(mixed)?.reason).equal('moved back to Review/CI: PR #1013 ready for review');
   });
 
-  it('should use the draft that is newer when the ready PR is older', () => {
-    const subject = at('tested', [shipped, openedAt(1005, OPENED_EARLY), openedAt(1013, OPENED_LATE, { draft: true })]);
-    should(move(subject)).match({ trigger: 'pr.opened', backward: true });
-  });
-
-  it('should say nothing of a card with nothing shipped on it: an open PR alone moves a card only forward', () => {
-    should(move(at('tested', [openedAt(1013, OPENED_LATE)]))).be.null();
-    should(move(at('implement', [openedAt(1013, OPENED_LATE)]))).match({ lane: { id: 'review' }, backward: false });
-  });
-
-  it('should leave a card already in review, a closed card and a dropped card where they are', () => {
-    should(move(at('review', [shipped, openedAt(1013, OPENED_LATE)]))).be.null();
-    should(move(at('closed', [shipped, openedAt(1013, OPENED_LATE)]))).be.null();
-    const dropped = at('tested', [shipped, openedAt(1013, OPENED_LATE)], {
-      dropped: { reason: 'gone', at: MERGED_AT },
-    });
+  it('should leave a card in review, a closed card and a dropped card where they are', () => {
+    should(move(at('review', [shipped, open(1013)]))).be.null();
+    should(move(at('closed', [shipped, open(1013)]))).be.null();
+    const dropped = at('tested', [shipped, open(1013)], { dropped: { reason: 'gone', at: MERGED_AT } });
     should(move(dropped)).be.null();
+  });
+
+  it('should move a card with nothing merged forward only: an open PR alone has shipped nothing to pull back', () => {
+    should(move(at('tested', [open(1013)]))).be.null();
+    should(move(at('implement', [open(1013)]))).match({ lane: { id: 'review' }, backward: false });
   });
 
   it('should not count its own move back as the owner sending the card back', () => {
@@ -239,7 +209,7 @@ describe('laneFromFacts: newer work pulls a shipped card back', () => {
       from: 'tested',
       to: 'review',
       backward: true,
-      reason: 'moved back to Review/CI: PR #1013 opened after #1008 shipped',
+      reason: 'moved back to Review/CI: PR #1013 ready for review',
       auto: true,
       trigger: 'pr.ready',
     };
@@ -249,7 +219,7 @@ describe('laneFromFacts: newer work pulls a shipped card back', () => {
   });
 
   it('should still keep a card the owner sent back where it is sent', () => {
-    const base = at('implement', [shipped, openedAt(1013, OPENED_LATE)]);
+    const base = at('implement', [shipped, open(1013)]);
     const sent: BoardTaskEvent = {
       seq: 2,
       at: '2026-10-30T10:05:00Z',
