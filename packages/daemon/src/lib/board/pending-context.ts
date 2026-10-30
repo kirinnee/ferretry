@@ -91,4 +91,19 @@ export class PendingContextDelivery {
     if (!carried(result, quietLine(items))) await restore();
     return result;
   }
+
+  /**
+   * Sends the held context as a message OF ITS OWN, never on top of anybody's words. The owner read
+   * `[board] &F115 → Manually tested` glued to the front of their own message as if they had written it.
+   * Total, like `send`: nothing held sends nothing, and a send that fails puts the context back.
+   */
+  async sendSeparately(sessionId: string, send: (line: string) => Promise<unknown>): Promise<void> {
+    const items = await this.context.take(sessionId).catch((): readonly QuietItem[] => []);
+    if (items.length === 0) return;
+    try {
+      await send(quietLine(items));
+    } catch {
+      await this.context.restore(sessionId, items).catch(() => undefined);
+    }
+  }
 }

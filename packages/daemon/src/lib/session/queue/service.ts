@@ -14,6 +14,8 @@ export interface QueueRequest {
   readonly text: string;
   readonly attachmentIds?: readonly string[] | undefined;
   readonly replyExpected?: boolean | undefined;
+  /** A daemon notice that may be typed into the owner's own chat, as a message of its own. */
+  readonly chat?: boolean | undefined;
 }
 
 /** What an enqueue did: made the message, or found the one a first request already made. */
@@ -75,6 +77,7 @@ export class SessionQueueService {
         text: request.text,
         attachmentIds: [...(request.attachmentIds ?? [])],
         ...(request.replyExpected === true ? { replyExpected: true } : {}),
+        ...(request.chat === true ? { chat: true } : {}),
         enqueuedAt: at,
         state: 'queued',
         stateAt: at,

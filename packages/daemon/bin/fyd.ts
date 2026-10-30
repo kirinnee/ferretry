@@ -63,6 +63,7 @@ import {
   DORMANT_AGENT_STATUSES,
   type FleetCredentialList,
   FY_DEFAULT_DAEMON_PORT,
+  ferretryNotice,
   type Harness,
   ioPressureView,
   type LearningConfig,
@@ -658,6 +659,7 @@ import {
   agendaBlockNotice,
   agentSpokenName,
   answerArguments,
+  answerOf,
   answerPaused,
   attachmentDirectory,
   authorizeSessionCommand,
@@ -913,6 +915,7 @@ import {
   portCandidates,
   previousConversation,
   publishableDirectCarrier,
+  QUEUE_ANSWER_WAIT_MS,
   QueueDeliverer,
   QueueingSends,
   QueueRefused,
@@ -3273,31 +3276,34 @@ function createSessionSendSubsystem(
         : { message: request.message, referenced: [] };
       // `now` stops the running turn first: that is the send path's to do, not a queue's to wait for.
       if (queueing && request.now !== true) {
-        const enqueued = await pending
-          .send(
-            id,
-            turn.message,
-            async message =>
-              await queue.enqueue(id, {
-                id: request.sendId,
-                sender: person ? 'human' : 'agent',
-                ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
-                text: messageWithAttachments(message, delivered),
-                ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
-                ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
-              }),
-            (sent, line) => sent.message.text.includes(line),
-          )
+        // The refusals only a person can lift are said now, exactly as the direct path says them.
+        await service.authorize(id, request.attachmentIds ?? []).catch((error: unknown) => sendRefusal(error));
+        const enqueued = await queue
+          .enqueue(id, {
+            id: request.sendId,
+            sender: person ? 'human' : 'agent',
+            ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
+            text: messageWithAttachments(turn.message, delivered),
+            ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+            ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+          })
           .catch((error: unknown) => sendRefusal(error));
-        // Answered as soon as it is on disk — the first tick — and typed by the deliverer, never by the caller.
-        void deliverer.enqueued(id).catch(() => undefined);
+        // The board's held news goes as Ferretry's own message, never on top of the sender's words: the
+        // queue types it after theirs, and the app shows it as a notice, not as the owner speaking.
+        await pending.sendSeparately(id, async line =>
+          queue.enqueue(id, { id: crypto.randomUUID(), sender: 'daemon', chat: true, text: ferretryNotice(line) }),
+        );
+        // On disk now — the first tick. The deliverer's first look types it into an empty box, and the
+        // answer is then what the ledger proves, as the direct path's was; held for a reason, it is queued.
+        await Promise.race([deliverer.enqueued(id).catch(() => undefined), Bun.sleep(QUEUE_ANSWER_WAIT_MS)]);
+        const answer = answerOf((await ledger.list(id)).find(record => record.sendId === enqueued.message.id));
         if (turn.referenced.length > 0) await conversation.settle(id, turn);
         if (person) await instructions.queueIfStale(id);
         return {
-          ...(await view(id, 'queued the message')),
-          disposition: 'queued',
+          ...(await view(id, 'took the message')),
+          disposition: answer.disposition,
           sendId: enqueued.message.id,
-          fate: 'accepted',
+          fate: answer.fate,
         };
       }
       const outcome = await pending
@@ -8998,7 +9004,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         deliverer: queueDeliverer,
         direct: sends,
         target: async (id: SessionId) => await sendRepository.read(id),
+        ledger: sendLedger,
         clock,
+        sleep: async (milliseconds: number) => await Bun.sleep(milliseconds),
       };
       const daemonSends = delivery.queue ? new QueueingSends(queueingPorts, 'daemon') : sends;
       const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human') : sends;

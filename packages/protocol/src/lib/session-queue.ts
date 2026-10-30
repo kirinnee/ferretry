@@ -54,6 +54,11 @@ export const QueuedMessageSchema = z.object({
   attachmentIds: z.array(z.string()),
   /** The sender is parked awaiting the reply, so the agent is told how to unblock them. */
   replyExpected: z.boolean().optional(),
+  /**
+   * A daemon notice that may be typed into the owner's own chat, as a message of its own: the board's
+   * news for a lead. Any other daemon message is never typed into an interactive session.
+   */
+  chat: z.boolean().optional(),
   enqueuedAt: InstantSchema,
   state: QueuedMessageStateSchema,
   /** When it reached `state`. */

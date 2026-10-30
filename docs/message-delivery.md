@@ -40,10 +40,17 @@ this page, which is still how a message reaches the pane.
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
   shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
 - **Switch** — `"delivery": { "queue": false }` in `config/daemon.json` turns it off (on by default; read at
-  start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES: the person's agenda
-  context, any held board events and the attachment paths are baked into the text at that moment, the
-  answer is `disposition: "queued"` with the message id as `sendId` as soon as it is on disk, and the
-  deliverer types it. `--now` (stop the running turn first) still goes straight down the send path.
+  start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES. The refusals only a person can lift (an open
+  structured question, a quarantined harness, an unconfirmed kill) are said first, exactly as the direct
+  path says them, and nothing is queued. The person's agenda context and the attachment paths are baked
+  into the text; the board's held events are NOT — they go as a message of their own, Ferretry's
+  (`[ferretry] [board] …`, `chat: true`), never on top of the sender's words. The route then waits, up to
+  `QUEUE_ANSWER_WAIT_MS` (20 s), for the deliverer's first look and answers what the send ledger says the
+  hand-over did (`answerOf`), so a message into an empty box is answered exactly as the direct path
+  answered it; one held for a draft or a question is answered `queued` at once, with the message id as
+  `sendId`. `--now` (stop the running turn first) still goes straight down the send path.
+- **A daemon notice made for the chat** (`chat: true`) is typed into an interactive session as a message of
+  its own: the board's news for a lead. Every other daemon message stays out of the owner's chat.
 - **Every producer** — the Warden, the board's nudges and checks, the declared-wait watcher, the learning
   re-instruction and the owner's agenda answers send through `QueueingSends`: enqueued under the request's
   own id (so receipts read from the send ledger still find it once typed), as the daemon's — or, for the

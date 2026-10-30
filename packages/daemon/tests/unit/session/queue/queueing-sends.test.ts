@@ -6,15 +6,21 @@ import {
   QueueingSends,
   type SendMessageRequest,
   type SendOutcome,
+  type SendRecord,
   SendRefused,
   type SendTarget,
+  SendUnavailable,
 } from '../../../../src/lib/index.ts';
 import { parseSessionId, type SessionId } from '../../../../src/lib/session-id.ts';
 
 const ID = parseSessionId('session-1');
 const AT = '2026-10-30T16:30:00.000Z';
 
-function world(target: SendTarget | undefined, kind: 'human' | 'daemon' = 'daemon') {
+function world(
+  target: SendTarget | undefined,
+  kind: 'human' | 'daemon' = 'daemon',
+  options: { readonly refuse?: Error; readonly ledger?: readonly SendRecord[] } = {},
+) {
   const enqueued: QueueRequest[] = [];
   const woken: SessionId[] = [];
   const direct: SendMessageRequest[] = [];
@@ -47,9 +53,14 @@ function world(target: SendTarget | undefined, kind: 'human' | 'daemon' = 'daemo
           direct.push(request);
           return { disposition: 'delivered' } as SendOutcome;
         },
+        authorize: async () => {
+          if (options.refuse !== undefined) throw options.refuse;
+        },
       },
       target: async () => target,
+      ledger: { list: async () => options.ledger ?? [] },
       clock: { now: () => AT },
+      sleep: async () => undefined,
     },
     kind,
   );
@@ -135,13 +146,42 @@ describe('a producer sending through the queue', () => {
       {
         queue: { enqueue: async () => ({ message, created: true }) },
         deliverer: { enqueued: async () => Promise.reject(new Error('busy')) },
-        direct: { send: async () => ({ disposition: 'delivered' }) as SendOutcome },
+        direct: { send: async () => ({ disposition: 'delivered' }) as SendOutcome, authorize: async () => undefined },
         target: async () => auto,
+        ledger: { list: async () => [] },
         clock: { now: () => AT },
+        sleep: async () => undefined,
       },
       'daemon',
     );
 
     should((await sends.send({ id: ID, sendId: 'z', message: 'm' })).disposition).equal('queued');
+  });
+
+  it('should refuse up front what only a person can lift, queueing nothing', async () => {
+    // Prose held behind a question the pane may never release would be a message that never arrives.
+    const { sends, enqueued } = world(auto, 'human', { refuse: new SendUnavailable('a question is open') });
+
+    const refused = await sends.send({ id: ID, sendId: 'p', message: 'hi' }).catch((error: unknown) => error);
+
+    should(refused).be.instanceof(SendUnavailable);
+    should(enqueued).be.empty();
+  });
+
+  it('should answer what the hand-over did once the first look typed it, as the direct path did', async () => {
+    const handed = {
+      sendId: 's-1',
+      acceptedAt: AT,
+      acceptedTurn: 7,
+      path: 'turn-file',
+      message: 'ship it',
+      fate: 'accepted',
+    } satisfies SendRecord;
+    const { sends } = world(auto, 'human', { ledger: [handed] });
+
+    const outcome = await sends.send({ id: ID, sendId: 's-1', message: 'ship it' });
+
+    should(outcome.disposition).equal('delivered');
+    should(outcome.record).equal(handed);
   });
 });

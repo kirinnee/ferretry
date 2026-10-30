@@ -2,7 +2,8 @@ import type { SendSenderKind } from '@ferretry/protocol';
 import type { ClockPort } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SendMessageRequest, SendOutcome } from '../send/service.ts';
-import { SendRefused, type SendTarget } from '../send/types.ts';
+import { type SendLedger, SendRefused, type SendTarget } from '../send/types.ts';
+import { answerOf } from './answer.ts';
 import type { QueueDeliverer } from './deliverer.ts';
 import { boardOnly } from './policy.ts';
 import type { SessionQueueService } from './service.ts';
@@ -29,12 +30,25 @@ import type { SessionQueueService } from './service.ts';
 export interface QueueingSendsPorts {
   readonly queue: Pick<SessionQueueService, 'enqueue'>;
   readonly deliverer: Pick<QueueDeliverer, 'enqueued'>;
-  /** The direct send path, for what the queue does not carry. */
-  readonly direct: { send(request: SendMessageRequest): Promise<SendOutcome> };
+  /** The direct send path: what the queue does not carry, and the refusals only a person can lift. */
+  readonly direct: {
+    send(request: SendMessageRequest): Promise<SendOutcome>;
+    authorize(id: SessionId, attachmentIds: readonly string[]): Promise<void>;
+  };
   /** The session a message is for, as the send path reads it. */
   target(id: SessionId): Promise<SendTarget | undefined>;
+  /** The send ledger, which says what the hand-over did under the message's own id. */
+  readonly ledger: Pick<SendLedger, 'list'>;
   readonly clock: ClockPort;
+  sleep(milliseconds: number): Promise<void>;
 }
+
+/**
+ * How long a send waits for the deliverer's first look at its message before it is answered `queued`. A
+ * message into an empty box is typed within it, and answered as the direct path answered; one held for a
+ * draft or a question is answered at once, because the look returns as soon as it says why.
+ */
+export const QUEUE_ANSWER_WAIT_MS = 20_000;
 
 export class QueueingSends {
   constructor(
@@ -49,6 +63,7 @@ export class QueueingSends {
     const sender: SendSenderKind =
       request.origin === 'daemon' ? 'daemon' : request.senderReference !== undefined ? 'agent' : this.kind;
     if (request.now === true || boardOnly({ sender }, target.mode)) return await this.ports.direct.send(request);
+    await this.ports.direct.authorize(request.id, request.attachmentIds ?? []);
     const { message } = await this.ports.queue.enqueue(request.id, {
       id: request.sendId,
       sender,
@@ -57,11 +72,16 @@ export class QueueingSends {
       ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
       ...(request.replyExpected === true ? { replyExpected: true } : {}),
     });
-    void this.ports.deliverer.enqueued(request.id).catch(() => undefined);
+    await Promise.race([
+      this.ports.deliverer.enqueued(request.id).catch(() => undefined),
+      this.ports.sleep(QUEUE_ANSWER_WAIT_MS),
+    ]);
+    const handed = (await this.ports.ledger.list(request.id)).find(record => record.sendId === message.id);
+    const { disposition } = answerOf(handed);
     return {
       target,
-      disposition: 'queued',
-      record: {
+      disposition,
+      record: handed ?? {
         sendId: message.id,
         acceptedAt: message.enqueuedAt,
         acceptedTurn: target.turn,
