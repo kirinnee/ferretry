@@ -20,9 +20,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import should from 'should';
 import { buildWorld } from '../../../bin/fyd.ts';
-import { freeLoopbackPort } from '../support/booted-daemon.ts';
-import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
-import { dialWebRtc, type WebRtcPhone } from '../support/webrtc-phone.ts';
+import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { ABSENT_USER_HOME, cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
+import { dialWebRtc, type WebRtcPhone } from '../../integration/support/webrtc-phone.ts';
 
 const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
 /** "Within a few seconds": the measured stop is tens of milliseconds, so this only catches a hang. */

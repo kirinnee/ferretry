@@ -40,32 +40,6 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  # Which of the optional macOS jobs have anything to prove (scripts/ci/macos-relevance.sh says why a
-  # job and not a `paths` filter, and what is deliberately generous). `main` and manual dispatch
-  # decide `true` for all of them. A job it leaves out is SKIPPED, which counts as passed.
-  changes:
-    name: macOS Relevance
-    permissions:
-      contents: read
-      pull-requests: read
-    # GitHub, not Namespace: a few seconds of bash with no nix shell (docs/standards/ci-cd, "Runners").
-    runs-on: ubuntu-latest
-    outputs:
-      containment: ${{ steps.decide.outputs.containment }}
-      safari: ${{ steps.decide.outputs.safari }}
-      harness_os: ${{ steps.decide.outputs.harness_os }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-          sparse-checkout: scripts/ci
-      - id: decide
-        name: Decide which macOS jobs have anything to prove
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-        run: ./scripts/ci/macos-relevance.sh
-
   precommit:
     name: Pre-Commit (${{ matrix.part }})
     permissions:
@@ -300,9 +274,10 @@ jobs:
   # path at ~4.4 min (~3.8 min of tests); each group is about a minute. The matrix lists every group
   # by name, and `int-ledger` refuses to judge unless every group in the config reported.
   # The tier grew back to the critical path: by Oct 28 `everything-else` took ~480s and
-  # `daemon-runtime` ~330s on GitHub. Their slowest files now have groups of their own — the four
-  # real-time budget suites (~160s of measuring an idle daemon) and the PWA feature surfaces plus
-  # the send handover (~175s of browser walks) — so no group needs much over five minutes. GitHub
+  # `daemon-runtime` ~330s on GitHub. Their slowest files now have groups of their own — the PWA feature
+  # surfaces plus the send handover (~175s of browser walks) — so no group needs much over five
+  # minutes. The real-time budget suites that once had a group are the realworld tier's now
+  # (realworld.yaml): they asserted the machine, not the code, so they cannot gate a merge. GitHub
   # runs these for free; the cost is two more jobs in its 20-job queue, measured as worth it.
   int:
     name: Integration Tests (${{ matrix.group }})
@@ -316,7 +291,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        group: [daemon-budgets, daemon-runtime, daemon, pwa-render, pwa-chat, pwa-surfaces, everything-else]
+        group: [daemon-runtime, daemon, pwa-render, pwa-chat, pwa-surfaces, everything-else]
     steps:
       - uses: actions/checkout@v5
         with:
@@ -362,114 +337,6 @@ jobs:
         with:
           name: coverage-int
           path: coverage/int/lcov.info
-          if-no-files-found: warn
-
-  darwin-confinement:
-    name: Containment (macOS)
-    needs: changes
-    if: needs.changes.outputs.containment == 'true'
-    permissions:
-      contents: read
-    # `macos-15`: GitHub retires `macos-14` on 2026-11-02, and its October brownout windows fail jobs
-    # outright before then (the Sandbox Shell job below says more).
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/install-nix
-      # The pane-identity tests drive a real tmux, which no macOS runner image ships.
-      - name: Install tmux
-        run: command -v tmux >/dev/null 2>&1 || brew install tmux
-      # The one claim in this repository that a Linux runner cannot check for macOS: that the file
-      # viewer's confinement actually holds on the kernel the POSIX pinner was written for.
-      - name: Prove containment on macOS
-        run: nix develop .#ci -c ./scripts/ci/darwin-confinement.sh
-
-  safari-sandbox-shell:
-    name: Sandbox Shell (Safari)
-    needs: changes
-    if: needs.changes.outputs.safari == 'true'
-    permissions:
-      contents: read
-    # `macos-15`, NOT `macos-14`. macOS 14 entered deprecation on 2026-07-06 with October brownout
-    # windows that fail jobs outright and retirement on 2026-11-02, so pinning a release-blocking gate
-    # to it buys a job that starts failing for reasons unrelated to Safari. `macos-15` also ships the
-    # newer Safari/SafariDriver pair. No job here runs on `macos-14` any more.
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/install-nix
-      # safaridriver has no headless mode and Safari hosts exactly one WebDriver session at a time, so
-      # this runs HEADED in the runner's autologin GUI session and strictly sequentially. The image
-      # already ran `sudo safaridriver --enable` and wrote AllowRemoteAutomation at build time;
-      # re-running is idempotent and costs nothing, and asserting the flag turns the one unproven
-      # assumption behind this job into a loud failure instead of a confusing session error.
-      - name: Prove Safari can host a WebDriver session
-        run: |
-          sudo safaridriver --enable
-          /usr/libexec/PlistBuddy -c 'print AllowRemoteAutomation' "$HOME/Library/WebDriver/com.apple.Safari.plist"
-      # The only claim in this repository that no Linux runner can check: that the sandbox shell's
-      # hash-pinned inline install, its opaque origin and its zero-request posture hold in the browser
-      # every Apple device actually runs. A red here is either a product outage on every iPhone and Mac
-      # or the deletion of the shell's security argument — the script's header says which is which.
-      - name: Prove the fy-render sandbox shell in Safari
-        run: nix develop .#ci -c ./scripts/ci/safari-render-proof.sh
-      # `always()` because a red run is the run whose facts matter most: the artifact carries the exact
-      # policy and hashes measured, the Safari and SafariDriver versions, the ordered request ledger,
-      # every property's rule and outcome, and what a green run does NOT establish.
-      - name: Upload the Safari evidence ledger
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: safari-render-proof
-          path: packages/pwa/.artifacts/safari-render/
-          if-no-files-found: warn
-
-  harness-contract:
-    name: Harness Contract (${{ matrix.os }})
-    needs: changes
-    permissions:
-      contents: read
-    # The account model shares one login across many runtimes through mechanisms Claude Code and
-    # Codex never documented (design §8.5): CLAUDE_SECURESTORAGE_CONFIG_DIR and its refresh lock, a
-    # Codex auth.json rewritten in place through a link, file-only credential storage, and the
-    # trust/onboarding keys a wrapper writes. This measures each one against the PINNED harnesses
-    # (the flake's own nixpkgs) with fake credentials and a proxy that forwards nothing, so a pin
-    # bump that breaks one turns this red instead of forking somebody's login.
-    #
-    # `macos-15` is not optional: Claude's macOS keychain path is compiled out of the Linux build,
-    # so this is the only place it is measured (gap G1). Release runs only after a green CI, which
-    # is what makes this a release gate. FY_CONTRACT_KEYCHAIN lets that job write throwaway items
-    # into the runner's login keychain; the suite refuses to anywhere `CI` is not `true`.
-    #
-    # The Linux leg always runs. The `macos-15` leg is in the matrix only when the pull request touches
-    # what this measures (scripts/ci/macos-relevance.sh); `main` always has it, and the nightly
-    # `Harness Contract (latest)` covers upstream drift in between. The matrix is data rather than an
-    # `if:` because a job-level `if:` cannot read `matrix`.
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(needs.changes.outputs.harness_os) }}
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          persist-credentials: false
-      - uses: ./.github/actions/install-nix
-      - name: Measure the pinned harnesses
-        env:
-          FY_CONTRACT_KEYCHAIN: ${{ startsWith(matrix.os, 'macos') && '1' || '' }}
-          FY_CONTRACT_ARTIFACTS: ${{ runner.temp }}/harness-contract
-        run: nix develop .#ci -c ./packages/fleet/tests/contract/run.sh pinned
-      - name: Upload the harness contract result
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: harness-contract-pinned-${{ matrix.os }}
-          path: ${{ runner.temp }}/harness-contract/
           if-no-files-found: warn
 
   compile:

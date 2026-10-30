@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# The macOS jobs that a pull request runs only when their inputs change.
+# The macOS jobs of the REALWORLD workflow, which a pull request runs only when their inputs change.
 #
 # `scripts/ci/macos-relevance.sh` decides, from a pull request's changed files, whether Containment,
 # Sandbox Shell (Safari) and the macos-15 leg of Harness Contract have anything to prove. The cost of a
@@ -12,13 +12,17 @@ set -euo pipefail
 #   2. a docs-only or unrelated change selects none, and the toolchain, the lockfile and the workflows
 #      select all three, so the lists cannot silently become "never" or "always";
 #   3. `main`, a manual dispatch and any doubt run all three;
-#   4. ci.yaml gates exactly those jobs on the decision, and leaves Smoke darwin-arm64 ungated.
+#   4. realworld.yaml gates exactly those jobs on the decision, ci.yaml no longer runs them, and CI's
+#      Smoke darwin-arm64 stays ungated;
+#   5. realworld.yaml's `pull_request.paths` triggers on every input of every job, so a pull request that
+#      changes one is never left without the run that would measure it.
 
 root_dir="$(git rev-parse --show-toplevel)"
 cd "${root_dir}"
 
 decider="scripts/ci/macos-relevance.sh"
-workflow=".github/workflows/ci.yaml"
+workflow=".github/workflows/realworld.yaml"
+ci_workflow=".github/workflows/ci.yaml"
 containment_script="scripts/ci/darwin-confinement.sh"
 safari_script="scripts/ci/safari-render-proof.sh"
 harness_script="packages/fleet/tests/contract/run.sh"
@@ -28,7 +32,7 @@ fail() {
   exit 1
 }
 
-for required in "${decider}" "${workflow}" "${containment_script}" "${safari_script}" "${harness_script}"; do
+for required in "${decider}" "${workflow}" "${ci_workflow}" "${containment_script}" "${safari_script}" "${harness_script}"; do
   [ -f "${required}" ] || fail "macOS relevance input is missing: ${required}"
 done
 
@@ -69,12 +73,15 @@ ts_files_under() { git ls-files "$@" | { rg '[.]ts$' || true; }; }
 
 # ─── 1. every input a job's script reads selects that job ───────────────────────────────────────
 
-# expect_job <label> <column 1..3> <path>... — each path, changed alone, must select the job.
+# expect_job <label> <column 1..3> <path>... — each path, changed alone, must select the job. Every path
+# is also recorded in `all_inputs`, which section 5 holds the workflow's `pull_request.paths` to.
+all_inputs=()
 expect_job() {
   local job="$1" column="$2" path got
   shift 2
   for path in "$@"; do
     [ -e "${path}" ] || fail "${job}: ${path} is read by its script but does not exist; update ${decider}"
+    all_inputs+=("$(as_file "${path}")")
     got="$(decide "$(as_file "${path}")" | cut -d' ' -f"${column}")"
     [ "${got}" = true ] || fail "${job}: an input of its script does not select it (changed: ${path}); update ${decider}"
   done
@@ -107,7 +114,8 @@ expect_job 'Harness Contract (macos-15)' 3 "${harness_script}" "${harness_files[
 expect 'false false false' 'documentation only' docs/standards/ci-cd/index.md README.md
 expect 'false false false' 'a PWA feature unrelated to the sandbox shell' packages/pwa/src/features/settings/capability-list.tsx
 expect 'false false false' 'a daemon route unrelated to the file viewer' packages/daemon/src/lib/grants/policy.ts
-for always in flake.lock flake.nix nix/pre-commit.nix .github/workflows/ci.yaml .github/workflows/e2e.yaml .github/actions/install-nix/action.yml bun.lock; do
+expect 'false false false' 'the CI workflow no longer runs these jobs' .github/workflows/ci.yaml .github/workflows/e2e.yaml
+for always in flake.lock flake.nix nix/pre-commit.nix .github/workflows/realworld.yaml .github/actions/install-nix/action.yml bun.lock bunfig.realworld.toml; do
   expect 'true true true' "the toolchain, the lockfile or a workflow changed (${always})" "${always}"
 done
 expect 'true false false' 'only the containment script changed' scripts/ci/darwin-confinement.sh
@@ -140,7 +148,7 @@ printf 'README.md\n' >"${tmp_dir}/readme-files"
 run_with MACOS_RELEVANCE_FILES="${tmp_dir}/readme-files"
 grep -qx 'harness_os=\["ubuntu-latest"\]' "${tmp_dir}/run-out" || fail 'a docs-only change must leave Harness Contract on its Linux leg alone'
 
-# ─── 4. ci.yaml gates exactly these jobs ────────────────────────────────────────────────────────
+# ─── 4. realworld.yaml gates exactly these jobs ────────────────────────────────────────────────────────
 
 job_block() {
   awk -v id="$1" '
@@ -165,11 +173,36 @@ block_has safari-sandbox-shell '^    needs: changes$' 'must need changes'
 block_has safari-sandbox-shell "^    if: needs[.]changes[.]outputs[.]safari == 'true'\$" 'must run only when safari is true'
 block_has harness-contract '^    needs: changes$' 'must need changes'
 block_has harness-contract 'os: [$][{][{] fromJSON[(]needs[.]changes[.]outputs[.]harness_os[)] [}][}]' 'must take its os matrix from harness_os'
-if job_block smoke | rg -q 'changes'; then
-  fail "${workflow}: Smoke darwin-arm64 must run on every pull request, not be gated on \`changes\`"
+for moved in changes darwin-confinement safari-sandbox-shell harness-contract; do
+  grep -qx "  ${moved}:" "${ci_workflow}" && fail "${ci_workflow}: job '${moved}' belongs in ${workflow}, which no release waits on"
+done
+if awk '$0 == "  smoke:" { in_job = 1; next } in_job && /^  [A-Za-z0-9_-]+:$/ { exit } in_job { print }' "${ci_workflow}" | rg -q 'changes'; then
+  fail "${ci_workflow}: Smoke darwin-arm64 must run on every pull request, not be gated on \`changes\`"
 fi
 if job_block harness-contract | rg -q '^    if:'; then
   fail "${workflow}: Harness Contract must not carry a job-level if: — its Linux leg always runs; gate the macos-15 leg through \`harness_os\`"
 fi
 
-echo "✅ macOS relevance holds: every input of the three optional macOS jobs selects its job, main runs them all"
+# ─── 5. the workflow triggers on every input ────────────────────────────────────────────────────
+
+mapfile -t trigger_globs < <(awk '
+  /^  pull_request:/ { in_pr = 1; next }
+  in_pr && /^  [A-Za-z_]+:/ && !/^  pull_request:/ { in_pr = 0 }
+  in_pr && /^      - / { sub(/^      - /, ""); gsub(/^'"'"'|'"'"'$/, ""); print }
+' "${workflow}")
+[ "${#trigger_globs[@]}" -ge 5 ] || fail "found only ${#trigger_globs[@]} pull_request paths in ${workflow}; the extraction is stale"
+
+# A GitHub path glob as a regex: `**` crosses directories, `*` does not.
+glob_regex() { sed -e 's/[.]/[.]/g' -e 's#[*][*]#\x01#g' -e 's#[*]#[^/]*#g' -e 's#\x01#.*#g' <<<"$1"; }
+triggers_on() {
+  local glob
+  for glob in "${trigger_globs[@]}"; do
+    grep -Eq "^$(glob_regex "${glob}")\$" <<<"$1" && return 0
+  done
+  return 1
+}
+for input in "${all_inputs[@]}"; do
+  triggers_on "${input}" || fail "${workflow}: a pull request that changes ${input} would not run it; add it to \`on.pull_request.paths\`"
+done
+
+echo "✅ macOS relevance holds: every input of the three optional macOS jobs selects its job, main runs them all, and realworld.yaml triggers on each"

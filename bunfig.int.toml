@@ -1,6 +1,6 @@
 [test]
 root = "packages"
-pathIgnorePatterns = ["**/tests/unit/**", "**/tests/sit/**"]
+pathIgnorePatterns = ["**/tests/unit/**", "**/tests/sit/**", "**/tests/realworld/**"]
 # This is a global multi-file hook, not a per-file teardown. The shared Chromium
 # support closes its one process only after every integration file has completed;
 # putting the hook in an importing test file would close a sibling's browser.

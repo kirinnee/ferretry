@@ -120,6 +120,11 @@ tasks:
     cmds:
       - SIT_DRIVER=binary CLI_BIN=dist/bin/{{.ARTIFACT}} ./scripts/test/swept.sh bun test --config=bunfig.sit.toml
 
+  test:realworld:
+    desc: Run the non-blocking realworld suite (machine-dependent timing, memory and rate claims)
+    cmds:
+      - ./scripts/test/swept.sh bun test --config=bunfig.realworld.toml --timeout 120000
+
   test:e2e:
     desc: Run isolated end-to-end journeys through the freshly compiled binary
     deps: [compile]

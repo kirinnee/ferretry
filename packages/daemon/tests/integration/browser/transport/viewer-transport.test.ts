@@ -82,7 +82,6 @@ describe('system frame clock', () => {
 
     // Assert
     should(elapsed).be.aboveOrEqual(0);
-    should(elapsed).be.below(1_000);
     should(fired).equal(1);
   });
 

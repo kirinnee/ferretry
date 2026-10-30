@@ -21,34 +21,35 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 
 ## Hook inventory
 
-| Hook                         | What it enforces                                                             |
-| ---------------------------- | ---------------------------------------------------------------------------- |
-| `treefmt`                    | formatting: actionlint, nixfmt, prettier, shfmt                              |
-| `a-biome`                    | Biome lint on TS/JS (formatting is prettier's job, not Biome's)              |
-| `typecheck`                  | `tsc --noEmit` across the workspace                                          |
-| `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                         |
-| `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry          |
-| `a-shellcheck`               | shellcheck on every `*.sh`                                                   |
-| `a-enforce-exec`             | tracked shell scripts are executable                                         |
-| `a-action-pins-trusted`      | trusted GitHub Actions pin a major tag                                       |
-| `a-action-pins-non-trusted`  | everything else pins a 40-char SHA plus its tag in a comment                 |
-| `a-cli-contracts`            | the release/architecture invariants in [Contracts](../contracts/README.md)   |
-| `a-closed-set-agreement`     | registered cross-package closed enumerations have the same members           |
-| `a-composition-invocation`   | constructed composition-root fields have a caller                            |
-| `a-composition-reachability` | production modules are used by their package's composition root              |
-| `a-conflict-markers`         | marker shapes appear only in declared teaching documents                     |
-| `a-contract-registry`        | executable, documented and wired contract inventories agree                  |
-| `a-cors-header-agreement`    | the CORS preflight admits every header the browser code can send             |
-| `a-daemon-scope`             | PWA state and requests stay qualified by their owning daemon                 |
-| `a-fetch-binding`            | the PWA never stores a `fetch` builtin or calls the network past the carrier |
-| `a-git-hooks-worktree`       | commit linting works from a linked worktree, concurrently and repeatedly     |
-| `a-macos-relevance`          | the optional macOS jobs' path lists cover every input their scripts read     |
-| `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their three teaching files          |
-| `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers               |
-| `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)              |
-| `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree           |
-| `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt    |
-| `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                             |
+| Hook                         | What it enforces                                                              |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `treefmt`                    | formatting: actionlint, nixfmt, prettier, shfmt                               |
+| `a-biome`                    | Biome lint on TS/JS (formatting is prettier's job, not Biome's)               |
+| `typecheck`                  | `tsc --noEmit` across the workspace                                           |
+| `a-deadcode`                 | Knip, repository view (`knip.json`) — includes tests                          |
+| `a-deadcode-production`      | Knip, production view (`knip.production.json`) — from the bin entry           |
+| `a-shellcheck`               | shellcheck on every `*.sh`                                                    |
+| `a-enforce-exec`             | tracked shell scripts are executable                                          |
+| `a-action-pins-trusted`      | trusted GitHub Actions pin a major tag                                        |
+| `a-action-pins-non-trusted`  | everything else pins a 40-char SHA plus its tag in a comment                  |
+| `a-cli-contracts`            | the release/architecture invariants in [Contracts](../contracts/README.md)    |
+| `a-closed-set-agreement`     | registered cross-package closed enumerations have the same members            |
+| `a-composition-invocation`   | constructed composition-root fields have a caller                             |
+| `a-composition-reachability` | production modules are used by their package's composition root               |
+| `a-conflict-markers`         | marker shapes appear only in declared teaching documents                      |
+| `a-contract-registry`        | executable, documented and wired contract inventories agree                   |
+| `a-cors-header-agreement`    | the CORS preflight admits every header the browser code can send              |
+| `a-daemon-scope`             | PWA state and requests stay qualified by their owning daemon                  |
+| `a-fetch-binding`            | the PWA never stores a `fetch` builtin or calls the network past the carrier  |
+| `a-git-hooks-worktree`       | commit linting works from a linked worktree, concurrently and repeatedly      |
+| `a-macos-relevance`          | the optional macOS jobs' path lists cover every input their scripts read      |
+| `a-no-fy-render-in-docs`     | `fy-render` fence openers appear only in their three teaching files           |
+| `a-no-legacy-state`          | package code cannot reference predecessor state or identifiers                |
+| `a-no-pattern-kill`          | test code never kills processes by pattern (`pkill`, `killall`)               |
+| `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree            |
+| `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt     |
+| `a-test-tiers`               | every test lives in a tier; integration asserts no wall-clock or memory bound |
+| `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                              |
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and
 therefore catches files that only tests reach, which the repository view considers used.

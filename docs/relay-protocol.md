@@ -2975,7 +2975,7 @@ and a remote-browser view (§14) needs more than 7.5 MB/s. Its cost is that it i
   and every later offer is refused `webrtc_unavailable` until a restart, rather than letting the next
   peer block the daemon for good. A stopping daemon closes its peers and does NOT hand the engine
   back: the threads end with the process, and the one call that waits on the library has nothing to
-  give a stop. Proved by `packages/daemon/tests/integration/runtime/shutdown-time.test.ts` (a real
+  give a stop. Proved by `packages/daemon/tests/realworld/runtime/shutdown-time.test.ts` (a real
   `fyd`: no library thread before an offer, a clean SIGTERM within 5 s idle and with a phone connected)
   and the engine's own suite (the threads gone after a release, a second answer starting them again).
 - **Licence.** node-datachannel and libdatachannel are MPL-2.0: file-level copyleft that permits

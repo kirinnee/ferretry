@@ -1,7 +1,7 @@
 /**
  * THE ANALYTICS INDEX MUST NOT FREEZE THE DAEMON WHEN THE DISK IS SATURATED.
  *
- * CI's `daemon-budgets` caught a 307 ms stall 2.75 s into boot whose stacks were
+ * the realworld tier caught a 307 ms stall 2.75 s into boot whose stacks were
  * `upsert (sqlite-analytics-store.ts) ← sweep (analytics/ingestion.ts)`: the ingestion sweep wrote its
  * rows to `analytics.sqlite` in one transaction on the event loop, and the commit — with the checkpoint's
  * `fsync` behind it — ran there. The same disk froze the session index for seconds (`io-pressure-index`).
@@ -29,8 +29,8 @@ import type {
   AnalyticsWriterResponse,
 } from '../../../src/adapters/analytics/analytics-writer-program.ts';
 import { createFoundationPaths, type FoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
-import { refusedSession } from '../support/analytics-fixtures.ts';
-import { SlowCommitDatabase } from '../support/slow-sqlite.ts';
+import { refusedSession } from '../../integration/support/analytics-fixtures.ts';
+import { SlowCommitDatabase } from '../../integration/support/slow-sqlite.ts';
 
 /** What one commit costs on the saturated disk: a second and a half, inside what was measured. */
 const COMMIT_MS = 1_500;
@@ -38,7 +38,7 @@ const COMMIT_MS = 1_500;
 const BUDGET_MS = 200;
 /** The owner's fleet: thousands of finished sessions, ingested in a handful of sweeps. */
 const ROWS = 1_500;
-const SLOW_WRITER = resolve(import.meta.dir, '../support/slow-analytics-writer.worker.ts');
+const SLOW_WRITER = resolve(import.meta.dir, '../../integration/support/slow-analytics-writer.worker.ts');
 
 const homes = new Set<string>();
 

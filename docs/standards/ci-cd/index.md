@@ -59,18 +59,19 @@ did before Namespace.
 **Where each job runs** on a pull request, with the busy cores measured by sampling `/proc/stat`
 every second, and the GitHub times from the last runs before Namespace (p50):
 
-| Job                                              | Runner        | Measured                     | Why                                                       |
-| ------------------------------------------------ | ------------- | ---------------------------- | --------------------------------------------------------- |
-| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores     | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path  |
-| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8 | knip needs more than a 2x4's 4GB; a 4x8 bought 16s        |
-| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                   | `bun test` runs one file at a time                        |
-| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                   | short builds; `Build Checks` also refreshes the cache     |
-| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                   | well inside the critical path                             |
-| `PWA Full Gallery (dark, <viewport>)`            | Namespace 4x8 | RAM peaks 5–7GB a viewport   | PR: GitHub legs wait in its queue (p90 ~11 min vs ~8)     |
-| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB               | one journey at a time                                     |
-| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                 | free; seven groups keep the slowest near five minutes     |
-| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell        | billed a whole minute and a cache attachment on Namespace |
-| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                            | free; macOS and arm64 have no Namespace equivalent here   |
+| Job                                              | Runner        | Measured                     | Why                                                        |
+| ------------------------------------------------ | ------------- | ---------------------------- | ---------------------------------------------------------- |
+| `Pre-Commit (format)`                            | Namespace 2x4 | treefmt, ~3.4 of 4 cores     | ~55s on 2x4 vs ~30s on 4x8: half the price, off the path   |
+| `Pre-Commit (gates)`                             | GitHub        | 113s vs 97s on Namespace 4x8 | knip needs more than a 2x4's 4GB; a 4x8 bought 16s         |
+| `Unit Tests (<group>)`                           | Namespace 2x4 | ~0.7 cores                   | `bun test` runs one file at a time                         |
+| `Build Checks`, `Compile Binaries`               | Namespace 2x4 | ~1.4 cores                   | short builds; `Build Checks` also refreshes the cache      |
+| `PWA Settings Geometry (light)`                  | Namespace 2x4 | ~1.9 cores                   | well inside the critical path                              |
+| `PWA Full Gallery (dark, <viewport>)`            | Namespace 4x8 | RAM peaks 5–7GB a viewport   | PR: GitHub legs wait in its queue (p90 ~11 min vs ~8)      |
+| `E2E Shard (1..3)`                               | Namespace 2x4 | ~1 core, 1.8GB               | one journey at a time                                      |
+| `Integration Tests (<group>)`                    | GitHub        | ~0.6–2 cores                 | free; the machine-dependent group left for `Realworld`     |
+| `Realworld Tests`                                | Namespace 4x8 | idle budgets, 200 ms stalls  | every event: a quiet dedicated VM is what its budgets need |
+| `Unit Tests`, `Integration Tests`, `E2E …` tails | GitHub        | seconds, no nix shell        | billed a whole minute and a cache attachment on Namespace  |
+| `SIT`, smoke, harness contract, every macOS job  | GitHub        | —                            | free; macOS and arm64 have no Namespace equivalent here    |
 
 - **One cache volume, tag `ferretry-nix`, requested at 10GB.** `namespacelabs/nscloud-cache-action`
   with `cache: nix` mounts a persistent `/nix` BEFORE the [Nix install](#installing-nix), so the dev shell
@@ -114,8 +115,10 @@ worst 74. The queue, not the work, held pull requests up, and there is no paid p
 (Namespace macOS is ten times a Linux unit's price, ~$600 a month at this pace).
 
 So a pull request runs **Smoke on every run** and the other three **only when their inputs change**.
-`main`, a manual dispatch and any doubt run all four: they are the release gates, so a path list that
-missed an input shows up one merge later and never as a release that skipped its proof.
+`main`, a manual dispatch and any doubt run all four, so a path list that missed an input shows up
+one merge later. Smoke stays in `ci.yaml`. The other three, and the job that decides them, are the
+realworld tier's: they live in `realworld.yaml`, so a macOS queue never holds up a pull request or a
+release, and a failure on `main` files an issue ([Realworld workflow](#realworld-workflow)).
 
 | Job (check name)              | On a pull request, when this changes                                                                                                                                                                                    |
 | ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -125,21 +128,23 @@ missed an input shows up one merge later and never as a release that skipped its
 | `Harness Contract (macos-15)` | `packages/fleet/**`, the daemon contract suite and transcript conversion, `VERIFIED_HARNESS_VERSIONS`. The nightly `Harness Contract (latest)` covers upstream drift in between                                         |
 
 All three also run when anything in the **toolchain or the pipeline** changes: `flake.lock`,
-`flake.nix`, `nix/**`, `.github/workflows/**`, `.github/actions/**`, `bun.lock`, a manifest, a bunfig or
-tsconfig, or `setup.sh`. The Linux leg of `Harness Contract` always runs; only its `macos-15` leg is added
+`flake.nix`, `nix/**`, `.github/workflows/realworld.yaml`, `.github/actions/**`, `bun.lock`, a manifest,
+a bunfig or tsconfig, or `setup.sh`. (`ci.yaml` is not on the list: it no longer defines any of the three.) The Linux leg of `Harness Contract` always runs; only its `macos-15` leg is added
 to the matrix.
 
 - **A job, not a `paths` filter** — for the reason `E2E Relevance` gives. `macOS Relevance`
-  (`changes` in `ci.yaml`, `scripts/ci/macos-relevance.sh`) lists the pull request's files through the API
+  (`changes` in `realworld.yaml`, `scripts/ci/macos-relevance.sh`) lists the pull request's files through the API
   and writes one output per job. A job it leaves out is **skipped, and a skipped check counts as
-  passed**, so no stub check and no branch-protection change is needed. It fails open: an unreadable or
+  passed**, so no stub check and no branch-protection change is needed (and nothing in branch
+  protection names them anyway). It fails open: an unreadable or
   empty file list runs all three.
 - **The lists are generous on purpose** and held to the scripts, not to memory:
   `scripts/validate/macos-relevance.sh` (`a-macos-relevance`, and `test.sh`) extracts every test path
   `darwin-confinement.sh` runs, every file the Safari probe and the contract suite import, and the
   `VERIFIED_HARNESS_VERSIONS` file, and fails unless each one selects its job. It also fails if a
   docs-only change selects any job, if `flake.lock` or a workflow does not select all three, or if
-  `ci.yaml` stops gating them (or starts gating Smoke). Adding a path to a job's script therefore
+  `realworld.yaml` stops gating them, `ci.yaml` starts gating Smoke or defines one of them again, or
+  `realworld.yaml`'s `pull_request` `paths:` stop covering an input. Adding a path to a job's script therefore
   fails pre-commit until the list covers it.
 - **Why the Harness matrix is data.** A job-level `if:` cannot read `matrix`, so the `macos-15` leg is
   in or out through `fromJSON(needs.changes.outputs.harness_os)`; the check keeps its name,
@@ -147,16 +152,19 @@ to the matrix.
 
 ## Workflow split
 
-| Workflow   | Trigger                                                                   | Responsibility                                                     |
-| ---------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------ |
-| `CI`       | push to `main`, pull request, manual dispatch                             | gates, tests, compile, SIT, cross-platform smoke                   |
-| `E2E`      | pull request (docs/model-catalog-only ones skip inside), manual dispatch  | the e2e tier's fast journeys in three shards, into `E2E Journeys`  |
-| `E2E Slow` | nightly, manual dispatch, pull requests touching relay or connection code | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys` |
-| `Release`  | `CI` completed successfully on `main`                                     | semantic-release: version, changelog, `vX.Y.Z` tag                 |
-| `CD`       | push of a `v*.*.*` tag                                                    | GoReleaser publishes the release and its channels                  |
+| Workflow                    | Trigger                                                                     | Responsibility                                                                   |
+| --------------------------- | --------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
+| `CI`                        | push to `main`, pull request, manual dispatch                               | gates, tests, compile, SIT, cross-platform smoke                                 |
+| `E2E`                       | pull request (docs/model-catalog-only ones skip inside), manual dispatch    | the e2e tier's fast journeys in three shards, into `E2E Journeys`                |
+| `E2E Slow`                  | nightly, manual dispatch, pull requests touching relay or connection code   | the `[slow]` e2e journeys, one per shard, into `E2E Slow Journeys`               |
+| `Realworld`                 | push to `main`, nightly, manual dispatch, pull requests touching its inputs | the realworld tier, the macOS jobs and the pinned harness contract; files issues |
+| `Harness Contract (latest)` | nightly, manual dispatch                                                    | the contract suite against the newest upstream harnesses, files issues           |
+| `Release`                   | `CI` completed successfully on `main`                                       | semantic-release: version, changelog, `vX.Y.Z` tag                               |
+| `CD`                        | push of a `v*.*.*` tag                                                      | GoReleaser publishes the release and its channels                                |
 
 The chain is deliberately one-directional: CI proves the tree, Release decides the version and
-pushes the tag, the tag fires CD. Nothing else publishes anything.
+pushes the tag, the tag fires CD. Nothing else publishes anything. `Realworld` and
+`Harness Contract (latest)` sit beside the chain, not in it.
 
 ## CI jobs
 
@@ -172,7 +180,6 @@ pushes the tag, the tag fires CD. Nothing else publishes anything.
 | `compile`        | `nix develop .#ci -c ./scripts/release/compile.sh`                               | uploads `cli-binaries` from `dist/bin/`                                       |
 | `sit`            | `nix develop .#ci -c ./scripts/ci/test.sh sit`                                   | `needs: compile`, downloads the binaries                                      |
 | `smoke`          | `./scripts/release/smoke.sh dist/bin/<binary>-<target>`                          | `needs: compile`, one runner per build target                                 |
-| `changes`        | `./scripts/ci/macos-relevance.sh`                                                | `macOS Relevance`: gates Containment, Safari and the `macos-15` Harness leg   |
 
 Notable details:
 
@@ -227,6 +234,58 @@ Notable details:
   does not enter a nix shell — it only needs the downloaded binary and `jq` — and it derives
   the binary name from the CLI package's `bin` key so the matrix stays rename-proof
   ([Architecture](../architecture/index.md)).
+
+## Realworld workflow
+
+`.github/workflows/realworld.yaml` is the fourth test tier's own workflow
+([Testing](../testing/index.md#the-four-tiers-concretely)): what depends on the machine as much as on the
+code, run where a failure cannot hold anything up.
+
+| Job                    | Runs                                                           | Runner        | Ceiling |
+| ---------------------- | -------------------------------------------------------------- | ------------- | ------- |
+| `realworld`            | `nix develop .#ci -c ./scripts/ci/test.sh realworld`           | Namespace 4x8 | 30 min  |
+| `changes`              | `./scripts/ci/macos-relevance.sh` (`macOS Relevance`)          | GitHub        | 5 min   |
+| `darwin-confinement`   | `./scripts/ci/darwin-confinement.sh` (`Containment (macOS)`)   | GitHub macOS  | 20 min  |
+| `safari-sandbox-shell` | `scripts/ci/safari-render-proof.sh` (`Sandbox Shell (Safari)`) | GitHub macOS  | 20 min  |
+| `harness-contract`     | the pinned harness contract, Linux and `macos-15`              | GitHub        | 30 min  |
+| `report`               | `scripts/ci/realworld-report.sh`                               | GitHub        | 10 min  |
+
+- **Triggers.** A push to `main` (the same `paths-ignore` as `CI`), a nightly run at 03:43 UTC (off the
+  hour, when the fleet of scheduled jobs is thin), a manual dispatch, and a pull request that touches
+  the tier's inputs: `tests/realworld/**`, `bunfig.realworld.toml`, the workflow, its scripts, the
+  toolchain, and the inputs of the macOS jobs. A pull request that touches none of them starts no run.
+- **The `realworld` job gets a Namespace 4x8 on every event.** Its budgets (an idle daemon's CPU and
+  memory, a 200 ms event-loop bound under a saturated disk) are the claims a busy shared runner would
+  fail for the wrong reason, so it takes a quiet dedicated VM and the pool's escape hatch
+  (`vars.CI_RUNNER_POOL == 'github'`) like every Namespace job. It runs the tier swept, with the
+  120-second per-test timeout on the command line, no coverage ledger, no quarantine and no rerun, and uploads
+  `realworld-results` (JUnit and the console log). A red test fails the job, nothing else.
+- **`report` files the failures.** On a push or a scheduled run that fails, it reads the JUnit and the
+  console log and, for each failing test, opens one issue titled `realworld: <file> > <test>` with the
+  `realworld` label (created on first use), the run and job links and the lines before the failure; a
+  test already open gets a comment instead. A macOS or harness job that failed files
+  `realworld: <job>`. A job that died before any test ran files one issue naming it. It files at most
+  25 per run. A pull request run never files: its author reads the job.
+- **`Harness Contract (latest)`** (`harness-contract-latest.yaml`) is part of the same tier and is unchanged: a
+  daily run of the contract suite against the newest upstream `claude-code` and `codex` that files its
+  own issue on drift.
+- **Concurrency.** Like `CI`, a pull request's runs are grouped by its number and a newer push cancels
+  the older; every other run has a group of its own, so a push to `main` and the nightly never cancel
+  each other.
+
+## Release gating
+
+**`Release` waits on `CI` and nothing else.** It fires on the `workflow_run` of `CI` on `main`
+(see [Release and CD](#release-and-cd)), so a version ships when the unit and integration tiers, the
+ledgers, SIT, the build checks and the cross-platform smoke are green. `Realworld` is a different
+workflow: `Release` never sees it, so it cannot delay one, and a failure on `main` or in the nightly files
+an issue and **never blocks a release**. **Nothing in branch protection names a `Realworld` job**,
+and none should: a required check there would make a quiet-machine claim a merge gate again, which is
+what the tier exists to avoid. When a realworld issue is a real regression, the fix goes through a
+normal pull request.
+
+The contrary rule is the one for the blocking tiers: a flake there is a bug in the test or the
+product, fixed at the root, never retried ([Testing](../testing/index.md#the-four-tiers-concretely)).
 
 ## E2E tier
 

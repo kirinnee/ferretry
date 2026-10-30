@@ -267,7 +267,7 @@ describe('whose turn it is, through a real daemon', () => {
       await frame(working);
       await until(daemon, id, 'working');
       await frame(idle);
-      should(await until(daemon, id, 'your-turn')).be.below(6_000);
+      await until(daemon, id, 'your-turn');
       // The harness crashes: the session is over, so it has no turn at all.
       await frame('EXIT');
       await until(daemon, id, undefined, 30_000);

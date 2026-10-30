@@ -1,4 +1,6 @@
 /**
+ * Asserts a rate over a timed window; the outcome depends on the machine, not the code.
+ *
  * ONE THREAD PER RUNNING SESSION, IN A REAL DAEMON — pooled and dedicated.
  *
  * Boots a real `fyd` from source over a small fleet with REAL tmux panes for its running sessions, and asks
@@ -16,9 +18,9 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { PerformanceProfileView, PerformanceReport } from '@ferretry/protocol';
 import should from 'should';
-import { freeLoopbackPort } from '../support/booted-daemon.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
-import { scaledFleet, sessionIdOf } from '../support/scaled-fleet.ts';
+import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
+import { scaledFleet, sessionIdOf } from '../../integration/support/scaled-fleet.ts';
 
 const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
 const RUNNING = 2;

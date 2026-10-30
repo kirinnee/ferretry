@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Which of the three optional macOS jobs has anything to prove? Writes to $GITHUB_OUTPUT:
+# Which of the three optional macOS jobs of the REALWORLD workflow has anything to prove? Writes to $GITHUB_OUTPUT:
 #
 #   containment=true|false   Containment (macOS)         scripts/ci/darwin-confinement.sh
 #   safari=true|false        Sandbox Shell (Safari)      scripts/ci/safari-render-proof.sh
@@ -14,12 +14,13 @@ set -euo pipefail
 #
 # Only 5 macOS jobs run at once across the whole GitHub account, and a run used 4 of them, so two
 # overlapping pull requests queued (p90 6 minutes, worst 74). A pull request that touches none of a
-# job's inputs now leaves that job out. `main` and `workflow_dispatch` ALWAYS run all four: they are
-# the release gates, so a path list that missed an input shows up one merge later, never as a
-# release that skipped its proof.
+# job's inputs now leaves that job out. `main`, the nightly and `workflow_dispatch` ALWAYS run all three,
+# so a path list that missed an input shows up one merge later, never as a proof that was skipped. The jobs
+# live in `.github/workflows/realworld.yaml` and gate no release (docs/standards/ci-cd, "Release gating"),
+# so what a miss costs is an issue, not a blocked release.
 #
 # WHY A JOB AND NOT `paths`/`paths-ignore`. The same reason as scripts/ci/e2e-relevance.sh: a
-# workflow-level filter would skip the whole of `CI`, and a job that is skipped by `if:` reports as
+# workflow-level filter would skip the whole workflow, and a job that is skipped by `if:` reports as
 # skipped, which GitHub (and scripts/safe-merge.sh) count as passed. There is no branch protection to
 # configure and no stub check to keep in step.
 #
@@ -36,7 +37,7 @@ out="${GITHUB_OUTPUT:-/dev/stdout}"
 # Everything that changes how ANY macOS job builds or runs: the toolchain (flake, nix/), the
 # workflows and the composite actions that call these jobs, the lockfile and manifests `setup.sh`
 # installs from, and the test configs.
-common='^(flake\.(nix|lock)|nix/|\.github/(workflows|actions)/|bun\.lock|package\.json|bunfig[^/]*\.toml|tsconfig[^/]*\.json|scripts/(ci|local)/setup\.sh)'
+common='^(flake\.(nix|lock)|nix/|\.github/(workflows/realworld\.yaml|actions/)|bun\.lock|package\.json|bunfig[^/]*\.toml|tsconfig[^/]*\.json|scripts/(ci|local)/setup\.sh)'
 
 # The daemon's file viewer (`session`, `filesystem`), its POSIX pinner (`pins`), git, the process
 # inventory (`migrate`, `process`), pane identity (`tmux`, `terminal`), the file-event hub, and the
@@ -77,7 +78,7 @@ emit() {
 }
 
 [ "${MACOS_RELEVANCE_FILES:-}" = "" ] && [ "${GITHUB_EVENT_NAME:-}" != "pull_request" ] &&
-  emit "not a pull request (${GITHUB_EVENT_NAME:-local}): the release gates all run" true true true
+  emit "not a pull request (${GITHUB_EVENT_NAME:-local}): every proof runs" true true true
 [ "${MACOS_RELEVANCE_FILES:-}" = "" ] && [ -z "${PR_NUMBER:-}" ] &&
   emit "no pull request number" true true true
 

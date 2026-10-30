@@ -112,7 +112,7 @@ can take seconds. The daemon keeps that wait off its main thread, so it stays re
   If one of these threads fails five times in ten minutes, the daemon does its work on the main thread
   instead and says so once in its log.
 
-The guards are `packages/daemon/tests/integration/runtime/io-pressure-index.test.ts` and
+The guards are `packages/daemon/tests/realworld/runtime/io-pressure-index.test.ts` and
 `io-pressure-analytics.test.ts`. They make every disk write take 1.5 s, and check that the event loop
 (and, for the session index, a health check) stays under 200 ms. For the analytics index the same
 test shows the old behaviour first: a 1,500-row sweep committing on the main thread stalled the loop
@@ -139,7 +139,7 @@ You can read the whole report before you send it.
 - `scripts/local/bench-idle-daemon.ts` builds the owner-scale fleet (36 sessions, 5 running in real tmux
   panes, 2,000 Codex rollouts) and measures any `fyd` build from inside and outside. Use it for the
   before/after table in a performance PR.
-- `packages/daemon/tests/integration/runtime/idle-budget.test.ts` holds the idle daemon to CI ceilings.
+- `packages/daemon/tests/realworld/runtime/idle-budget.test.ts` holds the idle daemon to ceilings in the realworld tier.
   A PR that makes something cheaper lowers that ceiling in the same commit. Ceilings only go down,
   towards the targets in `packages/daemon/src/lib/performance/budgets.ts`.
 

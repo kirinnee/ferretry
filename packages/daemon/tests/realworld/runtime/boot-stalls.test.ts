@@ -17,9 +17,9 @@ import { afterAll, describe, it } from 'bun:test';
 import { Database } from 'bun:sqlite';
 import { join, resolve } from 'node:path';
 import should from 'should';
-import { OWNER_MAC_FLEET, scaledFleet } from '../support/scaled-fleet.ts';
-import { freeLoopbackPort } from '../support/booted-daemon.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
+import { OWNER_MAC_FLEET, scaledFleet } from '../../integration/support/scaled-fleet.ts';
+import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
 
 /** The budget: no single block of the event loop longer than this, from the first step to the last. */
 const BLOCK_BUDGET_MS = 200;

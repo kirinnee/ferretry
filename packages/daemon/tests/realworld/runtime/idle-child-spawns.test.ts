@@ -17,10 +17,10 @@
 import { afterAll, describe, it } from 'bun:test';
 import { join, resolve } from 'node:path';
 import should from 'should';
-import { freeLoopbackPort } from '../support/booted-daemon.ts';
-import { startFleetPanes } from '../support/fleet-panes.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
-import { type ScaledFleetShape, scaledFleet } from '../support/scaled-fleet.ts';
+import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { startFleetPanes } from '../../integration/support/fleet-panes.ts';
+import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
+import { type ScaledFleetShape, scaledFleet } from '../../integration/support/scaled-fleet.ts';
 
 /** The budget, per minute of an idle daemon. */
 const SPAWNS_PER_MINUTE_BUDGET = 30;

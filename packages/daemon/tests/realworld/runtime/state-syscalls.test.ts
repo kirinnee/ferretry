@@ -16,9 +16,9 @@ import { afterAll, describe, it } from 'bun:test';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import should from 'should';
-import { freeLoopbackPort } from '../support/booted-daemon.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
-import { OWNER_MAC_FLEET, scaledFleet } from '../support/scaled-fleet.ts';
+import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
+import { OWNER_MAC_FLEET, scaledFleet } from '../../integration/support/scaled-fleet.ts';
 
 /** File system calls a second on paths inside the state home, steady. Measured: ~90 after, ~1,700 before. */
 const STATE_CALLS_PER_SECOND = 200;

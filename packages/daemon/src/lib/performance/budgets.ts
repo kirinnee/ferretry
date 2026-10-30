@@ -6,7 +6,7 @@ import type { BudgetVerdict, PerformanceReport } from '@ferretry/protocol';
  * "Idle" is the owner's fleet with nobody touching it: 36 sessions, 5 of them running agents that are
  * themselves idle. A daemon in that state is doing nothing a person asked for, so everything it spends
  * is overhead — and on a corporate Mac, where endpoint security inspects every process start and every
- * file open, overhead is what made it lag. The same numbers are held in CI by the idle-budget test and
+ * file open, overhead is what made it lag. The same numbers are held in the realworld tier by the idle-budget test and
  * printed in every `fy daemon profile`, so a regression and a slow machine are read against one bar.
  */
 export interface PerformanceBudget {

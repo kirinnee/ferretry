@@ -13,27 +13,28 @@ assumes it is running inside the nix devshell — see [Nix](../nix/index.md).
 
 `task --list` is the authority; this is what it prints today.
 
-| Command                  | Purpose                                                  |
-| ------------------------ | -------------------------------------------------------- |
-| `task setup`             | install locked workspace dependencies                    |
-| `task check`             | typecheck the workspace (`tsc --noEmit`)                 |
-| `task lint`              | run every repository gate (`pre-commit run --all-files`) |
-| `task build`             | build the Bun bundle into `dist/`                        |
-| `task build:pwa`         | build the PWA static bundle into `packages/pwa/dist/`    |
-| `task clean`             | remove build, dependency, and coverage artifacts         |
-| `task deadcode`          | review strict and LLM-assisted dead-code findings        |
-| `task run -- <args>`     | run the CLI source entry point                           |
-| `task preview -- <args>` | run this host's compiled standalone binary               |
-| `task compile`           | cross-compile every standalone binary into `dist/bin/`   |
-| `task compile:smoke`     | smoke-test one compiled binary                           |
-| `task test`              | unit + integration + SIT, no coverage                    |
-| `task test:unit`         | unit suite only                                          |
-| `task test:int`          | integration suite only                                   |
-| `task test:sit`          | black-box journeys through the freshly compiled binary   |
-| `task test:e2e`          | isolated end-to-end journeys (`scripts/test/run-e2e.sh`) |
-| `task test:gate`         | the exact coverage gate CI runs (`scripts/ci/test.sh`)   |
-| `task test:coverage`     | every coverage-capable suite with coverage               |
-| `task test:watch`        | watch the fast unit suite                                |
+| Command                  | Purpose                                                   |
+| ------------------------ | --------------------------------------------------------- |
+| `task setup`             | install locked workspace dependencies                     |
+| `task check`             | typecheck the workspace (`tsc --noEmit`)                  |
+| `task lint`              | run every repository gate (`pre-commit run --all-files`)  |
+| `task build`             | build the Bun bundle into `dist/`                         |
+| `task build:pwa`         | build the PWA static bundle into `packages/pwa/dist/`     |
+| `task clean`             | remove build, dependency, and coverage artifacts          |
+| `task deadcode`          | review strict and LLM-assisted dead-code findings         |
+| `task run -- <args>`     | run the CLI source entry point                            |
+| `task preview -- <args>` | run this host's compiled standalone binary                |
+| `task compile`           | cross-compile every standalone binary into `dist/bin/`    |
+| `task compile:smoke`     | smoke-test one compiled binary                            |
+| `task test`              | unit + integration + SIT, no coverage                     |
+| `task test:unit`         | unit suite only                                           |
+| `task test:int`          | integration suite only                                    |
+| `task test:sit`          | black-box journeys through the freshly compiled binary    |
+| `task test:realworld`    | non-blocking machine-dependent suite (not in `task test`) |
+| `task test:e2e`          | isolated end-to-end journeys (`scripts/test/run-e2e.sh`)  |
+| `task test:gate`         | the exact coverage gate CI runs (`scripts/ci/test.sh`)    |
+| `task test:coverage`     | every coverage-capable suite with coverage                |
+| `task test:watch`        | watch the fast unit suite                                 |
 
 `task compile` is an alias for `compile:default`. Each `test:*` task also has a `:coverage`
 variant (`test:unit:coverage`, `test:int:coverage`, `test:sit:coverage`). The tiers themselves

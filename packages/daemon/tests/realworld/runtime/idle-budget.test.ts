@@ -22,11 +22,15 @@ import { join, resolve } from 'node:path';
 import type { PerformanceProfileView, PerformanceReport } from '@ferretry/protocol';
 import should from 'should';
 import { IDLE_DAEMON_BUDGETS } from '../../../src/lib/performance/budgets.ts';
-import { freeLoopbackPort } from '../support/booted-daemon.ts';
-import { ANTHROPIC_USAGE_PATH, CODEX_USAGE_PATH, startFakeUsageServer } from '../support/fake-usage-server.ts';
-import { startFleetPanes } from '../support/fleet-panes.ts';
-import { cleanupTempDirectories, tempDirectory } from '../support/repository.ts';
-import { OWNER_MAC_FLEET, scaledFleet, sessionIdOf } from '../support/scaled-fleet.ts';
+import { freeLoopbackPort } from '../../integration/support/booted-daemon.ts';
+import {
+  ANTHROPIC_USAGE_PATH,
+  CODEX_USAGE_PATH,
+  startFakeUsageServer,
+} from '../../integration/support/fake-usage-server.ts';
+import { startFleetPanes } from '../../integration/support/fleet-panes.ts';
+import { cleanupTempDirectories, tempDirectory } from '../../integration/support/repository.ts';
+import { OWNER_MAC_FLEET, scaledFleet, sessionIdOf } from '../../integration/support/scaled-fleet.ts';
 
 const FYD_ENTRY = resolve(import.meta.dir, '../../../bin/fyd.ts');
 const SETTLE_SECONDS = 15;

@@ -1,0 +1,291 @@
+name: Realworld
+
+# THE REALWORLD TIER, and the proofs only a real platform can give. Everything here is machine-dependent:
+# a wall-clock, memory or rate claim (`packages/*/tests/realworld/`, bunfig.realworld.toml), or a claim a
+# Linux runner cannot check (macOS containment, Safari, the pinned harnesses on macOS). Their outcome
+# depends on the machine and the upstream, not only on the code, so none of it may gate a pull request
+# or a release — see docs/standards/testing ("Realworld") and docs/standards/ci-cd ("Release gating").
+#
+# ITS OWN WORKFLOW, so that:
+#   - Release, which fires on CI's conclusion on `main`, never waits on it: a failure here files an issue
+#     (`report` below) and releases anyway;
+#   - nothing in branch protection names it, so a red run is never a merge blocker;
+#   - the nightly run measures only this, not all of CI again.
+# `Harness Contract (latest)` (harness-contract-latest.yaml) is the same tier's upstream-drift half: it
+# stays its own workflow, with its own schedule and issue reporter.
+#
+# `push` ignores exactly the paths ci.yaml does (see there for why), the nightly is off the hour, and a
+# pull request runs it only when it touches what this proves: `scripts/validate/macos-relevance.sh`
+# holds the `paths` below to the inputs of the macOS jobs' scripts.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'Casks/**'
+      - 'VERSION'
+      - 'Changelog.md'
+      - 'Changelog.old.md'
+      - 'packages/cli/package.json'
+      - 'packages/daemon/package.json'
+  schedule:
+    - cron: '43 3 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'packages/*/tests/realworld/**'
+      - 'bunfig*.toml'
+      - '.github/workflows/realworld.yaml'
+      - '.github/actions/**'
+      - 'scripts/ci/realworld-report.sh'
+      - 'scripts/ci/macos-relevance.sh'
+      - 'scripts/ci/test.sh'
+      - 'scripts/ci/darwin-confinement.sh'
+      - 'scripts/ci/safari-render-proof.sh'
+      - 'scripts/test/swept.sh'
+      - 'flake.nix'
+      - 'flake.lock'
+      - 'nix/**'
+      - 'bun.lock'
+      - 'package.json'
+      - 'tsconfig*.json'
+      - 'scripts/ci/setup.sh'
+      - 'scripts/local/setup.sh'
+      - 'packages/fleet/**'
+      - 'packages/protocol/package.json'
+      - 'packages/protocol/src/adapters/process-incarnation*'
+      - 'packages/protocol/src/lib/harness-update.ts'
+      - 'packages/protocol/tests/integration/process-incarnation*'
+      - 'packages/daemon/package.json'
+      - 'packages/daemon/src/**'
+      - 'packages/daemon/tests/integration/**'
+      - 'packages/daemon/tests/contract/**'
+      - 'packages/cli/package.json'
+      - 'packages/cli/src/adapters/reads/**'
+      - 'packages/cli/src/lib/**'
+      - 'packages/cli/tests/integration/reads/**'
+      - 'packages/pwa/package.json'
+      - 'packages/pwa/harness/fy-render-safari/**'
+      - 'packages/pwa/scripts/**'
+      - 'packages/pwa/public/_headers'
+      - 'packages/pwa/src/**'
+      - 'packages/pwa/tests/fixtures/fy-render-journey.ts'
+
+# A new push to a PR supersedes the run for its old SHA. `main`, the nightly and manual dispatch get a
+# group of their own run id, so a queued run is never cancelled by a newer one.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{
+      github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number)
+      || github.run_id
+    }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  # The Linux realworld tier: the machine-dependent tests, in one process, on a quiet dedicated VM.
+  realworld:
+    name: Realworld Tests
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    # Namespace 4x8 on EVERY event, `main` and the nightly included: a timing or memory budget is only
+    # worth measuring on a machine nothing else is using, and a shared runner's noise was the reason
+    # these tests left the blocking tier. `vars.CI_RUNNER_POOL == 'github'` is the same escape hatch the
+    # other jobs have.
+    runs-on: >-
+      ${{
+        vars.CI_RUNNER_POOL == 'github' && 'ubuntu-latest'
+        || fromJSON('["nscloud-ubuntu-24.04-amd64-4x8-with-cache","nscloud-cache-tag-ferretry-nix","nscloud-cache-size-10gb","nscloud-cache-allow-commit-from-main"]')
+      }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Mount the Nix store cache
+        if: runner.environment == 'self-hosted'
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1.7.0
+        with:
+          cache: nix
+      - uses: ./.github/actions/install-nix
+      - name: Run the realworld tests
+        run: nix develop .#ci -c ./scripts/ci/test.sh realworld
+      # `always()`: a red run is the run whose results matter, and `report` reads them.
+      - name: Upload the realworld results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: realworld-results
+          path: |
+            coverage/realworld/junit.xml
+            coverage/realworld/console.log
+          if-no-files-found: warn
+
+  # Which of the optional macOS jobs have anything to prove (scripts/ci/macos-relevance.sh says why a
+  # job and not a `paths` filter, and what is deliberately generous). `main`, the nightly and manual
+  # dispatch decide `true` for all of them. A job it leaves out is SKIPPED, which counts as passed.
+  changes:
+    name: macOS Relevance
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    # GitHub, not Namespace: a few seconds of bash with no nix shell (docs/standards/ci-cd, "Runners").
+    runs-on: ubuntu-latest
+    outputs:
+      containment: ${{ steps.decide.outputs.containment }}
+      safari: ${{ steps.decide.outputs.safari }}
+      harness_os: ${{ steps.decide.outputs.harness_os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - id: decide
+        name: Decide which macOS jobs have anything to prove
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: ./scripts/ci/macos-relevance.sh
+
+  darwin-confinement:
+    name: Containment (macOS)
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.containment == 'true'
+    permissions:
+      contents: read
+    # `macos-15`: GitHub retires `macos-14` on 2026-11-02, and its October brownout windows fail jobs
+    # outright before then (the Sandbox Shell job below says more).
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      # The pane-identity tests drive a real tmux, which no macOS runner image ships.
+      - name: Install tmux
+        run: command -v tmux >/dev/null 2>&1 || brew install tmux
+      # The one claim in this repository that a Linux runner cannot check for macOS: that the file
+      # viewer's confinement actually holds on the kernel the POSIX pinner was written for.
+      - name: Prove containment on macOS
+        run: nix develop .#ci -c ./scripts/ci/darwin-confinement.sh
+
+  safari-sandbox-shell:
+    name: Sandbox Shell (Safari)
+    timeout-minutes: 20
+    needs: changes
+    if: needs.changes.outputs.safari == 'true'
+    permissions:
+      contents: read
+    # `macos-15`, NOT `macos-14`. macOS 14 entered deprecation on 2026-07-06 with October brownout
+    # windows that fail jobs outright and retirement on 2026-11-02, so pinning a proof
+    # to it buys a job that starts failing for reasons unrelated to Safari. `macos-15` also ships the
+    # newer Safari/SafariDriver pair. No job here runs on `macos-14` any more.
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      # safaridriver has no headless mode and Safari hosts exactly one WebDriver session at a time, so
+      # this runs HEADED in the runner's autologin GUI session and strictly sequentially. The image
+      # already ran `sudo safaridriver --enable` and wrote AllowRemoteAutomation at build time;
+      # re-running is idempotent and costs nothing, and asserting the flag turns the one unproven
+      # assumption behind this job into a loud failure instead of a confusing session error.
+      - name: Prove Safari can host a WebDriver session
+        run: |
+          sudo safaridriver --enable
+          /usr/libexec/PlistBuddy -c 'print AllowRemoteAutomation' "$HOME/Library/WebDriver/com.apple.Safari.plist"
+      # The only claim in this repository that no Linux runner can check: that the sandbox shell's
+      # hash-pinned inline install, its opaque origin and its zero-request posture hold in the browser
+      # every Apple device actually runs. A red here is either a product outage on every iPhone and Mac
+      # or the deletion of the shell's security argument — the script's header says which is which.
+      - name: Prove the fy-render sandbox shell in Safari
+        run: nix develop .#ci -c ./scripts/ci/safari-render-proof.sh
+      # `always()` because a red run is the run whose facts matter most: the artifact carries the exact
+      # policy and hashes measured, the Safari and SafariDriver versions, the ordered request ledger,
+      # every property's rule and outcome, and what a green run does NOT establish.
+      - name: Upload the Safari evidence ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: safari-render-proof
+          path: packages/pwa/.artifacts/safari-render/
+          if-no-files-found: warn
+
+  harness-contract:
+    name: Harness Contract (${{ matrix.os }})
+    timeout-minutes: 30
+    needs: changes
+    permissions:
+      contents: read
+    # The account model shares one login across many runtimes through mechanisms Claude Code and
+    # Codex never documented (design §8.5): CLAUDE_SECURESTORAGE_CONFIG_DIR and its refresh lock, a
+    # Codex auth.json rewritten in place through a link, file-only credential storage, and the
+    # trust/onboarding keys a wrapper writes. This measures each one against the PINNED harnesses
+    # (the flake's own nixpkgs) with fake credentials and a proxy that forwards nothing, so a pin
+    # bump that breaks one turns this red instead of forking somebody's login.
+    #
+    # `macos-15` is not optional: Claude's macOS keychain path is compiled out of the Linux build,
+    # so this is the only place it is measured (gap G1). A red run files an issue and blocks no release
+    # (this workflow's header says why). FY_CONTRACT_KEYCHAIN lets that job write throwaway items
+    # into the runner's login keychain; the suite refuses to anywhere `CI` is not `true`.
+    #
+    # The Linux leg always runs. The `macos-15` leg is in the matrix only when the pull request touches
+    # what this measures (scripts/ci/macos-relevance.sh); `main` always has it, and the nightly
+    # `Harness Contract (latest)` covers upstream drift in between. The matrix is data rather than an
+    # `if:` because a job-level `if:` cannot read `matrix`.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.changes.outputs.harness_os) }}
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/install-nix
+      - name: Measure the pinned harnesses
+        env:
+          FY_CONTRACT_KEYCHAIN: ${{ startsWith(matrix.os, 'macos') && '1' || '' }}
+          FY_CONTRACT_ARTIFACTS: ${{ runner.temp }}/harness-contract
+        run: nix develop .#ci -c ./packages/fleet/tests/contract/run.sh pinned
+      - name: Upload the harness contract result
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: harness-contract-pinned-${{ matrix.os }}
+          path: ${{ runner.temp }}/harness-contract/
+          if-no-files-found: warn
+
+  # A red night nobody reads is a night nobody acts on, so a failed `main` or nightly run files (or adds to)
+  # one issue per failing test, `realworld: <file> > <test>`. A pull-request run measures the change
+  # itself and stays quiet: its author reads the run.
+  report:
+    name: Report failed realworld tests
+    needs: [realworld, darwin-confinement, safari-sandbox-shell, harness-contract]
+    # `failure()` is true when any needed job failed; a skipped macOS job is not a failure.
+    if: ${{ failure() && github.event_name != 'pull_request' }}
+    timeout-minutes: 10
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          name: realworld-results
+          path: ${{ runner.temp }}/results
+        continue-on-error: true
+      - name: File or update the issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FY_REALWORLD_JOB_RESULT: ${{ needs.realworld.result }}
+          NEEDS: ${{ toJSON(needs) }}
+        run: |
+          # The macOS proofs have no JUnit: a failed one is reported as the job it is.
+          FY_REALWORLD_FAILED_JOBS="$(jq -r 'to_entries[] | select(.key != "realworld" and .value.result == "failure") | .key' <<<"${NEEDS}")"
+          export FY_REALWORLD_FAILED_JOBS
+          ./scripts/ci/realworld-report.sh "${{ runner.temp }}/results/junit.xml" "${{ runner.temp }}/results/console.log"

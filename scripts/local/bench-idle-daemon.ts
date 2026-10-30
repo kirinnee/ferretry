@@ -19,7 +19,7 @@
  * whole run, as `fy statusline` writes it while a session on that login runs — so the bench shows what a
  * passive update costs, and that a login with a running session is never given an active read.
  *
- * Manual only, never CI (the CI budget is `tests/integration/runtime/idle-budget.test.ts`). Linux only.
+ * Manual only, never CI (the CI budget is `tests/realworld/runtime/idle-budget.test.ts`). Linux only.
  *
  *   bun scripts/local/bench-idle-daemon.ts [--fyd "<command>"] [--seconds 30] [--settle 40] [--trace]
  *     [--fixture /tmp/fy-idle-fixture] [--small] [--statusline] [--out report.json]

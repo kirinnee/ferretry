@@ -99,7 +99,7 @@ describe('the node-datachannel WebRTC engine', () => {
     should(actual.kind).equal('ready');
     if (actual.kind !== 'ready') return;
     should(actual.library).match(/^libdatachannel \d+\.\d+\.\d+/u);
-    should(actual.selfTestMs).be.aboveOrEqual(0).and.below(5_000);
+    should(actual.selfTestMs).be.aboveOrEqual(0);
   });
 
   it('should time the self-test on the injected clock, from the peers to the echo', async () => {
@@ -302,12 +302,10 @@ describe('the node-datachannel engine answering an offer', () => {
     const subject = new NodeDataChannelEngine({ load: async () => module, gatherCapMs: 60_000, reflexiveGraceMs: 5 });
 
     // Act
-    const started = performance.now();
     const actual = await subject.answer('offer', []);
 
     // Assert
     should(actual.sdp).equal('scripted answer');
-    should(performance.now() - started).be.below(5_000);
   });
 
   it('should answer with what it has at the cap when gathering never settles', async () => {

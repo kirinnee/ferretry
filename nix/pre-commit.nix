@@ -130,12 +130,25 @@ pre-commit-lib.run {
 
     # A pull request runs Containment, Sandbox Shell (Safari) and the macos-15 Harness Contract only when
     # their inputs change. The lists live in scripts/ci/macos-relevance.sh; this holds them to the
-    # scripts and test files those jobs actually run, and ci.yaml to the decision.
+    # scripts and test files those jobs actually run, and realworld.yaml (and ci.yaml) to the decision.
     a-macos-relevance = {
       enable = true;
       name = "macOS job relevance";
       entry = validator "scripts/validate/macos-relevance.sh";
-      files = "^(scripts/(ci/(macos-relevance|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/workflows/ci\\.yaml|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
+      files = "^(scripts/(ci/(macos-relevance|darwin-confinement|safari-render-proof)|validate/macos-relevance)\\.sh|\\.github/workflows/(ci|realworld)\\.yaml|packages/(daemon/tests/(contract|integration/(session|migrate|file-events|support|process))/.*|fleet/tests/contract/.*|protocol/tests/integration/process-incarnation.*|cli/tests/integration/reads/.*|pwa/harness/fy-render-safari/.*))$";
+      pass_filenames = false;
+      language = "system";
+    };
+
+    # A test's tier is where it lives, and the blocking tiers' promise is a deterministic outcome: an
+    # integration test that asserts a wall-clock or memory bound belongs in the realworld tier, which
+    # files an issue instead of failing a merge. This also holds config/test-groups.json to the files
+    # that exist and counts the unit tier's real-clock escapes.
+    a-test-tiers = {
+      enable = true;
+      name = "Test tiers";
+      entry = validator "scripts/validate/test-tiers.sh";
+      files = "^(packages/[^/]+/tests/.*\\.test\\.tsx?|config/test-groups\\.json|scripts/validate/test-tiers\\.sh)$";
       pass_filenames = false;
       language = "system";
     };
