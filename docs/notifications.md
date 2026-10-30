@@ -157,9 +157,10 @@ went idle), which are what the list shows beside the badge.
 ## Agenda mode
 
 A ferret keeps an agenda only when it is told to. **Agenda mode** is a switchable section of its
-instructions, like Pack mode, and it is **OFF by default**. With it on, the ferret is taught to put each
+instructions, like Pack mode, and a new ferret has it **ON** unless the machine default is off. With it on, the ferret is taught to put each
 thing only the owner can decide or do on the agenda, as its own item (`fy agenda add …`, see
-[agenda.md](agenda.md)); with it off, it is told only the notify rule above.
+[agenda.md](agenda.md)); with it off, it is told only the notify rule above. A new ferret starts with it
+on unless the machine default (below) is turned off.
 
 The section (`AGENDA_INSTRUCTION` in `@ferretry/fleet`, about 1,000 characters, capped at 1,300 by a
 test) names the verbs and flags `fy agenda` takes, what `--blocking`, `--will-block` and `--by` mean, and
@@ -170,6 +171,14 @@ that `"[answer to !A3 …]"` is an answer while `"[re !A3 …]"` is chat.
   the launch environment variable `FY_AGENDA=1|0` (`AGENDA_ENV`), and it is what sets `agendaMode` on the
   session summary, so with the switch off the summary carries no `agendaMode` and the chat draws no agenda
   line or drawer.
+- **The machine default** is `agendaMode` in `machine.yaml` (**on** unless you turn it off; the Machine tab's
+  **Agenda mode** section, `fy machine set agenda-mode on|off`, or the `machine.settings` change). A ferret
+  that is started or imported records it ONCE as `config.agenda: true` (the same adoption step Pack mode's
+  machine switch uses, run for `fy new`, the app's start, pack sub-ferrets and a continued conversation), and
+  a value the ferret already recorded, on or off, always wins, so an owner's explicit off is never overruled.
+  Ferrets that already exist are never touched, and turning the default off records nothing on anyone. It is
+  **not a loosening** (the config machinery holds only agent control and skipped permissions for
+  `fy config confirm`), so the change applies at once with no confirmation.
 - **Flipping it in the app:** the ferret's **Actions › Agenda mode** toggle (beside Hypermedia and Pack
   mode, in the header and the sessions list), or the **Agenda mode** mark in the header. The ferret's
   Info › Runtime tab shows it as a row, and the sidebar / header marks (a to-do list icon) show it only
@@ -216,11 +225,8 @@ ferret already on is a no-op). It never stops the daemon starting.
 
 ## GAPs
 
-- **Agenda mode is per ferret, not per profile or runtime.** There is no default that new ferrets inherit;
-  the migration switches existing ones on once, and new ones start off. A profile- or runtime-level
-  default is not built.
-- **The app has no agenda switch yet.** Only `fy notify agenda` and the route flip it; the Info panel names
-  the instruction section but does not toggle it.
+- **The default is per machine, not per profile or runtime.** One `agendaMode` switch decides it for every new
+  ferret on the machine; a profile- or runtime-level default is not built.
 - **A running ferret keeps its launch-time instructions.** Flipping the mode changes the next launch, not
   the current turn; the owner restarts the ferret to apply it.
 - **A stop is seen, not reconstructed.** A ferret idle on the owner when the daemon starts does not buzz at
