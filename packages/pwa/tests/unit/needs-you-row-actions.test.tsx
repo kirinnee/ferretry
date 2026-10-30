@@ -1,16 +1,15 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { needsYouActions, needsYouReason } from '../../src/lib/needs-you-reason.ts';
 import { AttentionInboxContext } from '../../src/hooks/use-attention-inbox.ts';
 import { SessionsBarNeedsYou } from '../../src/shell/sessions-bar-needs-you.tsx';
 import { attentionItem, fakeInbox, InboxHarness, inboxCard } from '../support/attention-inbox.tsx';
-import { interact, type Mounted, mount, must } from '../support/dom.ts';
+import { type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
 const DAEMON = 'alpha' as DaemonId;
 const view = sessionView('s-1', {
   config: { teammate: 'zoe', label: 'Fix the build' },
-  state: { attention: { open: 1, first: 'a1', ask: 'Ship it?', latestAt: '2026-10-16T12:00:00.000Z' } },
+  state: { attention: { open: 2, first: 'A1', ask: 'Ship it?', latestAt: '2026-10-16T12:00:00.000Z' } },
 });
 
 let mounted: Mounted | null = null;
@@ -19,72 +18,52 @@ afterEach(async () => {
   mounted = null;
 });
 
-describe('needs-you reason', () => {
-  test('items on the deck are an attention reason with Done and Dismiss', () => {
-    const card = inboxCard(attentionItem('a1'), view, 'Workshop', DAEMON);
-    const reason = needsYouReason([card], false);
-    expect(reason.kind).toBe('attention');
-    expect(needsYouActions(reason, DAEMON, view).map(a => a.kind)).toEqual(['done', 'dismiss']);
-  });
-  test('no items while reading is reading, with Open only', () => {
-    const reason = needsYouReason([], true);
-    expect(reason.kind).toBe('reading');
-    expect(needsYouActions(reason, DAEMON, view).map(a => a.kind)).toEqual(['open']);
-  });
-  test('no items and not reading is stale, with Open and Hide', () => {
-    const reason = needsYouReason([], false);
-    expect(reason.kind).toBe('stale');
-    expect(needsYouActions(reason, DAEMON, view).map(a => a.kind)).toEqual(['open', 'hide']);
-  });
-});
+const draw = async (rows: Parameters<typeof SessionsBarNeedsYou>[0]['rows']) => {
+  const cards = [inboxCard(attentionItem('A1'), view, 'Workshop', DAEMON)];
+  mounted = await mount(
+    <InboxHarness
+      cards={cards}
+      fake={fakeInbox()}
+      reading={false}
+      render={inbox => (
+        <AttentionInboxContext.Provider value={inbox}>
+          <SessionsBarNeedsYou isActive={() => false} learns={() => false} onNavigate={() => {}} rows={rows} />
+        </AttentionInboxContext.Provider>
+      )}
+    />,
+  );
+  return mounted.container;
+};
 
-describe('SessionsBarNeedsYou row actions', () => {
-  const rows = [{ daemonId: DAEMON, view }];
-  const draw = async (cards: ReturnType<typeof inboxCard>[], fake = fakeInbox(), reading = false) => {
-    mounted = await mount(
-      <InboxHarness
-        cards={cards}
-        fake={fake}
-        reading={reading}
-        render={inbox => (
-          <AttentionInboxContext.Provider value={inbox}>
-            <SessionsBarNeedsYou isActive={() => false} learns={() => false} onNavigate={() => {}} rows={rows} />
-          </AttentionInboxContext.Provider>
-        )}
-      />,
-    );
-    return { fake, root: mounted.container };
-  };
+describe('the sidebar Needs you rows', () => {
+  test('carry no Done, Dismiss, Open or Hide control: nothing on a row settles an ask', async () => {
+    const root = await draw([{ daemonId: DAEMON, view }]);
 
-  test('Done schedules the item into the undo window', async () => {
-    const card = inboxCard(attentionItem('a1'), view, 'Workshop', DAEMON);
-    const { fake, root } = await draw([card]);
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-needs-you-action="done"]'), 'done').click());
-    expect(fake.deferred.getSnapshot().pending.map(p => p.key)).toEqual([card.key]);
+    expect(root.querySelectorAll('[data-sbar-needs-you-group] button')).toHaveLength(0);
+    expect(root.textContent).not.toContain('Done');
+    expect(root.textContent).not.toContain('Dismiss');
+    expect(root.textContent).not.toContain('asked for you');
   });
 
-  test('Dismiss schedules the item too', async () => {
-    const card = inboxCard(attentionItem('a1'), view, 'Workshop', DAEMON);
-    const { fake, root } = await draw([card]);
-    await interact(() =>
-      must(root.querySelector<HTMLButtonElement>('[data-needs-you-action="dismiss"]'), 'dismiss').click(),
-    );
-    expect(fake.deferred.getSnapshot().pending).toHaveLength(1);
+  test('open the conversation at its first open item', async () => {
+    const root = await draw([{ daemonId: DAEMON, view }]);
+
+    const link = must(root.querySelector<HTMLAnchorElement>('[data-sbar-needs-you-group] a'), 'row link');
+    expect(link.getAttribute('href')).toContain('attention=A1');
   });
 
-  test('a stale row says the machine needs an update and Hide removes it', async () => {
-    const { root } = await draw([]);
-    expect(must(root.querySelector('[data-needs-you-reason]'), 'row').getAttribute('data-needs-you-reason')).toBe(
-      'stale',
-    );
-    expect(root.textContent).toContain('needs an update');
-    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-needs-you-action="hide"]'), 'hide').click());
-    expect(root.querySelector('[data-sbar-needs-you-group]')).toBeNull();
-  });
+  test('count the rows in the heading, and draw nothing when there are none', async () => {
+    const other = sessionView('s-2', {
+      state: { attention: { open: 1, first: 'A4', ask: 'Rotate it?', latestAt: '2026-10-16T13:00:00.000Z' } },
+    });
+    const root = await draw([
+      { daemonId: DAEMON, view },
+      { daemonId: DAEMON, view: other, machine: 'studio' },
+    ]);
+    expect(must(root.querySelector('.fy-sbar__count'), 'count').textContent).toBe('2');
+    await mounted?.unmount();
 
-  test('a row still being read offers Open and nothing destructive', async () => {
-    const { root } = await draw([], fakeInbox(), true);
-    expect(root.querySelector('[data-needs-you-action="open"]')).not.toBeNull();
-    expect(root.querySelector('[data-needs-you-action="done"]')).toBeNull();
+    const empty = await draw([]);
+    expect(empty.querySelector('[data-sbar-needs-you-group]')).toBeNull();
   });
 });
