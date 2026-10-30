@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { DaemonId } from '../../src/lib/daemon-connection.ts';
-import { AttentionInboxContext } from '../../src/hooks/use-attention-inbox.ts';
+import { AgendaInboxContext } from '../../src/hooks/use-agenda-inbox.ts';
 import { SessionsBarNeedsYou } from '../../src/shell/sessions-bar-needs-you.tsx';
-import { attentionItem, fakeInbox, InboxHarness, inboxCard } from '../support/attention-inbox.tsx';
+import { agendaItem, fakeInbox, InboxHarness, inboxCard } from '../support/agenda-inbox.tsx';
 import { type Mounted, mount, must } from '../support/dom.ts';
 import { sessionView } from '../support/sessions.ts';
 
@@ -19,16 +19,16 @@ afterEach(async () => {
 });
 
 const draw = async (rows: Parameters<typeof SessionsBarNeedsYou>[0]['rows']) => {
-  const cards = [inboxCard(attentionItem('A1'), view, 'Workshop', DAEMON)];
+  const cards = [inboxCard(agendaItem('A1'), view, 'Workshop', DAEMON)];
   mounted = await mount(
     <InboxHarness
       cards={cards}
       fake={fakeInbox()}
       reading={false}
       render={inbox => (
-        <AttentionInboxContext.Provider value={inbox}>
+        <AgendaInboxContext.Provider value={inbox}>
           <SessionsBarNeedsYou isActive={() => false} learns={() => false} onNavigate={() => {}} rows={rows} />
-        </AttentionInboxContext.Provider>
+        </AgendaInboxContext.Provider>
       )}
     />,
   );

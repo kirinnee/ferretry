@@ -9,9 +9,9 @@
  * styles live in `sessions-bar.css`, which every surface that draws it already loads.
  */
 
-import { badgeText } from '../lib/attention-inbox.ts';
+import { badgeText } from '../lib/agenda-inbox.ts';
 import { cn } from '../lib/class-names.ts';
-import { attentionWords } from './sessions-bar-model.ts';
+import { agendaWords } from './sessions-bar-model.ts';
 
 export function UnreadBadge({
   count,
@@ -26,7 +26,7 @@ export function UnreadBadge({
   return (
     <span className={cn('fy-unread-badge', className)} data-unread-badge="" data-count={count}>
       <span aria-hidden="true">{badgeText(count)}</span>
-      {announce ? <span className="sr-only">{attentionWords(count)}</span> : null}
+      {announce ? <span className="sr-only">{agendaWords(count)}</span> : null}
     </span>
   );
 }

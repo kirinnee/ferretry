@@ -9,14 +9,14 @@
  * The page is quiet by design: stats first, then flat one-line lists — no card per row.
  */
 
-import type { SessionView, WardenAttentionView, WardenLeaveDuration, WardenStatusView } from '@ferretry/protocol';
+import type { SessionView, WardenAgendaView, WardenLeaveDuration, WardenStatusView } from '@ferretry/protocol';
 import { AlertTriangle, LoaderCircle, RefreshCw, ShieldCheck, SlidersHorizontal } from 'lucide-react';
 
 import type { WardenReadState } from '../../hooks/use-warden-poll.ts';
 import { readView } from '../../hooks/use-warden-poll.ts';
 import { cn } from '../../lib/class-names.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
-import { daemonAttentionPath } from '../../lib/pages/routes.ts';
+import { daemonAgendaPath } from '../../lib/pages/routes.ts';
 import { INSIGHTS_COLUMN_CLASS } from '../../shell/insights-frame.tsx';
 import { Badge } from '../../shell/primitives.tsx';
 import { RouteLink } from '../../shell/route-link.tsx';
@@ -44,7 +44,7 @@ export interface WardenNotice {
 export interface WardenOverviewProps {
   readonly connection: DaemonConnection;
   readonly status: WardenReadState<WardenStatusView>;
-  readonly attention: WardenReadState<WardenAttentionView>;
+  readonly attention: WardenReadState<WardenAgendaView>;
   /** This daemon's sessions, for names; `null` while not read yet. */
   readonly sessions?: readonly SessionView[] | null;
   readonly now: number;
@@ -64,7 +64,7 @@ export interface WardenOverviewProps {
 export function WardenOverview({
   connection,
   status,
-  attention,
+  attention: agenda,
   sessions = null,
   now,
   sweeping = false,
@@ -78,7 +78,7 @@ export function WardenOverview({
 }: WardenOverviewProps) {
   const statusView = readView(status);
   const bySession = new Map((sessions ?? []).map(session => [session.config.id, session]));
-  const watching = statusView === undefined ? [] : watchingRows(statusView, readView(attention), now);
+  const watching = statusView === undefined ? [] : watchingRows(statusView, readView(agenda), now);
   const list = { connection, sessions: bySession, now, onNavigate };
 
   return (
@@ -125,7 +125,7 @@ export function WardenOverview({
             {notice.text}
           </p>
         )}
-        <InboxLine connection={connection} attention={attention} onNavigate={onNavigate} />
+        <InboxLine connection={connection} attention={agenda} onNavigate={onNavigate} />
       </header>
 
       {statusView !== undefined && (
@@ -196,14 +196,14 @@ function StatusSummary({ status, now }: { readonly status: WardenReadState<Warde
 /** One quiet line into the Inbox, where the Warden's asks now live. */
 function InboxLine({
   connection,
-  attention,
+  attention: agenda,
   onNavigate,
 }: {
   readonly connection: DaemonConnection;
-  readonly attention: WardenReadState<WardenAttentionView>;
+  readonly attention: WardenReadState<WardenAgendaView>;
   readonly onNavigate: ((to: string) => void) | undefined;
 }) {
-  const line = wardenInboxLine(attention);
+  const line = wardenInboxLine(agenda);
   if (line.kind === 'hidden') return null;
   if (line.kind === 'warning')
     return (
@@ -221,7 +221,7 @@ function InboxLine({
     <p className="m-0 text-meta leading-base" data-warden-inbox="link">
       <RouteLink
         // TODO(inbox-filter): switch to `/inbox?from=warden` once the Inbox filters by sender.
-        to={daemonAttentionPath(connection.daemonId)}
+        to={daemonAgendaPath(connection.daemonId)}
         {...(onNavigate === undefined ? {} : { onNavigate })}
         className="inline-flex !min-h-8 !min-w-0 items-center font-semibold text-accent no-underline sm:!min-h-0"
       >

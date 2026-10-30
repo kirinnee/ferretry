@@ -2,14 +2,14 @@
  * Telling a RUNNING ferret that the instructions every agent gets have changed (docs/launch-settings.md,
  * "Instructions that changed since the launch").
  *
- * A harness reads its appended system prompt once, at launch. So a rule Ferretry tightens — the Attention
+ * A harness reads its appended system prompt once, at launch. So a rule Ferretry tightens — the Agenda
  * rule, say — reached a ferret only when it next restarted, and a long-lived lead ferret could run for
  * days on the old words. Neither harness can re-read its system prompt mid-conversation, so the daemon
  * says the new words IN the conversation instead: once, for each always-on section
  * (`ALWAYS_ON_SECTIONS`) whose fingerprint differs from the one its launch recorded.
  *
  * - **An owner's message triggers it, and never carries it.** The owner's words go out exactly as typed;
- *   the note is queued in the ferret's attention outbox, so it rides the same quiet window and the same
+ *   the note is queued in the ferret's agenda outbox, so it rides the same quiet window and the same
  *   hold while the ferret is mid-turn as the owner's answers, and joins a batch of them as ONE message.
  *   Only an owner's message triggers it: a release must not start a turn for every idle ferret on the
  *   machine, and a teammate's message never does. A ferret nobody writes to does not need the rule until

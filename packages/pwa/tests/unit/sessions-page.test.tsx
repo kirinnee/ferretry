@@ -6,12 +6,12 @@ import type { FyApiClient } from '@ferretry/protocol/client';
 import type { ComponentType } from 'react';
 
 import { SessionsPage, type SessionsPageProps } from '../../src/components/sessions-page.tsx';
-import { AttentionInboxContext } from '../../src/hooks/use-attention-inbox.ts';
+import { AgendaInboxContext } from '../../src/hooks/use-agenda-inbox.ts';
 import { projectScopePath, projectScopeState, type ScopeNavigation } from '../../src/hooks/use-project-scope.ts';
 import type { WardenStatusReader } from '../../src/hooks/use-warden-status.ts';
 import type { AccountPickerHealthCatalog } from '../../src/lib/account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
-import type { InboxCard } from '../../src/lib/attention-inbox.ts';
+import type { InboxCard } from '../../src/lib/agenda-inbox.ts';
 import { type ControlsStorage, DaemonControlsStore } from '../../src/lib/controls.ts';
 import { type DaemonConnection, daemonConnection } from '../../src/lib/daemon-connection.ts';
 import type { FleetProject } from '../../src/lib/fleet-grouping.ts';
@@ -21,14 +21,7 @@ import { PageHost } from '../../src/lib/pages/page-host.tsx';
 import { DaemonClientProvider } from '../../src/lib/store.tsx';
 import { type DaemonProjectsPort, DaemonProjectsStore } from '../../src/lib/projects-store.ts';
 import { type DaemonUsagePort, DaemonUsageStore } from '../../src/lib/usage-store.ts';
-import {
-  attentionItem,
-  choices,
-  type FakeInbox,
-  fakeInbox,
-  InboxHarness,
-  inboxCard,
-} from '../support/attention-inbox.tsx';
+import { agendaItem, choices, type FakeInbox, fakeInbox, InboxHarness, inboxCard } from '../support/agenda-inbox.tsx';
 import { interact, mount, must } from '../support/dom.ts';
 import { healthOf } from '../support/health.ts';
 import { sessionView } from '../support/sessions.ts';
@@ -745,16 +738,16 @@ describe('SessionsPage across every machine', () => {
 });
 
 describe('SessionsPage Needs you', () => {
-  const card = inboxCard(attentionItem('A4', { subject: 'Rebase onto main?', ask: choices('Rebase now', 'Wait') }));
+  const card = inboxCard(agendaItem('A4', { subject: 'Rebase onto main?', ask: choices('Rebase now', 'Wait') }));
 
   const withInbox = (fake: FakeInbox, cards: readonly InboxCard[], props: SessionsPageProps) => (
     <InboxHarness
       cards={cards}
       fake={fake}
       render={inbox => (
-        <AttentionInboxContext.Provider value={inbox}>
+        <AgendaInboxContext.Provider value={inbox}>
           <SessionsPage {...props} />
-        </AttentionInboxContext.Provider>
+        </AgendaInboxContext.Provider>
       )}
     />
   );
@@ -763,9 +756,9 @@ describe('SessionsPage Needs you', () => {
     const navigated: string[] = [];
     const page = await mount(withInbox(fakeInbox(), [card], pageProps({ onNavigate: to => navigated.push(to) })));
     await settle();
-    const deck = must(page.container.querySelector('[data-attention-needs-you]'), 'the Needs you deck');
-    expect(deck.querySelector('[data-attention-card="A4"]')).not.toBeNull();
-    expect(deck.querySelector('[data-attention-see-all]')?.getAttribute('href')).toBe('/d/alpha/inbox');
+    const deck = must(page.container.querySelector('[data-agenda-needs-you]'), 'the Needs you deck');
+    expect(deck.querySelector('[data-agenda-card="A4"]')).not.toBeNull();
+    expect(deck.querySelector('[data-agenda-see-all]')?.getAttribute('href')).toBe('/d/alpha/inbox');
     // Above the list, not inside or after it.
     const list = must(page.container.querySelector('main'), 'the dashboard');
     expect(deck.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
@@ -776,13 +769,13 @@ describe('SessionsPage Needs you', () => {
   it('draws no deck with nothing open, and none at all without a shell inbox', async () => {
     const empty = await mount(withInbox(fakeInbox(), [], pageProps()));
     await settle();
-    expect(empty.container.querySelector('[data-attention-needs-you]')).toBeNull();
+    expect(empty.container.querySelector('[data-agenda-needs-you]')).toBeNull();
     await empty.unmount();
 
     const bare = await mount(<SessionsPage {...pageProps()} />);
     await settle();
-    expect(bare.container.querySelector('[data-attention-needs-you]')).toBeNull();
-    expect(bare.container.querySelector('[data-attention-undo]')).toBeNull();
+    expect(bare.container.querySelector('[data-agenda-needs-you]')).toBeNull();
+    expect(bare.container.querySelector('[data-agenda-undo]')).toBeNull();
     await bare.unmount();
   });
 });

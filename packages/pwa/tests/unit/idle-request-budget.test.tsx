@@ -227,11 +227,11 @@ const openShell = async (path: string, counter: RouteCounter) => {
     traffic += 1;
     const url = new URL(String(input));
     counter.add(routePattern(init?.method ?? 'GET', url.toString()));
-    const attention = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u)?.[1];
-    if (attention !== undefined)
+    const agenda = url.pathname.match(/^\/v1\/sessions\/([^/]+)\/attention$/u)?.[1];
+    if (agenda !== undefined)
       return Response.json({
         v: 1,
-        sessionId: decodeURIComponent(attention),
+        sessionId: decodeURIComponent(agenda),
         items: [],
         resolved: [],
         count: 0,

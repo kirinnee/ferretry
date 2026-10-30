@@ -2,9 +2,9 @@ import '../support/dom.ts';
 import { afterEach, describe, expect, it } from 'bun:test';
 import {
   DAEMON_FEATURES,
-  type SessionAttentionSummary,
+  type SessionAgendaSummary,
   WARDEN_AGENDA_PATH,
-  WARDEN_ATTENTION_PATH,
+  LEGACY_WARDEN_ATTENTION_PATH,
 } from '@ferretry/protocol';
 import type { FyApiClient } from '@ferretry/protocol/client';
 import type { z } from 'zod';
@@ -46,7 +46,7 @@ describe('which spelling of the agenda wire a machine speaks', () => {
     expect(sessionAgendaRepliesPath('s 1', 'agenda')).toBe('/v1/sessions/s%201/agenda/replies');
     expect(sessionAgendaRepliesPath('s 1', 'attention')).toBe('/v1/sessions/s%201/attention/replies');
     expect(wardenAgendaPath('agenda')).toBe(WARDEN_AGENDA_PATH);
-    expect(wardenAgendaPath('attention')).toBe(WARDEN_ATTENTION_PATH);
+    expect(wardenAgendaPath('attention')).toBe(LEGACY_WARDEN_ATTENTION_PATH);
   });
 });
 
@@ -94,7 +94,7 @@ describe('AgendaWireDirectory', () => {
 });
 
 describe('the session summary', () => {
-  const summary = (first: string): SessionAttentionSummary => ({
+  const summary = (first: string): SessionAgendaSummary => ({
     open: 1,
     first,
     ask: 'Rebase now?',

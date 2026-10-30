@@ -6,11 +6,11 @@
  * Plain notifications (`notice`) are the Inbox's, never the agenda's.
  */
 
-import { type AttentionItem, attentionTurn } from '@ferretry/protocol';
+import { type AgendaItem, agendaTurn } from '@ferretry/protocol';
 
 /** The items of an agenda: open, and not a plain notification. */
-export const agendaItems = (items: readonly AttentionItem[]): readonly AttentionItem[] =>
-  items.filter(item => item.notice !== true && attentionTurn(item) !== 'done');
+export const agendaItems = (items: readonly AgendaItem[]): readonly AgendaItem[] =>
+  items.filter(item => item.notice !== true && agendaTurn(item) !== 'done');
 
 export interface AgendaCounts {
   /** Items on the owner's turn that block the ferret now. */
@@ -21,8 +21,8 @@ export interface AgendaCounts {
   readonly withFerret: number;
 }
 
-export const agendaCounts = (items: readonly AttentionItem[]): AgendaCounts => {
-  const turns = items.map(item => ({ turn: attentionTurn(item), blocking: item.blockingNow === true }));
+export const agendaCounts = (items: readonly AgendaItem[]): AgendaCounts => {
+  const turns = items.map(item => ({ turn: agendaTurn(item), blocking: item.blockingNow === true }));
   const owner = turns.filter(entry => entry.turn === 'owner');
   return {
     blocking: owner.filter(entry => entry.blocking).length,

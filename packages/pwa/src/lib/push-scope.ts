@@ -119,7 +119,7 @@ export const unverifiedNotification = (payload: PushNotificationPayload, origin:
  * belongs to no machine — the app itself.
  *
  * A daemon names a conversation RELATIVE TO ITS OWN PAGES — `/session/<id>?attention=A3`
- * (`attentionNotificationPath`), since it never knows which name this browser files it under — so a
+ * (`agendaNotificationPath`), since it never knows which name this browser files it under — so a
  * machine's worker reads `/session/…` as under that machine. The app-wide worker knows no machine, and
  * such a path falls through to the app itself.
  *

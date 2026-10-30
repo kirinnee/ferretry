@@ -17,13 +17,7 @@ import type { DaemonHealthRead } from '../../../src/lib/daemon-health.ts';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
 import { interact, mount, must } from '../../support/dom.ts';
 import { healthOf } from '../../support/health.ts';
-import {
-  attentionItem,
-  wardenAnomaly,
-  wardenAttention,
-  wardenInvestigation,
-  wardenStatus,
-} from '../../support/warden.ts';
+import { agendaItem, wardenAnomaly, wardenAgenda, wardenInvestigation, wardenStatus } from '../../support/warden.ts';
 
 const NOW = Date.parse('2026-07-31T12:00:00.000Z');
 const connection = (id: string) =>
@@ -73,16 +67,16 @@ const fake = (options: FakeOptions = {}) => {
     request: (async (path: string, schema: { parse: (value: unknown) => unknown }) => {
       calls.requests.push(path);
       return schema.parse(
-        wardenAttention({
+        wardenAgenda({
           outcome: 'items',
-          items: [attentionItem({ sessionId: 'sess-new', source: 'warden-anomaly', anomalyKind: 'dead_monitor' })],
+          items: [agendaItem({ sessionId: 'sess-new', source: 'warden-anomaly', anomalyKind: 'dead_monitor' })],
         }),
       );
     }) as WardenOverviewClient['request'],
-    wardenAttention: async () =>
-      wardenAttention({
+    wardenAgenda: async () =>
+      wardenAgenda({
         outcome: 'items',
-        items: [attentionItem({ sessionId: 'sess-flag', source: 'warden-anomaly', anomalyKind: 'dead_monitor' })],
+        items: [agendaItem({ sessionId: 'sess-flag', source: 'warden-anomaly', anomalyKind: 'dead_monitor' })],
       }),
     wardenRun: async spawn => {
       calls.runs.push(spawn);

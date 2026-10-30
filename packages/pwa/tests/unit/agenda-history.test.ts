@@ -1,14 +1,14 @@
 import { describe, expect, test } from 'bun:test';
-import { type AttentionItem, agendaAnswerMessage, agendaReMessage } from '@ferretry/protocol';
+import { type AgendaItem, agendaAnswerMessage, agendaReMessage } from '@ferretry/protocol';
 import { HISTORY_FERRET_CHARS, itemHistory } from '../../src/lib/agenda-history.ts';
 import type { TranscriptEntry } from '../../src/lib/session-screens.ts';
-import { attentionItem } from '../support/attention-inbox.tsx';
+import { agendaItem } from '../support/agenda-inbox.tsx';
 
 const A47 = { id: 'A47', quote: 'Ship the relay fix?' } as never;
 const entry = (id: string, kind: TranscriptEntry['kind'], text: string, at?: number): TranscriptEntry =>
   ({ id, kind, text, ...(at === undefined ? {} : { at }) }) as TranscriptEntry;
 
-const item = (extra: Partial<AttentionItem> = {}): AttentionItem => attentionItem('A47', extra);
+const item = (extra: Partial<AgendaItem> = {}): AgendaItem => agendaItem('A47', extra);
 
 describe('the history of one agenda item', () => {
   test('is empty for an item nobody touched and a chat that never mentions it', () => {
@@ -19,7 +19,7 @@ describe('the history of one agenda item', () => {
     const revisions = [
       { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Old ask' } },
       { at: '2026-08-01T11:00:00.000Z', by: 'owner', changed: ['title'], previous: { title: 'Old title' } },
-    ] as unknown as AttentionItem['revisions'];
+    ] as unknown as AgendaItem['revisions'];
     const events = itemHistory(item({ revisions }), []);
     expect(events.map(event => event.kind)).toEqual(['revision', 'revision']);
     expect(events.map(event => event.at)).toEqual([
@@ -70,7 +70,7 @@ describe('the history of one agenda item', () => {
   test('interleaves revisions and chat by time, stably, and lets a row with no clock inherit the last', () => {
     const revisions = [
       { at: '2026-08-01T10:00:00.000Z', by: 'agent', changed: ['subject'], previous: { subject: 'Old' } },
-    ] as unknown as AttentionItem['revisions'];
+    ] as unknown as AgendaItem['revisions'];
     const base = Date.parse('2026-08-01T10:00:00.000Z');
     const events = itemHistory(item({ revisions }), [
       entry('a0', 'assistant', 'before: !A47', base - 1_000),
@@ -85,7 +85,7 @@ describe('the history of one agenda item', () => {
   test('gives a revision with an unreadable time the epoch rather than NaN', () => {
     const revisions = [
       { at: 'not a time', by: 'agent', changed: ['subject'], previous: { subject: 'Old' } },
-    ] as unknown as AttentionItem['revisions'];
+    ] as unknown as AgendaItem['revisions'];
     expect(itemHistory(item({ revisions }), [])[0]?.at).toBe(0);
   });
 });

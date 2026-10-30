@@ -319,7 +319,7 @@ describe('groupTasksByBoardLane', () => {
     should(groupTasksByBoardLane([]).map(lane => lane.tasks.length)).eql([0, 0, 0, 0, 0, 0]);
   });
 
-  it('sorts within a lane by the same attention order the list uses', () => {
+  it('sorts within a lane by the same agenda order the list uses', () => {
     const lanes = groupTasksByBoardLane([
       taskSummary({ id: 'calm', phase: 'todo' }),
       taskSummary({ id: 'blocked', phase: 'todo', blocked: true, blockedSince: '2026-07-01T00:00:00.000Z' }),

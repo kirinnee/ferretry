@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import type { AgendaMessagePart } from '@ferretry/protocol';
-import { AgendaItemHistory } from '../../../src/features/attention/agenda-item-history.tsx';
+import { AgendaItemHistory } from '../../../src/features/agenda/agenda-item-history.tsx';
 import type { HistoryEvent } from '../../../src/lib/agenda-history.ts';
 import { type Mounted, mount, must } from '../../support/dom.ts';
 

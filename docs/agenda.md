@@ -4,8 +4,8 @@ The agenda is what the owner has to decide or do, and what each item blocks. It 
 as the name of the feature (`fy attention …` still works, deprecated). A plain notification with
 nothing to decide is a **notice**, not an agenda item (see [Notices](#notices)).
 
-The daemon owns the model: the state machine is `packages/daemon/src/lib/attention/state-machine.ts`,
-the wire contract is `packages/protocol/src/lib/attention.ts`. This page says what they mean.
+The daemon owns the model: the state machine is `packages/daemon/src/lib/agenda/state-machine.ts`,
+the wire contract is `packages/protocol/src/lib/agenda.ts`. This page says what they mean.
 
 ## Agenda mode is a switch
 
@@ -24,7 +24,7 @@ loosening, so it needs no `fy config confirm`. The whole contract is
 
 ## Turns
 
-Every open item is somebody's turn. `attentionTurn(item)` (protocol) is the one definition:
+Every open item is somebody's turn. `agendaTurn(item)` (protocol) is the one definition:
 
 | Turn       | When                                                                 |
 | ---------- | -------------------------------------------------------------------- |
@@ -168,7 +168,7 @@ cleared is a bug.
 ## Delivery
 
 How the owner's card actions — an answer, a done, a dismiss, a Discuss or a request for more information —
-reach the ferret (`AttentionReplyBatcher`, `packages/daemon/src/lib/attention/reply-batch.ts`; the class keeps
+reach the ferret (`AgendaReplyBatcher`, `packages/daemon/src/lib/agenda/reply-batch.ts`; the class keeps
 its old name until a later release renames it; its files are [on disk](#on-disk) under the agenda names). The owner's words that drove it:
 "only on receipt (the harness receive the 'card reply'), then it can be considered 'DONE', else it surfaces
 back as a card again".

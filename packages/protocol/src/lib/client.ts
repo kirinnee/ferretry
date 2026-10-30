@@ -46,7 +46,7 @@ import type { MachineSkillsInventory, SessionSkillsInventory, SkillFile } from '
 import type { SessionHandoff } from './turn-handoff.ts';
 import type { VersionSkew } from './version-skew.ts';
 import type {
-  WardenAttentionView,
+  WardenAgendaView,
   WardenConfigPatch,
   WardenConfigView,
   WardenInvestigateRequest,
@@ -104,7 +104,7 @@ export interface IFyApiClient {
   wardenConfig(): Promise<WardenConfigView>;
   updateWardenConfig(patch: WardenConfigPatch): Promise<WardenConfigView>;
   /** Every ferret that needs the owner, and why. */
-  wardenAttention(): Promise<WardenAttentionView>;
+  wardenAgenda(): Promise<WardenAgendaView>;
   /** Ask for an investigation of one ferret: it skips Jev and waits for a free slot. */
   wardenInvestigate(request: WardenInvestigateRequest): Promise<WardenInvestigateView>;
   /** Leave a flagged or cleared ferret alone for longer than the Warden would: an hour, four, or until it changes. */

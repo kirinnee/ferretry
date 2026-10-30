@@ -376,7 +376,7 @@ const ASK = {
   sessionId: 'mvb9x0-c0ffee01',
   kind: 'attention',
   title: '“Builder”: Pick a release window',
-  tag: 'attention-mvb9x0-c0ffee01',
+  tag: 'agenda-mvb9x0-c0ffee01',
   url: '/session/mvb9x0-c0ffee01?attention=A3',
 } as const;
 const BETA_ASK = '/d/beta/session/mvb9x0-c0ffee01?attention=A3';
