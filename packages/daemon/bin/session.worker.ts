@@ -15,15 +15,13 @@ import { ControlModeTmuxProcess } from '../src/adapters/tmux/control-tmux-proces
 import { NodeTranscriptSource } from '../src/adapters/transcript/file-source.ts';
 import { SessionObserver } from '../src/lib/session/observer/observer.ts';
 import type { FromSessionWorker, ToSessionWorker } from '../src/lib/session/observer/protocol.ts';
-import { PANE_WATCH_FORMAT, SESSION_WORKER_ATTACH_FLAGS } from '../src/lib/tmux/control-protocol.ts';
+import { PANE_WATCH, PANE_WATCH_FORMAT, SESSION_WORKER_ATTACH_FLAGS } from '../src/lib/tmux/control-protocol.ts';
 import { ClaudeTranscriptParser } from '../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../src/lib/transcript/codex.ts';
 
 declare const self: { onmessage: ((event: MessageEvent<ToSessionWorker>) => void) | null };
 
 const post = (message: FromSessionWorker): void => postMessage(message);
-/** The one subscription each session's client holds. */
-const PANE_WATCH = 'fy-pane';
 const nowMs = (): number => performance.timeOrigin + performance.now();
 const children = countWorkerChildren(Bun, nowMs);
 
