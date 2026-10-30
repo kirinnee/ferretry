@@ -565,8 +565,8 @@ export const SessionConfigSchema = z.object({
   pack: z.boolean().optional(),
   /**
    * Whether this ferret is told to keep an agenda of items for the owner (docs/agenda.md). ABSENT MEANS OFF, unlike
-   * hypermedia and Pack: agenda mode is opt-in, and the one-time migration records it ON for a ferret that already
-   * had open items. Read at launch, so a change takes effect at the next launch.
+   * hypermedia and Pack: a ferret that recorded nothing is off, a new ferret records ON from the machine default
+   * (`machine.yaml` agendaMode), and the one-time migration records it ON for a ferret that already had open items. Read at launch, so a change takes effect at the next launch.
    */
   agenda: z.boolean().optional(),
 });

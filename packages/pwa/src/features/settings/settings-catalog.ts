@@ -819,6 +819,26 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
     ],
   },
   {
+    // The feature's own name, and what it does for the owner: items to answer, the Inbox, new ferrets' default.
+    id: 'agenda-mode',
+    label: 'Agenda mode',
+    description:
+      'Whether ferrets you start from now on keep an agenda of what only you can decide or do. On by default; a ferret you already have keeps its own switch. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#machines`,
+    keywords: [
+      'agenda',
+      'agenda mode',
+      'inbox',
+      'items',
+      'ask me',
+      'needs me',
+      'new ferrets',
+      'default',
+      'notify',
+      'machine.yaml',
+    ],
+  },
+  {
     // What a person types to go through setup again: the step names, and "onboarding" and "wizard".
     id: 'machine-setup',
     label: 'New machine setup',

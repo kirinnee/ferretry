@@ -71,6 +71,12 @@ describe('renderMachine', () => {
     should(renderMachine(machine({ autoResume: true }), 'fz')).not.match(/Last restart/);
   });
 
+  it('should say nothing of agenda mode for a daemon that predates it, and show the default otherwise', () => {
+    should(renderMachine(machine(), 'fz')).not.match(/Agenda mode/);
+    should(renderMachine(machine({ agendaMode: true }), 'fz')).match(/Agenda mode for new ferrets: on/);
+    should(renderMachine(machine({ agendaMode: false }), 'fz')).match(/Agenda mode for new ferrets: off/);
+  });
+
   it('should say when no default runtime resolves', () => {
     const text = renderMachine(
       machine({
@@ -304,6 +310,23 @@ describe('registerMachineCommands', () => {
     should(world.gateway.called('stage')[1]?.args[0]).match({ autoResume: true });
     await should(
       runCommand(registerMachineCommands, world, ['machine', 'set', 'auto-resume', 'maybe']),
+    ).be.rejectedWith(/on or off/);
+  });
+
+  it('should switch the agenda-mode default on or off, and refuse anything else', async () => {
+    const world = fakeWorld({ answers: ['y', 'y'] });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'agenda-mode', 'off']);
+    should(world.gateway.called('stage')[0]?.args[0]).eql({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: 'claude-default',
+      agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
+      agendaMode: false,
+    });
+    await runCommand(registerMachineCommands, world, ['machine', 'set', 'agenda-mode', 'on']);
+    should(world.gateway.called('stage')[1]?.args[0]).match({ agendaMode: true });
+    await should(
+      runCommand(registerMachineCommands, world, ['machine', 'set', 'agenda-mode', 'maybe']),
     ).be.rejectedWith(/on or off/);
   });
 

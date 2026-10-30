@@ -1686,6 +1686,44 @@ describe('deriveAccountChange: machine.settings', () => {
     should(edit.summary).equal('Set auto-resume after restart on');
   });
 
+  it('should switch the agenda-mode default off, saying existing ferrets keep their own switch', () => {
+    // Act
+    const edit = derive({
+      kind: 'machine.settings',
+      agentPermissions: 'auto',
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+      agendaMode: false,
+    });
+
+    // Assert
+    should(edit.summary).equal('Set agenda mode for new ferrets off');
+    should(edit.model.machine.agendaMode).equal(false);
+    should(edit.consequences).deepEqual([
+      'Applies to ferrets started after this; ferrets that already exist keep their own switch.',
+    ]);
+  });
+
+  it('should switch the agenda-mode default back on, and leave it alone when an older client leaves it out', () => {
+    // Arrange
+    const model = modelOf({ machine: { agendaMode: false } });
+    const base = {
+      kind: 'machine.settings' as const,
+      agentPermissions: 'auto' as const,
+      defaultRuntime: null,
+      agentControl: { terminals: true, browsers: true, files: true },
+    };
+
+    // Act
+    const on = derive({ ...base, agendaMode: true }, model);
+    const untouched = derive(base, model);
+
+    // Assert
+    should(on.summary).equal('Set agenda mode for new ferrets on');
+    should(untouched.summary).equal('Keep machine settings the same');
+    should(untouched.model.machine.agendaMode).equal(false);
+  });
+
   it('should say nothing moved when every field matches the current machine settings', () => {
     // Act
     const edit = derive({
