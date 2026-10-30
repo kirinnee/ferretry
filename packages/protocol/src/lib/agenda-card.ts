@@ -18,6 +18,7 @@
  * | review     | Needs changes  |                   | Looks good    |
  * | info       |                |                   | Got it        |
  * | reply      |                |                   |               |
+ * | input      |                |                   |               |
  *
  * The recommended answer is always on the right; a choice with no recommendation recommends its first
  * option.
@@ -128,6 +129,8 @@ export const askForKind = (kind: AgendaKind, options: readonly AgendaAskOption[]
       return undefined;
     case 'reply':
       return { kind: 'open-question' };
+    case 'input':
+      return undefined;
   }
 };
 
@@ -205,6 +208,7 @@ export const defaultAgendaAnswers = (
       case 'info':
         return [answer('right', 'done', GOT_IT_LABEL)];
       case 'reply':
+      case 'input':
         return [];
     }
   })();
