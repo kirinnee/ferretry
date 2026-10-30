@@ -11,6 +11,7 @@ import {
   unswipedChoices,
 } from '@ferretry/protocol';
 import { describeAnswer } from './answer.ts';
+import { displayHowToResolve } from './how-to-resolve.ts';
 import { attentionOrdinal, attentionReference } from './reference.ts';
 
 /** Widest a field is printed at before it is elided. */
@@ -26,7 +27,7 @@ const compact = (value: string, width = BODY_WIDTH): string => {
   return line.length > width ? `${line.slice(0, width - 1)}…` : line;
 };
 
-const pluralItems = (count: number): string => (count === 1 ? '1 unresolved item' : `${count} unresolved items`);
+const pluralItems = (count: number): string => (count === 1 ? '1 open item' : `${count} open items`);
 
 /** Who acted: an agent is named where the daemon knows the name. */
 function actor(by: 'human' | 'agent' | 'daemon', name: string | null): string {
@@ -88,7 +89,7 @@ function itemLines(item: AttentionItem): string[] {
   }
   lines.push(...agendaLines(item), ...briefLines(item), ...instructionLines(item));
   if (item.why.trim() !== item.subject.trim()) lines.push(`${INDENT}why: ${compact(item.why)}`);
-  lines.push(`${INDENT}resolve: ${compact(item.howToResolve)}`);
+  lines.push(`${INDENT}resolve: ${compact(displayHowToResolve(item.howToResolve))}`);
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
   if (item.notice === true) {
     lines.push(`${INDENT}notice: read, not answered${item.ping === true ? ' (pinged)' : ''}`);
@@ -171,10 +172,10 @@ function instructionLines(item: AttentionItem): string[] {
 function parseErrorWarning(snapshot: AttentionSnapshot): string | undefined {
   if (snapshot.parseErrors === 0) return undefined;
   const entries = snapshot.parseErrors === 1 ? '1 entry' : `${snapshot.parseErrors} entries`;
-  return `Warning: ${entries} on this board could not be read; the list below may be incomplete.`;
+  return `Warning: ${entries} on this agenda could not be read; the list below may be incomplete.`;
 }
 
-/** The unresolved agenda as a human reads it. */
+/** The open agenda as a human reads it. */
 export function renderAttentionList(snapshot: AttentionSnapshot): string {
   const warning = parseErrorWarning(snapshot);
   const preamble = warning === undefined ? [] : [warning];
@@ -231,7 +232,7 @@ export function renderAttentionMutation(
 function enrolmentWarning(enrolled: number | undefined): string[] {
   if (enrolled !== 0) return [];
   return [
-    'Warning: no device will be notified (0 enrolled). The item is on the board, but nobody was told — the owner turns notifications on in the app, under Settings › Notifications.',
+    'Warning: no device will be notified (0 enrolled). The item is on the agenda, but nobody was told — the owner turns notifications on in the app, under Settings › Notifications.',
   ];
 }
 

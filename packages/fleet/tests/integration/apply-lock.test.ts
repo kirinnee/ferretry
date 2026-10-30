@@ -17,6 +17,7 @@ afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map(directory => rm(directory, { recursive: true, force: true })));
 });
 
+/** A hold, not a wait: the rival gets every chance to overlap. A shorter hold only weakens the check; it can never fail a correct lock. */
 const settled = (): Promise<void> => new Promise(resolve => setTimeout(resolve, 5));
 
 /** The old convenience shape, rebuilt on the acquire/release pair the provisioner now drives. */

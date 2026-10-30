@@ -901,6 +901,7 @@ import {
   SendTracker,
   SendUnconfirmed,
   type SerialExecutor,
+  adoptAgendaDefault,
   SessionAgendaModeService,
   type SessionAgendaModeSubsystem,
   type SessionAncestor,
@@ -5478,7 +5479,7 @@ export function createSessionHandoverSubsystem(
           reportPath: null,
         }),
       },
-      attention: { raise: async () => seamAbsent('raise its attention item') },
+      attention: { raise: async () => seamAbsent('raise its agenda item') },
       journal: {
         appendOnce: async input => await appendHandoverEventOnce(wiring.storage, wiring.journalSerial, input),
       },
@@ -8789,6 +8790,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let releaseBrowserSession: (sessionId: string) => Promise<void> = async () => undefined;
       // A new ferret's passive-learning default, assigned once the learning subsystem below exists.
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
+      // A new ferret's agenda-mode default (docs/agenda.md), assigned once the agenda switch below exists.
+      let adoptAgenda: (sessionId: SessionId, eligible: boolean) => Promise<void> = async () => undefined;
       // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
       const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
@@ -8806,6 +8809,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ...(await packHooks.launchDefault(id)),
         ...(await agendaLaunchDefault(sessions, id)),
       });
+      // A start records Pack mode's switch and the machine's agenda default on the new ferret before its first launch.
+      const startHooks: SessionPackHooks = {
+        ...packHooks,
+        adopt: async (id, eligible, parent) => {
+          await packHooks.adopt(id, eligible, parent);
+          await adoptAgenda(id, eligible).catch(() => undefined);
+        },
+      };
       // ONE claim surface over the ledger for the start and the rename, so both take names through the
       // same allocator and the same file.
       const nameClaims = createCallsignClaims(storage, stateFiles, paths, callsignClaims);
@@ -8858,7 +8869,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             async id => await adoptLearning(id),
             id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
             async (executable, harness) => await launchSettings.digest(executable, harness),
-            packHooks,
+            startHooks,
             {
               fixedSettings: async (executable, harness) => await launchSettings.fixedSettings(executable, harness),
               codexChoices: async (executable, cwd) => await codexRuntimeModels.get(executable, cwd),
@@ -8915,6 +8926,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // An adopted conversation is a top-level ferret: told about Pack mode like any other new one.
           async id => {
             await packHooks.adopt(id, true, undefined).catch(() => undefined);
+            await adoptAgenda(id, true).catch(() => undefined);
             await adoptLearning(id);
           },
           id => handoffFolders(createSessionPaths(paths, id).directory, attachmentOriginals(id)),
@@ -9093,6 +9105,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           });
         });
         await attentionProjection.refresh(id);
+      };
+      adoptAgenda = async (id, eligible) => {
+        await adoptAgendaDefault(
+          {
+            machineDefault: async () => (await effectiveAccountModel())?.machine.agendaMode ?? true,
+            recorded: async sessionId => {
+              const recordedId = tryParseSessionId(sessionId);
+              return recordedId === undefined ? undefined : (await sessions.get(recordedId))?.config.agenda;
+            },
+            enable: async sessionId => await writeAgendaMode(sessionId, true, new Date(clock.now()).toISOString()),
+          },
+          id,
+          eligible,
+        );
       };
       const agendaModeService = new SessionAgendaModeService({
         facts: async reference => {

@@ -170,7 +170,7 @@ call.
 whose credential is in its environment, and nothing else: it talks only to the daemon on this machine,
 sends no bearer token, and never reads the host's admin token. The fleet's fixed layer adds it to every
 agent runtime as a locked entry, with a short built-in instruction (the tools, the rules for changing
-Ferretry's own settings, then how to raise Attention) in the system prompt:
+Ferretry's own settings, then how to notify the owner and, in agenda mode, raise agenda items) in the system prompt:
 
 - **Claude**: `--mcp-config=<inline JSON for server "ferretry">` (the person's own servers stay; its
   `env` blanks `FY_TOKEN`, since Claude hands a stdio server its whole environment) and

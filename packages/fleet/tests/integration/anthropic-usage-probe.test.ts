@@ -907,8 +907,8 @@ describe('fetchQuota', () => {
 
   it('should abort a response that outlives its deadline', async () => {
     // Arrange — an unbounded probe would hang the whole usage command.
-    const url = serve(async () => {
-      await Bun.sleep(3_000);
+    const url = serve(async request => {
+      await new Promise<void>(resolve => request.signal.addEventListener('abort', () => resolve(), { once: true }));
       return new Response('{}');
     });
 

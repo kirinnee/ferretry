@@ -28,6 +28,7 @@ import { resolveDaemonLayout } from '../../../src/lib/daemon/layout.ts';
 import { DirectSupervisor } from '../../../src/lib/daemon/supervisor.ts';
 import { StateHomeClaimService } from '../../../src/lib/state-home/claim.ts';
 import { TEARDOWN_TIMEOUT_MS, tearDownSupervisedDaemons } from '../support/supervised-daemon-teardown.ts';
+import { waitFor } from '../support/wait-for.ts';
 
 /**
  * THE DAEMON RESTARTS UNDER A FERRET THAT IS MID-TURN, end to end (docs/updating.md § Ferrets keep
@@ -225,15 +226,15 @@ async function boot(): Promise<BootedDaemon> {
     const handle = await supervisor.start(fyd);
     pid = handle.pid;
     if (pid !== undefined) daemons.add(pid);
-    for (let attempt = 0; attempt < 400 && !(await healthy(port)); attempt += 1) await Bun.sleep(50);
-    if (!(await healthy(port))) throw new Error(`fyd never served\n${await logOf(layout.logFile)}`);
+    await waitFor(() => healthy(port), 'fyd to answer its health probe', { evidence: () => logOf(layout.logFile) });
   };
   const stop = async (): Promise<void> => {
-    if (pid === undefined) throw new Error('no daemon to stop');
-    process.kill(pid, 'SIGTERM');
-    daemons.delete(pid);
-    for (let attempt = 0; attempt < 400 && (await healthy(port)); attempt += 1) await Bun.sleep(25);
-    for (let attempt = 0; attempt < 400 && alive(pid); attempt += 1) await Bun.sleep(25);
+    const stopping = pid;
+    if (stopping === undefined) throw new Error('no daemon to stop');
+    process.kill(stopping, 'SIGTERM');
+    daemons.delete(stopping);
+    await waitFor(async () => !(await healthy(port)), 'fyd to stop answering its health probe');
+    await waitFor(() => !alive(stopping), 'fyd to exit');
     pid = undefined;
   };
   await start();
@@ -274,18 +275,19 @@ async function startIdle(daemon: BootedDaemon): Promise<SessionView> {
 /** The environment the fake Claude was launched with: what a ferret's own `fy` inherits. */
 async function ferretEnvironment(daemon: BootedDaemon): Promise<Record<string, string>> {
   const path = join(daemon.root, 'claude-env.txt');
-  for (let attempt = 0; attempt < 200; attempt += 1) {
-    const text = await readFile(path, 'utf8').catch(() => '');
-    if (text.includes('FY_SESSION_ID=')) {
-      const pairs = text
-        .split('\n')
-        .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)] as const)
-        .filter(([name]) => name.startsWith('FY_'));
-      return Object.fromEntries(pairs);
-    }
-    await Bun.sleep(50);
-  }
-  throw new Error(`the fake Claude never wrote its environment\n${await logOf(daemon.logFile)}`);
+  const text = await waitFor(
+    async () => {
+      const read = await readFile(path, 'utf8').catch(() => '');
+      return read.includes('FY_SESSION_ID=') ? read : undefined;
+    },
+    'the fake Claude to write its environment',
+    { evidence: () => logOf(daemon.logFile) },
+  );
+  const pairs = text
+    .split('\n')
+    .map(line => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)] as const)
+    .filter(([name]) => name.startsWith('FY_'));
+  return Object.fromEntries(pairs);
 }
 
 /** A process with the environment `fy` sees on this host: the state home, and nothing of the real one. */
@@ -312,19 +314,36 @@ function fy(
     stderr: 'pipe',
   });
   children.add(child);
+  const seen = { text: '', done: Promise.resolve() };
+  seen.done = (async () => {
+    const decoder = new TextDecoder();
+    for await (const chunk of child.stderr) seen.text += decoder.decode(chunk, { stream: true });
+  })();
+  stderrs.set(child, seen);
   return child;
 }
 
+/** What each `fy` child has written to stderr so far, read as it arrives so a test can wait for a line. */
+const stderrs = new WeakMap<object, { text: string; done: Promise<void> }>();
+
 const finished = async (child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>) => {
-  const [code, stdout, stderr] = await Promise.all([
-    child.exited,
-    new Response(child.stdout).text(),
-    new Response(child.stderr).text(),
-  ]);
-  return { code, stdout, stderr };
+  const seen = stderrs.get(child);
+  if (seen === undefined) throw new Error('not a child started by fy()');
+  const [code, stdout] = await Promise.all([child.exited, new Response(child.stdout).text(), seen.done]);
+  return { code, stdout, stderr: seen.text };
 };
 
 const NOTE = /daemon restarting, retrying for up to 60s/gu;
+
+/** Resolves once `child` has said, on stderr, that it is waiting out a restart: it has met the dead daemon. */
+const saidItIsWaiting = (child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>, who: string) =>
+  waitFor(
+    () => (stderrs.get(child)?.text.match(NOTE) ?? undefined) !== undefined,
+    `${who} to say it is waiting for the daemon`,
+    {
+      evidence: () => stderrs.get(child)?.text ?? '',
+    },
+  );
 
 describe('a daemon restart under a ferret that is mid-turn', () => {
   it('lands the ferret’s fy call, its MCP tool call and a message in flight once the new daemon serves', async () => {
@@ -350,17 +369,14 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
       mcp.stdin.write(`${JSON.stringify(message)}\n`);
       mcp.stdin.flush();
     };
-    const answerTo = async (id: number, budgetMs: number): Promise<Record<string, unknown>> => {
-      const started = Date.now();
-      for (;;) {
-        const found = lines.map(line => JSON.parse(line) as Record<string, unknown>).find(each => each.id === id);
-        if (found !== undefined) return found;
-        if (Date.now() - started > budgetMs) throw new Error(`no MCP answer to ${String(id)}: ${lines.join('\n')}`);
-        await Bun.sleep(50);
-      }
-    };
+    const answerTo = (id: number): Promise<Record<string, unknown>> =>
+      waitFor(
+        () => lines.map(line => JSON.parse(line) as Record<string, unknown>).find(each => each.id === id),
+        `the MCP answer to ${String(id)}`,
+        { evidence: () => lines.join('\n') },
+      );
     rpc({ jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {} } });
-    await answerTo(1, 15_000);
+    await answerTo(1);
 
     // A message to the ferret, accepted and typed — and the daemon goes down before its first look.
     const sent = await fetch(`http://127.0.0.1:${daemon.port}/v1/sessions/${session.config.id}/send`, {
@@ -374,13 +390,17 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
     should(SendResultSchema.parse(JSON.parse(sentBody)).fate).not.equal('delivered');
     // A lead's `fy wait` on this ferret, already polling when the daemon goes down.
     const waiting = fy(daemon, ['wait', session.config.id, '--timeout', '12', '--interval', '1', '--keep'], ferret);
-    await Bun.sleep(1_000);
 
-    // Act — the restart, with the ferret's calls made while nothing answers.
+    // Act — the restart, with the ferret's calls made while nothing answers. The daemon comes back only
+    // once all three have met the dead one and said they are waiting.
     await daemon.stop();
     const call = fy(daemon, ['status', session.config.id, '--json'], ferret);
     rpc({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'terminal_list', arguments: {} } });
-    await Bun.sleep(1_500);
+    await Promise.all([
+      saidItIsWaiting(waiting, 'the fy wait'),
+      saidItIsWaiting(call, 'the fy status'),
+      saidItIsWaiting(mcp, 'the MCP server'),
+    ]);
     await daemon.start();
 
     // Assert — the wait rode the restart out and ended on its own deadline, never "daemon lost" (69).
@@ -393,26 +413,32 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
     should(SessionViewSchema.parse(JSON.parse(status.stdout)).config.id).equal(session.config.id);
     should(status.stderr.match(NOTE)).have.length(1);
     // The MCP tool call answered as a result, not an error.
-    const listed = await answerTo(2, 60_000);
+    const listed = await answerTo(2);
     should(listed).have.property('result');
     should((listed.result as { isError?: boolean }).isError).not.equal(true, JSON.stringify(listed));
     mcp.stdin.end();
     await mcp.exited;
     await reader;
-    should(await new Response(mcp.stderr).text()).match(NOTE);
+    await stderrs.get(mcp)?.done;
+    should(stderrs.get(mcp)?.text).match(NOTE);
     // The message in flight is confirmed by the new daemon, from the transcript, without being retyped.
-    let record: SendRecord | undefined;
-    for (let attempt = 0; attempt < 120; attempt += 1) {
-      const read = await fetch(
-        `http://127.0.0.1:${daemon.port}/v1/sessions/${session.config.id}/sends/send-across-the-restart`,
-        { headers: headers(daemon, `read-send-${String(attempt)}`) },
-      );
-      record = SendRecordSchema.parse(await read.json());
-      if (record.fate === 'delivered') break;
-      await Bun.sleep(250);
-    }
-    should(record?.fate).equal('delivered', `${JSON.stringify(record)}\n${await logOf(daemon.logFile)}`);
-    should(record?.attempt ?? 1).equal(1);
+    const read: { record?: SendRecord } = {};
+    let attempt = 0;
+    await waitFor(
+      async () => {
+        attempt += 1;
+        const response = await fetch(
+          `http://127.0.0.1:${daemon.port}/v1/sessions/${session.config.id}/sends/send-across-the-restart`,
+          { headers: headers(daemon, `read-send-${attempt}`) },
+        );
+        read.record = SendRecordSchema.parse(await response.json());
+        return read.record.fate === 'delivered';
+      },
+      'the new daemon to confirm the message in flight from the transcript',
+      { pollMs: 250, evidence: async () => `${JSON.stringify(read.record)}\n${await logOf(daemon.logFile)}` },
+    );
+    should(read.record?.fate).equal('delivered');
+    should(read.record?.attempt ?? 1).equal(1);
   }, 180_000);
 
   it('keeps a ferret mid-turn mid-turn: the new daemon adopts its pane with its turn state as it was', async () => {
@@ -426,8 +452,10 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
       });
       return SessionViewSchema.parse(await read.json()).state;
     };
-    for (let attempt = 0; attempt < 120 && (await state()).turnState !== 'working'; attempt += 1) await Bun.sleep(150);
-    should((await state()).turnState).equal('working', await logOf(daemon.logFile));
+    await waitFor(async () => (await state()).turnState === 'working', 'the daemon to see the ferret working', {
+      pollMs: 150,
+      evidence: () => logOf(daemon.logFile),
+    });
 
     // Act
     await daemon.stop();
@@ -449,7 +477,7 @@ describe('a daemon restart under a ferret that is mid-turn', () => {
     const refused = await finished(fy(daemon, ['ps', '--json'], {}));
     await marker.mark(Date.now() + 120_000);
     const waiting = fy(daemon, ['ps', '--json'], {});
-    await Bun.sleep(1_500);
+    await saidItIsWaiting(waiting, 'the fy call');
     await daemon.start();
     await marker.clear();
     const listed = await finished(waiting);

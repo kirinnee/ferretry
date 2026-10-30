@@ -21,7 +21,6 @@ cd "${root_dir}"
 if [[ ${mode} == "realworld" ]]; then
   # THE REALWORLD TIER (bunfig.realworld.toml): machine-dependent tests, swept like every other tier but
   # with no ledger, no quarantine and no rerun — a failure here files an issue, it never gates anything.
-  # The repo validators above and below belong to the blocking tiers, which run them.
   mkdir -p coverage/realworld
   echo "🧪 Running realworld tests..."
   set +e
@@ -32,16 +31,10 @@ if [[ ${mode} == "realworld" ]]; then
   echo "✅ realworld tests passed"
   exit 0
 fi
-./scripts/validate/pages-config.sh
-# The hosted relay's Worker config, deploy workflow and control-plane projections have no test that
-# can fail for them — `bun test` never reads a wrangler config or a workflow's shell. This is the
-# only place CI looks at them.
-./scripts/validate/relay-config.sh
-# The macOS jobs a pull request runs only when their inputs change: the path lists must cover every
-# input of the scripts those jobs run, or a macOS break reaches `main` unseen.
-./scripts/validate/macos-relevance.sh
-# Every test lives in a tier, and the integration tier asserts no wall-clock or memory bound.
-./scripts/validate/test-tiers.sh
+# THE REPOSITORY CONTRACTS ARE NOT CHECKED HERE. Pages config, the hosted relay config, macOS relevance and
+# the test tiers each have a pre-commit hook, and `Pre-Commit (gates)` runs every hook over every file on
+# every pull request and `main` push (pages-config also runs in `Build Checks`). Running them again here
+# cost ~23 s in each of the ten test jobs (13.6 s of macOS relevance alone) to prove nothing about tests.
 
 # The per-test budget, ON THE COMMAND LINE. `[test] timeout` in a bunfig is ignored by
 # Bun, so a tier that needs longer than the 5-second default has to say so here. The

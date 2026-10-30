@@ -174,6 +174,32 @@ describe('deprecated attention alias', () => {
     should(ATTENTION_DEPRECATION).startWith('`fy attention` is now `fy agenda`');
   });
 
+  it('should tell the exact move notice and keep the name out of the top-level help', async () => {
+    // Arrange
+    let help = '';
+    const program = new Command().name('fy').exitOverride();
+    program.configureOutput({
+      writeOut: text => {
+        help += text;
+      },
+      writeErr: () => {},
+    });
+    registerAttentionCommands(
+      program,
+      new AttentionController(new RecordingAttentionGateway(snapshot([])), new CapturingOutput(), SESSION),
+    );
+
+    // Act
+    await should(program.parseAsync(['node', 'fy', '--help'])).be.rejected();
+
+    // Assert
+    should(help).containEql('agenda');
+    should(help).not.containEql('attention');
+    should(ATTENTION_DEPRECATION).equal(
+      '`fy attention` is now `fy agenda` — the same commands; `fy attention` will be removed.',
+    );
+  });
+
   it('should keep notify on the alias only, handed to fy notify', async () => {
     // Arrange + Act
     const viaAlias = run(['attention', 'notify', 'build is green']);

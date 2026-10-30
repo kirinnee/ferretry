@@ -73,7 +73,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     label: 'Group Needs you at the top',
     description:
       'Lift the sessions with open Inbox items into a Needs you group at the top of the sessions list. Off leaves them in their project, with just the Inbox badge. Applies to this device.',
-    keywords: ['inbox', 'attention', 'needs you', 'pin', 'group', 'top', 'sessions', 'sidebar'],
+    keywords: ['inbox', 'agenda', 'attention', 'needs you', 'pin', 'group', 'top', 'sessions', 'sidebar'],
   },
   {
     id: 'chat-width',
@@ -151,7 +151,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
     id: 'composer-suggestions',
     label: 'Open suggestions with',
     description:
-      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ attention), the direct symbols (@ files, :agent, !attention), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
+      'Choose which keys open the composer’s reference menu: the @ ladder (@ files, @@ agents, @@@ agenda), the direct symbols (@ files, :agent, !agenda), or both; and whether $ opens skills. Suggestions only — a reference you write or paste yourself still resolves and links, and the / and % menus always open.',
     keywords: [
       'composer',
       'suggestion',
@@ -171,6 +171,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'file',
       'agent',
       'task',
+      'agenda',
       'attention',
       'skill',
       'quiet',
@@ -242,6 +243,7 @@ export const SETTINGS_DEFINITIONS: readonly SettingDefinition[] = [
       'push',
       'buzz',
       'awaiting',
+      'needs you',
       'needs attention',
       'question',
       'background',
@@ -814,6 +816,26 @@ export const SETTINGS_LINKS: readonly SettingsLinkDefinition[] = [
       'limit',
       'pack.yaml',
       'models-guide.yaml',
+    ],
+  },
+  {
+    // The feature's own name, and what it does for the owner: items to answer, the Inbox, new ferrets' default.
+    id: 'agenda-mode',
+    label: 'Agenda mode',
+    description:
+      'Whether ferrets you start from now on keep an agenda of what only you can decide or do. On by default; a ferret you already have keeps its own switch. On this machine — opens its Machine tab.',
+    href: daemon => `${daemonSettingsPath(daemon)}#machines`,
+    keywords: [
+      'agenda',
+      'agenda mode',
+      'inbox',
+      'items',
+      'ask me',
+      'needs me',
+      'new ferrets',
+      'default',
+      'notify',
+      'machine.yaml',
     ],
   },
   {

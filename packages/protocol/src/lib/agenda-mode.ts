@@ -3,7 +3,7 @@ import { SessionViewSchema } from './session.ts';
 
 /**
  * AGENDA MODE, PER FERRET (docs/notifications.md § Agenda mode): whether a ferret is told to keep an agenda of
- * items for the owner (`fy agenda …`). OFF by default; every ferret is told the short notify rule either way.
+ * items for the owner (`fy agenda …`). ON for a new ferret unless the machine default is off; every ferret is told the short notify rule either way.
  * Switched exactly like Pack mode and Hypermedia — `config.agenda` on the session document, which every surface
  * reads — and a running ferret takes the change at its next launch.
  *

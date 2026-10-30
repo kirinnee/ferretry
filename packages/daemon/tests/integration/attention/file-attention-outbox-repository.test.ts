@@ -120,7 +120,7 @@ describe('FileAttentionOutboxRepository', () => {
     const { repository } = await createRepository();
 
     // Act + Assert
-    should(() => repository.file('../escape')).throw(/not a valid attention session id/u);
+    should(() => repository.file('../escape')).throw(/not a valid agenda session id/u);
   });
 
   it('should leave no temporary file behind when a write fails', async () => {

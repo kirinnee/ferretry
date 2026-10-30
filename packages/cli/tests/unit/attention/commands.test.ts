@@ -201,7 +201,7 @@ describe('attention command surface', () => {
     should(gateway.applied[0]?.request).match({ context: 'ctx', why: 'why', howToResolve: 'how' });
   });
 
-  it('should list unresolved items on ls and its alias', async () => {
+  it('should list open items on ls and its alias', async () => {
     // Arrange + Act
     const first = run(['agenda', 'ls']);
     await first.parsed;
@@ -209,8 +209,8 @@ describe('attention command surface', () => {
     await second.parsed;
 
     // Assert
-    should(first.out.messages[0]).startWith('1 unresolved item');
-    should(second.out.messages[0]).startWith('1 unresolved item');
+    should(first.out.messages[0]).startWith('1 open item');
+    should(second.out.messages[0]).startWith('1 open item');
   });
 
   it('should show the audit on history and its alias', async () => {
@@ -387,7 +387,7 @@ describe('attention command surface', () => {
     // dismissing on the board already resolves it; a blocker cleared some other way still needs the
     // raising agent to close it itself, immediately — there is no wording left that could be read as
     // "an addressed item may stay open".
-    should(help).containEql('Answering or dismissing on the board already');
+    should(help).containEql('Answering or dismissing on the agenda already');
     should(help).containEql('the raising agent must run `done` or `dismiss` itself, immediately');
     should(help).containEql('whose reason is gone but is still open is a bug');
     should(help).not.containEql('never auto-clear');

@@ -246,6 +246,8 @@ describe('FileConversationLeaseStore', () => {
     const other = new Database(path.join(path.dirname(leaseFile(fleet)), '.lock'), { create: true });
     other.exec('PRAGMA journal_mode = MEMORY');
     other.exec('BEGIN EXCLUSIVE');
+    // The other claimant lets go while the store is polling. The claim's own wait is 5 s, so the order
+    // of the two cannot change the outcome.
     setTimeout(() => {
       other.exec('ROLLBACK');
       other.close();

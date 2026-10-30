@@ -3,7 +3,7 @@
 `fy-reference/1`
 
 This document is the contract for **references**: the sigil tokens that make a message, a task, an
-Attention item, a notice, a file preview or a composer draft point at something real, and clickable.
+agenda item, a notice, a file preview or a composer draft point at something real, and clickable.
 
 It is written for two audiences at once, because they have to agree:
 
@@ -47,7 +47,7 @@ rule exists so a model cannot fabricate a destination by writing one.
 | `@path:line`       | A file at one line  | `@src/api.ts:120`             | 1-based                                                     |
 | `@path:line-end`   | A file line range   | `@src/api.ts:120-140`         | Inclusive; `end` must be ≥ `line`                           |
 | `&ID`              | A task              | `&F12`, `&B7`, `&I3`, `&C1`   | Case-insensitive prefix, up to 9 digits                     |
-| `!AN`              | An Attention item   | `!A3`                         | Always `A` + a positive number                              |
+| `!AN`              | An agenda item      | `!A3`                         | Always `A` + a positive number                              |
 | `/name` or `$name` | A skill             | `/summary`, `$summary`        | **Lowercase only**; both sigils mean the same skill         |
 | `%terminal:<key>`  | A live terminal     | `%terminal:dev`               | The terminal's name, or the daemon's id; session-scoped     |
 | `%browser:<key>`   | A live browser page | `%browser:app`                | The page's name, or the worker's page id; session-scoped    |
@@ -106,10 +106,13 @@ never rewritten.
 | `:agent`     | That agent's session, **on the daemon the reference was proved against**      |
 | `@file`      | A file tab in the session workspace, scrolled to the referenced line or range |
 | `&task`      | The Tasks sheet for this session                                              |
-| `!attention` | The Attention panel at the top of this conversation, at that item             |
+| `!attention` | The agenda panel at the top of this conversation, at that item                |
 | `/skill`     | The Skills tab of this session's "This folder" context                        |
 | `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open        |
 | `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view    |
+
+The `!attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
+agenda (renamed in a later release).
 
 A modifier-click or middle-click is never intercepted: it is the reader asking their browser for a
 new tab.
@@ -123,9 +126,9 @@ one of the tokens in section 2.
 | ------- | ------------------- | ----------------------------------- |
 | `@`     | Files               | `@path`                             |
 | `@@`    | Fleet agents        | `:name`                             |
-| `@@@`   | Attention           | `!AN`                               |
+| `@@@`   | The agenda          | `!AN`                               |
 | `:`     | Fleet agents        | `:name`                             |
-| `!`     | Attention           | `!AN`                               |
+| `!`     | The agenda          | `!AN`                               |
 | `$`     | Skills              | `/name` on Claude, `$name` on Codex |
 | `/`     | Commands and skills | `/name` on Claude, `$name` on Codex |
 | `%`     | Live surfaces       | `%terminal:<key>`                   |
@@ -146,7 +149,7 @@ There is deliberately no fourth `@@@@` tier: Pins are a top link strip, not a re
 (handover #63), and they are readable composer text rather than a second reference grammar. Template
 libraries are not an `@` tier either, and no build of this app has ever had one.
 
-`!` opens Attention and nothing else. It was once a shell-command mode, that was removed on purpose,
+`!` opens the agenda and nothing else. It was once a shell-command mode, that was removed on purpose,
 and this is not that decision being reversed: no trigger in this document can run anything.
 
 ### The direct sigils are harder to open than `@`, `/` and `%`
@@ -177,11 +180,11 @@ composition ends: a candidate window and a suggestion list must not fight over t
 
 Settings › Behaviour › **Open suggestions with** is a device-local choice (`suggestionKeys`):
 
-| Choice               | Opens a menu                                                    |
-| -------------------- | --------------------------------------------------------------- |
-| `@ ladder` (default) | `@` files, `@@` agents, `@@@` attention; `:` and `!` stay prose |
-| `Symbols`            | `@` files, `:` agents, `!` attention; no `@@` tiers             |
-| `Both`               | every row of the matrix above                                   |
+| Choice               | Opens a menu                                                       |
+| -------------------- | ------------------------------------------------------------------ |
+| `@ ladder` (default) | `@` files, `@@` agents, `@@@` agenda items; `:` and `!` stay prose |
+| `Symbols`            | `@` files, `:` agents, `!` agenda items; no `@@` tiers             |
+| `Both`               | every row of the matrix above                                      |
 
 A separate switch, `skillSuggestions` (on by default), governs `$` only. `/` and `%` open in every
 mode, so a skill and a live terminal always have a way in.
@@ -206,7 +209,7 @@ What "proved" means per kind:
 | `agent`     | A session in **this daemon's** fleet slice holds that callsign |
 | `file`      | The session filesystem answers with a canonical, readable path |
 | `task`      | The id is in this session's task board                         |
-| `attention` | The id is in this session's Attention ledger, open or resolved |
+| `attention` | The id is in this session's agenda ledger, open or resolved    |
 | `skill`     | The name is in this session's skills catalog                   |
 | `surface`   | The session's owner is holding that terminal or page right now |
 

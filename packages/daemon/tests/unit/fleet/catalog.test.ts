@@ -414,6 +414,7 @@ describe('machineView', () => {
       agentControl: { terminals: true, browsers: true, files: true, ferretrySettings: false },
       browserMode: 'headless',
       autoResume: true,
+      agendaMode: true,
       lastAutoResume: null,
       tools: [
         { harness: 'claude', label: 'Claude Code', installed: true, command: '/usr/local/bin/claude' },
@@ -424,6 +425,17 @@ describe('machineView', () => {
       authority: OPEN,
     });
     FleetMachineViewSchema.parse(actual);
+  });
+
+  it('should carry the machine default for agenda mode, on unless turned off', () => {
+    // Act
+    const on = machineView(modelOf({}), factsOf({}), OPEN);
+    const off = machineView(modelOf({ machine: { agendaMode: false } }), factsOf({}), OPEN);
+
+    // Assert
+    should(on.agendaMode).equal(true);
+    should(off.agendaMode).equal(false);
+    FleetMachineViewSchema.parse(off);
   });
 
   it('should carry auto-resume and what the last pass did', () => {

@@ -49,7 +49,7 @@ describe('the sidebar Needs you rows', () => {
     const root = await draw([{ daemonId: DAEMON, view }]);
 
     const link = must(root.querySelector<HTMLAnchorElement>('[data-sbar-needs-you-group] a'), 'row link');
-    expect(link.getAttribute('href')).toContain('attention=A1');
+    expect(link.getAttribute('href')).toContain('agenda=A1');
   });
 
   test('count the rows in the heading, and draw nothing when there are none', async () => {

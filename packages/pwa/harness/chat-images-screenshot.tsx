@@ -1,5 +1,6 @@
 /**
- * Screenshots of pictures in the chat: a screenshot a tool returned, an image a ferret shared, a photo
+ * Screenshots of pictures in the chat: a screenshot a tool returned (one collapsed row at rest, the
+ * picture behind its chevron — `-open` scenes), an image a ferret shared, a photo
  * the owner attached from the composer, an image the daemon can no longer read, and the full-screen
  * viewer open on one. Phone (390) and desktop (1440), the light and dark studio themes. Review evidence;
  * nothing compares the PNGs.
@@ -85,6 +86,18 @@ const SCENES: Record<string, Scene> = {
     ].join('\\n'),
   },
 };
+SCENES['ferret-tool-screenshot-open'] = SCENES['ferret-tool-screenshot'] as Scene;
+SCENES['read-image'] = {
+  answered: [0],
+  log: [
+    '[10:20:00] user/message: Here is the checkout screenshot, can you look?',
+    '[10:20:10] assistant/tool-call: Read({"file_path":"/tmp/image.png"})',
+    '[10:20:11] tool/tool-result: ',
+    '    ' + SHOT,
+    '[10:20:20] assistant/message: I see it — the **Pay** button sits under the keyboard.',
+  ].join('\\n'),
+};
+SCENES['read-image-open'] = SCENES['read-image'] as Scene;
 SCENES['viewer'] = SCENES['ferret-tool-screenshot'] as Scene;
 
 const HANDOFF = {
@@ -280,7 +293,18 @@ const VIEWPORTS = [
   { name: 'phone', width: 390, height: 844, mobile: true },
   { name: 'desktop', width: 1440, height: 900, mobile: false },
 ] as const;
-const SCENE_NAMES = ['ferret-tool-screenshot', 'ferret-attachment', 'owner-photo', 'image-error', 'viewer'] as const;
+const SCENE_NAMES = [
+  'ferret-tool-screenshot',
+  'ferret-tool-screenshot-open',
+  'read-image',
+  'read-image-open',
+  'ferret-attachment',
+  'owner-photo',
+  'image-error',
+  'viewer',
+] as const;
+const COLLAPSED_SCENES: readonly string[] = ['ferret-tool-screenshot', 'read-image'];
+const OPENED_SCENES: readonly string[] = ['ferret-tool-screenshot-open', 'read-image-open', 'viewer'];
 
 try {
   for (const scheme of ['light', 'dark'] as const) {
@@ -305,10 +329,18 @@ try {
           page.on('pageerror', error => fail(`page error in ${scene}: ${error.message}`));
           await page.goto(`${server.url}?theme=studio-${scheme}&scene=${scene}`);
           await page.locator('[data-chat-images]').waitFor({ state: 'visible' });
-          const settled = scene === 'image-error' ? 'failed' : 'loaded';
-          await page.locator(`[data-transcript-image-state="${settled}"], .fy-handoff img`).first().waitFor({
-            state: 'visible',
-          });
+          if (COLLAPSED_SCENES.includes(scene)) {
+            await page.locator('.kt-chrome button').first().waitFor({ state: 'visible' });
+            await page.waitForTimeout(300);
+            const drawn = await page.locator('img, [data-transcript-image-state]').count();
+            if (drawn > 0) fail(`${scheme} ${viewport.name} ${scene} draws a picture before it is opened`);
+          } else {
+            if (OPENED_SCENES.includes(scene)) await page.locator('.kt-chrome button').first().click();
+            const settled = scene === 'image-error' ? 'failed' : 'loaded';
+            await page.locator(`[data-transcript-image-state="${settled}"], .fy-handoff img`).first().waitFor({
+              state: 'visible',
+            });
+          }
           if (scene === 'owner-photo')
             await page.locator('[data-handoff-state="read"] img').waitFor({ state: 'visible' });
           const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);

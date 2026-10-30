@@ -176,12 +176,19 @@ export const MACHINE_SHAPE = {
    */
   autoResume: z.boolean().default(true),
   /**
-   * "Attention check" (docs/attention.md § The turn-end check): when a top-level ferret's turn ends on a
-   * reply that asks the owner to act and the turn raised no Attention item for it, the daemon sends the
+   * "Agenda check" (docs/agenda.md): when a top-level ferret's turn ends on a
+   * reply that asks the owner to act and the turn raised no agenda item or notice for it, the daemon sends the
    * ferret one short reminder to raise each one. On by default. Not a loosening either way: it changes
    * what a ferret is reminded of, never what it may do or spend. Read at every turn end.
    */
   attentionNudge: z.boolean().default(true),
+  /**
+   * "Agenda mode for new ferrets" (docs/agenda.md § The machine default): whether a ferret that is started or adopted
+   * from now on is told to keep an agenda. On by default. It is recorded on the new ferret once, as `config.agenda`, so
+   * a ferret that already exists is never touched and an owner's explicit per-ferret switch always wins. Not a
+   * loosening either way: it changes what a ferret is told, never what it may do or spend. Read at every start.
+   */
+  agendaMode: z.boolean().default(true),
 };
 
 export const MachineSchema = z.strictObject(MACHINE_SHAPE).prefault({});

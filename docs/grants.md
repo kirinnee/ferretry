@@ -158,7 +158,7 @@ Each has two axes, and they are different questions:
 - **configure** — may the caller change how it behaves on this host?
 
 The list is closed. Everything the daemon does _inside its own state home_ — sessions, tasks,
-attention, pins — is deliberately absent: a grant list that grew to cover every route would be a
+the agenda, pins — is deliberately absent: a grant list that grew to cover every route would be a
 second copy of the route table, and a second copy is how the two stop agreeing.
 
 ## Permissive by default; LOCALITY is the layer

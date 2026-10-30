@@ -153,6 +153,17 @@ pre-commit-lib.run {
       language = "system";
     };
 
+    # The PWA build and the Pages deployment publish the same directory. Cheap and whole-repo, so it
+    # runs on any change to the files it reads; `Pre-Commit (gates)` runs it on every CI run.
+    a-pages-config = {
+      enable = true;
+      name = "Cloudflare Pages configuration";
+      entry = validator "scripts/validate/pages-config.sh";
+      files = "^(wrangler\\.jsonc|packages/protocol/src/lib/stt-cleanup\\.ts|packages/pwa/(vite\\.config\\.ts|package\\.json|public/_(headers|redirects))|scripts/(ci/build-pwa|validate/pages-config)\\.sh|\\.github/workflows/pwa-pages\\.yaml)$";
+      pass_filenames = false;
+      language = "system";
+    };
+
     # The hosted relay is the one subsystem whose configuration meets its code only in production:
     # no test reads a wrangler config or a workflow's shell. Includes the adapter sources because
     # the gate cross-checks the routes and Durable Object classes they declare against the two.

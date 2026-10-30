@@ -160,9 +160,10 @@ describe('owner asks', () => {
     should(actual).deepEqual([]);
   });
 
-  it('should drop an item that already references an Attention item', () => {
+  it('should drop an item that already references an agenda item, in either spelling', () => {
     // Arrange
-    const reply = '- You: answer !A3 on the board\n- You: see ?A4\n- You: read the attention item';
+    const reply =
+      '- You: answer !A3 on the agenda\n- You: see ?A4\n- You: read the attention item\n- You: read the agenda item';
 
     // Act
     const actual = ownerAsks(reply);

@@ -755,7 +755,7 @@ export function referenceTitle(reference: ResolvedReference): string {
     case 'task':
       return `Open task &${reference.id}`;
     case 'attention':
-      return `Open attention !${reference.id}`;
+      return `Open agenda item !${reference.id}`;
     case 'surface':
       return `Open this session's ${reference.surface} ${reference.key}`;
     case 'skill':
