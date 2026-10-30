@@ -6,7 +6,7 @@ import type { TranscriptHarness } from '../../lib/transcript/types.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
 
 /** The journal entry a nudge leaves, with the asks it named: the audit of what the owner was spared. */
-export const ATTENTION_NUDGED_EVENT = 'attention.nudged';
+export const ATTENTION_NUDGED_EVENT = 'agenda.nudged';
 
 /**
  * The session facts the turn-end check reads, from the session's own configuration document: whether it

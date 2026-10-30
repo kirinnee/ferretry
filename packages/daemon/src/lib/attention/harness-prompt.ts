@@ -346,7 +346,9 @@ export class HarnessPromptAttention {
 }
 
 function hasOpenAttention(state: unknown): boolean {
-  return typeof state === 'object' && state !== null && (state as { attention?: unknown }).attention !== undefined;
+  if (typeof state !== 'object' || state === null) return false;
+  const { agenda, attention } = state as { agenda?: unknown; attention?: unknown };
+  return (agenda ?? attention) !== undefined;
 }
 
 /**
