@@ -13,9 +13,11 @@ import { ArrowDown, ArrowLeft, ArrowUp, Plus, Trash2 } from 'lucide-react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { useBoardActions, useBoardProjects } from '../../hooks/use-board.ts';
 import type { BoardActions } from '../../lib/board-actions.ts';
+import { type FerretNames, ferretNamer } from '../../lib/board-present.ts';
 import type { DaemonConnection, DaemonId } from '../../lib/daemon-connection.ts';
 import {
   addLane,
+  CATEGORY_LABELS,
   deleteLane,
   draftChanged,
   draftFromLaneSet,
@@ -31,6 +33,7 @@ import {
   setLaneTriggers,
   setWorkflowLane,
   TEMPLATE_LABELS,
+  TRIGGER_LABELS,
   WORKFLOWS,
   workflowLanes,
 } from '../../lib/lane-editor-model.ts';
@@ -44,6 +47,12 @@ const fieldClass =
   'h-control min-w-0 rounded-control border border-border bg-surface-2 px-control-x text-ui text-fg focus-visible:outline-focus focus-visible:outline-offset-focus disabled:cursor-not-allowed disabled:opacity-60';
 
 const chipClass = 'rounded-control border border-border bg-surface-2 px-xs py-0.5 text-2xs text-fg';
+
+/** A chip the owner switches on and off: on reads as chosen, off is dimmed and struck through. */
+const toggleChipClass = (on: boolean): string =>
+  on
+    ? 'rounded-control border border-accent-border bg-accent-soft px-xs py-0.5 text-2xs font-medium text-accent'
+    : 'rounded-control border border-border bg-surface-2 px-xs py-0.5 text-2xs text-muted line-through';
 
 type LaneEditorActions = Pick<BoardActions, 'acceptLanes' | 'saveLanes' | 'adoptTemplate'>;
 
@@ -147,11 +156,19 @@ function LaneRow({
         >
           {LANE_CATEGORIES.map(category => (
             <option key={category} value={category}>
-              {category}
+              {CATEGORY_LABELS[category]}
             </option>
           ))}
         </select>
-        <label className="flex items-center gap-xs text-meta text-muted" htmlFor={`${base}-gate`}>
+        <label
+          className="flex items-center gap-xs text-meta text-muted"
+          htmlFor={`${base}-gate`}
+          title={
+            lane.category === 'closed'
+              ? 'The owner must move cards into this lane.'
+              : 'The owner must move cards out of this lane.'
+          }
+        >
           <input
             id={`${base}-gate`}
             type="checkbox"
@@ -159,17 +176,20 @@ function LaneRow({
             disabled={busy}
             onChange={event => onChange(setLaneOwnerGate(draft, lane.id, event.currentTarget.checked))}
           />
-          Owner gate
+          Only you move it on
         </label>
-        <input
-          className={`${fieldClass} w-20`}
-          aria-label={`Stale after for ${lane.name}`}
-          placeholder="never"
-          aria-invalid={problems.some(message => message.includes('duration'))}
-          value={lane.staleAfter ?? ''}
-          disabled={busy}
-          onChange={event => onChange(setLaneStaleAfter(draft, lane.id, event.currentTarget.value))}
-        />
+        <label className="ml-sm flex items-center gap-xs text-meta text-muted">
+          Stale after
+          <input
+            className={`${fieldClass} w-20`}
+            aria-label={`Stale after for ${lane.name}`}
+            placeholder="never"
+            aria-invalid={problems.some(message => message.includes('duration'))}
+            value={lane.staleAfter ?? ''}
+            disabled={busy}
+            onChange={event => onChange(setLaneStaleAfter(draft, lane.id, event.currentTarget.value))}
+          />
+        </label>
         <span className="ml-auto flex items-center gap-xs">
           <button
             className="kt-btn kt-btn--sm"
@@ -190,8 +210,7 @@ function LaneRow({
             <ArrowDown size={12} aria-hidden="true" />
           </button>
           <button
-            className="kt-btn kt-btn--sm"
-            data-variant="danger"
+            className="kt-btn kt-btn--sm hover:border-err-border hover:text-err focus-visible:text-err"
             type="button"
             aria-label={`Delete ${lane.name}`}
             disabled={busy || draft.lanes.length === 1}
@@ -203,12 +222,15 @@ function LaneRow({
       </div>
       <details data-lane-triggers={lane.id}>
         <summary className="cursor-pointer text-meta text-muted">
-          Moves a card in when: {triggers.length === 0 ? 'nothing (manual only)' : triggers.join(', ')}
+          Moves a card in when:{' '}
+          {triggers.length === 0
+            ? 'nothing (you move it by hand)'
+            : triggers.map(trigger => TRIGGER_LABELS[trigger]).join(', ')}
         </summary>
         <div className="mt-xs flex flex-wrap gap-xs">
           {LaneTriggerSchema.options.map(trigger => (
             <button
-              className={`${chipClass} mono`}
+              className={toggleChipClass(triggers.includes(trigger))}
               key={trigger}
               type="button"
               aria-pressed={triggers.includes(trigger)}
@@ -216,7 +238,7 @@ function LaneRow({
               disabled={busy}
               onClick={() => toggleTrigger(trigger)}
             >
-              {trigger}
+              {TRIGGER_LABELS[trigger]}
             </button>
           ))}
         </div>
@@ -295,7 +317,7 @@ function WorkflowVariants({
             <span className="mono w-28 text-meta text-muted">{workflow}</span>
             {draft.lanes.map(lane => (
               <button
-                className={chipClass}
+                className={toggleChipClass(walked.includes(lane.id))}
                 key={lane.id}
                 type="button"
                 aria-pressed={walked.includes(lane.id)}
@@ -320,12 +342,14 @@ function LaneSetEditor({
   laneSet,
   daemonId,
   actions,
+  names,
   onReload,
 }: {
   readonly project: BoardProject;
   readonly laneSet: NonNullable<BoardProject['laneSet']>;
   readonly daemonId: DaemonId;
   readonly actions: LaneEditorActions;
+  readonly names: FerretNames;
   readonly onReload: () => void;
 }) {
   const [draft, setDraft] = useState<LaneDraft>(() => draftFromLaneSet(laneSet));
@@ -356,7 +380,7 @@ function LaneSetEditor({
           role="status"
           data-lane-banner="unconfirmed"
         >
-          <span className="text-ui text-fg">Proposed by {laneSet.proposedBy}, not confirmed.</span>
+          <span className="text-ui text-fg">Proposed by {names(laneSet.proposedBy)} · not confirmed yet</span>
           <button
             className="kt-btn kt-btn--sm"
             data-variant="primary"
@@ -463,11 +487,14 @@ export function LaneEditor({
   project,
   daemonId,
   actions,
+  names,
   onReload,
 }: {
   readonly project: BoardProject;
   readonly daemonId: DaemonId;
   readonly actions: LaneEditorActions;
+  /** Names a ferret by its callsign; the banner says who proposed the set. */
+  readonly names: FerretNames;
   readonly onReload: () => void;
 }) {
   const [busy, setBusy] = useState(false);
@@ -501,6 +528,7 @@ export function LaneEditor({
       laneSet={project.laneSet}
       daemonId={daemonId}
       actions={actions}
+      names={names}
       onReload={onReload}
     />
   );
@@ -510,15 +538,19 @@ export function LaneEditor({
 export function LaneEditorPage({
   connection,
   projectId,
+  callsigns,
 }: {
   readonly connection: DaemonConnection;
   readonly projectId: string;
+  /** Ferret callsigns by session id; a ferret not listed is named by the start of its id. */
+  readonly callsigns: ReadonlyMap<string, string>;
 }) {
   const store = useAppStore();
   const { back } = useRouter();
   const machines = useMemo(() => [connection], [connection]);
   const states = useBoardProjects(store.board, machines);
   const actions = useBoardActions(store.board, store.attention, machines);
+  const names = useMemo(() => ferretNamer(callsigns), [callsigns]);
   const state = states.get(connection.daemonId);
   // A card's Accept answered elsewhere (the agenda) changes the set behind this page; reading again on mount
   // is what shows it.
@@ -564,6 +596,7 @@ export function LaneEditorPage({
           project={project}
           daemonId={connection.daemonId}
           actions={actions}
+          names={names}
           onReload={() => void store.board.refreshProjects(connection)}
         />
       )}

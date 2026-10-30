@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'bun:test';
-import { LANE_TEMPLATES, type Lane, LaneSetActionRequestSchema, MAX_BOARD_LANES } from '@ferretry/protocol';
+import {
+  LANE_CATEGORIES,
+  LANE_TEMPLATES,
+  type Lane,
+  LaneSetActionRequestSchema,
+  LaneTriggerSchema,
+  MAX_BOARD_LANES,
+} from '@ferretry/protocol';
 import {
   addLane,
   deleteLane,
@@ -18,6 +25,8 @@ import {
   setLaneTriggers,
   setWorkflowLane,
   TEMPLATE_LABELS,
+  TRIGGER_LABELS,
+  CATEGORY_LABELS,
   workflowLanes,
 } from '../../src/lib/lane-editor-model.ts';
 import { laneSetFor } from './board-support.ts';
@@ -254,5 +263,19 @@ describe('what a refused write says', () => {
 
   it('names every template', () => {
     expect(Object.keys(TEMPLATE_LABELS).sort()).toEqual(Object.keys(LANE_TEMPLATES).sort());
+  });
+});
+
+describe('the words the editor uses', () => {
+  it('has a plain-words label for every trigger, none of them a machine id', () => {
+    expect(Object.keys(TRIGGER_LABELS).sort()).toEqual([...LaneTriggerSchema.options].sort());
+    for (const label of Object.values(TRIGGER_LABELS)) expect(label).not.toMatch(/[a-z]\.[a-z]/);
+    expect(TRIGGER_LABELS['release.running']).toBe('this machine runs that release');
+  });
+
+  it('has a label for every lane category', () => {
+    expect(Object.keys(CATEGORY_LABELS).sort()).toEqual([...LANE_CATEGORIES].sort());
+    expect(CATEGORY_LABELS.verify).toBe('To test (verify)');
+    expect(CATEGORY_LABELS.review).toBe('In review');
   });
 });

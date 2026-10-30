@@ -7,6 +7,7 @@ import type { BoardActions } from '../../../src/lib/board-actions.ts';
 import { DaemonBoardStore } from '../../../src/lib/board-store.ts';
 import { RouterProvider } from '../../../src/lib/router.tsx';
 import { type AppStore, StoreProvider } from '../../../src/lib/store.tsx';
+import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 import { fakeEnvironment, fakePort, laneSetFor, laptop, PROJECT } from '../board-support.ts';
 
@@ -51,8 +52,16 @@ const show = async (element: ReactElement): Promise<Mounted> => {
   return open;
 };
 
+const names = ferretNamer(new Map([['mvuc7tsf-0c3d50df', 'denisha']]));
+
 const editor = (laneSet: LaneSet | null, actions: Actions = recorder(), onReload = () => undefined) => (
-  <LaneEditor actions={actions} daemonId={laptop.daemonId} onReload={onReload} project={projectOf(laneSet)} />
+  <LaneEditor
+    actions={actions}
+    daemonId={laptop.daemonId}
+    names={names}
+    onReload={onReload}
+    project={projectOf(laneSet)}
+  />
 );
 
 const click = async (element: Element): Promise<void> => {
@@ -169,10 +178,10 @@ describe('editing the lanes', () => {
     // Act
     await choose(byLabel(view, 'Category of Implement'), 'review');
     const triggers = must(row.querySelector('[data-lane-triggers]'), 'the trigger list');
-    const trigger = [...triggers.querySelectorAll('button')].find(node => node.textContent === 'pr.opened');
-    await click(must(trigger, 'the pr.opened trigger'));
-    const already = [...triggers.querySelectorAll('button')].find(node => node.textContent === 'work.started');
-    await click(must(already, 'the work.started trigger'));
+    const trigger = [...triggers.querySelectorAll('button')].find(node => node.textContent === 'a PR opens');
+    await click(must(trigger, 'the PR opens trigger'));
+    const already = [...triggers.querySelectorAll('button')].find(node => node.textContent === 'work starts');
+    await click(must(already, 'the work starts trigger'));
     await click(must(row.querySelector('input[type="checkbox"]'), 'the owner gate'));
     await type(byLabel(view, 'Stale after for Implement'), '6h');
     await click(buttonSaying(view, 'Save lanes'));
@@ -201,8 +210,45 @@ describe('editing the lanes', () => {
 
     // Assert
     const summary = (id: string) => view.container.querySelector(`[data-lane-triggers="${id}"] summary`)?.textContent;
-    expect(summary('implement')).toBe('Moves a card in when: work.started');
-    expect(summary('todo')).toBe('Moves a card in when: nothing (manual only)');
+    expect(summary('implement')).toBe('Moves a card in when: work starts');
+    expect(summary('todo')).toBe('Moves a card in when: nothing (you move it by hand)');
+    expect(summary('review')).toBe('Moves a card in when: a PR opens, a PR is ready, the ferret says done');
+  });
+
+  it('names categories and the owner gate in plain words', async () => {
+    // Arrange
+    const view = await show(editor(laneSetFor()));
+
+    // Act
+    const options = [...byLabel(view, 'Category of Implement').querySelectorAll('option')].map(
+      node => node.textContent,
+    );
+    const gate = must(
+      [...view.container.querySelectorAll('label')].find(node => node.textContent === 'Only you move it on'),
+      'the gate label',
+    );
+    const closedGate = must(
+      view.container.querySelector('[data-lane-row="closed"] label[title]'),
+      'the closed lane gate label',
+    );
+
+    // Assert
+    expect(options).toEqual(['Backlog', 'Active', 'In review', 'Shipped', 'To test (verify)', 'Closed']);
+    expect(gate.title).toBe('The owner must move cards out of this lane.');
+    expect(closedGate.getAttribute('title')).toBe('The owner must move cards into this lane.');
+    expect(view.container.textContent).toContain('Stale after');
+  });
+
+  it('draws the delete buttons neutral until they are hovered', async () => {
+    // Arrange
+    const view = await show(editor(laneSetFor()));
+
+    // Act
+    const button = byLabel(view, 'Delete Implement');
+
+    // Assert
+    expect(button.getAttribute('data-variant')).toBeNull();
+    expect(button.className).toContain('hover:text-err');
   });
 
   it('reorders lanes and stops at both ends', async () => {
@@ -254,6 +300,21 @@ describe('editing the lanes', () => {
     // Assert
     expect((byLabel(view, 'Name of lane implement') as HTMLInputElement).value).toBe('Implement');
     expect(buttonSaying(view, 'Save lanes').disabled).toBe(true);
+  });
+
+  it('shows a workflow that skips a lane differently from one that walks it', async () => {
+    // Arrange
+    const view = await show(editor(laneSetFor()));
+
+    // Act
+    const skipped = byLabel(view, 'quick walks Plan/Design');
+    const walked = byLabel(view, 'quick walks Review/CI');
+
+    // Assert
+    expect(skipped.getAttribute('aria-pressed')).toBe('false');
+    expect(skipped.className).toContain('line-through');
+    expect(walked.className).not.toContain('line-through');
+    expect(byLabel(view, 'design-first walks Plan/Design').getAttribute('aria-pressed')).toBe('true');
   });
 
   it('lets a workflow skip a lane', async () => {
@@ -383,7 +444,7 @@ describe('an unconfirmed set', () => {
     await click(must(banner.querySelector('button'), 'Accept'));
 
     // Assert
-    expect(banner.textContent).toContain('Proposed by mvuc7tsf-0c3d50df, not confirmed.');
+    expect(banner.textContent).toContain('Proposed by Denisha · not confirmed yet');
     expect(actions.calls).toEqual([{ accept: 1, projectId: PROJECT }]);
     expect(view.container.textContent).toContain('Version 1 · proposed');
   });
@@ -452,7 +513,7 @@ describe('the lane editor page', () => {
     return (
       <StoreProvider store={store}>
         <RouterProvider>
-          <LaneEditorPage connection={laptop} projectId={projectId} />
+          <LaneEditorPage callsigns={new Map()} connection={laptop} projectId={projectId} />
         </RouterProvider>
       </StoreProvider>
     );

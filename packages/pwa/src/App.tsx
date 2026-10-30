@@ -230,6 +230,7 @@ import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
+  type AppStore,
   createAppStore,
   StoreProvider,
   useAppStore,
@@ -1992,12 +1993,30 @@ function AgendaRoute({ connection }: DaemonPageProps) {
   );
 }
 
+/** Every ferret's callsign by session id, from the sessions every paired machine reports. */
+function useFerretCallsigns(store: AppStore): ReadonlyMap<string, string> {
+  const fleet = useSyncExternalStore(
+    listener => store.fleet.subscribe(listener),
+    () => store.fleet.getSnapshot(),
+  );
+  return useMemo(() => {
+    const names = new Map<string, string>();
+    for (const slice of fleet.daemons.values()) {
+      for (const session of slice.sessions ?? []) {
+        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
+      }
+    }
+    return names;
+  }, [fleet]);
+}
+
 /**
  * The Board across every paired machine. The query string carries the filters and the view, so a view is a
  * link; a change replaces the entry (the back button leaves the board, it does not walk every filter).
  */
 function BoardRoute(_props: BoardPageProps) {
   const store = useAppStore();
+  const callsigns = useFerretCallsigns(store);
   const { navigate } = useRouter();
   const { connections } = useConnectionSnapshot();
   const savedOrder = useMachineOrder(store.controls).saved;
@@ -2009,19 +2028,6 @@ function BoardRoute(_props: BoardPageProps) {
       })),
     [connections, savedOrder],
   );
-  const fleet = useSyncExternalStore(
-    listener => store.fleet.subscribe(listener),
-    () => store.fleet.getSnapshot(),
-  );
-  const callsigns = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const slice of fleet.daemons.values()) {
-      for (const session of slice.sessions ?? []) {
-        if (session.config.teammate !== undefined) names.set(session.config.id, session.config.teammate);
-      }
-    }
-    return names;
-  }, [fleet]);
   const phone = useLayoutMode() === 'drawer';
   const onSearch = useCallback(
     (search: string) => navigate(`${window.location.pathname}${search === '' ? '' : `?${search}`}`, { replace: true }),
@@ -2092,7 +2098,8 @@ function ProjectDetailRoute({ connection, projectId }: ProjectDetailPageProps) {
 }
 
 function ProjectLanesRoute({ connection, projectId }: ProjectDetailPageProps) {
-  return <LaneEditorPage connection={connection} projectId={projectId} />;
+  const callsigns = useFerretCallsigns(useAppStore());
+  return <LaneEditorPage callsigns={callsigns} connection={connection} projectId={projectId} />;
 }
 
 const PAGE_SLOTS: PageHostSlots = {

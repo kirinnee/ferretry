@@ -245,6 +245,28 @@ export const draftToEdit = (
 
 export const WORKFLOWS = TaskWorkflowSchema.options;
 
+/** Each trigger in plain words, as the end of "Moves a card in when …". */
+export const TRIGGER_LABELS: Readonly<Record<LaneTrigger, string>> = {
+  'work.started': 'work starts',
+  'pr.opened': 'a PR opens',
+  'pr.ready': 'a PR is ready',
+  'ci.green': 'CI passes',
+  'pr.merged': 'the PR merges',
+  'release.published': 'a release ships it',
+  'release.running': 'this machine runs that release',
+  'signal.done': 'the ferret says done',
+};
+
+/** Each lane category as the owner reads it. */
+export const CATEGORY_LABELS: Readonly<Record<LaneCategory, string>> = {
+  backlog: 'Backlog',
+  active: 'Active',
+  review: 'In review',
+  shipped: 'Shipped',
+  verify: 'To test (verify)',
+  closed: 'Closed',
+};
+
 /** What each template is called on the picker. */
 export const TEMPLATE_LABELS: Readonly<Record<LaneTemplateName, string>> = {
   'pr-release-verify': 'PR, release and verify',

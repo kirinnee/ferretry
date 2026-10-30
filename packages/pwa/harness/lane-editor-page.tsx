@@ -28,7 +28,7 @@ if (root !== null)
     <div className="bg-bg text-fg" data-fixture="lane-editor" style={{ height: '100vh' }}>
       <StoreProvider store={store}>
         <RouterProvider>
-          <LaneEditorPage connection={laptop} projectId={PROJECT} />
+          <LaneEditorPage callsigns={new Map([[DENISHA, 'denisha']])} connection={laptop} projectId={PROJECT} />
         </RouterProvider>
       </StoreProvider>
     </div>,
