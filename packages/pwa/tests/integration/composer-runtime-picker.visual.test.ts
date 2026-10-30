@@ -75,7 +75,14 @@ describe('the composer runtime chips on a phone', () => {
       await chip.tap();
       await page.waitForFunction(() => document.querySelector('[data-bottom-sheet] [role="dialog"]') !== null);
       await page.getByRole('menuitemradio', { name: /Sonnet 5/u }).waitFor({ state: 'visible' });
-      // The sheet slides up over 200ms; measure where it comes to rest.
+      // The sheet slides up over 200ms from a transform set on the frame AFTER it mounts, so wait for that
+      // target first: `getAnimations()` is empty until the transition has started, and waiting on it alone
+      // measured the sheet still parked below the phone (bottom 1220 of 844) whenever that frame was late.
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll<HTMLElement>('[data-bottom-sheet] [role="dialog"]')].some(
+          dialog => dialog.style.transform === 'translateY(0)',
+        ),
+      );
       await page.evaluate(async () => {
         await Promise.all(document.getAnimations().map(animation => animation.finished));
       });
