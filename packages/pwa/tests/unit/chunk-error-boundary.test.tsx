@@ -105,6 +105,32 @@ describe('ChunkErrorBoundary', () => {
     }
   });
 
+  it('clears a failure when the page changes, and keeps it while the same page is shown', async () => {
+    const caught = freshCaught();
+    const page = (resetKey: string, explode: boolean) => (
+      <ChunkErrorBoundary
+        onChunkError={error => caught.errors.push(error)}
+        onReload={() => undefined}
+        onReport={message => caught.reports.push(message)}
+        resetKey={resetKey}
+      >
+        <Boom explode={explode} />
+      </ChunkErrorBoundary>
+    );
+    const mounted = await mount(page('chat', true));
+    expect(mounted.container.querySelector('[role="alert"]')).not.toBeNull();
+
+    // The same page, re-rendered for any other reason: still the dead end, because it would only throw again.
+    await mounted.render(page('chat', false));
+    expect(mounted.container.querySelector('[role="alert"]')).not.toBeNull();
+
+    // Another page: drawn, not the previous page's failure.
+    await mounted.render(page('sessions', false));
+    expect(mounted.container.querySelector('[role="alert"]')).toBeNull();
+    expect(mounted.container.querySelector('[data-testid="pane"]')).not.toBeNull();
+    await mounted.unmount();
+  });
+
   it('derives the failed state purely, so the re-render after the throw stays side-effect free', () => {
     expect(ChunkErrorBoundary.getDerivedStateFromError()).toEqual({ failed: true });
   });
