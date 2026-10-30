@@ -14,11 +14,13 @@
  *   it as its note. Every row is still a real link to the conversation at the item (`?attention=<id>`), so a
  *   modified click opens the chat, and the open item has "Open chat". A tapped notification opens the chat and
  *   clears itself.
- * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) in the direction of an answer — the
- *   card's own row: ← left, ↑ the middle (the recommended), → right — and ↓ to SKIP to the next without answering; the item stays open. A swipe
- *   starts on the item's head, its who-and-what line or its quick replies (the body scrolls), is stamped with what
- *   it would do (no hint line: the stamp and the row say it), and goes into the same undo window as a tap. Reduced motion drops the fly-off. A phone also gets
- *   "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter opens one.
+ * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) in the direction of an answer —
+ *   the card's own row: ← left, ↑ the middle (the recommended), → right — and ↓ to SKIP to the next without
+ *   answering; the item stays open. On touch the item's head and quick-reply row swipe on their own, exactly as in
+ *   the chat; the who-and-what line is the deck's. A swipe goes into the same undo window as a tap; reduced motion
+ *   drops the fly-off. NO TEACHING TEXT: no hint line, no banner naming the answer mid-drag, no key caption. A phone
+ *   also gets "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter
+ *   opens one.
  * - FILTERS: Open / Resolved, a machine filter (once there is more than one machine), Find, and — from
  *   `/inbox?from=warden` — a "From Warden" chip that keeps only what the Warden raised, with a way to clear it.
  *
@@ -933,11 +935,6 @@ export function AgendaInboxPage({
             open={withFerretsShown}
             title="With ferrets"
           />
-        )}
-        {phone ? null : (
-          <p className="fy-attn-inbox__hint" data-agenda-keys="">
-            j / k to move · Enter to open here
-          </p>
         )}
       </div>
     );

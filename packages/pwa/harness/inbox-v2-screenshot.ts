@@ -1,7 +1,8 @@
 /**
  * Screenshots and checks for the Inbox v2: the list (who AND what on every group — callsign, task, card, machine),
  * an item OPEN as the chat's full item view with the ferret's real composer under it, and that item held mid-swipe
- * UP (stamped with its primary answer) and DOWN (stamped "Skip"). Phone 390 and desktop 1440, Studio light and dark.
+ * UP (toward its recommended answer) and DOWN (toward a skip) — with nothing drawn over it naming either. Phone 390 and
+ * desktop 1440, Studio light and dark.
  *
  *   bun harness/inbox-v2-screenshot.ts [outDir] [series]   # writes <outDir>/<series>-<name>-<phone|desktop>-<theme>.png
  *                                                          # (series defaults to inbox-v2)
@@ -9,11 +10,12 @@
  * It bundles `inbox-page.tsx` (the real `AgendaInboxPage` and `Composer`, invented data), serves it on an ephemeral
  * loopback port, drives it with a real pointer, and FAILS (after writing every picture) when: a page scrolls
  * sideways; a group head lacks its task or card; the open item is not the full item view; its who-and-what line or
- * its composer is missing or off screen; a hint line is drawn under the card (the owner removed it); or a held drag is not
- * stamped with what it would do; a phone's quick-reply row does not say its arrows (the chat's row does); or a picture
- * is not in the theme its name says — every page is opened with the browser's colour scheme set to match, because
- * the desktop list's theme switch applies the reader's light/dark preference over the page's own. Nothing is sent:
- * the drag is put back before it is let go.
+ * its composer is missing or off screen; any teaching text is drawn (a hint line, a banner naming the answer mid-drag);
+ * a held drag does not read as the answer it would send; the row draws arrow glyphs; the task name is cut; a long item
+ * has more than one vertical scroll area, or the page around it scrolls too; a five- or seven-option item hides a
+ * reply; or a picture is not in the theme its name says — every page is opened with the browser's colour scheme set
+ * to match, because the desktop list's theme switch applies the reader's light/dark preference over the page's own.
+ * Nothing is sent: the drag is put back before it is let go.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -138,7 +140,7 @@ const shot = async (page: Page, name: string, form: Form, theme: string): Promis
 };
 
 /** Holds a drag from the item's head by `dy`, shoots it, then puts it back before letting go: nothing is sent. */
-const holdDrag = async (page: Page, dy: number, name: string, form: Form, theme: string, stamp: string) => {
+const holdDrag = async (page: Page, dy: number, name: string, form: Form, theme: string, aim: string) => {
   // The deck's own handle: the who-and-what line (on a phone the view's head and row swipe on their own).
   const head = page.locator('.fy-attn-deck__top [data-inbox-who-ferret]').first();
   const box = await head.boundingBox();
@@ -152,8 +154,16 @@ const holdDrag = async (page: Page, dy: number, name: string, form: Form, theme:
   await page.mouse.move(x + 14, y);
   for (let step = 1; step <= 6; step += 1) await page.mouse.move(x, y + (dy * step) / 6);
   await page.waitForTimeout(80);
-  const said = (await page.locator('[data-agenda-stamp]').textContent())?.trim() ?? '';
-  check(said === stamp, `${form} ${theme} ${name}: the stamp says "${said}", not "${stamp}"`);
+  // What letting go would do is on the card, never drawn on it: no banner naming the answer (the owner's rule).
+  const held = page.locator('.fy-attn-deck__top[data-swipe-direction]');
+  const said =
+    (await held.getAttribute('data-swipe-answer')) ??
+    ((await held.getAttribute('data-swipe-direction')) === 'down' ? 'Skip' : '');
+  check(said === aim, `${form} ${theme} ${name}: the drag reads as "${said}", not "${aim}"`);
+  check(
+    (await page.locator('.fy-attn-deck__stamp').count()) === 0,
+    `${form} ${theme} ${name}: a banner names the answer mid-drag`,
+  );
   await shot(page, name, form, theme);
   await page.mouse.move(x, y);
   await page.mouse.up();

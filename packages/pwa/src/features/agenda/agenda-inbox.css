@@ -341,42 +341,6 @@
 .fy-attn-deck__peek > * > * {
   visibility: hidden;
 }
-/* The option a drag would send: an opaque banner flush across the top of the card in the hand, so no word
-   of the card reads through or beside it. */
-.fy-attn-deck__stamp {
-  position: absolute;
-  z-index: 4;
-  top: 0;
-  right: 0;
-  left: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  border-bottom: var(--stroke-heavy) solid var(--accent);
-  border-radius: var(--radius-panel) var(--radius-panel) 0 0;
-  background: var(--surface-3);
-  padding: 12px 14px;
-  color: var(--accent);
-  font-family: var(--font-display);
-  font-size: var(--text-lg);
-  font-weight: var(--weight-strong);
-  pointer-events: none;
-}
-.fy-attn-deck__stamp > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* Past the threshold: letting go sends it. */
-.fy-attn-deck__stamp[data-committed] {
-  background: var(--accent);
-  color: var(--accent-fg);
-}
-.fy-attn-deck__stamp[data-empty] {
-  border-color: var(--border-strong);
-  color: var(--faint);
-}
 /* A committed card flying off, from wherever the finger let go. Decoration: the answer is already held. */
 .fy-attn-deck__leaving {
   position: absolute;
@@ -1152,12 +1116,11 @@
   font-size: var(--text-sm);
   touch-action: none;
 }
+/* Never cut with "…": a task wider than the card wraps between its words. */
 .fy-inbox-who__main {
   min-width: 0;
   max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: break-word;
 }
 .fy-inbox-who__meta {
   white-space: nowrap;
@@ -1211,14 +1174,6 @@
 }
 .fy-inbox-composer {
   min-width: 0;
-}
-/* A card dragged UP leaves the top of the screen: its stamp rides its bottom edge instead, where it can be read. */
-.fy-attn-inbox__deck--open .fy-attn-deck__stamp[data-agenda-stamp='up'] {
-  top: auto;
-  bottom: 0;
-  border-top: var(--stroke-heavy) solid var(--accent);
-  border-bottom: 0;
-  border-radius: 0 0 var(--radius-panel) var(--radius-panel);
 }
 /* The last messages, opened, scroll on their own: the composer under them never leaves the screen. */
 .fy-inbox-deck-foot > .fy-attn-recent {

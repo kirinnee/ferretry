@@ -5,14 +5,14 @@
  *
  * - THE MAPPING IS THE CARD'S OWN ANSWERS (`swipeTargets`), never a second one: left, up and right each
  *   give the answer the card put in that direction. A direction with no answer commits nothing. While the
- *   card is dragged the answer it would send is STAMPED on it — arrow and label, growing with the drag —
- *   so the reader sees what they are about to say before they say it. A review's "Needs changes" is
- *   written in the message box, so it has no swipe: that drag springs back.
+ *   card is dragged it follows the finger; nothing is drawn over it naming the answer (the owner wants no teaching
+ *   text on the card) — what letting go would do is kept on the card as `data-swipe-*` attributes. A review's
+ *   "Needs changes" is written in the message box, so it has no swipe: that drag springs back.
  * - IT COMMITS ONLY PAST THE THRESHOLD (`swipeIntent(...).committed`). Short of it the card springs back
  *   and nothing is sent; past it the card flies off and the answer is handed to `onAct` — which, in the
  *   inbox, holds it for the undo window (`DeferredAgendaActions`) rather than posting it.
  * - DOWN IS NOTHING — unless the host can SKIP (`onSkip`, the Inbox): then a drag down past the threshold moves on
- *   to the next card without answering (stamped "↓ Skip"), and the card follows it down. Without `onSkip` the card
+ *   to the next card without answering, and the card follows it down. Without `onSkip` the card
  *   does not follow a downward drag and the browser keeps it as a scroll.
  * - A SWIPE STARTS ONLY FROM THE CARD'S HEAD ({@link startsInHandle}): its header and title (on a full item view:
  *   its sticky top, the Inbox's who-and-what line and the quick-reply bar). The detail
@@ -30,7 +30,6 @@
  */
 
 import { agendaTitle } from '@ferretry/protocol';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from 'lucide-react';
 import {
   type CSSProperties,
   type KeyboardEvent,
@@ -224,13 +223,6 @@ function AgendaCardFrame({ card, targets, onArrow, onSkip, children }: AgendaCar
     </section>
   );
 }
-
-const STAMP_ARROW: Readonly<Record<DeckDirection, ReactNode>> = {
-  down: <ArrowDown size={20} aria-hidden="true" />,
-  right: <ArrowRight size={20} aria-hidden="true" />,
-  left: <ArrowLeft size={20} aria-hidden="true" />,
-  up: <ArrowUp size={20} aria-hidden="true" />,
-};
 
 interface Drag {
   readonly dx: number;
@@ -471,7 +463,7 @@ export function AgendaSwipeDeck({
   const live = drag === null ? targets : verticalTargets(targets, drag.scroll);
   const intent = drag === null ? null : deckIntent(drag.dx, drag.dy, drag.width, live, canSkip);
   const offset = drag === null ? null : dragOffset(drag.dx, drag.dy, live, canSkip);
-  const stamp: SwipeTarget | undefined =
+  const aim: SwipeTarget | undefined =
     intent?.direction == null
       ? undefined
       : intent.direction === 'down'
@@ -500,6 +492,11 @@ export function AgendaSwipeDeck({
           data-dragging={drag === null ? undefined : ''}
           data-has-up={targets.up === undefined ? undefined : ''}
           data-swipe-direction={intent?.direction ?? undefined}
+          // What letting go would do — kept on the card for tests and assistive tech, never drawn: the owner wants no
+          // floating banner naming the option, only the card that follows the finger.
+          data-swipe-committed={intent?.committed || undefined}
+          data-swipe-empty={(intent?.direction != null && aim === undefined) || undefined}
+          data-swipe-answer={aim?.label}
           key={top.key}
           onClickCapture={event => {
             if (!swallowClick.current) return;
@@ -533,19 +530,6 @@ export function AgendaSwipeDeck({
               () => skip(top, { dx: 0, dy: 0 }),
             )}
           </AgendaCardFrame>
-          {intent === null || intent.direction === null ? null : (
-            <div
-              aria-hidden="true"
-              className="fy-attn-deck__stamp"
-              data-agenda-stamp={intent.direction}
-              data-committed={intent.committed || undefined}
-              data-empty={stamp === undefined || undefined}
-              style={{ '--stamp-progress': intent.progress.toFixed(2) } as CSSProperties}
-            >
-              {STAMP_ARROW[intent.direction]}
-              <span>{stamp?.label ?? 'Nothing this way'}</span>
-            </div>
-          )}
         </div>
       )}
       {leaving === null ? null : (

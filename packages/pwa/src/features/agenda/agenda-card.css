@@ -939,19 +939,6 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   height: 100%;
 }
 
-/* The stamp: arrow and label, opaque, growing as the drag nears the threshold. */
-.fy-attn-deck .fy-attn-deck__stamp {
-  gap: 8px;
-  padding: 10px 14px;
-}
-.fy-attn-deck .fy-attn-deck__stamp > * {
-  transform: scale(calc(0.85 + 0.3 * var(--stamp-progress, 1)));
-  transform-origin: center;
-}
-.fy-attn-deck[data-reduced-motion] .fy-attn-deck__stamp > * {
-  transform: none;
-}
-
 /* Each answer is its arrow over its label, so a label has the button's whole width and wraps between
    words rather than being cut off or split mid-word. */
 .fy-attn-answers > .fy-attn-answer {

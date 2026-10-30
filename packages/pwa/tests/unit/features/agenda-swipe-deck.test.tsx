@@ -127,7 +127,9 @@ const swipe = async (mounted: Mounted, dx: number, dy: number): Promise<void> =>
   await release(await dragBy(mounted, dx, dy), dx, dy);
 };
 
-const stamp = (mounted: Mounted): HTMLElement | null => mounted.container.querySelector('[data-agenda-stamp]');
+/** The card in the hand while a drag reads as a direction: what letting go would do is on it as `data-swipe-*`. */
+const stamp = (mounted: Mounted): HTMLElement | null =>
+  mounted.container.querySelector('.fy-attn-deck__top[data-swipe-direction]');
 const toast = (mounted: Mounted): HTMLElement =>
   must(mounted.container.querySelector<HTMLElement>('[data-agenda-undo]'), 'the undo toast');
 const undoButton = (mounted: Mounted): HTMLButtonElement =>
@@ -205,10 +207,10 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
     const target = await dragBy(mounted, 60, 4);
-    expect(stamp(mounted)?.textContent).toBe('Skip');
-    expect(stamp(mounted)?.getAttribute('data-agenda-stamp')).toBe('right');
-    expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(false);
-    expect(stamp(mounted)?.hasAttribute('data-empty')).toBe(false);
+    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBe('Skip');
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('right');
+    expect(stamp(mounted)?.hasAttribute('data-swipe-committed')).toBe(false);
+    expect(stamp(mounted)?.hasAttribute('data-swipe-empty')).toBe(false);
     expect(deckTop(mounted).style.transform).toContain('translate3d(60px, 0px, 0)');
 
     await release(target, 60, 4);
@@ -224,7 +226,7 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
     const target = await dragBy(mounted, 0, -180);
-    expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(true);
+    expect(stamp(mounted)?.hasAttribute('data-swipe-committed')).toBe(true);
     await release(target, 0, -180);
 
     expect(pending(fake)).toEqual(['Rebase now']);
@@ -254,8 +256,8 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
     expect(deckTop(mounted).style.touchAction).toBe('pan-down');
     const target = await dragBy(mounted, 0, -200);
-    expect(stamp(mounted)?.getAttribute('data-agenda-stamp')).toBe('up');
-    expect(stamp(mounted)?.textContent).toBe('Rebase now');
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('up');
+    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBe('Rebase now');
     await release(target, 0, -200);
     expect(pending(fake)).toEqual(['Rebase now']);
     expect(topId(mounted)).toBe('A2');
@@ -267,10 +269,10 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     const mounted = await mount(deckPage(fake, [bare]));
     expect(deckTop(mounted).style.touchAction).toBe('pan-y');
     const target = await dragBy(mounted, 0, -300);
-    expect(stamp(mounted)?.getAttribute('data-agenda-stamp')).toBe('up');
-    expect(stamp(mounted)?.hasAttribute('data-empty')).toBe(true);
-    expect(stamp(mounted)?.textContent).toBe('Nothing this way');
-    expect(stamp(mounted)?.hasAttribute('data-committed')).toBe(false);
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('up');
+    expect(stamp(mounted)?.hasAttribute('data-swipe-empty')).toBe(true);
+    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBeNull();
+    expect(stamp(mounted)?.hasAttribute('data-swipe-committed')).toBe(false);
     await release(target, 0, -300);
 
     await swipe(mounted, 0, 300);
@@ -283,8 +285,8 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [bare]));
     const target = await dragBy(mounted, -200, 0);
-    expect(stamp(mounted)?.getAttribute('data-agenda-stamp')).toBe('left');
-    expect(stamp(mounted)?.textContent).toBe('Nothing this way');
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('left');
+    expect(stamp(mounted)?.getAttribute('data-swipe-answer')).toBeNull();
     await release(target, -200, 0);
     expect(pending(fake)).toEqual([]);
     expect(topId(mounted)).toBe('A1');
@@ -327,7 +329,7 @@ describe('AgendaInboxPage on a phone: the swipe deck', () => {
       },
     });
     const target = await dragBy(mounted, 180, 0);
-    expect(stamp(mounted)?.getAttribute('data-agenda-stamp')).toBe('right');
+    expect(stamp(mounted)?.getAttribute('data-swipe-direction')).toBe('right');
     await release(target, 180, 0);
     expect(pending(fake)).toEqual(['Skip']);
     await mounted.unmount();
@@ -480,7 +482,7 @@ describe('Down is nothing', () => {
     const fake = fakeInbox();
     const mounted = await mount(deckPage(fake, [threeWay, twoWay]));
     const target = await dragBy(mounted, 0, 200);
-    expect(stamp(mounted)?.hasAttribute('data-committed') ?? false).toBe(false);
+    expect(stamp(mounted)?.hasAttribute('data-swipe-committed') ?? false).toBe(false);
     await release(target, 0, 200);
     expect(pendingActions(fake)).toEqual([]);
     expect(topId(mounted)).toBe('A3');
