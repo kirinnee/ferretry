@@ -124,7 +124,7 @@ describe('BoardPage — the card detail', () => {
 
   it('draws the open card beside the board, read from the machine it belongs to', async () => {
     const { root } = await open({ openCard: CARD });
-    expect(root.querySelector('aside .fy-board-detail__title')?.textContent).toBe('Build it');
+    expect(root.querySelector('aside .fy-board-detail__title')?.textContent).toBe('&F1 Build it');
     expect(root.querySelector('aside')?.getAttribute('data-mode')).toBe('drawer');
     expect(root.querySelector('.fy-board-detail__meta')?.textContent).toContain('ferretry');
   });
@@ -132,7 +132,7 @@ describe('BoardPage — the card detail', () => {
   it('opens a card over an agenda client that is a class with private fields, calling it on itself', async () => {
     const agenda = new PrivateFieldAgenda();
     const { root } = await open({ openCard: CARD, agenda: agenda as unknown as BoardPageProps['agenda'] });
-    expect(root.querySelector('aside .fy-board-detail__title')?.textContent).toBe('Build it');
+    expect(root.querySelector('aside .fy-board-detail__title')?.textContent).toBe('&F1 Build it');
     expect(root.querySelector('[role="alert"]')).toBeNull();
     expect(agenda.hydrated()).toEqual(['mvuc7tsf-0c3d50df']);
   });

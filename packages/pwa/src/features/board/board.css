@@ -1296,9 +1296,6 @@
   opacity: 0.6;
   cursor: default;
 }
-.fy-board-detail__done {
-  display: flex;
-}
 
 @media (max-width: 720px) {
   .fy-board-table__head {
@@ -1335,10 +1332,6 @@
   .fy-board-table__cell:empty,
   .fy-board-table__cell:has(> .fy-board-table__none) {
     display: none;
-  }
-  .fy-board-detail__done .fy-board-done {
-    width: 100%;
-    justify-content: center;
   }
 }
 

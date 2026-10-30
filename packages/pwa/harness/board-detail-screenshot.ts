@@ -2,7 +2,7 @@
  * Screenshots of the Board's card detail at a 390px phone and a 1440px desktop, light and dark, plus a
  * 🧪 To test card and a card with a blocking ask:
  *
- *   bun harness/board-detail-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-u12-*.png
+ *   bun harness/board-detail-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-detail-v2-*.png
  *
  * It bundles `board-detail.tsx` (the real page with a card open, invented cards), serves it on an ephemeral
  * loopback port, aborts anything that leaves it, and fails when a page scrolls sideways.
@@ -76,7 +76,7 @@ const PHONE = {
   userAgent:
     'Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Mobile Safari/537.36',
 } as const;
-const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
+const DESKTOP = { viewport: { width: 1_440, height: 1_500 } } as const;
 
 const open = async (context: BrowserContext, theme: string, view: string): Promise<Page> => {
   const page = await context.newPage();
@@ -94,7 +94,7 @@ const open = async (context: BrowserContext, theme: string, view: string): Promi
 };
 
 const shot = async (page: Page, name: string): Promise<void> => {
-  const path = join(shotsDir, `board-u12-${name}.png`);
+  const path = join(shotsDir, `board-detail-v2-${name}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -111,9 +111,17 @@ try {
       ] as const) {
         const page = await open(context, theme, 'card');
         await shot(page, `${scheme}-${label}`);
+        if (label === 'phone') {
+          await page.locator('.fy-board-detail__content').evaluate(node => node.scrollTo(0, node.scrollHeight));
+          await page.waitForTimeout(100);
+          await shot(page, `${scheme}-phone-end`);
+        }
         await page.close();
       }
       if (scheme === 'light') {
+        const bare = await open(desktop, theme, 'empty');
+        await shot(bare, 'empty-desktop');
+        await bare.close();
         for (const view of ['tested', 'ask'] as const) {
           const page = await open(desktop, theme, view);
           await shot(page, `${view}-desktop`);

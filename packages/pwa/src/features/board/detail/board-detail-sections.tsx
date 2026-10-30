@@ -1,17 +1,16 @@
-/** THE SECTIONS OF A CARD'S DETAIL: each a small collapsible block that draws one fact and decides nothing. */
+/** THE SECTIONS OF A CARD'S DETAIL: plain headed blocks in one flowing page, each drawing one fact and deciding nothing. */
 
 import { type BoardTaskView, formatTaskRef, type TaskRef } from '@ferretry/protocol';
-import { ChevronRight, ExternalLink, GitBranch } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { ExternalLink, GitBranch } from 'lucide-react';
+import { type ReactNode, useId } from 'react';
 import { Markdown } from '../../../components/markdown.tsx';
 import {
   askOrigin,
+  askWords,
   type CardAsks,
-  foldHistory,
   type HistoryContext,
   historyRows,
   isWebLink,
-  type LaneStep,
   linkLabel,
   prLine,
 } from '../../../lib/board-detail.ts';
@@ -23,39 +22,29 @@ export interface DetailSectionProps {
   readonly id: string;
   readonly title: ReactNode;
   readonly count?: number;
-  readonly defaultOpen?: boolean;
   readonly children: ReactNode;
 }
 
-/** A section the reader can fold; the browser's own disclosure carries the keyboard and screen-reader behaviour. */
-export function DetailSection({ id, title, count, defaultOpen = true, children }: DetailSectionProps) {
+/** A plain block: a small muted heading and the facts under it. Nothing folds and nothing is boxed. */
+export function DetailSection({ id, title, count, children }: DetailSectionProps) {
+  const heading = useId();
   return (
-    <details className="fy-board-detail__section" data-section={id} open={defaultOpen}>
-      <summary className="fy-board-detail__summary">
-        <ChevronRight aria-hidden="true" className="fy-board-detail__chevron" size={12} />
-        <span>{title}</span>
+    <section aria-labelledby={heading} className="fy-board-detail__section" data-section={id}>
+      <h3 className="fy-board-detail__heading" id={heading}>
+        {title}
         {count === undefined ? null : <span className="fy-board-detail__count">{count}</span>}
-      </summary>
+      </h3>
       <div className="fy-board-detail__body">{children}</div>
-    </details>
+    </section>
   );
 }
 
-export function LaneStepper({ steps }: { readonly steps: readonly LaneStep[] }) {
-  if (steps.length === 0) return <p className="fy-board-detail__quiet">This project has no confirmed lanes.</p>;
+/** A person as a small round initial in the page's own colours; the name is always written beside it. */
+export function Avatar({ name }: { readonly name: string }) {
   return (
-    <ol aria-label="Lanes" className="fy-board-stepper">
-      {steps.map(step => (
-        <li
-          aria-current={step.state === 'current' ? 'step' : undefined}
-          className="fy-board-stepper__step"
-          data-state={step.state}
-          key={step.id}
-        >
-          {step.name}
-        </li>
-      ))}
-    </ol>
+    <span aria-hidden="true" className="fy-board-avatar">
+      {name.trim().slice(0, 1).toUpperCase()}
+    </span>
   );
 }
 
@@ -77,12 +66,14 @@ export function AskSection({
   const origin = askOrigin(task, names, ageLabel(task.createdAt, now));
   return (
     <>
-      <blockquote className="fy-board-detail__ask">{task.ask.text}</blockquote>
+      <blockquote className="fy-board-detail__ask">{askWords(task.ask.text)}</blockquote>
       <p className="fy-board-detail__quiet" data-kind="ask-origin">
-        {origin.who}
+        from {origin.who}
+        {origin.via === null ? null : ` via ${origin.via}`}
+        {origin.age === null ? null : ` · ${origin.age}`}
         {origin.sessionId === null ? null : (
           <>
-            {', in '}
+            {' · '}
             <button
               className="fy-board-detail__link"
               onClick={() => onOpenSession(origin.sessionId as string)}
@@ -92,8 +83,6 @@ export function AskSection({
             </button>
           </>
         )}
-        {origin.via === null ? null : `, via ${origin.via}`}
-        {origin.age === null ? null : ` · ${origin.age}`}
       </p>
       {task.clarifications.length === 0 ? null : (
         <ul className="fy-board-detail__list">
@@ -177,9 +166,7 @@ export function DependencyChips({
   readonly onUndepend: ((ref: TaskRef) => void) | null;
 }) {
   const waiting = new Set(task.blockedBy.map(ref => formatTaskRef(ref)));
-  if (task.dependsOn.length === 0 && task.blocks.length === 0) {
-    return <p className="fy-board-detail__quiet">Nothing waits on this, and it waits on nothing.</p>;
-  }
+  if (task.dependsOn.length === 0 && task.blocks.length === 0) return null;
   return (
     <div className="fy-board-detail__chips">
       {task.dependsOn.length === 0 ? null : (
@@ -224,6 +211,46 @@ export function DependencyChips({
   );
 }
 
+/**
+ * What the card waits on, or one line saying nothing — with "Add dependency" always there and the form behind
+ * it only once it is pressed, so a card that waits on nothing does not carry a form it will not use.
+ */
+export function DependsLine({
+  task,
+  adding,
+  form,
+  onOpen,
+  onUndepend,
+  onToggleAdd,
+}: {
+  readonly task: BoardTaskView;
+  readonly adding: boolean;
+  readonly form: ReactNode;
+  readonly onOpen: (id: string) => void;
+  readonly onUndepend: ((ref: TaskRef) => void) | null;
+  readonly onToggleAdd: () => void;
+}) {
+  const none = task.dependsOn.length === 0 && task.blocks.length === 0;
+  return (
+    <>
+      <DependencyChips onOpen={onOpen} onUndepend={onUndepend} task={task} />
+      <p className="fy-board-detail__quiet" data-kind="add-dependency">
+        {none ? 'Nothing. ' : null}
+        <button
+          aria-expanded={adding}
+          className="fy-board-detail__link"
+          data-action="add-dependency"
+          onClick={onToggleAdd}
+          type="button"
+        >
+          Add dependency
+        </button>
+      </p>
+      {adding ? form : null}
+    </>
+  );
+}
+
 const Anchor = ({ value }: { readonly value: string }) =>
   isWebLink(value) ? (
     <a className="fy-board-detail__anchor" href={value} rel="noreferrer" target="_blank">
@@ -250,21 +277,7 @@ export function LinksSection({
         const line = prLine(pr);
         return (
           <li data-tone={line.tone} key={pr.url}>
-            <BoardIcon
-              name={
-                pr.state === 'merged'
-                  ? 'pr-merged'
-                  : pr.state === 'closed'
-                    ? 'pr-closed'
-                    : pr.draft
-                      ? 'pr-draft'
-                      : pr.checks === 'failing'
-                        ? 'pr-fail'
-                        : pr.checks === 'pending'
-                          ? 'pr-pending'
-                          : 'pr-pass'
-              }
-            />{' '}
+            <BoardIcon name={prIconName(pr)} />{' '}
             <a className="fy-board-detail__anchor" href={pr.url} rel="noreferrer" target="_blank">
               {pr.repo}#{pr.number}
             </a>
@@ -310,6 +323,20 @@ export function LinksSection({
   );
 }
 
+/** The icon that says where a PR stands, for the header's one-line meta and the Links list alike. */
+export const prIconName = (pr: BoardTaskView['links']['prs'][number]) =>
+  pr.state === 'merged'
+    ? 'pr-merged'
+    : pr.state === 'closed'
+      ? 'pr-closed'
+      : pr.draft
+        ? 'pr-draft'
+        : pr.checks === 'failing'
+          ? 'pr-fail'
+          : pr.checks === 'pending'
+            ? 'pr-pending'
+            : 'pr-pass';
+
 /** Where the card stands on one line each: id, kind and project are in the header; this is the asks log. */
 export function AsksList({ asks, names }: { readonly asks: CardAsks; readonly names: FerretNames }) {
   if (asks.open.length === 0 && asks.resolved.length === 0) {
@@ -335,6 +362,7 @@ export function AsksList({ asks, names }: { readonly asks: CardAsks; readonly na
   );
 }
 
+/** The card's history as a timeline, newest first: who, what, how long ago, and the note behind it muted below. */
 export function HistorySection({
   task,
   context,
@@ -344,28 +372,26 @@ export function HistorySection({
   readonly context: HistoryContext;
   readonly now: number;
 }) {
-  const items = foldHistory(historyRows(task.history, context));
-  const row = (entry: ReturnType<typeof historyRows>[number]) => (
-    <li data-type={entry.type} key={entry.seq}>
-      <span className="fy-board-detail__quiet">{ageLabel(entry.at, now) ?? ''} · </span>
-      <strong>{entry.actor}</strong> {entry.text}
-      {entry.detail === null ? null : <span className="fy-board-detail__detail">{entry.detail}</span>}
-    </li>
-  );
+  const rows = historyRows(task.history, context);
   return (
-    <ol className="fy-board-detail__history">
-      {items.map(item =>
-        item.kind === 'row' ? (
-          row(item.row)
-        ) : (
-          <li data-kind="fold" key={`fold-${item.rows[0]?.seq}`}>
-            <details>
-              <summary className="fy-board-detail__quiet">{item.label}</summary>
-              <ol className="fy-board-detail__history">{item.rows.map(row)}</ol>
-            </details>
-          </li>
-        ),
-      )}
+    <ol className="fy-board-timeline">
+      {rows.map(entry => (
+        <li
+          className="fy-board-timeline__row"
+          data-minor={entry.minor ? '' : undefined}
+          data-type={entry.type}
+          key={entry.seq}
+        >
+          <Avatar name={entry.actor} />
+          <div className="fy-board-timeline__what">
+            <p className="fy-board-timeline__line">
+              <strong>{entry.actor}</strong> {entry.text}
+              <span className="fy-board-detail__quiet"> · {ageLabel(entry.at, now) ?? ''}</span>
+            </p>
+            {entry.detail === null ? null : <p className="fy-board-detail__detail">{entry.detail}</p>}
+          </div>
+        </li>
+      ))}
     </ol>
   );
 }

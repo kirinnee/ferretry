@@ -3,16 +3,17 @@ import type { BoardTaskView, ResolvedAgendaItem } from '@ferretry/protocol';
 import {
   AskSection,
   AsksList,
+  Avatar,
   ChildrenList,
   DependencyChips,
+  DependsLine,
   DetailSection,
   HistorySection,
-  LaneStepper,
   LinksSection,
   Prose,
   TermsTable,
 } from '../../../src/features/board/detail/board-detail-sections.tsx';
-import { laneNameOf, laneStepper } from '../../../src/lib/board-detail.ts';
+import { laneNameOf } from '../../../src/lib/board-detail.ts';
 import { interact, type Mounted, mount, must } from '../../support/dom.ts';
 const text = (root: Element, selector: string): string | undefined =>
   root.querySelector(selector)?.textContent ?? undefined;
@@ -51,52 +52,35 @@ const RELEASE = { version: '4.111.0', tag: 'v4.111.0', at: '2026-08-01T09:50:00.
 const links = (extra: Record<string, unknown>) => ({ prs: [], branch: null, commits: [], docs: [], ...extra });
 
 describe('DetailSection', () => {
-  it('draws a titled disclosure, open by default, with a count only when given one', async () => {
+  it('draws a plain headed block that never folds, with a count only when given one', async () => {
     const root = await show(
       <>
-        <DetailSection id="a" title="Open one">
+        <DetailSection id="a" title="First one">
           body a
         </DetailSection>
-        <DetailSection count={3} defaultOpen={false} id="b" title="Shut one">
+        <DetailSection count={3} id="b" title="Second one">
           body b
         </DetailSection>
       </>,
     );
     const a = must(root.querySelector('[data-section="a"]'), 'section a');
     const b = must(root.querySelector('[data-section="b"]'), 'section b');
-    expect(a.hasAttribute('open')).toBe(true);
-    expect(b.hasAttribute('open')).toBe(false);
-    expect(a.querySelector('summary')?.textContent).toBe('Open one');
+    expect(root.querySelector('details, summary')).toBeNull();
+    expect(a.querySelector('h3')?.textContent).toBe('First one');
+    expect(a.getAttribute('aria-labelledby')).toBe(a.querySelector('h3')?.id ?? 'missing');
     expect(a.querySelector('.fy-board-detail__count')).toBeNull();
     expect(b.querySelector('.fy-board-detail__count')?.textContent).toBe('3');
     expect(b.querySelector('.fy-board-detail__body')?.textContent).toBe('body b');
+    expect(laneNameOf(laneSetFor(), 'review')).toBe('Review/CI');
   });
 });
 
-describe('LaneStepper', () => {
-  it('marks done, current and next lanes, with Closed last', async () => {
-    const laneSet = laneSetFor();
-    const root = await show(<LaneStepper steps={laneStepper(laneSet, 'review')} />);
-    const states = [...root.querySelectorAll('li')].map(
-      item => `${item.textContent}:${item.getAttribute('data-state')}`,
-    );
-    expect(states).toEqual([
-      'Todo:done',
-      'Plan/Design:done',
-      'Implement:done',
-      'Review/CI:current',
-      'Merged:next',
-      'Released:next',
-      'To test:next',
-      'Closed:next',
-    ]);
-    expect(root.querySelector('[aria-current="step"]')?.textContent).toBe('Review/CI');
-    expect(laneNameOf(laneSet, 'review')).toBe('Review/CI');
-  });
-
-  it('says the project has no lanes when there are none', async () => {
-    const root = await show(<LaneStepper steps={[]} />);
-    expect(root.textContent).toBe('This project has no confirmed lanes.');
+describe('Avatar', () => {
+  it('is the first letter of the name, hidden from a screen reader that reads the name beside it', async () => {
+    const root = await show(<Avatar name=" sada" />);
+    const dot = must(root.querySelector('.fy-board-avatar'), 'the avatar');
+    expect(dot.textContent).toBe('S');
+    expect(dot.getAttribute('aria-hidden')).toBe('true');
   });
 });
 
@@ -119,7 +103,7 @@ describe('AskSection', () => {
     const task = card('F1', { ask: { text: 'Ship the board', source: 'chat' } });
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     expect(root.querySelector('blockquote')?.textContent).toBe('Ship the board');
-    expect(text(root, '[data-kind="ask-origin"]')).toMatch(/^From Denisha, via chat · \d+/u);
+    expect(text(root, '[data-kind="ask-origin"]')).toMatch(/^from Denisha via chat · \d+/u);
     expect(root.querySelector('ul')).toBeNull();
   });
 
@@ -132,7 +116,7 @@ describe('AskSection', () => {
     const root = await show(
       <AskSection names={() => 'denisha'} now={NOW} onOpenSession={id => void opened.push(id)} task={task} />,
     );
-    expect(text(root, '[data-kind="ask-origin"]')).toMatch(/^The owner, in denisha's chat · \d+/u);
+    expect(text(root, '[data-kind="ask-origin"]')).toMatch(/^from you · \d+\w* · denisha's chat$/u);
     await interact(() =>
       (must(root.querySelector('[data-kind="ask-origin"] button'), 'the chat link') as HTMLElement).click(),
     );
@@ -145,7 +129,7 @@ describe('AskSection', () => {
       createdAt: 'never' as BoardTaskView['createdAt'],
     };
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
-    expect(text(root, '[data-kind="ask-origin"]')).toBe('The owner');
+    expect(text(root, '[data-kind="ask-origin"]')).toBe('from you');
   });
 
   it('credits each clarification to you or to the ferret by name', async () => {
@@ -163,6 +147,14 @@ describe('AskSection', () => {
     const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
     const lines = [...root.querySelectorAll('li')].map(item => item.textContent);
     expect(lines).toEqual(['Clarified by you: Only on phones', 'Clarified by a ferret (Denisha): Behind a flag']);
+  });
+});
+
+describe('AskSection quote', () => {
+  it('drops the raw note a ferret left in front of the words', async () => {
+    const task = card('F1', { ask: { text: '(sada, found live) Fix the login', source: 'chat' } });
+    const root = await show(<AskSection names={names} now={NOW} onOpenSession={() => undefined} task={task} />);
+    expect(root.querySelector('blockquote')?.textContent).toBe('Fix the login');
   });
 });
 
@@ -216,9 +208,9 @@ describe('ChildrenList', () => {
 });
 
 describe('DependencyChips', () => {
-  it('says nothing waits when there are no dependencies either way', async () => {
+  it('draws nothing when there are no dependencies either way', async () => {
     const root = await show(<DependencyChips onOpen={() => undefined} onUndepend={null} task={card('F1')} />);
-    expect(root.textContent).toBe('Nothing waits on this, and it waits on nothing.');
+    expect(root.textContent).toBe('');
   });
 
   it('draws what it waits for, marks the ones still blocking, and offers to stop waiting', async () => {
@@ -268,6 +260,43 @@ describe('DependencyChips', () => {
     await view?.render(<DependencyChips onOpen={() => undefined} onUndepend={null} task={waiting} />);
     expect(root.querySelector('.fy-board-chip__x')).toBeNull();
     expect(root.querySelector('[aria-label="Blocks"]')).toBeNull();
+  });
+});
+
+describe('DependsLine', () => {
+  const line = (task: BoardTaskView, adding: boolean, onToggleAdd: () => void = () => undefined) => (
+    <DependsLine
+      adding={adding}
+      form={<form data-form="depend" />}
+      onOpen={() => undefined}
+      onToggleAdd={onToggleAdd}
+      onUndepend={null}
+      task={task}
+    />
+  );
+
+  it('says "Nothing." with Add dependency, and keeps the form away until it is pressed', async () => {
+    let pressed = 0;
+    const root = await show(
+      line(card('F1'), false, () => {
+        pressed += 1;
+      }),
+    );
+    expect(root.textContent).toBe('Nothing. Add dependency');
+    expect(root.querySelector('[data-form="depend"]')).toBeNull();
+    const add = must(root.querySelector<HTMLElement>('[data-action="add-dependency"]'), 'the add button');
+    expect(add.getAttribute('aria-expanded')).toBe('false');
+    await interact(() => add.click());
+    expect(pressed).toBe(1);
+  });
+
+  it('shows the form once adding, under the chips of what it already waits for', async () => {
+    const waiting = card('F1', { dependsOn: [{ task: { id: 'F2' }, until: 'shipped' }] });
+    const root = await show(line(waiting, true));
+    expect(root.textContent).not.toContain('Nothing.');
+    expect(root.querySelector('.fy-board-chip')).not.toBeNull();
+    expect(root.querySelector('[data-form="depend"]')).not.toBeNull();
+    expect(root.querySelector('[data-action="add-dependency"]')?.getAttribute('aria-expanded')).toBe('true');
   });
 });
 
@@ -415,7 +444,7 @@ describe('HistorySection', () => {
     expect(rows[1]?.querySelector('.fy-board-detail__detail')).toBeNull();
   });
 
-  it('folds a run of small changes into one line that opens to the rows', async () => {
+  it('shows small changes inline as muted rows, with nothing that folds', async () => {
     const task = card('F1', {
       history: [
         { seq: 1, at: at(0), actor: { kind: 'ferret', sessionId: LEAD }, type: 'created', laneId: 'todo' },
@@ -425,12 +454,14 @@ describe('HistorySection', () => {
       ],
     });
     const root = await show(<HistorySection context={context} now={NOW} task={task} />);
-    const fold = must(root.querySelector('[data-kind="fold"]'), 'the fold');
-    expect(fold.querySelector('summary')?.textContent).toBe('3 small changes');
-    expect([...fold.querySelectorAll('li')].map(row => row.textContent)).toEqual([
+    expect(root.querySelector('details, summary')).toBeNull();
+    const rows = [...root.querySelectorAll('.fy-board-timeline__row')];
+    expect(rows.map(row => row.hasAttribute('data-minor'))).toEqual([true, true, true, false]);
+    expect(rows.map(row => row.textContent)).toEqual([
       expect.stringContaining('claimed c.ts'),
       expect.stringContaining('claimed b.ts'),
       expect.stringContaining('claimed a.ts'),
+      expect.stringContaining('opened it in Todo'),
     ]);
   });
 });
