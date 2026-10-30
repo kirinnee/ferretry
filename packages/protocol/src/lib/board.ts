@@ -567,8 +567,17 @@ export const BoardCountsSchema = z.strictObject({
 export type BoardCounts = z.infer<typeof BoardCountsSchema>;
 
 /**
+ * A card the daemon could not read. It is set aside and reported, never fatal to the board read: `id` is
+ * the card file's name, and `reason` a short summary of what failed to parse — never a path or the file's
+ * contents.
+ */
+export const BoardQuarantinedCardSchema = z.strictObject({ id: BoardTaskIdSchema, reason });
+export type BoardQuarantinedCard = z.infer<typeof BoardQuarantinedCardSchema>;
+
+/**
  * One page of a board. Scoped to one project, it carries that project's lanes, and every card is on it;
  * across every project (`projectId: null`) there is no one lane set, so the app reads each project's.
+ * `quarantined` names the cards on it that could not be read.
  */
 export const BoardResponseSchema = z
   .object({
@@ -577,6 +586,7 @@ export const BoardResponseSchema = z
     cards: z.array(BoardTaskViewSchema),
     counts: BoardCountsSchema,
     nextCursor: z.string().min(1).nullable(),
+    quarantined: z.array(BoardQuarantinedCardSchema).default([]),
   })
   .superRefine((value, context) => {
     if (value.projectId === null) {
