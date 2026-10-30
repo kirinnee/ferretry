@@ -25,7 +25,16 @@ is typed from it; the rest of this page is still how a message reaches the pane.
   delivery order (`boardOnly`): that session is the owner's own chat, and the notice goes on its board.
 - **Ready** — the deliverer types the next message as soon as the agent's input box is EMPTY, mid-turn
   included (the harness queues it itself). It holds only for a draft in the box, a question, dialog or
-  permission form on screen, or a pane it cannot read, and says which as the `waitReason`.
+  permission form on screen, a session still launching, or a pane it cannot read, and says which as the
+  `waitReason` (`waitReasonOf`). A stopped session is not held: the send path revives it.
+- **Deliverer** — `QueueDeliverer` (`lib/session/queue/deliverer.ts`) is the one owner of WHEN and IN WHAT
+  ORDER. It marks a message `typing` on disk, then hands it to the tracked send path under the message's
+  own id (`SendPathQueueTransport`), which does the HOW: the turn file, the turn record, the busy-pane
+  queue, a revive. The send ledger, keyed by that id, is where every later tick comes from
+  (`movesFrom`): `queued` there is ✓✓, `delivered` there is ✓✓✓. A `typing` message the ledger never saw
+  had no key typed and waits again; nothing is ever typed twice on a guess. It looks at a session when a
+  message is enqueued, when its state document changes, at boot, and every `lookMs` (5 s) while something
+  in it is still waiting or unproven. Claude Code only for now; Codex is the next slice.
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued` (`SessionQueueService.edit` / `.cancel`): once a key has gone to
   the pane, the words are the agent's.
