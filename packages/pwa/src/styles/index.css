@@ -19,6 +19,7 @@
 @import '../features/workspace/processes.css';
 @import '../shell/sessions-bar.css';
 @import '../features/session-info/session-info.css';
+@import '../features/restart-outdated/restart-outdated.css';
 @import '../features/session-actions/session-actions.css';
 @import '../features/permission-request/approval-card.css';
 @import '../features/harness-dialog/dialog-card.css';

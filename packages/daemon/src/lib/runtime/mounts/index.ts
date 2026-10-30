@@ -89,6 +89,7 @@ import { type SessionAgendaModeSubsystem, sessionAgendaModeRoutes } from './sess
 import { type SessionHypermediaSubsystem, sessionHypermediaRoutes } from './session-hypermedia.ts';
 import { type SessionMcpSubsystem, sessionMcpRoutes } from './session-mcp.ts';
 import { type SessionMigrateSubsystem, sessionMigrateRoutes } from './session-migrate.ts';
+import { type SessionRestartSubsystem, sessionRestartRoutes } from './session-restart.ts';
 import { type SessionPermissionSubsystem, sessionPermissionRoutes } from './session-permission.ts';
 import { type SessionProcessSubsystem, sessionProcessRoutes } from './session-processes.ts';
 import { sessionReadRoutes } from './session-reads.ts';
@@ -299,6 +300,8 @@ export interface MountedSubsystems {
   /** Moving a session onto another account: the in-flight safety gate, the restamped configuration
    *  document, and the relaunch that puts a different agent in the same session's chair. */
   readonly sessionMigrate: SessionMigrateSubsystem;
+  /** Restarting the ferrets whose launch instructions are out of date: restart what is idle, queue what is busy. */
+  readonly sessionRestart: SessionRestartSubsystem;
   /** The operation a migration cannot be: moving a top-level session to a DIFFERENT harness family,
    *  where the conversation is exactly the thing that cannot come along. It starts a replacement,
    *  carries every durable coordination fact into it, proves the replacement holds and can use the
@@ -555,6 +558,8 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         // `/v1/sessions/:sessionId` that differ only in their final literal, so neither can shadow the
         // other, and both belong above the deeper per-session subsystems.
         ...sessionMigrateRoutes(subsystems.sessionMigrate),
+        // `/v1/restarts` is a prefix no other route uses, so it can neither shadow nor be shadowed.
+        ...sessionRestartRoutes(subsystems.sessionRestart),
         // The handover registers immediately after the migration it is the cross-family counterpart of, so
         // the two operations a caller chooses between sit together. Its three paths are one and two
         // segments under `/v1/sessions/:sessionId` ending in the literal `handover` — and `handover/cancel`

@@ -667,9 +667,9 @@ export const LaunchInstructionSectionIdSchema = z.enum([
 export type LaunchInstructionSectionId = z.infer<typeof LaunchInstructionSectionIdSchema>;
 
 /**
- * One appended section, by name and size. The text itself is never carried — only, for the sections every
- * agent gets, a short fingerprint of it (`@ferretry/fleet` `instructionDigest`), so the daemon can tell
- * which of them changed since the launch. Absent on a record made before fingerprints were kept.
+ * One appended section, by name and size. The text itself is never carried — only a short fingerprint of it
+ * (`@ferretry/fleet` `instructionDigest`), so the daemon can tell which sections changed since the launch
+ * (live-patched, or outdated until a restart). Absent on a record made before fingerprints were kept.
  */
 export const LaunchInstructionSectionSchema = z.object({
   id: LaunchInstructionSectionIdSchema,
@@ -774,9 +774,21 @@ export const SessionStateSchema = z.object({
 });
 export type SessionState = z.infer<typeof SessionStateSchema>;
 
+/**
+ * A running ferret whose appended system prompt is not what a launch now would give it: the sections that
+ * differ (changed words, or a section switched on or off), minus any the daemon already told it in a
+ * live `[instructions updated]` turn. Derived when the view is read, never stored.
+ */
+export const SessionOutdatedSchema = z.strictObject({
+  sections: z.array(LaunchInstructionSectionIdSchema).min(1),
+});
+export type SessionOutdated = z.infer<typeof SessionOutdatedSchema>;
+
 export const SessionViewSchema = z.object({
   config: SessionConfigSchema,
   state: SessionStateSchema,
+  /** Present only while the running ferret carries out-of-date instructions (`fy restart --outdated`). */
+  outdated: SessionOutdatedSchema.optional(),
   directory: z.string().min(1),
   /**
    * The highest event sequence this session's journal held when the view was read: where a reader

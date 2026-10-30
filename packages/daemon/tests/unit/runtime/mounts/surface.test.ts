@@ -525,6 +525,12 @@ const subsystems = (scratchGc?: ScratchGcSubsystem): MountedSubsystems => ({
     close: async () => undefined,
   },
   sessionMigrate: new FakeSessionMigrate(),
+  sessionRestart: {
+    restart: async () => ({ restarted: [], queued: [], skipped: [], failed: [] }),
+    status: async () => ({ outdated: [], queued: [] }),
+    cancel: async () => ({ cancelled: 0 }),
+    drain: async () => undefined,
+  },
   // The quota-failover loop serves no route either, and for the same reason the declared-wait loop
   // does not: a background tick is ended by a timer, not by a request.
   quotaFailover: {
@@ -795,6 +801,7 @@ describe('the mounted daemon surface', () => {
       4 + // the configuration files: status, one file, an edit and a confirmation (the agent's door is `none`)
       1 + // an owner's request for a Warden investigation (the "who needs you" feed is `authenticated`, like the status)
       1 + // the owner leaving a ferret alone for longer than the Warden would
+      3 + // restarting the ferrets with out-of-date instructions: the restart, the status and clearing the queue (docs/launch-settings.md)
       1 + // a Restart's stale-settings read: would a relaunch change what this session runs on
       1 + // a cross-harness move's preview: what converting the conversation would carry (docs/migration-cross-harness.md)
       3 + // existing conversations kept as ferrets: the listing, one conversation's preview and the adoption
@@ -982,6 +989,9 @@ describe('the mounted daemon surface', () => {
       'GET /v1/sessions/:sessionId/relaunch-settings',
       'POST /v1/sessions/:sessionId/conversion-preview',
       'POST /v1/sessions/:sessionId/migrate',
+      'POST /v1/restarts',
+      'GET /v1/restarts',
+      'DELETE /v1/restarts',
       'POST /v1/sessions/:sessionId/handover',
       'GET /v1/sessions/:sessionId/handover',
       'POST /v1/sessions/:sessionId/handover/cancel',

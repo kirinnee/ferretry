@@ -19,6 +19,7 @@
 
 import type { SessionView } from '@ferretry/protocol';
 import { type ReactNode, useContext, useState } from 'react';
+import { OutdatedMark } from '../features/restart-outdated/outdated-mark.tsx';
 import { agendaOn, hypermediaOn, packOn } from '../features/session-info/info-model.ts';
 import { SwitchMarks } from '../features/session-info/switch-marks.tsx';
 import { unreadCount } from '../lib/attention-inbox.ts';
@@ -86,7 +87,10 @@ export function SessionsBarRow({
         to={sessionRowPath(daemonId, view)}
       >
         <StatusMark view={view} />
-        <span className="fy-sbar__name">{name}</span>
+        <span className="fy-sbar__title">
+          <span className="fy-sbar__name">{name}</span>
+          <OutdatedMark view={view} />
+        </span>
         {unread > 0 ? (
           <span className="fy-sbar__marks">
             {machine === undefined ? null : <MachineChip name={machine} />}

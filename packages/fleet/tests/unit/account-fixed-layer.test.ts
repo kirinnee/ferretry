@@ -819,10 +819,18 @@ describe('launchInstructions', () => {
           chars: NOTIFY_INSTRUCTION(binary).length,
           digest: instructionDigest(NOTIFY_INSTRUCTION(binary)),
         },
-        { id: 'hypermedia', chars: HYPERMEDIA_INSTRUCTION.length },
-        { id: 'pack', chars: PACK_INSTRUCTION(binary).length },
-        { id: 'agenda', chars: AGENDA_INSTRUCTION(binary).length },
-        { id: 'learning', chars: LESSONS_INSTRUCTION(binary).length },
+        { id: 'hypermedia', chars: HYPERMEDIA_INSTRUCTION.length, digest: instructionDigest(HYPERMEDIA_INSTRUCTION) },
+        { id: 'pack', chars: PACK_INSTRUCTION(binary).length, digest: instructionDigest(PACK_INSTRUCTION(binary)) },
+        {
+          id: 'agenda',
+          chars: AGENDA_INSTRUCTION(binary).length,
+          digest: instructionDigest(AGENDA_INSTRUCTION(binary)),
+        },
+        {
+          id: 'learning',
+          chars: LESSONS_INSTRUCTION(binary).length,
+          digest: instructionDigest(LESSONS_INSTRUCTION(binary)),
+        },
       ],
       mode: 'interactive',
       questions: true,
@@ -838,9 +846,10 @@ describe('launchInstructions', () => {
     const off = launchInstructions('fy', { [PACK_ENV]: '0', [PACK_ROUTING_ENV]: line });
 
     // Assert
-    should(on.sections.find(section => section.id === 'pack')?.chars).equal(
-      PACK_INSTRUCTION('fy').length + 1 + line.length,
-    );
+    const pack = on.sections.find(section => section.id === 'pack');
+    should(pack?.chars).equal(PACK_INSTRUCTION('fy').length + 1 + line.length);
+    should(pack?.digest).equal(instructionDigest(`${PACK_INSTRUCTION('fy')}\n${line}`));
+    should(pack?.digest).not.equal(instructionDigest(PACK_INSTRUCTION('fy')));
     should(off.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'notify']);
   });
 
@@ -900,10 +909,11 @@ describe('launchInstructions', () => {
       'agenda',
       'learning',
     ]);
-    // A per-ferret section carries a size, never a digest.
+    // A per-ferret section carries a size and a fingerprint, so a changed word is told from a changed switch.
     should(on.sections.find(section => section.id === 'agenda')).deepEqual({
       id: 'agenda',
       chars: AGENDA_INSTRUCTION('fy').length,
+      digest: instructionDigest(AGENDA_INSTRUCTION('fy')),
     });
   });
 

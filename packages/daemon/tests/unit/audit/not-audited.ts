@@ -33,6 +33,8 @@ export const NOT_AUDITED: Readonly<Record<string, string>> = {
   'POST /v1/sessions/:sessionId/stop': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/resume': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/migrate': 'drives an existing session; its journal records it',
+  'POST /v1/restarts': 'drives existing sessions through the migrate; each journal records it',
+  'DELETE /v1/restarts': 'clears a queue of pending restarts of sessions the caller already drives',
   'POST /v1/sessions/:sessionId/handover': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/handover/cancel': 'drives an existing session; its journal records it',
   'POST /v1/sessions/:sessionId/runtime': 'drives an existing session; its journal records it',

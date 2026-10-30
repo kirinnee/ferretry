@@ -520,3 +520,4 @@ export * from './web-terminals.ts';
 export * from './workspace-layout.ts';
 export * from './workspace-layout-store.ts';
 export * from './workspace-rail-preferences.ts';
+export * as restartOutdatedApi from '../features/restart-outdated/restart-outdated-api.ts';

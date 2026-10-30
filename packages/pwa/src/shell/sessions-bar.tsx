@@ -24,10 +24,11 @@
  * starts, because the page it opened is underneath it.
  */
 
-import type { SessionView } from '@ferretry/protocol';
+import type { RestartRequest, RestartResult, SessionView } from '@ferretry/protocol';
 import { ChartNoAxesCombined, ChevronDown, FolderKanban, Menu, Plus, QrCode, Search, Settings, X } from 'lucide-react';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { MachineLearners } from '../features/learning/passive-learning.tsx';
+import { RestartOutdatedStrip } from '../features/restart-outdated/restart-outdated-strip.tsx';
 import { pairPhoneLabel } from '../features/settings/pair-phone.tsx';
 import { RailDivider } from '../features/workspace/split-divider.tsx';
 import { useDialogFocus } from '../hooks/use-dialog-focus.ts';
@@ -51,10 +52,10 @@ import { NewSessionMenu, withReach } from './new-session-menu.tsx';
 import { PALETTE_KEYSHORTCUTS, paletteShortcutLabel } from './palette-shortcut.ts';
 import { RouteLink } from './route-link.tsx';
 import { type OpenRowMenu, SessionMenuContext, type SessionMenuState } from './session-menu-context.ts';
-import { SessionsBarOptions } from './sessions-bar-density.tsx';
 import { SessionsBarAttention } from './sessions-bar-attention.tsx';
-import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
+import { SessionsBarOptions } from './sessions-bar-density.tsx';
 import { SessionsRailDot } from './sessions-bar-dot.tsx';
+import { SessionsBarFilters, sessionsBarEmptyMessage } from './sessions-bar-filters.tsx';
 import { SessionsBarMachines, SessionsRailMachineDots } from './sessions-bar-machines.tsx';
 import { DEFAULT_LIST_FILTER, type SessionsListFilter, sessionsBarView, sidebarCompact } from './sessions-bar-model.ts';
 import { SessionsBarNeedsYou } from './sessions-bar-needs-you.tsx';
@@ -161,6 +162,11 @@ export interface SessionsBarProps {
   readonly machineSources?: readonly MachineSource[];
   /** The clock a machine's "last seen" is measured against. */
   readonly now?: number;
+  /**
+   * Restarts this machine's outdated ferrets (the button at the head of the list). Absent: the bar draws no
+   * such button, whatever the ferrets' marks say.
+   */
+  readonly onRestartOutdated?: (request: RestartRequest) => Promise<RestartResult>;
   /**
    * The menu a row opens (right-click, long-press, the Menu key): the host draws it for the pressed ferret.
    * Absent, rows have no menu and the browser's own is left alone.
@@ -399,6 +405,10 @@ function SessionsBarBody(props: SessionsBarProps & ListFilterProps & { readonly 
         filter={listFilter}
         hiddenStopped={hiddenStopped}
         onChange={props.onListFilterChange}
+      />
+      <RestartOutdatedStrip
+        sessions={sessions}
+        {...(props.onRestartOutdated === undefined ? {} : { onRestart: props.onRestartOutdated })}
       />
       <div className="fy-sbar__list scroll-thin">
         {machineView !== null ? (
