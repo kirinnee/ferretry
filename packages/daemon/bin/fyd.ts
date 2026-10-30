@@ -548,6 +548,7 @@ import {
   BoardSweep,
   BoardTurnCheck,
   LivenessActivityDeriver,
+  DoneDeliveryLadder,
   ReopenDeliveryLadder,
   SessionCards,
   type SessionLivenessSource,
@@ -1920,6 +1921,8 @@ function createBoardWorld(
   /** Which board a session works on, each board's lanes and its name (U3's `LaneSetService`). */
   lanes: Pick<LaneSetService, 'projectOf' | 'laneSet' | 'project' | 'apply'>,
   sends: Pick<SessionSendService, 'send'>,
+  /** The same send path as the owner's front: what the owner did to a card (done, reopen) is stamped as theirs. */
+  ownerSends: Pick<SessionSendService, 'send'>,
   /** One ferret's open agenda items; read lazily, because the agenda service is built after the board. */
   agendaItems: (sessionId: string) => Promise<readonly AgendaItem[]>,
   bin: string,
@@ -1958,7 +1961,8 @@ function createBoardWorld(
     lanes,
     parents,
     focus,
-    reopen: new ReopenDeliveryLadder(new SendReopenMessenger(sends), diagnostics),
+    reopen: new ReopenDeliveryLadder(new SendReopenMessenger(sends), diagnostics, new SendReopenMessenger(ownerSends)),
+    done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
     activity: new LivenessActivityDeriver({ sessions, clock }),
     agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
     changes: new JournalBoardChanges(storage),
@@ -8926,6 +8930,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         delivery.queue ? new QueueingSends(queueingPorts, 'daemon', feature) : sends;
       const boardSends = producerSends('Board');
       const agendaNudgeSends = producerSends('Agenda');
+      const boardOwnerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human', 'Board') : sends;
       const answerSends = delivery.queue ? new QueueingSends(queueingPorts, 'human', 'Agenda') : sends;
       /**
        * The declared-wait watcher, built LAST among the session slices because it drives two of them.
@@ -9012,6 +9017,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         () => attachmentDaemonId,
         laneSets,
         boardSends,
+        boardOwnerSends,
         async sessionId => {
           const listed = await agenda.list(sessionId);
           if (!listed.ok) throw new Error(listed.error.message);
