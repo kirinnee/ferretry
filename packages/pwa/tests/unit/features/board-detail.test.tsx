@@ -83,6 +83,34 @@ describe('BoardDetail — reading', () => {
     expect(root.querySelector('[role="status"]')).not.toBeNull();
   });
 
+  it('keeps a card that throws inside its drawer, with the error on screen and Close still working', async () => {
+    const harness = detailProps();
+    const reports: string[] = [];
+    const original = console.warn;
+    console.warn = (message: unknown) => void reports.push(String(message));
+    try {
+      view = await mount(
+        <BoardDetail
+          {...harness.props}
+          names={() => {
+            throw new TypeError('Receiver must be an instance of class anonymous');
+          }}
+        />,
+      );
+      await interact(() => flush());
+    } finally {
+      console.warn = original;
+    }
+    const root = view.container;
+    expect(text(root, '[role="alert"]')).toBe(
+      '&F1 could not be drawn.TypeError: Receiver must be an instance of class anonymous',
+    );
+    expect(text(root, '.fy-board-detail__ref')).toBe('&F1');
+    expect(reports).toEqual(['ferretry: card &F1 failed to render']);
+    await click(root, '.fy-board-detail__close');
+    expect(harness.closed.count).toBe(1);
+  });
+
   it('says why the card could not be read', async () => {
     const { root } = await open({ readFails: true });
     expect(text(root, '[role="alert"]')).toBe('The card could not be read: the machine is down.');
