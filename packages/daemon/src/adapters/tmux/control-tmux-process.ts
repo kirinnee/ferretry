@@ -8,6 +8,7 @@ import {
   controlReplyProgress,
   controlSubscriptionLine,
   isControlAttachable,
+  isReadOnlyAttach,
   parseControlGuard,
   parseControlNotification,
   type TmuxControlNotification,
@@ -37,14 +38,16 @@ export interface ControlModeOptions {
   /**
    * The ONE session this client attaches to, and how. Absent, it attaches to the first session that is
    * not a terminal, `ignore-size,no-output` — the daemon's shared query client. A session worker names
-   * its own session and attaches `read-only` as well.
+   * its own session, with the same flags. NEVER `read-only`: on tmux 3.7+ one read-only client can refuse
+   * every `send-keys` the daemon runs (`isReadOnlyAttach` says how), so such an attach is refused here.
    */
   readonly attach?: { readonly target: string; readonly flags: string };
   /**
    * What a command that is not an allowlisted read does: `spawn` gives it its own child (the shared
    * client); `refuse` answers it as a failure without running anything — a session worker observes and
-   * must never type into the agent it watches. tmux's `read-only` flag does NOT stop an in-band
-   * `send-keys` (it guards keyboard input, not control commands), so this is the guard.
+   * must never type into the agent it watches, and this is THE guard. tmux's `read-only` is not one: on
+   * 3.6a it did not stop an in-band `send-keys` at all, and from 3.7 it refuses the daemon's own
+   * `send-keys` from a spawned tmux too, whenever tmux picks the read-only client as their target.
    */
   readonly mutations?: 'spawn' | 'refuse';
 }
@@ -269,6 +272,10 @@ export class ControlModeTmuxProcess implements TmuxCommandPort, TmuxEventSource 
     };
     if (options.attach !== undefined && !isControlAttachable(options.attach.target))
       throw new Error(`${JSON.stringify(options.attach.target)} is not a session a control client may attach to`);
+    if (options.attach !== undefined && isReadOnlyAttach(options.attach.flags))
+      throw new Error(
+        'a control client must not attach read-only: tmux 3.7+ refuses every send-keys that takes it as its target client',
+      );
   }
 
   async execute(arguments_: readonly string[], stdin?: string): Promise<TmuxCommandResult> {

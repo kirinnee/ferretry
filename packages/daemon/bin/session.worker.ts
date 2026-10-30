@@ -2,7 +2,7 @@
  * A SESSION WORKER: the session observer's turn part, for the sessions this thread hosts.
  *
  * Wiring only — the program is `SessionWorkerRuntime`. It holds no storage, opens no database and writes
- * no file: it reads its sessions' panes through their own read-only attached tmux clients and their
+ * no file: it reads its sessions' panes through their own attached observe-only tmux clients and their
  * transcripts from disk, and posts turn patches the main thread applies (`docs/design/session-workers.md`).
  * Kept lean on purpose — no zod, no protocol schemas, no storage, no vault — and held so by the diet test.
  */
@@ -15,7 +15,7 @@ import { ControlModeTmuxProcess } from '../src/adapters/tmux/control-tmux-proces
 import { NodeTranscriptSource } from '../src/adapters/transcript/file-source.ts';
 import { SessionObserver } from '../src/lib/session/observer/observer.ts';
 import type { FromSessionWorker, ToSessionWorker } from '../src/lib/session/observer/protocol.ts';
-import { PANE_WATCH_FORMAT } from '../src/lib/tmux/control-protocol.ts';
+import { PANE_WATCH_FORMAT, SESSION_WORKER_ATTACH_FLAGS } from '../src/lib/tmux/control-protocol.ts';
 import { ClaudeTranscriptParser } from '../src/lib/transcript/claude.ts';
 import { CodexTranscriptParser } from '../src/lib/transcript/codex.ts';
 
@@ -29,13 +29,14 @@ const children = countWorkerChildren(Bun, nowMs);
 
 const runtime = new SessionWorkerRuntime({
   post,
-  // READ-ONLY, ATTACHED, REFUSING: the session's own control client answers reads in-band, and anything
-  // that is not an allowlisted read is refused without running — tmux's `read-only` does not stop an
-  // in-band `send-keys`. `no-output`: the pane's bytes are never streamed here; a subscription to its
-  // `#{pane_dead} #{window_activity}` says when it drew, at most once a second, which is all a look needs.
+  // ATTACHED, REFUSING: the session's own control client answers reads in-band, and anything that is not
+  // an allowlisted read is refused without running — that refusal is what keeps a worker from typing. NOT
+  // tmux's `read-only`: from 3.7 a read-only client refuses the daemon's own `send-keys` whenever tmux
+  // picks it as their target client. `no-output`: the pane's bytes are never streamed here; a subscription
+  // to its `#{pane_dead} #{window_activity}` says when it drew, at most once a second, all a look needs.
   tmux: ({ executable, socket, target }) => {
     const port = new ControlModeTmuxProcess(executable, socket, new BunTmuxProcess(executable, socket), {
-      attach: { target, flags: 'ignore-size,read-only,no-output' },
+      attach: { target, flags: SESSION_WORKER_ATTACH_FLAGS },
       mutations: 'refuse',
     });
     return {

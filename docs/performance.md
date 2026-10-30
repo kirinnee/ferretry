@@ -33,7 +33,7 @@ Every number covers only the window it measured.
 ## Session workers
 
 Every running session is observed off the daemon's main thread by a **session worker**. The worker
-watches the session's pane through its own read-only tmux client, follows its transcript, and works out
+watches the session's pane through its own observe-only tmux client, follows its transcript, and works out
 its turn, questions and liveness. The main thread only writes what the workers report and serves
 requests: it runs no observation loop of its own.
 
