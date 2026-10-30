@@ -18,14 +18,17 @@ import {
   type BoardSnapshot,
   type BoardStore,
   type BoardWrite,
+  type AgendaLinkSource,
   HistoryActivityDeriver,
   type LaneSetSource,
-  NoAgendaLinks,
   type ReopenNotice,
   type ReopenNotifier,
   type SessionFocus,
   type SessionParents,
 } from '../../../src/lib/board/index.ts';
+
+/** An agenda that names no card. */
+export const NO_ASKS: AgendaLinkSource = { asksFor: async () => new Map() };
 
 export const MACHINE = 'machine-1';
 export const NOW = '2026-10-30T10:00:00.000Z';
@@ -211,7 +214,7 @@ export const world = (overrides: Partial<ServiceWorld> = {}): ServiceWorld => {
     focus: new FakeFocus(),
     reopen: new FakeReopen(),
     activity: new HistoryActivityDeriver(),
-    agenda: new NoAgendaLinks(),
+    agenda: NO_ASKS,
     changes: new FakeChanges(),
     clock: { now: () => NOW },
     diagnostics: { warn: message => warnings.push(message) },
