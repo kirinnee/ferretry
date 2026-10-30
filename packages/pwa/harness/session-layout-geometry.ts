@@ -38,6 +38,7 @@
 import { join } from 'node:path';
 import type { Browser, BrowserContextOptions, Page } from 'playwright-core';
 import { THEME_FAMILIES } from '../src/lib/theme-preferences.ts';
+import { timed } from './walk-timing.ts';
 
 type ChatWidth = 'readable' | 'balanced' | 'full';
 
@@ -143,11 +144,13 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
     work: (page: Page, where: string) => Promise<void>,
   ): Promise<void> => {
     const where = `${family}-${scheme} ${viewport === 'phone' ? 'phone' : `${viewport.width}px`} ?${query}`;
-    const context = await browser.newContext({
-      ...(viewport === 'phone' ? run.phone : { viewport }),
-      colorScheme: scheme,
-      reducedMotion: 'reduce',
-    });
+    const context = await timed('layout.newContext', () =>
+      browser.newContext({
+        ...(viewport === 'phone' ? run.phone : { viewport }),
+        colorScheme: scheme,
+        reducedMotion: 'reduce',
+      }),
+    );
     try {
       await context.route('**/*', async route => {
         if (new URL(route.request().url()).origin !== new URL(rootUrl).origin) await route.abort();
@@ -157,10 +160,12 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
         ([id, mode]) => localStorage.setItem('fy-theme-v1', JSON.stringify({ family: id, mode })),
         [family, scheme] as const,
       );
-      const page = await context.newPage();
-      await page.goto(`${rootUrl}?${query}&family=${family}#session-workspace`);
-      await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
-      await page.locator('#harness-session-workspace-page .kt-chat-surface').waitFor({ state: 'attached' });
+      const page = await timed('layout.newPage', () => context.newPage());
+      await timed('layout.goto', () => page.goto(`${rootUrl}?${query}&family=${family}#session-workspace`));
+      await timed('layout.mount', async () => {
+        await page.locator('#harness-session-workspace-page').waitFor({ state: 'visible' });
+        await page.locator('#harness-session-workspace-page .kt-chat-surface').waitFor({ state: 'attached' });
+      });
       await page.evaluate(async () => {
         await document.fonts.ready;
         // An infinite busy mark (a spinner's pulse) has no end; `finish()` throws on one.
@@ -171,7 +176,7 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
       const theme = await page.evaluate(() => document.documentElement.dataset.theme);
       if (theme !== `${family}-${scheme}`)
         fail(`the session layout pass asked for ${family}-${scheme} and got ${theme}`);
-      await work(page, where);
+      await timed('layout.work', () => work(page, where));
       const families = run.captureFamilies ?? [];
       if (run.captureDir !== undefined && families.includes(family)) {
         const name = `session-layout-${family}-${scheme}-${viewport === 'phone' ? 'phone' : viewport.width}-${query.replaceAll(/[=&]/gu, '-')}.png`;
@@ -179,7 +184,7 @@ export async function runSessionLayoutGeometry(run: SessionLayoutRun): Promise<n
         process.stdout.write(`📸 session layout ${where} -> ${name}\n`);
       }
     } finally {
-      await context.close();
+      await timed('layout.close', () => context.close());
     }
   };
 

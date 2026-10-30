@@ -56,6 +56,7 @@ import { runSafeAreaGeometry, SAFE_AREA_GEOMETRY_CHECKS } from './safe-area-geom
 import { runSessionLayoutGeometry, SESSION_LAYOUT_GEOMETRY_CHECKS } from './session-layout-geometry.ts';
 import { runSessionsPageGeometry, SESSIONS_PAGE_GEOMETRY_CHECKS } from './sessions-page-geometry.ts';
 import { runViewportMatrix } from './viewport-matrix.ts';
+import { reportWalkTiming, timePage } from './walk-timing.ts';
 
 const harnessDir = dirname(fileURLToPath(import.meta.url));
 const packageDir = resolve(harnessDir, '..');
@@ -2313,6 +2314,7 @@ try {
         });
         const page = await context.newPage();
         watchTrustedTypes(page);
+        timePage(page);
         try {
           await page.goto(server.url.toString());
           if (SEARCH_ONLY) {
@@ -4287,6 +4289,7 @@ try {
         await context.close();
       }
     }
+    reportWalkTiming('viewport walk');
 
     // THE SESSION PAGE'S LAYOUT — conversation width, the tab strip, nothing under a split pane — in
     // every theme family. Its own contexts and viewports, so it runs after the viewport passes.
@@ -4311,6 +4314,7 @@ try {
         `✅ session layout geometry checks: ${sessionLayoutChecks}/${SESSION_LAYOUT_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
     else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('session layout geometry', PASS_OWNER.sessionLayout));
+    reportWalkTiming('session layout');
 
     // THE BOTTOM SAFE-AREA INSET'S ONE OWNER, on a simulated home-indicator phone: at rest, keyboard up and
     // down, and rotated. Its own contexts, so it runs after the viewport passes.
@@ -4335,6 +4339,7 @@ try {
         `✅ safe-area geometry checks: ${safeAreaChecks}/${SAFE_AREA_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
     else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('safe-area geometry', PASS_OWNER.safeArea));
+    reportWalkTiming('safe area');
 
     // THE BOTTOM OF THE APP ACROSS THE DEVICE MATRIX, each in its own engine. A WebKit row with no WebKit on
     // this machine is reported as skipped, never counted as passed.
@@ -4376,6 +4381,7 @@ try {
         `✅ sessions page geometry checks: ${sessionsPageChecks}/${SESSIONS_PAGE_GEOMETRY_CHECKS} in ${SCHEME}\n`,
       );
     else if (WALKS_SETTINGS) process.stdout.write(notOwedHere('sessions page geometry', PASS_OWNER.sessionsPage));
+    reportWalkTiming('sessions page');
 
     // THE CLOSING LINE, and the only one the CI script insists on. It is reached after every viewport
     // this run walks has completed, so a run that died halfway prints nothing here and the job goes red on a
