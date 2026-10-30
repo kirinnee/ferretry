@@ -17,12 +17,13 @@
  *
  * Set `FY_BOARD_SCROLL_SHOTS_DIR` to keep captures for review; every name in them is fake.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
+import { boundedContext, overlapped } from '../support/overlap.ts';
 import {
   pullDown,
   readBoardDensity,
@@ -40,6 +41,8 @@ const APP_BAR = 57;
 const VIEWPORT = 844;
 
 let browser: Browser;
+const overlap = overlapped();
+const bounded = boundedContext(() => browser, 3);
 let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 
@@ -72,7 +75,7 @@ const open = async (
   columns?: number,
 ): Promise<{ readonly context: BrowserContext; readonly tab: Page }> => {
   const phone = scene === 'phone';
-  const context = await browser.newContext({
+  const context = await bounded({
     viewport: phone ? { width: 390, height: VIEWPORT } : { width: 1_440, height: 900 },
     colorScheme: mode,
     reducedMotion: 'reduce',
@@ -113,158 +116,188 @@ describe('the Board scrolls in one place on a phone', () => {
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 180_000);
 
+  beforeAll(overlap.start);
+
   afterAll(async () => {
     server?.stop(true);
     if (directory !== '') await rm(directory, { force: true, recursive: true });
   });
 
-  it('has exactly one vertical scroller, and it is the board', async () => {
-    for (const mode of ['light', 'dark'] as const) {
-      const { context, tab } = await open('phone', mode);
-      try {
-        expect((await tab.$$('.fy-board-card')).length).toBeGreaterThanOrEqual(36);
-        const top = await readBoardScroll(tab);
-        expect(top.verticalScrollers).toEqual(['fy-board']);
-        expect(top.scrollingNow).toEqual(['fy-board']);
-        expect(top.documentOverflow).toBe(0);
-        await scrollBoardTo(tab, 1_100);
-        const scrolled = await readBoardScroll(tab);
-        expect(scrolled.boardScrollTop).toBeGreaterThan(500);
-        expect(scrolled.verticalScrollers).toEqual(['fy-board']);
-        expect(scrolled.documentOverflow).toBe(0);
-        await shoot(tab, `board-b62-${mode}-phone-scrolled.png`);
-      } finally {
-        await context.close();
-      }
-    }
-  }, 60_000);
-
-  it('keeps only the lane tabs in view, under the app bar, while the rest of the chrome scrolls out', async () => {
-    const { context, tab } = await open('phone');
-    try {
-      const top = await readBoardScroll(tab);
-      expect(top.strip?.position).toBe('sticky');
-      // At the top the strip is part of the flow, below the views, the filter row and the notice.
-      for (const bottom of Object.values(top.chromeBottoms)) expect(bottom).toBeGreaterThan(top.boardTop);
-      expect(top.strip?.top).toBeGreaterThan(top.boardTop + 60);
-
-      await scrollBoardTo(tab, 1_100);
-      const scrolled = await readBoardScroll(tab);
-      expect(scrolled.boardTop).toBe(APP_BAR);
-      expect(Math.abs((scrolled.strip?.top ?? Number.NaN) - scrolled.boardTop)).toBeLessThanOrEqual(1);
-      expect(scrolled.stripOnTop).toBe(true);
-      for (const bottom of Object.values(scrolled.chromeBottoms)) expect(bottom).toBeLessThanOrEqual(scrolled.boardTop);
-    } finally {
-      await context.close();
-    }
-  }, 60_000);
-
-  it('starts the first card within a quarter of the viewport, notice showing', async () => {
-    for (const mode of ['light', 'dark'] as const) {
-      const { context, tab } = await open('phone', mode);
-      try {
-        const facts = await readBoardScroll(tab);
-        expect(facts.viewport).toBe(VIEWPORT);
-        expect(facts.firstCardTop).not.toBeNull();
-        expect(facts.firstCardTop as number).toBeLessThanOrEqual(VIEWPORT * 0.25);
-        await shoot(tab, `board-b62-${mode}-phone-top.png`);
-      } finally {
-        await context.close();
-      }
-    }
-  }, 60_000);
-
-  it('still opens the finder from a pull at the top, and not from mid-list', async () => {
-    const { context, tab } = await open('phone');
-    try {
-      expect(await pullDown(tab, 400, 160)).toBe(1);
-      await scrollBoardTo(tab, 1_100);
-      expect(await pullDown(tab, 400, 160)).toBe(0);
-    } finally {
-      await context.close();
-    }
-  }, 60_000);
-
-  it('fits ten or more whole cards under the sticky strip, with a menu a finger can still hit', async () => {
-    for (const mode of ['light', 'dark'] as const) {
-      const { context, tab } = await open('phone', mode);
-      try {
-        await scrollBoardTo(tab, 1_100);
-        const dense = await readBoardDensity(tab);
-        expect(dense.wholeCardsUnderStrip).toBeGreaterThanOrEqual(10);
-        expect(dense.cardHeight).toBeLessThanOrEqual(64);
-        expect(dense.cardStep - dense.cardHeight).toBeLessThanOrEqual(5);
-        expect(dense.moreButton.height).toBeLessThan(40);
-        expect(dense.moreHit.width).toBeGreaterThanOrEqual(40);
-        expect(dense.moreHit.height).toBeGreaterThanOrEqual(40);
-        expect(dense.moreReached).toBe(true);
-        await shoot(tab, `board-b62-${mode}-phone-dense.png`);
-      } finally {
-        await context.close();
-      }
-    }
-  }, 60_000);
-
-  it('wraps a title to two lines and drops whole meta items, never cutting one mid-line', async () => {
-    const cases = [
-      { scene: 'phone', columns: undefined },
-      { scene: 'desktop', columns: 200 },
-      { scene: 'desktop', columns: 168 },
-      { scene: 'desktop', columns: 270 },
-    ] as const;
-    for (const { scene, columns } of cases) {
-      for (const mode of ['light', 'dark'] as const) {
-        const { context, tab } = await open(scene, mode, columns);
+  for (const mode of ['light', 'dark'] as const)
+    overlap.it(
+      `has exactly one vertical scroller, and it is the board — ${mode}`,
+      async () => {
+        const { context, tab } = await open('phone', mode);
         try {
-          const facts = await readBoardReadable(tab);
-          expect(facts.cards).toBeGreaterThan(30);
-          expect(facts.titleMaxLines).toBeLessThanOrEqual(2);
-          expect(facts.titlesCut).toBe(0);
-          expect(facts.partialItems).toBe(0);
-          expect(facts.cardsMissingId).toBe(0);
-          expect(facts.tallestCard).toBeLessThanOrEqual(64);
-          if (scene === 'desktop' && (columns ?? 999) <= 200) {
-            expect(facts.titleMaxLines).toBe(2);
-            expect(facts.titleWidth).toBeLessThan(200);
-          }
-          if (columns === 200 || columns === 270 || scene === 'phone') expect(facts.cardsMissingActivity).toBe(0);
-          await shoot(tab, `board-readable-${mode}-${scene}.png`);
+          expect((await tab.$$('.fy-board-card')).length).toBeGreaterThanOrEqual(36);
+          const top = await readBoardScroll(tab);
+          expect(top.verticalScrollers).toEqual(['fy-board']);
+          expect(top.scrollingNow).toEqual(['fy-board']);
+          expect(top.documentOverflow).toBe(0);
+          await scrollBoardTo(tab, 1_100);
+          const scrolled = await readBoardScroll(tab);
+          expect(scrolled.boardScrollTop).toBeGreaterThan(500);
+          expect(scrolled.verticalScrollers).toEqual(['fy-board']);
+          expect(scrolled.documentOverflow).toBe(0);
+          await shoot(tab, `board-b62-${mode}-phone-scrolled.png`);
         } finally {
           await context.close();
         }
+      },
+      60_000,
+    );
+
+  overlap.it(
+    'keeps only the lane tabs in view, under the app bar, while the rest of the chrome scrolls out',
+    async () => {
+      const { context, tab } = await open('phone');
+      try {
+        const top = await readBoardScroll(tab);
+        expect(top.strip?.position).toBe('sticky');
+        // At the top the strip is part of the flow, below the views, the filter row and the notice.
+        for (const bottom of Object.values(top.chromeBottoms)) expect(bottom).toBeGreaterThan(top.boardTop);
+        expect(top.strip?.top).toBeGreaterThan(top.boardTop + 60);
+
+        await scrollBoardTo(tab, 1_100);
+        const scrolled = await readBoardScroll(tab);
+        expect(scrolled.boardTop).toBe(APP_BAR);
+        expect(Math.abs((scrolled.strip?.top ?? Number.NaN) - scrolled.boardTop)).toBeLessThanOrEqual(1);
+        expect(scrolled.stripOnTop).toBe(true);
+        for (const bottom of Object.values(scrolled.chromeBottoms))
+          expect(bottom).toBeLessThanOrEqual(scrolled.boardTop);
+      } finally {
+        await context.close();
       }
-    }
-  }, 120_000);
+    },
+    60_000,
+  );
 
-  it('draws the notice on one line until tapped, and dismisses it', async () => {
-    const { context, tab } = await open('phone');
-    try {
-      const text = tab.locator('.fy-board__notice-text');
-      const folded = await text.boundingBox();
-      expect((folded?.height ?? 99) < 44).toBe(true);
-      expect(await text.getAttribute('aria-expanded')).toBe('false');
-      expect(await text.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
-      await text.tap();
-      expect(await text.getAttribute('aria-expanded')).toBe('true');
-      expect(await tab.locator('.fy-board__notice[data-open]').count()).toBe(1);
-      await tab.locator('.fy-board__notice-x').tap();
-      expect(await tab.locator('.fy-board__notice').count()).toBe(0);
-    } finally {
-      await context.close();
-    }
-  }, 60_000);
+  for (const mode of ['light', 'dark'] as const)
+    overlap.it(
+      `starts the first card within a quarter of the viewport, notice showing — ${mode}`,
+      async () => {
+        const { context, tab } = await open('phone', mode);
+        try {
+          const facts = await readBoardScroll(tab);
+          expect(facts.viewport).toBe(VIEWPORT);
+          expect(facts.firstCardTop).not.toBeNull();
+          expect(facts.firstCardTop as number).toBeLessThanOrEqual(VIEWPORT * 0.25);
+          await shoot(tab, `board-b62-${mode}-phone-top.png`);
+        } finally {
+          await context.close();
+        }
+      },
+      60_000,
+    );
 
-  it('keeps the desktop title and tools row, and scrolls in one place too', async () => {
-    const { context, tab } = await open('desktop');
-    try {
-      expect(await tab.locator('h1.fy-board__title').count()).toBe(1);
-      expect(await tab.locator('.fy-board__tools').count()).toBe(1);
-      const facts = await readBoardScroll(tab);
-      expect(facts.verticalScrollers.filter(name => name === 'fy-board')).toEqual(['fy-board']);
-      expect(facts.documentOverflow).toBe(0);
-      await shoot(tab, 'board-b62-light-desktop.png');
-    } finally {
-      await context.close();
-    }
-  }, 60_000);
+  overlap.it(
+    'still opens the finder from a pull at the top, and not from mid-list',
+    async () => {
+      const { context, tab } = await open('phone');
+      try {
+        expect(await pullDown(tab, 400, 160)).toBe(1);
+        await scrollBoardTo(tab, 1_100);
+        expect(await pullDown(tab, 400, 160)).toBe(0);
+      } finally {
+        await context.close();
+      }
+    },
+    60_000,
+  );
+
+  for (const mode of ['light', 'dark'] as const)
+    overlap.it(
+      `fits ten or more whole cards under the sticky strip, with a menu a finger can still hit — ${mode}`,
+      async () => {
+        const { context, tab } = await open('phone', mode);
+        try {
+          await scrollBoardTo(tab, 1_100);
+          const dense = await readBoardDensity(tab);
+          expect(dense.wholeCardsUnderStrip).toBeGreaterThanOrEqual(10);
+          expect(dense.cardHeight).toBeLessThanOrEqual(64);
+          expect(dense.cardStep - dense.cardHeight).toBeLessThanOrEqual(5);
+          expect(dense.moreButton.height).toBeLessThan(40);
+          expect(dense.moreHit.width).toBeGreaterThanOrEqual(40);
+          expect(dense.moreHit.height).toBeGreaterThanOrEqual(40);
+          expect(dense.moreReached).toBe(true);
+          await shoot(tab, `board-b62-${mode}-phone-dense.png`);
+        } finally {
+          await context.close();
+        }
+      },
+      60_000,
+    );
+
+  const readableCases = [
+    { scene: 'phone', columns: undefined },
+    { scene: 'desktop', columns: 200 },
+    { scene: 'desktop', columns: 168 },
+    { scene: 'desktop', columns: 270 },
+  ] as const;
+  for (const { scene, columns } of readableCases)
+    for (const mode of ['light', 'dark'] as const)
+      overlap.it(
+        `wraps a title to two lines and drops whole meta items, never cutting one mid-line — ${scene}${columns === undefined ? '' : ` ${columns}`}, ${mode}`,
+        async () => {
+          const { context, tab } = await open(scene, mode, columns);
+          try {
+            const facts = await readBoardReadable(tab);
+            expect(facts.cards).toBeGreaterThan(30);
+            expect(facts.titleMaxLines).toBeLessThanOrEqual(2);
+            expect(facts.titlesCut).toBe(0);
+            expect(facts.partialItems).toBe(0);
+            expect(facts.cardsMissingId).toBe(0);
+            expect(facts.tallestCard).toBeLessThanOrEqual(64);
+            if (scene === 'desktop' && (columns ?? 999) <= 200) {
+              expect(facts.titleMaxLines).toBe(2);
+              expect(facts.titleWidth).toBeLessThan(200);
+            }
+            if (columns === 200 || columns === 270 || scene === 'phone') expect(facts.cardsMissingActivity).toBe(0);
+            await shoot(tab, `board-readable-${mode}-${scene}.png`);
+          } finally {
+            await context.close();
+          }
+        },
+        60_000,
+      );
+
+  overlap.it(
+    'draws the notice on one line until tapped, and dismisses it',
+    async () => {
+      const { context, tab } = await open('phone');
+      try {
+        const text = tab.locator('.fy-board__notice-text');
+        const folded = await text.boundingBox();
+        expect((folded?.height ?? 99) < 44).toBe(true);
+        expect(await text.getAttribute('aria-expanded')).toBe('false');
+        expect(await text.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(true);
+        await text.tap();
+        expect(await text.getAttribute('aria-expanded')).toBe('true');
+        expect(await tab.locator('.fy-board__notice[data-open]').count()).toBe(1);
+        await tab.locator('.fy-board__notice-x').tap();
+        expect(await tab.locator('.fy-board__notice').count()).toBe(0);
+      } finally {
+        await context.close();
+      }
+    },
+    60_000,
+  );
+
+  overlap.it(
+    'keeps the desktop title and tools row, and scrolls in one place too',
+    async () => {
+      const { context, tab } = await open('desktop');
+      try {
+        expect(await tab.locator('h1.fy-board__title').count()).toBe(1);
+        expect(await tab.locator('.fy-board__tools').count()).toBe(1);
+        const facts = await readBoardScroll(tab);
+        expect(facts.verticalScrollers.filter(name => name === 'fy-board')).toEqual(['fy-board']);
+        expect(facts.documentOverflow).toBe(0);
+        await shoot(tab, 'board-b62-light-desktop.png');
+      } finally {
+        await context.close();
+      }
+    },
+    60_000,
+  );
 });

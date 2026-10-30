@@ -4,11 +4,9 @@
  * desktop width, light and dark, with no horizontal overflow at either. Set `FY_BROWSER_MODE_SHOTS_DIR` to
  * keep the captures; every name in them is fake.
  */
-import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { beforeAll, describe, it } from 'bun:test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { FleetMachineView } from '@ferretry/protocol';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -17,9 +15,9 @@ import should from 'should';
 import { BrowserChallengeBanner } from '../../../src/features/browser/browser-challenge-banner.tsx';
 import { BrowserModeSection } from '../../../src/features/fleet/machine/settings-tab.tsx';
 import type { SetupAccess } from '../../../src/features/fleet/setup/setup-access.ts';
+import { appStylesheet } from '../support/app-stylesheet.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
-const packageDir = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_BROWSER_MODE_SHOTS_DIR ?? '';
 
 const machine: FleetMachineView = {
@@ -71,36 +69,14 @@ const viewports = [
 const themes = ['light', 'dark'] as const;
 
 let browser: Browser;
-let workspace = '';
 let css = '';
 
 describe('Browser mode visual contract', () => {
   beforeAll(async () => {
     browser = await sharedChromium();
-    workspace = await mkdtemp(join(tmpdir(), 'fy-browser-mode-visual-'));
-    const stylesheet = join(workspace, 'app.css');
-    const result = spawnSync(
-      './node_modules/.bin/tailwindcss',
-      [
-        '--config',
-        'tailwind.config.ts',
-        '--input',
-        'src/styles/index.css',
-        '--output',
-        stylesheet,
-        '--content',
-        './src/**/*.{ts,tsx},./tests/integration/features/*.tsx',
-      ],
-      { cwd: packageDir, stdio: 'pipe' },
-    );
-    if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
-    css = await readFile(stylesheet, 'utf8');
+    css = await appStylesheet();
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 120_000);
-
-  afterAll(async () => {
-    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
-  });
 
   it('shows the section and the human-check strip at a phone and a desktop, light and dark, without overflow', async () => {
     for (const theme of themes) {

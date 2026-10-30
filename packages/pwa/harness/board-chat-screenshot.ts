@@ -6,7 +6,7 @@
  *   bun harness/board-chat-screenshot.ts [outDir]    # default /tmp/claude-1000, files board-u14-*.png
  *
  * It bundles `board-chat-page.tsx`, serves it on an ephemeral loopback port, aborts anything that leaves it,
- * and fails when the document scrolls sideways.
+ * and fails when the document scrolls sideways or a card's button in the side pane leaves its card.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -105,6 +105,20 @@ const open = async (
       .map(node => node.textContent?.slice(0, 40) ?? ''),
   );
   if (cut.length > 0) fail(`${cut.length} card parts overflow their box: ${cut.slice(0, 3).join(' | ')}`);
+  // Every button on a card in the ferret (Add to chat, ⋯, any answer) stays inside its card.
+  const spills = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('.fy-board-card')].flatMap(card => {
+      const box = card.getBoundingClientRect();
+      return [...card.querySelectorAll<HTMLButtonElement>('button')]
+        .filter(button => button.closest('[role="menu"]') === null)
+        .filter(button => {
+          const own = button.getBoundingClientRect();
+          return own.width > 0 && (own.left < box.left - 0.5 || own.right > box.right + 0.5);
+        })
+        .map(button => `&${card.dataset['task'] ?? '?'} "${button.getAttribute('aria-label') ?? button.textContent}"`);
+    }),
+  );
+  if (spills.length > 0) fail(`${state}: side-pane buttons leave their cards: ${spills.join('; ')}`);
   return page;
 };
 

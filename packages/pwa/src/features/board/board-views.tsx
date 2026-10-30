@@ -17,9 +17,8 @@ import {
   type BoardGroupOf,
   buildTree,
   flattenTree,
-  laneOfCategory,
 } from '../../lib/board-view.ts';
-import type { BoardDone } from '../../lib/board-done.ts';
+import { type BoardAnswerState, type BoardDone, doneLaneOf } from '../../lib/board-done.ts';
 import { BoardCard, type BoardCardMoves } from './board-card.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
@@ -52,6 +51,8 @@ export interface BoardCardEnv {
   readonly dragging: { readonly cardKey: string; readonly groupKey: string } | null;
   /** A phone: thumb-sized cards and the To test buttons spelled out. */
   readonly touch?: boolean;
+  /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
+  readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
 }
 
 interface PlacedProps {
@@ -65,6 +66,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
   const moves = place === undefined ? undefined : env.movesFor(card, place);
   const done = place === undefined ? undefined : env.doneFor?.(card, place);
+  const answer = env.answerFor?.(card);
   return (
     <BoardCard
       card={card}
@@ -81,6 +83,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
       {...(done === undefined ? {} : { done })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
+      {...(answer === undefined ? {} : { answer })}
     />
   );
 }
@@ -112,7 +115,7 @@ function KanbanBoard({
   readonly onDropCard: (groupKey: string, laneId: string) => void;
 }) {
   const inAir = env.dragging !== null && env.dragging.groupKey === group.key;
-  const closeLane = laneOfCategory(group, 'closed');
+  const closeLane = doneLaneOf(group.laneSet);
   const dragged = inAir ? env.dragging?.cardKey : undefined;
   const lanes = hideClosed ? group.lanes.filter(lane => lane.category !== 'closed') : group.lanes;
   return (
@@ -147,7 +150,7 @@ function KanbanBoard({
           category="closed"
           count={0}
           density="page"
-          name="Works → Close"
+          name="Done"
           onDropCard={() => onDropCard(group.key, closeLane)}
           variant="target"
         />

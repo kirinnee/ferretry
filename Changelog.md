@@ -1,3 +1,9 @@
+## [4.145.0](https://github.com/kirinnee/ferretry/compare/v4.144.0...v4.145.0) (2026-10-30)
+
+### Features
+
+* **board:** Done and Not good spin in place, never spill, and Not good sends pictures ([#1066](https://github.com/kirinnee/ferretry/issues/1066)) ([2e7ebf4](https://github.com/kirinnee/ferretry/commit/2e7ebf4d23cb018d7eb431be1b78283f0e7070e1)), closes [#1062](https://github.com/kirinnee/ferretry/issues/1062) [#1060](https://github.com/kirinnee/ferretry/issues/1060)
+
 ## [4.144.0](https://github.com/kirinnee/ferretry/compare/v4.143.0...v4.144.0) (2026-10-30)
 
 ### Features

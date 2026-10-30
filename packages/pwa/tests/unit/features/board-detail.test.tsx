@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'bun:test';
-import type { AgendaId } from '@ferretry/protocol';
+import { type AgendaId, boardOk } from '@ferretry/protocol';
 import { BoardDetail } from '../../../src/features/board/detail/board-detail.tsx';
 import { agendaConversationPath } from '../../../src/lib/agenda-inbox.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../src/lib/pages/routes.ts';
@@ -331,7 +331,9 @@ describe('BoardDetail — moving', () => {
     await clickNamed(reasonBox(root), 'Cancel');
     expect(root.querySelector('[role="dialog"]')).toBeNull();
     await pickLane(root, 'Todo');
-    await interact(() => pressKey(must(reasonBox(root).querySelector('input'), 'the reason input'), 'Escape'));
+    await interact(() =>
+      pressKey(must(reasonBox(root).querySelector('[aria-label="Reason"]'), 'the reason input'), 'Escape'),
+    );
     expect(root.querySelector('[role="dialog"]')).toBeNull();
     expect(closed.count).toBe(0);
     expect(actions.calls).toEqual([]);
@@ -342,7 +344,7 @@ describe('BoardDetail — moving', () => {
     const actions = fakeActions({ moveTask: () => pending.promise });
     const { root } = await open({ task: card('F1', IMPLEMENT), actions });
     await pickLane(root, 'Todo');
-    await fill(must(reasonBox(root).querySelector<HTMLInputElement>('input'), 'the input'), 'why');
+    await fill(must(reasonBox(root).querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'the input'), 'why');
     await submit(reasonBox(root));
     expect(buttonNamed(reasonBox(root), 'Moving…').disabled).toBe(true);
     pending.resolve(refusal('too late'));
@@ -354,10 +356,10 @@ describe('BoardDetail — moving', () => {
 describe('BoardDetail — the verdict', () => {
   const tested = { laneId: 'tested', title: 'Try it' };
 
-  it('offers Works → Close and Not good → the last working lane on a card to try', async () => {
+  it("offers Done and Not good → the last working lane on a card to try, in the board's own words", async () => {
     const { root } = await open({ task: card('F1', tested) });
-    expect(text(root, '[data-verdict="works"]')).toBe('Close');
-    expect(root.querySelector('[data-verdict="works"]')?.getAttribute('title')).toBe('Works → Close');
+    expect(text(root, '[data-verdict="works"]')).toBe('Done');
+    expect(root.querySelector('[data-verdict="works"]')?.getAttribute('title')).toBe('Mark Try it done and close it');
     expect(text(root, '[data-verdict="not-good"]')).toBe('Not good');
     expect(root.querySelector('[data-verdict="not-good"]')?.getAttribute('title')).toBe(
       'Not good → back to Implement, with a reason',
@@ -377,7 +379,7 @@ describe('BoardDetail — the verdict', () => {
     const { root, actions } = await open({ task: card('F1', tested) });
     await click(root, '[data-verdict="not-good"]');
     expect(text(reasonBox(root), '.fy-board-reason__heading')).toBe('Not good: send Try it back to Implement');
-    expect(reasonBox(root).querySelector('input')?.getAttribute('placeholder')).toBe(
+    expect(reasonBox(root).querySelector('[aria-label="Reason"]')?.getAttribute('placeholder')).toBe(
       'What is not good? The ferret reads this.',
     );
     await reasonSubmit(root, 'it crashes on phones');
@@ -409,7 +411,7 @@ describe('BoardDetail — Mark done', () => {
     expect(actions.calls).toEqual(['moveTask:["closed"]']);
   });
 
-  it('is left to Works → Close on a card to try, and is not offered on a dropped card', async () => {
+  it('is left to the verdict Done on a card to try, and is not offered on a dropped card', async () => {
     const tested = await open({ task: card('F1', { laneId: 'tested', title: 'Try it' }) });
     expect(tested.root.querySelector('.fy-board-done')).toBeNull();
     await view?.unmount();
@@ -750,5 +752,87 @@ describe('BoardDetail — answering', () => {
     expect(text(root, '[data-section="asks"]')).toContain('A1 from');
     await interact(() => must(root.querySelector<HTMLButtonElement>('[data-ask-open="A1"]'), 'the A1 row').click());
     expect(navigated).toEqual([agendaConversationPath(laptop.daemonId, LEAD, 'A1' as AgendaId)]);
+  });
+});
+
+describe('BoardDetail — an answer in flight', () => {
+  const tested = { laneId: 'tested', title: 'Try it' };
+
+  it('spins the pressed answer and holds the other until the move settles', async () => {
+    const pending = deferred<unknown>();
+    const actions = fakeActions({ moveTask: () => pending.promise });
+    const { root } = await open({ task: card('F1', tested), actions });
+    await click(root, '[data-verdict="works"]');
+    const works = must(root.querySelector<HTMLButtonElement>('[data-verdict="works"]'), 'Works');
+    expect(works.hasAttribute('data-pending')).toBe(true);
+    expect(works.getAttribute('aria-busy')).toBe('true');
+    expect(works.querySelector('[data-spinner]')).not.toBeNull();
+    expect(works.disabled).toBe(true);
+    expect(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]')?.disabled).toBe(true);
+    await interact(() => works.click());
+    expect(actions.calls).toEqual(['moveTask:["closed"]']);
+    pending.resolve(boardOk(card('F1', { laneId: 'closed' })));
+    await interact(() => flush());
+    expect(root.querySelector('[data-pending]')).toBeNull();
+  });
+
+  it('spins Mark done while it closes, and says a refusal beside it', async () => {
+    const pending = deferred<unknown>();
+    let tries = 0;
+    // The first close is refused; the second is held on its way.
+    const actions = fakeActions({ moveTask: () => (tries++ === 0 ? pending.promise : new Promise(() => undefined)) });
+    const { root } = await open({ task: card('F1', IMPLEMENT), actions });
+    await click(root, '.fy-board-detail__tools .fy-board-done');
+    expect(root.querySelector('.fy-board-detail__tools .fy-board-done [data-spinner]')).not.toBeNull();
+    pending.resolve(refusal('only the owner closes', 'owner-gate'));
+    await interact(() => flush());
+    expect(text(root, '[data-answer-error]')).toBe('only the owner closes');
+    expect(root.querySelector('.fy-board-detail__foot [data-problem]')).toBeNull();
+    // The next answer starts clean.
+    await click(root, '.fy-board-detail__tools .fy-board-done');
+    expect(root.querySelector('[data-answer-error]')).toBeNull();
+  });
+
+  it("sends Not good's pictures from the card's ferret with the words", async () => {
+    const uploads: string[] = [];
+    const { root, actions } = await open({
+      task: card('F1', { ...tested, assignee: 'child-1' }),
+      sendBackFiles: true,
+      uploads,
+    });
+    await click(root, '[data-verdict="not-good"]');
+    await interact(() => flush());
+    const picker = must(root.querySelector<HTMLInputElement>('[data-send-back-picker]'), 'the picker');
+    Object.defineProperty(picker, 'files', {
+      configurable: true,
+      value: [new File(['png'], 'a.png', { type: 'image/png' })],
+    });
+    await interact(() => picker.dispatchEvent(new Event('change', { bubbles: true })));
+    await interact(() => flush());
+    expect(uploads).toEqual(['child-1:a.png']);
+    await reasonSubmit(root, 'it crashes');
+    expect(actions.calls).toEqual([
+      `moveTask:["implement","it crashes",{"from":"child-1","ids":["att_${'a'.repeat(64)}"]}]`,
+    ]);
+  });
+
+  it('sends a move back with no pictures as the words alone, even where the machine takes them', async () => {
+    const { root, actions } = await open({ task: card('F1', IMPLEMENT), sendBackFiles: true });
+    await pickLane(root, 'Plan/Design');
+    await interact(() => flush());
+    expect(root.querySelector('[data-send-back-picker]')).not.toBeNull();
+    await reasonSubmit(root, 'wrong plan');
+    expect(actions.calls).toEqual(['moveTask:["plan","wrong plan"]']);
+  });
+});
+
+describe('BoardDetail — the one-line boxes', () => {
+  it('cancels the drop box without dropping', async () => {
+    const { root, actions } = await open({ task: card('F1', IMPLEMENT) });
+    await moreItem(root, 'Drop');
+    expect(root.querySelector('[data-board-send-back]')).toBeNull();
+    await clickNamed(reasonBox(root), 'Cancel');
+    expect(root.querySelector('[role="dialog"]')).toBeNull();
+    expect(actions.calls).toEqual([]);
   });
 });

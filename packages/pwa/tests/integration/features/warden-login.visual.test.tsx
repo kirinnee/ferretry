@@ -3,11 +3,9 @@
  * (never an opaque id), at a phone and a desktop width, light and dark, with no horizontal overflow. Set
  * `FY_WARDEN_LOGIN_SHOTS_DIR` to keep the captures; every name in them is fake.
  */
-import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { beforeAll, describe, it } from 'bun:test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
 import { renderToStaticMarkup } from 'react-dom/server';
 import should from 'should';
@@ -16,9 +14,9 @@ import { WardenSettingsForm } from '../../../src/features/warden/warden-settings
 import { wardenFormErrors } from '../../../src/features/warden/warden-settings-model.ts';
 import type { PickerAccount } from '../../../src/lib/account-picker-catalog.ts';
 import { wardenConfig } from '../../support/warden.ts';
+import { appStylesheet } from '../support/app-stylesheet.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
-const packageDir = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_WARDEN_LOGIN_SHOTS_DIR ?? '';
 
 const runtime = (wrapper: string, displayName: string, kind: PickerAccount['kind']): PickerAccount => ({
@@ -65,36 +63,14 @@ const viewports = [
 const themes = ['light', 'dark'] as const;
 
 let browser: Browser;
-let workspace = '';
 let css = '';
 
 describe('Warden login picker visual contract', () => {
   beforeAll(async () => {
     browser = await sharedChromium();
-    workspace = await mkdtemp(join(tmpdir(), 'fy-warden-login-visual-'));
-    const stylesheet = join(workspace, 'app.css');
-    const result = spawnSync(
-      './node_modules/.bin/tailwindcss',
-      [
-        '--config',
-        'tailwind.config.ts',
-        '--input',
-        'src/styles/index.css',
-        '--output',
-        stylesheet,
-        '--content',
-        './src/**/*.{ts,tsx},./tests/integration/features/*.tsx',
-      ],
-      { cwd: packageDir, stdio: 'pipe' },
-    );
-    if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
-    css = await readFile(stylesheet, 'utf8');
+    css = await appStylesheet();
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 120_000);
-
-  afterAll(async () => {
-    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
-  });
 
   it('shows the chosen login by name, harness and label at a phone and a desktop, light and dark', async () => {
     for (const theme of themes) {

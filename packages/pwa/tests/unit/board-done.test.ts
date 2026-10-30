@@ -1,6 +1,14 @@
 import { describe, expect, it } from 'bun:test';
 import { LANE_TEMPLATES } from '@ferretry/protocol';
-import { boardDone, doneLabel, doneTitle, isReleaseLane } from '../../src/lib/board-done.ts';
+import {
+  ANSWER_AT_REST,
+  boardDone,
+  doneLabel,
+  doneLaneOf,
+  doneTitle,
+  isReleaseLane,
+  notGoodLaneOf,
+} from '../../src/lib/board-done.ts';
 import { laneSetFor } from './board-support.ts';
 import { must } from '../support/dom.ts';
 
@@ -72,5 +80,38 @@ describe('isReleaseLane', () => {
     expect(isReleaseLane(merged, 'released')).toBe(true);
     expect(isReleaseLane(merged, 'merged')).toBe(false);
     expect(isReleaseLane({ lanes: [{ id: 'todo', name: 'Todo', category: 'backlog' }] }, 'todo')).toBe(false);
+  });
+});
+
+describe('the lanes Done and Not good go to', () => {
+  it('follows the lanes a lane set declares', () => {
+    const declared = { ...lanes, doneLane: 'closed', notGoodLane: 'plan' };
+    expect(doneLaneOf(declared)).toBe('closed');
+    expect(notGoodLaneOf(declared)).toBe('plan');
+    expect(boardDone({ laneSet: declared, category: 'closed', dropped: false })).toEqual({
+      kind: 'reopen',
+      laneId: 'plan',
+    });
+  });
+
+  it('falls back to the Closed lane and the last active lane when nothing is declared, or the declared lane is wrong', () => {
+    expect(doneLaneOf(lanes)).toBe('closed');
+    expect(notGoodLaneOf(lanes)).toBe('implement');
+    // A declared lane that is missing, or not of the right kind, is not followed.
+    const wrong = { ...lanes, doneLane: 'implement', notGoodLane: 'ghost' };
+    expect(doneLaneOf(wrong)).toBe('closed');
+    expect(notGoodLaneOf(wrong)).toBe('implement');
+    expect(doneLaneOf({ ...lanes, doneLane: null, notGoodLane: null })).toBe('closed');
+  });
+
+  it('has nowhere to go with no lanes, or no lane of the kind', () => {
+    expect(doneLaneOf(null)).toBeNull();
+    expect(notGoodLaneOf(null)).toBeNull();
+    expect(doneLaneOf({ lanes: lanes.lanes.filter(lane => lane.category !== 'closed') })).toBeNull();
+    expect(notGoodLaneOf({ lanes: lanes.lanes.filter(lane => lane.category !== 'active') })).toBeNull();
+  });
+
+  it('starts every card at rest', () => {
+    expect(ANSWER_AT_REST).toEqual({ pressed: null, error: null });
   });
 });

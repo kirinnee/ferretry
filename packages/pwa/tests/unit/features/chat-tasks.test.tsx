@@ -181,13 +181,14 @@ describe('ChatTasks — the owner’s Done and Not good', () => {
     expect(acts).toEqual([{ id: 'F22', request: { action: 'move', to: 'closed' } }]);
   });
 
-  it('asks for a reason before Not good sends the card back, and sends it with one', async () => {
+  it('opens the Board composer before Not good sends the card back', async () => {
     const { root, acts } = await open();
     await interact(() =>
       must(root.querySelector<HTMLElement>('[data-task="F22"] [data-verdict="not-good"]'), 'Not good').click(),
     );
-    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the reason box');
-    expect(dialog.textContent).toContain('Move Try the board back to Implement');
+    const dialog = must(document.body.querySelector('[role="dialog"]'), 'the composer');
+    expect(dialog.hasAttribute('data-board-send-back')).toBe(true);
+    expect(dialog.textContent).toContain('Not good: send Try the board back to Implement');
     expect(acts).toEqual([]);
   });
 
@@ -251,11 +252,12 @@ describe('ChatTasks — the reason box', () => {
     expect(acts).toEqual([]);
   });
 
-  it('says the move did not go through when Done is refused', async () => {
+  it('says a refused Done on the card itself, as the Board does', async () => {
     const { root } = await open({ refuse: 'Nope' });
     await interact(() => must(root.querySelector<HTMLElement>('[data-task="F22"] .fy-board-done'), 'Done').click());
     await interact(() => flush());
-    expect(root.querySelector('[data-board-side-notice]')?.textContent).toBe('The move did not go through.');
+    expect(root.querySelector('[data-task="F22"] [data-answer-error]')?.textContent).toBe('Nope');
+    expect(root.querySelector('[data-board-side-notice]')).toBeNull();
   });
 });
 

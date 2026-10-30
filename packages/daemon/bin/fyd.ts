@@ -149,6 +149,7 @@ import {
 } from '../src/adapters/attachments/index.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import { FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
+import { StoreBoardAttachments } from '../src/adapters/board/board-attachments.ts';
 import { SendReopenMessenger } from '../src/adapters/board/send-reopen-messenger.ts';
 import {
   JournalBoardChanges,
@@ -1962,6 +1963,8 @@ function createBoardWorld(
   /** The folders a ferret's repository is registered from (`projectRoots`), read per adoption. */
   projectRoots: () => Promise<readonly string[]>,
   userHome: string,
+  /** The attachment store: the files the owner sends with "Not good" are named and carried through it. */
+  attachments: StoreBoardAttachments,
 ): BoardWorld {
   const diagnostics = boardDiagnostics;
   const parents = new StorageSessionParents(storage);
@@ -1991,10 +1994,11 @@ function createBoardWorld(
     parents,
     focus,
     reopen: new ReopenDeliveryLadder(
-      new SendReopenMessenger(sends, new StorageSubFerretDirectory(storage)),
+      new SendReopenMessenger(sends, new StorageSubFerretDirectory(storage), attachments),
       diagnostics,
-      new SendReopenMessenger(ownerSends),
+      new SendReopenMessenger(ownerSends, undefined, attachments),
     ),
+    attachments,
     done: new DoneDeliveryLadder(new SendReopenMessenger(ownerSends), diagnostics),
     activity: new LivenessActivityDeriver({ sessions, clock }),
     agenda: new AgendaCardLinks({ open: agendaItems }, machineId, diagnostics),
@@ -9211,6 +9215,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         { register: async request => await catalogs.registerProject(request) },
         async () => (await daemonConfigStore.peek().catch(() => undefined))?.config.projectRoots ?? [],
         userHome,
+        new StoreBoardAttachments(attachmentStore),
       );
       // The GitHub watcher that moves the board's cards on PR facts (board-design.md §3.1): it runs the host's
       // own `gh`, links the PRs a card's work opened, and nudges through the board's nudge path. Armed after

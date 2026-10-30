@@ -184,13 +184,13 @@ describe('BoardCard', () => {
     expect(bare.querySelector('.fy-board-card__more')).toBeNull();
   });
 
-  it('offers Works → Close and Not good on a card waiting to be tried', async () => {
+  it('offers Done and Not good on a card waiting to be tried', async () => {
     const log: string[] = [];
     const root = await draw({ category: 'verify', moves: moves(log) });
     const works = must(root.querySelector<HTMLButtonElement>('[data-verdict="works"]'), 'Works');
     const notGood = must(root.querySelector<HTMLButtonElement>('[data-verdict="not-good"]'), 'Not good');
-    expect(works.textContent).toBe('Close');
-    expect(works.title).toBe('Works → Close');
+    expect(works.textContent).toBe('Done');
+    expect(works.title).toMatch(/^Mark .* done and close it$/u);
     expect(notGood.textContent).toBe('Not good');
     await interact(() => works.click());
     await interact(() => notGood.click());
@@ -235,7 +235,7 @@ describe('BoardCard', () => {
     expect(touch.querySelector('.fy-board-card__verdict .fy-board-done')).not.toBeNull();
   });
 
-  it('keeps Works → Close when the card has no Done to offer', async () => {
+  it('keeps a Done verdict button when the card has no Done control to offer', async () => {
     const reopen = { done: { kind: 'reopen', laneId: 'implement' } as const, press: () => undefined, atRelease: false };
     const root = await draw({ category: 'verify', done: reopen, moves: moves() });
     expect(root.querySelector('[data-verdict="works"]')).not.toBeNull();

@@ -131,6 +131,13 @@ const play = async (query: string): Promise<Probe> => {
 
 const PATHS = ['direct', 'turn-file', 'queued-file', 'merged'] as const;
 const HARNESSES = ['claude', 'codex'] as const;
+/**
+ * The harness only changes what the scene writes for a DIRECT send (Codex's soft-wrapped spacing); the turn-file,
+ * queued-file and merged rows are single-line text the harness does not reshape, and the reader never reads the
+ * ledger's evidence harness. Their claude and codex timelines are the same page, so each of those runs once.
+ */
+const harnessesOf = (path: (typeof PATHS)[number]): readonly (typeof HARNESSES)[number][] =>
+  path === 'direct' ? HARNESSES : ['claude'];
 const ORDERS = ['transcript-first', 'ledger-first', 'together'] as const;
 /** A local carrier answers within a frame or two; a relayed one is a poll behind. */
 const PACES = [
@@ -155,7 +162,7 @@ interface Run {
 const runsOf = new Map<string, Promise<PromiseSettledResult<Run>[]>>();
 const startRuns = (): void => {
   for (const path of PATHS)
-    for (const harness of HARNESSES)
+    for (const harness of harnessesOf(path))
       runsOf.set(
         `${path}/${harness}`,
         Promise.allSettled(
@@ -172,7 +179,7 @@ const startRuns = (): void => {
 describe('a sent message hands over to its transcript row in place', () => {
   beforeAll(startRuns);
   for (const path of PATHS)
-    for (const harness of HARNESSES)
+    for (const harness of harnessesOf(path))
       it(`${path} · ${harness}: one bubble, one element, at every frame in every order and pace`, async () => {
         for (const result of await (runsOf.get(`${path}/${harness}`) as Promise<PromiseSettledResult<Run>[]>)) {
           if (result.status === 'rejected') throw result.reason;

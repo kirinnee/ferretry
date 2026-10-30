@@ -6,11 +6,9 @@
  * reaches the page only inside the details sheet. Set `FY_CONNECTION_SHOTS_DIR` to also keep the
  * captures for review; every name and sentence in them is fake.
  */
-import { afterAll, beforeAll, describe, it } from 'bun:test';
-import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { beforeAll, describe, it } from 'bun:test';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { Browser } from 'playwright-core';
 import type { ReactElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -22,11 +20,11 @@ import {
 } from '../../../src/features/connection/connection-health-notice.tsx';
 import type { ConnectionHealthState } from '../../../src/lib/connection-health.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
+import { appStylesheet } from '../support/app-stylesheet.ts';
 import { sharedChromium } from '../support/chromium.ts';
 
 type Reconnecting = Extract<ConnectionHealthState, { kind: 'reconnecting' }>;
 
-const packageDir = resolve(import.meta.dir, '../../..');
 const NOW = Date.parse('2026-10-18T12:00:00.000Z');
 const MACHINE = 'workbench';
 const shotsDir = process.env.FY_CONNECTION_SHOTS_DIR ?? '';
@@ -124,36 +122,14 @@ const captures: readonly Capture[] = [
 ];
 
 let browser: Browser;
-let workspace = '';
 let css = '';
 
 describe('Connection notice visual contract', () => {
   beforeAll(async () => {
     browser = await sharedChromium();
-    workspace = await mkdtemp(join(tmpdir(), 'fy-connection-visual-'));
-    const stylesheet = join(workspace, 'app.css');
-    const result = spawnSync(
-      './node_modules/.bin/tailwindcss',
-      [
-        '--config',
-        'tailwind.config.ts',
-        '--input',
-        'src/styles/index.css',
-        '--output',
-        stylesheet,
-        '--content',
-        './src/**/*.{ts,tsx},./tests/integration/features/*.tsx',
-      ],
-      { cwd: packageDir, stdio: 'pipe' },
-    );
-    if (result.status !== 0) throw new Error(`tailwind build failed: ${result.stderr?.toString() ?? ''}`);
-    css = await readFile(stylesheet, 'utf8');
+    css = await appStylesheet();
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 120_000);
-
-  afterAll(async () => {
-    if (workspace !== '') await rm(workspace, { recursive: true, force: true });
-  });
 
   it('fits a phone and a desktop in both modes, meets the touch floor, and keeps the walk in the sheet', async () => {
     let page = '';
