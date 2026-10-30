@@ -1,3 +1,9 @@
+## [4.134.0](https://github.com/kirinnee/ferretry/compare/v4.133.0...v4.134.0) (2026-10-30)
+
+### Features
+
+* **daemon:** who a queued message is from is metadata, never text (QueuedMessage.by) ([#1025](https://github.com/kirinnee/ferretry/issues/1025)) ([4980a8e](https://github.com/kirinnee/ferretry/commit/4980a8ec8034839f285a322de9853c652ebaf30d))
+
 ## [4.133.0](https://github.com/kirinnee/ferretry/compare/v4.132.0...v4.133.0) (2026-10-30)
 
 ### Features
