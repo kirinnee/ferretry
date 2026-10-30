@@ -27,11 +27,22 @@ function message(overrides: Partial<QueuedMessage> = {}): QueuedMessage {
 
 class Gateway implements IQueueGateway {
   readonly asked: string[] = [];
+  readonly changes: string[] = [];
   constructor(private readonly held: readonly QueuedMessage[]) {}
 
   async messages(ferret: string): Promise<readonly QueuedMessage[]> {
     this.asked.push(ferret);
     return this.held;
+  }
+
+  async edit(ferret: string, messageId: string, text: string): Promise<QueuedMessage> {
+    this.changes.push(`edit ${ferret} ${messageId} ${text}`);
+    return message({ id: messageId, text, revision: 2 });
+  }
+
+  async cancel(ferret: string, messageId: string): Promise<QueuedMessage> {
+    this.changes.push(`cancel ${ferret} ${messageId}`);
+    return message({ id: messageId, state: 'cancelled' });
   }
 }
 
@@ -58,6 +69,24 @@ describe('fy queue', () => {
     await parsed;
 
     should(JSON.parse(lines.join('\n'))).deepEqual({ messages: [message()] });
+  });
+});
+
+describe('fy queue edit and cancel', () => {
+  it('should replace a waiting message’s words, joined from every word given', async () => {
+    const { parsed, gateway, lines } = run(['queue', 'edit', 'lizzette', 'q-1', 'ship', 'it', 'now'], []);
+    await parsed;
+
+    should(gateway.changes).eql(['edit lizzette q-1 ship it now']);
+    should(lines).eql(['Edited q-1 (revision 2). It still waits its turn.']);
+  });
+
+  it('should take back a waiting message', async () => {
+    const { parsed, gateway, lines } = run(['queue', 'cancel', 'lizzette', 'q-1'], []);
+    await parsed;
+
+    should(gateway.changes).eql(['cancel lizzette q-1']);
+    should(lines).eql(['Cancelled q-1. The ferret never saw it.']);
   });
 });
 
@@ -108,5 +137,26 @@ describe('the queue route', () => {
     should(queuePath('lizzette')).equal('/v1/sessions/lizzette/queue');
     should(paths).eql(['/v1/sessions/a%2Fb/queue']);
     should(messages.map(entry => entry.state)).eql(['delivered']);
+  });
+
+  it('should PATCH new words and DELETE a take-back on the message’s own path', async () => {
+    const calls: Array<{ path: string; init: RequestInit | undefined }> = [];
+    const client: QueueApiClient = {
+      request: <T>(path: string, schema: z.ZodType<T>, init?: RequestInit): Promise<T> => {
+        calls.push({ path, init });
+        return Promise.resolve(schema.parse(message({ id: 'q/1' })));
+      },
+    };
+    const gateway = new ProtocolQueueGateway(client);
+
+    await gateway.edit('lizzette', 'q/1', 'ship it now');
+    await gateway.cancel('lizzette', 'q/1');
+
+    should(calls.map(call => [call.init?.method, call.path])).eql([
+      ['PATCH', '/v1/sessions/lizzette/queue/q%2F1'],
+      ['DELETE', '/v1/sessions/lizzette/queue/q%2F1'],
+    ]);
+    should(JSON.parse(String(calls[0]?.init?.body))).deepEqual({ text: 'ship it now' });
+    await should(gateway.edit('lizzette', 'q/1', '   ')).be.rejected();
   });
 });

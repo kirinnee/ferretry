@@ -914,6 +914,7 @@ import {
   previousConversation,
   publishableDirectCarrier,
   QueueDeliverer,
+  QueueRefused,
   type QuotaFailoverLoop,
   QuotaFailoverService,
   RELAY_DIRECTORY_NOT_ASKED,
@@ -1827,6 +1828,8 @@ export interface DaemonWorld {
     sessionWorkers: DaemonConfig['sessionWorkers'],
     /** How long the owner's attention answers are held before they reach the ferret (`attention` block). */
     agenda: DaemonConfig['attention'],
+    /** Whether a message to a running ferret rides its durable queue (`delivery` block). */
+    delivery: DaemonConfig['delivery'],
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -3166,6 +3169,13 @@ function createResumeAnswerAgenda(storage: DaemonStorage, answerLedger: FileAnsw
  * launch still in flight becomes a retry, while a quarantine or an open question becomes a change of
  * plan. Collapsing them would tell an operator to fix something that is merely not ready yet.
  */
+/** A queue's refusal, in the send route's taxonomy: no such message, or one no longer waiting. */
+function queueRefusal(error: unknown): never {
+  if (error instanceof QueueRefused)
+    throw new SessionSendError(error.refusal === 'not_found' ? 'not_found' : 'refused', error.message);
+  throw error;
+}
+
 function sendRefusal(error: unknown): never {
   // The subclasses first: each extends `SendRefused`, and a plain refusal is the base.
   if (error instanceof SendPending) throw new SessionSendError('pending', error.message);
@@ -3195,8 +3205,13 @@ function createSessionSendSubsystem(
   sessions: SessionDirectorySubsystem,
   service: SessionSendService,
   ledger: Pick<SendLedger, 'list'>,
-  /** The session's durable queue, read here; delivery does not ride it yet. */
-  queue: Pick<SessionQueueService, 'list'>,
+  /**
+   * The session's durable queue and its deliverer. With `queueing` on, a message is enqueued and the
+   * deliverer types it; off, it is typed by the send path directly, as before. Read and edited either way.
+   */
+  queue: Pick<SessionQueueService, 'list' | 'enqueue' | 'edit' | 'cancel'>,
+  deliverer: Pick<QueueDeliverer, 'enqueued'>,
+  queueing: boolean,
   tracker: Pick<SendTracker, 'check' | 'watching'>,
   /** Copies each named attachment out where the agent can open it by path; see `lib/attachments/delivery.ts`. */
   deliverAttachments: (
@@ -3255,6 +3270,35 @@ function createSessionSendSubsystem(
       const turn = person
         ? await conversation.prepare(id, request.message)
         : { message: request.message, referenced: [] };
+      // `now` stops the running turn first: that is the send path's to do, not a queue's to wait for.
+      if (queueing && request.now !== true) {
+        const enqueued = await pending
+          .send(
+            id,
+            turn.message,
+            async message =>
+              await queue.enqueue(id, {
+                id: request.sendId,
+                sender: person ? 'human' : 'agent',
+                ...(request.senderSessionId === undefined ? {} : { from: request.senderSessionId }),
+                text: messageWithAttachments(message, delivered),
+                ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
+                ...(request.replyExpected === undefined ? {} : { replyExpected: request.replyExpected }),
+              }),
+            (sent, line) => sent.message.text.includes(line),
+          )
+          .catch((error: unknown) => sendRefusal(error));
+        // Answered as soon as it is on disk — the first tick — and typed by the deliverer, never by the caller.
+        void deliverer.enqueued(id).catch(() => undefined);
+        if (turn.referenced.length > 0) await conversation.settle(id, turn);
+        if (person) await instructions.queueIfStale(id);
+        return {
+          ...(await view(id, 'queued the message')),
+          disposition: 'queued',
+          sendId: enqueued.message.id,
+          fate: 'accepted',
+        };
+      }
       const outcome = await pending
         .send(
           id,
@@ -3298,6 +3342,10 @@ function createSessionSendSubsystem(
         .sort((left, right) => Date.parse(right.acceptedAt) - Date.parse(left.acceptedAt));
     },
     queue: async reference => await queue.list(require(reference)),
+    editQueued: async (reference, messageId, text) =>
+      await queue.edit(require(reference), messageId, text).catch((error: unknown) => queueRefusal(error)),
+    cancelQueued: async (reference, messageId) =>
+      await queue.cancel(require(reference), messageId).catch((error: unknown) => queueRefusal(error)),
     sendStatus: async (reference, sendId) => {
       const id = require(reference);
       await lookBeforeReading(tracker, id, async milliseconds => await Bun.sleep(milliseconds));
@@ -8599,6 +8647,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       browserLauncher,
       sessionWorkers,
       agendaConfig,
+      delivery,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
       // read from the configuration this boot loaded, and the adapters are built before that happens.
@@ -10796,6 +10845,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           sends,
           sendLedger,
           sessionQueue,
+          queueDeliverer,
+          delivery.queue,
           sendTracker,
           async (sessionId, attachmentIds) => {
             // Each copy sits beside its stored original, under the file's own name, written once: the
@@ -11812,6 +11863,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     world.browserLauncher,
     config.sessionWorkers,
     config.attention,
+    config.delivery,
   );
   // The older wire names (`legacy: true` routes) are counted into `<home>/legacy-wire-use.json` and shown on
   // `GET /v1/health`, so the release that removes them can wait for a quiet fortnight. A file that cannot be

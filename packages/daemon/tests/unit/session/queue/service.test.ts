@@ -62,8 +62,19 @@ describe('accepting a message', () => {
 
     should(second).deepEqual({ message: first.message, created: false });
     should(first.message).not.have.property('from');
+    should(first.message).not.have.property('replyExpected');
     should(first.message.attachmentIds).eql([]);
     should(store.logs.get(ID)).have.length(1);
+  });
+});
+
+describe('a message whose sender waits for the reply', () => {
+  it('should keep that the reply is expected, so the agent is told how to unblock them', async () => {
+    const { service } = subject();
+
+    const { message } = await service.enqueue(ID, { id: 'm1', sender: 'agent', text: 'ok?', replyExpected: true });
+
+    should(message.replyExpected).be.true();
   });
 });
 

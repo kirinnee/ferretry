@@ -37,9 +37,16 @@ is typed from it; the rest of this page is still how a message reaches the pane.
   in it is still waiting or unproven. Both harnesses follow one rule: Claude Code's own queue shows a
   message typed mid-turn, so its hand-over is proven at once; Codex steers it into the running turn and
   shows nothing, so it stays `typing` — holding the next message — until Codex's transcript proves it.
+- **Switch** — `"delivery": { "queue": true }` in `config/daemon.json` (off by default until every producer
+  rides the queue; read at start). On, `POST /v1/sessions/:sessionId/send` ENQUEUES: the person's agenda
+  context, any held board events and the attachment paths are baked into the text at that moment, the
+  answer is `disposition: "queued"` with the message id as `sendId` as soon as it is on disk, and the
+  deliverer types it. `--now` (stop the running turn first) still goes straight down the send path.
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
-- **Edit or cancel** — only while `queued` (`SessionQueueService.edit` / `.cancel`): once a key has gone to
-  the pane, the words are the agent's.
+- **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
+  `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
+<ferret> <id> <text…>` and `fy queue cancel <ferret> <id>`. Once a key has gone to the pane the words are
+  the agent's, and either answers `409`.
 
 ## The composer is read, never searched for
 
