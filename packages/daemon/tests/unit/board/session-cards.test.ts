@@ -48,6 +48,7 @@ interface Options {
   readonly proposed?: LaneSet | 'fail';
   readonly pendingFails?: boolean;
   readonly world?: Partial<ServiceWorld>;
+  readonly adoption?: SessionCardsPorts['adoption'];
 }
 
 const build = (options: Options = {}) => {
@@ -93,6 +94,7 @@ const build = (options: Options = {}) => {
     clock: { now: () => NOW },
     diagnostics: { warn: message => warnings.push(message) },
     bin: 'fy',
+    ...(options.adoption === undefined ? {} : { adoption: options.adoption }),
   };
   return { subject: new SessionCards(cardsPorts), ports, focus, proposals, pending, warnings };
 };
@@ -328,6 +330,66 @@ describe('a session started with a brief', () => {
     should(quiet.warnings).deepEqual([`&F1: ${hint}`]);
     should(afterFailure.card?.projectId).equal(UNFILED_PROJECT_ID);
     should(failing.warnings[0]).equal('could not propose lanes for Notes: the lane store is read-only');
+  });
+
+  it('should put the card of a start on the Unfiled board on the board of the repository it registers', async () => {
+    // Arrange
+    const adopted: string[] = [];
+    const adoption = (proposed: boolean): SessionCardsPorts['adoption'] => ({
+      adopt: async (sessionId, proposer) => {
+        adopted.push(`${sessionId}:${proposer ?? sessionId}`);
+        return { projectId: OTHER_PROJECT, proposed };
+      },
+    });
+    const fresh = build({ projects: { worker: UNFILED_PROJECT_ID }, adoption: adoption(true) });
+    const known = build({ projects: { worker: UNFILED_PROJECT_ID }, adoption: adoption(false) });
+
+    // Act
+    const opened = await fresh.subject.open({ sessionId: 'worker', brief: 'write notes' });
+    const again = await known.subject.open({ sessionId: 'worker', brief: 'write notes' });
+
+    // Assert
+    should(adopted).deepEqual(['worker:worker', 'worker:worker']);
+    should(opened.card?.projectId).equal(OTHER_PROJECT);
+    should(opened.notes).deepEqual([
+      'Home was registered as a project, so the card is on its board; its lanes were proposed for the owner to confirm (an agenda choice).',
+    ]);
+    should(again.notes).deepEqual(['Home was registered as a project, so the card is on its board.']);
+    should(fresh.proposals).be.empty();
+  });
+
+  it('should keep a start on its board when registering does nothing or fails, and never ask for a filed one', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const recording = (prefix: string): SessionCardsPorts['adoption'] => ({
+      adopt: async sessionId => {
+        asked.push(`${prefix}${sessionId}`);
+        return null;
+      },
+    });
+    const nothing = build({
+      projects: { worker: UNFILED_PROJECT_ID },
+      adoption: recording(''),
+    });
+    const failing = build({
+      projects: { worker: UNFILED_PROJECT_ID },
+      adoption: { adopt: () => Promise.reject(new Error('registry is damaged')) },
+    });
+    const filed = build({ adoption: recording('filed:') });
+
+    // Act
+    const kept = await nothing.subject.open({ sessionId: 'worker', brief: 'x' });
+    const fallen = await failing.subject.open({ sessionId: 'worker', brief: 'x' });
+    const onBoard = await filed.subject.open({ sessionId: 'worker', brief: 'x' });
+
+    // Assert
+    should([kept.card?.projectId, fallen.card?.projectId, onBoard.card?.projectId]).deepEqual([
+      UNFILED_PROJECT_ID,
+      UNFILED_PROJECT_ID,
+      PROJECT,
+    ]);
+    should(asked).deepEqual(['worker']);
+    should(failing.warnings).containEql('could not register the repository of worker: registry is damaged');
   });
 
   it('should never fail a start: a board failure is a note', async () => {

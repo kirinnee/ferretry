@@ -1,15 +1,17 @@
+import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises';
 import { basename, dirname, join, resolve } from 'node:path';
-import { randomUUID } from 'node:crypto';
 import {
   ProjectCloneUrlSchema,
   ProjectCloneUrlUnsupportedMessage,
-  ProjectListSchema,
-  ProjectPathSchema,
   type ProjectInfo,
   type ProjectList,
+  ProjectListSchema,
+  ProjectPathSchema,
   type RegisterProjectRequest,
 } from '@ferretry/protocol';
+import type { SerialExecutor } from '../../lib/ports.ts';
+import { KeyedSerialExecutor } from '../system/keyed-serial-executor.ts';
 
 /**
  * The transports a clone may use, handed to git itself. `ProjectCloneUrlSchema` already refuses every
@@ -27,6 +29,12 @@ export class FileProjectCatalog {
   constructor(
     private readonly file: string,
     private readonly now: () => string = () => new Date().toISOString(),
+    /**
+     * Holds each read-dedupe-write of the registry file, so two registrations at once (an owner's
+     * `fy project add` and a ferret's first card in the same repository) make one record, and neither write
+     * drops the other's. Every registration in the daemon goes through one instance.
+     */
+    private readonly serial: Pick<SerialExecutor, 'run'> = new KeyedSerialExecutor(),
   ) {}
 
   async projects(): Promise<ProjectList> {
@@ -47,22 +55,24 @@ export class FileProjectCatalog {
 
   async register(request: RegisterProjectRequest): Promise<ProjectInfo> {
     const root = await this.materialize(request);
-    const projects = await this.projects();
     const git = await this.gitAttachment(root);
-    const duplicate = projects.find(
-      project => project.path === root || (git && project.git?.commonDirectory === git.commonDirectory),
-    );
-    if (duplicate !== undefined) return duplicate;
-    const record: ProjectInfo = {
-      id: randomUUID(),
-      name: request.name ?? basename(root),
-      path: root,
-      source: request.kind,
-      createdAt: this.now(),
-      ...(git ? { git } : {}),
-    };
-    await this.write([...projects, record]);
-    return record;
+    return await this.serial.run(this.file, async () => {
+      const projects = await this.projects();
+      const duplicate = projects.find(
+        project => project.path === root || (git && project.git?.commonDirectory === git.commonDirectory),
+      );
+      if (duplicate !== undefined) return duplicate;
+      const record: ProjectInfo = {
+        id: randomUUID(),
+        name: request.name ?? basename(root),
+        path: root,
+        source: request.kind,
+        createdAt: this.now(),
+        ...(git ? { git } : {}),
+      };
+      await this.write([...projects, record]);
+      return record;
+    });
   }
 
   private async materialize(request: RegisterProjectRequest): Promise<string> {

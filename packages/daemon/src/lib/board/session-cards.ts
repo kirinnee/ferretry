@@ -37,6 +37,7 @@ import type {
   BoardDiagnostics,
   LaneProposer,
   LaneSetSource,
+  ProjectAdopter,
   SessionFocus,
   SessionParents,
 } from './ports.ts';
@@ -75,6 +76,8 @@ export interface SessionCardsPorts {
   readonly board: Pick<BoardService, 'reserve' | 'spawn' | 'signalDone'>;
   readonly lanes: LaneSetSource;
   readonly proposer: LaneProposer;
+  /** Registers the repository of a session on the Unfiled board, so its card goes on that project's board. */
+  readonly adoption?: ProjectAdopter;
   readonly projects: BoardProjectNames;
   readonly focus: Pick<SessionFocus, 'focusOf'>;
   readonly parents: SessionParents;
@@ -302,6 +305,20 @@ export class SessionCards {
     return { card, project: placed.project, notes: placed.notes };
   }
 
+  /** The repository's board for a session on the Unfiled board; `null` when it stays where it is. */
+  private async adopt(
+    sessionId: string,
+    proposer: string,
+  ): Promise<{ readonly projectId: BoardProjectId; readonly proposed: boolean } | null> {
+    const adoption = this.ports.adoption;
+    if (adoption === undefined) return null;
+    if ((await this.ports.lanes.projectOf(sessionId)) !== UNFILED_PROJECT_ID) return null;
+    return await adoption.adopt(sessionId, proposer).catch((error: unknown) => {
+      this.ports.diagnostics.warn(`could not register the repository of ${sessionId}: ${said(error)}`);
+      return null;
+    });
+  }
+
   /**
    * The board a session's card goes on: its project's, with lanes proposed when the project has none, else
    * the Unfiled board with a note that says how to move it.
@@ -310,6 +327,17 @@ export class SessionCards {
     sessionId: string,
     proposer: string,
   ): Promise<{ readonly projectId: BoardProjectId; readonly project: string; notes: string[] }> {
+    const adopted = await this.adopt(sessionId, proposer);
+    if (adopted !== null) {
+      const project = await this.ports.projects.nameOf(adopted.projectId);
+      return {
+        projectId: adopted.projectId,
+        project,
+        notes: [
+          `${project} was registered as a project, so the card is on its board${adopted.proposed ? '; its lanes were proposed for the owner to confirm (an agenda choice)' : ''}.`,
+        ],
+      };
+    }
     const projectId = await this.ports.lanes.projectOf(sessionId);
     const project = await this.ports.projects.nameOf(projectId);
     if ((await this.ports.lanes.laneSet(projectId)) !== null) return { projectId, project, notes: [] };
