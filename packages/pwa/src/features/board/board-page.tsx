@@ -33,17 +33,16 @@ import {
   type BoardGroupOf,
   type BoardViewId,
   cardPlaces,
-  DEFAULT_LIST_SORT,
   laneNames,
   laneOfCategory,
   parseBoardView,
-  parseListSort,
 } from '../../lib/board-view.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
 import { daemonBoardCardPath, daemonBoardPath, daemonProjectLanesPath } from '../../lib/pages/routes.ts';
 import { PageThemeSwitch } from '../../shell/theme-toggle.tsx';
 import type { BoardCardMoves } from './board-card.tsx';
 import { BoardCountsBar } from './board-counts.tsx';
+import { DEFAULT_SUMMARY_WINDOW, parseSummaryWindow, type SummaryWindow } from '../../lib/board-summary.ts';
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
 import { BoardNotice } from './board-notice.tsx';
 import { PhoneKanban } from './board-phone.tsx';
@@ -167,8 +166,7 @@ export function BoardPage({
     return next.toString();
   }, [defaultScoped, scopeFerret, search]);
   const view = parseBoardView(params.get('view'));
-  const sort = parseListSort(params.get('sort'));
-  const grouped = params.get('group') === 'lane';
+  const window = parseSummaryWindow(params.get('window'));
   const archive = view === 'archive';
 
   const writeParams = useCallback(
@@ -180,7 +178,7 @@ export function BoardPage({
   const writeFilters = useCallback(
     (filterSearch: string) => {
       const next = new URLSearchParams(filterSearch);
-      for (const key of ['view', 'sort', 'group', 'at']) {
+      for (const key of ['view', 'window', 'at']) {
         const kept = params.get(key);
         if (kept !== null) next.set(key, kept);
       }
@@ -206,16 +204,10 @@ export function BoardPage({
     nextParams.set('at', laneId);
     writeParams(nextParams);
   };
-  const setSort = (next: string): void => {
+  const setWindow = (next: SummaryWindow): void => {
     const nextParams = new URLSearchParams(params);
-    if (next === DEFAULT_LIST_SORT) nextParams.delete('sort');
-    else nextParams.set('sort', next);
-    writeParams(nextParams);
-  };
-  const setGrouped = (next: boolean): void => {
-    const nextParams = new URLSearchParams(params);
-    if (next) nextParams.set('group', 'lane');
-    else nextParams.delete('group');
+    if (next === DEFAULT_SUMMARY_WINDOW) nextParams.delete('window');
+    else nextParams.set('window', next);
     writeParams(nextParams);
   };
 
@@ -226,7 +218,7 @@ export function BoardPage({
   );
   const board = useBoard(store, machines, openFilters);
   // The Archive's two extra reads; an empty machine list reads nothing.
-  const wantClosed = archive && filters.state !== 'dropped';
+  const wantClosed = (archive && filters.state !== 'dropped') || view === 'list';
   const wantDropped = archive && filters.state !== 'closed';
   const closedFilters = useMemo<BoardFilters>(() => ({ ...filters, state: 'closed' }), [filters]);
   const droppedFilters = useMemo<BoardFilters>(() => ({ ...filters, state: 'dropped' }), [filters]);
@@ -448,10 +440,6 @@ export function BoardPage({
       return;
     }
     const next = boardFiltersToSearch({ ...filters, activity });
-    for (const key of ['sort']) {
-      const kept = params.get(key);
-      if (kept !== null) next.set(key, kept);
-    }
     next.set('view', 'list');
     writeParams(next);
   };
@@ -533,6 +521,7 @@ export function BoardPage({
             filters={filters}
             onChange={next => setFilters(next)}
             quietFerret={scopeFerret}
+            splitsAgents={model.splitsAgents}
           />
           {cardButton}
           {scopeToggle}
@@ -559,6 +548,7 @@ export function BoardPage({
             filters={filters}
             onChange={next => setFilters(next)}
             quietFerret={scopeFerret}
+            splitsAgents={model.splitsAgents}
           />
         </>
       )}
@@ -619,7 +609,7 @@ export function BoardPage({
           />
         )
       ) : view === 'list' ? (
-        <TableView env={env} grouped={grouped} model={model} onGroup={setGrouped} onSort={setSort} sort={sort} />
+        <TableView closed={closed.model} env={env} model={model} onWindow={setWindow} window={window} />
       ) : view === 'tree' ? (
         <TreeView env={env} model={model} />
       ) : view === 'dependencies' ? (

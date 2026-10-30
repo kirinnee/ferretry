@@ -255,12 +255,12 @@ describe('Board on a phone — counts and filters', () => {
       ['stale', 'stale'],
       ['orphaned', 'orphaned'],
     ] as const) {
-      const { root, searches } = await open('at=review&sort=age');
+      const { root, searches } = await open('at=review&window=today');
       await click(root, `[data-count="${count}"]`);
       const written = new URLSearchParams(searches[0]);
       expect(written.get('view')).toBe('list');
       expect(written.get('activity')).toBe(activity);
-      expect(written.get('sort')).toBe('age');
+      expect(written.get('window')).toBeNull();
       await view?.unmount();
     }
   });

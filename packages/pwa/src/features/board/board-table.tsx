@@ -1,26 +1,24 @@
 /**
- * THE BOARD'S TABLE VIEW (the route is still `?view=list`): one row per card, built to be read, not scanned
- * past. The title is whole and wraps; under it the card's one-line summary, muted, two lines at most and then
- * "more" (which opens the card). Never the long brief or the owner's ask.
- *
- * The RIGHT of a row holds the aligned columns: who, activity, PR, the Status pill (the lane) and last the
- * owner's "Done ✓" (or "Reopen" on a closed row in the Archive). On a phone the same row stacks: title and
- * summary, then the status pill and Done on one line. A row is a real link to the card detail.
+ * THE BOARD'S TABLE VIEW (the route is still `?view=list`): the CURRENT SUMMARY. What waits on the owner leads
+ * ("To test", with its Done action), then what is being worked on, then two quiet sections of what merged and
+ * what released lately. A row is the title, its one-line summary, the status pill and when it last mattered;
+ * the people and the PR numbers live on the card. The Archive keeps the flat, columned rows.
  */
 
 import { formatTaskRef } from '@ferretry/protocol';
+import { CornerDownRight } from 'lucide-react';
 import { type ReactNode, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { isAgentTask } from '../../lib/board-human.ts';
 import { cardSegments } from '../../lib/board-present.ts';
 import {
-  type BoardCardOf,
-  type BoardListRow,
-  groupRowsByLane,
-  LIST_SORT_LABEL,
-  LIST_SORTS,
-  type ListSort,
-  listRows,
-  sortRows,
-} from '../../lib/board-view.ts';
+  SUMMARY_SECTIONS,
+  SUMMARY_WINDOW_LABEL,
+  SUMMARY_WINDOWS,
+  type SummaryRow,
+  type SummaryWindow,
+  summarySections,
+} from '../../lib/board-summary.ts';
+import { type BoardCardOf, type BoardListRow, listRows } from '../../lib/board-view.ts';
 import type { BoardModel } from '../../lib/board-model.ts';
 import { RouteLink } from '../../shell/route-link.tsx';
 import { BoardDoneAction } from './board-done-action.tsx';
@@ -164,85 +162,152 @@ function TableHead() {
 export interface TableRowsProps {
   readonly rows: readonly BoardListRow[];
   readonly env: BoardCardEnv;
-  readonly grouped?: boolean;
 }
 
-/** The rows alone, flat or under a heading per lane: the Table and the Archive both draw them. */
-export function TableRows({ rows, env, grouped = false }: TableRowsProps) {
-  const groups = useMemo(() => (grouped ? groupRowsByLane(rows) : null), [grouped, rows]);
+/** The Archive's rows, flat, one per card. */
+export function TableRows({ rows, env }: TableRowsProps) {
   return (
-    <div className="fy-board-table" data-grouped={grouped ? '' : undefined}>
+    <div className="fy-board-table">
       <TableHead />
-      {groups === null ? (
-        <ul className="fy-board-table__rows">
-          {rows.map(row => (
-            <TableRow env={env} key={row.card.key} row={row} />
-          ))}
-        </ul>
-      ) : (
-        groups.map(group => (
-          <section aria-label={group.laneName} className="fy-board-table__group" key={group.key}>
-            <h2 className="fy-board-table__group-head">
-              <span className="fy-board-pill" data-category={group.category ?? 'unplaced'}>
-                {group.laneName}
-              </span>
-              <span className="fy-board-table__group-count">{group.rows.length}</span>
-            </h2>
-            <ul className="fy-board-table__rows">
-              {group.rows.map(row => (
-                <TableRow env={env} key={row.card.key} row={row} />
-              ))}
-            </ul>
-          </section>
-        ))
-      )}
+      <ul className="fy-board-table__rows">
+        {rows.map(row => (
+          <TableRow env={env} key={row.card.key} row={row} />
+        ))}
+      </ul>
     </div>
   );
 }
 
 export interface TableViewProps {
   readonly model: BoardModel;
+  /** Closed cards, read only to list what was released lately; empty until read. */
+  readonly closed?: BoardModel;
   readonly env: BoardCardEnv;
-  readonly sort: ListSort;
-  readonly onSort: (sort: ListSort) => void;
-  /** Group the rows under their lane. */
-  readonly grouped: boolean;
-  readonly onGroup: (grouped: boolean) => void;
+  readonly window: SummaryWindow;
+  readonly onWindow: (window: SummaryWindow) => void;
 }
 
-export function TableView({ model, env, sort, onSort, grouped, onGroup }: TableViewProps) {
-  const rows = useMemo(() => sortRows(listRows(model), sort), [model, sort]);
+function SummaryRowView({ entry, env }: { readonly entry: SummaryRow; readonly env: BoardCardEnv }) {
+  const { card, row } = entry;
+  const { task } = card;
+  const action = SUMMARY_SECTIONS[entry.section].action;
+  const place = env.places.get(card.key);
+  const done = action && place !== undefined ? env.doneFor?.(card, place) : undefined;
+  const href = env.hrefFor(card);
+  const extras = cardSegments(task, { names: env.names, now: env.now, category: row.category, machine: null }).filter(
+    segment => segment.key === 'blocked' || segment.key === 'subs',
+  );
   return (
-    <div className="fy-board-list">
+    <li
+      className="fy-board-summary__row"
+      data-action={action ? '' : undefined}
+      data-agent={isAgentTask(task) ? '' : undefined}
+      data-section={entry.section}
+      data-task={task.id}
+      data-touch={env.touch === true ? '' : undefined}
+      data-under={entry.under === null ? undefined : ''}
+    >
+      <div className="fy-board-table__what">
+        <div className="fy-board-table__line">
+          {entry.under === null ? null : (
+            <CornerDownRight aria-label="Made for the card above" className="fy-board-summary__under" size={12} />
+          )}
+          <RouteLink className="fy-board-table__title" onNavigate={env.onNavigate} to={href}>
+            <span className="fy-board-table__ref">{formatTaskRef({ id: task.id })}</span>{' '}
+            <span className="fy-board-table__title-text">{task.title}</span>
+          </RouteLink>
+          {extras.length === 0 ? null : (
+            <span className="fy-board-table__extras">
+              {extras.map(entry => (
+                <span
+                  className="fy-board-seg"
+                  data-seg={entry.key}
+                  data-tone={entry.tone}
+                  key={entry.key}
+                  title={entry.title}
+                >
+                  {entry.icon === null ? null : <BoardIcon name={entry.icon} />}
+                  {entry.text}
+                </span>
+              ))}
+            </span>
+          )}
+        </div>
+        {task.summary === '' ? null : <Summary href={href} onNavigate={env.onNavigate} text={task.summary} />}
+      </div>
+      <div className="fy-board-summary__meta">
+        <span className="fy-board-pill" data-category={row.category ?? 'unplaced'} title="Lane">
+          {row.laneName}
+        </span>
+        <span className="fy-board-summary__when">{entry.when}</span>
+      </div>
+      <div className="fy-board-summary__act">
+        {done === undefined ? null : (
+          <BoardDoneAction done={done.done} onPress={done.press} title={task.title} touch={env.touch === true} />
+        )}
+      </div>
+    </li>
+  );
+}
+
+/**
+ * THE TABLE: the current summary, not a spreadsheet. What waits on the owner leads, then what is being worked
+ * on, then two compact sections of what merged and what released lately (the time window narrows those two).
+ */
+export function TableView({ model, closed, env, window, onWindow }: TableViewProps) {
+  const sections = useMemo(
+    () =>
+      summarySections({
+        rows: listRows(model),
+        closedRows: closed === undefined ? [] : listRows(closed),
+        window,
+        now: env.now,
+      }),
+    [model, closed, window, env.now],
+  );
+  return (
+    <div className="fy-board-list fy-board-summary">
       <div className="fy-board-table__tools">
-        <div aria-label="Sort the table" className="fy-board-sort" role="toolbar">
-          {LIST_SORTS.map(option => (
+        <span className="fy-board-summary__tools-label" id="board-summary-window">
+          Merged and released in the last
+        </span>
+        <div aria-labelledby="board-summary-window" className="fy-board-sort" role="toolbar">
+          {SUMMARY_WINDOWS.map(option => (
             <button
-              aria-pressed={sort === option}
+              aria-pressed={window === option}
               className="fy-board-sort__option"
-              data-sort={option}
+              data-window={option}
               key={option}
-              onClick={() => onSort(option)}
+              onClick={() => onWindow(option)}
               type="button"
             >
-              {LIST_SORT_LABEL[option]}
+              {SUMMARY_WINDOW_LABEL[option]}
             </button>
           ))}
         </div>
-        <button
-          aria-pressed={grouped}
-          className="fy-board-sort__option fy-board-table__group-toggle"
-          data-group-by-lane=""
-          onClick={() => onGroup(!grouped)}
-          type="button"
-        >
-          Group by lane
-        </button>
       </div>
-      {rows.length === 0 ? (
-        <p className="fy-board-empty">No cards match.</p>
+      {sections.length === 0 ? (
+        <p className="fy-board-empty">Nothing to show for this window.</p>
       ) : (
-        <TableRows env={env} grouped={grouped} rows={rows} />
+        sections.map(section => (
+          <section
+            aria-label={section.title}
+            className="fy-board-summary__section"
+            data-action={section.action ? '' : undefined}
+            data-section={section.id}
+            key={section.id}
+          >
+            <h2 className="fy-board-summary__head">
+              {section.title}
+              <span className="fy-board-table__group-count">{section.rows.length}</span>
+            </h2>
+            <ul className="fy-board-table__rows">
+              {section.rows.map(entry => (
+                <SummaryRowView entry={entry} env={env} key={entry.card.key} />
+              ))}
+            </ul>
+          </section>
+        ))
       )}
     </div>
   );
