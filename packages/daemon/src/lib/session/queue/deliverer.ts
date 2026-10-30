@@ -143,7 +143,7 @@ export class QueueDeliverer {
   /** Brings every message already handed over up to what the send ledger proves. */
   private async settle(id: SessionId): Promise<void> {
     for (const message of await this.messages(id)) {
-      if (message.state !== 'typing' && message.state !== 'delivered') continue;
+      if (message.state !== 'typing' && message.state !== 'delivered' && message.state !== 'unconfirmed') continue;
       const fate = await this.ports.transport.fate(id, message.id);
       for (const move of movesFrom(message, fate)) await this.move(id, message.id, move.state, move.failure);
     }
@@ -215,7 +215,7 @@ export class QueueDeliverer {
   private unsettled(message: QueuedMessage): boolean {
     if (message.state === 'typing') return true;
     if (message.state === 'queued') return message.waitReason !== undefined;
-    if (message.state !== 'delivered') return false;
+    if (message.state !== 'delivered' && message.state !== 'unconfirmed') return false;
     return Date.parse(this.ports.clock.now()) - Date.parse(message.stateAt) < this.settings.readWatchMs;
   }
 

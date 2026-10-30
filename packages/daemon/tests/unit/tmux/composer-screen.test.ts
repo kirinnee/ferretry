@@ -16,6 +16,7 @@ import {
   readComposer,
   readHarnessQueue,
   readPendingInputs,
+  needsQueueKey,
   showsPayload,
 } from '../../../src/lib/index.ts';
 
@@ -597,5 +598,51 @@ describe('a multi-paragraph Claude draft closed by its rule', () => {
   it('should not swallow rows that are not an indented draft before a rule', () => {
     const claude = '❯ hello\n\n⏺ assistant output\n────────\n';
     should(composerRows(claude)).deepEqual({ first: 0, last: 0 });
+  });
+});
+
+/**
+ * A ferret's message typed into a busy Codex 0.156.1 pane: an envelope line, a blank row, then paragraphs,
+ * with no rule under the composer and the cursor at the end of the last paragraph. The composer ended at
+ * its first blank row, so the landing proof never saw the message, nothing pressed Tab, and it sat in the
+ * box under "tab to queue message" (2026-10-30). Rebuilt from the live capture.
+ */
+describe('a multi-paragraph Codex draft the cursor reaches', () => {
+  const visible = readFileSync(join(FIXTURES, 'codex-0.156.1-peer-message-draft.txt'), 'utf8');
+  const [x, y] = readFileSync(join(FIXTURES, 'codex-0.156.1-peer-message-draft.cursor'), 'utf8').trim().split('|');
+  const frame: DeliveryFrame = {
+    alive: true,
+    dead: false,
+    promptReady: false,
+    visible,
+    cursorX: Number(x),
+    cursorY: Number(y),
+  };
+  const MESSAGE =
+    '[message from ferret lainey (session mvvakqjy-1f2d2f45) — not from the owner]\n\n' +
+    'No reply needed. To reply: fy send lainey "<reply>"\n\n' +
+    'I have likely issues in split hex/Enter delivery, missing per-pane serialization, target facts rechecked ' +
+    'only before separate pane-proof check, incomplete ephemeral redaction wiring, values retained past TTL, ' +
+    'and terminal.wait testing raw text before scrubbing output (substring oracle). Please cover ' +
+    'authorization, service idempotency/restart and generic agenda route only; send concrete findings when ready.';
+
+  it('should read every paragraph down to the cursor as the composer’s input', () => {
+    const composer = readComposer(visible, cursorOf(frame));
+    should(composer?.placeholder).be.false();
+    should(composer?.text).endWith('send concrete findings when ready.');
+    should(composerState(frame).kind).equal('input');
+  });
+
+  it('should prove the message landed, and that the pane wants Tab while it sits in the box', () => {
+    should(composerLanding(frame, MESSAGE, true)).equal('chars');
+    should(needsQueueKey(frame, MESSAGE, 'chars')).be.true();
+  });
+
+  it('should not carry the composer past a row that is not a draft, nor to a cursor outside it', () => {
+    const conversation = '› fix the flaky test\n\n• Working (5s • esc to interrupt)\n  more\n';
+    should(readComposer(conversation, { x: 4, y: 3 })?.text).equal('fix the flaky test');
+    const ruled = '› hello\n\n────────\n  more\n';
+    should(readComposer(ruled, { x: 4, y: 3 })?.text).equal('hello');
+    should(readComposer('› hello\n', { x: 4, y: 9 })?.text).equal('hello');
   });
 });
