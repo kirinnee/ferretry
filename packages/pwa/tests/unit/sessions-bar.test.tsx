@@ -75,6 +75,21 @@ const click = async (element: Element | null, what: string): Promise<void> => {
   await interact(() => (must(element, what) as HTMLElement).click());
 };
 
+/** "Show stopped" is a row of the ⋯ menu: open it, read the row, and (optionally) choose it. */
+const stoppedRow = async (root: Element | null, choose: boolean): Promise<{ on: boolean; hidden: string | null }> => {
+  await click(root?.querySelector('[data-sbar-options]') ?? null, 'the options button');
+  const row = must(document.querySelector('[data-menu-key="show-stopped"]'), 'the Show stopped row');
+  const state = {
+    on: row.querySelector('svg') !== null,
+    hidden: row.querySelector('.mono')?.textContent ?? null,
+  };
+  if (choose) await click(row, 'Show stopped');
+  else await interact(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  return state;
+};
+const toggleShowStopped = (root: Element | null) => stoppedRow(root, true);
+const readShowStopped = (root: Element | null) => stoppedRow(root, false);
+
 describe('SessionsBar as a column', () => {
   test('shows a one-line preview of the question a waiting ferret asks, on its row', async () => {
     const asking = sessionView('asker-1', {
@@ -175,19 +190,17 @@ describe('SessionsBar as a column', () => {
       [...(view?.container.querySelectorAll('[data-sbar-session]') ?? [])].map(node =>
         node.getAttribute('data-sbar-session'),
       );
-    const box = () => view?.container.querySelector<HTMLInputElement>('[data-sbar-show-stopped]') ?? null;
     expect(ids()).not.toContain('old-1');
-    expect(box()?.checked).toBe(false);
-    expect(view.container.querySelector('[data-sbar-hidden-stopped]')?.textContent).toBe('1');
+    expect(view.container.querySelector('.fy-sbar__stopped')).toBeNull();
+    expect(await readShowStopped(view.container)).toEqual({ on: false, hidden: '1' });
     expect(view.container.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('3');
 
-    await click(box(), 'Show stopped');
+    await toggleShowStopped(view.container);
     expect(ids()).toContain('old-1');
-    expect(box()?.checked).toBe(true);
-    expect(view.container.querySelector('[data-sbar-hidden-stopped]')).toBeNull();
+    expect(await readShowStopped(view.container)).toEqual({ on: true, hidden: null });
     expect(view.container.querySelector('[data-sbar-filter="all"] .fy-sbar__count')?.textContent).toBe('4');
 
-    await click(box(), 'Show stopped');
+    await toggleShowStopped(view.container);
     expect(ids()).not.toContain('old-1');
   });
 
@@ -201,7 +214,7 @@ describe('SessionsBar as a column', () => {
     await view.render(bar({ sessions: [stopped], activeSessionId: null }).element);
     expect(view.container.querySelector('[data-sbar-session="hadi-1"]')).toBeNull();
     expect(view.container.querySelector('.fy-sbar__empty')?.textContent).toBe(
-      'No live sessions — 1 stopped. Tick Show stopped.',
+      'No live sessions — 1 stopped. Choose ⋯ › Show stopped.',
     );
   });
 
@@ -267,7 +280,7 @@ describe('SessionsBar as a column', () => {
     expect(ids()).toEqual(['pat-1']);
 
     await click(view.container.querySelector('[data-sbar-filter="auto"]'), 'Agents');
-    await click(view.container.querySelector('[data-sbar-show-stopped]'), 'Show stopped');
+    await toggleShowStopped(view.container);
     await click(view.container.querySelector('[data-sbar-filter="auto"]'), 'Agents');
     expect(chosen).toEqual(['auto']);
 
@@ -445,24 +458,47 @@ describe('SessionsBar row density', () => {
     expect(detail.querySelector('[data-sbar-dir]')).not.toBeNull();
   });
 
-  test('offers the density menu only to a host that can store the choice', async () => {
+  test('offers the density rows only to a host that can store the choice; the ⋯ always holds Show stopped', async () => {
     view = await mount(bar().element);
-    expect(options()).toBeNull();
+    await click(options(), 'the options button');
+    expect(items()).toEqual(['Show stoppedCompleted, failed, stalled or stopped sessions']);
+  });
+
+  test('keeps Restart outdated and Show stopped out of the list body, in the ⋯ with a count badge', async () => {
+    const stale = (id: string) => ({ ...sessionView(id), outdated: { sections: ['pack'] } }) as never;
+    const requests: unknown[] = [];
+    view = await mount(
+      bar({
+        sessions: [stale('a'), stale('b'), sessionView('c')],
+        onRestartOutdated: async request => {
+          requests.push(request);
+          return { restarted: [{ id: 'a' }], queued: [], skipped: [], failed: [] };
+        },
+      }).element,
+    );
+    expect(view.container.querySelector('.fy-sbar__filters input')).toBeNull();
+    expect(view.container.querySelector('[data-restart-outdated-button]')).toBeNull();
+    expect(options()?.querySelector('[data-sbar-options-badge]')?.textContent).toBe('2');
+    await click(options(), 'the options button');
+    expect(items()[1]).toContain('Restart outdated (2)');
+    await click(document.querySelector('[data-menu-key="restart-outdated"]'), 'Restart outdated');
+    expect(requests).toEqual([{ scope: 'outdated' }]);
+    expect(view.container.querySelector('[data-restart-outdated-result]')?.textContent).toContain('1 ferret restarted');
   });
 
   test('says which density is in force and writes the one the reader picks', async () => {
     const chosen: string[] = [];
     view = await mount(bar({ onDensityChange: next => chosen.push(next) }).element);
     await click(options(), 'the options button');
-    expect(items()).toEqual(['Compactcurrent', 'Comfortable']);
-    await click(document.querySelector('[role="menuitem"]:nth-child(2)'), 'Comfortable');
+    expect(items().slice(1)).toEqual(['Compactcurrent', 'Comfortable']);
+    await click(document.querySelector('[data-menu-key="comfortable"]'), 'Comfortable');
     expect(chosen).toEqual(['full']);
     await view.unmount();
 
     view = await mount(bar({ density: 'full', onDensityChange: next => chosen.push(next) }).element);
     await click(options(), 'the options button');
-    expect(items()).toEqual(['Compact', 'Comfortablecurrent']);
-    await click(document.querySelector('[role="menuitem"]:nth-child(1)'), 'Compact');
+    expect(items().slice(1)).toEqual(['Compact', 'Comfortablecurrent']);
+    await click(document.querySelector('[data-menu-key="compact"]'), 'Compact');
     expect(chosen).toEqual(['full', 'compact']);
   });
 });
@@ -714,8 +750,8 @@ describe('SessionsBar across every machine', () => {
         node.getAttribute('data-sbar-session'),
       );
     expect(rows()).not.toContain('end-1');
-    expect(view.container.querySelector('[data-sbar-hidden-stopped]')?.textContent).toBe('1');
-    await click(view.container.querySelector('[data-sbar-show-stopped]'), 'Show stopped');
+    expect((await readShowStopped(view.container)).hidden).toBe('1');
+    await toggleShowStopped(view.container);
     expect(rows()).toContain('end-1');
 
     await click(view.container.querySelector('[data-sbar-filter="interactive"]'), 'Interactive');
@@ -727,7 +763,7 @@ describe('SessionsBar across every machine', () => {
     const stopped = sessionView('old-1', { config: { name: 'Finished' }, state: { status: 'completed' } });
     const { element } = bar({ sessions: [SESSIONS[0] as (typeof SESSIONS)[number], stopped] });
     view = await mount(element);
-    await click(view.container.querySelector('[data-sbar-show-stopped]'), 'Show stopped');
+    await toggleShowStopped(view.container);
     expect(view.container.querySelector('[data-sbar-session="old-1"]')).not.toBeNull();
     await view.render(
       bar({ presentation: 'rail', sessions: [SESSIONS[0] as (typeof SESSIONS)[number], stopped] }).element,

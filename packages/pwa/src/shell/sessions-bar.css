@@ -66,6 +66,26 @@
   background: var(--nav-sel-bg, var(--accent-soft));
   color: var(--nav-sel-fg, var(--accent));
 }
+.fy-sbar__options {
+  position: relative;
+}
+/* The outdated count on the ⋯: the one reason to open it unprompted. Warn ink, like the row marks. */
+.fy-sbar__options-badge {
+  position: absolute;
+  top: -2px;
+  right: -2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: var(--warn);
+  color: var(--bg);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--weight-strong);
+  line-height: 14px;
+  text-align: center;
+}
 .fy-sbar__machine {
   display: inline-flex;
   align-items: center;
@@ -154,28 +174,8 @@
   color: var(--nav-sel-fg, var(--accent));
   font-weight: var(--weight-strong);
 }
-.fy-sbar__stopped {
-  display: inline-flex;
-  align-items: center;
-  align-self: flex-start;
-  gap: 6px;
-  min-height: 28px;
-  padding-inline: 4px;
-  color: var(--muted);
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.fy-sbar__stopped input {
-  width: 14px;
-  height: 14px;
-  margin: 0;
-  accent-color: var(--accent);
-}
 .fy-sbar--drawer .fy-sbar__seg {
   min-height: 40px;
-}
-.fy-sbar--drawer .fy-sbar__stopped {
-  min-height: 36px;
 }
 .fy-sbar__count {
   color: inherit;

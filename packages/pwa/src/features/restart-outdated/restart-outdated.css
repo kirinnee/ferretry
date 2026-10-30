@@ -1,5 +1,5 @@
-/* "Outdated" mark (outdated-mark.tsx): a refresh glyph in the warn ink, the size of a mode icon, and the one "Restart outdated (N)" strip
-   (restart-outdated-strip.tsx). Warn tokens: it means "act when you can", not "something is broken". */
+/* "Outdated" mark (outdated-mark.tsx): a refresh glyph in the warn ink, the size of a mode icon, and the line that answers
+   "Restart outdated (N)" (restart-outdated-strip.tsx). Warn tokens: it means "act when you can", not "something is broken". */
 .fy-outdated-mark {
   display: inline-flex;
   flex-shrink: 0;
@@ -14,12 +14,6 @@
   flex-direction: column;
   gap: var(--gap-xs);
   padding: 0 var(--gap-sm) var(--gap-sm);
-}
-.fy-restart-outdated__button {
-  justify-content: center;
-  gap: 6px;
-  width: 100%;
-  min-height: var(--target-floor);
 }
 .fy-restart-outdated__result {
   display: flex;

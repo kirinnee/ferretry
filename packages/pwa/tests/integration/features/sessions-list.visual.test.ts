@@ -84,6 +84,18 @@ const open = async (
   return { context, tab };
 };
 
+/** "Show stopped" lives in the bar's ⋯ menu: its row text (with the hidden count), read without choosing it. */
+const stoppedRow = async (tab: Page): Promise<string> => {
+  await tab.click('[data-sbar-options]');
+  const text = ((await tab.textContent('[data-menu-key="show-stopped"]')) ?? '').replace(/\s+/g, ' ').trim();
+  await tab.keyboard.press('Escape');
+  return text;
+};
+const toggleStopped = async (tab: Page): Promise<void> => {
+  await tab.click('[data-sbar-options]');
+  await tab.click('[data-menu-key="show-stopped"]');
+};
+
 const texts = async (tab: Page, selector: string): Promise<readonly string[]> =>
   await tab.$$eval(selector, nodes => nodes.map(node => (node as HTMLElement).innerText.replace(/\s+/gu, ' ').trim()));
 
@@ -98,7 +110,7 @@ const shot = async (tab: Page, name: string): Promise<void> => {
 
 /** No label in the segment strip or the tick is wider than the box it sits in. */
 const clippedControls = async (tab: Page): Promise<readonly string[]> =>
-  await tab.$$eval('[data-sbar-filter], .fy-sbar__stopped', nodes =>
+  await tab.$$eval('[data-sbar-filter]', nodes =>
     nodes
       .filter(node => (node as HTMLElement).scrollWidth > (node as HTMLElement).clientWidth)
       .map(node => node.textContent ?? ''),
@@ -136,11 +148,11 @@ describe('the sessions list', () => {
           const live = (await rowIds(tab)).slice().sort();
           expect(live).toEqual(['s-hadi', 's-ivo', 's-lea', 's-ora']);
           expect(await segments(tab)).toEqual(['Interactive 2', 'All 4', 'Agents 2']);
-          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 3']);
+          expect(await stoppedRow(tab)).toBe('Show stopped Completed, failed, stalled or stopped sessions 3');
           expect(await clippedControls(tab)).toEqual([]);
           await shot(tab, `sessions-list-${view}-hidden`);
 
-          await tab.click('[data-sbar-show-stopped]');
+          await toggleStopped(tab);
           expect((await rowIds(tab)).slice().sort()).toEqual([
             's-hadi',
             's-ivo',
@@ -151,16 +163,16 @@ describe('the sessions list', () => {
             's-rue',
           ]);
           expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
-          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped']);
+          expect(await stoppedRow(tab)).toBe('Show stopped Completed, failed, stalled or stopped sessions');
           await shot(tab, `sessions-list-${view}-stopped`);
 
           await tab.click('[data-sbar-filter="auto"]');
           expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-kai', 's-lea', 's-noa']);
           // Choosing a kind leaves the other segments' numbers alone.
           expect(await segments(tab)).toEqual(['Interactive 3', 'All 7', 'Agents 4']);
-          await tab.click('[data-sbar-show-stopped]');
+          await toggleStopped(tab);
           expect((await rowIds(tab)).slice().sort()).toEqual(['s-ivo', 's-lea']);
-          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 2']);
+          expect(await stoppedRow(tab)).toBe('Show stopped Completed, failed, stalled or stopped sessions 2');
           await shot(tab, `sessions-list-${view}-agents`);
         } finally {
           await context.close();
@@ -293,10 +305,10 @@ describe('the sessions list', () => {
           ]);
           // Stopped sessions on either machine are hidden, and the segment counts both.
           expect(await segments(tab)).toEqual(['Interactive 3', 'All 6', 'Agents 3']);
-          expect(await texts(tab, '.fy-sbar__stopped')).toEqual(['Show stopped 4']);
+          expect(await stoppedRow(tab)).toBe('Show stopped Completed, failed, stalled or stopped sessions 4');
           await shot(tab, `sessions-list-${view}-machines`);
 
-          await tab.click('[data-sbar-show-stopped]');
+          await toggleStopped(tab);
           expect(await rowIds(tab)).toContain('l-ada');
           await shot(tab, `sessions-list-${view}-machines-stopped`);
         } finally {

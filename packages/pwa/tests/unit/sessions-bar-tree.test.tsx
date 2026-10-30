@@ -102,7 +102,8 @@ describe('the sessions bar as a tree', () => {
 
   test('Show stopped lists the stopped child in its branch and counts it in the rollup', async () => {
     view = await mount(bar());
-    await click(q('[data-sbar-show-stopped]'), 'Show stopped');
+    await click(q('[data-sbar-options]'), 'the options button');
+    await click(document.querySelector('[data-menu-key="show-stopped"]'), 'Show stopped');
     expect(listed()).toContain('gone');
     expect(q('[data-sbar-fold="lead"]')?.textContent).toContain('1 stopped');
   });
