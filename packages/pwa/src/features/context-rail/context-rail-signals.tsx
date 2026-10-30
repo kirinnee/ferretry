@@ -148,10 +148,7 @@ function SignalItem({ row, agentName, nowMs, busy, refusal, onRespond, onResolve
   const open = row.state === 'open';
   return (
     <li
-      className={cn(
-        'kt-panel flex min-w-0 flex-col gap-xs p-panel',
-        open ? 'border-l-heavy border-l-warn' : 'opacity-90',
-      )}
+      className={cn('kt-panel flex min-w-0 flex-col gap-xs p-panel', open ? 'bg-warn-bg' : 'opacity-90')}
       data-context-signal={row.item.id}
       data-context-signal-state={row.state}
     >
