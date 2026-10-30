@@ -18,10 +18,11 @@
  *   - Tailwind's own `rounded-xl`/`shadow-2xl`-style ramp keys, which the config does NOT map to
  *     tokens, and arbitrary `rounded-[…px]` / `shadow-[…px…]` values.
  *
- * The theme sheet (`styles/themes.css`) and the syntax mapping (`styles/highlight.css`) are where
- * literals belong and are not scanned. A literal that genuinely must not follow the theme — a QR
- * code has to stay black on white to scan — carries `theme-literal-ok: <why>` in a comment on its
- * own line or the line above, so the exception is written down where the next reader meets it.
+ * The theme sheet (`styles/themes.css`), the face declarations it names (`styles/theme-fonts.css`) and the
+ * syntax mapping (`styles/highlight.css`) are where literals belong and are not scanned. A literal that
+ * genuinely must not follow the theme — a QR code has to stay black on white to scan — carries
+ * `theme-literal-ok: <why>` in a comment on its own line or the line above, so the exception is written
+ * down where the next reader meets it.
  */
 
 import { describe, expect, it } from 'bun:test';
@@ -32,7 +33,7 @@ import { Glob } from 'bun';
 const SRC = join(import.meta.dir, '../../src');
 
 /** The token files: the only places in `src/` a literal look may be written. */
-const TOKEN_FILES = new Set(['styles/themes.css', 'styles/highlight.css']);
+const TOKEN_FILES = new Set(['styles/themes.css', 'styles/theme-fonts.css', 'styles/highlight.css']);
 
 const ESCAPE = 'theme-literal-ok';
 

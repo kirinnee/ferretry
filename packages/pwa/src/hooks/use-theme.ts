@@ -35,6 +35,7 @@ import {
   themeAttribute,
   themeColorFromComputedStyle,
 } from '../lib/theme-preferences.ts';
+import { preloadThemeFonts } from '../lib/theme-fonts.ts';
 
 /** The one store every consumer in a tab shares unless a test injects another. */
 export const themePreferences = new ThemePreferenceStore();
@@ -91,6 +92,7 @@ export function useTheme(store: ThemePreferenceStore = themePreferences): ThemeS
   useEffect(() => {
     const root = document.documentElement;
     root.dataset.theme = attr;
+    preloadThemeFonts(preference.family);
     applyTextScale(root, preference.textScale);
 
     const link = document.getElementById(MANIFEST_LINK_ID);
