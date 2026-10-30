@@ -1,4 +1,5 @@
 import { describe, it } from 'bun:test';
+import { DAEMON_FEATURES } from '@ferretry/protocol';
 import { Command } from 'commander';
 import should from 'should';
 import { registerAgendaCommands } from '../../../src/lib/agenda/commands';
@@ -16,8 +17,9 @@ import {
 const board = snapshot([humanItem('A1', 'approve the deploy')], { resolved: [resolvedItem('A9', 'old ask')] });
 const afterAdd = snapshot([humanItem('A1', 'approve the deploy'), agentItem('A2', 'pick a cluster')]);
 
-function run(argv: string[], result = board) {
+function run(argv: string[], result = board, offered: readonly string[] = []) {
   const gateway = new RecordingAgendaGateway(board, result);
+  gateway.offered = offered;
   const out = new CapturingOutput();
   const sent: Array<{ words: readonly string[]; options: unknown }> = [];
   const program = new Command().name('fy').exitOverride();
@@ -606,6 +608,53 @@ describe('attention needs-info command', () => {
 
     // Assert
     should(gateway.applied[0]?.request).match({ action: 'add', ask: { kind: 'task' }, steps: ['Run it'] });
+  });
+
+  it('should tie the item to the card --task names, on a daemon that offers it', async () => {
+    // Arrange + Act
+    const bare = run(['agenda', 'add', 'Approve it', '--title', 'Approve', '--task', 'F18'], afterAdd, [
+      DAEMON_FEATURES.agendaTask,
+    ]);
+    await bare.parsed;
+    const sigil = run(['agenda', 'add', '--task', '&f18', 'Approve it', '--title', 'Approve'], afterAdd, [
+      DAEMON_FEATURES.agendaTask,
+    ]);
+    await sigil.parsed;
+
+    // Assert
+    should(bare.gateway.applied[0]?.request).match({ subject: 'Approve it', kind: 'reply', task: { id: 'F18' } });
+    should(sigil.gateway.applied[0]?.request).match({ subject: 'Approve it', task: { id: 'F18' } });
+    should(bare.out.diagnostics).be.empty();
+  });
+
+  it('should raise the item without its card on an older daemon, and say so', async () => {
+    // Arrange + Act
+    const { parsed, gateway, out } = run(
+      ['agenda', 'add', 'Approve it', '--title', 'Approve', '--task', 'F18'],
+      afterAdd,
+    );
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).not.have.property('task');
+    should(out.diagnostics).deepEqual([
+      'this daemon is older than agenda items tied to cards, so the item is raised without &F18; update the daemon to tie it',
+    ]);
+  });
+
+  it('should keep a bare --task, a word that is not a card, and --todo as a to-do', async () => {
+    // Arrange + Act
+    const word = run(['agenda', 'add', '--title', 'Rotate', '--task', 'Rotate', 'the', 'key'], afterAdd, [
+      DAEMON_FEATURES.agendaTask,
+    ]);
+    await word.parsed;
+    const todo = run(['agenda', 'add', 'Log in', '--title', 'Log in', '--todo'], afterAdd);
+    await todo.parsed;
+
+    // Assert
+    should(word.gateway.applied[0]?.request).match({ subject: 'Rotate the key', ask: { kind: 'task' } });
+    should(word.gateway.applied[0]?.request).not.have.property('task');
+    should(todo.gateway.applied[0]?.request).match({ ask: { kind: 'task' } });
   });
 });
 

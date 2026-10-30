@@ -65,7 +65,7 @@ beforeEach(async () => {
   let ports: WorkerCredentialPorts | undefined;
   const reading = new FleetReading({
     credentials: async () => [{ id: 'work', resolution: work, usedBy: ['work-runtime'] }],
-    sessions: async () => [],
+    roster: { current: async () => ({ generation: 1, sessions: [] }) },
     jobs: counted,
     watch: (path, listener) => hub.subscribe(path, () => listener()),
     passiveFile: id => new FilePassiveUsageStore(root).path(id),

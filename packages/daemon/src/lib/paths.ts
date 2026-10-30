@@ -87,6 +87,12 @@ export interface SessionPaths {
    * the pane as `FY_MEDIA_DIR` and read back by `/fs/file?scope=media` (docs/hypermedia.md).
    */
   readonly media: string;
+  /**
+   * Where Claude's `PreToolUse` hook records the `AskUserQuestion` it is asking — which its transcript
+   * holds back until the form is answered (`lib/session/question/asked.ts`). Handed to the pane as
+   * `FY_QUESTION_FILE`; replaced whole by every question, read by both observer hosts.
+   */
+  readonly questionAsked: string;
 }
 
 export function createFoundationPaths(home: StateHome): FoundationPaths {
@@ -128,6 +134,7 @@ export function createSessionPaths(paths: FoundationPaths, sessionId: SessionId)
     lastSnapshot: join(directory, 'last-snapshot.txt'),
     terminalPane: join(directory, 'terminal-pane.json'),
     media: join(directory, 'media'),
+    questionAsked: join(directory, 'question-asked.json'),
   };
 }
 

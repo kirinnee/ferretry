@@ -34,7 +34,7 @@ const sameLabel = (a: string, b: string | undefined): boolean =>
   b !== undefined && a.trim().toLowerCase() === b.trim().toLowerCase();
 
 /** The small tag on the recommended option. Words, not colour alone, so a screen reader says it too. */
-function RecommendedTag() {
+export function RecommendedTag() {
   return (
     <span className="fy-attn-tag" data-agenda-recommended="">
       <span className="sr-only">, </span>
@@ -45,7 +45,7 @@ function RecommendedTag() {
 }
 
 /** A ⋯ button and the menu it opens: arrows move, Esc closes and returns focus, outside taps close. */
-function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDismiss: () => void }) {
+export function ActionMenu({ busy, onDismiss }: { readonly busy: boolean; readonly onDismiss: () => void }) {
   const menuId = useId();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);

@@ -47,8 +47,8 @@ const entry = (items: readonly ContextMenuItem[], key: string): ContextMenuItem 
   );
 
 describe('sessionMenuLabel', () => {
-  it('names the menu after the callsign the fleet uses', () => {
-    expect(sessionMenuLabel(lead)).toBe('Actions for Nero');
+  it('names the menu after the session title', () => {
+    expect(sessionMenuLabel(lead)).toBe('Actions for Fleet Lead');
   });
 
   it('falls back to the session name so the menu is never anonymous to a screen reader', () => {
@@ -164,7 +164,7 @@ describe('SessionRowMenu', () => {
 
   it('opens for the pressed row and names itself after that session', async () => {
     const view = await renderMenu();
-    expect(menu(view.container)?.getAttribute('aria-label')).toBe('Actions for Nero');
+    expect(menu(view.container)?.getAttribute('aria-label')).toBe('Actions for Fleet Lead');
     const labels = [...view.container.querySelectorAll('[role="menuitem"]')].map(item => item.textContent ?? '');
     expect(labels.some(label => label.includes('Interrupt turn'))).toBe(true);
     expect(labels.some(label => label.includes('cascade whole tree'))).toBe(true);

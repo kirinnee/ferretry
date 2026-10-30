@@ -175,6 +175,11 @@ const cases: SchemaCase[] = [
   },
   { name: 'attempt', schema: pack.PackAttemptSchema, value: attempt },
   {
+    name: 'child card',
+    schema: pack.PackChildCardSchema,
+    value: { id: 'F413', project: 'Ferretry', leadCard: 'F412', note: 'You had no card, so &F412 was made.' },
+  },
+  {
     name: 'started',
     schema: pack.PackNewOutcomeSchema,
     value: {
@@ -183,6 +188,7 @@ const cases: SchemaCase[] = [
       decidedBy: 'routing',
       attempts: [attempt],
       note: 'Jev was over its cap.',
+      card: { id: 'F413', project: 'Ferretry' },
     },
   },
   {

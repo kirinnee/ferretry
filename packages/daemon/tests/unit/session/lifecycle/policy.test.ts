@@ -407,17 +407,17 @@ describe('session lifecycle policy', () => {
     });
     // The name is a wire contract with the CLI, not a local choice, so it is pinned here too.
     should(SESSION_ID_VARIABLE).equal('FY_SESSION_ID');
-    // The media folder is derived like the id: a stored value cannot redirect it.
+    // The media folder and the question file are derived like the id: a stored value cannot redirect
+    // either — the observer reads only the session's own question file.
     should(
-      sessionPaneEnvironment(
-        id,
-        { FY_MEDIA_DIR: '/elsewhere' },
-        'interactive',
-        '/home/me/.fy/state/sessions/session-1/media',
-      ),
+      sessionPaneEnvironment(id, { FY_MEDIA_DIR: '/elsewhere', FY_QUESTION_FILE: '/elsewhere.json' }, 'interactive', {
+        media: '/home/me/.fy/state/sessions/session-1/media',
+        questionAsked: '/home/me/.fy/state/sessions/session-1/question-asked.json',
+      }),
     ).deepEqual({
       FY_HYPERMEDIA: '1',
       FY_MEDIA_DIR: '/home/me/.fy/state/sessions/session-1/media',
+      FY_QUESTION_FILE: '/home/me/.fy/state/sessions/session-1/question-asked.json',
       FY_SESSION_ID: 'session-1',
     });
   });

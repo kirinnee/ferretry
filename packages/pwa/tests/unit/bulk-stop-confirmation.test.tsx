@@ -59,10 +59,9 @@ const rows = (container: HTMLElement, label: string): readonly string[] => {
 };
 
 describe('stopTargetName', () => {
-  it('names a session by its display callsign, because that is what the fleet is discussed in', () => {
-    // The callsign wins over the name, and it arrives Title-cased rather than
-    // in the raw lowercase form the app routes and ranks on.
-    expect(stopTargetName(lead)).toBe('Nero');
+  it('names a session by the task it was given, because that is its title everywhere', () => {
+    // The task it was named wins over the callsign: the callsign is the small line beside the title.
+    expect(stopTargetName(lead)).toBe('Fleet Lead');
   });
 
   it('falls back to the name and then the id so a target is never anonymous', () => {

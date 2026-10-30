@@ -34,9 +34,6 @@ import type { PaneSnapshotReader } from '../../components/terminal-snapshot.tsx'
 import { readPaneSnapshot } from '../../components/terminal-snapshot-model.ts';
 import { Transcript } from '../../components/transcript.tsx';
 import { TranscriptUnboundNotice } from '../../components/transcript-unbound-notice.tsx';
-import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
-import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
-import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import {
   type AgendaActionClient,
   type AgendaFocus,
@@ -45,6 +42,9 @@ import {
 } from '../../features/agenda/agenda.tsx';
 import { AgendaRepliesNotice } from '../../features/agenda/agenda-replies-notice.tsx';
 import { AGENDA_RESOLVED_ACTION_ID, resolvedActionContribution } from '../../features/agenda/agenda-resolved.tsx';
+import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
+import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
+import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -106,13 +106,13 @@ import type { SidePaneTabPresentation } from '../../shell/side-pane-tab-model.ts
 import { statusMark, TERMINAL_STATUSES } from '../../shell/status-mark.tsx';
 import { ThemeToggle } from '../../shell/theme-toggle.tsx';
 import type { DaemonAccountPickerStore } from '../account-picker-store.ts';
+import type { DaemonAgendaClient } from '../agenda-client.ts';
+import { needsYouItems, unreadCount } from '../agenda-inbox.ts';
+import type { AgendaLoadStatus } from '../agenda-store.ts';
 import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
-import type { DaemonAgendaClient } from '../agenda-client.ts';
-import { needsYouItems, unreadCount } from '../agenda-inbox.ts';
-import type { AgendaLoadStatus } from '../agenda-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
@@ -1126,7 +1126,7 @@ export function SessionChatPage({
         />
       ) : undefined,
     entries,
-    send: message => client.send(session.config.id, { message, now: false }),
+    onAnswered: onSent,
     scope,
     snapshot: agendaModel?.snapshot ?? null,
     status: agendaModel?.status ?? 'idle',
@@ -1386,12 +1386,7 @@ export function SessionChatPage({
   }, [agendaSent, onSent]);
   const composerClient = useMemo(() => withReferencePrefix(client, agendaReferences), [client, agendaReferences]);
   const chat = (
-    <div
-      className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col"
-      data-agenda-focus={agenda.covered || undefined}
-      data-chat-width={chatWidth}
-      ref={chatSurface}
-    >
+    <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col" data-chat-width={chatWidth} ref={chatSurface}>
       {/* A zero-height row, so the pill overlays the top of the transcript without moving a line of it. */}
       {updating ? (
         <div className="relative h-0">
@@ -1407,34 +1402,39 @@ export function SessionChatPage({
           />
         </div>
       ) : null}
-      <div className="fy-chat-log" inert={agenda.covered || undefined}>
-        {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
-        <AgendaItemsProvider snapshot={agendaModel?.snapshot}>
-          <Transcript
-            activity={pane.activity}
-            activityFallback={session.state.activity ?? null}
-            live={liveSample}
-            turnStartedAt={working ? (session.state.turnStateAt ?? null) : null}
-            agentName={agentName}
-            busy={busy}
-            daemonId={connection.daemonId}
-            entries={entries}
-            liveInRow={agenda.hostsLive}
-            {...(onRetry === undefined ? {} : { onRetry })}
-            {...(onCancel === undefined ? {} : { onCancel })}
-            {...(onSubmit === undefined ? {} : { onSubmit })}
-            {...(onDismiss === undefined ? {} : { onDismiss })}
-            {...(onExpand === undefined ? {} : { onExpand })}
-            pinSignal={pinSignal}
-            {...(readingPosition === undefined ? {} : { readingPosition })}
-            sessionId={session.config.id}
-          />
-        </AgendaItemsProvider>
+      <div className="fy-chat-log">
+        {/* An open item covers the message list only: the transcript stays mounted, but is hidden from sight and keys. */}
+        <div className="contents" inert={agenda.covered || undefined}>
+          {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
+          <AgendaItemsProvider snapshot={agendaModel?.snapshot}>
+            <Transcript
+              activity={pane.activity}
+              activityFallback={session.state.activity ?? null}
+              live={liveSample}
+              turnStartedAt={working ? (session.state.turnStateAt ?? null) : null}
+              agentName={agentName}
+              busy={busy}
+              daemonId={connection.daemonId}
+              entries={entries}
+              liveInRow={agenda.hostsLive}
+              {...(onRetry === undefined ? {} : { onRetry })}
+              {...(onCancel === undefined ? {} : { onCancel })}
+              {...(onSubmit === undefined ? {} : { onSubmit })}
+              {...(onDismiss === undefined ? {} : { onDismiss })}
+              {...(onExpand === undefined ? {} : { onExpand })}
+              pinSignal={pinSignal}
+              {...(readingPosition === undefined ? {} : { readingPosition })}
+              sessionId={session.config.id}
+            />
+          </AgendaItemsProvider>
+        </div>
         {agenda.scrim}
+        {/* The open item's view: over the message list, never over the agenda row or the composer. */}
+        {agenda.view}
       </div>
-      <div className="fy-chat-input" data-safe-bottom="" data-session-input="" inert={agenda.covered || undefined}>
+      <div className="fy-chat-input" data-safe-bottom="" data-session-input="">
         <div className="fy-chat-input__column">
-          {/* THE AGENDA: the drawer, the line and the "re:" chips, all siblings above the composer, so the
+          {/* THE AGENDA: the drawer, the line and the "about" chip, all siblings above the composer, so the
               composer's own box never moves. */}
           {agenda.above}
           {permissionRequest === undefined || !canControl ? null : (
@@ -1519,8 +1519,6 @@ export function SessionChatPage({
           )}
         </div>
       </div>
-      {/* FOCUS MODE: the item view covers the whole column, composer included; the chat above stays mounted. */}
-      {agenda.view}
     </div>
   );
 

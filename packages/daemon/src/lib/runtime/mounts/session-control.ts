@@ -13,6 +13,7 @@ import { ApiError } from '../../api/error.ts';
 import { decodeParameter, headerValue, type ApiRequest, type ApiResponse } from '../../api/http.ts';
 import { errorResponse, jsonResponse } from '../../api/responses.ts';
 import type { ApiRoute, RouteContext } from '../../api/route.ts';
+import type { Delegation } from '../../board/index.ts';
 import { BOARD_CAPABILITY_HEADER, reraiseTaskBoardError } from './task-boards.ts';
 
 /**
@@ -97,6 +98,8 @@ export type SessionControlFailure =
   | 'callsign_unavailable'
   /** The launch itself failed, and the session records why. */
   | 'failed'
+  /** A stop found a launch of the same session still in flight and stopped nothing; ask again once it settles. */
+  | 'pending'
   /** The parent already runs as many sub-ferrets as Pack mode's limit allows (docs/pack-mode.md). */
   | 'limit_reached'
   /** A sub-ferret this deep may not start its own (docs/pack-mode.md). */
@@ -128,12 +131,17 @@ export interface SessionControlSubsystem {
    * asks for board access. It is what the child grant is authorized by, so it travels to the
    * subsystem rather than being read from anything the start's body could name: a body field would
    * be a caller-controlled claim about who is asking, and on a board that is a privilege escalation.
+   *
+   * `delegation` is a `fy new`'s card, reserved by the daemon before the start (`SessionCards.delegate`):
+   * the started session's card is then the lead's, under the lead's focus card. It never comes from a
+   * request body. Without it a start with a prompt gets a card of its own.
    */
   start(
     request: StartSessionRequest,
     requestId: string,
     payload: string,
     boardCapability?: string,
+    delegation?: Delegation,
   ): Promise<SessionView>;
   stop(sessionId: string, reason: string | undefined): Promise<SessionView>;
   /**
@@ -160,6 +168,8 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   callsign_taken: { status: 409, code: 'callsign_taken' },
   callsign_unavailable: { status: 503, code: 'callsign_unavailable' },
   failed: { status: 500, code: 'session_launch_failed' },
+  // 409: nothing was attempted, and the same stop succeeds once the launch it waited for settles.
+  pending: { status: 409, code: 'session_launch_pending' },
   // 409: the request is well formed and would be served once the parent has fewer running children,
   // or by a shallower ferret — not by retrying it as it is.
   limit_reached: { status: 409, code: 'limit_reached' },

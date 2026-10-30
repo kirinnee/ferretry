@@ -159,15 +159,16 @@ import {
 } from './hooks/use-service-worker-update.ts';
 import { useSttSettings } from './hooks/use-stt-settings.ts';
 import { useTheme } from './hooks/use-theme.ts';
-import { ThemeToggle } from './shell/theme-toggle.tsx';
 import { type MachineSource, machineDisplayOrder } from './lib/all-machines.ts';
 import { AgendaWireProbes } from './lib/agenda-wire-react.tsx';
 import { agendaTargetFromSearch } from './lib/agenda-inbox.ts';
 import { inboxSourceFromSearch } from './lib/agenda-inbox-list.ts';
+import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import { DEFAULT_CARRIER_PREFERENCE } from './lib/carrier-preference.ts';
 import type { DaemonConnectionRecord } from './lib/connections.ts';
 import { type DaemonConnection, type DaemonId, daemonCarriers } from './lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from './lib/daemon-scope.ts';
+import { browserFleetFeedEnvironment } from './lib/fleet-feed.ts';
 import { projectKeyFor } from './lib/fleet-grouping.ts';
 import { installBanner } from './lib/install-prompt.ts';
 import { isKeyboardCaptured } from './lib/keyboard-capture.ts';
@@ -223,7 +224,6 @@ import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
 import { RouterProvider, useRouter } from './lib/router.tsx';
 import { chatScrollSlot } from './lib/scroll-memory.ts';
 import { type LedgerSendRecord, ledgerFeed, parseLedgerSendsResponse, readLedgerSends } from './lib/send-ledger.ts';
-import { transcriptIsCurrent } from './lib/background-fresh.ts';
 import type { CachedTranscript } from './lib/session-cache.ts';
 import {
   createAppStore,
@@ -261,6 +261,7 @@ import {
   type SessionsBarPresentation,
   type SessionsBarUpdate,
 } from './shell/sessions-bar.tsx';
+import { ThemeToggle } from './shell/theme-toggle.tsx';
 
 /**
  * Wraps a one-shot document-lifetime side effect, latching only on SUCCESS.
@@ -2146,6 +2147,8 @@ export function AppShell() {
     layoutPhone,
     browserFleetPollEnvironment,
     openFleetFeed,
+    browserFleetFeedEnvironment,
+    useCallback((daemonId, event) => store.board.noteEvent(daemonId, event), [store.board]),
   );
   const lockedMachines = useLockedMachines(store.unlockGate);
   const agendaInbox = useAgendaInboxModel(store.attention, useInboxMachines(store.fleet, everyPairedMachine));
@@ -2586,7 +2589,7 @@ export function AppShell() {
                 — can explicitly decline it.
               */}
                   <PullToPaletteRegion
-                    className="relative min-h-0 min-w-0 flex-1 px-1 sm:px-3"
+                    className={`relative min-h-0 min-w-0 flex-1 px-1 sm:px-3${phone && showsTabBar(pageRoute) ? ' overflow-clip' : ''}`}
                     enabled={touchAffected}
                     onOpen={openPalette}
                   >

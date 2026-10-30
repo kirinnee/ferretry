@@ -625,7 +625,7 @@ function SessionOption({
       <span className="flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-baseline gap-sm">
           <span className="shrink-0 font-semibold text-fg">{entry.headline}</span>
-          {entry.task && <span className="min-w-0 flex-1 truncate text-cell text-fg-soft">{entry.task}</span>}
+          {entry.callsign && <span className="min-w-0 flex-1 truncate text-cell text-fg-soft">{entry.callsign}</span>}
           {entry.machine === undefined ? null : <MachineChip className="ml-auto shrink-0" name={entry.machine} />}
         </span>
         <span className="flex min-w-0 items-baseline gap-sm text-meta text-muted">

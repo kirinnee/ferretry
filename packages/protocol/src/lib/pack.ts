@@ -18,6 +18,7 @@
  */
 import { z } from 'zod';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
+import { BoardTaskIdSchema } from './board-refs.ts';
 import { HarnessSchema, InteractionModeSchema, SessionViewSchema } from './session.ts';
 
 const NonEmpty = z.string().min(1);
@@ -448,6 +449,21 @@ export const PackAttemptSchema = z.strictObject({
 export type PackAttempt = z.infer<typeof PackAttemptSchema>;
 
 /**
+ * The board card a started sub-ferret works on (`board-design.md` §3.1): made with the session, owned by
+ * the lead and named in the sub-ferret's brief. `leadCard` is set when the lead had no focus card and one
+ * was made for it first, so the child's card has a parent. `note` says what the start could not do on the
+ * board; the session started all the same, because a board failure never fails a start.
+ */
+export const PackChildCardSchema = z.strictObject({
+  id: BoardTaskIdSchema.optional(),
+  /** The board's name as the owner reads it: the project's, or `Unfiled`. */
+  project: NonEmpty.optional(),
+  leadCard: BoardTaskIdSchema.optional(),
+  note: NonEmpty.optional(),
+});
+export type PackChildCard = z.infer<typeof PackChildCardSchema>;
+
+/**
  * What `POST /v1/pack/new` answers. A refusal is an ANSWER, not an HTTP error, so a ferret reads the
  * closed code and every attempt from one body and falls back to the next candidate.
  *
@@ -462,6 +478,8 @@ export const PackNewOutcomeSchema = z.discriminatedUnion('outcome', [
     attempts: z.array(PackAttemptSchema).readonly(),
     /** Said when Jev was meant to decide and the routing prompt's order was used instead. */
     note: NonEmpty.optional(),
+    /** The sub-ferret's board card; absent from a daemon that predates cards. */
+    card: PackChildCardSchema.optional(),
   }),
   z.strictObject({
     outcome: z.literal('refused'),

@@ -1,0 +1,37 @@
+{
+  "session_id": "48fa096f-185c-42e1-b456-33dd3c77c5ce",
+  "transcript_path": "/home/user/.claude/projects/-work-repro/48fa096f-185c-42e1-b456-33dd3c77c5ce.jsonl",
+  "cwd": "/work/repro",
+  "scratchpad_dir": "/tmp/claude-1000/-work-repro/48fa096f-185c-42e1-b456-33dd3c77c5ce/scratchpad",
+  "prompt_id": "153c6d74-9753-4ddd-95e3-41907baa9c71",
+  "permission_mode": "bypassPermissions",
+  "effort": {
+    "level": "low"
+  },
+  "hook_event_name": "PreToolUse",
+  "tool_name": "AskUserQuestion",
+  "tool_input": {
+    "questions": [
+      {
+        "question": "Choice 1 of 5 — what web address should the test-report viewer live at?",
+        "header": "Web address",
+        "multiSelect": false,
+        "options": [
+          {
+            "label": "reports.example.dev (Recommended)",
+            "description": "A clean address on a domain you already have in Cloudflare."
+          },
+          {
+            "label": "tests.example.dev",
+            "description": "Same idea, different word."
+          },
+          {
+            "label": "…example.workers.dev",
+            "description": "Cloudflare's free built-in address. No setup, but long."
+          }
+        ]
+      }
+    ]
+  },
+  "tool_use_id": "toolu_01T4KnfY1in2GTL7P9wUmRtt"
+}

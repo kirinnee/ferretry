@@ -117,6 +117,7 @@ const wardenCases: SchemaCase[] = [
   { name: 'caps', schema: warden.WardenCapsSchema, value: wardenConfig.caps },
   { name: 'may act alone', schema: warden.WardenMayActAloneSchema, value: wardenConfig.mayActAlone },
   { name: 'jev acts', schema: warden.WardenJevActsSchema, value: wardenConfig.jevActs },
+  { name: 'revive', schema: warden.WardenReviveConfigSchema, value: wardenConfig.revive },
   { name: 'events', schema: warden.WardenEventTriggersSchema, value: wardenConfig.events },
   { name: 'effort', schema: warden.WardenEffortSchema, value: 'medium' },
   { name: 'investigation', schema: warden.WardenInvestigationConfigSchema, value: wardenConfig.investigation },

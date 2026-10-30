@@ -22,8 +22,8 @@ import { type MessagesClient, readRecentMessages } from '../../src/lib/recent-me
 import { agendaItem, inboxCard } from '../support/agenda-inbox.tsx';
 import { sessionView } from '../support/sessions.ts';
 
-const MIGRATE = sessionView('dm', { config: { teammate: 'johnnie', label: 'diene-migrate' } });
-const RELAY = sessionView('ra', { config: { teammate: 'hadi', label: 'Relay advertisement' } });
+const MIGRATE = sessionView('dm', { config: { teammate: 'johnnie', name: 'diene-migrate' } });
+const RELAY = sessionView('ra', { config: { teammate: 'hadi', name: 'Relay advertisement' } });
 const LAPTOP = daemonId('laptop');
 
 const a10 = inboxCard(
@@ -59,7 +59,7 @@ describe('inboxSections', () => {
     expect(inboxSections([a10, elsewhere], []).needsYou).toHaveLength(2);
   });
 
-  it('names a conversation with no label by its ferret alone', () => {
+  it('names a conversation with no name by its ferret alone', () => {
     const bare = inboxCard(agendaItem('A1'), sessionView('x', { config: { teammate: 'moe', name: undefined } }));
     expect(inboxSections([bare], []).needsYou[0]).toMatchObject({ ferret: 'Moe', task: null });
   });

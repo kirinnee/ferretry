@@ -84,7 +84,7 @@ interface HostProps {
   readonly status?: 'loading' | 'ready' | 'error';
   readonly live?: ReactElement;
   readonly entries?: readonly TranscriptEntry[];
-  readonly send?: (message: string) => Promise<unknown>;
+  readonly onAnswered?: () => void;
 }
 
 let current: Agenda | undefined;
@@ -109,7 +109,7 @@ function Host({ snapshot, agendaMode = true, desktop = false, focus = null, ...r
     ...(rest.repliesSlot === undefined ? {} : { repliesSlot: rest.repliesSlot }),
     ...(rest.live === undefined ? {} : { live: rest.live }),
     ...(rest.entries === undefined ? {} : { entries: rest.entries }),
-    ...(rest.send === undefined ? {} : { send: rest.send }),
+    ...(rest.onAnswered === undefined ? {} : { onAnswered: rest.onAnswered }),
   });
   current = agenda;
   return (
@@ -351,21 +351,38 @@ describe('the full card', () => {
     expect(wide.root.findByType(AgendaItemView).props.swipeable).toBe(false);
   });
 
-  test('after an answer, goes to the next item that needs the owner, else closes', async () => {
-    const view = mount({ snapshot: board([item('A1'), item('A2'), item('A3', { waitingOn: 'ferret' })]) });
+  test('after an answer, closes the view and tells the chat the answer went', async () => {
+    const answered: string[] = [];
+    const view = mount({
+      snapshot: board([item('A1'), item('A2')]),
+      onAnswered: () => answered.push('answered'),
+    });
     withDrawer(view);
     open(view, 'A1');
     await runAsync(async () => {
-      view.root.findByType(AgendaItemView).props.onAct({ kind: 'resolve' }, '');
+      view.root.findByType(AgendaItemView).props.onAct({ kind: 'resolve' });
     });
     expect(calls).toEqual(['resolve:A1']);
-    expect(cardId(view)).toBe('A2');
-    run(() => view.update(<Host snapshot={board([item('A2'), item('A3', { waitingOn: 'ferret' })])} />));
-    await runAsync(async () => {
-      view.root.findByType(AgendaItemView).props.onAct({ kind: 'resolve' }, '');
-    });
-    expect(calls).toEqual(['resolve:A1', 'resolve:A2']);
     expect(cardId(view)).toBeUndefined();
+    expect(live().covered).toBe(false);
+    expect(answered).toEqual(['answered']);
+  });
+
+  test('keeps a card the owner has since moved on from, and still tells the chat', async () => {
+    const answered: string[] = [];
+    const view = mount({
+      snapshot: board([item('A1'), item('A2')]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+      onAnswered: () => answered.push('answered'),
+    });
+    const sendResolve = view.root.findByType(AgendaItemView).props.onAct;
+    run(() => view.root.findByType(AgendaItemView).props.onNext());
+    expect(cardId(view)).toBe('A2');
+    await runAsync(async () => {
+      sendResolve({ kind: 'resolve' });
+    });
+    expect(cardId(view)).toBe('A2');
+    expect(answered).toEqual(['answered']);
   });
 
   test('stays on the card and says why when the machine refuses', async () => {
@@ -375,7 +392,7 @@ describe('the full card', () => {
     await runAsync(async () => {
       view.root
         .findByType(AgendaItemView)
-        .props.onAct({ kind: 'respond', response: { kind: 'permission', decision: 'approve' } }, '');
+        .props.onAct({ kind: 'respond', response: { kind: 'permission', decision: 'approve' } });
     });
     expect(cardId(view)).toBe('A1');
     expect(view.root.findByType(AgendaItemView).props.error).toBe('The machine said no.');
@@ -432,103 +449,111 @@ describe('a request to show an item (`?attention=A5`)', () => {
   });
 });
 
-describe('the "re:" chips', () => {
+describe('the "about" chip', () => {
   const chips = (view: ReturnType<typeof render>): readonly string[] =>
     view.root
       .findAllByType(AgendaReferenceChips)
       .flatMap(entry => entry.props.items.map((it: { id: string }) => it.id));
 
-  test('collect several items, add each once, and can be removed one by one', () => {
+  test('rides the composer for the open item, and follows the card to the next one', () => {
     const view = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AgendaId, seq: 1 } });
-    const reply = () => run(() => view.root.findByType(AgendaItemView).props.onReply(''));
-    const openFromDrawer = (id: string) => {
-      run(() => toggle(view.root)[0]?.props.onClick());
-      run(() =>
-        view.root
-          .findAllByType(AgendaRow)
-          .find(row => row.props.item.id === id)
-          ?.props.onOpen(),
-      );
-    };
-    reply();
-    openFromDrawer('A2');
-    reply();
-    openFromDrawer('A3');
-    reply();
-    expect(live().references()).toEqual(['A3', 'A2']);
-    expect(chips(view)).toEqual(['A3', 'A2']);
-    run(() => view.root.findByType(AgendaReferenceChips).props.onRemove('A3'));
+    expect(live().references()).toEqual(['A3']);
+    expect(chips(view)).toEqual(['A3']);
+    run(() => view.root.findByType(AgendaItemView).props.onNext());
+    expect(live().references()).toEqual(['A2']);
     expect(chips(view)).toEqual(['A2']);
   });
 
-  test('"Add to reply" closes the view and the chips are spent when a message goes', () => {
-    const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
-    run(() => view.root.findByType(AgendaItemView).props.onReply(''));
-    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(0);
-    expect(live().covered).toBe(false);
-    expect(live().references()).toEqual(['A2']);
-    run(() => live().composer.onSent());
+  test('is absent while no item is open', () => {
+    const view = mount({ snapshot: board(MIXED) });
     expect(live().references()).toEqual([]);
     expect(chips(view)).toEqual([]);
   });
 
-  test('are dropped when their item leaves the agenda', () => {
+  test('× means plain chat: the chip goes, the view stays, and the next card is about itself again', () => {
+    const view = mount({ snapshot: board(MIXED), focus: { target: 'A3' as AgendaId, seq: 1 } });
+    run(() => view.root.findByType(AgendaReferenceChips).props.onRemove('A3'));
+    expect(live().references()).toEqual([]);
+    expect(chips(view)).toEqual([]);
+    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(1);
+    run(() => view.root.findByType(AgendaItemView).props.onNext());
+    expect(live().references()).toEqual(['A2']);
+  });
+
+  test('a message from the composer closes the view and spends the chip', () => {
     const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
-    run(() => view.root.findByType(AgendaItemView).props.onReply(''));
+    expect(live().covered).toBe(true);
+    run(() => live().composer.onSent());
+    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(0);
+    expect(live().covered).toBe(false);
+    expect(live().references()).toEqual([]);
+    expect(chips(view)).toEqual([]);
+  });
+
+  test('is dropped when its item leaves the agenda', () => {
+    const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
     run(() => view.update(<Host snapshot={board([item('A3')])} />));
     expect(live().references()).toEqual([]);
   });
 });
 
 describe('what the item view sends', () => {
-  const sent: string[] = [];
-  const send = async (message: string) => {
-    sent.push(message);
+  const composer = (draft: string) => {
+    const state = { draft, replaced: [] as string[] };
+    const dispose = registerComposerQuoteTarget({
+      ...scope,
+      draft: () => state.draft,
+      replaceDraft: next => {
+        state.draft = next;
+        state.replaced.push(next);
+      },
+    });
+    return { state, dispose };
   };
-  afterEach(() => {
-    sent.length = 0;
-  });
   const open = (extra: Partial<HostProps> = {}) =>
-    mount({ snapshot: board([item('A1')]), focus: { target: 'A1' as AgendaId, seq: 1 }, send, ...extra });
+    mount({ snapshot: board([item('A1')]), focus: { target: 'A1' as AgendaId, seq: 1 }, ...extra });
 
-  test('typed text goes as a reply naming the item, through the normal send', async () => {
+  test('a quick reply carries what the composer holds as its note, and then empties the composer', async () => {
+    const { state, dispose } = composer('on the staging box only');
     const view = open();
     await runAsync(async () => {
-      await view.root.findByType(AgendaItemView).props.onSend('on the staging box only');
-    });
-    expect(sent).toEqual(['!A1 on the staging box only']);
-  });
-
-  test('says so, and sends nothing, when the conversation cannot take a message from here', async () => {
-    const view = open({ send: undefined as unknown as HostProps['send'] });
-    let reason = '';
-    await runAsync(async () => {
-      await view.root
-        .findByType(AgendaItemView)
-        .props.onSend('hello')
-        .catch((error: Error) => {
-          reason = error.message;
-        });
-    });
-    expect(reason).toBe('This conversation cannot take a message from here.');
-    expect(sent).toEqual([]);
-  });
-
-  test('an option carries the typed text as the answer’s note', async () => {
-    const view = open();
-    await runAsync(async () => {
-      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' }, 'on the staging box only');
+      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' });
     });
     expect(calls).toEqual(['dismiss:A1:on the staging box only']);
-    expect(sent).toEqual([]);
+    expect(state.replaced).toEqual(['']);
+    dispose();
   });
 
-  test('an option without text carries no note', async () => {
+  test('a quick reply with nothing typed carries no note and leaves the composer alone', async () => {
+    const { state, dispose } = composer('   ');
     const view = open();
     await runAsync(async () => {
-      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' }, '');
+      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' });
     });
     expect(calls).toEqual(['dismiss:A1:']);
+    expect(state.replaced).toEqual([]);
+    dispose();
+  });
+
+  test('a quick reply with no composer mounted carries no note', async () => {
+    const view = open();
+    await runAsync(async () => {
+      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' });
+    });
+    expect(calls).toEqual(['dismiss:A1:']);
+  });
+
+  test('keeps the composer’s text when the machine refuses', async () => {
+    const { state, dispose } = composer('keep me');
+    const view = open({ clientOverride: client(true) });
+    await runAsync(async () => {
+      view.root
+        .findByType(AgendaItemView)
+        .props.onAct({ kind: 'respond', response: { kind: 'permission', decision: 'approve' } });
+    });
+    expect(state.replaced).toEqual([]);
+    expect(view.root.findByType(AgendaItemView).props.error).toBe('The machine said no.');
+    dispose();
   });
 
   test('reads the item’s history from the conversation', () => {
@@ -739,53 +764,5 @@ describe('the layout choice when the browser hides its storage', () => {
       if (original) Object.defineProperty(globalThis, 'localStorage', original);
       else delete (globalThis as { localStorage?: unknown }).localStorage;
     }
-  });
-});
-
-describe('"Add to reply" keeps what was typed', () => {
-  const composer = (draft: string) => {
-    const state = { draft, replaced: 0 };
-    const dispose = registerComposerQuoteTarget({
-      ...scope,
-      draft: () => state.draft,
-      replaceDraft: next => {
-        state.draft = next;
-        state.replaced += 1;
-      },
-    });
-    return { state, dispose };
-  };
-  const reply = (typed: string) => {
-    const view = mount({ snapshot: board(MIXED), focus: { target: 'A2' as AgendaId, seq: 1 } });
-    run(() => view.root.findByType(AgendaItemView).props.onReply(typed));
-    return view;
-  };
-
-  test('moves the typed text into an empty composer draft, with the chip and the view closed', () => {
-    const { state, dispose } = composer('  ');
-    const view = reply('on staging first');
-    expect(state.draft).toBe('on staging first');
-    expect(live().references()).toEqual(['A2']);
-    expect(view.root.findAllByType(AgendaItemView)).toHaveLength(0);
-    dispose();
-  });
-
-  test('puts it after what the composer already holds, a blank line apart', () => {
-    const { state, dispose } = composer('already here  \n');
-    reply('and this');
-    expect(state.draft).toBe('already here\n\nand this');
-    dispose();
-  });
-
-  test('touches nothing when nothing was typed', () => {
-    const { state, dispose } = composer('kept');
-    reply('');
-    expect(state.replaced).toBe(0);
-    dispose();
-  });
-
-  test('still adds the chip when no composer is mounted', () => {
-    reply('lost with no composer');
-    expect(live().references()).toEqual(['A2']);
   });
 });

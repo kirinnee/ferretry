@@ -1,17 +1,20 @@
 /**
- * Screenshots and layout checks for the agenda in a ferret's chat: the drawer, an agenda item in FULL-HEIGHT FOCUS
- * (the overlay), the action bar with text typed, a long item scrolled mid-way, the thinking line beside the
- * pill, the pill alone and, on a phone, the bar above a faked keyboard. Desktop 1440 and phone 390, in the
- * Studio and Neo-Brutalism themes, light and dark.
+ * Screenshots and layout checks for the agenda in a ferret's chat: the drawer, an agenda item OPEN over the message
+ * list (the composer stays below it, typeable), the "about" chip and a send that closes the view, a multi-question
+ * item (as written without options, and with them), a permission item, a config change, a long item scrolled
+ * mid-way, the thinking line beside the pill and, on a phone, the quick replies above a faked keyboard. Desktop
+ * 1440 and phone 390, in the Studio and Neo-Brutalism themes, light and dark.
  *
- *   bun harness/agenda-v2-screenshot.ts [outDir]   # writes <outDir>/agenda-v2-<name>-<phone|desktop>-<theme>.png
+ *   bun harness/agenda-v3-screenshot.ts [outDir]   # writes <outDir>/agenda-v3-<name>-<phone|desktop>-<theme>.png
  *
  * It bundles `agenda-page.tsx` (the real `useAgenda`, invented data), serves it on an ephemeral loopback
  * port, drives it with real clicks, and FAILS (after writing every picture) when: a page scrolls sideways; the
- * overlay's box is not the chat column's box or the composer shows through it; the top or the bar moves when the
- * body scrolls; the chat underneath loses its scroll position; anything but the one body scrolls; a drawer row
- * holds more than the row button; the composer moves with the pill, the drawer or the thinking line; the thinking
- * line and the pill are not on one row; or a phone touch target is under 44px.
+ * overlay's box is not the message list's box, or it covers any of the composer; the composer moves when an item
+ * opens or closes; the top or the quick replies move when the body scrolls; the transcript loses its scroll
+ * position; anything but the one body scrolls; no "about" chip rides the composer while an item is open, or a
+ * send does not carry the item's reference, or × does not make it plain, or a send leaves the view open; a
+ * question's text is drawn twice; the old "message box below" boilerplate is back; a drawer row holds more than
+ * the row button; or a phone touch target is under 44px.
  */
 
 import { spawnSync } from 'node:child_process';
@@ -21,7 +24,7 @@ import { chromium, type Locator, type Page } from 'playwright-core';
 
 const harnessDir = import.meta.dir;
 const packageDir = resolve(harnessDir, '..');
-const buildDir = join(harnessDir, 'out', 'agenda-v2-build');
+const buildDir = join(harnessDir, 'out', 'agenda-v3-build');
 const outDir = resolve(process.argv[2] ?? '/tmp/claude-1000');
 
 const fail = (message: string): never => {
@@ -133,7 +136,7 @@ const open = async (browserContext: { newPage: () => Promise<Page> }, theme: str
 const shot = async (page: Page, name: string, form: Form, theme: string): Promise<void> => {
   await page.mouse.move(1, 1);
   await page.waitForTimeout(120);
-  const path = join(outDir, `agenda-v2-${name}-${form}-${theme}.png`);
+  const path = join(outDir, `agenda-v3-${name}-${form}-${theme}.png`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -149,19 +152,20 @@ const openDrawer = async (page: Page): Promise<void> => {
 /** The sizes the overlay's own checks read. */
 const overlay = (page: Page) => page.locator('[data-agenda-view]');
 
-const checkOverlay = async (page: Page, form: Form, label: string): Promise<void> => {
+const checkOverlay = async (page: Page, form: Form, label: string, composerRest: Box): Promise<void> => {
   await overlay(page).waitFor({ state: 'visible' });
-  const surface = await boxOf(page.locator('.kt-chat-surface'), 'chat column');
-  sameBox(await boxOf(overlay(page), 'overlay'), surface, `${label}: the overlay is not the chat column`);
-  const covered = await page.evaluate(() => {
+  const log = await boxOf(page.locator('.fy-chat-log'), 'message list');
+  sameBox(await boxOf(overlay(page), 'overlay'), log, `${label}: the overlay is not the message list`);
+  sameBox(await composerBox(page), composerRest, `${label}: opening the item moved the composer`);
+  const composerFree = await page.evaluate(() => {
     const composer = document.querySelector('[data-agenda-harness-composer]');
     const view = document.querySelector('[data-agenda-view]');
     if (composer === null || view === null) return false;
     const at = composer.getBoundingClientRect();
     const hit = document.elementFromPoint(at.x + at.width / 2, at.y + at.height / 2);
-    return hit !== null && view.contains(hit);
+    return hit !== null && composer.contains(hit) && !view.contains(hit);
   });
-  check(covered, `${label}: the composer shows through the overlay`);
+  check(composerFree, `${label}: the composer is covered by the view`);
   const only = await page.evaluate(() => {
     const view = document.querySelector('[data-agenda-view]');
     if (view === null) return [];
@@ -178,20 +182,29 @@ const checkOverlay = async (page: Page, form: Form, label: string): Promise<void
     only.every(name => name === 'body'),
     `${label}: scrolls somewhere other than the body: ${only.join(', ')}`,
   );
-  const body = page.locator('[data-agenda-body]');
+  const body = page.locator('.fy-item-view__body');
   const sideways = await body.evaluate(node => node.scrollWidth - node.clientWidth);
   check(sideways <= 1, `${label}: the body scrolls sideways by ${sideways}px`);
   const topBox = await boxOf(page.locator('[data-agenda-top]'), 'top');
-  check(topBox.y >= surface.y - 1, `${label}: the top starts above the chat column`);
+  check(topBox.y >= log.y - 1, `${label}: the top starts above the message list`);
+  check((await page.locator('[data-agenda-chip]').count()) === 1, `${label}: no "about" chip rides the composer`);
+  check(
+    !((await overlay(page).textContent()) ?? '').includes('message box below'),
+    `${label}: the "message box below" boilerplate is back`,
+  );
   if (form === 'phone') {
-    for (const button of await page.locator('[data-agenda-bar] button, [data-agenda-top] button').all()) {
-      if (!(await button.isVisible())) continue;
+    for (const button of await page.locator('[data-agenda-top] button').all()) {
       const rect = await button.boundingBox();
       if (rect !== null)
         check(
           rect.height >= 43.5 || rect.width >= 43.5,
           `${label}: a touch target is ${Math.round(rect.width)}x${Math.round(rect.height)}`,
         );
+    }
+    for (const button of await page.locator('[data-agenda-quick-replies] button').all()) {
+      const rect = await button.boundingBox();
+      if (rect !== null)
+        check(rect.height >= 35.5, `${label}: a quick reply is ${Math.round(rect.width)}x${Math.round(rect.height)}`);
     }
   }
 };
@@ -252,29 +265,105 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await shot(thinking, 'row-thinking-and-pill', form, theme);
   await thinking.close();
 
-  // a choice item, with history and the terms table
+  // a choice item: the composer stays, the chip rides it, a typed message goes out WITH the reference and closes the view
   const choice = await open(browserContext, theme, 'view=board&history=1');
   await openItem(choice, 'A5');
-  await checkOverlay(choice, form, 'choice item');
+  await checkOverlay(choice, form, 'choice item', composerRest);
   check((await choice.locator('table[data-agenda-terms]').count()) === 1, 'the terms are not a table');
-  check((await choice.locator('[data-agenda-history] li').count()) >= 3, 'the history has fewer than 3 rows');
+  check(
+    (await choice.locator('[data-agenda-history-latest] li').count()) === 1,
+    'the latest owner message is not kept',
+  );
+  check(
+    (await choice.locator('[data-agenda-history] li').count()) === 1,
+    'the collapsed history shows more than one row',
+  );
   await shot(choice, 'item-choice', form, theme);
-  // the bar with text typed
-  await choice.locator('[data-agenda-field]').fill('Leaning SQLite — but keep the nightly export.');
-  await shot(choice, 'item-bar-typed', form, theme);
+  const toEnd = (): Promise<void> =>
+    choice.locator('.fy-item-view__body').evaluate(node => {
+      node.scrollTop = node.scrollHeight;
+    });
+  await toEnd();
+  await shot(choice, 'item-history-collapsed', form, theme);
+  await choice.locator('[data-agenda-history-toggle]').click();
+  await toEnd();
+  check((await choice.locator('[data-agenda-history] li').count()) >= 4, 'the opened history has fewer than 4 rows');
+  await shot(choice, 'item-history-open', form, theme);
+  await choice.locator('[data-agenda-history-toggle]').click();
+  await choice.locator('[data-agenda-harness-input]').fill('Leaning SQLite, but keep the nightly export.');
+  await choice.locator('.fy-item-view__body').evaluate(node => {
+    node.scrollTop = 0;
+  });
+  await shot(choice, 'item-composer-typed', form, theme);
+  sameBox(await composerBox(choice), composerRest, 'typing moved the composer');
+  await choice.locator('[data-agenda-harness-send]').click();
+  await choice.waitForTimeout(150);
+  check((await overlay(choice).count()) === 0, 'a send left the item view open');
+  const sentBubble = choice.locator('[data-chat-sent]').last();
+  const sentText = (await sentBubble.textContent()) ?? '';
+  check(sentText.includes('A5'), `the send did not carry the reference: ${sentText}`);
+  check((await sentBubble.locator('[data-agenda-message]').count()) === 1, 'the reply did not draw as its agenda card');
+  sameBox(await composerBox(choice), composerRest, 'closing the view moved the composer');
+  await shot(choice, 'after-send', form, theme);
   await choice.close();
+
+  // × on the chip means plain chat; a quick reply answers AND closes
+  const plainSend = await open(browserContext, theme, 'view=board&agenda=A3');
+  await overlay(plainSend).waitFor({ state: 'visible' });
+  await plainSend.locator('[data-agenda-chip-clear]').click();
+  check((await plainSend.locator('[data-agenda-chip]').count()) === 0, 'the × did not take the chip off');
+  await plainSend.locator('[data-agenda-harness-input]').fill('Unrelated: how is the build?');
+  await plainSend.locator('[data-agenda-harness-send]').click();
+  const plainText = (await plainSend.locator('[data-chat-sent]').last().textContent()) ?? '';
+  check(!plainText.includes('!A3'), `a plain send carried a reference: ${plainText}`);
+  await plainSend.close();
+  const answered = await open(browserContext, theme, 'view=board&agenda=A3');
+  await overlay(answered).waitFor({ state: 'visible' });
+  await answered.locator('[data-agenda-answer]').first().click();
+  await answered.waitForTimeout(250);
+  check((await overlay(answered).count()) === 0, 'a quick reply did not close the view');
+  await answered.close();
+
+  // the multi-question item, as the ferret wrote it (no options) and with options and a recommendation
+  for (const id of ['A47', 'A48'] as const) {
+    const multi = await open(browserContext, theme, `view=board&jaeda=1&agenda=${id}`);
+    await overlay(multi).waitFor({ state: 'visible' });
+    await checkOverlay(multi, form, `multi-question ${id}`, composerRest);
+    const text = (await overlay(multi).textContent()) ?? '';
+    // A47 is Jaeda's item word for word; A48 the same three questions written with options.
+    const questions =
+      id === 'A47'
+        ? ['.dockerignore has', 'merge tool rebuilds nix/yaml lists', 'each template ships only the files']
+        : ['duplicate `retry` line', 'rename of `carrier`', 'the other two relay files'];
+    for (const question of questions) {
+      const count = text.split(question).length - 1;
+      check(count === 1, `${id}: "${question}" is drawn ${count} times`);
+    }
+    check(!/Answer this one in the message box/u.test(text), `${id}: per-question boilerplate is back`);
+    if (id === 'A47') check(!/Why it matters/u.test(text), 'A47: the ferret picks read as Why it matters');
+    if (id === 'A48') {
+      check(
+        (await overlay(multi).locator('[data-agenda-recommended]').count()) >= 3,
+        'the recommended picks are not tagged',
+      );
+      await multi.locator('[data-agenda-use-recommended]').click();
+      await multi.waitForTimeout(100);
+    }
+    await shot(multi, id === 'A47' ? 'item-multi-question' : 'item-multi-structured', form, theme);
+    await multi.close();
+  }
 
   // a permission item
   const permission = await open(browserContext, theme, 'view=board&history=1');
   await openItem(permission, 'A2');
-  await checkOverlay(permission, form, 'permission item');
+  await checkOverlay(permission, form, 'permission item', composerRest);
   await shot(permission, 'item-permission', form, theme);
   await permission.close();
 
   // a permission item that confirms a config change: the change block, no premise
   const change = await open(browserContext, theme, 'view=board&history=1&config=1');
   await openItem(change, 'A2');
-  await checkOverlay(change, form, 'config-change item');
+  await checkOverlay(change, form, 'config-change item', composerRest);
   check((await change.locator('[data-agenda-confirms="warden.yaml"]').count()) === 1, 'the config change is not drawn');
   check(
     !((await overlay(change).textContent()) ?? '').includes("What's going on"),
@@ -283,7 +372,7 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await shot(change, 'item-config-change', form, theme);
   await change.close();
 
-  // a LONG item scrolled mid-way: top and bar stay put, the chat keeps its scroll, only the body scrolls
+  // a LONG item scrolled mid-way: top and quick replies stay put, the transcript keeps its scroll, only the body scrolls
   const longPage = await open(browserContext, theme, 'view=board&long=1');
   await longPage.evaluate(() => {
     const log = document.querySelector('.fy-chat-log > div');
@@ -291,10 +380,10 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   });
   const chatBefore = await longPage.evaluate(() => document.querySelector('.fy-chat-log > div')?.scrollTop ?? -1);
   await openItem(longPage, 'A5');
-  await checkOverlay(longPage, form, 'long item');
+  await checkOverlay(longPage, form, 'long item', composerRest);
   const topBefore = await boxOf(longPage.locator('[data-agenda-top]'), 'top');
-  const barBefore = await boxOf(longPage.locator('[data-agenda-bar]'), 'bar');
-  const body = longPage.locator('[data-agenda-body]');
+  const barBefore = await boxOf(longPage.locator('[data-agenda-quick-replies]'), 'quick replies');
+  const body = longPage.locator('.fy-item-view__body');
   const room = await body.evaluate(node => node.scrollHeight - node.clientHeight);
   check(room > 200, `the long item barely scrolls (${room}px)`);
   await body.evaluate(node => {
@@ -303,19 +392,24 @@ const scenes = async (form: Form, theme: string): Promise<void> => {
   await longPage.waitForTimeout(150);
   check((await body.evaluate(node => node.scrollTop)) > 100, 'the body did not scroll');
   sameBox(await boxOf(longPage.locator('[data-agenda-top]'), 'top'), topBefore, 'the top moved when the body scrolled');
-  sameBox(await boxOf(longPage.locator('[data-agenda-bar]'), 'bar'), barBefore, 'the bar moved when the body scrolled');
+  sameBox(
+    await boxOf(longPage.locator('[data-agenda-quick-replies]'), 'quick replies'),
+    barBefore,
+    'the quick replies moved when the body scrolled',
+  );
+  sameBox(await composerBox(longPage), composerRest, 'scrolling the body moved the composer');
   const chatAfter = await longPage.evaluate(() => document.querySelector('.fy-chat-log > div')?.scrollTop ?? -1);
-  check(chatAfter === chatBefore, `the chat lost its scroll position: ${chatBefore} -> ${chatAfter}`);
+  check(chatAfter === chatBefore, `the transcript lost its scroll position: ${chatBefore} -> ${chatAfter}`);
   await shot(longPage, 'item-long-scrolled', form, theme);
   await longPage.close();
 
-  // a phone with a keyboard: the bar rides above it
+  // a phone with a keyboard: the composer and the quick replies ride above it
   if (phone) {
     const keyboard = await open(browserContext, theme, 'view=board&attention=A5&history=1&kb=1');
     await overlay(keyboard).waitFor({ state: 'visible' });
-    const bar = await boxOf(keyboard.locator('[data-agenda-bar]'), 'bar');
+    const composer = await composerBox(keyboard);
     const fixture = await boxOf(keyboard.locator('[data-fixture]'), 'fixture');
-    check(bar.y + bar.height <= fixture.y + fixture.height + 1, 'the bar sits below the keyboard line');
+    check(composer.y + composer.height <= fixture.y + fixture.height + 1, 'the composer sits below the keyboard line');
     await shot(keyboard, 'item-keyboard', form, theme);
     await keyboard.close();
   }

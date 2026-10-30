@@ -24,6 +24,14 @@ export function jsonResponse(value: unknown, status = 200, extra: Readonly<Recor
   return { status, headers, body: JSON.stringify(value) };
 }
 
+/**
+ * A JSON response whose body the caller has already spelled — for a body too large to build as a value and
+ * serialise on the loop in one piece. The caller owns that it is valid JSON.
+ */
+export function jsonTextResponse(body: string, status = 200): ApiResponse {
+  return { status, headers: baseHeaders(JSON_CONTENT_TYPE), body };
+}
+
 /** A plain-text (or other non-JSON) response. */
 export function textResponse(
   body: string,

@@ -59,6 +59,7 @@ const VERB: Readonly<Record<WardenActionKind, string>> = {
   bless: 'Left alone',
   nudge: 'Nudged',
   resume: 'Resumed',
+  revive: 'Revived',
   restart: 'Restarted',
   stop: 'Stopped',
   failover: 'Moved to another account',

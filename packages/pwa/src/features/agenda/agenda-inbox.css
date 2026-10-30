@@ -37,15 +37,27 @@
 }
 
 /* ---- The page ------------------------------------------------------------------------------------- */
+/* THE PAGE IS ITS OWN SCROLLER, and the scroller ends where the phone's tab bar begins (the bar is the
+   next flex row under the page area), so no card can be drawn under the bar. The column is centred with
+   padding rather than a max-width so the scrollbar stays at the window's edge. The bottom padding is the
+   undo toast's clearance, not the bar's height: the toast floats above the bar and must not hide the
+   last card, and the home-indicator inset is the bar's to pay (index.css, THE BOTTOM INSET). */
 .fy-attn-inbox {
   display: flex;
+  box-sizing: border-box;
+  height: 100%;
+  min-height: 0;
   min-width: 0;
   flex-direction: column;
   gap: var(--gap-md);
-  margin: 0 auto;
   width: 100%;
-  max-width: 52rem;
-  padding: var(--gap-md) 16px calc(96px + var(--safe-bottom, 0px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: var(--gap-md) max(16px, calc((100% - 52rem) / 2)) 96px;
+}
+/* A flex column squeezes its children to fit unless they refuse; the page scrolls instead. */
+.fy-attn-inbox > * {
+  flex-shrink: 0;
 }
 /* ONE COMPACT ROW: title and count, the quiet "Updating" mark, then the tools pushed to the end. A phone
    wraps the tools onto a second line rather than squeezing them. */
@@ -1059,7 +1071,7 @@
    note never resizes the deck — the detail scrolls inside, the answer bar stays where it was. */
 .fy-attn-inbox[data-agenda-inbox='card'] {
   min-height: 100%;
-  padding-bottom: calc(12px + var(--safe-bottom, 0px));
+  padding-bottom: 12px;
 }
 .fy-attn-inbox__deck .fy-attn-deck__top .fy-attn-card {
   height: var(--deck-room, max(20rem, calc(100dvh - 19rem)));

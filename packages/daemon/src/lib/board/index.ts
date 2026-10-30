@@ -1,3 +1,4 @@
+export * from './agenda-links.ts';
 export * from './authority.ts';
 export * from './card-actions.ts';
 export * from './derive.ts';
@@ -5,7 +6,11 @@ export * from './errors.ts';
 export * from './graph.ts';
 export * from './lineage.ts';
 export * from './pr-cache.ts';
+export * from './pending-context.ts';
 export * from './ports.ts';
 export * from './query.ts';
+export * from './reopen-delivery.ts';
 export * from './service.ts';
+export * from './session-cards.ts';
+export * from './signal-done.ts';
 export * from './stubs.ts';

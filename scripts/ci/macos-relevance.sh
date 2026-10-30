@@ -56,12 +56,14 @@ safari="${common}|^scripts/ci/safari-render-proof\.sh$"
 safari+='|^packages/pwa/(package\.json|harness/fy-render-safari/|scripts/|public/_headers|src/lib/(fy-render|references)|src/.*fy-render|tests/fixtures/fy-render-journey\.ts)'
 
 # The pinned Claude/Codex harnesses, the account model that drives them (`packages/fleet`), the
-# `VERIFIED_HARNESS_VERSIONS` the runner cross-checks, and the daemon's transcript conversion that the
-# contract suite proves against the real binaries.
+# `VERIFIED_HARNESS_VERSIONS` the runner cross-checks, and the daemon's transcript conversion and
+# question projection (the hook's file read beside the transcript) that the contract suite proves against
+# the real binaries.
 harness="${common}|^scripts/ci/harness-contract-report\.sh$"
 harness+='|^packages/fleet/'
 harness+='|^packages/protocol/(package\.json|src/lib/harness-update\.ts)'
 harness+='|^packages/daemon/(package\.json|tests/contract/|src/(adapters|lib)/transcript/|src/lib/migrate/)'
+harness+='|^packages/daemon/src/(adapters|lib)/session/question/'
 
 # The 3.8 leg (nix/env.nix says why CI pins 3.7b): anything of the daemon's named for tmux, the session
 # lifecycle and health code that reads dead panes, their integration tests, and how the groups run.
