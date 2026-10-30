@@ -1,7 +1,7 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import { type BoardTaskEvent, BoardTaskEventSchema } from '../../src/lib/board.ts';
-import { describeBoardEvent } from '../../src/lib/board-history.ts';
+import { attachmentsPhrase, describeBoardEvent } from '../../src/lib/board-history.ts';
 
 const AT = '2026-10-30T10:00:00.000Z';
 const DENISHA = 'mvuc7tsf-0c3d50df';
@@ -68,6 +68,29 @@ describe('describeBoardEvent', () => {
         ask: { text: 'do more', source: 'chat://2' },
       }),
     ).equal('reopened Merged → Todo: new scope — ask: do more');
+  });
+
+  it('should say what files the owner sent with a reopen', () => {
+    // Arrange
+    const image = (digit: string) => ({ id: `att_${digit.repeat(64)}`, filename: 'a.png', mime: 'image/png' });
+
+    // Act + Assert
+    should(
+      say({
+        type: 'reopened',
+        from: 'merged',
+        to: 'todo',
+        reason: 'still flickers',
+        ask: { text: 'still flickers', source: 'owner (board move)' },
+        attachments: [image('a'), image('b')],
+      }),
+    ).equal('reopened Merged → Todo: still flickers — ask: still flickers — with 2 images');
+    should(attachmentsPhrase([{ mime: 'image/png' }])).equal('1 image');
+    should(attachmentsPhrase([{ mime: 'application/pdf' }])).equal('1 file');
+    should(attachmentsPhrase([{ mime: 'image/png' }, { mime: 'text/plain' }, { mime: 'text/csv' }])).equal(
+      '1 image and 2 files',
+    );
+    should(attachmentsPhrase([])).equal('');
   });
 
   it('should describe notes, clarifications and links', () => {

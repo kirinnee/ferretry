@@ -36,7 +36,10 @@ export const fakeActions = (
   const verb =
     (name: keyof BoardActions) =>
     async (...args: unknown[]) => {
-      calls.push(`${name}:${JSON.stringify(args.slice(1))}`);
+      // A trailing argument left out reads the same as one passed as `undefined`.
+      const said = args.slice(1);
+      while (said.length > 0 && said.at(-1) === undefined) said.pop();
+      calls.push(`${name}:${JSON.stringify(said)}`);
       const custom = overrides[name];
       return custom === undefined ? await done() : await (custom as (...rest: unknown[]) => Promise<unknown>)(...args);
     };
@@ -85,6 +88,10 @@ export interface DetailOptions {
   readonly readFails?: boolean;
   readonly hold?: boolean;
   readonly agendaItems?: readonly AgendaItem[];
+  /** Whether the machine takes pictures with a move back; absent, the page has no way to upload. */
+  readonly sendBackFiles?: boolean;
+  /** Every upload, as `session:file`. */
+  readonly uploads?: string[];
 }
 
 /** A detail wired to a real board store over a fake port and a real agenda store. */
@@ -139,6 +146,22 @@ export const detailProps = (options: DetailOptions = {}): DetailHarness => {
         sent.push({ sessionId, message });
         await options.sendMessage?.(sessionId, message);
       },
+      ...(options.sendBackFiles === undefined
+        ? {}
+        : {
+            sendBackFiles: async () => options.sendBackFiles === true,
+            uploadAttachment: async (_daemon, sessionId, file) => {
+              options.uploads?.push(`${sessionId}:${file.name}`);
+              return {
+                id: `att_${'a'.repeat(64)}`,
+                filename: file.name,
+                mime: file.type,
+                size: file.size,
+                sha256: '0'.repeat(64),
+                createdAt: '2026-08-01T10:00:00.000Z',
+              };
+            },
+          }),
     },
     phone: options.phone ?? false,
     onClose: () => {

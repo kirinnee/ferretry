@@ -66,9 +66,41 @@ export const MAX_BOARD_FILE_LENGTH = 1024;
 export const MAX_BOARD_QUERY_LENGTH = 200;
 export const MAX_BOARD_PAGE = 500;
 export const DEFAULT_BOARD_PAGE = 100;
+/** Files one move back may carry to the card's ferret (the owner's "Not good" composer). */
+export const MAX_BOARD_REOPEN_ATTACHMENTS = 10;
+export const MAX_BOARD_ATTACHMENT_NAME_LENGTH = 255;
 
 const SessionIdSchema = z.string().min(1);
 const reason = z.string().trim().min(1).max(MAX_BOARD_REASON_LENGTH);
+/** A stored attachment's id: the content address the attachment store gives every file it keeps. */
+const BoardAttachmentIdSchema = z.string().regex(/^att_[0-9a-f]{64}$/u);
+
+/**
+ * A file the owner sent with a move back, as the card's history names it: enough to say "2 images" and to
+ * open it from the ferret's chat, never its bytes.
+ */
+export const BoardAttachmentSchema = z.object({
+  id: BoardAttachmentIdSchema,
+  filename: z.string().min(1).max(MAX_BOARD_ATTACHMENT_NAME_LENGTH),
+  mime: z.string().min(1).max(MAX_BOARD_ATTACHMENT_NAME_LENGTH),
+});
+export type BoardAttachment = z.infer<typeof BoardAttachmentSchema>;
+
+/**
+ * The files a move back carries to the card's ferret (the "Not good" composer). They are uploaded first, through
+ * the ordinary attachment route, to `from`: the card's assignee or its owner ferret, the two the reopen is
+ * delivered to. The daemon carries them on to whichever of the two is told. Sent only to a daemon that reports
+ * `board.reopen.attachments.1`; an older one refuses the field.
+ */
+export const BoardReopenAttachmentsSchema = z.strictObject({
+  from: SessionIdSchema,
+  ids: z
+    .array(BoardAttachmentIdSchema)
+    .min(1)
+    .max(MAX_BOARD_REOPEN_ATTACHMENTS)
+    .refine(ids => new Set(ids).size === ids.length, 'an attachment is named once'),
+});
+export type BoardReopenAttachments = z.infer<typeof BoardReopenAttachmentsSchema>;
 const oneLine = (maximum: number) =>
   z
     .string()
@@ -298,6 +330,8 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     to: LaneIdSchema,
     reason,
     ask: TaskMessageSchema,
+    /** The files the owner sent with it; absent when there were none. */
+    attachments: z.array(BoardAttachmentSchema).min(1).max(MAX_BOARD_REOPEN_ATTACHMENTS).optional(),
   }),
   z.object({ ...EventBase, type: z.literal('note'), text: z.string().trim().min(1).max(MAX_BOARD_NOTE_LENGTH) }),
   z.object({
@@ -681,7 +715,13 @@ const editFields = {
  */
 export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
   /** A move back needs a reason; the schema cannot tell direction, so {@link moveReasonProblem} does. */
-  z.strictObject({ action: z.literal('move'), to: LaneIdSchema, reason: reason.optional() }),
+  z.strictObject({
+    action: z.literal('move'),
+    to: LaneIdSchema,
+    reason: reason.optional(),
+    /** Files for the card's ferret: only an owner's move back (a reopen) carries them. */
+    attachments: BoardReopenAttachmentsSchema.optional(),
+  }),
   /** Make this the card the calling session's activity is attributed to. */
   z.strictObject({ action: z.literal('focus') }),
   z.strictObject({ action: z.literal('block'), reason }),
@@ -695,7 +735,13 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
   z.strictObject({ action: z.literal('undepend'), task: TaskRefSchema, reason }),
   z.strictObject({ action: z.literal('drop'), reason }),
   /** Back to a lane with the owner's words: the reason, and the ask as said (appended to clarifications). */
-  z.strictObject({ action: z.literal('reopen'), to: LaneIdSchema, reason, ask: TaskMessageSchema }),
+  z.strictObject({
+    action: z.literal('reopen'),
+    to: LaneIdSchema,
+    reason,
+    ask: TaskMessageSchema,
+    attachments: BoardReopenAttachmentsSchema.optional(),
+  }),
   z.strictObject({
     action: z.literal('clarify'),
     text: z.string().min(1).max(MAX_BOARD_BRIEF_LENGTH),

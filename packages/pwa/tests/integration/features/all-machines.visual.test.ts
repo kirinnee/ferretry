@@ -21,12 +21,13 @@
  *
  * Set `FY_ALL_MACHINES_SHOTS_DIR` to keep the captures for review; every name in them is fake.
  */
-import { afterAll, beforeAll, describe, expect, it } from 'bun:test';
+import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
 import { sharedChromium } from '../support/chromium.ts';
+import { boundedContext, overlapped } from '../support/overlap.ts';
 
 const packageRoot = resolve(import.meta.dir, '../../..');
 const shotsDir = process.env.FY_ALL_MACHINES_SHOTS_DIR ?? '';
@@ -42,6 +43,8 @@ interface Evidence {
 }
 
 let browser: Browser;
+const overlap = overlapped();
+const bounded = boundedContext(() => browser, 3);
 let directory = '';
 let server: ReturnType<typeof Bun.serve> | undefined;
 
@@ -78,7 +81,7 @@ const open = async (
   extra = '',
 ): Promise<{ readonly context: BrowserContext; readonly tab: Page }> => {
   const phone = scene !== 'bar';
-  const context = await browser.newContext({
+  const context = await bounded({
     viewport: phone ? { width: 390, height: 844 } : { width: 1_440, height: 900 },
     colorScheme: mode,
     reducedMotion: 'reduce',
@@ -97,6 +100,19 @@ const open = async (
       : '[data-machine-reach="online"] + [data-machine-reach="online"]',
   );
   return { context, tab };
+};
+
+/** Switches theme and colour scheme on a loaded page — the scene only sets `data-theme` once, so this is what a reload with `?theme=` would give. */
+const restyle = async (tab: Page, theme: string, mode: 'light' | 'dark'): Promise<void> => {
+  await tab.emulateMedia({ colorScheme: mode });
+  await tab.evaluate(
+    value =>
+      new Promise<void>(resolve => {
+        document.documentElement.dataset.theme = value;
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      }),
+    `${theme}-${mode}`,
+  );
 };
 
 const evidence = async (tab: Page): Promise<Evidence> =>
@@ -124,243 +140,269 @@ describe('one session list across two machines, one offline', () => {
     if (shotsDir !== '') await mkdir(shotsDir, { recursive: true });
   }, 180_000);
 
+  beforeAll(overlap.start);
+
   afterAll(async () => {
     server?.stop(true);
     if (directory !== '') await rm(directory, { force: true, recursive: true });
   });
 
-  it('reads each machine with its own device, pins what needs you, and greys the offline machine', async () => {
-    const { context, tab } = await open('bar', 'studio', 'light');
-    try {
-      const seen = await evidence(tab);
-      const devices = new Map([
-        [seen.studio, 'device-on-studio'],
-        [seen.laptop, 'device-on-laptop'],
-      ]);
-      // Every read went to a paired machine, with that machine's device — never the other's.
-      for (const read of seen.reads) expect(read.deviceId).toBe(devices.get(read.daemonId) as string);
-      expect(
-        seen.reads.filter(read => read.daemonId === seen.studio && read.what === 'sessions').length,
-      ).toBeGreaterThan(0);
-      // Once five minutes ago, and again by the poll, which it no longer answers.
-      expect(
-        seen.reads.filter(read => read.daemonId === seen.laptop && read.what === 'sessions').length,
-      ).toBeGreaterThan(1);
+  overlap.it(
+    'reads each machine with its own device, pins what needs you, and greys the offline machine',
+    async () => {
+      const { context, tab } = await open('bar', 'studio', 'light');
+      try {
+        const seen = await evidence(tab);
+        const devices = new Map([
+          [seen.studio, 'device-on-studio'],
+          [seen.laptop, 'device-on-laptop'],
+        ]);
+        // Every read went to a paired machine, with that machine's device — never the other's.
+        for (const read of seen.reads) expect(read.deviceId).toBe(devices.get(read.daemonId) as string);
+        expect(
+          seen.reads.filter(read => read.daemonId === seen.studio && read.what === 'sessions').length,
+        ).toBeGreaterThan(0);
+        // Once five minutes ago, and again by the poll, which it no longer answers.
+        expect(
+          seen.reads.filter(read => read.daemonId === seen.laptop && read.what === 'sessions').length,
+        ).toBeGreaterThan(1);
 
-      // Needs you: studio's question before its request for a human; each row names its machine.
-      const pinned = await texts(tab, '[data-sbar-needs-you-group] [data-sbar-session]');
-      expect(pinned.length).toBe(2);
-      expect(pinned[0]).toContain('Hadi');
-      expect(pinned[1]).toContain('Ora');
-      expect(await texts(tab, '[data-sbar-needs-you-group] [data-machine-chip]')).toEqual(['studio', 'studio']);
+        // Needs you: studio's question before its request for a human; each row names its machine.
+        const pinned = await texts(tab, '[data-sbar-needs-you-group] [data-sbar-session]');
+        expect(pinned.length).toBe(2);
+        expect(pinned[0]).toContain('Hadi');
+        expect(pinned[1]).toContain('Ora');
+        expect(await texts(tab, '[data-sbar-needs-you-group] [data-machine-chip]')).toEqual(['studio', 'studio']);
 
-      // Machines in the order they were paired; the offline one says when it was last seen.
-      expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
-      expect(await texts(tab, '[data-machine-reach="offline"] .fy-sbar__machine-reach')).toEqual([
-        'offline · last seen 5m',
-      ]);
-      // Its waiting session stays home, greyed — nobody can answer a machine that is not answering.
-      const laptopRows = await texts(tab, '[data-machine-reach="offline"] [data-sbar-session]');
-      expect(laptopRows.some(row => row.includes('Pim'))).toBe(true);
-      const opacity = await tab.$eval(
-        '[data-machine-reach="offline"] .fy-sbar__group',
-        node => getComputedStyle(node).opacity,
-      );
-      expect(Number(opacity)).toBeLessThan(1);
+        // Machines in the order they were paired; the offline one says when it was last seen.
+        expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
+        expect(await texts(tab, '[data-machine-reach="offline"] .fy-sbar__machine-reach')).toEqual([
+          'offline · last seen 5m',
+        ]);
+        // Its waiting session stays home, greyed — nobody can answer a machine that is not answering.
+        const laptopRows = await texts(tab, '[data-machine-reach="offline"] [data-sbar-session]');
+        expect(laptopRows.some(row => row.includes('Pim'))).toBe(true);
+        const opacity = await tab.$eval(
+          '[data-machine-reach="offline"] .fy-sbar__group',
+          node => getComputedStyle(node).opacity,
+        );
+        expect(Number(opacity)).toBeLessThan(1);
 
-      // `s-ivo` is a session on BOTH machines; only studio's is the open one.
-      expect(await tab.$$eval('[data-sbar-session="s-ivo"]', nodes => nodes.length)).toBe(2);
-      expect(await texts(tab, '[data-sbar-session="s-ivo"][aria-current="page"]')).toHaveLength(1);
-      expect((await texts(tab, '[data-sbar-session="s-ivo"][aria-current="page"]'))[0]).toContain('Ivo');
+        // `s-ivo` is a session on BOTH machines; only studio's is the open one.
+        expect(await tab.$$eval('[data-sbar-session="s-ivo"]', nodes => nodes.length)).toBe(2);
+        expect(await texts(tab, '[data-sbar-session="s-ivo"][aria-current="page"]')).toHaveLength(1);
+        expect((await texts(tab, '[data-sbar-session="s-ivo"][aria-current="page"]'))[0]).toContain('Ivo');
 
-      // A laptop row opens the LAPTOP's session.
-      await tab.click('[data-machine-reach="offline"] [data-sbar-session="l-pim"]');
-      expect((await evidence(tab)).navigations.at(-1)).toBe(
-        `/d/${encodeURIComponent(seen.laptop)}/session/l-pim?agenda=A1`,
-      );
+        // A laptop row opens the LAPTOP's session.
+        await tab.click('[data-machine-reach="offline"] [data-sbar-session="l-pim"]');
+        expect((await evidence(tab)).navigations.at(-1)).toBe(
+          `/d/${encodeURIComponent(seen.laptop)}/session/l-pim?agenda=A1`,
+        );
 
-      // "+ New" asks which machine: this one first and marked; the laptop is not answering, so it is
-      // listed but unavailable, saying why — a new session cannot start on a machine nobody can reach.
-      await tab.click('[data-new-session-menu]');
-      const menu = '[role="menu"][aria-label="New session on"]';
-      await tab.waitForSelector(menu, { state: 'visible' });
-      // Read as text content: the menu is mid-entry when it first turns visible.
-      const items = await tab.$$eval(`${menu} [role="menuitem"]`, nodes =>
-        nodes.map(node => [node.textContent ?? '', (node as HTMLButtonElement).disabled] as const),
-      );
-      expect(items[0]?.[0]).toContain('studio');
-      expect(items[0]?.[0]).toContain('this one');
-      expect(items[0]?.[1]).toBe(false);
-      expect(items[1]?.[0]).toContain('laptop isn’t reachable right now');
-      expect(items[1]?.[1]).toBe(true);
-      await tab.click(`${menu} [role="menuitem"]:nth-of-type(1)`);
-      expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.studio)}/new`);
-    } finally {
-      await context.close();
-    }
-  }, 120_000);
+        // "+ New" asks which machine: this one first and marked; the laptop is not answering, so it is
+        // listed but unavailable, saying why — a new session cannot start on a machine nobody can reach.
+        await tab.click('[data-new-session-menu]');
+        const menu = '[role="menu"][aria-label="New session on"]';
+        await tab.waitForSelector(menu, { state: 'visible' });
+        // Read as text content: the menu is mid-entry when it first turns visible.
+        const items = await tab.$$eval(`${menu} [role="menuitem"]`, nodes =>
+          nodes.map(node => [node.textContent ?? '', (node as HTMLButtonElement).disabled] as const),
+        );
+        expect(items[0]?.[0]).toContain('studio');
+        expect(items[0]?.[0]).toContain('this one');
+        expect(items[0]?.[1]).toBe(false);
+        expect(items[1]?.[0]).toContain('laptop isn’t reachable right now');
+        expect(items[1]?.[1]).toBe(true);
+        await tab.click(`${menu} [role="menuitem"]:nth-of-type(1)`);
+        expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.studio)}/new`);
+      } finally {
+        await context.close();
+      }
+    },
+    120_000,
+  );
 
-  it('opens the second machine’s session without moving the list, and marks both machines’ learners', async () => {
-    const { context, tab } = await open('bar', 'studio', 'light', 'laptop');
-    try {
-      const seen = await evidence(tab);
-      // The machine just opened is NOT hoisted: the list holds the order it had.
-      expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
-      expect(await texts(tab, '[data-sbar-machine] .fy-sbar__machine-name')).toEqual(['laptop']);
-      // `s-ivo` runs on both; the open one is the laptop's, and only it.
-      const current = `[data-sbar-machine-group="${seen.laptop}"] [data-sbar-session="s-ivo"][aria-current="page"]`;
-      expect(await tab.$$eval('[data-sbar-session][aria-current="page"]', nodes => nodes.length)).toBe(1);
-      expect(await tab.$$eval(current, nodes => nodes.length)).toBe(1);
-      // Each machine marks ITS learners — the studio's too, though the laptop is the one on screen.
-      const learns = async (machine: string, id: string): Promise<boolean> =>
-        (await tab.$$eval(
-          `[data-sbar-machine-group="${machine}"] [data-sbar-session="${id}"] [data-learning-passive]`,
-          nodes => nodes.length,
-        )) === 1;
-      expect([
-        await learns(seen.studio, 's-noa'),
-        await learns(seen.studio, 's-ivo'),
-        await learns(seen.laptop, 's-ivo'),
-      ]).toEqual([true, false, true]);
-      // A studio row still opens the studio's session.
-      await tab.click(`[data-sbar-machine-group="${seen.studio}"] [data-sbar-session="s-ivo"]`);
-      expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.studio)}/session/s-ivo`);
-      const shots = (['light', 'dark'] as const).flatMap(mode =>
-        (['bar', 'drawer'] as const).map(scene => ({ mode, scene })),
-      );
-      await Promise.all(
-        shots.map(async ({ mode, scene }) => {
-          const shot = await open(scene, 'studio', mode, 'laptop');
-          try {
-            // The phone drawer is shorter than the list: bring the open row into the capture.
-            if (scene === 'drawer')
-              await shot.tab.evaluate(() =>
-                document.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'center' }),
-              );
-            const wide = await shot.tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-            expect(wide).toBeLessThanOrEqual(0);
-            if (shotsDir !== '')
-              await writeFile(
-                join(shotsDir, `second-machine-open-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
-                await shot.tab.screenshot({ animations: 'disabled' }),
-              );
-          } finally {
-            await shot.context.close();
-          }
-        }),
-      );
-    } finally {
-      await context.close();
-    }
-  }, 180_000);
-
-  it('lists Needs you and every machine on the phone Sessions page', async () => {
-    const { context, tab } = await open('page', 'studio', 'light');
-    try {
-      const pinned = await texts(tab, '[data-needs-you-group] [data-session-row]');
-      expect(pinned.length).toBe(2);
-      expect(pinned[0]).toContain('Hadi');
-      expect(await texts(tab, '[data-needs-you-group] [data-machine-chip]')).toEqual(['studio', 'studio']);
-      expect(await tab.$$eval('[data-machine-section]', nodes => nodes.length)).toBe(2);
-      // The machine that stopped answering says so IN ITS OWN SECTION — its status line, with when its
-      // rows are from — and nothing about it reaches the page as a whole.
-      expect((await texts(tab, '[data-machine-reach="offline"] h2'))[0]).toContain('offline');
-      const status = (await texts(tab, '[data-machine-reach="offline"] [data-machine-status]'))[0] ?? '';
-      expect(status).toContain('Unreachable · retrying');
-      expect(status).toMatch(/as of \d\d:\d\d/);
-      expect(await tab.$$eval('[role="alert"], [data-machine-status-row], [data-cache-updating]', n => n.length)).toBe(
-        0,
-      );
-      // Grouped under the machine already: no chip on a row there.
-      expect(await tab.$$eval('[data-machine-section] [data-machine-chip]', nodes => nodes.length)).toBe(0);
-    } finally {
-      await context.close();
-    }
-  }, 120_000);
-
-  it('draws compact rows as one short line and Comfortable as the full rows, crowded, without sideways scroll', async () => {
-    // The four crowded lists (two modes, bar and drawer), each at both densities, are read at once.
-    const lists = (['light', 'dark'] as const).flatMap(mode =>
-      (['bar', 'drawer'] as const).map(scene => ({ mode, scene })),
-    );
-    await Promise.all(
-      lists.map(async ({ mode, scene }) => {
-        const heights: Record<string, number> = {};
+  overlap.it(
+    'opens the second machine’s session without moving the list, and marks both machines’ learners',
+    async () => {
+      const { context, tab } = await open('bar', 'studio', 'light', 'laptop');
+      try {
+        const seen = await evidence(tab);
+        // The machine just opened is NOT hoisted: the list holds the order it had.
+        expect(await texts(tab, '.fy-sbar__machine-label')).toEqual(['studio', 'laptop']);
+        expect(await texts(tab, '[data-sbar-machine] .fy-sbar__machine-name')).toEqual(['laptop']);
+        // `s-ivo` runs on both; the open one is the laptop's, and only it.
+        const current = `[data-sbar-machine-group="${seen.laptop}"] [data-sbar-session="s-ivo"][aria-current="page"]`;
+        expect(await tab.$$eval('[data-sbar-session][aria-current="page"]', nodes => nodes.length)).toBe(1);
+        expect(await tab.$$eval(current, nodes => nodes.length)).toBe(1);
+        // Each machine marks ITS learners — the studio's too, though the laptop is the one on screen.
+        const learns = async (machine: string, id: string): Promise<boolean> =>
+          (await tab.$$eval(
+            `[data-sbar-machine-group="${machine}"] [data-sbar-session="${id}"] [data-learning-passive]`,
+            nodes => nodes.length,
+          )) === 1;
+        expect([
+          await learns(seen.studio, 's-noa'),
+          await learns(seen.studio, 's-ivo'),
+          await learns(seen.laptop, 's-ivo'),
+        ]).toEqual([true, false, true]);
+        // A studio row still opens the studio's session.
+        await tab.click(`[data-sbar-machine-group="${seen.studio}"] [data-sbar-session="s-ivo"]`);
+        expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.studio)}/session/s-ivo`);
+        const shots = (['light', 'dark'] as const).flatMap(mode =>
+          (['bar', 'drawer'] as const).map(scene => ({ mode, scene })),
+        );
         await Promise.all(
-          (['compact', 'full'] as const).map(async density => {
-            const { context, tab } = await open(scene, 'studio', mode, 'laptop', `&big=1&density=${density}`);
+          shots.map(async ({ mode, scene }) => {
+            const shot = await open(scene, 'studio', mode, 'laptop');
             try {
-              const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+              // The phone drawer is shorter than the list: bring the open row into the capture.
+              if (scene === 'drawer')
+                await shot.tab.evaluate(() =>
+                  document.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'center' }),
+                );
+              const wide = await shot.tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
               expect(wide).toBeLessThanOrEqual(0);
-              const listWide = await tab.$$eval('.fy-sbar__list', nodes =>
-                nodes.map(node => node.scrollWidth - node.clientWidth),
-              );
-              for (const overflow of listWide) expect(overflow).toBeLessThanOrEqual(0);
-
-              const plain = '[data-sbar-machine-group] [data-sbar-session]:not([aria-current="page"])';
-              const rowHeights = await tab.$$eval(plain, nodes =>
-                nodes.map(node => node.getBoundingClientRect().height),
-              );
-              expect(rowHeights.length).toBeGreaterThan(8);
-              const tallest = Math.max(...rowHeights);
-              heights[density] = Math.min(...rowHeights);
-              const head = await tab.$$eval('.fy-sbar__machine-head', nodes =>
-                nodes.map(node => node.getBoundingClientRect().height),
-              );
-              expect(head.length).toBe(2);
-              for (const height of head) expect(height).toBeLessThanOrEqual(32);
-
-              const detailBox = await tab.$eval(`${plain} .fy-sbar__detail`, node => {
-                const box = node.getBoundingClientRect().height;
-                return box > 0 ? box : (node.firstElementChild?.getBoundingClientRect().height ?? 0);
-              });
-              const open = await tab.$eval('[aria-current="page"] .fy-sbar__detail', node => ({
-                height: node.getBoundingClientRect().height,
-                ferret: node.querySelector('[data-sbar-ferret]') !== null,
-              }));
-              if (density === 'compact') {
-                // One line: 32px on a pointer, the 44px touch floor on a phone; the detail is clipped away.
-                expect(tallest).toBeLessThanOrEqual(scene === 'bar' ? 34 : 46);
-                expect(detailBox).toBeLessThanOrEqual(1);
-                expect(open.height).toBeGreaterThan(8);
-                expect(open.ferret).toBe(true);
-              } else {
-                expect(detailBox).toBeGreaterThan(8);
-              }
               if (shotsDir !== '')
                 await writeFile(
-                  join(shotsDir, `sidebar-${density}-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
-                  await tab.screenshot({ animations: 'disabled' }),
+                  join(shotsDir, `second-machine-open-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
+                  await shot.tab.screenshot({ animations: 'disabled' }),
                 );
             } finally {
-              await context.close();
+              await shot.context.close();
             }
           }),
         );
-        expect(heights.compact).toBeLessThan(heights.full as number);
-      }),
-    );
-  }, 240_000);
+      } finally {
+        await context.close();
+      }
+    },
+    180_000,
+  );
 
-  it('fits a phone and a desktop, light and dark, in two theme families', async () => {
-    const fits = ['studio', 'neo'].flatMap(theme =>
-      (['light', 'dark'] as const).flatMap(mode => (['bar', 'page'] as const).map(scene => ({ theme, mode, scene }))),
-    );
-    await Promise.all(
-      fits.map(async ({ theme, mode, scene }) => {
-        const { context, tab } = await open(scene, theme, mode);
-        try {
-          const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-          expect(wide).toBeLessThanOrEqual(0);
-          if (shotsDir !== '')
-            await writeFile(
-              join(shotsDir, `all-machines-${scene === 'bar' ? 'desktop' : 'phone'}-${theme}-${mode}.png`),
-              await tab.screenshot({ animations: 'disabled' }),
-            );
-        } finally {
-          await context.close();
-        }
-      }),
-    );
-  }, 180_000);
+  overlap.it(
+    'lists Needs you and every machine on the phone Sessions page',
+    async () => {
+      const { context, tab } = await open('page', 'studio', 'light');
+      try {
+        const pinned = await texts(tab, '[data-needs-you-group] [data-session-row]');
+        expect(pinned.length).toBe(2);
+        expect(pinned[0]).toContain('Hadi');
+        expect(await texts(tab, '[data-needs-you-group] [data-machine-chip]')).toEqual(['studio', 'studio']);
+        expect(await tab.$$eval('[data-machine-section]', nodes => nodes.length)).toBe(2);
+        // The machine that stopped answering says so IN ITS OWN SECTION — its status line, with when its
+        // rows are from — and nothing about it reaches the page as a whole.
+        expect((await texts(tab, '[data-machine-reach="offline"] h2'))[0]).toContain('offline');
+        const status = (await texts(tab, '[data-machine-reach="offline"] [data-machine-status]'))[0] ?? '';
+        expect(status).toContain('Unreachable · retrying');
+        expect(status).toMatch(/as of \d\d:\d\d/);
+        expect(
+          await tab.$$eval('[role="alert"], [data-machine-status-row], [data-cache-updating]', n => n.length),
+        ).toBe(0);
+        // Grouped under the machine already: no chip on a row there.
+        expect(await tab.$$eval('[data-machine-section] [data-machine-chip]', nodes => nodes.length)).toBe(0);
+      } finally {
+        await context.close();
+      }
+    },
+    120_000,
+  );
+
+  overlap.it(
+    'draws compact rows as one short line and Comfortable as the full rows, crowded, without sideways scroll',
+    async () => {
+      // The crowded lists (bar and drawer), each at both densities, are read at once: one load per list, light
+      // and dark switched in place.
+      await Promise.all(
+        (['bar', 'drawer'] as const).map(async scene => {
+          const heights: Record<string, Record<string, number>> = { light: {}, dark: {} };
+          await Promise.all(
+            (['compact', 'full'] as const).map(async density => {
+              const { context, tab } = await open(scene, 'studio', 'light', 'laptop', `&big=1&density=${density}`);
+              try {
+                for (const mode of ['light', 'dark'] as const) {
+                  await restyle(tab, 'studio', mode);
+                  const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+                  expect(wide).toBeLessThanOrEqual(0);
+                  const listWide = await tab.$$eval('.fy-sbar__list', nodes =>
+                    nodes.map(node => node.scrollWidth - node.clientWidth),
+                  );
+                  for (const overflow of listWide) expect(overflow).toBeLessThanOrEqual(0);
+
+                  const plain = '[data-sbar-machine-group] [data-sbar-session]:not([aria-current="page"])';
+                  const rowHeights = await tab.$$eval(plain, nodes =>
+                    nodes.map(node => node.getBoundingClientRect().height),
+                  );
+                  expect(rowHeights.length).toBeGreaterThan(8);
+                  const tallest = Math.max(...rowHeights);
+                  (heights[mode] as Record<string, number>)[density] = Math.min(...rowHeights);
+                  const head = await tab.$$eval('.fy-sbar__machine-head', nodes =>
+                    nodes.map(node => node.getBoundingClientRect().height),
+                  );
+                  expect(head.length).toBe(2);
+                  for (const height of head) expect(height).toBeLessThanOrEqual(32);
+
+                  const detailBox = await tab.$eval(`${plain} .fy-sbar__detail`, node => {
+                    const box = node.getBoundingClientRect().height;
+                    return box > 0 ? box : (node.firstElementChild?.getBoundingClientRect().height ?? 0);
+                  });
+                  const open = await tab.$eval('[aria-current="page"] .fy-sbar__detail', node => ({
+                    height: node.getBoundingClientRect().height,
+                    ferret: node.querySelector('[data-sbar-ferret]') !== null,
+                  }));
+                  if (density === 'compact') {
+                    // One line: 32px on a pointer, the 44px touch floor on a phone; the detail is clipped away.
+                    expect(tallest).toBeLessThanOrEqual(scene === 'bar' ? 34 : 46);
+                    expect(detailBox).toBeLessThanOrEqual(1);
+                    expect(open.height).toBeGreaterThan(8);
+                    expect(open.ferret).toBe(true);
+                  } else {
+                    expect(detailBox).toBeGreaterThan(8);
+                  }
+                  if (shotsDir !== '')
+                    await writeFile(
+                      join(shotsDir, `sidebar-${density}-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
+                      await tab.screenshot({ animations: 'disabled' }),
+                    );
+                }
+              } finally {
+                await context.close();
+              }
+            }),
+          );
+          for (const mode of ['light', 'dark'])
+            expect(heights[mode]?.compact).toBeLessThan(heights[mode]?.full as number);
+        }),
+      );
+    },
+    240_000,
+  );
+
+  overlap.it(
+    'fits a phone and a desktop, light and dark, in two theme families',
+    async () => {
+      // One load per scene; the four theme and scheme combinations are switched in place.
+      await Promise.all(
+        (['bar', 'page'] as const).map(async scene => {
+          const { context, tab } = await open(scene, 'studio', 'light');
+          try {
+            for (const theme of ['studio', 'neo'])
+              for (const mode of ['light', 'dark'] as const) {
+                await restyle(tab, theme, mode);
+                const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+                expect(wide).toBeLessThanOrEqual(0);
+                if (shotsDir !== '')
+                  await writeFile(
+                    join(shotsDir, `all-machines-${scene === 'bar' ? 'desktop' : 'phone'}-${theme}-${mode}.png`),
+                    await tab.screenshot({ animations: 'disabled' }),
+                  );
+              }
+          } finally {
+            await context.close();
+          }
+        }),
+      );
+    },
+    180_000,
+  );
 });

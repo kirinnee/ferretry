@@ -295,6 +295,8 @@ const store = new DaemonBoardStore(
       return task === undefined ? null : { task, laneSet: laneSetFor() };
     },
     projects: async () => [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
+    // A move stays on its way, so an answer's spinner can be captured.
+    act: async () => await new Promise<never>(() => undefined),
   }),
   fakeEnvironment(),
 );
@@ -333,6 +335,15 @@ function Harness() {
         ports={{
           sendMessage: async () => undefined,
           startFerret: async () => OTTILIE,
+          sendBackFiles: async () => true,
+          uploadAttachment: async (_daemon, _session, file) => ({
+            id: `att_${'a'.repeat(64)}`,
+            filename: file.name,
+            mime: file.type,
+            size: file.size,
+            sha256: '0'.repeat(64),
+            createdAt: ago(0),
+          }),
         }}
         search=""
         store={store}

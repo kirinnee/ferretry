@@ -20,6 +20,7 @@ import {
   type AgendaResponse,
   type BoardErrorCode,
   type BoardProjectId,
+  type BoardReopenAttachments,
   type BoardResult,
   type BoardTaskActionRequestInput,
   type BoardTaskCreateRequestInput,
@@ -73,10 +74,25 @@ type BoardLinkTarget = Omit<Action<'link'>, 'action'>;
 type BoardEdit = Omit<Action<'edit'>, 'action'>;
 
 export interface BoardActions {
-  /** Moves a card. A move back needs `reason` (refused here without a round trip when it is missing). */
-  moveTask(target: BoardMoveTarget, to: string, reason?: string): Promise<BoardMutation>;
+  /**
+   * Moves a card. A move back needs `reason` (refused here without a round trip when it is missing). An owner's
+   * move back may carry `attachments`, already uploaded to the card's ferret — only to a machine that reports
+   * `board.reopen.attachments.1`, because an older one refuses the field.
+   */
+  moveTask(
+    target: BoardMoveTarget,
+    to: string,
+    reason?: string,
+    attachments?: BoardReopenAttachments,
+  ): Promise<BoardMutation>;
   /** Reopens a closed card into a lane, with the owner's reason and the ask as said. */
-  reopen(target: BoardCardTarget, to: string, reason: string, ask: TaskMessage): Promise<BoardMutation>;
+  reopen(
+    target: BoardCardTarget,
+    to: string,
+    reason: string,
+    ask: TaskMessage,
+    attachments?: BoardReopenAttachments,
+  ): Promise<BoardMutation>;
   depend(target: BoardCardTarget, dependency: BoardDependency): Promise<BoardMutation>;
   /** Takes a dependency off; the daemon records why. */
   undepend(target: BoardCardTarget, task: Action<'undepend'>['task'], reason: string): Promise<BoardMutation>;
@@ -158,7 +174,7 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
     saveLanes: (daemonId, projectId, { version, layout, relocate }) =>
       changeLanes(daemonId, projectId, { action: 'edit', version, layout, relocate }),
     acceptLanes: (daemonId, projectId, version) => changeLanes(daemonId, projectId, { action: 'confirm', version }),
-    moveTask: async (target, to, reason) => {
+    moveTask: async (target, to, reason, attachments) => {
       const checked = checkMove(target.laneSet, target.laneId, to, reason);
       if (!checked.ok) {
         const problem = checked.error;
@@ -179,9 +195,11 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
         action: 'move',
         to,
         ...(trimmed === undefined || trimmed === '' ? {} : { reason: trimmed }),
+        ...(attachments === undefined ? {} : { attachments }),
       });
     },
-    reopen: (target, to, reason, ask) => send(target, { action: 'reopen', to, reason, ask }),
+    reopen: (target, to, reason, ask, attachments) =>
+      send(target, { action: 'reopen', to, reason, ask, ...(attachments === undefined ? {} : { attachments }) }),
     depend: (target, { task, until, overrideReason }) =>
       send(target, {
         action: 'depend',

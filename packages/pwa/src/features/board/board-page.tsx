@@ -2,8 +2,10 @@
  * THE BOARD PAGE (`/d/<id>/board`): every task on every paired machine as lanes.
  *
  * It owns what the views must not: the reads (the U10 board store, once per kind of read), the filters in
- * the URL, the drag in the air and the move flow. A move forward is sent as dropped; a move BACK opens a
- * one-line reason box and is sent only with it. Everything drawn is `BoardCard`, `BoardLane`,
+ * the URL, the drag in the air and the move flow. A move forward is sent as dropped; a move BACK opens the
+ * send-back composer (the words, and pictures where the machine takes them) and is sent only with its words.
+ * Each card's answer in flight is tracked here, so the pressed button spins, the card's other answers wait,
+ * and a refusal is said on the card it belongs to. Everything drawn is `BoardCard`, `BoardLane`,
  * `BoardCountsBar` and `BoardFilterBar`, which the phone and the side pane reuse.
  */
 
@@ -20,8 +22,8 @@ import {
 import type { DaemonBoardStore } from '../../lib/board-store.ts';
 import type { DaemonId } from '../../lib/daemon-connection.ts';
 import { type BoardFilters, boardFiltersToSearch } from '../../lib/board-model.ts';
-import { boardDone, isReleaseLane } from '../../lib/board-done.ts';
-import { moveChoices, planMove } from '../../lib/board-move.ts';
+import { boardDone, doneLaneOf, isReleaseLane, notGoodLaneOf } from '../../lib/board-done.ts';
+import { moveChoices } from '../../lib/board-move.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import {
   archivePage,
@@ -34,7 +36,6 @@ import {
   type BoardViewId,
   cardPlaces,
   laneNames,
-  laneOfCategory,
   parseBoardView,
 } from '../../lib/board-view.ts';
 import type { DaemonSessionScope } from '../../lib/daemon-scope.ts';
@@ -46,7 +47,8 @@ import { DEFAULT_SUMMARY_WINDOW, parseSummaryWindow, type SummaryWindow } from '
 import { BoardFilterBar, BoardFilterSheet } from './board-filters.tsx';
 import { BoardNotice } from './board-notice.tsx';
 import { PhoneKanban } from './board-phone.tsx';
-import { BoardReasonBox } from './board-reason-box.tsx';
+import { useBoardAnswers } from './board-answers.tsx';
+import type { SendBackPorts } from './board-send-back.tsx';
 import { type BoardAgenda, BoardDetail, type BoardDetailPorts } from './detail/board-detail.tsx';
 import { BoardNewCard, type NewCardPorts } from './detail/board-new-card.tsx';
 import { TableView } from './board-table.tsx';
@@ -76,7 +78,7 @@ export interface BoardPageProps {
   /** The card the address names (`/d/<id>/board/<taskId>`); it opens as a drawer, or a page on a phone. */
   readonly openCard?: { readonly daemonId: DaemonId; readonly taskId: string } | null;
   /** Speaking to ferrets and starting one; without them the detail cannot comment and there is no "+ Card". */
-  readonly ports?: BoardDetailPorts & NewCardPorts;
+  readonly ports?: BoardDetailPorts & NewCardPorts & SendBackPorts;
   /** A phone: one lane at a time under a chip strip, the filters in a bottom sheet, rows sized for a thumb. */
   readonly phone?: boolean;
   /**
@@ -84,13 +86,6 @@ export interface BoardPageProps {
    * "All cards" to widen it; a ferret or "All cards" choice in the URL always wins.
    */
   readonly origin?: DaemonSessionScope | null;
-}
-
-interface PendingMove {
-  readonly card: BoardCardOf;
-  readonly group: BoardGroupOf;
-  readonly to: string;
-  readonly toName: string;
 }
 
 const useNow = (fixed: number | undefined): number => {
@@ -250,53 +245,18 @@ export function BoardPage({
 
   // ----- moving -------------------------------------------------------------------------------------
   const [dragging, setDragging] = useState<{ cardKey: string; groupKey: string } | null>(null);
-  const [pending, setPending] = useState<PendingMove | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [composing, setComposing] = useState(false);
   // A phone can dismiss a machine's error; it comes back if the machine says something else.
   const [dismissedErrors, setDismissedErrors] = useState<ReadonlySet<string>>(() => new Set());
 
-  const send = useCallback(
-    async (card: BoardCardOf, group: BoardGroupOf, to: string, reason?: string): Promise<boolean> => {
-      setBusy(true);
-      setProblem(null);
-      const result = await actions.moveTask(
-        { daemonId: card.daemonId, id: card.task.id, laneId: card.task.laneId, laneSet: group.laneSet },
-        to,
-        reason,
-      );
-      setBusy(false);
-      if (result.ok) return true;
-      setProblem(result.error.message);
-      return false;
-    },
-    [actions],
-  );
-
-  const requestMove = useCallback(
-    (card: BoardCardOf, group: BoardGroupOf, laneId: string): void => {
-      const plan = planMove(group.laneSet, card.task.laneId, laneId);
-      setNotice(null);
-      if (plan.kind === 'refused') {
-        setNotice(plan.message);
-        return;
-      }
-      if (plan.kind === 'ask-reason') {
-        const toName = group.laneSet?.lanes.find(lane => lane.id === plan.to)?.name ?? plan.to;
-        setProblem(null);
-        setPending({ card, group, to: plan.to, toName });
-        return;
-      }
-      if (plan.kind === 'send') {
-        void send(card, group, plan.to).then(ok => {
-          if (!ok) setNotice('The move did not go through.');
-        });
-      }
-    },
-    [send],
-  );
+  const { requestMove, answerFor, composer } = useBoardAnswers({
+    actions,
+    ports,
+    connectionOf: daemonId => machines.find(machine => machine.connection.daemonId === daemonId)?.connection,
+    phone,
+    onNotice: setNotice,
+  });
 
   const movesFor = useCallback(
     (card: BoardCardOf, place: BoardCardPlace): BoardCardMoves | undefined => {
@@ -304,9 +264,9 @@ export function BoardPage({
       if (group.laneSet === null || place.category === 'closed') return undefined;
       return {
         choices: moveChoices(group.laneSet, card.task.laneId),
-        onMove: (target, laneId) => requestMove(target, group, laneId),
-        closeLaneId: laneOfCategory(group, 'closed'),
-        reworkLaneId: laneOfCategory(group, 'active', 'last'),
+        onMove: (target, laneId, answer) => requestMove(target, group, laneId, answer),
+        closeLaneId: doneLaneOf(group.laneSet),
+        reworkLaneId: notGoodLaneOf(group.laneSet),
         onDragStart: target => setDragging({ cardKey: target.key, groupKey: group.key }),
         onDragEnd: () => setDragging(null),
       };
@@ -325,7 +285,7 @@ export function BoardPage({
         ? undefined
         : {
             done,
-            press: () => requestMove(card, place.group, done.laneId),
+            press: () => requestMove(card, place.group, done.laneId, done.kind),
             atRelease: isReleaseLane(place.group.laneSet, card.task.laneId),
           };
     },
@@ -345,12 +305,6 @@ export function BoardPage({
     [dragging, model, requestMove],
   );
 
-  const submitReason = async (reason: string): Promise<void> => {
-    if (pending === null) return;
-    const ok = await send(pending.card, pending.group, pending.to, reason);
-    if (ok) setPending(null);
-  };
-
   // ----- what the views are given -------------------------------------------------------------------
   const env = useMemo<BoardCardEnv>(
     () => ({
@@ -364,8 +318,22 @@ export function BoardPage({
       doneFor,
       places,
       dragging,
+      answerFor,
     }),
-    [names, now, model.multiMachine, machines.length, onNavigate, archive, movesFor, doneFor, places, dragging, phone],
+    [
+      names,
+      now,
+      model.multiMachine,
+      machines.length,
+      onNavigate,
+      archive,
+      movesFor,
+      doneFor,
+      places,
+      dragging,
+      phone,
+      answerFor,
+    ],
   );
 
   const [archiveQuery, setArchiveQuery] = useState('');
@@ -629,20 +597,7 @@ export function BoardPage({
           total={archiveAll.length}
         />
       )}
-      {pending === null ? null : (
-        <div className="fy-board__scrim" data-phone={phone ? '' : undefined}>
-          <BoardReasonBox
-            busy={busy}
-            error={problem}
-            heading={`Move ${pending.card.task.title} back to ${pending.toName}`}
-            onCancel={() => {
-              setPending(null);
-              setProblem(null);
-            }}
-            onSubmit={reason => void submitReason(reason)}
-          />
-        </div>
-      )}
+      {composer}
       {openCard === null || detailMachine === undefined || ports === undefined || detailAgenda === null ? null : (
         <BoardDetail
           actions={actions}

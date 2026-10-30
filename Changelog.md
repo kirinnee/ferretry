@@ -1,3 +1,20 @@
+## [4.145.0](https://github.com/kirinnee/ferretry/compare/v4.144.0...v4.145.0) (2026-10-30)
+
+### Features
+
+* **board:** Done and Not good spin in place, never spill, and Not good sends pictures ([#1066](https://github.com/kirinnee/ferretry/issues/1066)) ([2e7ebf4](https://github.com/kirinnee/ferretry/commit/2e7ebf4d23cb018d7eb431be1b78283f0e7070e1)), closes [#1062](https://github.com/kirinnee/ferretry/issues/1062) [#1060](https://github.com/kirinnee/ferretry/issues/1060)
+
+## [4.144.0](https://github.com/kirinnee/ferretry/compare/v4.143.0...v4.144.0) (2026-10-30)
+
+### Features
+
+* **agenda:** refresh the whole card on every ferret reply; clear agent-ferret backlog ([#1068](https://github.com/kirinnee/ferretry/issues/1068)) ([4dd6d11](https://github.com/kirinnee/ferretry/commit/4dd6d11a941b24d759ab57a88dfc8762d65b4bc3))
+
+### Fixes
+
+* **pwa:** every !A opens the same item card; Info has one agenda list ([#1071](https://github.com/kirinnee/ferretry/issues/1071)) ([014330c](https://github.com/kirinnee/ferretry/commit/014330c6d0749ebff74f5b891b48908ed7e31178)), closes [#1043](https://github.com/kirinnee/ferretry/issues/1043)
+* **pwa:** hold the browser pane still while it works ([#1074](https://github.com/kirinnee/ferretry/issues/1074)) ([8c73f49](https://github.com/kirinnee/ferretry/commit/8c73f497866695c7264a1014ee0b81f6ebdc0b24))
+
 ## [4.143.0](https://github.com/kirinnee/ferretry/compare/v4.142.0...v4.143.0) (2026-10-30)
 
 ### Features

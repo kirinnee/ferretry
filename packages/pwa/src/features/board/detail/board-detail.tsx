@@ -38,16 +38,17 @@ import {
   verdictLanes,
   written,
 } from '../../../lib/board-detail.ts';
-import { boardDone } from '../../../lib/board-done.ts';
+import { type BoardAnswer, boardDone, doneTitle } from '../../../lib/board-done.ts';
 import type { RunningOnMachine } from '../../../lib/board-model.ts';
 import { moveChoices, planMove } from '../../../lib/board-move.ts';
 import type { FerretNames } from '../../../lib/board-present.ts';
 import type { DaemonBoardStore } from '../../../lib/board-store.ts';
 import type { DaemonConnection } from '../../../lib/daemon-connection.ts';
 import { daemonBoardPath, daemonSessionPath } from '../../../lib/pages/routes.ts';
-import { BoardDoneAction } from '../board-done-action.tsx';
+import { AnswerIcon, BoardDoneAction } from '../board-done-action.tsx';
 import { BoardIcon } from '../board-icons.tsx';
 import { BoardReasonBox } from '../board-reason-box.tsx';
+import { BoardSendBack, type SendBack, type SendBackPorts, useSendBackFiles } from '../board-send-back.tsx';
 import {
   AskSection,
   AsksList,
@@ -66,7 +67,7 @@ import {
 export type BoardAgenda = Pick<DaemonAgendaClient, 'hydrate' | 'respond' | 'store'>;
 
 /** What the detail needs from outside the Board: a way to speak to a ferret. */
-export interface BoardDetailPorts {
+export interface BoardDetailPorts extends SendBackPorts {
   /** Sends one message to a ferret's session on this machine. */
   readonly sendMessage: (daemon: DaemonConnection, sessionId: string, message: string) => Promise<void>;
 }
@@ -217,6 +218,9 @@ function DetailBody({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The answer whose move is in flight (it spins; every answer waits), and why the last one did not go through.
+  const [pressed, setPressed] = useState<BoardAnswer | null>(null);
+  const [answerProblem, setAnswerProblem] = useState<string | null>(null);
   const [menu, setMenu] = useState<MenuName | null>(null);
   const [adding, setAdding] = useState(false);
   const [reparenting, setReparenting] = useState(false);
@@ -260,16 +264,53 @@ function DetailBody({
     return false;
   };
 
-  const requestMove = (to: string): void => {
+  /**
+   * One of the owner's answers (Done, Works, Not good, a move): the pressed control spins and every answer is
+   * disabled until the daemon answers.
+   */
+  const settle = async (
+    answer: BoardAnswer,
+    work: () => Promise<{ readonly ok: boolean; readonly error?: { readonly message: string } }>,
+  ): Promise<boolean> => {
+    if (busy) return false;
+    setPressed(answer);
+    setAnswerProblem(null);
+    setBusy(true);
+    setProblem(null);
+    setNotice(null);
+    const result = await work();
+    setBusy(false);
+    setPressed(null);
+    if (result.ok) {
+      setDialog(null);
+      return true;
+    }
+    const message = result.error?.message ?? 'That did not go through.';
+    // An answer's refusal is said beside the answers; a lane pick's beside the comment box, and a composer's in it.
+    if (dialog === null && answer !== 'move') setAnswerProblem(message);
+    else setProblem(message);
+    return false;
+  };
+
+  const requestMove = (to: string, answer: BoardAnswer = 'move'): void => {
     setMenu(null);
     setNotice(null);
     const plan = planMove(laneSet, task.laneId, to);
     if (plan.kind === 'refused') setNotice(plan.message);
     else if (plan.kind === 'ask-reason') {
       setProblem(null);
-      setDialog({ kind: 'move', to: plan.to, toName: laneNameOf(laneSet, plan.to) });
-    } else if (plan.kind === 'send') void run(() => actions.moveTask(moveTarget, plan.to));
+      setDialog({
+        kind: answer === 'not-good' ? 'rework' : 'move',
+        to: plan.to,
+        toName: laneNameOf(laneSet, plan.to),
+      });
+    } else if (plan.kind === 'send') void settle(answer, () => actions.moveTask(moveTarget, plan.to));
   };
+  const sendBackFiles = useSendBackFiles(
+    ports,
+    machine.connection,
+    dialog?.kind === 'move' || dialog?.kind === 'rework' ? recipient : null,
+  );
 
   const copyLink = (): void => {
     setMenu(null);
@@ -286,10 +327,18 @@ function DetailBody({
 
   const submitReason = (reason: string): void => {
     if (dialog === null) return;
-    if (dialog.kind === 'move' || dialog.kind === 'rework')
-      void run(() => actions.moveTask(moveTarget, dialog.to, reason));
-    else if (dialog.kind === 'drop') void run(() => actions.drop(target, reason));
-    else void run(() => actions.undepend(target, dialog.ref, reason));
+    if (dialog.kind === 'drop') void run(() => actions.drop(target, reason));
+    else if (dialog.kind === 'undepend') void run(() => actions.undepend(target, dialog.ref, reason));
+  };
+  const submitSendBack = ({ reason, attachmentIds }: SendBack): void => {
+    if (dialog?.kind !== 'move' && dialog?.kind !== 'rework') return;
+    const files =
+      attachmentIds.length === 0 || sendBackFiles === null
+        ? undefined
+        : { from: sendBackFiles.sessionId, ids: [...attachmentIds] };
+    void settle(dialog.kind === 'rework' ? 'not-good' : 'move', () =>
+      actions.moveTask(moveTarget, dialog.to, reason, files),
+    );
   };
 
   const dialogHeading =
@@ -315,7 +364,11 @@ function DetailBody({
                 submitLabel: 'Send back',
                 busyLabel: 'Sending…',
               }
-            : {};
+            : {
+                placeholder: 'Why is it going back? The ferret reads this.',
+                submitLabel: 'Move back',
+                busyLabel: 'Moving…',
+              };
 
   const laneMenu = (
     <div aria-label="Move to…" className="fy-board-menu fy-board-detail__lanemenu" id={menuId} role="menu">
@@ -348,7 +401,8 @@ function DetailBody({
                 <BoardDoneAction
                   disabled={busy}
                   done={done}
-                  onPress={() => requestMove(done.laneId)}
+                  onPress={() => requestMove(done.laneId, done.kind)}
+                  pending={pressed === done.kind}
                   size="primary"
                   title={task.title}
                 />
@@ -491,21 +545,25 @@ function DetailBody({
           <fieldset aria-label="Your verdict" className="fy-board-detail__verdict">
             {verdict.closeLaneId === null ? null : (
               <button
+                aria-busy={pressed === 'works'}
                 className="kt-btn"
+                data-pending={pressed === 'works' ? '' : undefined}
                 data-variant="primary"
                 data-verdict="works"
                 disabled={busy}
-                title="Works → Close"
-                onClick={() => requestMove(verdict.closeLaneId as string)}
+                title={doneTitle({ kind: 'done', laneId: verdict.closeLaneId }, task.title)}
+                onClick={() => requestMove(verdict.closeLaneId as string, 'works')}
                 type="button"
               >
-                <Check aria-hidden="true" size={14} />
-                Close
+                <AnswerIcon icon={Check} pending={pressed === 'works'} size={14} />
+                Done
               </button>
             )}
             {verdict.reworkLaneId === null ? null : (
               <button
+                aria-busy={pressed === 'not-good'}
                 className="kt-btn"
+                data-pending={pressed === 'not-good' ? '' : undefined}
                 data-variant="ghost"
                 data-verdict="not-good"
                 disabled={busy}
@@ -517,11 +575,16 @@ function DetailBody({
                 }}
                 type="button"
               >
-                <X aria-hidden="true" size={14} />
+                <AnswerIcon icon={X} pending={pressed === 'not-good'} size={14} />
                 Not good
               </button>
             )}
           </fieldset>
+        )}
+        {answerProblem === null ? null : (
+          <p className="fy-board-reason__error fy-board-detail__answer-error" data-answer-error="" role="alert">
+            {answerProblem}
+          </p>
         )}
 
         {reparenting ? (
@@ -658,7 +721,22 @@ function DetailBody({
         />
       </footer>
 
-      {dialog === null ? null : (
+      {dialog?.kind === 'move' || dialog?.kind === 'rework' ? (
+        <div className="fy-board__scrim">
+          <BoardSendBack
+            busy={busy}
+            error={problem}
+            files={sendBackFiles}
+            heading={dialogHeading}
+            onCancel={() => {
+              setDialog(null);
+              setProblem(null);
+            }}
+            onSubmit={submitSendBack}
+            {...dialogWords}
+          />
+        </div>
+      ) : dialog === null ? null : (
         <div className="fy-board__scrim">
           <BoardReasonBox
             busy={busy}

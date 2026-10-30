@@ -356,10 +356,10 @@ describe('Board on a phone — rows waiting to be tested', () => {
     expect(acts).toEqual([]);
     const scrim = must(root.querySelector('.fy-board__scrim'), 'the reason box');
     expect(scrim.hasAttribute('data-phone')).toBe(true);
-    expect(scrim.textContent).toContain('Move Try the thing back to Implement');
+    expect(scrim.textContent).toContain('Not good: send Try the thing back to Implement');
 
-    const input = must(scrim.querySelector<HTMLInputElement>('input'), 'the reason');
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, 'The button is dead');
+    const input = must(scrim.querySelector<HTMLTextAreaElement>('[aria-label="Reason"]'), 'the reason');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'The button is dead');
     await interact(() => input.dispatchEvent(new Event('input', { bubbles: true })));
     await interact(() => must(scrim.querySelector<HTMLButtonElement>('button[type="submit"]'), 'submit').click());
     await interact(() => flush());

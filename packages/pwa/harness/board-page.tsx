@@ -4,9 +4,13 @@
  * with PR chips, a lead with sub-ferrets, blockers, and closed and dropped work for the Archive.
  *
  * `?view=kanban|list|tree|dependencies|archive` picks the view; nothing leaves the page.
+ *
+ * A move never lands: it stays on its way, so an answer's spinner can be captured (`?refuse=1` refuses it
+ * instead, to show the refusal on the card). The machine takes pictures with "Not good" (`?old=1`: it is too old
+ * to), and an upload is answered at once without leaving the page.
  */
 
-import type { BoardTaskView } from '@ferretry/protocol';
+import { type BoardTaskView, boardErr } from '@ferretry/protocol';
 import { createRoot } from 'react-dom/client';
 import { useState } from 'react';
 import { BoardPage } from '../src/features/board/board-page.tsx';
@@ -434,9 +438,32 @@ const store = new DaemonBoardStore(
       });
     },
     projects: async () => [{ id: PROJECT, name: 'Ferretry', path: null, laneSet: laneSetFor() }],
+    act: async () =>
+      new URLSearchParams(window.location.search).get('refuse') === null
+        ? await new Promise<never>(() => undefined)
+        : boardErr({
+            status: 409,
+            message: 'Only the owner closes a card; this device is not paired as the owner.',
+            boardCode: 'owner-gate',
+          }),
   }),
   fakeEnvironment(),
 );
+
+const OLD_MACHINE = new URLSearchParams(window.location.search).get('old') !== null;
+const PORTS = {
+  sendMessage: async () => undefined,
+  startFerret: async () => 'mvzzzzzz-00000000',
+  sendBackFiles: async () => !OLD_MACHINE,
+  uploadAttachment: async (_daemon: unknown, _session: string, file: File) => ({
+    id: `att_${'a'.repeat(64)}`,
+    filename: file.name,
+    mime: file.type,
+    size: file.size,
+    sha256: '0'.repeat(64),
+    createdAt: new Date(NOW).toISOString(),
+  }),
+};
 
 function Harness() {
   const params = new URLSearchParams(window.location.search);
@@ -461,6 +488,7 @@ function Harness() {
         now={NOW}
         onNavigate={() => undefined}
         onSearch={setSearch}
+        ports={PORTS}
         search={search}
         store={store}
       />

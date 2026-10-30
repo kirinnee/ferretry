@@ -5,11 +5,22 @@
  * Pure. The caller says how a lane id and a session id read, because only it holds the lane set and the
  * session directory.
  */
-import type { BoardTaskEvent } from './board.ts';
+import type { BoardAttachment, BoardTaskEvent } from './board.ts';
 import { formatTaskRef } from './board-refs.ts';
 
 /** How a lane id or a session id reads to whoever is shown the line. */
 export type BoardNamer = (id: string) => string;
+
+const counted = (count: number, one: string): string => `${count} ${count === 1 ? one : `${one}s`}`;
+
+/** What a reopen carried, in words: "2 images", "1 file", "2 images and 1 file". Empty for nothing. */
+export function attachmentsPhrase(files: readonly Pick<BoardAttachment, 'mime'>[]): string {
+  const images = files.filter(file => file.mime.startsWith('image/')).length;
+  const others = files.length - images;
+  return [images > 0 ? counted(images, 'image') : null, others > 0 ? counted(others, 'file') : null]
+    .filter(part => part !== null)
+    .join(' and ');
+}
 
 /** One history event's wording; the closed union means every event this build can read is spelled here. */
 export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, names: BoardNamer): string {
@@ -22,7 +33,9 @@ export function describeBoardEvent(event: BoardTaskEvent, lane: BoardNamer, name
       return `${event.backward ? 'moved back' : 'moved'} ${lane(event.from)} → ${lane(event.to)}${auto}${why}`;
     }
     case 'reopened':
-      return `reopened ${lane(event.from)} → ${lane(event.to)}: ${event.reason} — ask: ${event.ask.text}`;
+      return `reopened ${lane(event.from)} → ${lane(event.to)}: ${event.reason} — ask: ${event.ask.text}${
+        event.attachments === undefined ? '' : ` — with ${attachmentsPhrase(event.attachments)}`
+      }`;
     case 'note':
       return `note: ${event.text}`;
     case 'clarified':

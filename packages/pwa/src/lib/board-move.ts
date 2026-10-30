@@ -3,7 +3,7 @@
  *
  * The owner may move any card in any direction (`board-design.md` §2.9). Forward needs no words; a move
  * BACK needs a one-line reason, so the page opens its reason box instead of sending. Dragging into a Closed
- * lane is "✓ Works → Close" and goes straight through. The rule itself is the protocol's
+ * lane is "✓ Done" and goes straight through. The rule itself is the protocol's
  * (`isBackwardMove`); this file only turns it into the page's three outcomes.
  */
 
@@ -12,7 +12,7 @@ import { isBackwardMove, type LaneCategory, type LaneSet } from '@ferretry/proto
 export type MovePlan =
   /** Dropped where it already is. */
   | { readonly kind: 'stay' }
-  /** Send it now; `closing` is the one-tap "Works → Close". */
+  /** Send it now; `closing` is the one-tap "Done". */
   | { readonly kind: 'send'; readonly to: string; readonly closing: boolean }
   /** Ask the owner why, then send. */
   | { readonly kind: 'ask-reason'; readonly to: string }

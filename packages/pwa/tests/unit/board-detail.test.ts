@@ -204,6 +204,17 @@ describe('history', () => {
     expect(rowOf('moved', { from: 'a', to: 'b', backward: false, reason: null, auto: true }).text).toBe(
       'moved automatically A → B',
     );
+    expect(
+      rowOf('reopened', {
+        from: 'a',
+        to: 'b',
+        reason: 'see the pictures',
+        attachments: [
+          { id: `att_${'a'.repeat(64)}`, filename: 'one.png', mime: 'image/png' },
+          { id: `att_${'b'.repeat(64)}`, filename: 'two.png', mime: 'image/png' },
+        ],
+      }),
+    ).toMatchObject({ text: 'reopened A → B with 2 images', detail: 'see the pictures' });
     expect(rowOf('reopened', { from: 'a', to: 'b', reason: 'again' })).toMatchObject({
       text: 'reopened A → B',
       detail: 'again',

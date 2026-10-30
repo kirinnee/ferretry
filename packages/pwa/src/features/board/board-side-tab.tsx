@@ -24,6 +24,7 @@ import { type ReactElement, useCallback, useState } from 'react';
 import { Spinner } from '../../components/spinner.tsx';
 import type { BoardChat, ChatKanbanLane } from '../../lib/board-chat.ts';
 import { NO_BOARD_FILTERS } from '../../lib/board-model.ts';
+import type { BoardAnswerState } from '../../lib/board-done.ts';
 import { ferretNamer } from '../../lib/board-present.ts';
 import type { BoardSideView } from '../../lib/board-side-view.ts';
 import type { BoardCardOf, BoardCardPlace } from '../../lib/board-view.ts';
@@ -60,6 +61,8 @@ export interface BoardSideTabProps {
   readonly dragging?: BoardCardOf | null;
   /** A card was dropped on a lane (only lanes of the dragged card's own board take drops). */
   readonly onDropCard?: (card: BoardCardOf, lane: ChatKanbanLane) => void;
+  /** The owner's answer in flight on a card, and its last refusal; every card is at rest when absent. */
+  readonly answerFor?: (card: BoardCardOf) => BoardAnswerState;
 }
 
 const VIEWS: readonly { readonly id: BoardSideView; readonly label: string; readonly Icon: typeof List }[] = [
@@ -146,6 +149,7 @@ export function BoardSideTab({
   onExpand,
   dragging = null,
   onDropCard,
+  answerFor,
 }: BoardSideTabProps): ReactElement {
   const { cards, status } = chat;
   const draggedGroup = dragging === null ? null : (cards.places.get(dragging.key)?.group.key ?? null);
@@ -162,6 +166,7 @@ export function BoardSideTab({
     const place = cards.places.get(card.key);
     const moves = place === undefined ? undefined : movesFor?.(card, place);
     const done = place === undefined ? undefined : doneFor?.(card, place);
+    const answer = answerFor?.(card);
     return (
       <BoardCard
         card={card}
@@ -178,6 +183,7 @@ export function BoardSideTab({
         showMachine={false}
         {...(moves === undefined ? {} : { moves })}
         {...(done === undefined ? {} : { done })}
+        {...(answer === undefined ? {} : { answer })}
         {...(extra.lane === undefined ? {} : { lane: extra.lane })}
       />
     );

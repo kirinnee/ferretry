@@ -517,24 +517,29 @@
 .fy-board-seg[data-tone='accent'] {
   color: var(--accent);
 }
+/* THE ANSWERS NEVER LEAVE THE CARD. Each button starts at its whole label (`max-content`) and shares what is left;
+   when two do not fit side by side the row wraps and each takes a line, and a label wider than the card itself
+   breaks between words, never inside one (`min-content`). No answer clips, and none overflows its card. */
 .fy-board-card__verdict {
   display: flex;
+  min-width: 0;
   flex: 1 1 100%;
+  flex-wrap: wrap;
   gap: var(--gap-xs);
   margin-top: 4px;
 }
 .fy-board-verdict {
   display: inline-flex;
-  min-width: 0;
+  min-width: min-content;
+  max-width: 100%;
   min-height: 20px;
-  flex: 1 1 0;
+  flex: 1 1 max-content;
   align-items: center;
   justify-content: center;
   gap: 4px;
   padding: 0 var(--gap-xs);
-  overflow: hidden;
   line-height: 1.3;
-  white-space: nowrap;
+  text-align: center;
   border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-control);
   background: var(--surface);
@@ -543,9 +548,53 @@
   cursor: pointer;
 }
 .fy-board-card__verdict .fy-board-done {
-  min-width: 0;
-  flex: 1 1 0;
+  min-width: min-content;
+  max-width: 100%;
+  flex: 1 1 max-content;
   justify-content: center;
+  padding: 0 var(--gap-sm);
+  white-space: normal;
+  text-align: center;
+}
+.fy-board-verdict:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+/* The pressed answer stays fully drawn while its spinner turns: it is the one the reader is watching. */
+.fy-board-verdict[data-pending]:disabled,
+.fy-board-done[data-pending]:disabled,
+.kt-btn[data-pending]:disabled {
+  opacity: 1;
+  cursor: progress;
+}
+/* An answer's spinner is drawn in the button's own ink, so it reads on a filled button (Close, Mark done) as well
+   as on a quiet one: the accent arc on an accent fill vanished. */
+.fy-board-answer-spinner {
+  flex: none;
+  --spinner-arc: currentColor;
+  --spinner-track: color-mix(in srgb, currentColor 30%, transparent);
+}
+.fy-board-card__more:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+/* A refusal is said on the card it belongs to, under its answers. */
+.fy-board-card__error,
+.fy-board-table__error {
+  flex: 1 1 100%;
+  min-width: 0;
+  margin: 4px 0 0;
+  color: var(--err);
+  font-size: var(--text-xs);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+.fy-board-table__error {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+.fy-board-detail__answer-error {
+  margin-top: var(--gap-xs);
 }
 .fy-board-menu__item[data-done='done'] {
   color: var(--ok);
@@ -720,6 +769,54 @@
   display: flex;
   justify-content: flex-end;
   gap: var(--gap-sm);
+}
+
+/* ---- Send back: "Not good" with words and pictures ---------------------------------------------------- */
+.fy-board-sendback {
+  width: min(34rem, 100%);
+}
+.fy-board-sendback__input {
+  min-height: 4.5rem;
+  max-height: 40vh;
+  padding: var(--gap-xs) var(--gap-sm);
+  line-height: 1.4;
+  resize: vertical;
+}
+.fy-board-sendback__note {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-board-sendback__actions {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.fy-board-sendback__attach,
+.fy-board-sendback__send {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.fy-board-sendback__hold {
+  color: var(--muted);
+  font-size: var(--text-xs);
+}
+.fy-board-sendback__spacer {
+  flex: 1 1 0;
+}
+/* Both words sit in one cell, so Send keeps one width whether it says "Send back" or "Sending…". */
+.fy-board-sendback__send-label {
+  display: inline-grid;
+}
+.fy-board-sendback__send-label > span {
+  grid-area: 1 / 1;
+}
+.fy-board-sendback__send-label > span:last-child,
+.fy-board-sendback__send-label[data-busy] > span:first-child {
+  visibility: hidden;
+}
+.fy-board-sendback__send-label[data-busy] > span:last-child {
+  visibility: visible;
 }
 
 /* ---- Phone: lanes stack, targets stay thumb-sized ------------------------------------------------- */
@@ -1030,6 +1127,9 @@
   min-height: 44px;
   font-size: 16px;
 }
+.fy-board__scrim[data-phone] .fy-board-sendback__input {
+  min-height: 5.5rem;
+}
 @keyframes fy-board-slide-up {
   from {
     transform: translateY(100%);
@@ -1333,6 +1433,7 @@
 
 .fy-board-done {
   display: inline-flex;
+  max-width: 100%;
   min-height: 24px;
   align-items: center;
   gap: 4px;
