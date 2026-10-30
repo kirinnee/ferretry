@@ -48,7 +48,7 @@ describe('outdatedSections', () => {
     should(outdatedSections(on, record(base))).deepEqual(['agenda']);
   });
 
-  it('should read an old attention section as notify, so the rename alone is not a change', () => {
+  it('should read an old agenda section as notify, so the rename alone is not a change', () => {
     const old = record([TOOLS, SETTINGS, { id: 'attention', chars: 30, digest: 'c' }]);
     should(outdatedSections(old, record(base))).deepEqual([]);
     const changed = record([TOOLS, SETTINGS, { id: 'attention', chars: 99 }]);

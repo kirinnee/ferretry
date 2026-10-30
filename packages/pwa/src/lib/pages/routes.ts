@@ -64,7 +64,7 @@ export interface DaemonSessionRoute {
  * The Inbox: every open item, across every paired machine, newest first. Addressed under the
  * machine on screen only because every page is — the deck itself is not one machine's.
  */
-export interface DaemonAttentionRoute {
+export interface DaemonAgendaRoute {
   readonly kind: 'attention';
   readonly daemonId: DaemonId;
 }
@@ -114,7 +114,7 @@ export type DaemonPageRoute =
   | DaemonProjectsRoute
   | DaemonProjectDetailRoute
   | DaemonSessionRoute
-  | DaemonAttentionRoute
+  | DaemonAgendaRoute
   | DaemonSettingsRoute
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
@@ -133,7 +133,7 @@ export interface LegacyTasksRedirectRoute {
 /** The Inbox's old `/attention` address, which now redirects to `/inbox` keeping its query. */
 export interface LegacyAttentionRedirectRoute {
   readonly kind: 'legacy-attention-redirect';
-  readonly to: DaemonAttentionRoute;
+  readonly to: DaemonAgendaRoute;
 }
 
 export type Route = PageRoute | LegacyTasksRedirectRoute | LegacyAttentionRedirectRoute;
@@ -199,7 +199,7 @@ export const daemonSessionPath = (id: DaemonId, sessionId: string): string => {
 };
 
 /** Builds the Inbox pathname, under the machine on screen. `/attention` is the old spelling and redirects here. */
-export const daemonAttentionPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/inbox`;
+export const daemonAgendaPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/inbox`;
 
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
@@ -290,7 +290,7 @@ export const routePath = (route: Route): string => {
     case 'session':
       return daemonSessionPath(route.daemonId, route.sessionId);
     case 'attention':
-      return daemonAttentionPath(route.daemonId);
+      return daemonAgendaPath(route.daemonId);
     case 'settings':
       return daemonSettingsPath(route.daemonId);
     case 'warden':

@@ -10,7 +10,7 @@
 
 import type {
   AnalyticsResponse,
-  AttentionSnapshot,
+  AgendaSnapshot,
   BrowserStatus,
   CapabilityGrant,
   CapabilityGrants,
@@ -123,7 +123,7 @@ import {
   type SessionAnalyticsRequest,
   SessionAnalyticsSurface,
 } from '../src/features/analytics/session-analytics-surface.tsx';
-import { AttentionBoard } from '../src/features/attention/attention-board.tsx';
+import { AgendaBoard } from '../src/features/agenda/agenda-board.tsx';
 import { BrowserLoginBanner, type BrowserLoginView } from '../src/features/browser/browser-login-banner.tsx';
 import { InAppBrowserSurface } from '../src/features/browser/in-app-browser.tsx';
 import type { BrowserDestination } from '../src/features/browser/in-app-browser-model.ts';
@@ -222,7 +222,7 @@ import type { WardenStatusReader } from '../src/hooks/use-warden-status.ts';
 import type { PickerAccount, PickerAccountHealth } from '../src/lib/account-picker-catalog.ts';
 import { type DaemonAccountPickerSlice, DaemonAccountPickerStore } from '../src/lib/account-picker-store.ts';
 import { DaemonHttpTransport, daemonApiClient } from '../src/lib/api-client.ts';
-import { DaemonAttentionClient } from '../src/lib/attention-client.ts';
+import { DaemonAgendaClient } from '../src/lib/agenda-client.ts';
 import type { DaemonConnectionRecord } from '../src/lib/connections.ts';
 import { type ChatWidthPreference, type ControlsStorage, DaemonControlsStore } from '../src/lib/controls.ts';
 import { type DaemonConnection, type DaemonId, daemonConnection } from '../src/lib/daemon-connection.ts';
@@ -321,7 +321,7 @@ import { isPairFromMenuPage, PairFromMenuHarness } from './pair-from-menu.tsx';
 import { harnessPerformanceClient, harnessRecorder } from './performance-fixture.ts';
 import { isSessionContextMenuPage, SessionContextMenuHarness } from './session-context-menu.tsx';
 import {
-  WARDEN_FIXTURE_ATTENTION,
+  WARDEN_FIXTURE_AGENDA,
   WARDEN_FIXTURE_CONFIG,
   WARDEN_FIXTURE_CONFIG_NO_LOGIN,
   WARDEN_FIXTURE_CONFIG_UNKNOWN_LOGIN,
@@ -2384,7 +2384,7 @@ const HARNESS_WARDEN_CLIENT: WardenClientFactory = async connection => {
 /** The Warden page's reads, answered from the fixture day; a sweep or investigate request answers in words. */
 const HARNESS_WARDEN_OVERVIEW_CLIENT = async () => ({
   wardenStatus: async () => WARDEN_FIXTURE_STATUS,
-  wardenAttention: async () => WARDEN_FIXTURE_ATTENTION,
+  wardenAgenda: async () => WARDEN_FIXTURE_AGENDA,
   // The harness has no app store, so no machine reads as speaking the agenda wire.
   request: async () => {
     throw new Error('the harness answers the older route only');
@@ -3970,13 +3970,13 @@ const PALETTE_SETTINGS: PaletteSettingsSource = (daemon, query) => settingsPalet
 
 /**
  * A ferret's agenda in its chat: the line above the composer, pressed open into its drawer.
- * `harness/screenshot.ts --attention-only` presses the line and captures it, which proves the journey
+ * `harness/screenshot.ts --agenda-only` presses the line and captures it, which proves the journey
  * rather than just the render.
  */
 function AgendaHarness() {
   return (
     <Card className="overflow-hidden" data-harness="agenda" style={{ height: 520 }}>
-      <AgendaChatHarness board={ATTENTION} now={HARNESS_NOW} />
+      <AgendaChatHarness board={AGENDA} now={HARNESS_NOW} />
     </Card>
   );
 }
@@ -3984,7 +3984,7 @@ function AgendaHarness() {
 /** Attention fixture puts all four response shapes beside their distinct action
  * controls. The permission background stays deliberately long so the phone
  * disclosure is exercised without hiding the required action. */
-const ATTENTION: AttentionSnapshot = {
+const AGENDA: AgendaSnapshot = {
   v: 1,
   sessionId: 'harness-session',
   count: 4,
@@ -5858,7 +5858,7 @@ function Shell() {
             connection={daemon}
             now={WARDEN_FIXTURE_NOW}
             status={{ status: 'ready', view: WARDEN_FIXTURE_STATUS }}
-            attention={{ status: 'ready', view: WARDEN_FIXTURE_ATTENTION }}
+            attention={{ status: 'ready', view: WARDEN_FIXTURE_AGENDA }}
             sessions={WORKSPACE_FLEET}
             settingsHref="#warden"
             onSweep={() => {}}
@@ -5914,8 +5914,8 @@ function Shell() {
                 ? { daemonId: daemon.daemonId, sessionId: 'harness-session', name: 'zelda' }
                 : null
             }
-            attentionReferenceResolver={id => id === 'A3'}
-            onAttentionOpen={() => {}}
+            agendaReferenceResolver={id => id === 'A3'}
+            onAgendaOpen={() => {}}
             onCodeReferenceOpen={() => {}}
             onNavigate={() => {}}
             onSkillOpen={() => {}}
@@ -6719,9 +6719,9 @@ function Shell() {
       label: 'Inbox ledger',
       render: () => (
         <Card className="min-h-[360px] overflow-hidden">
-          <AttentionBoard
+          <AgendaBoard
             connection={daemon}
-            snapshot={ATTENTION}
+            snapshot={AGENDA}
             loading={false}
             error={null}
             now={HARNESS_NOW}
@@ -6935,7 +6935,7 @@ function Shell() {
           <div className="flex h-[420px] min-h-0">
             <AgentSidebar
               activeId={SIDEBAR_FLEET.groups[0]?.rows[1]?.config.id}
-              attentionCountFor={id => (id === SIDEBAR_FLEET.groups[0]?.rows[0]?.config.id ? 3 : 0)}
+              agendaCountFor={id => (id === SIDEBAR_FLEET.groups[0]?.rows[0]?.config.id ? 3 : 0)}
               canMutate
               collapsed={false}
               daemonId={daemon.daemonId}
@@ -8358,7 +8358,7 @@ const WORKSPACE_LAYOUTS = (() => {
     );
   return store;
 })();
-const WORKSPACE_ATTENTION = new DaemonAttentionClient();
+const WORKSPACE_AGENDA = new DaemonAgendaClient();
 /** `?chat-width=readable|balanced|full` picks the conversation measure, as Settings › Appearance does. */
 const WORKSPACE_CHAT_WIDTH: ChatWidthPreference = (() => {
   const asked = new URLSearchParams(window.location.search).get('chat-width');
@@ -8523,7 +8523,7 @@ function SessionWorkspaceHarness() {
           workspaceLayouts={WORKSPACE_LAYOUTS}
           {...(WORKSPACE_INFO === undefined ? {} : { initialInfo: WORKSPACE_INFO })}
           context={{
-            attention: WORKSPACE_ATTENTION,
+            attention: WORKSPACE_AGENDA,
             createFleetClient: harnessDaemonClient,
             machineName: 'AMER-D22HXVF42W',
           }}

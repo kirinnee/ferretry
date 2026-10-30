@@ -53,7 +53,11 @@ export interface SharedHistoryFileNode {
   readonly kind: 'file';
   readonly modifiedAtMs: number;
   readonly size: number;
-  /** The filesystem device holding this inode. A rename can never move an inode off its device. */
+  /**
+   * The device the filesystem reports for this inode. Informational only: on overlayfs a non-directory
+   * reports its underlying layer's device while a directory reports the overlay's, so a rename is
+   * judged by the device of the directories on either side of it, never by an entry's own.
+   */
   readonly deviceId: number;
   /** Populated only when the caller asks for the root file's text. */
   readonly text?: string;
@@ -258,6 +262,8 @@ export interface SharedHistoryPlan extends SharedHistoryPreview {
 }
 
 export interface SharedHistoryObservedHome extends SharedHistoryHome {
+  /** The device of the directory the home entries are renamed out of, not of any entry in it. */
+  readonly deviceId: number;
   readonly entries: Readonly<Record<string, SharedHistoryNode | undefined>>;
 }
 
@@ -498,10 +504,13 @@ function planMove(
   state: PlanningState,
   source: string,
   sourceNode: SharedHistoryNode,
+  sourceDirectoryDeviceId: number,
   destination: string,
   destinationDeviceId: number,
 ): void {
-  assertSameDevice(source, sourceNode.deviceId, destination, destinationDeviceId);
+  assertSameDevice(source, sourceDirectoryDeviceId, destination, destinationDeviceId);
+  // A directory that is itself a mount point reports the mounted device, and rename(2) cannot move it.
+  if (sourceNode.kind === 'directory') assertSameDevice(source, sourceNode.deviceId, destination, destinationDeviceId);
   state.actions.push({ kind: 'move', source, destination });
 }
 
@@ -579,9 +588,10 @@ function planForeignLink(
   source: string,
   poolPath: string,
   sourceNode: SharedHistorySymbolicLinkNode,
+  sourceDirectoryDeviceId: number,
 ): void {
   const preservedAt = reserveConflictPath(join(conflictRoot(state.pool, account), basename(poolPath)), state);
-  planMove(state, source, sourceNode, preservedAt, conflictDeviceId(state, preservedAt));
+  planMove(state, source, sourceNode, sourceDirectoryDeviceId, preservedAt, conflictDeviceId(state, preservedAt));
   state.changes.push({
     kind: 'collision',
     incoming: source,
@@ -602,6 +612,7 @@ function planCollision(
   incoming: SharedHistoryNode,
   existingPath: string,
   existing: SharedHistoryNode,
+  incomingDirectoryDeviceId: number,
   pooledDeviceId: number,
 ): boolean {
   const incomingWins = incoming.modifiedAtMs > existing.modifiedAtMs;
@@ -612,11 +623,18 @@ function planCollision(
   const owner = incomingWins ? pooledOwner(state, existingPath) : account;
   const preservedAt = reserveConflictPath(join(conflictRoot(state.pool, owner), entryRelativePath, name), state);
   if (incomingWins) {
-    planMove(state, existingPath, existing, preservedAt, conflictDeviceId(state, preservedAt));
-    planMove(state, incomingPath, incoming, existingPath, pooledDeviceId);
+    planMove(state, existingPath, existing, pooledDeviceId, preservedAt, conflictDeviceId(state, preservedAt));
+    planMove(state, incomingPath, incoming, incomingDirectoryDeviceId, existingPath, pooledDeviceId);
     state.contributors.set(existingPath, account);
   } else {
-    planMove(state, incomingPath, incoming, preservedAt, conflictDeviceId(state, preservedAt));
+    planMove(
+      state,
+      incomingPath,
+      incoming,
+      incomingDirectoryDeviceId,
+      preservedAt,
+      conflictDeviceId(state, preservedAt),
+    );
   }
   state.changes.push({ kind: 'collision', incoming: incomingPath, pooled: existingPath, winner, loser, preservedAt });
   state.conflicts++;
@@ -640,7 +658,7 @@ function planDirectoryMerge(
     const incomingPath = join(sourcePath, name);
     const existingPath = join(pooledPath, name);
     if (existing === undefined) {
-      planMove(state, incomingPath, incoming, existingPath, pooled.deviceId);
+      planMove(state, incomingPath, incoming, source.deviceId, existingPath, pooled.deviceId);
       state.changes.push({ kind: 'move', source: incomingPath, destination: existingPath });
       state.contributors.set(existingPath, account);
       state.migrated++;
@@ -671,6 +689,7 @@ function planDirectoryMerge(
       incoming,
       existingPath,
       existing,
+      source.deviceId,
       pooled.deviceId,
     );
     if (incomingWins) children = { ...children, [name]: incoming };
@@ -696,6 +715,7 @@ function planJsonlMerge(
   account: string,
   sourcePath: string,
   pooledPath: string,
+  homeDeviceId: number,
   source: SharedHistoryFileNode,
   pooled: SharedHistoryFileNode,
 ): SharedHistoryFileNode {
@@ -703,7 +723,7 @@ function planJsonlMerge(
     throw new Error(`history JSONL was not read completely: ${sourcePath} or ${pooledPath}`);
   }
   const sourcePreservedAt = reserveConflictPath(join(conflictRoot(state.pool, account), basename(sourcePath)), state);
-  assertSameDevice(sourcePath, source.deviceId, sourcePreservedAt, conflictDeviceId(state, sourcePreservedAt));
+  assertSameDevice(sourcePath, homeDeviceId, sourcePreservedAt, conflictDeviceId(state, sourcePreservedAt));
   const lines = sharedHistoryJsonlAdditions(pooled.text, source.text);
   // A pooled file that does not end in a newline would otherwise splice its last line into the first
   // appended one.
@@ -740,6 +760,7 @@ function planEntry(
   entry: SharedHistoryEntry,
   account: string,
   homePath: string,
+  homeDeviceId: number,
   source: SharedHistoryNode | undefined,
   pooled: SharedHistoryNode | undefined,
 ): SharedHistoryNode {
@@ -761,7 +782,7 @@ function planEntry(
   let next = pooled;
   if (next === undefined) {
     if (source !== undefined && source.kind !== 'symbolic-link') {
-      planMove(state, sourcePath, source, pooledPath, state.poolDeviceId);
+      planMove(state, sourcePath, source, homeDeviceId, pooledPath, state.poolDeviceId);
       state.changes.push({ kind: 'move', source: sourcePath, destination: pooledPath });
       state.contributors.set(pooledPath, account);
       state.migrated++;
@@ -774,10 +795,10 @@ function planEntry(
   } else if (source?.kind === 'directory' && next.kind === 'directory') {
     next = planDirectoryMerge(state, account, entry.name, sourcePath, pooledPath, source, next);
   } else if (source?.kind === 'file' && next.kind === 'file' && entry.merge === 'jsonl') {
-    next = planJsonlMerge(state, account, sourcePath, pooledPath, source, next);
+    next = planJsonlMerge(state, account, sourcePath, pooledPath, homeDeviceId, source, next);
   }
 
-  if (source?.kind === 'symbolic-link') planForeignLink(state, account, sourcePath, pooledPath, source);
+  if (source?.kind === 'symbolic-link') planForeignLink(state, account, sourcePath, pooledPath, source, homeDeviceId);
   state.actions.push({ kind: 'link', path: sourcePath, target: pooledPath });
   state.changes.push({ kind: 'link', path: sourcePath, target: pooledPath });
   state.links++;
@@ -818,7 +839,15 @@ export function planSharedHistory(
     for (const entry of sharedHistoryEntries(request.kind)) {
       pooled = {
         ...pooled,
-        [entry.name]: planEntry(state, entry, home.account, home.path, home.entries[entry.name], pooled[entry.name]),
+        [entry.name]: planEntry(
+          state,
+          entry,
+          home.account,
+          home.path,
+          home.deviceId,
+          home.entries[entry.name],
+          pooled[entry.name],
+        ),
       };
     }
   }
@@ -1143,8 +1172,12 @@ export class SharedHistoryMigration {
   ): Promise<SharedHistoryObservedHome | undefined> {
     try {
       await this.resolveHomeRoot(home, canonicalPool, resolvedHomes);
+      // The entries are renamed out of the home directory, so that directory's device is the source
+      // side of the comparison: an entry's own st_dev is not comparable with a directory's on overlayfs.
+      const deviceId = await this.files.deviceIdOf(await this.files.canonicalDirectoryOf(home.path));
       return {
         ...home,
+        deviceId,
         entries: Object.fromEntries(
           await Promise.all(
             entries.map(async entry => [

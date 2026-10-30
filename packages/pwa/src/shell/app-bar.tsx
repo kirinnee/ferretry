@@ -49,7 +49,7 @@ import { useLayoutMode } from '../hooks/use-layout-mode.ts';
 import type { DaemonId } from '../lib/daemon-connection.ts';
 import {
   daemonAnalyticsPath,
-  daemonAttentionPath,
+  daemonAgendaPath,
   daemonLearningPath,
   daemonProjectsPath,
   daemonSessionsPath,
@@ -110,7 +110,7 @@ export const WARDEN_ENTRY = { label: 'Warden', title: 'Open fleet supervision an
 export const LEARNING_ENTRY = { label: 'Learning', title: 'Open fleet learning proposals' } as const;
 export const ANALYTICS_ENTRY = { label: 'Analytics', title: 'Query all sessions and graph daily usage' } as const;
 export const PROJECTS_ENTRY = { label: 'Projects', title: 'Open registered workspaces and folders' } as const;
-export const ATTENTION_ENTRY = {
+export const AGENDA_ENTRY = {
   label: 'Inbox',
   title: 'Everything your ferrets are waiting on you for, across every machine',
 } as const;
@@ -123,7 +123,7 @@ export const ATTENTION_ENTRY = {
  * destination, and stays with the other right-side controls.
  */
 export const APP_BAR_DESTINATIONS = [
-  { id: 'attention', ...ATTENTION_ENTRY, path: daemonAttentionPath, Icon: Inbox },
+  { id: 'attention', ...AGENDA_ENTRY, path: daemonAgendaPath, Icon: Inbox },
   { id: 'projects', ...PROJECTS_ENTRY, path: daemonProjectsPath, Icon: FolderKanban },
   { id: 'analytics', ...ANALYTICS_ENTRY, path: daemonAnalyticsPath, Icon: ChartNoAxesCombined },
   { id: 'warden', ...WARDEN_ENTRY, path: daemonWardenPath, Icon: ShieldCheck },
@@ -261,7 +261,7 @@ export function SidebarDrawerTrigger({ onOpen, sessionCount }: SidebarDrawerTrig
  * The Inbox count on a PLACE (a tab, a nav link, a heading): THE unread pill the rows draw
  * (`UnreadBadge`), and nothing at zero — a calm place is the good news.
  */
-export function AttentionCountBadge({ count, className }: { readonly count: number; readonly className?: string }) {
+export function AgendaCountBadge({ count, className }: { readonly count: number; readonly className?: string }) {
   return count <= 0 ? null : <UnreadBadge count={count} {...(className === undefined ? {} : { className })} />;
 }
 
@@ -270,13 +270,13 @@ function AppNavLink({
   daemon,
   active,
   onNavigate,
-  attentionCount,
+  agendaCount,
 }: {
   destination: AppNavigationEntry;
   daemon: DaemonId;
   active: boolean;
   onNavigate?: (to: string) => void;
-  attentionCount: number;
+  agendaCount: number;
 }) {
   return (
     <RouteLink
@@ -288,7 +288,7 @@ function AppNavLink({
       className="kt-appnav__link"
     >
       {destination.label}
-      {destination.id === 'attention' ? <AttentionCountBadge count={attentionCount} /> : null}
+      {destination.id === 'attention' ? <AgendaCountBadge count={agendaCount} /> : null}
     </RouteLink>
   );
 }
@@ -400,7 +400,7 @@ export interface AppBarProps {
    */
   readonly tabBarShown?: boolean;
   /** Open Inbox items across every paired machine: the Inbox place's badge. */
-  readonly attentionCount?: number;
+  readonly agendaCount?: number;
 }
 
 export function AppBar({
@@ -417,7 +417,7 @@ export function AppBar({
   themeToggle,
   currentSessionSearch,
   tabBarShown = false,
-  attentionCount = 0,
+  agendaCount = 0,
 }: AppBarProps) {
   const layout = useLayoutMode();
   const statusVisible = connectionStatus !== 'open' || updateReady !== null;
@@ -512,7 +512,7 @@ export function AppBar({
                 daemon={daemon}
                 {...(onNavigate ? { onNavigate } : {})}
                 active={active === destination.id}
-                attentionCount={attentionCount}
+                agendaCount={agendaCount}
               />
             ))}
           </nav>
@@ -546,8 +546,8 @@ export interface AppTabBarProps {
   readonly onNavigate?: (to: string) => void;
   /** Find opens the same palette as the desktop's search box. */
   readonly onOpenPalette: () => void;
-  /** Open Attention items across every paired machine: the Inbox tab's badge. */
-  readonly attentionCount?: number;
+  /** Open Agenda items across every paired machine: the Inbox tab's badge. */
+  readonly agendaCount?: number;
 }
 
 const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
@@ -570,7 +570,7 @@ const TAB_ICONS: Readonly<Record<AppBarDestinationId, ReactNode>> = {
  * here that can be open, so it closes through its own dismissal path first, as the `data-kb-hide` contract
  * in index.css requires.
  */
-export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, attentionCount = 0 }: AppTabBarProps) {
+export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, agendaCount = 0 }: AppTabBarProps) {
   const [moreOpen, setMoreOpen] = useState(false);
   const moreId = useId();
   const keyboardOpen = useKeyboardOpen();
@@ -591,7 +591,7 @@ export function AppTabBar({ daemon, active = null, onNavigate, onOpenPalette, at
       >
         <span className="kt-tabbar__icon">
           {TAB_ICONS[id]}
-          {id === 'attention' ? <AttentionCountBadge className="kt-tabbar__badge" count={attentionCount} /> : null}
+          {id === 'attention' ? <AgendaCountBadge className="kt-tabbar__badge" count={agendaCount} /> : null}
         </span>
         <span className="kt-tabbar__label">{destination.label}</span>
       </RouteLink>

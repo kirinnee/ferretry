@@ -26,9 +26,9 @@ const timeOf = (value: string | null): number => {
 /** ADHD list order: blocked work first, then stale work, then the oldest evidence. */
 export const sortSessionTasks = (tasks: readonly TaskSummary[]): TaskSummary[] =>
   [...tasks].sort((left, right) => {
-    const leftAttention = left.blocked ? 0 : left.live.staleness ? 1 : 2;
-    const rightAttention = right.blocked ? 0 : right.live.staleness ? 1 : 2;
-    if (leftAttention !== rightAttention) return leftAttention - rightAttention;
+    const leftAgenda = left.blocked ? 0 : left.live.staleness ? 1 : 2;
+    const rightAgenda = right.blocked ? 0 : right.live.staleness ? 1 : 2;
+    if (leftAgenda !== rightAgenda) return leftAgenda - rightAgenda;
     const leftTime = timeOf(left.blockedSince ?? left.updatedAt ?? left.createdAt);
     const rightTime = timeOf(right.blockedSince ?? right.updatedAt ?? right.createdAt);
     if (leftTime !== rightTime) return leftTime - rightTime;

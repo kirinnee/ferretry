@@ -426,12 +426,12 @@ describe('replaceComposerTrigger', () => {
   test('should insert the canonical reference syntax for the task and attention tiers', () => {
     // Act
     const task = replaceComposerTrigger('track @@@F1', detected('track @@@F1'), '&F12');
-    const attention = replaceComposerTrigger('resolve @@@@A', detected('resolve @@@@A'), '!A3');
+    const agenda = replaceComposerTrigger('resolve @@@@A', detected('resolve @@@@A'), '!A3');
 
     // Assert — the browse trigger is `@`; what lands in the draft is the grammar
     // `findReferences` parses.
     should(task).deepEqual({ value: 'track &F12 ', selection: { start: 11, end: 11 } });
-    should(attention).deepEqual({ value: 'resolve !A3 ', selection: { start: 12, end: 12 } });
+    should(agenda).deepEqual({ value: 'resolve !A3 ', selection: { start: 12, end: 12 } });
   });
 });
 

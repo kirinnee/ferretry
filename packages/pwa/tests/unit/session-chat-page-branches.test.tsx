@@ -12,7 +12,7 @@ import {
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import {
-  type SessionAttentionModel,
+  type SessionAgendaModel,
   type SessionChatClient,
   SessionChatPage,
 } from '../../src/lib/pages/session-chat-page.tsx';
@@ -87,11 +87,11 @@ const interruptButton = (root: ReactTestInstance): ReactTestInstance => {
 
 describe('SessionChatPage branches', () => {
   test('offers the composer no Attention catalogue while the board is unreadable', () => {
-    const unreadable = { client: {}, snapshot: null, status: 'error' } as unknown as SessionAttentionModel;
+    const unreadable = { client: {}, snapshot: null, status: 'error' } as unknown as SessionAgendaModel;
     const page = renderPage({ attention: unreadable });
 
     try {
-      expect('autocompleteAttention' in page.root.findByType(Composer).props).toBe(false);
+      expect('autocompleteAgenda' in page.root.findByType(Composer).props).toBe(false);
     } finally {
       run(() => page.unmount());
     }

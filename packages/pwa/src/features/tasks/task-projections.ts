@@ -132,7 +132,7 @@ export const filterTasks = <Task extends TaskSummary>(tasks: readonly Task[], fi
 /**
  * An absent or unparseable timestamp sorts LAST, not first. `sortTasksForList`
  * leads with the oldest evidence, so treating "no timestamp" as time zero would
- * put every undated record at the top of the attention list ahead of real
+ * put every undated record at the top of the agenda list ahead of real
  * blocked work.
  */
 const timeOf = (value: string | null | undefined): number => {
@@ -141,7 +141,7 @@ const timeOf = (value: string | null | undefined): number => {
 };
 
 /**
- * The attention-first list order: blocked cards, then stale ones, then the
+ * The agenda-first list order: blocked cards, then stale ones, then the
  * rest — and within each band, the OLDEST evidence first.
  *
  * This is kteam's "ADHD list" ordering and it is deliberate. A list sorted by
@@ -151,9 +151,9 @@ const timeOf = (value: string | null | undefined): number => {
  * to id, so the order is total and a re-read never reshuffles equal rows.
  */
 export const sortTasksForList = <Task extends TaskSummary>(tasks: readonly Task[]): Task[] => {
-  const attention = (task: Task): number => (task.blocked ? 0 : task.live.staleness ? 1 : 2);
+  const agenda = (task: Task): number => (task.blocked ? 0 : task.live.staleness ? 1 : 2);
   return [...tasks].sort((left, right) => {
-    const band = attention(left) - attention(right);
+    const band = agenda(left) - agenda(right);
     if (band !== 0) return band;
     // Two undated records both read as +Infinity, so their difference is NaN.
     // NaN from a comparator is an UNORDERED result, not a tie, and leaves the

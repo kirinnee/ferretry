@@ -225,8 +225,11 @@ describe('one session list across two machines, one offline', () => {
       // A studio row still opens the studio's session.
       await tab.click(`[data-sbar-machine-group="${seen.studio}"] [data-sbar-session="s-ivo"]`);
       expect((await evidence(tab)).navigations.at(-1)).toBe(`/d/${encodeURIComponent(seen.studio)}/session/s-ivo`);
-      for (const mode of ['light', 'dark'] as const)
-        for (const scene of ['bar', 'drawer'] as const) {
+      const shots = (['light', 'dark'] as const).flatMap(mode =>
+        (['bar', 'drawer'] as const).map(scene => ({ mode, scene })),
+      );
+      await Promise.all(
+        shots.map(async ({ mode, scene }) => {
           const shot = await open(scene, 'studio', mode, 'laptop');
           try {
             // The phone drawer is shorter than the list: bring the open row into the capture.
@@ -244,7 +247,8 @@ describe('one session list across two machines, one offline', () => {
           } finally {
             await shot.context.close();
           }
-        }
+        }),
+      );
     } finally {
       await context.close();
     }
@@ -275,76 +279,88 @@ describe('one session list across two machines, one offline', () => {
   }, 120_000);
 
   it('draws compact rows as one short line and Comfortable as the full rows, crowded, without sideways scroll', async () => {
-    for (const mode of ['light', 'dark'] as const)
-      for (const scene of ['bar', 'drawer'] as const) {
+    // The four crowded lists (two modes, bar and drawer), each at both densities, are read at once.
+    const lists = (['light', 'dark'] as const).flatMap(mode =>
+      (['bar', 'drawer'] as const).map(scene => ({ mode, scene })),
+    );
+    await Promise.all(
+      lists.map(async ({ mode, scene }) => {
         const heights: Record<string, number> = {};
-        for (const density of ['compact', 'full'] as const) {
-          const { context, tab } = await open(scene, 'studio', mode, 'laptop', `&big=1&density=${density}`);
-          try {
-            const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-            expect(wide).toBeLessThanOrEqual(0);
-            const listWide = await tab.$$eval('.fy-sbar__list', nodes =>
-              nodes.map(node => node.scrollWidth - node.clientWidth),
-            );
-            for (const overflow of listWide) expect(overflow).toBeLessThanOrEqual(0);
-
-            const plain = '[data-sbar-machine-group] [data-sbar-session]:not([aria-current="page"])';
-            const rowHeights = await tab.$$eval(plain, nodes => nodes.map(node => node.getBoundingClientRect().height));
-            expect(rowHeights.length).toBeGreaterThan(8);
-            const tallest = Math.max(...rowHeights);
-            heights[density] = Math.min(...rowHeights);
-            const head = await tab.$$eval('.fy-sbar__machine-head', nodes =>
-              nodes.map(node => node.getBoundingClientRect().height),
-            );
-            expect(head.length).toBe(2);
-            for (const height of head) expect(height).toBeLessThanOrEqual(32);
-
-            const detailBox = await tab.$eval(`${plain} .fy-sbar__detail`, node => {
-              const box = node.getBoundingClientRect().height;
-              return box > 0 ? box : (node.firstElementChild?.getBoundingClientRect().height ?? 0);
-            });
-            const open = await tab.$eval('[aria-current="page"] .fy-sbar__detail', node => ({
-              height: node.getBoundingClientRect().height,
-              ferret: node.querySelector('[data-sbar-ferret]') !== null,
-            }));
-            if (density === 'compact') {
-              // One line: 32px on a pointer, the 44px touch floor on a phone; the detail is clipped away.
-              expect(tallest).toBeLessThanOrEqual(scene === 'bar' ? 34 : 46);
-              expect(detailBox).toBeLessThanOrEqual(1);
-              expect(open.height).toBeGreaterThan(8);
-              expect(open.ferret).toBe(true);
-            } else {
-              expect(detailBox).toBeGreaterThan(8);
-            }
-            if (shotsDir !== '')
-              await writeFile(
-                join(shotsDir, `sidebar-${density}-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
-                await tab.screenshot({ animations: 'disabled' }),
+        await Promise.all(
+          (['compact', 'full'] as const).map(async density => {
+            const { context, tab } = await open(scene, 'studio', mode, 'laptop', `&big=1&density=${density}`);
+            try {
+              const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+              expect(wide).toBeLessThanOrEqual(0);
+              const listWide = await tab.$$eval('.fy-sbar__list', nodes =>
+                nodes.map(node => node.scrollWidth - node.clientWidth),
               );
-          } finally {
-            await context.close();
-          }
-        }
+              for (const overflow of listWide) expect(overflow).toBeLessThanOrEqual(0);
+
+              const plain = '[data-sbar-machine-group] [data-sbar-session]:not([aria-current="page"])';
+              const rowHeights = await tab.$$eval(plain, nodes =>
+                nodes.map(node => node.getBoundingClientRect().height),
+              );
+              expect(rowHeights.length).toBeGreaterThan(8);
+              const tallest = Math.max(...rowHeights);
+              heights[density] = Math.min(...rowHeights);
+              const head = await tab.$$eval('.fy-sbar__machine-head', nodes =>
+                nodes.map(node => node.getBoundingClientRect().height),
+              );
+              expect(head.length).toBe(2);
+              for (const height of head) expect(height).toBeLessThanOrEqual(32);
+
+              const detailBox = await tab.$eval(`${plain} .fy-sbar__detail`, node => {
+                const box = node.getBoundingClientRect().height;
+                return box > 0 ? box : (node.firstElementChild?.getBoundingClientRect().height ?? 0);
+              });
+              const open = await tab.$eval('[aria-current="page"] .fy-sbar__detail', node => ({
+                height: node.getBoundingClientRect().height,
+                ferret: node.querySelector('[data-sbar-ferret]') !== null,
+              }));
+              if (density === 'compact') {
+                // One line: 32px on a pointer, the 44px touch floor on a phone; the detail is clipped away.
+                expect(tallest).toBeLessThanOrEqual(scene === 'bar' ? 34 : 46);
+                expect(detailBox).toBeLessThanOrEqual(1);
+                expect(open.height).toBeGreaterThan(8);
+                expect(open.ferret).toBe(true);
+              } else {
+                expect(detailBox).toBeGreaterThan(8);
+              }
+              if (shotsDir !== '')
+                await writeFile(
+                  join(shotsDir, `sidebar-${density}-${scene === 'bar' ? 'desktop' : 'phone'}-${mode}.png`),
+                  await tab.screenshot({ animations: 'disabled' }),
+                );
+            } finally {
+              await context.close();
+            }
+          }),
+        );
         expect(heights.compact).toBeLessThan(heights.full as number);
-      }
+      }),
+    );
   }, 240_000);
 
   it('fits a phone and a desktop, light and dark, in two theme families', async () => {
-    for (const theme of ['studio', 'neo'])
-      for (const mode of ['light', 'dark'] as const)
-        for (const scene of ['bar', 'page'] as const) {
-          const { context, tab } = await open(scene, theme, mode);
-          try {
-            const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
-            expect(wide).toBeLessThanOrEqual(0);
-            if (shotsDir !== '')
-              await writeFile(
-                join(shotsDir, `all-machines-${scene === 'bar' ? 'desktop' : 'phone'}-${theme}-${mode}.png`),
-                await tab.screenshot({ animations: 'disabled' }),
-              );
-          } finally {
-            await context.close();
-          }
+    const fits = ['studio', 'neo'].flatMap(theme =>
+      (['light', 'dark'] as const).flatMap(mode => (['bar', 'page'] as const).map(scene => ({ theme, mode, scene }))),
+    );
+    await Promise.all(
+      fits.map(async ({ theme, mode, scene }) => {
+        const { context, tab } = await open(scene, theme, mode);
+        try {
+          const wide = await tab.evaluate(() => document.documentElement.scrollWidth - innerWidth);
+          expect(wide).toBeLessThanOrEqual(0);
+          if (shotsDir !== '')
+            await writeFile(
+              join(shotsDir, `all-machines-${scene === 'bar' ? 'desktop' : 'phone'}-${theme}-${mode}.png`),
+              await tab.screenshot({ animations: 'disabled' }),
+            );
+        } finally {
+          await context.close();
         }
+      }),
+    );
   }, 180_000);
 });

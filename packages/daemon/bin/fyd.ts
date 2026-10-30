@@ -117,26 +117,26 @@ import {
   NodeRawDeflate,
   probePdfDecryptWorker,
 } from '../src/adapters/attachments/index.ts';
-import { FileAgendaFileStore } from '../src/adapters/attention/file-agenda-file-store.ts';
-import { FileAgendaFilesMigrationMarker } from '../src/adapters/attention/file-agenda-files-migration-marker.ts';
-import { FileAgendaMigrationMarker } from '../src/adapters/attention/file-agenda-migration-marker.ts';
-import { FileAttentionLedgerRepository } from '../src/adapters/attention/file-attention-ledger-repository.ts';
-import { FileAttentionOutboxRepository } from '../src/adapters/attention/file-attention-outbox-repository.ts';
-import { KeyedAttentionReplyTimers } from '../src/adapters/attention/keyed-attention-reply-timers.ts';
+import { FileAgendaFileStore } from '../src/adapters/agenda/file-agenda-file-store.ts';
+import { FileAgendaFilesMigrationMarker } from '../src/adapters/agenda/file-agenda-files-migration-marker.ts';
+import { FileAgendaMigrationMarker } from '../src/adapters/agenda/file-agenda-migration-marker.ts';
+import { FileAgendaLedgerRepository } from '../src/adapters/agenda/file-agenda-ledger-repository.ts';
+import { FileAgendaOutboxRepository } from '../src/adapters/agenda/file-agenda-outbox-repository.ts';
+import { KeyedAgendaReplyTimers } from '../src/adapters/agenda/keyed-agenda-reply-timers.ts';
 import {
-  LedgerAttentionReceipts,
-  PaneAttentionComposer,
-  SendAttentionMessenger,
-} from '../src/adapters/attention/send-attention-delivery.ts';
-import { SessionConfigAgendaModes } from '../src/adapters/attention/session-agenda-modes.ts';
-import { armSessionTurnChanges, StorageSessionStops } from '../src/adapters/attention/session-turn-stops.ts';
-import { armAttentionNudge, StorageAttentionNudgeSessions } from '../src/adapters/attention/storage-attention-nudge.ts';
+  LedgerAgendaReceipts,
+  PaneAgendaComposer,
+  SendAgendaMessenger,
+} from '../src/adapters/agenda/send-agenda-delivery.ts';
+import { SessionConfigAgendaModes } from '../src/adapters/agenda/session-agenda-modes.ts';
+import { armSessionTurnChanges, StorageSessionStops } from '../src/adapters/agenda/session-turn-stops.ts';
+import { armAgendaNudge, StorageAgendaNudgeSessions } from '../src/adapters/agenda/storage-agenda-nudge.ts';
 import {
   StorageHarnessPromptJournal,
   StorageHarnessPromptStates,
   StorageHarnessQuestionAnswerer,
-} from '../src/adapters/attention/storage-harness-prompt.ts';
-import { StorageSessionAttentionState } from '../src/adapters/attention/storage-session-attention-state.ts';
+} from '../src/adapters/agenda/storage-harness-prompt.ts';
+import { StorageSessionAgendaState } from '../src/adapters/agenda/storage-session-agenda-state.ts';
 import { FilePendingContext, FileSweepMemory } from '../src/adapters/board/file-board-sweep-state.ts';
 import { FileBoardStore } from '../src/adapters/board/file-board-store.ts';
 import {
@@ -226,7 +226,7 @@ import {
   FileCgroupConfigStore,
   FileDaemonConfig,
   FileModelCatalogCache,
-  AttentionLaneAgenda,
+  AgendaLaneAgenda,
   FileLaneSetStore,
   GitRepositoryProbe,
   StorageSessionFacts,
@@ -608,19 +608,19 @@ import {
   type ApiServerPort,
   type ArgumentAnswer,
   type AssigneeObservation,
-  type AttentionActor,
-  AttentionBoardUndelivered,
-  AttentionBuzz,
-  AttentionChangeFanout,
+  type AgendaActor,
+  AgendaBoardUndelivered,
+  AgendaBuzz,
+  AgendaChangeFanout,
   LaneProposalAcceptance,
   LaneSetService,
   SessionProjects,
-  AttentionConversation,
-  AttentionReplyBatcher,
-  AttentionReplyDelivery,
-  AttentionResurfacer,
-  AttentionService,
-  AttentionTurnNudge,
+  AgendaConversation,
+  AgendaReplyBatcher,
+  AgendaReplyDelivery,
+  AgendaResurfacer,
+  AgendaService,
+  AgendaTurnNudge,
   AUDIT_FOLD_WINDOW_MS,
   AuditedPairingService,
   AuditLog,
@@ -745,7 +745,7 @@ import {
   type FoundationPaths,
   fastStartRefusal,
   findAccountByAgent,
-  firstWriteReleasedAnswerAttention,
+  firstWriteReleasedAnswerAgenda,
   fleetManifestRefusal,
   foreignAdvertisementNotice,
   HANDOVER_RESCAN_INTERVAL_MS,
@@ -757,7 +757,7 @@ import {
   type HarnessDiscoveryPolicy,
   type HarnessPreflight,
   HarnessPromptAnswerDelivery,
-  HarnessPromptAttention,
+  HarnessPromptAgenda,
   HarnessQuirkService,
   HarnessUpdateService,
   type HarnessVersionPort,
@@ -885,7 +885,7 @@ import {
   RELAY_DIRECTORY_NOT_ASKED,
   RELOAD_THE_APP,
   RETIRED_ACCOUNT_MODEL_NOTICE,
-  attentionBlockNotice,
+  agendaBlockNotice,
   RETIRED_FLEET_BLOCK_NOTICE,
   RETIRED_SESSION_WORKERS_SWITCH_NOTICE,
   RecommendError,
@@ -897,7 +897,7 @@ import {
   type RelayPairingRedeemer,
   type RelayStreamDispatch,
   RememberedHandoverReceipts,
-  type ResumeAnswerAttention,
+  type ResumeAnswerAgenda,
   ResumeCancelled,
   type ResumeLauncher,
   ResumeRefused,
@@ -915,7 +915,7 @@ import {
   relaunchCommand,
   relayCarrierRemedy,
   relayCarriersNeedDiscovery,
-  releasedAnswerAttentionOwnedBy,
+  releasedAnswerAgendaOwnedBy,
   releasingAttachmentsOnStop,
   renderConfiguration,
   renderDoctorReport,
@@ -952,7 +952,7 @@ import {
   type SessionAnswerSubsystem,
   SessionAttachmentStore,
   SessionAttachService,
-  SessionAttentionProjection,
+  SessionAgendaProjection,
   SessionConsoleService,
   SessionControlError,
   type SessionControlFailure,
@@ -1006,7 +1006,7 @@ import {
   SkillsInventoryService,
   type SocketRoute,
   SpeedupsService,
-  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
   type StackSamplerPort,
   StagedApiSurface,
   StepUpRegistry,
@@ -1210,7 +1210,7 @@ const TERMINAL_REAP_SETTLE_MS = 1_000;
 /** The reaper's slow backstop, for a pane that became reapable without this daemon writing it so. */
 const TERMINAL_REAP_BACKSTOP_MS = 60_000;
 /** How long after a turn ends the Attention check reads its transcript: the last words reach the file late. */
-const ATTENTION_NUDGE_SETTLE_MS = 2_000;
+const AGENDA_NUDGE_SETTLE_MS = 2_000;
 
 /**
  * The three things the managed-worktree surface cannot decide for itself.
@@ -1460,10 +1460,10 @@ export interface DaemonWorld {
     storage: DaemonStorage,
     launcher: ResumeLauncher,
     /** Where the released structured-answer advisory is durably dismissed; see
-     *  `createResumeAnswerAttention`. Passed IN for the launcher's reason: it is built from the
+     *  `createResumeAnswerAgenda`. Passed IN for the launcher's reason: it is built from the
      *  answer ledger and the answer queue, which belong to the mounted subsystems rather than the
      *  world, and a second construction would dismiss on a queue nothing else holds. */
-    answerAttention: ResumeAnswerAttention,
+    answerAgenda: ResumeAnswerAgenda,
     /** The session's ANSWER/monitor queue, used as the resume service's own serializer. Passed in
      *  because it belongs to the mounted subsystems, and shared because a dismissal must hold it
      *  from the old pane's release through the final clear — see `SessionResumePorts.serial`. */
@@ -1764,7 +1764,7 @@ export interface DaemonWorld {
      */
     sessionWorkers: DaemonConfig['sessionWorkers'],
     /** How long the owner's attention answers are held before they reach the ferret (`attention` block). */
-    attention: DaemonConfig['attention'],
+    agenda: DaemonConfig['attention'],
   ) => MountedSubsystems;
   /** The bearer tokens the API accepts, minted into the state home on first boot. */
   readonly credentials: StateApiCredentials;
@@ -3016,7 +3016,7 @@ function createSessionResumeSubsystem(
  * Holding that queue across the whole critical section is also what makes the clear that follows
  * safe: no drive and no projection can publish a newer advisory between this append and it.
  *
- * THE RECORD IS THE ONE THE STANDING ADVISORY NAMES, decided by `releasedAnswerAttentionOwnedBy` —
+ * THE RECORD IS THE ONE THE STANDING ADVISORY NAMES, decided by `releasedAnswerAgendaOwnedBy` —
  * the projection's own ownership predicate, reused rather than reimplemented. Counting quarantined
  * rows was the first thing wrong with the obvious version: a session carrying an unrelated older
  * quarantine would refuse to dismiss the warning actually on screen. Looking for the tool id inside
@@ -3041,7 +3041,7 @@ function createSessionResumeSubsystem(
  * advisory still stands. Refusing there would strand the session forever on the one path meant to
  * recover it, so the retry appends nothing, returns, and lets the service finish the clear.
  */
-function createResumeAnswerAttention(storage: DaemonStorage, answerLedger: FileAnswerLedger): ResumeAnswerAttention {
+function createResumeAnswerAgenda(storage: DaemonStorage, answerLedger: FileAnswerLedger): ResumeAnswerAgenda {
   return {
     acknowledge: async (id, actor) => {
       const state = SessionStateSchema.safeParse(await storage.readState(id));
@@ -3058,7 +3058,7 @@ function createResumeAnswerAttention(storage: DaemonStorage, answerLedger: FileA
       // ever named its tool. Counting only the candidates would let a `confirmed` co-owner sit
       // outside the count, leaving exactly one candidate and an ambiguity the guard exists to
       // catch. So: exactly one owner in the whole ledger, THEN that owner must be dismissable.
-      const owners = records.filter(record => releasedAnswerAttentionOwnedBy(state.data, record));
+      const owners = records.filter(record => releasedAnswerAgendaOwnedBy(state.data, record));
       if (owners.length !== 1)
         throw new Error(
           `the released structured-answer advisory on session ${id} is owned by ${owners.length} answer ` +
@@ -3143,11 +3143,11 @@ function createSessionSendSubsystem(
   /** One hand-off document as the person's message; `undefined` when it is gone. */
   readHandoff: (sessionId: SessionId, name: string) => Promise<SessionHandoff | undefined>,
   /**
-   * A PERSON's message read against the ferret's open Attention (`AttentionConversation`): the words it
+   * A PERSON's message read against the ferret's open Attention (`AgendaConversation`): the words it
    * receives, and the items it named made the ferret's turn once it was accepted (nothing resolves). A
    * teammate's message is never read this way — only the owner talks about the owner's items.
    */
-  conversation: Pick<AttentionConversation, 'prepare' | 'settle'>,
+  conversation: Pick<AgendaConversation, 'prepare' | 'settle'>,
   /**
    * The always-on instructions that changed since the ferret launched, queued once as a message of their
    * own when a PERSON writes (`InstructionRefresh`, docs/launch-settings.md). A teammate's message never
@@ -3541,12 +3541,12 @@ function createSessionAnswerSubsystem(
           const next: Record<string, unknown> = {
             ...(current as Record<string, unknown>),
             status: statusProtectedFromAnswer(parsed.data.status) ? parsed.data.status : 'awaiting_user',
-            needsHumanKind: STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
+            needsHumanKind: STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
             // The projection's own builder, not a copy of its sentence: this first write IS one of
-            // the two messages `releasedAnswerAttentionOwnedBy` recognises, so a second literal here
+            // the two messages `releasedAnswerAgendaOwnedBy` recognises, so a second literal here
             // would be a fact with two owners — and the day they drifted, ownership would silently
             // read false and the advisory would become undismissable.
-            needsHuman: firstWriteReleasedAnswerAttention(record.toolUseId),
+            needsHuman: firstWriteReleasedAnswerAgenda(record.toolUseId),
           };
           if (parsed.data.pendingQuestion?.toolUseId === record.toolUseId) delete next.pendingQuestion;
           return next as typeof current;
@@ -3775,7 +3775,7 @@ interface SessionPackHooks {
 
 /** A session status after which no process runs until the session is launched again. */
 /** How often the deadline sweep looks for an item whose `neededBy` came near with nothing else touching its board. */
-const ATTENTION_DEADLINE_SWEEP_MS = 5 * 60_000;
+const AGENDA_DEADLINE_SWEEP_MS = 5 * 60_000;
 
 const HYPERMEDIA_NOT_RUNNING: ReadonlySet<string> = new Set(['completed', 'failed', 'stalled', 'stopped']);
 
@@ -3964,14 +3964,14 @@ interface WardenSupervisionState {
 }
 
 /**
- * Provenance for every attention item the warden writes.
+ * Provenance for every agenda item the warden writes.
  *
  * `warden-escalation` is a DISTINCT daemon cause from ordinary source
  * reconciliation, and the state machine reads it: an agent can never dismiss a
  * daemon-raised item, and a reader can tell a warden's interruption apart from a
  * session's own request without parsing its prose.
  */
-const WARDEN_ESCALATION_ACTOR: AttentionActor = { kind: 'daemon', cause: 'warden-escalation' };
+const WARDEN_ESCALATION_ACTOR: AgendaActor = { kind: 'daemon', cause: 'warden-escalation' };
 
 /** How many transcript lines a Jev snapshot carries. The guard bounds them again; this bounds the read. */
 const WARDEN_TRIAGE_TAIL = 12;
@@ -4006,7 +4006,7 @@ interface WardenParts {
    */
   readonly documents: Pick<SessionDirectorySubsystem, 'list'>;
   /**
-   * The ONE attention service every other caller uses, not a second one.
+   * The ONE agenda service every other caller uses, not a second one.
    *
    * A warden escalation lands on the flagged session's own board, through the
    * same state machine, the same locking and the same durable document a person
@@ -4014,7 +4014,7 @@ interface WardenParts {
    * session is waiting for, and the two would disagree the first time anybody
    * resolved anything.
    */
-  readonly attention: AttentionService;
+  readonly attention: AgendaService;
   readonly usage: UsageFeedPort;
   readonly accounts: AccountInventoryPort & Partial<RuntimeNamesPort>;
   /** The machine's default runtime, read fresh: the investigation login when `warden.yaml` names none. */
@@ -4345,7 +4345,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
     run: async (force: boolean) => await loop.run(force),
     config: async () => await service.view(),
     updateConfig: async (patch: unknown) => await service.updateConfig(parseWardenConfigPatch(patch)),
-    attention: async () => await service.attention(),
+    attention: async () => await service.agenda(),
     // Queued inside the sweep chain, then a sweep right behind it: if a slot is free the investigation
     // starts now, and the answer says whether it did.
     investigate: async request => {
@@ -7872,12 +7872,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const autoResumeSummary = new FileAutoResumeSummaryStore(stateFiles, join(paths.home, 'auto-resume-summary.json'));
   /** The resume factory, held as a local for the same reason `createSessionLifecycle` is: the mounted
    *  subsystems must get the same one the world publishes rather than a second construction. */
-  const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher, answerAttention, serial) =>
+  const createSessionResume: DaemonWorld['createSessionResume'] = (storage, launcher, answerAgenda, serial) =>
     new SessionResumeService(
       {
         repository: new StorageResumeRepository(storage),
         launcher,
-        answerAttention,
+        answerAgenda,
         turns: resumeTurns,
         monitors: new NoMonitorSupervision(),
         gate: launchGate,
@@ -8475,7 +8475,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       harnessDiscovery,
       browserLauncher,
       sessionWorkers,
-      attentionConfig,
+      agendaConfig,
     ) => {
       // Handed to `harnessBinary` above, which cannot be given it at construction: the declaration is
       // read from the configuration this boot loaded, and the adapters are built before that happens.
@@ -8679,7 +8679,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       const resume = createSessionResume(
         storage,
         reviver,
-        createResumeAnswerAttention(storage, answerLedger),
+        createResumeAnswerAgenda(storage, answerLedger),
         // THE ANSWER QUEUE ITSELF, not a private executor. Every writer of structured-answer
         // attention already takes this key — the drives and the quarantine writer through the
         // coordinator, the monitor's reprojection through `runIfIdle` — so handing it to resume is
@@ -9066,7 +9066,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         serial: new KeyedSerialExecutor(),
         clock,
       });
-      // ONE attention service for this opened store, shared by the route a person answers on and by
+      // ONE agenda service for this opened store, shared by the route a person answers on and by
       // the warden sweep that raises and clears its own escalations. Two would each hold their own
       // idea of what a session is waiting for.
       // The ledger repository is handed raw ids from the transport, so the id is parsed here rather than
@@ -9083,30 +9083,30 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           log: line => process.stderr.write(`${line}\n`),
         },
       );
-      const attentionBoards = new FileAttentionLedgerRepository(
+      const agendaBoards = new FileAgendaLedgerRepository(
         id => createSessionPaths(paths, parseSessionId(id)).directory,
         undefined,
         agendaFilesMigrated,
       );
-      // Each ferret's held answers (docs/attention.md § Delivery). The send is awaited by the batcher, outside
+      // Each ferret's held answers (docs/agenda.md § Delivery). The send is awaited by the batcher, outside
       // its per-session lock: it may wait for a launch or revive a stopped ferret, and the owner's next answer
       // must not wait on that. The send ledger keeps one message per batch send id, and is the one witness of
       // whether it arrived; an answer that did not is reopened on the board, built just below (read lazily).
-      const attentionReplies = new AttentionReplyBatcher(
-        new FileAttentionOutboxRepository(
+      const agendaReplies = new AgendaReplyBatcher(
+        new FileAgendaOutboxRepository(
           id => createSessionPaths(paths, parseSessionId(id)).directory,
           undefined,
           agendaFilesMigrated,
         ),
-        new SendAttentionMessenger(sends),
-        new KeyedAttentionReplyTimers(),
+        new SendAgendaMessenger(sends),
+        new KeyedAgendaReplyTimers(),
         new KeyedSerialExecutor(),
         { now: () => clock.now() },
         {
-          settleMs: attentionConfig.replySettleSeconds * 1_000,
-          capMs: attentionConfig.replyMaxWaitSeconds * 1_000,
-          composerWaitMs: attentionConfig.replyComposerWaitSeconds * 1_000,
-          receiptMs: attentionConfig.replyReceiptSeconds * 1_000,
+          settleMs: agendaConfig.replySettleSeconds * 1_000,
+          capMs: agendaConfig.replyMaxWaitSeconds * 1_000,
+          composerWaitMs: agendaConfig.replyComposerWaitSeconds * 1_000,
+          receiptMs: agendaConfig.replyReceiptSeconds * 1_000,
         },
         // A batch that falls due while the ferret is mid-turn waits for the turn to end. Unreadable state
         // is not busy, so a damaged document never holds an answer.
@@ -9119,20 +9119,20 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           },
         },
         {
-          composer: new PaneAttentionComposer(sendTerminal),
-          receipts: new LedgerAttentionReceipts(sendLedger),
-          undelivered: new AttentionBoardUndelivered({
-            undelivered: async (...parameters) => await attention.undelivered(...parameters),
+          composer: new PaneAgendaComposer(sendTerminal),
+          receipts: new LedgerAgendaReceipts(sendLedger),
+          undelivered: new AgendaBoardUndelivered({
+            undelivered: async (...parameters) => await agenda.undelivered(...parameters),
           }),
         },
       );
       // Answers held across a restart are delivered, in the background, once the daemon is up.
-      void attentionReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      void agendaReplies.resume(storage.listSessions().map(session => session.id)).catch(() => undefined);
       const agendaModes = new SessionConfigAgendaModes(sessions);
       const sessionStops = new StorageSessionStops(storage);
-      const attentionProjection = new SessionAttentionProjection(
-        attentionBoards,
-        new StorageSessionAttentionState(storage),
+      const agendaProjection = new SessionAgendaProjection(
+        agendaBoards,
+        new StorageSessionAgendaState(storage),
         new KeyedSerialExecutor(),
         () => clock.now(),
         agendaModes,
@@ -9140,16 +9140,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // THE PHONE BUZZES ONLY when a ferret stops on the owner, when an item's deadline is near, or for a
       // notice with `ping` (docs/notifications.md); everything else only moves the Inbox badge.
-      const attentionBuzz = new AttentionBuzz(
-        attentionBoards,
+      const agendaBuzz = new AgendaBuzz(
+        agendaBoards,
         sessionStops,
         notifications,
         clock,
-        attentionConfig.deadlineWarnHours,
+        agendaConfig.deadlineWarnHours,
       );
       // Boards that moved before summaries were kept (or while this daemon was down) are caught up once,
       // in the background: a list served before it finishes is only missing an unread mark.
-      void attentionProjection.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
+      void agendaProjection.reconcile(storage.listSessions().map(session => session.id)).catch(() => undefined);
       // Hoisted so a board answer to a harness question is typed into the form by the SAME path the
       // Console's answer takes: one coordinator, one receipt ledger, one driver.
       const sessionAnswer = createSessionAnswerSubsystem(
@@ -9165,7 +9165,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new StorageHarnessQuestionAnswerer(storage, sessionAnswer),
         new StorageHarnessPromptJournal(storage),
         // Read lazily: the service is built just below, and this is only called after it commits.
-        { raise: async (...parameters) => await attention.raise(...parameters) },
+        { raise: async (...parameters) => await agenda.raise(...parameters) },
       );
       // The board's projects and their lanes. A proposal is raised on the proposing ferret's agenda, and the
       // owner's Accept confirms it (below, in the change fanout). The agenda is read lazily: it is built next.
@@ -9178,12 +9178,12 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           new GitRepositoryProbe(),
           [...COMMON_SCRATCH_ROOTS, tmpdir()],
         ),
-        new AttentionLaneAgenda({ raise: async (...parameters) => await attention.raise(...parameters) }),
+        new AgendaLaneAgenda({ raise: async (...parameters) => await agenda.raise(...parameters) }),
         // The board store (U2) takes over moving a deleted lane's cards; until it lands there are none to move.
         { relocate: async () => undefined },
       );
-      const attention = new AttentionService(
-        attentionBoards,
+      const agenda = new AgendaService(
+        agendaBoards,
         clock,
         {
           // A missing agenda.json is an empty board only for a session the
@@ -9191,17 +9191,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           // rather than being flattened into "no attention".
           has: async id => (await sessions.get(id)) !== undefined,
         },
-        attentionBuzz,
-        new AttentionChangeFanout([
+        agendaBuzz,
+        new AgendaChangeFanout([
           // The session list's unread signal, kept true to the board.
-          attentionProjection,
+          agendaProjection,
           // The owner's Accept on a lane proposal confirms those lanes; any other answer is ignored.
           new LaneProposalAcceptance(laneSets),
           // The owner's answer, told to the ferret that asked — through its outbox, which holds a burst of
           // answers for a few seconds and delivers them as ONE message.
-          new AttentionReplyDelivery(attentionReplies, CLIENT_NAME),
+          new AgendaReplyDelivery(agendaReplies, CLIENT_NAME),
           // A board that now leaves an idle ferret stopped on the owner, or an item whose deadline is near.
-          attentionBuzz,
+          agendaBuzz,
           // The owner's answer to a harness question, typed into its form. DETACHED: a drive watches the
           // pane for seconds, and the answer is already on the board.
           {
@@ -9212,29 +9212,29 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         ]),
       );
       // Off unless `attention.resurfaceAfterMinutes` is set: asks left in discussion that long surface themselves.
-      if (attentionConfig.resurfaceAfterMinutes !== undefined) {
-        new AttentionResurfacer(
-          attentionBoards,
-          attention,
+      if (agendaConfig.resurfaceAfterMinutes !== undefined) {
+        new AgendaResurfacer(
+          agendaBoards,
+          agenda,
           () => storage.listSessions().map(session => session.id),
-          new KeyedAttentionReplyTimers(),
+          new KeyedAgendaReplyTimers(),
           () => clock.now(),
-          attentionConfig.resurfaceAfterMinutes,
+          agendaConfig.resurfaceAfterMinutes,
         ).start();
       }
       // A ferret that goes idle with an agenda item on the owner is STOPPED on them: pushed once for that stop,
       // and its summary says so. Learned from the fleet as it stands first, so a daemon that starts announces nobody.
       const turnChanges = new TurnChanges();
       armSessionTurnChanges(storage, turnChanges, async sessionId => {
-        await attentionProjection.refresh(sessionId);
-        await attentionBuzz.turnChanged(sessionId);
+        await agendaProjection.refresh(sessionId);
+        await agendaBuzz.turnChanged(sessionId);
       });
       // An item whose `neededBy` is within `attention.deadlineWarnHours` is pushed once; the sweep finds the ones
       // whose time came while nothing else touched their board.
-      const sweepDeadlines = asActivity(activities, 'attention-deadlines', async () => {
-        await attentionBuzz.sweep(storage.listSessions().map(session => session.id));
+      const sweepDeadlines = asActivity(activities, 'agenda-deadlines', async () => {
+        await agendaBuzz.sweep(storage.listSessions().map(session => session.id));
       });
-      setInterval(sweepDeadlines, ATTENTION_DEADLINE_SWEEP_MS).unref();
+      setInterval(sweepDeadlines, AGENDA_DEADLINE_SWEEP_MS).unref();
       setTimeout(sweepDeadlines, 30_000).unref();
       // The project boards, and their own sweep (`lib/board/sweep.ts`): "last touched" is judged from the
       // session roster with the Warden's liveness ledger laid over it — the ledger is published when the
@@ -9283,7 +9283,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             [AGENDA_ENV]: enabled ? '1' : '0',
           });
         });
-        await attentionProjection.refresh(id);
+        await agendaProjection.refresh(id);
       };
       adoptAgenda = async (id, eligible) => {
         await adoptAgendaDefault(
@@ -9327,7 +9327,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         storage.listSessions().map(session => session.id),
         {
           marker: new FileAgendaMigrationMarker(join(paths.home, 'agenda-mode-migration.json')),
-          boards: attentionBoards,
+          boards: agendaBoards,
           modes: {
             enabled: async sessionId => await agendaModes.enabled(sessionId),
             enable: async sessionId => await writeAgendaMode(sessionId, true, new Date(clock.now()).toISOString()),
@@ -9337,8 +9337,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       );
       // A harness parked on its own prompt waits on the owner, so it is an item on the board, raised and
       // cleared from the state documents storage writes — and caught up once at start, in the background.
-      const harnessPrompts = new HarnessPromptAttention(
-        attention,
+      const harnessPrompts = new HarnessPromptAgenda(
+        agenda,
         new KeyedSerialExecutor(),
         new StorageHarnessPromptStates(storage),
       );
@@ -9348,10 +9348,10 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // from a turn that raised no item for it, gets one nudge. Read after the transcript has settled, since
       // the turn's end can be seen on the pane before its last words reach the file; a listener must never
       // throw into the journal's append path, and a check that cannot read says nothing.
-      const nudgeSessions = new StorageAttentionNudgeSessions(storage, {
+      const nudgeSessions = new StorageAgendaNudgeSessions(storage, {
         read: async sessionId => await agendaModes.enabled(sessionId),
       });
-      const attentionNudge = new AttentionTurnNudge(
+      const attentionNudge = new AgendaTurnNudge(
         {
           enabled: async () => agendaNudgeEnabled((await effectiveAccountModel())?.machine ?? { attentionNudge: true }),
           subject: async sessionId => await nudgeSessions.subject(sessionId),
@@ -9369,7 +9369,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         },
         CLIENT_NAME,
       );
-      armAttentionNudge(storage, attentionNudge, ATTENTION_NUDGE_SETTLE_MS, (run, delayMs) => {
+      armAgendaNudge(storage, attentionNudge, AGENDA_NUDGE_SETTLE_MS, (run, delayMs) => {
         setTimeout(run, delayMs).unref();
       });
       // ONE ingestion service for this opened store, shared by the loop that writes rows and the route
@@ -10347,8 +10347,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           schedule: fleetReading,
         }),
         notifications,
-        attention,
-        attentionReplies,
+        attention: agenda,
+        agendaReplies,
         pins: new PinService(
           new FilePinSessionDirectory(paths, stateFiles),
           // Its own queue: a pin mutation must not serialize behind storage-wide or session work.
@@ -10475,11 +10475,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
                   attachmentRoot: attachmentOriginals(sessionId),
                 });
           },
-          new AttentionConversation(attention),
+          new AgendaConversation(agenda),
           new InstructionRefresh({
             sections: () => ALWAYS_ON_SECTIONS(CLIENT_NAME),
             queue: async (sessionId, digest, note) =>
-              await attentionReplies.add(sessionId, instructionsReplyKey(digest), note),
+              await agendaReplies.add(sessionId, instructionsReplyKey(digest), note),
             recorded: async sessionId => {
               const id = tryParseSessionId(sessionId);
               if (id === undefined) return undefined;
@@ -10694,7 +10694,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           sessions,
           documents: createSessionDirectorySubsystem(paths, storage),
           control: sessionControl,
-          attention,
+          attention: agenda,
           usage,
           accounts,
           defaultRuntime: async () => {
@@ -11196,8 +11196,8 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // it is still there, so the operator can delete it.
   if (config.retiredAccountModel) world.notices.state(RETIRED_ACCOUNT_MODEL_NOTICE);
   if (config.retiredFleetBlock) world.notices.state(RETIRED_FLEET_BLOCK_NOTICE);
-  const attentionNotice = attentionBlockNotice(config.attentionSpelling);
-  if (attentionNotice !== undefined) world.notices.state(attentionNotice);
+  const agendaNotice = agendaBlockNotice(config.agendaSpelling);
+  if (agendaNotice !== undefined) world.notices.state(agendaNotice);
   if (config.sessionWorkers.enabled === false) world.notices.state(RETIRED_SESSION_WORKERS_SWITCH_NOTICE);
 
   progress.enter('opening the usage feed');

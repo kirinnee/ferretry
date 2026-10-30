@@ -19,7 +19,7 @@ const taskListing = (sessionId = 'session-a') => ({
   updatedAt: '2026-08-06T00:00:00.000Z',
 });
 
-const attentionListing = (sessionId = 'session-a') => ({
+const agendaListing = (sessionId = 'session-a') => ({
   v: 1 as const,
   sessionId,
   items: [
@@ -70,7 +70,7 @@ describe('readComposerReferenceCatalogs', () => {
     const calls: string[] = [];
     const client = reader(path => {
       if (path.endsWith('/tasks')) return taskListing();
-      if (path.endsWith('/attention')) return attentionListing();
+      if (path.endsWith('/attention')) return agendaListing();
       return skillsListing;
     }, calls);
 
@@ -105,7 +105,7 @@ describe('readComposerReferenceCatalogs', () => {
   test('keeps task and Attention proof when the skills route fails', async () => {
     const client = reader(path => {
       if (path.endsWith('/tasks')) return taskListing();
-      if (path.endsWith('/attention')) return attentionListing();
+      if (path.endsWith('/attention')) return agendaListing();
       throw new Error('skills unavailable');
     });
 
@@ -120,7 +120,7 @@ describe('readComposerReferenceCatalogs', () => {
   test('refuses a response about another session without erasing other proof', async () => {
     const client = reader(path => {
       if (path.endsWith('/tasks')) return taskListing('session-b');
-      if (path.endsWith('/attention')) return attentionListing();
+      if (path.endsWith('/attention')) return agendaListing();
       return skillsListing;
     });
 
@@ -164,7 +164,7 @@ describe('useComposerReferenceCatalogs', () => {
   test('publishes a completed bundle and supports a host without the optional reader', async () => {
     const client = reader(path => {
       if (path.endsWith('/tasks')) return taskListing();
-      if (path.endsWith('/attention')) return attentionListing();
+      if (path.endsWith('/attention')) return agendaListing();
       return skillsListing;
     });
     const view = render(<CatalogProbe client={client} sessionId="session-a" />);
@@ -179,12 +179,12 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('publishes a fast family before slow siblings without issuing a second read', async () => {
     const calls: string[] = [];
-    let resolveAttention: ((value: unknown) => void) | undefined;
+    let resolveAgenda: ((value: unknown) => void) | undefined;
     let resolveSkills: ((value: unknown) => void) | undefined;
     const client = reader(path => {
       if (path.endsWith('/tasks')) return taskListing();
       return new Promise(resolve => {
-        if (path.endsWith('/attention')) resolveAttention = resolve;
+        if (path.endsWith('/attention')) resolveAgenda = resolve;
         else resolveSkills = resolve;
       });
     }, calls);
@@ -198,9 +198,8 @@ describe('useComposerReferenceCatalogs', () => {
       '/v1/sessions/session-a/tasks',
     ]);
 
-    if (resolveAttention === undefined || resolveSkills === undefined)
-      throw new Error('slow catalog reads did not start');
-    resolveAttention(attentionListing());
+    if (resolveAgenda === undefined || resolveSkills === undefined) throw new Error('slow catalog reads did not start');
+    resolveAgenda(agendaListing());
     resolveSkills(skillsListing);
     await flushCatalogs();
     expect(output(view)).toBe('1:1:1');
@@ -210,7 +209,7 @@ describe('useComposerReferenceCatalogs', () => {
 
   test('joins shared task and skill owners while reading only Attention itself', async () => {
     const calls: string[] = [];
-    let resolveAttention: ((value: unknown) => void) | undefined;
+    let resolveAgenda: ((value: unknown) => void) | undefined;
     let resolveTasks: (() => void) | undefined;
     let resolveSkills: (() => void) | undefined;
     const tasksSettled = new Promise<void>(resolve => {
@@ -222,7 +221,7 @@ describe('useComposerReferenceCatalogs', () => {
     const client = reader(
       () =>
         new Promise(resolve => {
-          resolveAttention = resolve;
+          resolveAgenda = resolve;
         }),
       calls,
     );
@@ -250,9 +249,9 @@ describe('useComposerReferenceCatalogs', () => {
     void allSettled?.then(() => {
       finished = true;
     });
-    if (resolveAttention === undefined || resolveTasks === undefined || resolveSkills === undefined)
+    if (resolveAgenda === undefined || resolveTasks === undefined || resolveSkills === undefined)
       throw new Error('shared catalog reads did not start');
-    resolveAttention(attentionListing());
+    resolveAgenda(agendaListing());
     await flushCatalogs();
     expect(output(view)).toBe('1:1:1');
     expect(finished).toBe(false);
@@ -265,9 +264,9 @@ describe('useComposerReferenceCatalogs', () => {
     run(() => view.unmount());
   });
 
-  test('reads nothing when the host owns the live Attention board, and offers that board as it moves', async () => {
+  test('reads nothing when the host owns the live Agenda board, and offers that board as it moves', async () => {
     const calls: string[] = [];
-    const client = reader(() => attentionListing(), calls);
+    const client = reader(() => agendaListing(), calls);
     const shared = (items: ComposerReferenceCatalogSources['attention']): ComposerReferenceCatalogSources => ({
       tasks: taskListing().tasks,
       skills: skillsListing,
@@ -294,7 +293,7 @@ describe('useComposerReferenceCatalogs', () => {
     expect(latest?.settled()).toBeUndefined();
 
     // The board is read, then a new item is raised: both reach the menu with no read of this module's own.
-    const first = attentionListing().items;
+    const first = agendaListing().items;
     run(() => view.update(probe(shared({ items: first }))));
     expect(latest?.attention).toBe(first);
     const raised = [...first, { ...first[0], id: 'A7' }] as typeof first;
@@ -342,7 +341,7 @@ describe('useComposerReferenceCatalogs', () => {
         pending.push(value => resolve(value));
       }).then(() => {
         if (path.endsWith('/tasks')) return taskListing('session-a');
-        if (path.endsWith('/attention')) return attentionListing('session-a');
+        if (path.endsWith('/attention')) return agendaListing('session-a');
         return skillsListing;
       }),
     );
@@ -360,7 +359,7 @@ describe('the composer reference catalogs on the agenda wire', () => {
   const answer = (path: string) => {
     if (path.endsWith('/tasks')) return taskListing();
     if (path.endsWith('/skills')) return skillsListing;
-    return attentionListing();
+    return agendaListing();
   };
 
   test('reads the agenda route when told the daemon speaks it, and the older one otherwise', async () => {

@@ -22,11 +22,11 @@ import {
 } from '../../../src/features/warden/warden-overview-model.ts';
 import { chip } from '../../../src/features/warden/warden-vocabulary.ts';
 import {
-  attentionItem,
+  agendaItem,
   wardenAccount,
   wardenAction,
   wardenAnomaly,
-  wardenAttention,
+  wardenAgenda,
   wardenConfig,
   wardenInvestigation,
   wardenStatus,
@@ -332,22 +332,22 @@ describe('watchingRows', () => {
         wardenAction({ sessionId: 'quiet', action: 'bless', by: 'warden' }),
       ],
     });
-    const attention = wardenAttention({
+    const agenda = wardenAgenda({
       items: [
-        attentionItem({
+        agendaItem({
           sessionId: 'checking',
           teammate: 'kofi',
           label: 'Design',
           judgement: { state: 'pending', reason: 'r' },
         }),
-        attentionItem({ sessionId: 'waiting', judgement: { state: 'queued', reason: 'r' } }),
-        attentionItem({ sessionId: 'flagged', judgement: { state: 'queued', reason: 'r' } }),
-        attentionItem({ sessionId: 'settled' }),
+        agendaItem({ sessionId: 'waiting', judgement: { state: 'queued', reason: 'r' } }),
+        agendaItem({ sessionId: 'flagged', judgement: { state: 'queued', reason: 'r' } }),
+        agendaItem({ sessionId: 'settled' }),
       ],
     });
 
     // Act
-    const rows = watchingRows(status, attention, NOW);
+    const rows = watchingRows(status, agenda, NOW);
 
     // Assert
     const by = new Map(rows.map(row => [row.sessionId, row]));
@@ -378,21 +378,21 @@ describe('watchingRows', () => {
   it('should chip an older daemon’s flag being judged by its kind, or as flagged when it names none', () => {
     // Arrange
     const status = wardenStatus();
-    const attention = wardenAttention({
+    const agenda = wardenAgenda({
       outcome: 'items',
       items: [
-        attentionItem({
+        agendaItem({
           sessionId: 'kind',
           source: 'warden-anomaly',
           anomalyKind: 'sus_thinking',
           judgement: { state: 'pending', reason: 'r' },
         }),
-        attentionItem({ sessionId: 'bare', source: 'warden-anomaly', judgement: { state: 'queued', reason: 'r' } }),
+        agendaItem({ sessionId: 'bare', source: 'warden-anomaly', judgement: { state: 'queued', reason: 'r' } }),
       ],
     });
 
     // Act
-    const by = new Map(watchingRows(status, attention, NOW).map(row => [row.sessionId, row]));
+    const by = new Map(watchingRows(status, agenda, NOW).map(row => [row.sessionId, row]));
 
     // Assert
     expect(by.get('kind')?.chips[0]).toEqual({ label: 'long think', tone: 'warn' });
@@ -488,7 +488,7 @@ describe('compactAgo and fullTime', () => {
 });
 
 describe('wardenInboxLine', () => {
-  const ready = (view: ReturnType<typeof wardenAttention>): WardenReadState<ReturnType<typeof wardenAttention>> => ({
+  const ready = (view: ReturnType<typeof wardenAgenda>): WardenReadState<ReturnType<typeof wardenAgenda>> => ({
     status: 'ready',
     view,
   });
@@ -500,8 +500,8 @@ describe('wardenInboxLine', () => {
 
   it('should count the notifications and link to the Inbox', () => {
     // Arrange
-    const one = ready(wardenAttention({ items: [attentionItem()] }));
-    const two = ready(wardenAttention({ items: [attentionItem(), attentionItem({ id: 'item-2' })] }));
+    const one = ready(wardenAgenda({ items: [agendaItem()] }));
+    const two = ready(wardenAgenda({ items: [agendaItem(), agendaItem({ id: 'item-2' })] }));
 
     // Act / Assert
     expect(wardenInboxLine(one)).toEqual({ kind: 'link', text: '1 Warden notification in Inbox', stale: false });
@@ -510,14 +510,14 @@ describe('wardenInboxLine', () => {
 
   it('should say none only after a clean read of an empty inbox', () => {
     // Arrange / Act / Assert
-    expect(wardenInboxLine(ready(wardenAttention()))).toEqual({ kind: 'none', text: 'No Warden notifications' });
+    expect(wardenInboxLine(ready(wardenAgenda()))).toEqual({ kind: 'none', text: 'No Warden notifications' });
   });
 
   it('should mark a count taken from an older read as stale', () => {
     // Arrange
-    const stale: WardenReadState<ReturnType<typeof wardenAttention>> = {
+    const stale: WardenReadState<ReturnType<typeof wardenAgenda>> = {
       status: 'stale',
-      view: wardenAttention({ items: [attentionItem()] }),
+      view: wardenAgenda({ items: [agendaItem()] }),
       reason: 'offline',
     };
 
@@ -528,12 +528,12 @@ describe('wardenInboxLine', () => {
   it('should warn, never all-clear, over a failed, degraded, stale-empty or unswept read', () => {
     // Arrange
     const warning = { kind: 'warning' as const, text: 'Couldn’t count Warden notifications' };
-    const failed: WardenReadState<ReturnType<typeof wardenAttention>> = { status: 'error', reason: 'offline' };
-    const degraded = ready(wardenAttention({ outcome: 'degraded' }));
-    const noSweep = ready(wardenAttention({ outcome: 'no-sweep' }));
-    const staleEmpty: WardenReadState<ReturnType<typeof wardenAttention>> = {
+    const failed: WardenReadState<ReturnType<typeof wardenAgenda>> = { status: 'error', reason: 'offline' };
+    const degraded = ready(wardenAgenda({ outcome: 'degraded' }));
+    const noSweep = ready(wardenAgenda({ outcome: 'no-sweep' }));
+    const staleEmpty: WardenReadState<ReturnType<typeof wardenAgenda>> = {
       status: 'stale',
-      view: wardenAttention(),
+      view: wardenAgenda(),
       reason: 'offline',
     };
 

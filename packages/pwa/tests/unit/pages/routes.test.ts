@@ -5,7 +5,7 @@ import {
   connectionPickerPath,
   daemonAnalyticsPath,
   daemonAnalyticsQueryPath,
-  daemonAttentionPath,
+  daemonAgendaPath,
   daemonImportedHistoryPath,
   daemonLearningPath,
   daemonMachineSetupPath,
@@ -309,7 +309,7 @@ describe('the Inbox route', () => {
     const canonical = parseRoute('/d/daemon-b/inbox');
     const legacy = parseRoute('/d/daemon-b/attention');
 
-    should(daemonAttentionPath(daemonB)).equal('/d/daemon-b/inbox');
+    should(daemonAgendaPath(daemonB)).equal('/d/daemon-b/inbox');
     should(canonical).deepEqual({ kind: 'attention', daemonId: daemonB });
     should(legacy).deepEqual({
       kind: 'legacy-attention-redirect',

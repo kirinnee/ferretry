@@ -1,3 +1,9 @@
+## [4.115.0](https://github.com/kirinnee/ferretry/compare/v4.114.0...v4.115.0) (2026-10-30)
+
+### Features
+
+* **board:** session projects, Unfiled board and lane proposal flow (U3) ([#932](https://github.com/kirinnee/ferretry/issues/932)) ([f413b09](https://github.com/kirinnee/ferretry/commit/f413b095ab9eb2974d92f0ba75e21ead2e82f9d6))
+
 ## [4.114.0](https://github.com/kirinnee/ferretry/compare/v4.113.0...v4.114.0) (2026-10-30)
 
 ### Features

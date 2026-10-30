@@ -1,18 +1,18 @@
 import { describe, expect, it } from 'bun:test';
-import type { AttentionId, AttentionItem } from '@ferretry/protocol';
+import type { AgendaId, AgendaItem } from '@ferretry/protocol';
 import { agendaCounts, agendaItems, agendaSegments } from '../../src/lib/agenda-chat.ts';
 
-const item = (id: string, extra: Record<string, unknown> = {}): AttentionItem =>
+const item = (id: string, extra: Record<string, unknown> = {}): AgendaItem =>
   ({
-    id: id as AttentionId,
+    id: id as AgendaId,
     source: 'agent-raised',
     subject: `Ask ${id}`,
     waitingSince: '2026-07-31T11:30:00.000Z',
     ask: { kind: 'permission' },
     ...extra,
-  }) as unknown as AttentionItem;
+  }) as unknown as AgendaItem;
 
-const ids = (items: readonly AttentionItem[]): readonly string[] => items.map(entry => entry.id);
+const ids = (items: readonly AgendaItem[]): readonly string[] => items.map(entry => entry.id);
 
 describe('agendaItems', () => {
   it('keeps what is open and drops notifications and finished items', () => {

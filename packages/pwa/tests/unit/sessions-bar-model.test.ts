@@ -11,7 +11,7 @@ import {
   sessionsBarDirectory,
   sessionsBarNames,
   sessionsBarSubline,
-  hasAttention,
+  hasAgenda,
   sessionsBarView,
   sidebarCompact,
 } from '../../src/shell/sessions-bar-model.ts';
@@ -50,7 +50,7 @@ describe('who needs the reader', () => {
     const result = sessionsBarView([filed], [], { mode: 'all', showStopped: false }, undefined, false);
     expect(result.needsYou).toEqual([]);
     expect(result.groups.flatMap(group => group.rows).map(row => row.config.id)).toEqual(['c']);
-    expect(hasAttention(filed)).toBe(true);
+    expect(hasAgenda(filed)).toBe(true);
   });
 
   test('stopped is the status mark’s own finished class, kill_failed included', () => {

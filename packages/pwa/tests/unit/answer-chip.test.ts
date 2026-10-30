@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'bun:test';
-import type { AttentionId } from '@ferretry/protocol';
+import type { AgendaId } from '@ferretry/protocol';
 import { withReferencePrefix } from '../../src/lib/answer-chip.ts';
 
-const id = (value: string): AttentionId => value as AttentionId;
+const id = (value: string): AgendaId => value as AgendaId;
 
 const fakeClient = () => {
   const sent: string[] = [];
@@ -23,7 +23,7 @@ const fakeClient = () => {
 describe('withReferencePrefix', () => {
   it('prefixes every chip, in order, and binds other methods to the target', async () => {
     const { sent, client } = fakeClient();
-    let chips: readonly AttentionId[] = [id('A4'), id('A7')];
+    let chips: readonly AgendaId[] = [id('A4'), id('A7')];
     const wrapped = withReferencePrefix(client, () => chips);
     await wrapped.send('s', { message: 'hi' });
     chips = [];

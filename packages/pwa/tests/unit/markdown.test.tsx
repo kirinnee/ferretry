@@ -1,5 +1,5 @@
 import { describe, test } from 'bun:test';
-import type { AttentionId } from '@ferretry/protocol';
+import type { AgendaId } from '@ferretry/protocol';
 import type { ReactTestInstance } from 'react-test-renderer';
 import should from 'should';
 import { FyRenderBlock } from '../../src/components/fy-render-block.tsx';
@@ -383,11 +383,11 @@ describe('Markdown references', () => {
     should(opened).deepEqual(['F12']);
   });
 
-  test('should hand a proved attention reference to its opener', () => {
+  test('should hand a proved agenda reference to its opener', () => {
     // Arrange
-    const opened: AttentionId[] = [];
+    const opened: AgendaId[] = [];
     const tree = render(
-      <Markdown attentionReferenceResolver={() => true} onAttentionOpen={id => opened.push(id)} text="see !A3" />,
+      <Markdown agendaReferenceResolver={() => true} onAgendaOpen={id => opened.push(id)} text="see !A3" />,
     );
 
     // Act
