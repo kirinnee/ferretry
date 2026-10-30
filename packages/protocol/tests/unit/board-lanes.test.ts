@@ -347,3 +347,37 @@ describe('lane helpers', () => {
     should(isBlockerDone('closed', 'released')).be.true();
   });
 });
+
+describe('lane proposal references', () => {
+  const projectId = '0b1f2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+  it('should round trip a project and version through the reference', () => {
+    const reference = lanesModule.laneProposalReference(projectId, 3);
+    should(reference).equal(`lanes:${projectId}:3`);
+    should(lanesModule.parseLaneProposalReference(reference)).deepEqual({ projectId, version: 3 });
+  });
+
+  it('should read the unfiled project too', () => {
+    should(lanesModule.parseLaneProposalReference('lanes:unfiled:1')).deepEqual({ projectId: 'unfiled', version: 1 });
+  });
+
+  it('should refuse anything that is not a lane proposal reference', () => {
+    for (const bad of [
+      null,
+      '',
+      'task:abc',
+      `lanes:${projectId}`,
+      `lanes:${projectId}:`,
+      `lanes:${projectId}:x`,
+      `lanes:${projectId}:-1`,
+      `lanes:${projectId}:1.5`,
+      'lanes:not-a-project:2',
+    ]) {
+      should(lanesModule.parseLaneProposalReference(bad)).be.undefined();
+    }
+  });
+
+  it('should name the two answers the card offers', () => {
+    should(lanesModule.LANE_PROPOSAL_ANSWERS).deepEqual({ accept: 'Accept', edit: 'Edit' });
+  });
+});

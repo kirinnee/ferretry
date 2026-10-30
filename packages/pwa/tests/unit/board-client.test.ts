@@ -8,6 +8,7 @@ import {
   fetchBoardTask,
   fetchDaemonVersion,
   postBoardAction,
+  postLaneSetAction,
   readWholeBoard,
 } from '../../src/lib/board-client.ts';
 import { NO_BOARD_FILTERS, toServerQuery } from '../../src/lib/board-model.ts';
@@ -151,6 +152,61 @@ describe('postBoardAction', () => {
   });
 });
 
+describe('postLaneSetAction', () => {
+  it('posts the parsed request to the project', async () => {
+    let sent: { url: string; method?: string; body?: unknown } = { url: '' };
+    const answer = await postLaneSetAction(laptop, PROJECT, { action: 'confirm', version: 2 }, async (asked, init) => {
+      sent = { url: String(asked), method: init?.method, body: JSON.parse(String(init?.body)) };
+      return json({ laneSet: laneSetFor(), agenda: 'not-needed' });
+    });
+    expect(sent).toEqual({
+      url: `https://laptop.example.test/v1/board/projects/${PROJECT}/lanes`,
+      method: 'POST',
+      body: { action: 'confirm', version: 2 },
+    });
+    expect(answer.ok && answer.value.laneSet.version).toBe(1);
+  });
+
+  it('never sends a malformed request', async () => {
+    let called = false;
+    const answer = await postLaneSetAction(laptop, PROJECT, { action: 'confirm', version: 0 }, async () => {
+      called = true;
+      return json({});
+    });
+    expect(called).toBe(false);
+    expect(!answer.ok && answer.error).toMatchObject({ status: 0, code: 'invalid' });
+  });
+
+  it('hands a refusal back as a value with the daemon’s code, and a dead network as status 0', async () => {
+    const conflict = await postLaneSetAction(laptop, PROJECT, { action: 'confirm', version: 1 }, async () =>
+      json({ error: 'moved on', code: 'version-conflict' }, 409),
+    );
+    expect(!conflict.ok && conflict.error).toEqual({ status: 409, message: 'moved on', code: 'version-conflict' });
+    const bare = await postLaneSetAction(
+      laptop,
+      PROJECT,
+      { action: 'confirm', version: 1 },
+      async () => new Response('plain', { status: 502 }),
+    );
+    expect(!bare.ok && bare.error).toEqual({ status: 502, message: 'HTTP 502', code: null });
+    const down = await postLaneSetAction(laptop, PROJECT, { action: 'confirm', version: 1 }, async () => {
+      throw new Error('offline');
+    });
+    expect(!down.ok && down.error).toEqual({ status: 0, message: 'offline', code: null });
+    const text = await postLaneSetAction(laptop, PROJECT, { action: 'confirm', version: 1 }, async () => {
+      throw 'plain';
+    });
+    expect(!text.ok && text.error.message).toBe('plain');
+  });
+
+  it('refuses an answer that is not a lane change', async () => {
+    const odd = await postLaneSetAction(laptop, PROJECT, { action: 'confirm', version: 1 }, async () =>
+      json({ nope: 1 }),
+    );
+    expect(!odd.ok && odd.error.message).toContain('cannot read');
+  });
+});
+
 describe('daemonBoardPort', () => {
   it('binds every call to the fetcher it is given', async () => {
     const urls: string[] = [];
@@ -169,7 +225,8 @@ describe('daemonBoardPort', () => {
     await port.projects(laptop);
     expect(await port.version(laptop)).toBe('1.0.0');
     await port.act(laptop, 'F1', { action: 'note', text: 'x' });
-    expect(urls).toHaveLength(5);
+    await port.lanes(laptop, PROJECT, { action: 'confirm', version: 1 });
+    expect(urls).toHaveLength(6);
   });
 });
 

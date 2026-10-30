@@ -19,16 +19,20 @@ import {
   type AgendaRef,
   type AgendaResponse,
   type BoardErrorCode,
+  type BoardProjectId,
   type BoardResult,
   type BoardTaskActionRequestInput,
   type BoardTaskId,
   type BoardTaskView,
   boardErr,
   boardOk,
+  type LaneLayoutValue,
   type LaneSet,
+  type LaneTemplateName,
   type TaskMessage,
 } from '@ferretry/protocol';
 import type { DaemonAgendaClient } from './agenda-client.ts';
+import type { LaneWriteError } from './board-client.ts';
 import { checkMove } from './board-model.ts';
 import type { DaemonBoardStore } from './board-store.ts';
 import type { DaemonConnection, DaemonId } from './daemon-connection.ts';
@@ -42,6 +46,8 @@ interface BoardMutationError {
   /** The daemon's code, or the local one: `no-lane-set` (project has no lanes) or `no-machine` (unpaired). */
   readonly boardCode: BoardErrorCode | 'no-machine' | null;
 }
+
+type LaneMutation = BoardResult<LaneSet, LaneWriteError>;
 
 type BoardMutation = BoardResult<BoardTaskView, BoardMutationError>;
 
@@ -75,6 +81,20 @@ export interface BoardActions {
   link(target: BoardCardTarget, link: BoardLinkTarget): Promise<BoardMutation>;
   drop(target: BoardCardTarget, reason: string): Promise<BoardMutation>;
   editField(target: BoardCardTarget, edit: BoardEdit): Promise<BoardMutation>;
+  /** The owner picks a template for a project with no lanes: proposed, then confirmed in the same breath. */
+  useTemplate(daemonId: DaemonId, projectId: BoardProjectId, template: LaneTemplateName): Promise<LaneMutation>;
+  /** Saves an edited layout against the version the editor saw; the owner's edit confirms the set. */
+  saveLanes(
+    daemonId: DaemonId,
+    projectId: BoardProjectId,
+    edit: {
+      readonly version: number;
+      readonly layout: LaneLayoutValue;
+      readonly relocate: Readonly<Record<string, string>>;
+    },
+  ): Promise<LaneMutation>;
+  /** The owner's Accept of a proposed set, from the editor's banner. */
+  acceptLanes(daemonId: DaemonId, projectId: BoardProjectId, version: number): Promise<LaneMutation>;
   /** Answers one of the card's open asks, in the ferret's own agenda. */
   answer(
     daemonId: DaemonId,
@@ -85,7 +105,7 @@ export interface BoardActions {
 }
 
 export interface BoardActionsDeps {
-  readonly store: Pick<DaemonBoardStore, 'act'>;
+  readonly store: Pick<DaemonBoardStore, 'act' | 'changeLanes'>;
   readonly agenda: Pick<DaemonAgendaClient, 'respond'>;
   /** The current pairing of a machine, or `undefined` once it is unpaired. */
   readonly connection: (daemonId: DaemonId) => DaemonConnection | undefined;
@@ -97,6 +117,12 @@ const unpaired = (daemonId: DaemonId): BoardMutationError => ({
   boardCode: 'no-machine',
 });
 
+const unpairedLanes = (daemonId: DaemonId): LaneWriteError => ({
+  status: 0,
+  message: `machine ${daemonId} is no longer paired`,
+  code: 'no-machine',
+});
+
 export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
   const send = async (target: BoardCardTarget, request: BoardTaskActionRequestInput): Promise<BoardMutation> => {
     const machine = deps.connection(target.daemonId);
@@ -104,7 +130,27 @@ export const createBoardActions = (deps: BoardActionsDeps): BoardActions => {
     return await deps.store.act(machine, target.id, request);
   };
 
+  const changeLanes = async (
+    daemonId: DaemonId,
+    projectId: BoardProjectId,
+    request: Parameters<DaemonBoardStore['changeLanes']>[2],
+  ): Promise<LaneMutation> => {
+    const machine = deps.connection(daemonId);
+    if (machine === undefined) return boardErr(unpairedLanes(daemonId));
+    const changed = await deps.store.changeLanes(machine, projectId, request);
+    return changed.ok ? boardOk(changed.value.laneSet) : changed;
+  };
+
   return {
+    useTemplate: async (daemonId, projectId, template) => {
+      const proposed = await changeLanes(daemonId, projectId, { action: 'propose', template, renames: {} });
+      return proposed.ok
+        ? await changeLanes(daemonId, projectId, { action: 'confirm', version: proposed.value.version })
+        : proposed;
+    },
+    saveLanes: (daemonId, projectId, { version, layout, relocate }) =>
+      changeLanes(daemonId, projectId, { action: 'edit', version, layout, relocate }),
+    acceptLanes: (daemonId, projectId, version) => changeLanes(daemonId, projectId, { action: 'confirm', version }),
     moveTask: async (target, to, reason) => {
       const checked = checkMove(target.laneSet, target.laneId, to, reason);
       if (!checked.ok) {
