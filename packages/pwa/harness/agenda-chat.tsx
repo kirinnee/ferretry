@@ -84,10 +84,11 @@ export function AgendaChatHarness({
   const chat = (
     <div className="kt-chat-surface flex min-h-0 min-w-0 flex-1 flex-col">
       <div className="fy-chat-log">
+        {/* The REAL list layer's class, not a stand-in grid area: a stand-in kept this harness green while the
+            app's conversation fell out of the log's cell (`tests/unit/chat-log-cell.test.ts`). */}
         <div
-          className="flex min-h-0 flex-col justify-end gap-sm overflow-y-auto p-panel"
+          className="fy-chat-log__messages justify-end gap-sm overflow-y-auto p-panel"
           inert={agenda.covered || undefined}
-          style={{ gridArea: '1 / 1' }}
         >
           {MESSAGES.map(message => (
             <article

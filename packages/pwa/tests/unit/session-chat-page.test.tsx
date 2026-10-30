@@ -15,10 +15,12 @@ import { ReferenceSurfaceProvider } from '../../src/components/reference-surface
 import type { RuntimeModelControls } from '../../src/components/runtime-controls.tsx';
 import { SessionTopBar, sessionDisplayName } from '../../src/components/session-top-bar.tsx';
 import { Transcript } from '../../src/components/transcript.tsx';
-import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
+import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
 import { AgendaDrawer, AgendaLine, AgendaReferenceChips } from '../../src/features/agenda/agenda-line.tsx';
 import { AgendaRow } from '../../src/features/agenda/agenda-row.tsx';
-import { AgendaItemView } from '../../src/features/agenda/agenda-item-view.tsx';
+import { SessionAnalyticsSurface } from '../../src/features/analytics/session-analytics-surface.tsx';
+import { BoardSideTab } from '../../src/features/board/board-side-tab.tsx';
+import { ChatCardChip } from '../../src/features/board/chat-card-chip.tsx';
 import { ContextRailBody } from '../../src/features/context-rail/context-rail-body.tsx';
 import { DialogCard } from '../../src/features/harness-dialog/dialog-card.tsx';
 import { ApprovalCard } from '../../src/features/permission-request/approval-card.tsx';
@@ -31,16 +33,13 @@ import { ForkForm } from '../../src/features/session-actions/fork-form.tsx';
 import type { SessionActionContribution } from '../../src/features/session-actions/registry.ts';
 import { RenameForm } from '../../src/features/session-actions/rename-form.tsx';
 import { SessionInfo } from '../../src/features/session-info/session-info.tsx';
-import { BoardSideTab } from '../../src/features/board/board-side-tab.tsx';
-import { ChatCardChip } from '../../src/features/board/chat-card-chip.tsx';
 import { SessionSearchProvider } from '../../src/features/session-search/session-search.tsx';
-import { DaemonBoardStore } from '../../src/lib/board-store.ts';
-import { PROJECT, boardAnswer, card as boardCard, fakeEnvironment, fakePort, laneSetFor } from './board-support.ts';
 import { SessionWorkspace } from '../../src/features/workspace/session-workspace.tsx';
 import { WorkspaceView } from '../../src/features/workspace/workspace-view.tsx';
 import { TOUCH_SELECTION_RELEASE_SETTLE_MS } from '../../src/hooks/use-live-clock.ts';
 import { DaemonAccountPickerStore } from '../../src/lib/account-picker-store.ts';
 import { DaemonAgendaClient } from '../../src/lib/agenda-client.ts';
+import { DaemonBoardStore } from '../../src/lib/board-store.ts';
 import { daemonConnection } from '../../src/lib/daemon-connection.ts';
 import { daemonSessionScope } from '../../src/lib/daemon-scope.ts';
 import { createLiveActivityHub, type LiveActivityFeed } from '../../src/lib/live-activity-feed.ts';
@@ -59,6 +58,7 @@ import { WorkspaceRailPreferenceStore } from '../../src/lib/workspace-rail-prefe
 import { BottomSheet } from '../../src/shell/bottom-sheet.tsx';
 import { resetSidePaneTabsStates } from '../../src/shell/side-pane-tab-model.ts';
 import { fakeDeck, terminalListing, terminalView } from '../support/terminal-deck.ts';
+import { boardAnswer, card as boardCard, fakeEnvironment, fakePort, laneSetFor, PROJECT } from './board-support.ts';
 import { factoryFor } from './features/fleet/mcp-sign-in-support.ts';
 import '../support/dom.ts';
 import { render, run, runAsync } from '../support/react.ts';
@@ -2620,7 +2620,8 @@ describe('SessionChatPage', () => {
     test('covers the messages, never the composer, while an item shows, and gives them back when it closes', () => {
       const page = renderSessionChatPage(agendaPage());
       try {
-        const hidden = () => page.root.find(node => node.type === 'div' && node.props.className === 'contents');
+        const hidden = () =>
+          page.root.find(node => node.type === 'div' && node.props.className === 'fy-chat-log__messages');
         expect(hidden().props.inert).toBeUndefined();
         run(() => page.root.findByType(ReferenceSurfaceProvider).props.surface.onAgendaOpen('A3', null));
         expect(hidden().props.inert).toBe(true);

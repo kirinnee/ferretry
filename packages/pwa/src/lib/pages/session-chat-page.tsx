@@ -45,6 +45,8 @@ import { AGENDA_RESOLVED_ACTION_ID, resolvedActionContribution } from '../../fea
 import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
+import { BoardSideTab } from '../../features/board/board-side-tab.tsx';
+import { ChatCardChip } from '../../features/board/chat-card-chip.tsx';
 import { browserPageLabel } from '../../features/browser/browser-surface-list.tsx';
 import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx';
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
@@ -83,10 +85,6 @@ import { readRelaunchSettings } from '../../features/session-info/relaunch-setti
 import { SessionInfo, type SessionInfoPorts } from '../../features/session-info/session-info.tsx';
 import type { SwitchSection } from '../../features/session-info/switch-marks.tsx';
 import { useInfoPlacement } from '../../features/session-info/use-info-placement.ts';
-import { BoardSideTab } from '../../features/board/board-side-tab.tsx';
-import { ChatCardChip } from '../../features/board/chat-card-chip.tsx';
-import { useChatCard } from '../../hooks/use-chat-card.ts';
-import type { DaemonBoardStore } from '../board-store.ts';
 import { useSessionSearch } from '../../features/session-search/session-search.tsx';
 import { useSessionSkills } from '../../features/skills/session-skills-store.ts';
 import { addSkillInvocationToComposer } from '../../features/skills/skills-composer.ts';
@@ -98,6 +96,7 @@ import { useSessionWorkspace } from '../../features/workspace/use-session-worksp
 import { type SurfaceEventFeed, useSurfaceDriving } from '../../features/workspace/use-surface-driving.ts';
 import { useSessionTerminals, useWorkspaceFormFactor } from '../../features/workspace/use-workspace-environment.ts';
 import type { AgendaReplies } from '../../hooks/use-agenda-replies.ts';
+import { useChatCard } from '../../hooks/use-chat-card.ts';
 import { useChatScrollbarGutter } from '../../hooks/use-chat-scrollbar-gutter.ts';
 import { conversationFromTranscript } from '../../hooks/use-dictation.ts';
 import { useFinePointer } from '../../hooks/use-fine-pointer.ts';
@@ -117,6 +116,7 @@ import { sessionAgendaSummary } from '../agenda-wire.ts';
 import { useAgendaWire } from '../agenda-wire-react.tsx';
 import { agentReferenceIdentityKey } from '../agent-references.ts';
 import { withReferencePrefix } from '../answer-chip.ts';
+import type { DaemonBoardStore } from '../board-store.ts';
 import type { DaemonBrowserLoginStore } from '../browser-login.ts';
 import type { ComposerEnterKeyPreference } from '../composer-keybinding.ts';
 import { useComposerReferenceCatalogs } from '../composer-reference-catalogs.ts';
@@ -1456,8 +1456,10 @@ export function SessionChatPage({
         </div>
       ) : null}
       <div className="fy-chat-log">
-        {/* An open item covers the message list only: the transcript stays mounted, but is hidden from sight and keys. */}
-        <div className="contents" inert={agenda.covered || undefined}>
+        {/* An open item covers the message list only: the transcript stays mounted, but is hidden from sight and keys.
+            The list is a real element in the log's ONE grid cell, like the view over it: a `contents` wrapper let the
+            transcript fall into a second row, which squeezed an open item to 0px under an inert, untouchable list. */}
+        <div className="fy-chat-log__messages" data-chat-messages="" inert={agenda.covered || undefined}>
           {/* The agenda the conversation's answer and reply cards name their items from (`agenda-message.tsx`). */}
           <AgendaItemsProvider snapshot={agendaModel?.snapshot}>
             <Transcript
