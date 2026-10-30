@@ -333,7 +333,7 @@ button.fy-agenda-line__main:focus-visible {
   }
 }
 
-/* THE CHIPS: "re: <title> ✕", directly above the composer. */
+/* THE CHIP: "about !A47 <title> ✕", directly above the composer. */
 .fy-agenda-chips {
   display: flex;
   margin: 0;
@@ -346,8 +346,8 @@ button.fy-agenda-line__main:focus-visible {
 .fy-agenda-ref {
   display: inline-flex;
   min-width: 0;
-  /* Compact: two refs share one line above the composer, several wrap. */
-  max-width: min(calc(50% - var(--gap-xs) / 2), 16rem);
+  /* One chip above the composer, as wide as its title needs. */
+  max-width: min(100%, 28rem);
   min-height: 32px;
   align-items: center;
   gap: var(--gap-xs);
@@ -360,6 +360,11 @@ button.fy-agenda-line__main:focus-visible {
 }
 .fy-agenda-ref__lead {
   color: var(--muted);
+}
+.fy-agenda-ref__id {
+  flex-shrink: 0;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
 }
 .fy-agenda-ref__title {
   min-width: 0;

@@ -13,7 +13,7 @@ import type { AgendaItem } from '@ferretry/protocol';
 import type { ReactNode } from 'react';
 import { ChatProse } from '../../components/chat-prose.tsx';
 import { revisionHighlight } from '../../lib/agenda-revisions.ts';
-import { AgendaBriefSections } from './agenda-brief.tsx';
+import { type AgendaBriefProps, AgendaBriefSections } from './agenda-brief.tsx';
 import { AgendaBody, AgendaSteps } from './agenda-steps.tsx';
 import { AgendaUpdated } from './agenda-updated.tsx';
 
@@ -26,6 +26,11 @@ export interface AgendaDetailProps {
   /** Ticks or unticks one step on the machine. Absent: the steps are read-only. */
   readonly onProgress?: (step: number, done: boolean) => Promise<void>;
   readonly busy?: boolean;
+  /**
+   * The full view draws the item's questions and its recommendation in the same ordered sections; what it needs
+   * from the host is only what the host owns: the picks, the ask when it is longer than the heading's preview.
+   */
+  readonly brief?: Pick<AgendaBriefProps, 'ask' | 'askLabel' | 'askShown' | 'picker' | 'recommendation'>;
 }
 
 const markdownProse = (text: string): ReactNode => <ChatProse text={text} />;
@@ -43,6 +48,7 @@ export function AgendaDetail({
   renderProse = markdownProse,
   onProgress,
   busy = false,
+  brief,
 }: AgendaDetailProps) {
   const body = item.body?.trim() ? item.body : null;
   const highlight = revisionHighlight(item);
@@ -58,7 +64,8 @@ export function AgendaDetail({
         highlight={highlight}
         detail={body === null ? undefined : <AgendaBody renderProse={renderProse} text={body} />}
         item={item}
-        part="detail"
+        part={layout === 'full' ? 'all' : 'detail'}
+        {...brief}
         renderProse={renderProse}
         steps={
           item.steps === undefined ? undefined : (

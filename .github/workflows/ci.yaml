@@ -206,6 +206,9 @@ jobs:
       # broke instead of reading a geometry number and guessing.
       - name: Upload the captured ${{ matrix.scope }} frames
         if: always()
+        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
+        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: pwa-${{ matrix.scope }}-frames-${{ matrix.scheme }}${{ matrix.viewport && format('-{0}', matrix.viewport) || '' }}
@@ -246,11 +249,23 @@ jobs:
           TEST_GROUP: ${{ matrix.group }}
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh unit "$TEST_GROUP"
       - name: Upload the ${{ matrix.group }} coverage ledger
+        id: upload_1
+        continue-on-error: true
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit-${{ matrix.group }}
           path: coverage/unit/groups/${{ matrix.group }}/lcov.info
+          if-no-files-found: warn
+      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
+      # now and then) is retried once from the same files; a second failure fails the job as before.
+      - name: Upload the ${{ matrix.group }} coverage ledger (retry)
+        if: ${{ (always()) && steps.upload_1.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-unit-${{ matrix.group }}
+          path: coverage/unit/groups/${{ matrix.group }}/lcov.info
+          overwrite: true
           if-no-files-found: warn
 
   # The unit tier's 100% ledger over every group's, as `int-ledger` does for int; no nix shell.
@@ -280,6 +295,9 @@ jobs:
         run: ./scripts/ci/coverage-ledger.sh unit --groups coverage/unit/groups
       - name: Upload unit coverage artifact
         if: always()
+        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
+        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-unit
@@ -331,11 +349,23 @@ jobs:
           TEST_GROUP: ${{ matrix.group }}
         run: ./scripts/ci/in-devshell.sh ./scripts/ci/test.sh int "$TEST_GROUP"
       - name: Upload the ${{ matrix.group }} coverage ledger
+        id: upload_2
+        continue-on-error: true
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-int-${{ matrix.group }}
           path: coverage/int/groups/${{ matrix.group }}/lcov.info
+          if-no-files-found: warn
+      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
+      # now and then) is retried once from the same files; a second failure fails the job as before.
+      - name: Upload the ${{ matrix.group }} coverage ledger (retry)
+        if: ${{ (always()) && steps.upload_2.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-int-${{ matrix.group }}
+          path: coverage/int/groups/${{ matrix.group }}/lcov.info
+          overwrite: true
           if-no-files-found: warn
 
   # The integration tier's 100% ledger over every group's (scripts/ci/coverage-ledger.sh says why it
@@ -367,6 +397,9 @@ jobs:
         run: ./scripts/ci/coverage-ledger.sh int --groups coverage/int/groups
       - name: Upload int coverage artifact
         if: always()
+        # Evidence only: a reader's convenience, never the gate. GitHub's artifact service drops a
+        # finalize now and then (ECONNRESET), and that must not turn a proven run red.
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: coverage-int
@@ -402,10 +435,22 @@ jobs:
       - name: List the binaries
         run: ./scripts/ci/binaries-manifest.sh write dist/bin
       - name: Upload binaries
+        id: upload_3
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: cli-binaries
           path: dist/bin/
+          if-no-files-found: error
+      # A later job reads this artifact, so a dropped upload (GitHub's artifact service resets a finalize
+      # now and then) is retried once from the same files; a second failure fails the job as before.
+      - name: Upload binaries (retry)
+        if: steps.upload_3.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: cli-binaries
+          path: dist/bin/
+          overwrite: true
           if-no-files-found: error
 
   sit:

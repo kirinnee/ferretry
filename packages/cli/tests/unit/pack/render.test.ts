@@ -151,6 +151,26 @@ describe('renderGuide', () => {
 });
 
 describe('renderPackNewOutcome', () => {
+  it("should name the sub-ferret's card and its board, and say what the board could not do", () => {
+    // Act
+    const named = renderPackNewOutcome(
+      started({
+        card: { id: 'F413', project: 'Ferretry', leadCard: 'F412', note: 'You had no card, so &F412 was made.' },
+      }),
+      'fy',
+    );
+    const bare = renderPackNewOutcome(started({ card: { id: 'F413' } }), 'fy');
+    const unmade = renderPackNewOutcome(started({ card: { note: 'No card was made: the board is down' } }), 'fy');
+    const none = renderPackNewOutcome(started(), 'fy');
+
+    // Assert
+    should(named).containEql('Its card is &F413 on the Ferretry board.\nYou had no card, so &F412 was made.');
+    should(bare).containEql('Its card is &F413.');
+    should(unmade).containEql('No card was made: the board is down');
+    should(unmade).not.containEql('Its card is');
+    should(none).not.containEql('card');
+  });
+
   it('should time a probe that passed and one that failed, and name a failed probe another start shared', () => {
     // Arrange
     const outcome = refused({

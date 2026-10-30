@@ -25,7 +25,6 @@ import {
   planReconciliation,
   type RebuildResult,
   type ReplayPage,
-  type SerialExecutor,
   type SessionEvent,
   type SessionId,
   type SessionIndex,
@@ -36,6 +35,7 @@ import {
   sessionJournalRequired,
   sessionMarkerNeedsUpgrade,
   tryParseSessionId,
+  type YieldingSerialExecutor,
 } from '../../lib/index.ts';
 
 export class InvalidStateDocumentError extends Error {
@@ -213,6 +213,11 @@ interface WatchedDocument {
   changes: number;
 }
 
+function assertFleetTailLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000)
+    throw new Error('fleet event limit must be an integer between 1 and 10000');
+}
+
 export class DaemonStorage {
   private closed = false;
   /**
@@ -261,7 +266,7 @@ export class DaemonStorage {
     private readonly fileSystem: FileSystemPort,
     private readonly index: SessionIndex,
     private readonly clock: ClockPort,
-    private readonly serial: SerialExecutor,
+    private readonly serial: YieldingSerialExecutor,
     private readonly homeLock: HomeLockLease,
     private readonly changes?: DocumentChanges,
   ) {}
@@ -1342,28 +1347,30 @@ export class DaemonStorage {
    */
   async tailEvents(limit = 5_000): Promise<readonly SessionEvent[]> {
     this.assertOpen();
-    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 10_000)
-      throw new Error('fleet event limit must be an integer between 1 and 10000');
-    return await this.serial.runExclusive(async () => {
-      const sessionIds = await this.synchronizeFleetSessionsUnlocked();
-      // A tail query cannot prove that rows are complete merely by resolving the rows SQLite did
-      // return: a damaged disposable index may omit every pointer and make a non-empty fleet look
-      // empty. Reconcile each indexed journal first, then require the contiguous event-count
-      // invariant the append path establishes before selecting the bounded global tail.
-      for (const id of sessionIds) {
-        const synchronized = this.index.findSession(id);
-        if (synchronized === undefined || this.index.countEvents(id) !== synchronized.lastSequence)
-          throw new Error(`event index for ${id} does not completely represent its durable journal`);
-      }
-      let pointers = this.index.fleetEventPointers(limit);
-      let events = await this.resolveFleetPointers(pointers);
-      if (events !== undefined) return events;
-      for (const id of new Set(pointers.map(pointer => pointer.sessionId))) await this.syncSessionUnlocked(id);
-      pointers = this.index.fleetEventPointers(limit);
-      events = await this.resolveFleetPointers(pointers);
-      if (events === undefined) throw new Error('fleet event index is inconsistent after re-indexing');
-      return events;
-    });
+    assertFleetTailLimit(limit);
+    return await this.serial.runExclusive(
+      async () => await this.tailEventsUnlocked(await this.synchronizeFleetSessionsUnlocked(), limit),
+    );
+  }
+
+  private async tailEventsUnlocked(sessionIds: readonly SessionId[], limit: number): Promise<readonly SessionEvent[]> {
+    // A tail query cannot prove that rows are complete merely by resolving the rows SQLite did
+    // return: a damaged disposable index may omit every pointer and make a non-empty fleet look
+    // empty. Reconcile each indexed journal first, then require the contiguous event-count
+    // invariant the append path establishes before selecting the bounded global tail.
+    for (const id of sessionIds) {
+      const synchronized = this.index.findSession(id);
+      if (synchronized === undefined || this.index.countEvents(id) !== synchronized.lastSequence)
+        throw new Error(`event index for ${id} does not completely represent its durable journal`);
+    }
+    let pointers = this.index.fleetEventPointers(limit);
+    let events = await this.resolveFleetPointers(pointers);
+    if (events !== undefined) return events;
+    for (const id of new Set(pointers.map(pointer => pointer.sessionId))) await this.syncSessionUnlocked(id);
+    pointers = this.index.fleetEventPointers(limit);
+    events = await this.resolveFleetPointers(pointers);
+    if (events === undefined) throw new Error('fleet event index is inconsistent after re-indexing');
+    return events;
   }
 
   /**
@@ -1376,6 +1383,28 @@ export class DaemonStorage {
   async fleetSessionIds(): Promise<readonly SessionId[]> {
     this.assertOpen();
     return await this.serial.runExclusive(async () => await this.synchronizeFleetSessionsUnlocked());
+  }
+
+  /**
+   * A live feed's whole backlog — every session and the bounded tail — proved in ONE pass.
+   *
+   * It is {@link fleetSessionIds} and {@link tailEvents} under one survey instead of two, and it YIELDS
+   * to session writes while it waits (`runExclusiveYielding`): a feed reconnect must never make a
+   * launch, a resume or a signal wait for a pass that has not started. `claim` is asked once the pass
+   * holds the lock; answering false skips the survey entirely, which is how a pass whose every reader
+   * has already gone costs nothing. A limit of `0` proves the sessions and reads no tail.
+   */
+  async fleetBacklog(
+    limit: number,
+    claim: () => boolean,
+  ): Promise<{ readonly sessionIds: readonly SessionId[]; readonly events: readonly SessionEvent[] } | undefined> {
+    this.assertOpen();
+    if (limit !== 0) assertFleetTailLimit(limit);
+    return await this.serial.runExclusiveYielding(async () => {
+      if (!claim()) return undefined;
+      const sessionIds = await this.synchronizeFleetSessionsUnlocked();
+      return { sessionIds, events: limit === 0 ? [] : await this.tailEventsUnlocked(sessionIds, limit) };
+    });
   }
 
   findSession(id: SessionId): IndexedSession | undefined {

@@ -36,10 +36,13 @@ export interface WardenRemedyPort {
 
 /** The act a verdict asks for, before the owner's permissions are applied. */
 export type WardenVerdictAct =
-  | { readonly action: Exclude<WardenActionKind, 'bless' | 'failover' | 'close_leftover'>; readonly reason: string }
+  | {
+      readonly action: Exclude<WardenActionKind, 'bless' | 'failover' | 'close_leftover' | 'revive'>;
+      readonly reason: string;
+    }
   | { readonly action: 'failover'; readonly reason: string; readonly agent: string };
 
-const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless' | 'close_leftover'>, string>> = {
+const DEFAULT_REASONS: Readonly<Record<Exclude<WardenActionKind, 'bless' | 'close_leftover' | 'revive'>, string>> = {
   nudge: 'it looks wedged but recoverable',
   resume: 'its turn died but the work should continue',
   restart: 'its process is dead or frozen',

@@ -9,6 +9,8 @@ import {
   applyFixedLayer,
   CLAUDE_NO_QUESTIONS_FLAG,
   CLAUDE_PROMPTS_SEEN,
+  CLAUDE_QUESTION_HOOK_COMMAND,
+  CLAUDE_QUESTION_HOOKS,
   CODEX_HIDDEN_NOTICES,
   CODEX_NO_ALT_SCREEN_FLAG,
   claudeToolsConfig,
@@ -189,6 +191,7 @@ describe('fixedLayerFor — Claude', () => {
           permissions: { defaultMode: 'auto' },
           remoteControlAtStartup: false,
           skipAutoPermissionPrompt: true,
+          hooks: CLAUDE_QUESTION_HOOKS,
         },
         claudeJson: {
           hasCompletedOnboarding: true,
@@ -221,12 +224,35 @@ describe('fixedLayerFor — Claude', () => {
       permissions: { defaultMode: 'bypassPermissions' },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
+      hooks: CLAUDE_QUESTION_HOOKS,
     });
     should(actual.entries.some(entry => entry.key === 'skipAutoPermissionPrompt')).be.false();
     should(actual.entries.map(entry => [entry.purpose, entry.key, entry.value])).containDeep([
       ['permission-mode', 'permissions.defaultMode', 'bypassPermissions'],
       ['skip-prompt', 'skipDangerousModePermissionPrompt', true],
     ]);
+  });
+
+  it('should hand the daemon every question Claude asks through an overlay hook, and never through settings', () => {
+    // Act
+    const actual = layerOf({
+      harness: 'claude',
+      agentPermissions: 'skip',
+      cwd: CWD,
+      fyCommand: FY,
+      acceptsAutoPermissionMode: false,
+    });
+
+    // Assert — Claude 2.1.281 writes an AskUserQuestion call to its transcript only once the form is
+    // answered, so the hook is how the daemon learns of an open one: before the form, for that tool alone.
+    should(actual.claudeSettingsOverlay?.hooks).deepEqual({
+      PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
+    });
+    // The file it writes is the one the daemon names per pane, and it never fails the tool it watches.
+    should(CLAUDE_QUESTION_HOOK_COMMAND).containEql('"$FY_QUESTION_FILE"');
+    should(CLAUDE_QUESTION_HOOK_COMMAND).endWith('exit 0');
+    // A settings entry is written OVER the profile's own settings, which would drop a person's own hooks.
+    should(actual.entries.some(entry => entry.path[0] === 'hooks')).be.false();
   });
 
   it('should refuse Auto mode on a Claude that does not accept it, naming the fix (O4)', () => {
