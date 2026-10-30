@@ -406,3 +406,7 @@ packages/pwa/src/lib/text-scale-postcss.ts # build tooling for the Text size set
 
 # The gate's roots skip .tsx entries (packages/pwa exports ./main → src/main.tsx), so a .ts module imported only from the app tree reads as unreached.
 packages/pwa/src/hooks/use-fine-pointer.ts # used by SessionChatPage via App.tsx ← main.tsx; unreached only because the gate ignores .tsx roots
+
+# The project board's data layer (board U10) lands before the pages that read it (board U11–U15).
+packages/pwa/src/hooks/use-board.ts # the board hooks; the board pages import them next (U11–U15)
+packages/pwa/src/lib/board-actions.ts # the board write verbs, reached through use-board.ts

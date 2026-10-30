@@ -74,6 +74,7 @@ unserved POST /v1/task-boards/grants/revoke # DEFECT: the CLI dials it; packages
 # Correct as written: not the daemon.
 unserved GET /v1/default-relay # CORRECT: dialled against the relay DISCOVERY ORIGIN, a Ferretry service, never a daemon
 unserved GET /v1/tunnel-service # CORRECT: dialled against the same relay DISCOVERY ORIGIN for the hosted tunnel service's advertisement (relay-protocol §15), never a daemon
+unserved GET /v1/board/projects # the PWA tolerates a 404 until the daemon route (board U3, #932) lands; delete this line in the rebase that brings it in
 
 # ── unreached: the daemon serves, nothing in this repository dials ────────────────────────────
 
@@ -98,10 +99,7 @@ unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes T
 unreached POST /v1/sessions/:sessionId/terminals/:terminalId # DEFECT: the daemon serves rename as POST while the only client uses PATCH
 unreached POST /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
 unreached DELETE /v1/sessions/:sessionId/attachments/:attachmentId/unlock # the PWA has the unlock COPY and no call
-unreached GET /v1/board # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
 unreached POST /v1/board/tasks # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
-unreached GET /v1/board/tasks/:taskId # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
-unreached POST /v1/board/tasks/:taskId # the project board (v2) lands daemon-first; the CLI (board U4) and the PWA (board U10) dial it next
 
 # ── verb-unproven: the address agrees, the method is not proved ────────────────────────────────
 

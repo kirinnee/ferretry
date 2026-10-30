@@ -24,9 +24,12 @@ import {
   readAccountPickerHealth,
 } from './account-picker-catalog.ts';
 import { DaemonAccountPickerStore } from './account-picker-store.ts';
-import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { AgendaWireDirectory } from './agenda-wire.ts';
+import { DaemonHttpTransport, daemonApiClient } from './api-client.ts';
 import { DaemonAttentionClient } from './attention-client.ts';
+import { BackgroundChatFreshener, type BackgroundFreshEnvironment } from './background-fresh.ts';
+import { daemonBoardPort } from './board-client.ts';
+import { DaemonBoardStore } from './board-store.ts';
 import { browserLoginPort, DaemonBrowserLoginStore } from './browser-login.ts';
 import { browserCarrierDropEnvironment, CarrierDropLog } from './carrier-drops.ts';
 import { CarrierPreferenceStore } from './carrier-preference.ts';
@@ -84,7 +87,6 @@ import { RelayPairingRefusedError, RelaySessionError } from './relay-session.ts'
 import { browserFetch, type DaemonFetch } from './runtime-models.ts';
 import { browserScrollMemoryStorage, ScrollMemory, type ScrollMemoryStorage } from './scroll-memory.ts';
 import { fetchSecuritySettings, UNLOCK_STAYS_FALLBACK, unlockStaysSentence } from './security-settings-client.ts';
-import { BackgroundChatFreshener, type BackgroundFreshEnvironment } from './background-fresh.ts';
 import { SessionCache, type SessionCacheBackend, seedFleetFromCache } from './session-cache.ts';
 import { browserSessionCacheBackend } from './session-cache-storage.ts';
 import { sharingIdenticalReads } from './shared-reads.ts';
@@ -381,6 +383,8 @@ export interface AppStore {
   readonly fleet: DaemonFleetStore;
   readonly controls: DaemonControlsStore;
   readonly projects: DaemonProjectsStore;
+  /** Every paired machine's board cards, kept live by the `board.changed` fleet event. */
+  readonly board: DaemonBoardStore;
   readonly accountPicker: DaemonAccountPickerStore;
   /** Which kinds of each machine's configuration have moved, so a screen reads them again. */
   readonly configChanges: DaemonConfigChangeStore;
@@ -773,6 +777,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
   const controls = new DaemonControlsStore();
   const configChanges = new DaemonConfigChangeStore();
   const projects = new DaemonProjectsStore(daemonProjectsPort(sharedReads));
+  const board = new DaemonBoardStore(daemonBoardPort(sharedReads));
   const accountPicker = new DaemonAccountPickerStore({
     catalog: async daemon => await readAccountPickerCatalog(await clients.client(daemon)),
     health: async daemon => await readAccountPickerHealth(await clients.client(daemon)),
@@ -826,6 +831,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
       fleet,
       controls,
       projects,
+      board,
       accountPicker,
       attention,
       agendaWire,
@@ -940,6 +946,7 @@ export async function createAppStore(options: CreateAppStoreOptions = {}): Promi
     fleet,
     controls,
     projects,
+    board,
     accountPicker,
     configChanges,
     attention,

@@ -28,7 +28,11 @@
     "packages/pwa": {
       "entry": ["src/main.tsx", "src/lib/index.ts"],
       "project": ["src/**/*.{ts,tsx}"],
-      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"]
+      "ignoreDependencies": ["sherpa-glue", "sherpa-runtime-wasm"],
+      "ignore": [
+        "src/hooks/use-board.ts",
+        "src/lib/board-actions.ts"
+      ]
     }
   },
   "bun": false,
