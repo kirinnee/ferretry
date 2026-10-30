@@ -4,6 +4,7 @@
  * set. No I/O, no clock, no globals — everything arrives through the arguments.
  */
 
+import type { TaskRef } from '@ferretry/protocol';
 import { susFindings } from './sus.ts';
 import { firstInstantMs, instantMs, isoFromMs, latestInstantMs } from './time.ts';
 import {
@@ -27,7 +28,9 @@ export type WardenAnomalyKind =
   | 'agent_frozen'
   | 'provider_unavailable'
   /** Never detected: the owner asked the Warden to investigate this ferret. */
-  | 'owner_request';
+  | 'owner_request'
+  /** A card in an active or review lane whose ferret is finished, with nothing alive under it (`orphans.ts`). */
+  | 'orphaned_card';
 
 export interface WardenAnomaly {
   readonly kind: WardenAnomalyKind;
@@ -58,6 +61,8 @@ export interface WardenAnomaly {
    * (`backoff.ts`); a new episode is a new subject at once. See {@link anomalySubject}.
    */
   readonly subject?: string;
+  /** The board card the anomaly is about, for a kind about a card (`orphaned_card`). */
+  readonly task?: TaskRef;
 }
 
 /**
@@ -105,6 +110,7 @@ const ANOMALY_SUBJECT: Readonly<Record<WardenAnomalyKind, string>> = {
   agent_frozen: 'Session frozen',
   provider_unavailable: 'Provider is unavailable',
   owner_request: 'You asked for an investigation',
+  orphaned_card: 'A card has no ferret working it',
 };
 
 export function wardenAnomalySubject(kind: WardenAnomalyKind): string {
@@ -197,7 +203,7 @@ export function susAnchorMs(startedAt: string | undefined, observedSince: string
  * treated as warden descent: doing so would shield every session whose parent
  * has been pruned and quietly disable supervision for them.
  */
-function inWardenLineage(view: WardenSessionView, fleet: ReadonlyMap<string, WardenSessionView>): boolean {
+export function inWardenLineage(view: WardenSessionView, fleet: ReadonlyMap<string, WardenSessionView>): boolean {
   const seen = new Set<string>();
   let current: WardenSessionView | undefined = view;
   while (current !== undefined && !seen.has(current.config.id)) {

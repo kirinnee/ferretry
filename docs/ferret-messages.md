@@ -134,3 +134,29 @@ Declared gaps:
   sent beneath it, so the lead hears the line with the message after those.
 - **The owner's Chat shows the line** above their own words, because it is part of the message the
   ferret was given.
+
+## The Warden and the board
+
+The Warden reads the board (`board-design.md` §3.4). Both of its board messages are `[ferretry] ` notices.
+
+- **An orphaned card.** A card in an active or review lane whose ferret is finished, with nothing alive
+  under it, is the Warden anomaly `orphaned_card` (`packages/daemon/src/lib/warden/orphans.ts`). The
+  board decides "orphaned"; the Warden reads its word. The card's **owner ferret**, when it is alive and
+  is not the finished ferret, gets one queued message naming the card and the three ways out:
+  `fy resume <ferret>`, `fy task assign F412 <ferret>` or `fy task drop F412 --reason "<why>"`.
+  Otherwise the owner gets a plain notice tied to the card (`task` on the agenda item, source reference
+  `warden-orphan:F412`) on the owner ferret's board, else the finished ferret's. Each is sent once per
+  card and ferret that left it; a message to an owner ferret that has finished since moves on to the
+  notice; the notice clears itself once a ferret is on the card again. Nothing is investigated: the flag
+  never reaches Jev, an investigation or the Warden's spawn fingerprint. It is shown on the Warden page
+  as **card orphaned**.
+- **The card a resumed ferret carries on.** When the Warden starts an auto ferret again — an auto-revive,
+  or a verdict's resume or restart — and the ferret has a focus card, its turn names the card: id, title,
+  lane, the ask and every clarification verbatim, its links and its last five history lines
+  (`packages/daemon/src/lib/warden/focus-card.ts`). A ferret with no card gets the turn it got before.
+  An interactive ferret never gets a card typed into its terminal.
+
+Declared gaps:
+
+- **A failover is not handed the card.** Moving a ferret to another login keeps its conversation, and the
+  migration writes its own notice; the card is not added to it.

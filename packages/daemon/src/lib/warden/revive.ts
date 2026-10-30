@@ -27,6 +27,7 @@
  */
 
 import { ferretryNotice, type WardenReviveConfig } from '@ferretry/protocol';
+import { focusCardBrief, type WardenFocusCard } from './focus-card.ts';
 import { instantMs } from './time.ts';
 
 /** One journal event, as the revive reads it. */
@@ -168,15 +169,22 @@ const clock = (at: string): string => `${at.slice(0, 10)} ${at.slice(11, 16)} UT
 /**
  * What a revived session is told.
  *
- * An AUTO session is told why and to carry on. An INTERACTIVE one gets the notice only: somebody is typing
- * into that terminal, and an instruction to "continue" would be Ferretry putting words in the owner's turn.
+ * An AUTO session is told why and to carry on, on its focus card when it has one (`focus-card.ts`). An
+ * INTERACTIVE one gets the notice only: somebody is typing into that terminal, and an instruction to "continue"
+ * would be Ferretry putting words in the owner's turn.
  */
-export function reviveMessage(cause: ReviveCause, diedAt: string, mode: 'auto' | 'interactive'): string {
+export function reviveMessage(
+  cause: ReviveCause,
+  diedAt: string,
+  mode: 'auto' | 'interactive',
+  card?: WardenFocusCard,
+): string {
   const notice = `Your terminal ended because ${causeText(cause)} at ${clock(diedAt)}; it was started again.`;
   if (mode === 'interactive') return ferretryNotice(notice);
   return ferretryNotice(
     `${notice}\n\nThis notice is from Ferretry, not from the owner. Your conversation was resumed as it was. ` +
-      'Re-read your last turn file and continue where you left off.',
+      'Re-read your last turn file and continue where you left off' +
+      (card === undefined ? '.' : `, on the card below.\n\n${focusCardBrief(card)}`),
   );
 }
 

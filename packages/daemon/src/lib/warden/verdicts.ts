@@ -89,6 +89,7 @@ const ANOMALY_KINDS: Readonly<Record<WardenAnomalyKind, true>> = {
   agent_frozen: true,
   provider_unavailable: true,
   owner_request: true,
+  orphaned_card: true,
 };
 
 const WARDEN_ANOMALY_KINDS: ReadonlySet<string> = new Set(Object.keys(ANOMALY_KINDS));
