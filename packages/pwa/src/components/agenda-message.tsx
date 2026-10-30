@@ -27,6 +27,7 @@ import {
   agendaTitle,
   parseAgendaMessage,
   type ResolvedAgendaItem,
+  agendaChatReply,
 } from '@ferretry/protocol';
 import { Check } from 'lucide-react';
 import { createContext, type ReactNode, useContext, useId, useMemo, useState } from 'react';
@@ -41,6 +42,18 @@ type AgendaItemOrResolved = AgendaItem | ResolvedAgendaItem;
 export type AgendaItemLookup = (id: string) => AgendaItemOrResolved | undefined;
 
 const AgendaItemsContext = createContext<AgendaItemLookup>(() => undefined);
+
+/** The session's OPEN items, in board order: what a message on its way is worded against. */
+const AgendaOpenItemsContext = createContext<readonly AgendaItem[]>([]);
+
+/**
+ * A message still on its way, worded exactly as the ferret will receive it (`agendaChatReply`, the one writer):
+ * a reply naming `!A5` reads as its agenda card from the moment it is sent, not as the raw text until it lands.
+ */
+export function useAgendaChatReply(text: string): string {
+  const open = useContext(AgendaOpenItemsContext);
+  return useMemo(() => agendaChatReply(text, open, agendaTitle).message, [text, open]);
+}
 
 /**
  * The session's agenda, for the cards in its conversation. Absent, every card falls back to the ask its
@@ -59,7 +72,12 @@ export function AgendaItemsProvider({
     );
     return id => byId.get(id);
   }, [snapshot]);
-  return <AgendaItemsContext.Provider value={lookup}>{children}</AgendaItemsContext.Provider>;
+  const open = useMemo((): readonly AgendaItem[] => snapshot?.items ?? [], [snapshot]);
+  return (
+    <AgendaItemsContext.Provider value={lookup}>
+      <AgendaOpenItemsContext.Provider value={open}>{children}</AgendaOpenItemsContext.Provider>
+    </AgendaItemsContext.Provider>
+  );
 }
 
 /** What each form says happened, as the card's header names it. */
@@ -95,11 +113,28 @@ function AgendaReferenceChip({ id }: { readonly id: string }) {
   );
 }
 
+/**
+ * What a card's body says. A reply's heading already names its items, so the references the owner typed at the
+ * front of it ("!A5 Leaning SQLite") are not said again: leading `!A<n>` tokens that are exactly the card's own
+ * items are dropped. Display only — the ferret received the text as written; any other text is drawn whole.
+ */
+export const agendaPartBody = (part: Pick<AgendaMessagePart, 'kind' | 'items' | 'text'>): string => {
+  if (part.kind !== 're') return part.text;
+  const own = new Set(part.items.map(item => item.id));
+  const lead = /^\s*!(A[1-9][0-9]*)(?=[\s,;:]|$)[\s,;:]*/u;
+  let body = part.text;
+  for (let match = lead.exec(body); match !== null && own.has(match[1] as string); match = lead.exec(body)) {
+    body = body.slice(match[0].length);
+  }
+  return body;
+};
+
 function AgendaPart({ part }: { readonly part: AgendaMessagePart }) {
   const lookup = useContext(AgendaItemsContext);
   const items = part.items.map(named => ({ named, item: lookup(named.id) }));
   const first = items[0]?.item;
   const chosen = isChosenAnswer(part, first);
+  const body = agendaPartBody(part);
   return (
     <section className="fy-agenda-msg-part" data-agenda-kind={part.kind}>
       <header className="fy-agenda-msg-head">
@@ -113,15 +148,15 @@ function AgendaPart({ part }: { readonly part: AgendaMessagePart }) {
           {item === undefined ? named.quote : agendaTitle(item)}
         </p>
       ))}
-      {part.text === '' ? null : chosen ? (
+      {body === '' ? null : chosen ? (
         <p className="fy-agenda-msg-choice">
           <span className="fy-agenda-msg-option">
             <Check aria-hidden="true" size={14} strokeWidth={2.5} />
-            <span>{part.text}</span>
+            <span>{body}</span>
           </span>
         </p>
       ) : (
-        <p className="fy-agenda-msg-text">{part.text}</p>
+        <p className="fy-agenda-msg-text">{body}</p>
       )}
       {part.note === undefined ? null : (
         <p className="fy-agenda-msg-note">

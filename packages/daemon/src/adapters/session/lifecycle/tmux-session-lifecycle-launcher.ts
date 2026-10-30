@@ -6,7 +6,7 @@ import {
   type SessionEnvironmentStore,
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
-  type SessionMediaDirectory,
+  type SessionPaneFolders,
   sessionPaneEnvironment,
 } from '../../../lib/session/lifecycle/index.ts';
 import type { LastSnapshotWriter } from '../../../lib/session/snapshot/index.ts';
@@ -63,8 +63,8 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
      * still launches whatever happens: the port answers nothing a launch could branch on.
      */
     private readonly accountRenewal?: AccountLaunchRenewal,
-    /** Creates and names the session's media folder, handed to the pane as `FY_MEDIA_DIR`. */
-    private readonly media?: SessionMediaDirectory,
+    /** Creates the session's media folder and names its pane files (`FY_MEDIA_DIR`, `FY_QUESTION_FILE`). */
+    private readonly files?: SessionPaneFolders,
     /**
      * The CLI's binary name, as the wrapper's instructions spell it. With it, a launch answers what the
      * pane was told (`launchInstructions`); without it, it answers nothing and the record keeps what it had.
@@ -101,7 +101,7 @@ export class TmuxSessionLifecycleLauncher implements SessionLifecycleLauncher {
         await this.environment.read(record.config.id),
       ),
       record.config.mode,
-      await this.media?.(record.config.id),
+      await this.files?.(record.config.id),
     );
     // Before the pane, not after: an access token that has aged out is renewed while there is still
     // somebody here to be told it could not be, rather than surfacing later as an agent that cannot

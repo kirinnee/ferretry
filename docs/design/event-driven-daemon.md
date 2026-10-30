@@ -108,7 +108,8 @@ an edit from outside the daemon is seen once the hub hears it, within its 25 ms 
 still proved by a `stat`, because a request acts on what a person may just have written. The `stat` also
 stays whenever the watch cannot vouch: the directory is polled, or no hub is wired, as in the CLI. The
 daemon's own writes invalidate at once, before and after the rename, so a read that ran alongside a write
-cannot keep the old file. At most 1,024 documents are watched.
+cannot keep the old file. At most 4,096 documents are watched (two per session, so 2,048 sessions; it was 1,024,
+which a ~600-session fleet outgrew, leaving every document past the bound `stat`ed on every pass).
 On the idle fixture (`bench-idle-daemon.ts --small --trace --syscall-summary --seconds 60`), compared with
 `origin/main` `9e456c0f0`:
 

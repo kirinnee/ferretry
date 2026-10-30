@@ -54,8 +54,8 @@ import {
   type PassiveUsageRecord,
   type ProviderPreset,
   resolveCredentialStore,
-  storeInspectionWords,
   type StoredCredentialResolution,
+  storeInspectionWords,
   usableCredentialReading,
 } from '@ferretry/fleet';
 import {
@@ -447,6 +447,31 @@ export interface FleetCredentialsServiceDeps {
    * listing logins never asks a provider anything; whoever is watching asks the reader first.
    */
   readonly providerQuota?: { peek(id: string): ProviderQuotaReading | undefined };
+  /**
+   * How long one list answers every caller that asks for the same view of the same catalogue. Absent, a
+   * list is shared only by the callers that ask while it is being made.
+   */
+  readonly listCache?: CredentialListCache;
+}
+
+/** The list's short keep: a clock, and how long a made list is answered again. */
+export interface CredentialListCache {
+  now(): number;
+  readonly freshMs: number;
+}
+
+/**
+ * How long the daemon answers a made credentials list again. Short: the list is a view of what is already
+ * known and nothing a person does waits on it — a Check now, a sign-out and every usage pass drop it.
+ */
+export const CREDENTIAL_LIST_FRESH_MS = 2_000;
+
+/** One list, made or being made, and what it was made from. */
+interface KeptList {
+  readonly key: string;
+  readonly list: Promise<FleetCredentialList>;
+  /** When it was made; absent while it is being made. */
+  at?: number;
 }
 
 /** The harness's own sign-out arguments. Neither touches a model. */
@@ -472,6 +497,9 @@ export type FleetCredentialSignOutOutcome =
   | { readonly outcome: 'failed'; readonly reason: string; readonly credential: FleetCredentialView };
 
 export class FleetCredentialsService {
+  /** The list per view (`settled` or not), shared — see {@link list}. */
+  readonly #lists = new Map<string, KeptList>();
+
   constructor(private readonly deps: FleetCredentialsServiceDeps) {}
 
   /**
@@ -481,9 +509,57 @@ export class FleetCredentialsService {
    * last known word instead of "Checking" for one being read right now (see `CredentialViewOptions`).
    * The usage pass reads its credentials while the feed lists them, so without it the pass itself
    * would cache a working login as "not known" for a whole interval.
+   *
+   * SHARED. Many readers ask for this — the usage feed, the runtime catalogue, a start's readiness check,
+   * the logins page — and making it asks every login's status, which for a Codex login reads the session
+   * roster. So callers asking for the same view while one is being made share it (single flight), and a
+   * made list answers again for {@link CredentialListCache.freshMs} while the catalogue it was made from
+   * and every environment login's quota reading are unchanged. A Check now, a sign-out and each usage pass
+   * drop it, so nothing a person did is answered from before they did it.
    */
   async list(options: CredentialViewOptions = {}): Promise<FleetCredentialList> {
-    const { format, entries } = await this.deps.catalog.entries();
+    const catalog = await this.deps.catalog.entries();
+    const view = JSON.stringify(options);
+    const key = JSON.stringify([
+      catalog,
+      catalog.entries.map(entry =>
+        entry.credential.store === 'environment' ? (this.deps.providerQuota?.peek(entry.id) ?? null) : null,
+      ),
+    ]);
+    const kept = this.#lists.get(view);
+    const cache = this.deps.listCache;
+    if (
+      kept !== undefined &&
+      kept.key === key &&
+      (kept.at === undefined || (cache !== undefined && cache.now() - kept.at < cache.freshMs))
+    )
+      return await kept.list;
+    const made: KeptList = { key, list: this.#list(catalog, options) };
+    this.#lists.set(view, made);
+    try {
+      const list = await made.list;
+      if (cache === undefined) this.#forgetList(view, made);
+      else made.at = cache.now();
+      return list;
+    } catch (error) {
+      this.#forgetList(view, made);
+      throw error;
+    }
+  }
+
+  /** Drops every kept list: what one would say may just have changed. */
+  #forgetLists(): void {
+    this.#lists.clear();
+  }
+
+  #forgetList(view: string, made: KeptList): void {
+    if (this.#lists.get(view) === made) this.#lists.delete(view);
+  }
+
+  async #list(
+    { format, entries }: Awaited<ReturnType<FleetCredentialCatalog['entries']>>,
+    options: CredentialViewOptions,
+  ): Promise<FleetCredentialList> {
     const emails = await this.#emails(entries);
     const environment = await this.#environmentFacts(entries);
     const credentials: FleetCredentialView[] = [];
@@ -512,6 +588,7 @@ export class FleetCredentialsService {
         .filter(entry => stored(entry.resolution) !== undefined && (ids === undefined || ids.includes(entry.id)))
         .map(entry => this.deps.status.observe(subjectOf(entry))),
     );
+    this.#forgetLists();
   }
 
   /**
@@ -535,7 +612,7 @@ export class FleetCredentialsService {
     }
     const act = checkAct(entry);
     if (!act.available) throw new FleetCredentialRefusal('fleet_credential_unavailable', act.reason);
-    const view = await this.deps.status.checkNow(subjectOf(entry));
+    const view = await this.deps.status.checkNow(subjectOf(entry)).finally(() => this.#forgetLists());
     return this.#row(entry, view, await this.#emails(entries), entries);
   }
 
@@ -575,6 +652,7 @@ export class FleetCredentialsService {
       command: [binary, ...launch.arguments, ...LOGOUT_ARGV[resolution.harness]],
       environment: { ...this.deps.baseEnvironment(), ...launch.environment },
     });
+    this.#forgetLists();
     const credential = await answer();
     if (credential.status.word === 'needs_sign_in') return { outcome: 'signed-out', credential };
     return {

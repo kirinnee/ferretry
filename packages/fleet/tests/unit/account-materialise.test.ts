@@ -1,6 +1,6 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
-import { AGENT_INSTRUCTION, tomlString } from '../../src/lib/account/fixed-layer.ts';
+import { AGENT_INSTRUCTION, CLAUDE_QUESTION_HOOKS, tomlString } from '../../src/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../src/lib/account/ids.ts';
 import {
   FIXED_SETTINGS_FILE,
@@ -685,6 +685,7 @@ describe('materialiseFleet', () => {
         permissions: { defaultMode: 'auto' },
         remoteControlAtStartup: false,
         skipAutoPermissionPrompt: true,
+        hooks: CLAUDE_QUESTION_HOOKS,
       });
       should(only(result, `${HOME_A}/settings.json`)).match({
         layers: [{ settings: { permissions: { defaultMode: 'auto' } } }],
@@ -704,8 +705,16 @@ describe('materialiseFleet', () => {
       should(only(result, overlay)).eql({
         kind: 'file',
         path: overlay,
-        content:
-          '{\n  "permissions": {\n    "defaultMode": "bypassPermissions"\n  },\n  "remoteControlAtStartup": false,\n  "skipDangerousModePermissionPrompt": true\n}\n',
+        content: `${JSON.stringify(
+          {
+            permissions: { defaultMode: 'bypassPermissions' },
+            remoteControlAtStartup: false,
+            skipDangerousModePermissionPrompt: true,
+            hooks: CLAUDE_QUESTION_HOOKS,
+          },
+          null,
+          2,
+        )}\n`,
         mode: 0o600,
       });
       should(

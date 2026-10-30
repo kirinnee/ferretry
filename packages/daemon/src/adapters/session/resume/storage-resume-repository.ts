@@ -59,6 +59,7 @@ export class StorageResumeRepository implements ResumeRepository {
         ...(change.turn === undefined ? {} : { turn: change.turn }),
         ...(change.retryAttempt === undefined ? {} : { retryAttempt: change.retryAttempt }),
         ...(change.reason === undefined ? {} : { reason: change.reason }),
+        ...(change.finishedAt === undefined ? {} : { finishedAt: change.finishedAt }),
         // A relaunch's launch fact replaces the old pane's; a transition that launched nothing keeps it.
         ...(change.launchInstructions === undefined ? {} : { launchInstructions: change.launchInstructions }),
       };

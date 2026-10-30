@@ -8,10 +8,10 @@
  */
 
 import { type AgendaItem, hasOwnTitle } from '@ferretry/protocol';
-import { type AgendaStatus, agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { bulletPoints } from '../../lib/agenda-revisions.ts';
-import { AgendaStatusPill } from './agenda-status-pill.tsx';
+import { type AgendaStatus, agendaAuthor, agendaStatus } from '../../lib/agenda-status.ts';
 import { agendaHeading } from './agenda-delivery.tsx';
+import { AgendaStatusPill } from './agenda-status-pill.tsx';
 
 export interface AgendaRowProps {
   readonly item: AgendaItem;

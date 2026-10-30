@@ -18,6 +18,9 @@
  *   system call at all.
  * - **Configuration.** {@link configLoaded}, from the config watcher's `afterLoad`: credentials added or
  *   removed open or close their watches.
+ * - **Sessions.** Which rollouts are a Codex credential's comes from every session's config, read through
+ *   the shared {@link SessionRosterReader}: once per roster generation, however many logins ask. A
+ *   credential's rollout watch is re-derived only when the generation it was derived from has moved on.
  *
  * The boot pass always runs, as it did at boot before; and a feed with a source only time refreshes — an
  * external collector — keeps one pass an interval, whatever the credentials say.
@@ -29,7 +32,7 @@
  */
 import type { CredentialSubject, PassiveUsageRecord, StoredCredentialResolution } from '@ferretry/fleet';
 import type { FileSubscription } from '../file-events/hub.ts';
-import { attributedTranscripts, type CredentialSessionRecord } from '../fleet/credentials-service.ts';
+import { attributedTranscripts } from '../fleet/credentials-service.ts';
 import type { HousekeepingJobs } from '../housekeeping/ports.ts';
 import {
   dueCredentials,
@@ -41,6 +44,7 @@ import {
   withPassive,
   withPassiveUnknown,
 } from './model.ts';
+import type { SessionRosterReader, SessionRosterSnapshot } from './session-roster.ts';
 
 /** One stored credential, as the reading watches it. */
 export interface FleetReadingSubject {
@@ -59,8 +63,8 @@ export interface FleetReadingTimers {
 export interface FleetReadingPorts {
   /** The stored credentials the configuration in effect names. */
   credentials(): Promise<readonly FleetReadingSubject[]>;
-  /** The sessions this daemon has records for: where a Codex credential's rollouts are. */
-  sessions(): Promise<readonly CredentialSessionRecord[]>;
+  /** The sessions this daemon has records for: where a Codex credential's rollouts are. Shared, kept. */
+  readonly roster: SessionRosterReader;
   readonly jobs: HousekeepingJobs;
   /** Hear when a file may have changed (`FileEventHub.subscribe`): once at first, then on each change. */
   watch(path: string, listener: () => void): FileSubscription;
@@ -111,6 +115,8 @@ export class FleetReading {
   readonly #subjects = new Map<string, FleetReadingSubject>();
   readonly #passive = new Map<string, PassiveWatch>();
   readonly #stores = new Map<string, StoreWatch>();
+  /** The roster generation each Codex credential's rollout watch was last derived from. */
+  readonly #derived = new Map<string, number>();
   #timer: unknown;
   #due: (() => void) | undefined;
   /** When the last pass finished; until the first, the boot pass is due. */
@@ -141,6 +147,7 @@ export class FleetReading {
     if (this.#closed) return;
     const ids = new Set(subjects.map(subject => subject.id));
     for (const id of [...this.#passive.keys()]) if (!ids.has(id)) this.#closePassive(id);
+    for (const id of [...this.#derived.keys()]) if (!ids.has(id)) this.#derived.delete(id);
     const files = new Set(subjects.map(subject => storeFile(subject.resolution)));
     for (const [path, watch] of [...this.#stores]) {
       if (files.has(path)) continue;
@@ -168,7 +175,11 @@ export class FleetReading {
   async passiveUsage(subject: CredentialSubject): Promise<PassiveUsageRecord | undefined> {
     const known = this.#subjects.get(subject.id);
     if (known === undefined) return await this.#readDirect(subject);
-    if (known.resolution.harness === 'codex') await this.#watchPassive(known);
+    if (known.resolution.harness === 'codex') {
+      // One roster read for every login that asks while it holds; re-derived only on a new generation.
+      const roster = await this.ports.roster.current();
+      if (this.#derived.get(known.id) !== roster.generation) await this.#watchPassive(known, roster);
+    }
     const watch = this.#passive.get(subject.id);
     const reading = this.#state.get(subject.id);
     if (watch !== undefined && reading?.passiveKnown === true && watch.subscriptions.every(open => open.live()))
@@ -208,14 +219,16 @@ export class FleetReading {
   }
 
   /** The files a subject's passive reading comes from: its statusLine file, or its attributed rollouts. */
-  async #passiveFiles(subject: FleetReadingSubject): Promise<readonly string[]> {
+  async #passiveFiles(subject: FleetReadingSubject, roster?: SessionRosterSnapshot): Promise<readonly string[]> {
     if (subject.resolution.harness === 'claude') return [this.ports.passiveFile(subject.id)];
-    return attributedTranscripts(subject, await this.ports.sessions().catch(() => []));
+    const sessions = roster ?? (await this.ports.roster.current());
+    this.#derived.set(subject.id, sessions.generation);
+    return attributedTranscripts(subject, sessions.sessions);
   }
 
   /** Opens, or re-opens on a changed file set, a subject's passive watch. */
-  async #watchPassive(subject: FleetReadingSubject): Promise<void> {
-    const files = await this.#passiveFiles(subject);
+  async #watchPassive(subject: FleetReadingSubject, roster?: SessionRosterSnapshot): Promise<void> {
+    const files = await this.#passiveFiles(subject, roster);
     const current = this.#passive.get(subject.id);
     if (this.#closed || (current !== undefined && sameFiles(current.files, files))) return;
     this.#closePassive(subject.id);

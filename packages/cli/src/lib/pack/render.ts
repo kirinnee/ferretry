@@ -1,11 +1,13 @@
-import type {
-  PackAttempt,
-  PackModelOption,
-  PackNewOutcome,
-  PackRecommendation,
-  PackView,
-  RoutingPromptView,
-  RoutingSuggested,
+import {
+  formatTaskRef,
+  type PackAttempt,
+  type PackChildCard,
+  type PackModelOption,
+  type PackNewOutcome,
+  type PackRecommendation,
+  type PackView,
+  type RoutingPromptView,
+  type RoutingSuggested,
 } from '@ferretry/protocol';
 
 /**
@@ -102,6 +104,16 @@ const DECIDED_BY: Readonly<Record<Extract<PackNewOutcome, { outcome: 'started' }
   jev: 'jev',
 };
 
+/** What `new` says about the sub-ferret's board card: which it is, and what the board could not do. */
+function cardLines(card: PackChildCard | undefined): readonly string[] {
+  if (card === undefined) return [];
+  const where = card.project === undefined ? '' : ` on the ${card.project} board`;
+  return [
+    ...(card.id === undefined ? [] : [`Its card is ${formatTaskRef({ id: card.id })}${where}.`]),
+    ...(card.note === undefined ? [] : [card.note]),
+  ];
+}
+
 /** What `new` did: the ferret it started and how, or the refusal and every attempt. */
 export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): string {
   const attempts = outcome.attempts.map(attemptLine);
@@ -116,6 +128,7 @@ export function renderPackNewOutcome(outcome: PackNewOutcome, bin: string): stri
   return [
     `Started ${who} on ${view.config.agent}${view.config.model === undefined ? '' : `, ${view.config.model}`} — decided by ${DECIDED_BY[outcome.decidedBy]}.`,
     ...(outcome.note === undefined ? [] : [outcome.note]),
+    ...cardLines(outcome.card),
     ...attempts,
     `Wait for its result: ${bin} wait ${view.config.id}`,
   ].join('\n');

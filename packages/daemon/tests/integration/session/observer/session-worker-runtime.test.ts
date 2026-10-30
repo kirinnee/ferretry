@@ -14,6 +14,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
 import { SessionWorkerRuntime, type WorkerTmuxClient } from '../../../../src/adapters/index.ts';
+import { readAskedQuestion } from '../../../../src/adapters/session/question/index.ts';
 import { NodeTranscriptSource } from '../../../../src/adapters/transcript/index.ts';
 import {
   type AnswerOperationRecord,
@@ -193,6 +194,7 @@ async function rig() {
         const info = await stat(file);
         return { size: info.size, mtimeMs: info.mtimeMs };
       }),
+    asked: async (file, bound) => await counted(async () => await readAskedQuestion(file, bound)),
     clock: { now: () => new Date().toISOString() },
     nowMs: () => now,
     schedule: (delayMs, run) => {
@@ -494,6 +496,67 @@ describe('SessionWorkerRuntime — the question part', () => {
     should(afterReceipt).equal(2);
     should(looks().length).equal(3);
     should(stats).deepEqual([]);
+  });
+
+  it('should project the question Claude’s hook recorded while the transcript still holds it back', async () => {
+    // Arrange — Claude 2.1.281 writes the call only once the form is answered; its hook wrote it as asked.
+    const { attach, advance, looks, transcript, binding, root } = await rig();
+    await appendFile(transcript, claudeUser('ship it?'));
+    const questionAsked = join(root, 'question-asked.json');
+    await writeFile(
+      questionAsked,
+      JSON.stringify({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'toolu_hook',
+        transcript_path: transcript,
+        tool_input: { questions: [{ question: 'Ship?', options: [{ label: 'Yes' }, { label: 'No' }] }] },
+      }),
+    );
+
+    // Act
+    await attach({ status: 'running', turn: 1 }, { ...binding, questionAsked });
+    await advance(0);
+
+    // Assert — the form on screen is a question the daemon can offer, by the model's own call id.
+    const patch = looks()
+      .at(-1)
+      ?.patches.find(candidate => candidate.kind === 'question');
+    should(patch).containDeep({
+      kind: 'question',
+      projection: { kind: 'pending', question: { toolUseId: 'toolu_hook' } },
+    });
+  });
+
+  it('should not read a question file for a Codex session', async () => {
+    // Arrange — Codex writes its question to the rollout as it asks it; the file is Claude's alone.
+    const { attach, advance, looks, transcript, binding, root } = await rig();
+    await appendFile(transcript, '');
+    const questionAsked = join(root, 'question-asked.json');
+    await writeFile(
+      questionAsked,
+      JSON.stringify({
+        hook_event_name: 'PreToolUse',
+        tool_name: 'AskUserQuestion',
+        tool_use_id: 'toolu_hook',
+        transcript_path: transcript,
+        tool_input: { questions: [{ question: 'Ship?', options: [{ label: 'Yes' }] }] },
+      }),
+    );
+
+    // Act
+    await attach(
+      { status: 'running', turn: 1 },
+      { ...binding, transcript: { file: transcript, harness: 'codex' }, questionAsked },
+    );
+    await advance(0);
+
+    // Assert
+    should(
+      looks().some(look =>
+        look.patches.some(patch => patch.kind === 'question' && patch.projection.kind === 'pending'),
+      ),
+    ).be.false();
   });
 
   it('should say nothing about a question while no transcript is bound', async () => {

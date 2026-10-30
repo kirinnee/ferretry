@@ -1,3 +1,4 @@
+export * from './interrupted-launch.ts';
 export * from './policy.ts';
 export * from './retry.ts';
 export * from './service.ts';

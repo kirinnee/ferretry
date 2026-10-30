@@ -1,5 +1,6 @@
 import { sessionTarget, TmuxAddressError } from './address.ts';
 import type { TmuxLaunch } from './contracts.ts';
+import { CONTROL_SUBSCRIPTION_NAMES } from './control-protocol.ts';
 
 export const paneMetadataFormat =
   '#{pane_dead}|#{pane_dead_status}|#{cursor_x}|#{cursor_y}|#{pane_height}|#{pane_width}';
@@ -58,9 +59,14 @@ export function paneIdentityArguments(session: string): readonly string[] {
   return ['display-message', '-p', '-t', sessionTarget(session), '#{pane_id} #{pane_pid}'];
 }
 
-export function killPaneArguments(paneId: string): readonly string[] {
+/** A pane id, `%<n>` exactly: the last thing between a sweep and an arbitrary kill target. */
+function paneIdTarget(paneId: string): string {
   if (!/^%(?:0|[1-9][0-9]*)$/u.test(paneId)) throw new TmuxAddressError('pane id is not usable');
-  return ['kill-pane', '-t', paneId];
+  return paneId;
+}
+
+export function killPaneArguments(paneId: string): readonly string[] {
+  return ['kill-pane', '-t', paneIdTarget(paneId)];
 }
 
 export function sendLiteralArguments(session: string, text: string): readonly string[] {
@@ -148,4 +154,50 @@ export function remainOnExitArguments(session: string): readonly string[] {
 
 export function killSessionArguments(session: string): readonly string[] {
   return ['kill-session', '-t', sessionTarget(session)];
+}
+
+/** How a listing of attached clients is read: whether each is a control client, and its name. */
+export const attachedClientFormat = '#{client_control_mode} #{client_name}';
+
+/** The clients attached to `session`. */
+export function sessionClientsArguments(session: string): readonly string[] {
+  return ['list-clients', '-t', sessionTarget(session), '-F', attachedClientFormat];
+}
+
+/** The clients attached to the session holding the pane `paneId` — tmux resolves a pane id to its session. */
+export function paneSessionClientsArguments(paneId: string): readonly string[] {
+  return ['list-clients', '-t', paneIdTarget(paneId), '-F', attachedClientFormat];
+}
+
+/** A tmux client name this daemon will address: `client-<pid>` for a control client. */
+const CLIENT_NAME = /^[A-Za-z0-9_./-]{1,128}$/u;
+
+/** The control clients in a {@link attachedClientFormat} listing, by name; any other line is not one. */
+export function parseControlClients(stdout: string): readonly string[] {
+  const clients: string[] = [];
+  for (const line of stdout.split('\n')) {
+    const [mode, name, ...rest] = line.trim().split(' ');
+    if (mode === '1' && name !== undefined && rest.length === 0 && CLIENT_NAME.test(name)) clients.push(name);
+  }
+  return clients;
+}
+
+/**
+ * `kill`, preceded IN THE SAME COMMAND LIST by dropping every subscription each of `clients` may hold.
+ *
+ * WHY, AND WHY ONE LIST. tmux 3.6a crashes the WHOLE SERVER — every pane on it — when a control client
+ * with a `refresh-client -B` subscription outlives its session: destroying the session leaves the client
+ * with no session while it is still exiting, and its subscription timer, once a second, reads the
+ * windows of that missing session (`control_check_subs_timer`, fixed in 3.7). A session worker's client
+ * holds exactly such a subscription, so every `kill-session` of a session, and every `kill-pane` of its
+ * last pane, could take the fleet down — it did on 29 and 30 October 2026. A client with no
+ * subscription is safe, and tmux runs one command list in one turn, so no tick can fall between the
+ * release and the kill. Dropping a subscription a client does not hold is a no-op.
+ */
+export function releasedKillArguments(clients: readonly string[], kill: readonly string[]): readonly string[] {
+  const release = clients.flatMap(client => {
+    if (!CLIENT_NAME.test(client)) throw new TmuxAddressError('client name is not usable');
+    return CONTROL_SUBSCRIPTION_NAMES.flatMap(name => ['refresh-client', '-t', client, '-B', name, ';']);
+  });
+  return [...release, ...kill];
 }

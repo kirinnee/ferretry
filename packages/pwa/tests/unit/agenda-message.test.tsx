@@ -13,7 +13,9 @@ import {
   AGENDA_KIND_LABEL,
   AgendaItemsProvider,
   AgendaMessageOr,
+  agendaPartBody,
   isChosenAnswer,
+  useAgendaChatReply,
 } from '../../src/components/agenda-message.tsx';
 import { ReferenceSurfaceProvider } from '../../src/components/reference-surface.tsx';
 import { TranscriptRow } from '../../src/components/transcript-row.tsx';
@@ -172,5 +174,53 @@ describe('the transcript', () => {
     const view = render(<TranscriptRow entry={entry} />);
     expect(byClass(view, 'fy-agenda-msg')).toHaveLength(1);
     expect(textOf(view)).not.toContain('[answer to');
+  });
+});
+
+describe('a message on its way', () => {
+  const Worded = ({ text }: { readonly text: string }) => <p>{useAgendaChatReply(text)}</p>;
+  const word = (text: string, board: AgendaSnapshot | null = snapshot): string =>
+    textOf(
+      render(
+        <AgendaItemsProvider snapshot={board}>
+          <Worded text={text} />
+        </AgendaItemsProvider>,
+      ),
+    );
+
+  test('is worded as the ferret will receive it: a reply naming an open item reads as one about it', () => {
+    expect(word('!A45 Button only, please')).toBe('[re !A45 «Restarting outdated ferrets»] !A45 Button only, please');
+  });
+
+  test('is left as typed when it names nothing open, a resolved item, or no board has been read', () => {
+    expect(word('plain words')).toBe('plain words');
+    expect(word('!A7 thanks')).toBe('!A7 thanks');
+    expect(word('!A45 hi', null)).toBe('!A45 hi');
+  });
+});
+
+describe("a reply card's body", () => {
+  const re = (text: string, ids: readonly string[] = ['A5']) => ({
+    kind: 're' as const,
+    items: ids.map(id => ({ id, quote: id })),
+    text,
+  });
+
+  test('drops the leading references the heading already names, and only those', () => {
+    expect(agendaPartBody(re('!A5 Leaning SQLite'))).toBe('Leaning SQLite');
+    expect(agendaPartBody(re('!A5, !A7: both yes', ['A5', 'A7']))).toBe('both yes');
+    expect(agendaPartBody(re('!A9 Leaning SQLite'))).toBe('!A9 Leaning SQLite');
+    expect(agendaPartBody(re('Leaning SQLite, see !A5'))).toBe('Leaning SQLite, see !A5');
+    expect(agendaPartBody(re('!A5'))).toBe('');
+  });
+
+  test('leaves every other card exactly as written', () => {
+    expect(agendaPartBody({ kind: 'answer', items: [{ id: 'A5', quote: 'q' }], text: '!A5 Yes' })).toBe('!A5 Yes');
+  });
+
+  test('draws without the repeated reference', () => {
+    const view = draw(`[re !A45 «${ASK}»] !A45 Button only, please`);
+    expect(textOf(view)).toContain('Button only, please');
+    expect(byClass(view, 'fy-agenda-msg-text').map(node => textOf(node))).toEqual(['Button only, please']);
   });
 });

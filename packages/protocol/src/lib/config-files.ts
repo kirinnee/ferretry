@@ -2,6 +2,8 @@ import { z } from 'zod';
 import { InstantSchema, NonEmptyStringSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 import { type LearningConfig, LearningConfigSchema } from './learning.ts';
 import {
+  DEFAULT_WARDEN_REVIVE,
+  WardenReviveConfigSchema,
   LegacyWardenTriageSchema,
   mergeWardenConfig,
   migrateLegacyWardenSettings,
@@ -222,6 +224,7 @@ export function configFileCapability(address: ConfigFileAddress): 'fleet' | 'war
  */
 export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
   enabled: true,
+  revive: DEFAULT_WARDEN_REVIVE,
   layers: { jev: false, llm: false },
   // Jev costs $0.042 per million input tokens, output free (docs.typesafe.ai/models.md, checked 2026-10-29).
   guard: { threshold: 0.85, model: 'jev-latest', usdPerMillionInputTokens: 0.042 },
@@ -250,6 +253,7 @@ export const DEFAULT_WARDEN_CONFIG: WardenConfig = {
  * still say `triage`; it is read as the layers it meant, and the next write leaves it out.
  */
 export const WardenFileSchema = z.strictObject({
+  revive: WardenReviveConfigSchema.strict().partial().optional(),
   enabled: z.boolean().optional(),
   layers: WardenLayersSchema.strict().partial().optional(),
   /** DEPRECATED: the single choice `layers` replaced. Read as its layers; never written back. */

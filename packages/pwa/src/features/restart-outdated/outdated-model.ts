@@ -40,7 +40,7 @@ export const outdatedSectionWords = (view: SessionView): string => {
 /** The mark's tooltip and accessible name: what is stale and what fixes it. */
 export const outdatedLabel = (view: SessionView): string => {
   const what = outdatedSectionWords(view);
-  return `Outdated: running on older instructions${what === '' ? '' : ` (${what})`}. Restart to apply the new ones.`;
+  return `Outdated — restart to load new instructions${what === '' ? '' : ` (${what})`}`;
 };
 
 /**

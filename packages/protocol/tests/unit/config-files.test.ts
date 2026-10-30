@@ -221,6 +221,30 @@ describe('warden.yaml', () => {
     should(actual.investigation).deepEqual({ effort: 'high' });
   });
 
+  it('should merge a partial revive section into its defaults, key by key', () => {
+    // Arrange
+    const input = config.WardenFileSchema.parse({ revive: { enabled: false, waveSize: 2 } });
+
+    // Act
+    const actual = config.wardenConfigFromFile(input);
+
+    // Assert
+    should(actual.revive).deepEqual({ ...config.DEFAULT_WARDEN_CONFIG.revive, enabled: false, waveSize: 2 });
+    should(actual.revive.windowMinutes).equal(15);
+  });
+
+  it.each([
+    ['a wave larger than three', { waveSize: 4 }],
+    ['a wave gap under ten seconds', { waveGapSeconds: 5 }],
+    ['an unknown key', { oom: true }],
+  ])('should reject %s in the revive section', (_name, revive) => {
+    // Act
+    const parsed = config.WardenFileSchema.safeParse({ revive });
+
+    // Assert
+    should(parsed.success).be.false();
+  });
+
   it('should read a legacy triage as its layers, with an explicit layer winning', () => {
     // Arrange
     const input = config.WardenFileSchema.parse({ triage: 'jev', layers: { llm: false } });

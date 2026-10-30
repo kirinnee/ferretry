@@ -147,6 +147,21 @@ describe('row chips and labels', () => {
     expect(closed?.verb).toBe('Closed a leftover browser');
   });
 
+  it('should show a revive by its verb, and a revive that did not take as Failed', () => {
+    // Arrange
+    const actions = [
+      wardenAction({ at: at(2), action: 'revive', outcome: 'failed', sessionId: 'a' }),
+      wardenAction({ at: at(1), action: 'revive', sessionId: 'b' }),
+    ];
+
+    // Act
+    const [done, failed] = rowsOf(...actions);
+
+    // Assert
+    expect(failed).toMatchObject({ chip: { label: 'Failed', tone: 'err' }, failed: true, verb: 'Revived' });
+    expect(done).toMatchObject({ failed: false, verb: 'Revived' });
+  });
+
   it('should word each actor, with Jev’s confidence only on Jev', () => {
     // Arrange
     const actions = [

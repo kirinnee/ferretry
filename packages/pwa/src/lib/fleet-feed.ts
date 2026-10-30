@@ -56,6 +56,8 @@ export interface FleetFeedOptions {
   readonly open: OpenFleetFeed;
   /** The list may have moved: read it again. */
   readonly onChange: () => void;
+  /** Every event the feed delivers, as it arrives; for readers that need the payload, not just "something moved". */
+  readonly onEvent?: (event: FyEvent) => void;
   readonly onStatus?: (status: FleetFeedStatus) => void;
   readonly environment?: FleetFeedEnvironment;
 }
@@ -68,8 +70,9 @@ export interface FleetFeedControl {
 /** A daemon that does not know `tail` refuses the upgrade with 400; nothing else says "too old". */
 const refusedAsTooOld = (reason: unknown): boolean => (reason as { readonly status?: unknown } | null)?.status === 400;
 
-/** A surface's control facts move nothing on a list row. */
-const movesTheList = (event: FyEvent): boolean => !event.type.startsWith('surface.');
+/** A surface's control facts and the board's card changes move nothing on a session list row. */
+const movesTheList = (event: FyEvent): boolean =>
+  !event.type.startsWith('surface.') && !event.type.startsWith('board.');
 
 export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
   const environment = options.environment ?? browserFleetFeedEnvironment;
@@ -149,7 +152,9 @@ export const startFleetFeed = (options: FleetFeedOptions): FleetFeedControl => {
       .open(
         event => {
           alive(undefined);
-          if (current() && movesTheList(event)) change();
+          if (!current()) return;
+          options.onEvent?.(event);
+          if (movesTheList(event)) change();
         },
         idleSeconds => alive(idleSeconds),
         controller.signal,

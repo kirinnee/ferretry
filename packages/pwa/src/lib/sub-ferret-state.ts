@@ -71,7 +71,7 @@ export const subFerretLive = (reading: SubFerretReading): boolean =>
 
 /** The name a sub-ferret is called by: its callsign, else its task, else its short id. */
 export const subFerretName = (view: SessionView): string =>
-  displayCallsign(view.config.teammate) || view.config.label || view.config.name || shortSessionId(view.config.id);
+  displayCallsign(view.config.teammate) || view.config.name || shortSessionId(view.config.id);
 
 /** The model it runs on, as observed when the harness said, else as it was started. */
 export const subFerretModel = (view: SessionView): string | undefined => view.state.observedModel ?? view.config.model;
