@@ -1,15 +1,7 @@
 import { describe, it } from 'bun:test';
 import { MAX_BOARD_NOTE_LENGTH, MAX_BOARD_REASON_LENGTH, type PrLink } from '@ferretry/protocol';
 import should from 'should';
-import {
-  clip,
-  DONE_WITHOUT_MESSAGE,
-  doneLane,
-  doneMove,
-  doneNote,
-  doneQuietText,
-  doneReason,
-} from '../../../src/lib/board/index.ts';
+import { clip, DONE_WITHOUT_MESSAGE, doneLane, doneMove, doneNote, doneReason } from '../../../src/lib/board/index.ts';
 import { card, lanes, NOW, PROJECT } from './support.ts';
 
 const PR: PrLink = {
@@ -47,15 +39,6 @@ describe('the done message on a card', () => {
     should(doneReason('')).equal(DONE_WITHOUT_MESSAGE);
     should(doneReason('y'.repeat(MAX_BOARD_REASON_LENGTH * 2)).length).equal(MAX_BOARD_REASON_LENGTH);
     should(clip('short', 10)).equal('short');
-  });
-
-  it("should tell the lead the card, where it went and the message's first line", () => {
-    // Arrange
-    const review = lanes().lanes.find(lane => lane.id === 'review') ?? null;
-
-    // Act / Assert
-    should(doneQuietText({ id: 'F413' }, review, 'PR ready\nmore detail')).equal('&F413 → Review/CI · done: PR ready');
-    should(doneQuietText({ id: 'F413' }, null, undefined)).equal(`&F413 ${DONE_WITHOUT_MESSAGE}`);
   });
 });
 

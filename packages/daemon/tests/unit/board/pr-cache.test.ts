@@ -326,7 +326,7 @@ describe('applyPrUpdate', () => {
       {
         reason: 'closed-unmerged',
         sessionId: 'lead',
-        message: '[board] &F1 PR #940 was closed without merging — reopen it, link its replacement, or drop the card',
+        message: '&F1 PR #940 was closed without merging. Reopen it, link its replacement, or drop the card.',
       },
     ]);
     should(apply(task as BoardTask, { observed: [observed({ state: 'closed' })] }).nudges).be.empty();
@@ -341,7 +341,7 @@ describe('applyPrUpdate', () => {
       {
         reason: 'ci-failing',
         sessionId: 'child',
-        message: '[board] &F1 PR #940 CI is red — fix it, or note on the card why it can stay red',
+        message: '&F1 PR #940 CI is red. Fix it, or note on the card why it can stay red.',
       },
     ]);
     should(apply(task as BoardTask, { observed: [observed({ checks: 'failing' })] }).nudges).be.empty();

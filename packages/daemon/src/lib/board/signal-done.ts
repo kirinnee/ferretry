@@ -59,13 +59,6 @@ export const doneLane = (card: BoardTask, laneSet: LaneSet): Lane | null => {
   return target === undefined || target.category === 'closed' ? null : target;
 };
 
-/** The quiet line the lead hears (§2.8), without the `[board] ` prefix. */
-export const doneQuietText = (card: Pick<BoardTask, 'id'>, moved: Lane | null, message: string | undefined): string => {
-  const said = message?.trim().split('\n')[0]?.trim() ?? '';
-  const what = said === '' ? DONE_WITHOUT_MESSAGE : `done: ${clip(said, 200)}`;
-  return moved === null ? `${formatTaskRef(card)} ${what}` : `${formatTaskRef(card)} → ${moved.name} · ${what}`;
-};
-
 /** A done move, or why the card stays where it is. */
 export type DoneMove = { readonly task: BoardTask } | { readonly held: string };
 

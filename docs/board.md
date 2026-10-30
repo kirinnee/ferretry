@@ -63,8 +63,8 @@ once this machine runs that release), any merged with none open is `pr.merged`, 
 a Closed lane in a set with a To test lane. A fact passes an owner gate (out of Plan/Design); gates still stop ferrets.
 The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a
 PR nobody has asked GitHub about is polled on the next tick. A card the owner sent back stays back until a PR newer
-than that move merges. History names the fact; a daemon move from a fact is never a quiet line
-([ferret-messages.md](ferret-messages.md#board-events-that-ride-the-next-message)).
+than that move merges. History names the fact; no move is ever typed into a chat
+([ferret-messages.md](ferret-messages.md#what-the-board-types-into-a-chat)).
 
 ## The turn-end check
 
@@ -72,7 +72,7 @@ When a turn ends, the daemon reads it (`packages/daemon/src/lib/board/turn-check
 **mutating work** while the session had **no focus card in an open lane**, the ferret gets one queued message:
 
 ```text
-[board] You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"
+You changed code this turn without a card. Create one (fy task create …) or record why not: fy task skip "<why>"
 ```
 
 - **Mutating work** is the turn's own tool calls: an edit tool (`Edit`, `MultiEdit`, `Write`, `NotebookEdit`,

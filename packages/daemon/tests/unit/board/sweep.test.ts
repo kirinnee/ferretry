@@ -1,24 +1,20 @@
 import { describe, it } from 'bun:test';
-import type { BoardActor, BoardTask, BoardTaskEvent, BoardTaskView, LaneTrigger, PrLink } from '@ferretry/protocol';
+import type { BoardActor, BoardTask, BoardTaskEvent, BoardTaskView } from '@ferretry/protocol';
 import should from 'should';
 import {
   BoardSweep,
   type BoardSweepPorts,
   EMPTY_SWEEP_MEMORY,
   formatIdle,
-  leadOf,
-  mergeQuietItems,
   nudgeMessage,
   nudgeRecipient,
-  type PendingContextQueue,
   planSweep,
-  type QuietItem,
   type SessionRoster,
   type SweepBoard,
   type SweepMemory,
   type SweepMemoryStore,
 } from '../../../src/lib/board/index.ts';
-import { card, FakeSessions, lanes, liveSession, MACHINE, NOW, PROJECT, rosterOf } from './support.ts';
+import { card, FakeSessions, lanes, liveSession, NOW, PROJECT, rosterOf } from './support.ts';
 
 const NOW_MS = Date.parse(NOW);
 const MINUTE = 60_000;
@@ -77,24 +73,12 @@ const sawChild = (mark: Partial<SweepMemory['seen'][string]> = {}): SweepMemory 
   v: 1,
   sweptAt: EARLIER,
   nudged: {},
-  seen: { F1: { seq: 1, blockedBy: [], waiting: [] }, F2: { seq: 1, blockedBy: [], waiting: [], ...mark } },
+  seen: { F1: { blockedBy: [] }, F2: { blockedBy: [], ...mark } },
 });
 
-const pr = (): PrLink => ({
-  url: 'https://github.com/kirinnee/ferretry/pull/930',
-  number: 930,
-  repo: 'kirinnee/ferretry',
-  state: 'open',
-  draft: false,
-  checks: 'pending',
-  mergedAt: null,
-  mergeSha: null,
-  releasedIn: null,
-  polledAt: NOW,
-});
-
-const quietTexts = (memory: SweepMemory, swept: SweepBoard, roster: SessionRoster = everyone) =>
-  planSweep(memory, swept, roster, NOW).quiet.map(each => `${each.sessionId}: ${each.item.text} [${each.item.key}]`);
+/** Every message a plan sends, as `recipient: text`. */
+const sentTexts = (memory: SweepMemory, swept: SweepBoard, roster: SessionRoster = everyone) =>
+  planSweep(memory, swept, roster, NOW).nudges.map(each => `${each.sessionId}: ${each.message}`);
 
 describe('the nudge words', () => {
   it('should say an idle span the way the owner reads it', () => {
@@ -102,10 +86,10 @@ describe('the nudge words', () => {
     should([30_000, 59 * MINUTE, 3 * HOUR, 47 * HOUR, 72 * HOUR].map(formatIdle)).eql(['1m', '59m', '3h', '47h', '3d']);
   });
 
-  it('should name the card, how long and the lane', () => {
+  it('should name the card, how long and the lane, as a plain sentence with no tag', () => {
     // Assert
     should(nudgeMessage({ id: 'F412' }, 3 * HOUR, 'Implement')).equal(
-      '[board] &F412 untouched 3h in Implement — move it, note why, block it, or drop it',
+      '&F412 has had no activity for 3h in Implement. Move it, note why, block it, or drop it.',
     );
   });
 });
@@ -174,8 +158,8 @@ describe('the sweep plan: nudges', () => {
 
     // Assert
     should(plan.nudges).eql([
-      { taskId: 'F2', sessionId: 'lead', message: nudgeMessage({ id: 'F2' }, 3 * HOUR, 'Implement') },
-      { taskId: 'F3', sessionId: 'lead', message: nudgeMessage({ id: 'F3' }, 5 * HOUR, 'Implement') },
+      { kind: 'stale', taskId: 'F2', sessionId: 'lead', message: nudgeMessage({ id: 'F2' }, 3 * HOUR, 'Implement') },
+      { kind: 'stale', taskId: 'F3', sessionId: 'lead', message: nudgeMessage({ id: 'F3' }, 5 * HOUR, 'Implement') },
     ]);
     should(plan.memory.nudged).eql({ F1: ago(HOUR), F2: ago(3 * HOUR) });
     should(plan.memory.sweptAt).equal(NOW);
@@ -220,200 +204,71 @@ describe('the sweep plan: nudges', () => {
 
     // Assert
     should(plan.memory.nudged).eql({ F1: EARLIER });
-    should(plan.memory.seen).eql({ F1: { seq: 1, blockedBy: ['/F7'], waiting: ['lead/A3'] } });
+    should(plan.memory.seen).eql({ F1: { blockedBy: ['/F7'] } });
   });
 });
 
-describe('the sweep plan: quiet events', () => {
-  it('should take a board it has never seen as a baseline and say nothing', () => {
+describe('the sweep plan: no news', () => {
+  it("should send nobody a child card's moves, blocks, unblocks, reopens, drops, dones or asks", () => {
     // Arrange
-    const child = view(childCard([{ at: EARLIER, actor: ferret('child'), type: 'note', text: 'hi' }]));
-
-    // Assert
-    should(quietTexts(EMPTY_SWEEP_MEMORY, board(leadCard, child))).eql([]);
-  });
-
-  it("should tell the lead of a child card's moves, blocks, unblocks, reopens and drops since it last looked", () => {
-    // Arrange
-    const child = childCard(
-      [
-        {
-          at: EARLIER,
-          actor: ferret('child'),
-          type: 'moved',
-          from: 'todo',
-          to: 'implement',
-          backward: false,
-          reason: null,
-        },
-        { at: EARLIER, actor: ferret('child'), type: 'note', text: 'progress' },
-        { at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'waiting on\nthe vendor' },
-        { at: EARLIER, actor: ferret('child'), type: 'unblocked', reason: null },
-        {
-          at: EARLIER,
-          actor: { kind: 'owner' },
-          type: 'reopened',
-          from: 'review',
-          to: 'implement',
-          reason: 'x'.repeat(100),
-          ask: { text: 'again', source: 'owner' },
-        },
-        {
-          at: EARLIER,
-          actor: ferret('lead'),
-          type: 'moved',
-          from: 'implement',
-          to: 'review',
-          backward: false,
-          reason: null,
-        },
-      ],
-      { laneId: 'review' },
-    );
-
-    // Act
-    const texts = quietTexts(sawChild(), board(leadCard, view(child)));
-
-    // Assert
-    should(texts).eql([
-      'lead: &F2 → Implement [F2:lane]',
-      'lead: &F2 blocked: waiting on the vendor [F2:block]',
-      'lead: &F2 unblocked [F2:block]',
-      `lead: &F2 reopened → Implement: ${'x'.repeat(79)}… [F2:lane]`,
-    ]);
-  });
-
-  it('should keep a daemon move that a PR fact made out of the quiet lines, and announce a drop before forgetting the card', () => {
-    // Arrange
-    const moved = childCard(
-      [
-        {
-          at: EARLIER,
-          actor: { kind: 'daemon' },
-          type: 'moved',
-          from: 'implement',
-          to: 'review',
-          backward: false,
-          reason: null,
-          auto: true,
-          trigger: 'pr.opened',
-        },
-      ],
-      { laneId: 'review', links: { prs: [pr()], branch: null, commits: [], docs: [] } },
-    );
-    const dropped = {
-      ...childCard([{ at: EARLIER, actor: ferret('child'), type: 'dropped', reason: 'superseded by &F9' }], {
-        id: 'F3',
-        dropped: { reason: 'superseded by &F9', at: EARLIER },
-      }),
-    };
-    const memory = { ...sawChild(), seen: { ...sawChild().seen, F3: { seq: 1, blockedBy: [], waiting: [] } } };
-
-    // Act
-    const plan = planSweep(memory, board(leadCard, view(moved), view(dropped)), everyone, NOW);
-
-    // Assert
-    should(plan.quiet.map(each => each.item.text)).eql(['&F3 dropped: superseded by &F9']);
-    should(Object.keys(plan.memory.seen)).eql(['F1', 'F2']);
-  });
-
-  it('should keep every move a fact made quiet, and still tell of a daemon move no fact made', () => {
-    // Arrange
-    const daemonMove = (to: string, trigger: LaneTrigger) =>
+    const moved = (from: string, to: string, extra: Partial<Extract<EventInput, { type: 'moved' }>> = {}) =>
       ({
         at: EARLIER,
-        actor: { kind: 'daemon' },
+        actor: ferret('child'),
         type: 'moved',
-        from: 'implement',
+        from,
         to,
         backward: false,
         reason: null,
-        auto: true,
-        trigger,
+        ...extra,
       }) as const;
-    const facts = (
-      ['pr.opened', 'pr.ready', 'ci.green', 'pr.merged', 'release.published', 'release.running'] as const
-    ).map(trigger => daemonMove('review', trigger));
-    const started = childCard([...facts, daemonMove('implement', 'work.started')], { laneId: 'implement' });
-
-    // Act
-    const texts = quietTexts(sawChild(), board(leadCard, view(started)));
-
-    // Assert
-    should(texts).eql(['lead: &F2 → Implement [F2:lane]']);
-  });
-
-  it("should leave a done move to the done's own quiet line", () => {
-    // Arrange
-    const done = childCard(
-      [
-        {
-          at: EARLIER,
-          actor: { kind: 'daemon' },
-          type: 'moved',
-          from: 'implement',
-          to: 'review',
-          backward: false,
-          reason: 'shipped the sweep',
-          auto: true,
-          trigger: 'signal.done',
-        },
-      ],
-      { laneId: 'review' },
-    );
-
-    // Act
-    const plan = planSweep(sawChild(), board(leadCard, view(done)), everyone, NOW);
-
-    // Assert
-    should(plan.quiet).eql([]);
-    should(plan.memory.seen['F2']?.seq).equal(2);
-  });
-
-  it('should read a card created since the last tick from its first event, and skip a closed one never seen', () => {
-    // Arrange
-    const fresh = childCard(
-      [
-        {
-          at: NOW,
-          actor: ferret('child'),
-          type: 'moved',
-          from: 'todo',
-          to: 'implement',
-          backward: false,
-          reason: null,
-          auto: undefined,
-        },
-      ],
-      { createdAt: NOW },
-    );
-    const closed = view(childCard([], { id: 'F3', laneId: 'closed', createdAt: NOW }));
-    const memory = { ...sawChild(), seen: { F1: { seq: 1, blockedBy: [], waiting: [] } } };
-
-    // Assert
-    should(quietTexts(memory, board(leadCard, view(fresh), closed))).eql(['lead: &F2 → Implement [F2:lane]']);
-  });
-
-  it('should tell the lead when a child starts waiting on a card or the owner', () => {
-    // Arrange
-    const child = view(childCard([]), {
-      blockedBy: [{ id: 'F9' }, { id: 'F8', machineId: 'mac' }],
-      waitingOnOwner: [
-        { sessionId: 'child', id: 'A9' },
-        { sessionId: 'child', id: 'A3' },
-      ],
-    });
-
-    // Act
-    const texts = quietTexts(sawChild({ waiting: ['child/A3'] }), board(leadCard, child));
-
-    // Assert
-    should(texts).eql(['lead: &F2 waiting on &F9, &F8 [F2:deps]', 'lead: &F2 waiting on owner (!A9) [F2:asks]']);
-  });
-
-  it('should tell the assignee and the lead once the last blocker ships, naming it', () => {
-    // Arrange
     const child = view(
+      childCard(
+        [
+          moved('todo', 'implement'),
+          { at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' },
+          { at: EARLIER, actor: ferret('child'), type: 'unblocked', reason: null },
+          {
+            at: EARLIER,
+            actor: { kind: 'owner' },
+            type: 'reopened',
+            from: 'review',
+            to: 'implement',
+            reason: 'not good',
+            ask: { text: 'again', source: 'owner' },
+          },
+          moved('implement', 'review', { auto: true, trigger: 'signal.done', reason: 'done: shipped it' }),
+          moved('review', 'merged', { auto: true, trigger: 'pr.merged' }),
+        ],
+        { laneId: 'review' },
+      ),
+      { blockedBy: [{ id: 'F9' }], waitingOnOwner: [{ sessionId: 'child', id: 'A9' }] },
+    );
+    const dropped = view(
+      childCard([{ at: EARLIER, actor: ferret('child'), type: 'dropped', reason: 'superseded' }], {
+        id: 'F3',
+        dropped: { reason: 'superseded', at: EARLIER },
+      }),
+    );
+    const fresh = view(childCard([moved('todo', 'implement')], { id: 'F4', createdAt: NOW }));
+
+    // Act
+    const plan = planSweep(
+      { ...sawChild(), seen: { ...sawChild().seen, F3: { blockedBy: [] } } },
+      board(leadCard, child, dropped, fresh),
+      everyone,
+      NOW,
+    );
+
+    // Assert
+    should(plan.nudges).eql([]);
+    should(plan.memory.seen).eql({ F1: { blockedBy: [] }, F2: { blockedBy: ['/F9'] }, F4: { blockedBy: [] } });
+  });
+});
+
+describe('the sweep plan: a go-ahead once the last blocker ships', () => {
+  const blockedChild = () =>
+    view(
       childCard([], {
         dependsOn: [
           { task: { id: 'F9' }, until: 'shipped' },
@@ -426,86 +281,41 @@ describe('the sweep plan: quiet events', () => {
         ],
       }),
     );
-    const blockers = [
-      view({ id: 'F9', laneId: 'merged' }),
-      view({ id: 'F8', laneId: 'released' }, { shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: EARLIER } }),
-      view({ id: 'F4', laneId: 'implement' }),
-      view({ id: 'F3', projectId: '33333333-3333-4333-8333-333333333333' }),
-    ];
-    const memory = sawChild({ blockedBy: ['/F9', '/F8', 'mac/F7', '/F6', '/F5', '/F4', '/F3'] });
+  const blockers = [
+    view({ id: 'F9', laneId: 'merged' }),
+    view({ id: 'F8', laneId: 'released' }, { shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: EARLIER } }),
+    view({ id: 'F4', laneId: 'implement' }),
+    view({ id: 'F3', projectId: '33333333-3333-4333-8333-333333333333' }),
+  ];
+  const wasBlocked = sawChild({ blockedBy: ['/F9', '/F8', 'mac/F7', '/F6', '/F5', '/F4', '/F3'] });
 
+  it("should tell only the dependent card's assignee it can go ahead, naming what shipped", () => {
     // Act
-    const texts = quietTexts(memory, board(leadCard, child, ...blockers));
+    const plan = planSweep(wasBlocked, board(leadCard, blockedChild(), ...blockers), everyone, NOW);
 
     // Assert
-    should(texts).eql([
-      'lead: &F2 unblocked: &F9 merged, &F8 released [F2:deps]',
-      'child: &F2 unblocked: &F9 merged, &F8 released [F2:unblocked]',
+    should(plan.nudges).eql([
+      { kind: 'unblocked', taskId: 'F2', sessionId: 'child', message: '&F2 can go ahead: &F9 merged, &F8 released.' },
     ]);
   });
 
-  it('should tell only the lead when the blockers left without shipping', () => {
+  it('should tell nobody when the blockers left without shipping, the assignee is gone, or nothing changed', () => {
     // Arrange
-    const child = view(childCard([], { dependsOn: [] }));
+    const unshipped = view(childCard([], { dependsOn: [] }));
+    const stillBlocked = view(childCard([]), { blockedBy: [{ id: 'F9' }] });
+    const swept = board(leadCard, blockedChild(), ...blockers);
 
     // Assert
-    should(quietTexts(sawChild({ blockedBy: ['/F9'] }), board(leadCard, child))).eql(['lead: &F2 unblocked [F2:deps]']);
-  });
-
-  it('should tell nobody about a top-level card, and nobody the roster does not hold', () => {
-    // Arrange
-    const top = view(
-      childCard([{ at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' }], { parent: null }),
-    );
-    const child = view(childCard([{ at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' }]));
-
-    // Assert
-    should(quietTexts(sawChild(), board(leadCard, top))).eql([]);
-    should(quietTexts(sawChild(), board(leadCard, child), rosterOf([liveSession('child')]))).eql([]);
-  });
-});
-
-describe('the lead of a card', () => {
-  it("should be the parent's ferret, the card's owner when the parent is elsewhere, and never the card's own ferret", () => {
-    // Arrange
-    const byId = new Map([
-      ['F1', view({ id: 'F1', assignee: 'boss' })],
-      ['F5', view({ id: 'F5', assignee: 'child' })],
-    ]);
-
-    // Assert
-    should(leadOf(view({ id: 'F2', parent: { id: 'F1' }, assignee: 'child' }), byId)).equal('boss');
-    should(leadOf(view({ id: 'F2', parent: { id: 'F1', machineId: MACHINE }, assignee: 'child' }), byId)).equal('boss');
-    should(leadOf(view({ id: 'F2', parent: { id: 'F1', machineId: 'mac' }, assignee: 'child' }), byId)).equal('lead');
-    should(leadOf(view({ id: 'F2', parent: { id: 'F404' }, assignee: 'child' }), byId)).equal('lead');
-    should(leadOf(view({ id: 'F2', parent: { id: 'F5' }, assignee: 'child' }), byId)).be.null();
-    should(leadOf(view({ id: 'F2', parent: null, assignee: 'child' }), byId)).be.null();
+    should(sentTexts(sawChild({ blockedBy: ['/F9'] }), board(leadCard, unshipped))).eql([]);
+    should(sentTexts(wasBlocked, swept, rosterOf([liveSession('lead')]))).eql([]);
+    should(sentTexts(sawChild({ blockedBy: ['/F9'] }), board(leadCard, stillBlocked))).eql([]);
+    should(sentTexts(EMPTY_SWEEP_MEMORY, swept)).eql([]);
   });
 });
 
 // ---------------------------------------------------------------------------------------------------
 // The tick
 // ---------------------------------------------------------------------------------------------------
-
-class MemoryContext implements PendingContextQueue {
-  readonly held = new Map<string, readonly QuietItem[]>();
-  failAppendFor: string | undefined;
-
-  async append(sessionId: string, items: readonly QuietItem[]): Promise<void> {
-    if (sessionId === this.failAppendFor) throw new Error('disk full');
-    this.held.set(sessionId, mergeQuietItems(this.held.get(sessionId) ?? [], items));
-  }
-
-  async take(sessionId: string): Promise<readonly QuietItem[]> {
-    const items = this.held.get(sessionId) ?? [];
-    this.held.delete(sessionId);
-    return items;
-  }
-
-  async restore(sessionId: string, items: readonly QuietItem[]): Promise<void> {
-    this.held.set(sessionId, mergeQuietItems(items, this.held.get(sessionId) ?? []));
-  }
-}
 
 class MemoryStore implements SweepMemoryStore {
   written: SweepMemory[] = [];
@@ -525,14 +335,11 @@ class MemoryStore implements SweepMemoryStore {
 const tickWorld = (swept: SweepBoard, memory: SweepMemory, failing: ReadonlySet<string> = new Set()) => {
   const sent: { sessionId: string; message: string }[] = [];
   const warnings: string[] = [];
-  const context = new MemoryContext();
   const store = new MemoryStore(memory);
   const ports: BoardSweepPorts = {
     board: { sweepBoard: async () => swept },
     sessions: new FakeSessions(everyone),
     memory: store,
-    quiet: context,
-    context,
     nudges: {
       send: async (sessionId, message) => {
         if (failing.has(sessionId)) throw new Error('composer busy');
@@ -542,67 +349,60 @@ const tickWorld = (swept: SweepBoard, memory: SweepMemory, failing: ReadonlySet<
     clock: { now: () => NOW },
     diagnostics: { warn: message => warnings.push(message) },
   };
-  return { sweep: new BoardSweep(ports), sent, warnings, context, store };
+  return { sweep: new BoardSweep(ports), sent, warnings, store };
 };
 
 describe('the board sweep tick', () => {
   const stale = (id: string, assignee: string) =>
     view({ id, assignee, laneId: 'implement' }, { activity: 'stale', lastTouchedAt: ago(3 * HOUR) });
+  const unblocked = () =>
+    view(childCard([], { dependsOn: [{ task: { id: 'F9' }, until: 'shipped' }] }), { blockedBy: [] });
 
-  it("should queue quiet events, nudge with the recipient's pending context on top, and remember the nudge", async () => {
+  it('should send each nudge as it is, the go-ahead too, and remember the stale nudge', async () => {
     // Arrange
     const child = view(
-      childCard([
-        {
-          at: EARLIER,
-          actor: ferret('child'),
-          type: 'moved',
-          from: 'implement',
-          to: 'review',
-          backward: false,
-          reason: null,
-        },
-        { at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' },
-      ]),
+      childCard([{ at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' }], {
+        dependsOn: [{ task: { id: 'F9' }, until: 'shipped' }],
+      }),
     );
-    const { sweep, sent, context, store } = tickWorld(board(leadCard, child, stale('F5', 'lead')), sawChild());
+    const { sweep, sent, store } = tickWorld(
+      board(leadCard, child, view({ id: 'F9', laneId: 'merged' }), stale('F5', 'lead')),
+      sawChild({ blockedBy: ['/F9'] }),
+    );
 
     // Act
     const report = await sweep.tick();
 
     // Assert
-    should(report).eql({ nudged: ['F5'], quiet: 2 });
+    should(report).eql({ nudged: ['F5'], unblocked: ['F2'] });
     should(sent).eql([
-      {
-        sessionId: 'lead',
-        message: `[board] &F2 → Review/CI · &F2 blocked: vendor\n\n${nudgeMessage({ id: 'F5' }, 3 * HOUR, 'Implement')}`,
-      },
+      { sessionId: 'child', message: '&F2 can go ahead: &F9 merged.' },
+      { sessionId: 'lead', message: nudgeMessage({ id: 'F5' }, 3 * HOUR, 'Implement') },
     ]);
-    should(context.held.has('lead')).be.false();
     should(store.current.nudged).eql({ F5: NOW });
+    should(store.current.seen.F2).eql({ blockedBy: [] });
     should(store.current.sweptAt).equal(NOW);
   });
 
-  it('should report what it could not do and carry on, keeping an unsent nudge unremembered', async () => {
+  it('should report what it could not send and carry on, so an unsent nudge or go-ahead is tried again', async () => {
     // Arrange
-    const child = view(childCard([{ at: EARLIER, actor: ferret('child'), type: 'blocked', reason: 'vendor' }]));
     const world = tickWorld(
-      board(leadCard, child, stale('F5', 'other'), stale('F6', 'child')),
-      sawChild(),
-      new Set(['other']),
+      board(leadCard, unblocked(), view({ id: 'F9', laneId: 'merged' }), stale('F5', 'other'), stale('F6', 'lead')),
+      sawChild({ blockedBy: ['/F9'] }),
+      new Set(['other', 'child']),
     );
-    world.context.failAppendFor = 'lead';
 
     // Act
     const report = await world.sweep.tick();
 
     // Assert
-    should(report).eql({ nudged: ['F6'], quiet: 0 });
+    should(report).eql({ nudged: ['F6'], unblocked: [] });
     should(world.warnings).eql([
-      'could not queue board events for lead: disk full',
+      'could not nudge child about &F2: composer busy',
       'could not nudge other about &F5: composer busy',
     ]);
     should(world.store.current.nudged).eql({ F6: NOW });
+    should(world.store.current.seen.F2).eql({ blockedBy: ['/F9'] });
   });
 
   it('should do nothing in a tick that overlaps a running one', async () => {
@@ -626,8 +426,8 @@ describe('the board sweep tick', () => {
     const third = await world.sweep.tick();
 
     // Assert
-    should(second).eql({ nudged: [], quiet: 0 });
-    should(third).eql({ nudged: [], quiet: 0 });
+    should(second).eql({ nudged: [], unblocked: [] });
+    should(third).eql({ nudged: [], unblocked: [] });
     should(world.store.written).have.length(2);
   });
 });

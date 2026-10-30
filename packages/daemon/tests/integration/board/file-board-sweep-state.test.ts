@@ -1,17 +1,15 @@
 import { afterEach, describe, it } from 'bun:test';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import should from 'should';
-import { FilePendingContext, FileSweepMemory } from '../../../src/adapters/board/file-board-sweep-state.ts';
+import { FileSweepMemory } from '../../../src/adapters/board/file-board-sweep-state.ts';
 import { StateFileSystem } from '../../../src/adapters/filesystem/state-file-system.ts';
-import { KeyedSerialExecutor } from '../../../src/adapters/index.ts';
-import { EMPTY_SWEEP_MEMORY, type QuietItem, type SweepMemory } from '../../../src/lib/board/index.ts';
+import { EMPTY_SWEEP_MEMORY, type SweepMemory } from '../../../src/lib/board/index.ts';
 import { createFoundationPaths, resolveStateHome } from '../../../src/lib/index.ts';
 
 /**
- * The board sweep's two small state files over a real state home: its memory (`board/sweep.json`) and
- * each ferret's pending context (`board/pending/<session>.json`). Temp `FY_HOME`; no daemon.
+ * The board sweep's memory (`board/sweep.json`) over a real state home. Temp `FY_HOME`; no daemon.
  */
 
 const homes = new Set<string>();
@@ -29,7 +27,6 @@ async function fixture() {
     directory,
     warnings,
     memory: () => new FileSweepMemory(directory, files, diagnostics),
-    context: () => new FilePendingContext(directory, files, new KeyedSerialExecutor(), diagnostics),
   };
 }
 
@@ -37,8 +34,6 @@ async function plant(path: string, text: string): Promise<void> {
   await mkdir(join(path, '..'), { recursive: true });
   await writeFile(path, text);
 }
-
-const item = (key: string, text = key): QuietItem => ({ key, text, at: NOW });
 
 afterEach(async () => {
   for (const home of homes) await rm(home, { recursive: true, force: true });
@@ -53,7 +48,7 @@ describe('the board sweep memory file', () => {
       v: 1,
       sweptAt: NOW,
       nudged: { F1: NOW },
-      seen: { F1: { seq: 3, blockedBy: ['/F9'], waiting: ['lead/A9'] } },
+      seen: { F1: { blockedBy: ['/F9'] } },
     };
 
     // Act
@@ -81,71 +76,23 @@ describe('the board sweep memory file', () => {
     should(wrongShape).eql(EMPTY_SWEEP_MEMORY);
     should(warnings).have.length(2);
   });
-});
 
-describe('the pending context files', () => {
-  it('should append, coalesce, take everything and keep it across a restart', async () => {
+  it('should read a memory written when the sweep also kept history positions and asks, keeping the blockers', async () => {
     // Arrange
-    const { context } = await fixture();
-    await context().append('lead', [item('F1:lane', 'old'), item('F2:lane')]);
-    await context().append('lead', [item('F1:lane', 'new')]);
-
-    // Act
-    const taken = await context().take('lead');
-    const again = await context().take('lead');
-
-    // Assert
-    should(taken.map(each => each.text)).eql(['F2:lane', 'new']);
-    should(again).eql([]);
-  });
-
-  it('should restore what a failed send took ahead of what came since', async () => {
-    // Arrange
-    const { context } = await fixture();
-    const queue = context();
-    await queue.append('lead', [item('F1:lane')]);
-    const taken = await queue.take('lead');
-    await queue.append('lead', [item('F2:lane')]);
-
-    // Act
-    await queue.restore('lead', taken);
-
-    // Assert
-    should((await queue.take('lead')).map(each => each.key)).eql(['F1:lane', 'F2:lane']);
-  });
-
-  it('should keep one file per session, write nothing for nothing, and ignore an id that is not a session', async () => {
-    // Arrange
-    const { directory, context } = await fixture();
-    const queue = context();
-
-    // Act
-    await queue.take('lead');
-    await queue.append('child', [item('F2:lane')]);
-    await queue.append('../escape', [item('F3:lane')]);
-    const stranger = await queue.take('../escape');
-
-    // Assert
-    should(await readFile(join(directory, 'pending', 'lead.json'), 'utf8').catch(() => 'missing')).equal('missing');
-    should(JSON.parse(await readFile(join(directory, 'pending', 'child.json'), 'utf8'))).eql({
+    const { directory, memory, warnings } = await fixture();
+    const older = {
       v: 1,
-      items: [item('F2:lane')],
-    });
-    should(stranger).eql([]);
-  });
-
-  it('should drop a damaged file, say so, and keep working', async () => {
-    // Arrange
-    const { directory, context, warnings } = await fixture();
-    await plant(join(directory, 'pending', 'lead.json'), 'garbage');
+      sweptAt: NOW,
+      nudged: {},
+      seen: { F1: { seq: 3, blockedBy: ['/F9'], waiting: ['lead/A9'] } },
+    };
+    await plant(join(directory, 'sweep.json'), JSON.stringify(older));
 
     // Act
-    const taken = await context().take('lead');
-    await context().append('lead', [item('F1:lane')]);
+    const read = await memory().read();
 
     // Assert
-    should(taken).eql([]);
-    should(warnings).eql(["the board's pending context for lead is damaged; dropping it"]);
-    should((await context().take('lead')).map(each => each.key)).eql(['F1:lane']);
+    should(read).eql({ v: 1, sweptAt: NOW, nudged: {}, seen: { F1: { blockedBy: ['/F9'] } } });
+    should(warnings).eql([]);
   });
 });
