@@ -47,6 +47,15 @@ export const doneLabel = (done: BoardDone, spelledOut = false): string =>
 export const doneTitle = (done: BoardDone, cardTitle: string): string =>
   done.kind === 'reopen' ? `Reopen ${cardTitle}: send it back, with a reason` : `Mark ${cardTitle} done and close it`;
 
-/** Whether this lane is where released work waits to be tried: the last of the set's shipped lanes (Merged is earlier). */
-export const isReleaseLane = (laneSet: DoneLanes | null, laneId: string): boolean =>
-  laneSet?.lanes.filter(lane => lane.category === 'shipped').at(-1)?.id === laneId;
+/**
+ * Whether this lane is where released work waits to be tried: the open lane a release enters
+ * (`release.published`: Released · to test, or a classic Released), else the last of the set's shipped lanes
+ * (Merged is earlier).
+ */
+export const isReleaseLane = (laneSet: DoneLanes | null, laneId: string): boolean => {
+  const lanes = laneSet?.lanes ?? [];
+  const release =
+    lanes.find(lane => lane.category !== 'closed' && lane.enterOn?.includes('release.published') === true) ??
+    lanes.filter(lane => lane.category === 'shipped').at(-1);
+  return release !== undefined && release.id === laneId;
+};

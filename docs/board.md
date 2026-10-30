@@ -104,6 +104,32 @@ it; moving an open card into Closed stays the owner's.
 `fy board lanes show|propose|edit --project <name|id>` and `fy board --project <name|id|all>` name a board by its
 name or id, wherever the flag is written on the line.
 
+## The lane design rule
+
+**Lanes are about what the owner must DO, plus just enough progress to show work moves.** The owner, verbatim
+(2026-10-30):
+
+> remember the lane design is always about ACTION -- when user need to have action and INFORMATION -- its good for
+> the user to feel like there is SOME progress, but action is more important. for example, in-progress tells the
+> user its being worked on. merge/release tbh doesnt matter THAT much, but release tells user it can be tested. and
+> closed keeps the board lean.
+
+So every template, every proposal and every lane a ferret adds follows it:
+
+- **A lane for each thing the owner does.** Approve a plan (Plan/Design), test a release (Released · to test).
+  These are `emphasis: action` lanes, and the Board draws them prominent.
+- **One lane that says work is moving.** In progress. Review and CI fold into it: they are the ferret's to finish,
+  not the owner's to act on. A separate review lane is only for a project where the OWNER reviews (the `writing`
+  template's Review). These are `emphasis: progress` lanes, drawn as ordinary lanes.
+- **Information only where it costs nothing.** Merged is kept as a compact, de-emphasised lane (`emphasis: info`).
+  A release is what the owner can test, so released IS "to test": one lane, never two.
+- **Closed keeps the board lean.** It is hidden from the Kanban (`emphasis: info`), and only the owner's Done
+  enters it.
+- **No lane the workflow does not need.** A ferret proposing lanes starts from a template and renames; it does not
+  add lanes.
+
+This section is the one owner of the rule; templates and the lane editor implement it.
+
 ## Lanes and categories
 
 A project's lane set is a list of lanes plus, per workflow, which of them a card walks. A lane is a name the owner
@@ -120,26 +146,48 @@ can change; its **category** is one of six fixed values that the rest of the sys
 
 Each lane has an `id`, a `name`, a `category`, and optionally:
 
-| Field        | Meaning                                                                                                                                                 |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `enterOn`    | triggers that move a card here: `work.started`, `pr.opened`, `pr.ready`, `ci.green`, `pr.merged`, `release.published`, `release.running`, `signal.done` |
-| `ownerGate`  | only the owner moves a card into this lane (`owner-gate` for a ferret)                                                                                  |
-| `staleAfter` | how long a card may sit untouched here before it counts as stale                                                                                        |
+| Field        | Meaning                                                                                                                                                                                                                                                                                                                                                     |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `enterOn`    | triggers that move a card here: `work.started`, `pr.opened`, `pr.ready`, `ci.green`, `pr.merged`, `release.published`, `release.running`, `signal.done`                                                                                                                                                                                                     |
+| `ownerGate`  | only the owner moves a card into this lane (`owner-gate` for a ferret)                                                                                                                                                                                                                                                                                      |
+| `staleAfter` | how long a card may sit untouched here before it counts as stale                                                                                                                                                                                                                                                                                            |
+| `emphasis`   | how the Board draws it: `action` (the owner acts here: prominent), `progress` (work moving: ordinary) or `info` (information only: compact). Absent, it follows the category: `verify` and an owner-gated lane are `action`, `shipped` and `closed` are `info`, the rest `progress`. A `verify` lane is always `action` and the `closed` lane always `info` |
+
+A lane set also names the two lanes the owner's verdicts send a card to: **`doneLane`**, where Done (or Works)
+moves it, which is the set's `closed` lane, and **`notGoodLane`**, where Not good sends it back, which is an
+`active` lane where work resumes (In progress, Fix, Draft, Doing; a backlog lane only in a set with no active lane).
+Templates declare both, the Kanban, the Table and the card detail all read them, and a set stored before they
+existed reads with them derived: the closed lane, and the last active lane. An edit that names neither keeps the
+set's own while those lanes are still there, so an app that predates them never resets them.
 
 **Templates.** A ferret proposes a lane set from a template, then renames lanes if the project calls for it
-(`packages/protocol/src/lib/board-lanes.ts`):
+(`packages/protocol/src/lib/board-lanes.ts`). Each is built by [the lane design rule](#the-lane-design-rule):
 
-| Template            | Lanes                                                                      |
-| ------------------- | -------------------------------------------------------------------------- |
-| `pr-release-verify` | Todo, Plan/Design, Implement, Review/CI, Merged, Released, To test, Closed |
-| `pr-release`        | as above without To test; Released closes                                  |
-| `pr`                | Todo, Plan/Design, Implement, Review/CI; Merged closes                     |
-| `ops`               | Todo, Investigate, Fix, Verify, Closed                                     |
-| `writing`           | Todo, Research, Draft, Review, Published, Closed                           |
-| `quick`             | Todo, Doing, Closed; closes when the ferret signals done                   |
+| Template            | Lanes                                                              | Done → / Not good →    |
+| ------------------- | ------------------------------------------------------------------ | ---------------------- |
+| `pr-release-verify` | Todo, Plan/Design, In progress, Merged, Released · to test, Closed | Closed / In progress   |
+| `pr-release`        | Todo, Plan/Design, In progress, Merged; Released closes            | Released / In progress |
+| `pr`                | Todo, Plan/Design, In progress; Merged closes                      | Merged / In progress   |
+| `ops`               | Todo, Investigate, Fix, Verify, Closed                             | Closed / Fix           |
+| `writing`           | Todo, Research, Draft, Review, Published, Closed                   | Closed / Draft         |
+| `quick`             | Todo, Doing, Closed; closes when the ferret signals done           | Closed / Doing         |
+
+In the PR templates In progress keeps its old id `implement` and is entered on `work.started`, `pr.opened` and
+`pr.ready`; Released · to test (id `released`, category `verify`, owner-gated) is entered on `release.published`,
+and the owner's Done moves it on. A card that signals done with no PR goes to Released · to test for the owner to
+check. No shipped template uses `release.running`; it stays a trigger for a hand-made set.
 
 A card's **workflow** (`quick`, `design-first`, `research-first`, `investigate`) selects its variant of the lane
-set and cannot change after creation. In the PR templates `quick` work skips Plan/Design.
+set and cannot change after creation. In the PR templates only `design-first` and `research-first` work walks
+Plan/Design.
+
+**Released and To test became one lane.** Boards stored before board v3 had a `shipped` Released lane and a
+`verify` To test lane after it, entered when this machine ran the release. At every boot the daemon folds any set
+that still has that pair into one Released · to test lane (`mergeReleaseLanes`): the Released lane's id and place,
+category `verify`, entered on release, gated as To test was. The cards of both end up in it, each moved card's
+history says "Released and To test are one lane now: Released · to test", the set's version rises, its confirmation
+stands, and the owner is asked nothing. It is idempotent. Nothing else on an existing board changes: Review/CI
+stays a lane there until the owner edits it out.
 
 A proposal is live at once but unconfirmed. The owner gets one agenda choice, Accept or Edit
 ([agenda.md](agenda.md)); accepting confirms the set. Edits are version-checked (a stale edit is a
@@ -184,9 +232,33 @@ The view adds fields that are never stored:
 | `waitingOnOwner`, `openAsks` | open agenda items against the card, blocking or all               |
 | `blockedBy`, `blocks`        | dependencies not yet done; the cards that depend on this one      |
 | `shippedIn`                  | the earliest release a merged PR of the card shipped in           |
+| `origin`                     | `human` (the owner asked for it) or `agent`; see below            |
+| `humanParent`                | the nearest ancestor card whose origin is `human`, or none        |
 
 A card is referenced as `&F412`, an agenda item as `!A48`. The retired `#F12` is still accepted as input, and
 never printed ([reference-standard.md](reference-standard.md)).
+
+## Human and agent cards
+
+The Board shows what the OWNER asked for by default, and folds the rest away behind "Show agent tasks", each agent
+card under its `humanParent` where it has one. `origin` is derived at read time by one pure rule, `cardOrigin` in
+`packages/daemon/src/lib/board/origin.ts`, and never stored. A card is **human** when:
+
+1. the owner made it (the Board page, a paired device, the admin CLI);
+2. its ask's source names the owner (`owner`, "owner via lead jaeda", "the owner (fy task reopen)"), whoever wrote
+   it down; or
+3. a ferret recorded it from a session the owner started: the source's `session:<id>`, else the recording ferret
+   itself. Only the owner talks in such a session.
+
+Everything else is **agent**: the card of a sub-ferret a lead started (`fy new`, or `fy start` from a ferret,
+whose ask is `session:<lead>`), the daemon's own cards (the board import's untriaged asks), and a card a
+sub-ferret recorded from its own brief. Whether a session was started by a ferret is its `config.parent`, read once
+per session per board read; a session this daemon cannot read counts as the owner's, so a card is never hidden on
+a guess.
+
+The rule cannot tell a top-level ferret's own idea from the owner's words in that ferret's chat; both read as
+human, which errs toward showing the owner a card. Both fields are optional on the wire: a daemon older than the
+split sends neither, and the app then shows every card and no toggle.
 
 ## Authority
 
@@ -232,13 +304,15 @@ baseline, not news.
 ## Lanes follow PR facts
 
 A card never sits behind its own PR. `laneFromFacts` (`packages/daemon/src/lib/board/lane-facts.ts`) is the one
-owner of where PR facts put a card: all PRs merged and released is the `release.published` lane (`release.running`
-once this machine runs that release), any merged with none open is `pr.merged`, any open is `pr.opened` /
-`pr.ready`, and otherwise no opinion. It never moves a card backward, with one exception: any open PR, draft or
-not and however old, on a card that has shipped something pulls it back to Review/CI ("moved back to Review/CI: PR
-#1013 ready for review"), because work still in flight means the card is not shipped. A PR closed unmerged says
-nothing. Nor does a fact move a card out of Closed or a drop, or into a Closed lane in a set with a To test lane. A
-fact passes an owner gate (out of Plan/Design, and back out of To test); gates still stop ferrets.
+owner of where PR facts put a card: all PRs merged and released is the `release.published` lane (Released · to
+test; in a hand-made set that still has a `release.running` lane, that one once this machine runs the release), any
+merged with none open is `pr.merged`, any open is `pr.opened` / `pr.ready`, and otherwise no opinion. It never moves
+a card backward, with one exception: any open PR, draft or not and however old, on a card that has shipped
+something pulls it back to where `pr.ready` goes (In progress, or Review/CI on an older board: "moved back to In
+progress: PR #1013 ready for review"), because work still in flight means the card is not shipped. A PR closed
+unmerged says nothing. Nor does a fact move a card out of Closed or a drop, or into a Closed lane in a set with a
+`verify` lane. A fact passes an owner gate (out of Plan/Design, and back out of Released · to test); gates still
+stop ferrets.
 The GitHub watcher reconciles every linked card on every poll, refile and `fy task link --pr` re-evaluate at once, and a
 PR nobody has asked GitHub about is polled on the next tick. A card the owner sent back stays back until a PR newer
 than that move merges. History names the fact; no move is ever typed into a chat

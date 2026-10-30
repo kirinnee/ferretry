@@ -89,6 +89,15 @@ describe('renaming and fields', () => {
     expect(bare).toEqual({ id: 'merged', name: 'Merged', category: 'review' });
   });
 
+  it('lets a lane’s emphasis follow its new category, so a changed lane is never refused for it', () => {
+    const emphatic = {
+      ...start(),
+      lanes: start().lanes.map(lane => (lane.id === 'merged' ? { ...lane, emphasis: 'info' as const } : lane)),
+    };
+    const draft = setLaneCategory(emphatic, 'merged', 'verify');
+    expect(draft.lanes.find(lane => lane.id === 'merged')?.emphasis).toBeUndefined();
+  });
+
   it('counts a change undone as no change, whatever order the fields were put back in', () => {
     let draft = setLaneStaleAfter(start(), 'merged', '9d');
     draft = setLaneStaleAfter(draft, 'merged', '3d');

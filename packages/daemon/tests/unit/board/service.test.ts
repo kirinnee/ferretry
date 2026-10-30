@@ -1502,6 +1502,23 @@ describe('the reopen message and actors', () => {
 });
 
 describe("relocating a removed lane's cards", () => {
+  it('should record the reason it is given instead, for a move that is not a removal', async () => {
+    // Arrange
+    const { ports, service } = serviceWith([card({ id: 'F1', laneId: 'tested' })]);
+
+    // Act
+    await service.relocate(PROJECT, { tested: 'released' }, 'Released and To test are one lane now');
+
+    // Assert
+    should(stored(ports, 'F1').laneId).equal('released');
+    should(lastEvent(ports, 'F1')).match({
+      type: 'moved',
+      from: 'tested',
+      to: 'released',
+      reason: 'Released and To test are one lane now',
+    });
+  });
+
   it('should move each card of a removed lane on that board once, and say why', async () => {
     // Arrange
     const { ports, service } = serviceWith([

@@ -78,7 +78,7 @@ export interface GitHubWatcherPorts {
   readonly timers: WatcherTimers;
   readonly clock: WatcherClock;
   readonly diagnostics: BoardDiagnostics;
-  /** This daemon's own version: a card enters its `release.running` lane once this runs its release. */
+  /** This daemon's own version, for a set that still has a `release.running` lane (no shipped template does). */
   readonly version: string;
 }
 

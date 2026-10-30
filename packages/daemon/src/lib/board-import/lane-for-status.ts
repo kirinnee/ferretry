@@ -47,7 +47,8 @@ const last = (lanes: readonly Lane[], category: Lane['category']): Lane | undefi
  * - `researched`, `designed` → the first active lane (Plan/Design).
  * - `in_progress` → the last active lane (Implement: the one after Plan, or the only one).
  * - `built` → the first review lane when a PR is linked, else where `in_progress` goes.
- * - `live` → the last shipped lane (Released when there is one), else the verify lane, else the closed lane.
+ * - `live` → the lane a release enters (`release.published`: Released · to test, or a classic Released), else
+ *   the last shipped lane, else the verify lane, else the closed lane.
  * - `done` and `dropped` → the closed lane and the first backlog lane; a dropped card is hidden by its drop,
  *   not by its lane.
  *
@@ -72,7 +73,12 @@ export const laneForStatus = (laneSet: LaneSet, choice: LaneChoice): Lane => {
       case 'built':
         return (choice.hasPullRequest ? first(lanes, 'review') : undefined) ?? working;
       case 'live':
-        return last(lanes, 'shipped') ?? first(lanes, 'verify') ?? closed;
+        return (
+          lanes.find(lane => lane.enterOn?.includes('release.published') === true && lane.category !== 'closed') ??
+          last(lanes, 'shipped') ??
+          first(lanes, 'verify') ??
+          closed
+        );
       case 'done':
         return closed;
     }

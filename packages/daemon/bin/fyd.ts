@@ -9036,8 +9036,8 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         new AgendaLaneAgenda({ raise: async (...parameters) => await agenda.raise(...parameters) }),
         // A lane edit that removed lanes moves their cards to the lanes it named, in the board store.
         {
-          relocate: async (projectId, moves) => {
-            await boardWorld.board.relocate(projectId, moves);
+          relocate: async (projectId, moves, reason) => {
+            await boardWorld.board.relocate(projectId, moves, reason);
           },
         },
       );
@@ -9349,6 +9349,23 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         undefined,
         agendaFilesMigrated,
       );
+      // Released and To test are one lane now: every stored set that still has both is folded into one at boot,
+      // its cards moved with it, and the owner is asked nothing. Idempotent, so every boot runs it, once the boot
+      // has settled and before the import below.
+      unrefTimer(1000, () => {
+        void laneSets
+          .mergeReleaseLanes()
+          .then(outcomes => {
+            for (const outcome of outcomes) {
+              process.stderr.write(
+                outcome.merged
+                  ? `board lanes: ${outcome.projectId} Released and To test merged (version ${String(outcome.version)})\n`
+                  : `board lanes: ${outcome.projectId} could not merge Released and To test: ${outcome.problem}\n`,
+              );
+            }
+          })
+          .catch(() => undefined);
+      });
       // The one-time import of the old per-session task files onto the project boards. It shares the board's
       // store with the board service (one id counter), proposes lanes through the lane service above, and
       // points the open agenda items at their cards. Total: a bad file is reported, never a failed start.

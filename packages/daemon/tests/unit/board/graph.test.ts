@@ -426,3 +426,70 @@ describe('the derived view', () => {
     should(gathered.asks).equal(asks);
   });
 });
+
+describe('who a card is for, in its view', () => {
+  const NO_ACTIVITY: ActivityDeriver = { derive: async () => new Map() };
+  const NO_AGENDA = { asksFor: async () => new Map() };
+  const owners = card({ id: 'F1', createdBy: { kind: 'owner' } });
+  const spawned = card({
+    id: 'F2',
+    parent: { id: 'F1' },
+    createdBy: { kind: 'daemon', sessionId: 'lead' },
+    ask: { text: 'a brief', source: 'session:lead' },
+  });
+  const childOwn = card({
+    id: 'F3',
+    parent: { id: 'F2' },
+    createdBy: { kind: 'ferret', sessionId: 'child' },
+    ask: { text: 'a follow-up', source: 'session:child' },
+  });
+  const cards = [owners, spawned, childOwn];
+
+  it('should derive the origin and the nearest human ancestor, asking each session’s lineage once', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const parents = {
+      parentOf: async (session: string) => {
+        asked.push(session);
+        return session === 'child' ? 'lead' : undefined;
+      },
+    };
+    const index = new BoardIndex(cards, MACHINE);
+
+    // Act
+    const gathered = await gatherDerivation(cards, index, laneSets, {
+      activity: NO_ACTIVITY,
+      agenda: NO_AGENDA,
+      parents,
+    });
+    const views = cards.map(subject => deriveView(subject, gathered));
+
+    // Assert
+    should(asked).deepEqual(['child']);
+    should(views.map(view => [view.id, view.origin, view.humanParent])).deepEqual([
+      ['F1', 'human', null],
+      ['F2', 'agent', { id: 'F1' }],
+      ['F3', 'agent', { id: 'F1' }],
+    ]);
+  });
+
+  it('should read every session as the owner’s with no lineage port, or when a lineage read fails', async () => {
+    // Arrange
+    const index = new BoardIndex(cards, MACHINE);
+    const failing = { parentOf: async () => Promise.reject(new Error('config unreadable')) };
+
+    // Act
+    const without = await gatherDerivation(cards, index, laneSets, { activity: NO_ACTIVITY, agenda: NO_AGENDA });
+    const broken = await gatherDerivation(cards, index, laneSets, {
+      activity: NO_ACTIVITY,
+      agenda: NO_AGENDA,
+      parents: failing,
+    });
+
+    // Assert
+    should(without.origins).be.undefined();
+    should(deriveView(childOwn, without).origin).equal('human');
+    should(deriveView(childOwn, broken).origin).equal('human');
+    should(deriveView(spawned, inputs(cards)).origin).equal('agent');
+  });
+});

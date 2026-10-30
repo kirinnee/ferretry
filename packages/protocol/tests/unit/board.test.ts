@@ -31,6 +31,7 @@ import {
   BoardTaskResponseSchema,
   BoardTaskSchema,
   type BoardTaskView,
+  BoardTaskOriginSchema,
   BoardTaskViewSchema,
   BoardTermSchema,
   BoardTermsSchema,
@@ -62,12 +63,25 @@ const SHA = 'a'.repeat(40);
 const LEAD = 'mvuc7tsf-0c3d50df';
 const CHILD = 'mvudnuly-ec442385';
 
+/** Ferretry's lanes before board v3 (Review/CI and To test as lanes of their own), which stored sets still have. */
 const LANES: LaneSet = {
   projectId: PROJECT,
   version: 1,
   confirmedBy: 'owner',
   proposedBy: LEAD,
-  ...LANE_TEMPLATES['pr-release-verify'],
+  lanes: [
+    { id: 'todo', name: 'Todo', category: 'backlog' },
+    { id: 'plan', name: 'Plan/Design', category: 'active', enterOn: ['work.started'], ownerGate: true },
+    { id: 'implement', name: 'Implement', category: 'active', enterOn: ['work.started'] },
+    { id: 'review', name: 'Review/CI', category: 'review', enterOn: ['pr.opened', 'pr.ready'] },
+    { id: 'merged', name: 'Merged', category: 'shipped', enterOn: ['pr.merged'] },
+    { id: 'released', name: 'Released', category: 'shipped', enterOn: ['release.published'] },
+    { id: 'tested', name: 'To test', category: 'verify', enterOn: ['release.running'], ownerGate: true },
+    { id: 'closed', name: 'Closed', category: 'closed', ownerGate: true },
+  ],
+  variants: {},
+  doneLane: 'closed',
+  notGoodLane: 'implement',
 };
 
 const FERRET = { kind: 'ferret', sessionId: CHILD } as const;
@@ -248,6 +262,17 @@ const VALID: readonly SchemaCase[] = [
   { name: 'activity', schema: BoardTaskActivitySchema, value: 'orphaned' },
   { name: 'rollup', schema: RollupSchema, value: ROLLUP },
   { name: 'view', schema: BoardTaskViewSchema, value: VIEW },
+  {
+    name: 'view with its origin',
+    schema: BoardTaskViewSchema,
+    value: { ...VIEW, origin: 'agent', humanParent: { id: 'F12' } },
+  },
+  {
+    name: 'human view with no human parent',
+    schema: BoardTaskViewSchema,
+    value: { ...VIEW, origin: 'human', humanParent: null },
+  },
+  { name: 'origin', schema: BoardTaskOriginSchema, value: 'human' },
   { name: 'pr filter', schema: BoardPrStateFilterSchema, value: 'ci_red' },
   { name: 'activity filter', schema: BoardActivityFilterSchema, value: 'to_test' },
   { name: 'state filter', schema: BoardStateFilterSchema, value: 'dropped' },
@@ -396,6 +421,8 @@ const INVALID: readonly SchemaCase[] = [
     value: { ...VIEW, openAsks: [{ sessionId: CHILD, id: 'A9' }] },
   },
   { name: 'view of an incoherent card', schema: BoardTaskViewSchema, value: { ...VIEW, kind: 'bug' } },
+  { name: 'unknown origin', schema: BoardTaskOriginSchema, value: 'warden' },
+  { name: 'view with a malformed human parent', schema: BoardTaskViewSchema, value: { ...VIEW, humanParent: 'F12' } },
   { name: 'unknown pr filter', schema: BoardPrStateFilterSchema, value: 'closed' },
   { name: 'stray query field', schema: BoardQuerySchema, value: { lane: 'todo' } },
   { name: 'page too big', schema: BoardQuerySchema, value: { limit: 501 } },
@@ -692,7 +719,7 @@ describe('board mutations', () => {
 
     // Act + Assert
     should(edit({ plan: 'implement' }).success).be.true();
-    should(edit({ implement: 'review' }).error?.issues.map(issue => issue.message)).deepEqual([
+    should(edit({ implement: 'merged' }).error?.issues.map(issue => issue.message)).deepEqual([
       'lane implement is kept, so it has no relocation',
     ]);
     should(edit({ plan: 'ghost' }).error?.issues.map(issue => issue.message)).deepEqual([
