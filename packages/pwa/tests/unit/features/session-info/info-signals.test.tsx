@@ -1,5 +1,5 @@
 /**
- * Info › Signals: the same attention board as the Folder rail (unchanged), plus the Warden's verdicts
+ * Info › Signals: the same agenda board as the Folder rail (unchanged), plus the Warden's verdicts
  * narrowed to this one ferret, newest first.
  */
 

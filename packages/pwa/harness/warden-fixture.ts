@@ -11,7 +11,7 @@ import {
   DEFAULT_WARDEN_CONFIG,
   SPEEDUPS_PATH,
   type SpeedupsView,
-  type WardenAttentionView,
+  type WardenAgendaView,
   type WardenConfigView,
   type WardenDayStats,
   type WardenJevBefore,
@@ -598,7 +598,7 @@ export const WARDEN_FIXTURE_STATUS: WardenStatusView = {
   ),
 };
 
-export const WARDEN_FIXTURE_ATTENTION: WardenAttentionView = {
+export const WARDEN_FIXTURE_AGENDA: WardenAgendaView = {
   generatedAt: at(1),
   lastSweepAt: at(1),
   outcome: 'items',

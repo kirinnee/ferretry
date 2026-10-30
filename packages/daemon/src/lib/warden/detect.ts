@@ -88,7 +88,7 @@ export function anomalySubject(
  * Outcome-first, short human name for each anomaly class.
  *
  * ONE OWNER. The fleet attention projection titles a synthetic row with it and
- * the escalation titles the durable Attention item with it; two spellings of
+ * the escalation titles the durable Agenda item with it; two spellings of
  * "what this class is called" would let the same fault reach a human under two
  * different names. Declared as a total record over the kind union, so adding a
  * kind without naming it is a compile error rather than an empty heading.

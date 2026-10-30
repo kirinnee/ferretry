@@ -60,7 +60,7 @@ retain packages/pwa/src/shell/side-pane-tab-model.ts:instanceCloseListeners # in
 
 invalidate DaemonSessionCache # the keyed-cache PRIMITIVE, not a cache. Stores are built out of it and are registered themselves; registering the class would be registering the concept.
 invalidate DaemonUsageIndex # owned by DaemonUsageStore, which IS registered and forwards clearDaemon to it (lib/usage-store.ts:226).
-invalidate DaemonAttentionStore # owned by DaemonAttentionClient, which forwards clearDaemon to it (lib/attention-client.ts:188).
+invalidate DaemonAgendaStore # owned by DaemonAgendaClient, which forwards clearDaemon to it (lib/agenda-client.ts:188).
 invalidate DaemonPinStore # owned by DaemonPinClient, which forwards clearDaemon to it (lib/pin-client.ts:165).
 invalidate DaemonNotificationLedger # cleared by its own watcher: startNotificationWatch diffs the daemon set each tick and calls clearDaemon for every daemon that left the snapshot (lib/notification-ledger.ts:278). It is in-memory only and never outlives the watch.
 invalidate DaemonAttachmentBlobCache # a per-mount useRef in attachment-gallery.tsx, disposed with the component. Every entry carries its own daemonId and clearDaemon filters on it, so no cross-daemon read is reachable; the registry cannot hold a cache that is created per mount.

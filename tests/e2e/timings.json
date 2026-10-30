@@ -1,7 +1,7 @@
 {
-  "tests/e2e/attention-lifecycle.e2e.test.ts": {
+  "tests/e2e/agenda-lifecycle.e2e.test.ts": {
     "attention lifecycle against a real fyd (E2E) > dismisses a multiple-choice item and keeps it in the audit with its note": 3.2,
-    "attention lifecycle against a real fyd (E2E) > raises, lists, answers, and audits an attention item through the live session registry": 3.6
+    "attention lifecycle against a real fyd (E2E) > raises, lists, answers, and audits an agenda item through the live session registry": 3.6
   },
   "tests/e2e/browser-cors-preflight.e2e.test.ts": {
     "a real browser at another origin, and a compiled daemon > should let a cross-origin page send the request-id header and refuse a lookalike": 1.3
@@ -15,7 +15,7 @@
     "command group journeys > should emit machine-readable output under --json": 0.4,
     "command group journeys > should list a pin board through the shipped binary": 0.5,
     "command group journeys > should push a notification through the shipped binary": 0.4,
-    "command group journeys > should raise and answer an attention item through the shipped binary": 0.7,
+    "command group journeys > should raise and answer an agenda item through the shipped binary": 0.7,
     "command group journeys > should refuse to run without a daemon token instead of guessing one": 0.4,
     "command group journeys > should remove a pin named by the short id the listing printed": 0.4,
     "command group journeys > should render an analytics table through the shipped binary": 0.5,

@@ -10,7 +10,7 @@ describe('sessionReferenceHost', () => {
 
     host.onTaskOpen?.('F12');
     host.onCodeReferenceOpen?.({ path: 'src/app.ts', line: 4 });
-    host.onAttentionOpen?.('A3');
+    host.onAgendaOpen?.('A3');
 
     expect(destinations).toEqual([
       '/d/daemon-a/session/same-session',

@@ -14,10 +14,10 @@
 
 import {
   DAEMON_FEATURES,
-  type SessionAttentionSummary,
+  type SessionAgendaSummary,
   type SessionState,
   WARDEN_AGENDA_PATH,
-  WARDEN_ATTENTION_PATH,
+  LEGACY_WARDEN_ATTENTION_PATH,
 } from '@ferretry/protocol';
 import type { DaemonId } from './daemon-connection.ts';
 import { type DaemonHealthRead, machineOffers } from './daemon-health.ts';
@@ -85,7 +85,7 @@ export const sessionAgendaRepliesPath = (sessionId: string, wire: AgendaWire): s
 
 /** `GET` the fleet's "who needs you" view. */
 export const wardenAgendaPath = (wire: AgendaWire): string =>
-  wire === 'agenda' ? WARDEN_AGENDA_PATH : WARDEN_ATTENTION_PATH;
+  wire === 'agenda' ? WARDEN_AGENDA_PATH : LEGACY_WARDEN_ATTENTION_PATH;
 
 /**
  * The session's open-items summary: the daemon writes `agenda` beside `attention`, an older daemon only
@@ -93,4 +93,4 @@ export const wardenAgendaPath = (wire: AgendaWire): string =>
  */
 export const sessionAgendaSummary = (
   state: Pick<SessionState, 'agenda' | 'attention'>,
-): SessionAttentionSummary | undefined => state.agenda ?? state.attention;
+): SessionAgendaSummary | undefined => state.agenda ?? state.attention;

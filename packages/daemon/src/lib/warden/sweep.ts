@@ -58,7 +58,7 @@
  */
 
 import type {
-  AttentionSource,
+  AgendaSource,
   WardenAction,
   WardenCap,
   WardenConfigView,
@@ -75,7 +75,7 @@ import type {
   WardenSpend,
   WardenStatusView,
   WardenTriageStatus,
-  WardenAttentionView as WireAttentionView,
+  WardenAgendaView as WireAgendaView,
   WardenAnomaly as WireWardenAnomaly,
 } from '@ferretry/protocol';
 import {
@@ -87,7 +87,7 @@ import {
 } from '@ferretry/protocol';
 import { displayAgentName } from '../names/session-names.ts';
 import type { TriageDecision, TriageGuardPort } from '../speedups/jev.ts';
-import { type AttentionBoardInput, buildWardenAttentionView } from './attention.ts';
+import { type AgendaBoardInput, buildWardenAgendaView } from './agenda.ts';
 import {
   BACKOFF_CEILING_MS,
   backoffHold,
@@ -356,20 +356,20 @@ export interface WardenVerdictReader {
 }
 
 /** How the daemon's raise or refresh landed. */
-export type WardenAttentionWrite = 'created' | 'refreshed' | 'unchanged' | 'rejected';
+export type WardenAgendaWrite = 'created' | 'refreshed' | 'unchanged' | 'rejected';
 
 /**
- * The ONE attention store, reached through the same service every other caller
+ * The ONE agenda store, reached through the same service every other caller
  * uses — never a second board of the warden's own.
  *
  * Every method is total: a board that cannot be read is `undefined`, a write
  * that the state machine refuses is `rejected`. A throw here would abort a sweep
  * that has already completed its real work.
  */
-export interface WardenAttentionPort {
+export interface WardenAgendaPort {
   board(sessionId: string): Promise<WardenEscalationBoard | undefined>;
-  raise(sessionId: string, request: WardenEscalationRaise): Promise<WardenAttentionWrite>;
-  resolveSource(sessionId: string, source: AttentionSource, sourceRef: string, note: string): Promise<boolean>;
+  raise(sessionId: string, request: WardenEscalationRaise): Promise<WardenAgendaWrite>;
+  resolveSource(sessionId: string, source: AgendaSource, sourceRef: string, note: string): Promise<boolean>;
 }
 
 /** What the daemon can read about a flagged ferret for Jev. Total: an unreadable ferret is no evidence. */
@@ -382,9 +382,9 @@ export interface WardenInvestigationCostReader {
   costUsd(wardenSessionId: string): Promise<number | undefined>;
 }
 
-/** One session's attention board, in the view's shape, for reading the Warden's own notifications back. */
+/** One session's agenda board, in the view's shape, for reading the Warden's own notifications back. */
 export interface WardenFeedReader {
-  board(sessionId: string): Promise<AttentionBoardInput | undefined>;
+  board(sessionId: string): Promise<AgendaBoardInput | undefined>;
 }
 
 export interface WardenSweepPorts {
@@ -407,7 +407,7 @@ export interface WardenSweepPorts {
   /** Read AFTER detection, for the escalation reconciliation only. */
   readonly verdicts: WardenVerdictReader;
   /** Written AFTER detection, for the escalation reconciliation only. */
-  readonly attention: WardenAttentionPort;
+  readonly attention: WardenAgendaPort;
   readonly journal: WardenJournal;
   /** Jev's checks, one record each, kept beside the reports (`jev-checks.ts`). */
   readonly jevChecks: WardenJevCheckLog;
@@ -746,10 +746,10 @@ export class WardenSweepService {
   /**
    * What the Warden needs the owner for: its own open notifications, read back from the boards
    * (`attention.ts`). A thin read, never a second list — they are raised and cleared by the sweep
-   * (`reconcileEscalations`) and answered in the unified Attention inbox. What could not be read is said
+   * (`reconcileEscalations`) and answered in the unified Agenda inbox. What could not be read is said
    * out loud as a degraded view rather than read as "nothing waits".
    */
-  async attention(): Promise<WireAttentionView> {
+  async agenda(): Promise<WireAgendaView> {
     const stored = await this.storedConfig();
     const state = parseWardenRuntimeState(await this.ports.state.read());
     const fleet = await this.ports.fleet.fleet();
@@ -759,9 +759,9 @@ export class WardenSweepService {
     const read = await Promise.all(
       live.map(async session => await this.ports.feed.board(session.config.id).catch(() => undefined)),
     );
-    const boards = read.filter((board): board is AttentionBoardInput => board !== undefined);
+    const boards = read.filter((board): board is AgendaBoardInput => board !== undefined);
     const reports = await this.ports.verdicts.recent().catch(() => undefined);
-    return buildWardenAttentionView({
+    return buildWardenAgendaView({
       now: this.ports.nowMs(),
       sessions: fleet,
       boards,
@@ -1038,7 +1038,7 @@ export class WardenSweepService {
 
     // LAST, and deliberately so. Everything above — detection, the report
     // prompts, the spawn gates — has already been decided and persisted before
-    // a single attention board is opened, which is what makes "ordinary
+    // a single agenda board is opened, which is what makes "ordinary
     // Attention cannot affect the scan" a property of the ORDER rather than a
     // promise. Moving this call earlier would break it.
     await this.reconcileEscalations(detected.anomalies, fleet, {

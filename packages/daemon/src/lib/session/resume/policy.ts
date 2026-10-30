@@ -1,8 +1,8 @@
 import { resolve } from 'node:path';
 import { turnFileInstruction } from '@ferretry/protocol';
 import {
-  STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND,
-  STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND,
+  STRUCTURED_ANSWER_RELEASED_AGENDA_KIND,
+  STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND,
 } from '../question/answer-ledger.ts';
 import type { SessionResumeSettings } from './settings.ts';
 import {
@@ -131,7 +131,7 @@ export type ResumeAction =
        * they can never disagree, which is what stops an answer advisory clearing without a durable
        * record of who dismissed it.
        */
-      readonly acknowledgeAnswerAttention: boolean;
+      readonly acknowledgeAnswerAgenda: boolean;
       /** Whether the retry counter resets; an automatic retry must keep counting its own attempts. */
       readonly resetRetryAttempt: boolean;
     };
@@ -158,7 +158,7 @@ export function planResume(
   // A quarantined session may be sitting in an unknown native modal, so its pane cannot be trusted
   // to receive input even while it looks alive.
   const quarantined =
-    target.needsHumanKind !== undefined && target.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND;
+    target.needsHumanKind !== undefined && target.needsHumanKind !== STRUCTURED_ANSWER_RELEASED_AGENDA_KIND;
   // "Bare" is a property of the REQUEST — the caller supplied no message at all — and deliberately
   // not `ResumeAction.bare`, which is the narrower "and this is an interactive session, so no turn
   // is invented". An auto-mode session resumed with no message synthesises the default prompt and is
@@ -170,8 +170,8 @@ export function planResume(
   // that carries prose-shaped whitespace buy the dismissal that no other message can. Any supplied
   // message is prose, and prose never dismisses the warning.
   const bareRequest = message === undefined;
-  const acknowledgeAnswerAttention =
-    target.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND && policy.humanOperator === true && bareRequest;
+  const acknowledgeAnswerAgenda =
+    target.needsHumanKind === STRUCTURED_ANSWER_RELEASED_AGENDA_KIND && policy.humanOperator === true && bareRequest;
   // The released advisory is not an input modal, so a live pane normally keeps the send shortcut —
   // but then a bare operator resume met `already running` and the one action that may dismiss the
   // warning was unreachable on exactly the sessions that carry it. A dismissal therefore gives up
@@ -180,7 +180,7 @@ export function planResume(
     usable &&
     !isTerminalForResume(target) &&
     !quarantined &&
-    !acknowledgeAnswerAttention &&
+    !acknowledgeAnswerAgenda &&
     policy.replaceLiveTerminal !== true
   ) {
     if (!trimmed) throw new ResumeRefused(`session ${target.id} is already running`);
@@ -190,15 +190,15 @@ export function planResume(
   // Both structured-answer kinds are held back from the generic explicit clear. The blocking
   // `structured-answer-unconfirmed` kind never clears through resume at all — a possibly-live form
   // is not something a relaunch can reason about — and the released advisory clears only on the
-  // dismissal above, which is also the only thing that records why. Every other attention kind
+  // dismissal above, which is also the only thing that records why. Every other agenda kind
   // keeps the behaviour it had: any non-automatic resume clears it.
   //
   // What makes clearing safe is not this flag but the QUEUE: the service holds the answer/monitor
   // executor across release, relaunch, acknowledgement and clear, so no projection can publish a
   // newer advisory into the middle of a dismissal. See `SessionResumePorts.serial`.
-  const answerAttention =
-    target.needsHumanKind === STRUCTURED_ANSWER_RELEASED_ATTENTION_KIND ||
-    target.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_ATTENTION_KIND;
+  const answerAgenda =
+    target.needsHumanKind === STRUCTURED_ANSWER_RELEASED_AGENDA_KIND ||
+    target.needsHumanKind === STRUCTURED_ANSWER_UNCONFIRMED_AGENDA_KIND;
   return {
     kind: 'relaunch',
     pane: usable ? 'snapshot-and-kill' : pane.alive ? 'quiet-cleanup' : 'none',
@@ -206,8 +206,8 @@ export function planResume(
     turn: bare ? target.turn : target.turn + 1,
     prompt: bare ? undefined : (trimmed ?? settings.defaultResumePrompt),
     cancelPendingQuestion: target.pendingQuestion !== undefined,
-    clearNeedsHuman: answerAttention ? acknowledgeAnswerAttention : !policy.automatic,
-    acknowledgeAnswerAttention,
+    clearNeedsHuman: answerAgenda ? acknowledgeAnswerAgenda : !policy.automatic,
+    acknowledgeAnswerAgenda,
     resetRetryAttempt: !(policy.automatic && policy.expectedStatus === 'retrying'),
   };
 }

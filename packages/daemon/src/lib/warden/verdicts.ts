@@ -41,7 +41,7 @@ export interface WardenVerdict {
   readonly anomalyKind?: WardenAnomalyKind;
   readonly verdict: WardenVerdictKind;
   /** True only when the verdict came from an explicit `Verdict: NEEDS_HUMAN`
-   *  marker. Attention requests require the marker; heuristic prose stays report
+   *  marker. Agenda requests require the marker; heuristic prose stays report
    *  history and never interrupts a human on its own. */
   readonly explicitNeedsHuman?: boolean;
   readonly recommendation?: WardenRecommendation;
@@ -105,7 +105,7 @@ export interface WardenVerdictSourceIdentity {
   readonly anomalyKind?: WardenAnomalyKind;
 }
 
-/** Stable attention-source identity for one exact report block. Generated
+/** Stable agenda-source identity for one exact report block. Generated
  *  report paths never contain `#`, so the suffix is an unambiguous selector. */
 export function wardenVerdictSourceRef(
   reportPath: string | undefined,

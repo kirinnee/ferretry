@@ -305,11 +305,11 @@ export interface HandoverPreflightVerdict {
 }
 
 /** Raising the one item a human must act on when a handover strands. */
-export interface HandoverAttentionPort {
-  raise(input: HandoverAttentionRequest): Promise<void>;
+export interface HandoverAgendaPort {
+  raise(input: HandoverAgendaRequest): Promise<void>;
 }
 
-export interface HandoverAttentionRequest {
+export interface HandoverAgendaRequest {
   readonly sessionId: string;
   /** Stable across retries, so the ledger refreshes one item instead of growing a pile. */
   readonly sourceRef: string;
@@ -364,7 +364,7 @@ export interface HandoverPorts {
   readonly preparer: HandoverTransferPreparePort;
   readonly importer: HandoverTransferImportPort;
   readonly preflight: HandoverPreflightPort;
-  readonly attention: HandoverAttentionPort;
+  readonly attention: HandoverAgendaPort;
   readonly journal: HandoverJournalPort;
   readonly identity: HandoverIdentityPort;
   readonly clock: HandoverClock;

@@ -111,8 +111,8 @@ const entries: TranscriptEntry[] = [
   { id: 'a2', kind: 'assistant', label: 'Ethan', text: scene.after, at: at + 120_000 },
 ];
 const surface = {
-  attentionReferenceResolver: (id: string) => ['A45', 'A46', 'A47'].includes(id),
-  onAttentionOpen: () => undefined,
+  agendaReferenceResolver: (id: string) => ['A45', 'A46', 'A47'].includes(id),
+  onAgendaOpen: () => undefined,
 };
 
 const root = document.getElementById('root');

@@ -7,7 +7,7 @@ import {
   composerSuggestionSwitches,
 } from '../../src/components/composer-autocomplete.ts';
 import {
-  type ComposerAttentionItem,
+  type ComposerAgendaItem,
   type ComposerSkillsCatalog,
   createComposerAutocompleteProviders,
   createDirectReferenceProviders,
@@ -601,7 +601,7 @@ describe('composer reference families', () => {
     },
     state: { status: 'tool_running', observedModel: 'gpt-5.6-sol' },
   });
-  const attention: readonly ComposerAttentionItem[] = [
+  const agenda: readonly ComposerAgendaItem[] = [
     { id: 'A3', subject: 'Choose the rollout window', source: 'question' },
   ];
   const providerFor = (which: 'a' | 'b') => {
@@ -617,9 +617,9 @@ describe('composer reference families', () => {
         expect(received).toEqual(scope);
         return [agent];
       },
-      getAttentionItems: received => {
+      getAgendaItems: received => {
         expect(received).toEqual(scope);
-        return attention;
+        return agenda;
       },
     });
   };
@@ -627,7 +627,7 @@ describe('composer reference families', () => {
   it('projects daemon-scoped agents and attention into canonical authored text', () => {
     const provider = providerFor('a');
     const agents = provider.initialCandidates?.(referenceContext(2, 'ott'));
-    const attentionRows = provider.initialCandidates?.(referenceContext(3, 'A3'));
+    const agendaRows = provider.initialCandidates?.(referenceContext(3, 'A3'));
 
     expect(agents?.candidates[0]).toMatchObject({
       kind: 'agent',
@@ -637,14 +637,14 @@ describe('composer reference families', () => {
     });
     expect(agents?.contextLabel).toBe('Agents');
     expect(agents?.candidates[0]?.detail).toContain('composer-work · Build the reference picker');
-    expect(attentionRows?.candidates[0]).toMatchObject({
+    expect(agendaRows?.candidates[0]).toMatchObject({
       kind: 'attention',
       label: '!A3',
       detail: 'Choose the rollout window',
       replacement: '!A3',
     });
-    expect(attentionRows?.contextLabel).toBe('Agenda');
-    for (const result of [agents, attentionRows]) {
+    expect(agendaRows?.contextLabel).toBe('Agenda');
+    for (const result of [agents, agendaRows]) {
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('daemon-a'))).toBe(true);
       expect(result?.candidates.every(candidate => decodeURIComponent(candidate.id).includes('same/session'))).toBe(
         true,
@@ -663,24 +663,24 @@ describe('composer reference families', () => {
       providerB.initialCandidates?.(referenceContext(3, 'A3'))?.candidates[0]?.id,
     );
 
-    let liveAttention: readonly ComposerAttentionItem[] = attention;
+    let liveAgenda: readonly ComposerAgendaItem[] = agenda;
     const live = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getAttentionItems: () => liveAttention,
+      getAgendaItems: () => liveAgenda,
     });
     const before = live.snapshotKey;
-    liveAttention = [{ id: 'A4', subject: 'Updated snapshot', source: 'question' }];
+    liveAgenda = [{ id: 'A4', subject: 'Updated snapshot', source: 'question' }];
     expect(live.snapshotKey).not.toBe(before);
     expect(live.initialCandidates?.(referenceContext(3, 'A4'))?.candidates[0]).toMatchObject({ label: '!A4' });
   });
 
-  it('warms only the attention store and teaches unsupported tiers', async () => {
+  it('warms only the agenda store and teaches unsupported tiers', async () => {
     const warmed: string[] = [];
     const provider = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      waitForAttentionItems: async (daemon, scope, signal) => {
+      waitForAgendaItems: async (daemon, scope, signal) => {
         expect({ daemon, scope, signal }).toMatchObject({ daemon: daemonA, scope: scopeA });
         warmed.push('attention');
       },
@@ -702,12 +702,12 @@ describe('composer reference families', () => {
     const read = new Promise<void>(resolve => {
       deliver = resolve;
     });
-    let liveAttention: readonly ComposerAttentionItem[] = [];
+    let liveAgenda: readonly ComposerAgendaItem[] = [];
     const provider = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getAttentionItems: () => liveAttention,
-      waitForAttentionItems: () => read,
+      getAgendaItems: () => liveAgenda,
+      waitForAgendaItems: () => read,
     });
 
     // THE WINDOW. The host's one read is still in flight, so the getter holds
@@ -720,15 +720,15 @@ describe('composer reference families', () => {
     expect(provider.initialCandidates?.(referenceContext(4, ''))?.notice).toContain('one to three @ signs');
 
     const settled = provider.candidates(referenceContext(3, ''));
-    liveAttention = attention;
+    liveAgenda = agenda;
     deliver();
     expect((await settled).candidates[0]?.replacement).toBe('!A3');
 
     const loaded = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getAttentionItems: () => attention,
-      waitForAttentionItems: () => undefined,
+      getAgendaItems: () => agenda,
+      waitForAgendaItems: () => undefined,
     });
     expect(loaded.initialCandidates?.(referenceContext(3, ''))?.candidates[0]?.replacement).toBe('!A3');
   });
@@ -742,8 +742,8 @@ describe('composer reference families', () => {
     const provider = createReferencesProvider({
       daemon: daemonA,
       scope: scopeA,
-      getAttentionItems: () => attention,
-      waitForAttentionItems: () => {
+      getAgendaItems: () => agenda,
+      waitForAgendaItems: () => {
         started += 1;
         return read;
       },
@@ -765,77 +765,77 @@ describe('composer reference families', () => {
         reads.push('sessions');
         return [agent];
       },
-      getAttentionItems: () => {
+      getAgendaItems: () => {
         reads.push('attention');
-        return attention;
+        return agenda;
       },
     };
     const ladder = createReferencesProvider(options);
-    const [agents, attentionProvider] = createDirectReferenceProviders(options);
+    const [agents, agendaProvider] = createDirectReferenceProviders(options);
 
-    expect([agents?.trigger, attentionProvider?.trigger]).toEqual([':', '!']);
+    expect([agents?.trigger, agendaProvider?.trigger]).toEqual([':', '!']);
     expect(agents?.candidates(context(':', 'ott'))).toMatchObject({
       contextLabel: ': fleet agents',
       candidates: [{ replacement: ':ottis' }],
     });
-    expect(attentionProvider?.initialCandidates?.(context('!', 'A3'))).toMatchObject({
+    expect(agendaProvider?.initialCandidates?.(context('!', 'A3'))).toMatchObject({
       contextLabel: '! open agenda items',
       candidates: [{ replacement: '!A3' }],
     });
     // The same rows the ladder offers, from the same read — one fact, two doors.
     expect(ladder.initialCandidates?.(referenceContext(3, 'A3'))?.candidates[0]?.replacement).toBe(
-      attentionProvider?.initialCandidates?.(context('!', 'A3'))?.candidates[0]?.replacement,
+      agendaProvider?.initialCandidates?.(context('!', 'A3'))?.candidates[0]?.replacement,
     );
     expect(new Set(reads)).toEqual(new Set(['sessions', 'attention']));
   });
 
   it('warms a direct family exactly like its tier does', async () => {
     const warmed: string[] = [];
-    const [, attentionProvider] = createDirectReferenceProviders({
+    const [, agendaProvider] = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
-      waitForAttentionItems: async () => {
+      waitForAgendaItems: async () => {
         warmed.push('attention');
       },
     });
-    expect(await attentionProvider?.candidates(context('!', 'A3'))).toMatchObject({ candidates: [] });
+    expect(await agendaProvider?.candidates(context('!', 'A3'))).toMatchObject({ candidates: [] });
     expect(warmed).toEqual(['attention']);
   });
 
   it('publishes a stable snapshot per family, and a new one only when that family moves', () => {
     let liveSessions: readonly SessionView[] = [agent];
-    let liveAttention: readonly ComposerAttentionItem[] = attention;
-    const [agents, attentionProvider] = createDirectReferenceProviders({
+    let liveAgenda: readonly ComposerAgendaItem[] = agenda;
+    const [agents, agendaProvider] = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
       getSessions: () => liveSessions,
-      getAttentionItems: () => liveAttention,
+      getAgendaItems: () => liveAgenda,
     });
 
     const agentsBefore = agents?.snapshotKey;
-    const attentionBefore = attentionProvider?.snapshotKey;
+    const agendaBefore = agendaProvider?.snapshotKey;
     expect(agents?.snapshotKey).toBe(agentsBefore);
-    expect(attentionProvider?.snapshotKey).toBe(attentionBefore);
+    expect(agendaProvider?.snapshotKey).toBe(agendaBefore);
 
     liveSessions = [agent, sessionView('second-session', { config: { teammate: 'zelda' } })];
     expect(agents?.snapshotKey).not.toBe(agentsBefore);
-    expect(attentionProvider?.snapshotKey).toBe(attentionBefore);
+    expect(agendaProvider?.snapshotKey).toBe(agendaBefore);
 
-    liveAttention = [{ id: 'A4', subject: 'Another question', source: 'question' }];
-    expect(attentionProvider?.snapshotKey).not.toBe(attentionBefore);
+    liveAgenda = [{ id: 'A4', subject: 'Another question', source: 'question' }];
+    expect(agendaProvider?.snapshotKey).not.toBe(agendaBefore);
   });
 
   it('abandons a warmed direct family whose request was already aborted', async () => {
     const aborted = new AbortController();
-    const [, attentionProvider] = createDirectReferenceProviders({
+    const [, agendaProvider] = createDirectReferenceProviders({
       daemon: daemonA,
       scope: scopeA,
-      waitForAttentionItems: async () => {
+      waitForAgendaItems: async () => {
         aborted.abort();
       },
     });
 
-    await expect(attentionProvider?.candidates(context('!', 'A3', aborted.signal))).rejects.toThrow();
+    await expect(agendaProvider?.candidates(context('!', 'A3', aborted.signal))).rejects.toThrow();
   });
 
   it('answers shouldOpen from the switches, per family, without disabling the rest', () => {
