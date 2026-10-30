@@ -56,13 +56,20 @@ async function settle(home: string): Promise<void> {
   }
 }
 
-/** Records, by path, every `stat`, `readdir` and `open` made from here on. */
-function countCalls() {
+/**
+ * Records, by path, every `stat`, `readdir` and `open` made from here on UNDER `home`.
+ *
+ * The spies see every call in the test process, so a stat by another file's leftover work (a watcher, a
+ * timer still settling) used to land in the count ("expected 7 to be 5" on #1003). Only this test's own
+ * home is the index's business; anything else is someone else's call.
+ */
+function countCalls(home: string) {
   const stat = spyOn(fs, 'stat');
   const readdir = spyOn(fs, 'readdir');
   const open = spyOn(fs, 'open');
   spies.push(stat, readdir, open);
-  const paths = (spy: { mock: { calls: unknown[][] } }): string[] => spy.mock.calls.map(call => String(call[0]));
+  const paths = (spy: { mock: { calls: unknown[][] } }): string[] =>
+    spy.mock.calls.map(call => String(call[0])).filter(path => path === home || path.startsWith(`${home}/`));
   return {
     stats: () => paths(stat),
     listings: () => paths(readdir),
@@ -90,7 +97,7 @@ describe('NodeCodexRolloutIndex cost', () => {
     const mine = await writeRollout(home, '2026/10/28', uuid(9_999), [
       JSON.stringify({ type: 'response_item', payload: { text: `working in ${token}` } }),
     ]);
-    const calls = countCalls();
+    const calls = countCalls(home);
 
     // Act: the reads an unresolved session makes while it waits.
     const answers = [];
@@ -109,7 +116,7 @@ describe('NodeCodexRolloutIndex cost', () => {
     const file = await writeRollout(home, '2026/10/20', uuid(1));
     const index = new NodeCodexRolloutIndex();
     await index.ids(home);
-    const calls = countCalls();
+    const calls = countCalls(home);
 
     // Act
     const again = await index.ids(home);
@@ -130,7 +137,7 @@ describe('NodeCodexRolloutIndex cost', () => {
     const index = new NodeCodexRolloutIndex();
     const first = await index.ids(home);
     const changesAfterFirst = index.changes(home);
-    const calls = countCalls();
+    const calls = countCalls(home);
 
     // Act + Assert: an untouched home is one `stat` per directory and no listing at all.
     should(await index.ids(home)).eql(first);
@@ -178,7 +185,7 @@ describe('NodeCodexRolloutIndex cost', () => {
     await writeRollout(home, '2026/10/20', uuid(1));
     const index = new NodeCodexRolloutIndex();
     await index.ids(home);
-    const calls = countCalls();
+    const calls = countCalls(home);
 
     // Act
     await index.ids(home);
@@ -268,7 +275,7 @@ describe('NodeCodexRolloutIndex cost', () => {
     await settle(home);
     const index = new NodeCodexRolloutIndex();
     await index.ids(home);
-    const calls = countCalls();
+    const calls = countCalls(home);
 
     // Act
     const answers = await Promise.all([index.ids(home), index.ids(home), index.ids(home)]);
