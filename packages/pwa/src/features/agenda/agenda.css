@@ -331,6 +331,14 @@
   font-size: var(--text-sm);
   cursor: pointer;
 }
+/* With no → answer it takes the swipe row's empty right slot instead of a row of its own. */
+.fy-qr__row[data-slots] > .fy-qr__dismiss[data-in-row] {
+  grid-column: 3;
+  align-self: stretch;
+  justify-self: end;
+  white-space: nowrap;
+  margin: 0;
+}
 .fy-qr__dismiss:hover:not(:disabled) {
   color: var(--fg);
   text-decoration: underline;

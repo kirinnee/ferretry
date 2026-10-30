@@ -164,6 +164,23 @@ describe('the quick replies', () => {
     expect(spy.acted.at(-1)?.kind).toBe('dismiss');
   });
 
+  test('puts Not needed in the swipe row when no answer takes its right slot', async () => {
+    const spy = await draw(agendaItem('A10', { ask: choices('Now', 'Later') } as Partial<AgendaItem>));
+    expect(root().querySelector('[data-agenda-answer="right"]')).toBeNull();
+    const dismiss = one<HTMLButtonElement>('fieldset[data-slots] > [data-agenda-dismiss]');
+    expect(dismiss.hasAttribute('data-in-row')).toBe(true);
+    expect(root().querySelectorAll('[data-agenda-dismiss]')).toHaveLength(1);
+    await interact(() => dismiss.click());
+    expect(spy.acted.at(-1)?.kind).toBe('dismiss');
+  });
+
+  test('keeps Not needed under the rows when the right slot is taken', async () => {
+    await draw(agendaItem('A11', { ask: choices('Now', 'Later', 'Never') } as Partial<AgendaItem>));
+    expect(root().querySelector('[data-agenda-answer="right"]')).not.toBeNull();
+    expect(root().querySelector('fieldset [data-agenda-dismiss]')).toBeNull();
+    expect(one('[data-agenda-dismiss]').hasAttribute('data-in-row')).toBe(false);
+  });
+
   test('has no arrows on a mouse', async () => {
     await draw(chosen, { swipeable: false });
     expect(root().querySelector('.lucide-arrow-right')).toBeNull();

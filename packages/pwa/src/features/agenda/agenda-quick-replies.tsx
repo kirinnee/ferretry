@@ -223,6 +223,8 @@ export function AgendaQuickReplies({
   const slotted = replies.length > 0 && sending === undefined && !model.notice;
   // Every row reads one way: one long label letters the swipe row AND the rows under it.
   const lettered = rowLettered([...replies, ...extras]);
+  // "Not needed" takes the swipe row's right slot when no answer is there, rather than a row of its own.
+  const dismissInRow = canDismiss && slotted && !replies.some(reply => reply.answer.direction === 'right');
   if (!hasReplies(model, sending) && error === null && waitingOn === undefined) return null;
   return (
     <div
@@ -277,20 +279,27 @@ export function AgendaQuickReplies({
           />
         ))}
         {sending === undefined ? null : <QuestionChips busy={busy} sending={sending} />}
+        {dismissInRow ? <NotNeeded busy={busy} give={give} inRow /> : null}
       </fieldset>
       <MoreChoices busy={busy} extras={extras} give={give} lettered={lettered} />
-      {canDismiss ? (
-        <button
-          className="fy-qr__dismiss"
-          data-agenda-dismiss=""
-          disabled={busy}
-          onClick={() => give(DISMISS_ACTION)}
-          type="button"
-        >
-          Not needed
-        </button>
-      ) : null}
+      {canDismiss && !dismissInRow ? <NotNeeded busy={busy} give={give} inRow={false} /> : null}
     </div>
+  );
+}
+
+/** "Not needed": a plain, quiet button — in the swipe row's empty right slot, or under the rows. */
+function NotNeeded({ busy, give, inRow }: { busy: boolean; give: (action: InboxAction) => void; inRow: boolean }) {
+  return (
+    <button
+      className="fy-qr__dismiss"
+      data-agenda-dismiss=""
+      data-in-row={inRow || undefined}
+      disabled={busy}
+      onClick={() => give(DISMISS_ACTION)}
+      type="button"
+    >
+      Not needed
+    </button>
   );
 }
 
