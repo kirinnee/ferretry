@@ -10,12 +10,12 @@
  *   release → the lane `release.published` enters, and the lane `release.running` enters once this machine
  *   runs that release; any merged with none open → `pr.merged`; any open → `pr.ready` (`pr.opened` while
  *   all are drafts). A lane set that lacks the lane a fact names falls back to the next fact down.
- * - **Never backward, never sideways, except for newer work.** A card already at or past the lane stays. A
+ * - **Never backward, never sideways, except for open work.** A card already at or past the lane stays. A
  *   card the owner or a ferret sent back stays back until a PR newer than that move merges; the merges it
- *   was sent back from are spent. The one fact that moves a card back is an open PR that is newer work than
- *   everything the card has shipped (opened after the last merge, else a higher number in the same
- *   repository): the card is back in review, and the history says "PR #1013 opened after #1008 shipped".
- *   An older open PR (a stale, abandoned one) never pulls a card back.
+ *   was sent back from are spent. The one fact that moves a card back is an open PR, draft or not and
+ *   whenever it was opened, on a card that has shipped something: work still in flight means the card is not
+ *   shipped, so it is back in review and the history says "moved back to Review/CI: PR #1013 ready for
+ *   review". A PR closed unmerged says nothing.
  * - **Gates are for decisions, not facts.** A fact moves a card through an `ownerGate` lane, forward out of
  *   Plan/Design or back out of To test. It never enters an owner-gated `closed` lane, nor any `closed`
  *   lane in a set with a `verify` lane: only the owner closes there.
@@ -47,7 +47,7 @@ export interface FactMove {
   /** The trigger whose lane this is: `laneForTrigger(laneSet, workflow, trigger)` is `lane`. */
   readonly trigger: LaneTrigger;
   readonly reason: string;
-  /** The card goes back to an earlier lane, because newer work opened after what it shipped. */
+  /** The card goes back to an earlier lane, because open work sits beside what it shipped. */
   readonly backward: boolean;
 }
 
@@ -64,8 +64,8 @@ export const FACT_TRIGGERS: ReadonlySet<LaneTrigger> = new Set<LaneTrigger>([
 interface Candidate {
   readonly trigger: LaneTrigger;
   readonly reason: string;
-  /** Set on an open-PR candidate that is newer work than all shipped: what to say if it pulls a card back. */
-  readonly pullBack?: string;
+  /** Open work beside something shipped: the card is not shipped, so this may move it back. */
+  readonly pullsBack?: boolean;
 }
 
 /** When the card was last sent back by a person or a ferret (a reopen, or a move to an earlier lane). */
@@ -91,52 +91,16 @@ const livePrs = (card: BoardTask, prs: readonly PrLink[]): readonly PrLink[] => 
 
 const named = (prs: readonly PrLink[]): string => `PR ${prs.map(pr => `#${String(pr.number)}`).join(', ')}`;
 
-const sameRepository = (left: PrLink, right: PrLink): boolean => left.repo.toLowerCase() === right.repo.toLowerCase();
-
-/**
- * Whether an open PR is newer work than a merged one: opened after it merged, else (when GitHub's open time
- * was never read) numbered higher in the same repository. Numbers of different repositories say nothing.
- */
-const newerThan = (open: PrLink, merged: PrLink): boolean => {
-  const openedAt = Date.parse(open.createdAt ?? '');
-  const mergedAt = Date.parse(merged.mergedAt ?? '');
-  if (!Number.isNaN(openedAt) && !Number.isNaN(mergedAt)) return openedAt > mergedAt;
-  return sameRepository(open, merged) && open.number > merged.number;
-};
-
-/** The open PRs that are newer than every merged one, said as the reason a card goes back; `undefined` for none. */
-const pullBackReason = (open: readonly PrLink[], merged: readonly PrLink[]): string | undefined => {
-  const newer = merged.length === 0 ? [] : open.filter(pr => merged.every(shipped => newerThan(pr, shipped)));
-  const last = merged.reduce<PrLink | null>(
-    (latest, pr) =>
-      latest === null || Date.parse(pr.mergedAt ?? '') > Date.parse(latest.mergedAt ?? '') ? pr : latest,
-    null,
-  );
-  return newer.length === 0 || last === null
-    ? undefined
-    : `${named(newer)} opened after #${String(last.number)} shipped`;
-};
-
 /** The facts as candidates, most advanced first. */
 const candidatesOf = (live: readonly PrLink[], running: string | null): readonly Candidate[] => {
   const open = live.filter(pr => pr.state === 'open');
   const merged = live.filter(pr => pr.state === 'merged');
   if (open.length > 0) {
     const ready = open.filter(pr => !pr.draft);
-    const opened: Candidate = {
-      trigger: 'pr.opened',
-      reason: `${named(open)} open`,
-      pullBack: pullBackReason(open, merged),
-    };
+    const pullsBack = merged.length > 0;
+    const opened: Candidate = { trigger: 'pr.opened', reason: `${named(open)} open`, pullsBack };
     return ready.length > 0
-      ? [
-          {
-            trigger: 'pr.ready',
-            reason: `${named(ready)} ready for review`,
-            pullBack: pullBackReason(ready, merged),
-          },
-          opened,
-        ]
+      ? [{ trigger: 'pr.ready', reason: `${named(ready)} ready for review`, pullsBack }, opened]
       : [opened];
   }
   if (merged.length === 0) return [];
@@ -190,15 +154,11 @@ export const laneFromFacts = (
     if (!backward.ok) return null;
     if (!backward.value)
       return { lane: found.value, trigger: candidate.trigger, reason: candidate.reason, backward: false };
-    if (candidate.pullBack === undefined) {
-      // Only an open PR can have newer work to say; behind a ready one a draft may still pull the card back.
-      if (candidate.trigger === 'pr.ready') continue;
-      return null;
-    }
+    if (candidate.pullsBack !== true) return null;
     return {
       lane: found.value,
       trigger: candidate.trigger,
-      reason: `moved back to ${found.value.name}: ${candidate.pullBack}`,
+      reason: `moved back to ${found.value.name}: ${candidate.reason}`,
       backward: true,
     };
   }
