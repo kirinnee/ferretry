@@ -33,6 +33,18 @@ const row = (overrides: Partial<LedgerSendRecord> = {}): LedgerSendRecord => ({
 });
 
 describe('joinQueue', () => {
+  test('an unconfirmed queue message stays unaccounted on its ledger row, alone or joined, until proof arrives', () => {
+    const unconfirmed = message({ state: 'unconfirmed' });
+    const [alone] = joinQueue([], [unconfirmed]);
+    const [joined] = joinQueue([row({ sendId: unconfirmed.id, fate: 'unaccounted' })], [unconfirmed]);
+    const [proven] = joinQueue([row({ sendId: unconfirmed.id, fate: 'delivered' })], [unconfirmed]);
+
+    expect(alone?.fate).toBe('unaccounted');
+    expect(joined?.fate).toBe('unaccounted');
+    expect(proven?.fate).toBe('delivered');
+    expect(effectiveQueueState(proven as LedgerSendRecord)).toBe('delivered');
+  });
+
   test('an empty queue returns the ledger untouched', () => {
     const rows = [row()];
     expect(joinQueue(rows, [])).toBe(rows);

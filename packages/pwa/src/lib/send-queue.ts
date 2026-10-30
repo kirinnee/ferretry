@@ -83,6 +83,8 @@ const fateOf = (state: QueuedMessage['state']): LedgerSendRecord['fate'] => {
       return 'cancelled';
     case 'failed':
       return 'timed_out';
+    case 'unconfirmed':
+      return 'unaccounted';
     default:
       return 'accepted';
   }
@@ -110,6 +112,8 @@ const joinedFate = (row: LedgerSendRecord, state: QueuedMessage['state']): Ledge
   // Failed in the queue means nothing PROVED the message arrived — not that it didn't. Only a ledger that
   // proved it absent (or no ledger row at all, in `synthesize`) is red; anything else may have landed.
   if (state === 'failed') return row.fate === 'timed_out' ? 'timed_out' : 'unaccounted';
+  // Typed, and nothing proves it arrived, though it may have: never "sending" again, never red.
+  if (state === 'unconfirmed') return 'unaccounted';
   return row.fate === 'timed_out' || row.fate === 'unaccounted' ? 'accepted' : row.fate;
 };
 

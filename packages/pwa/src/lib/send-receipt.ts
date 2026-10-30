@@ -66,6 +66,10 @@ const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | u
           };
     case 'typing':
       return record.fate === 'cancelled' ? undefined : { kind: 'queued', name: 'Sending', detail };
+    case 'unconfirmed':
+      return record.fate === 'cancelled' || record.fate === 'delivered'
+        ? undefined
+        : { kind: 'unconfirmed', name: 'Unconfirmed', detail, chip: 'unconfirmed' };
     case 'failed':
       if (record.fate === 'cancelled' || record.fate === 'delivered') return undefined;
       return record.fate === 'unaccounted'
@@ -94,6 +98,7 @@ const queueReceipt = (record: LedgerSendRecord, detail: string): SendReceipt | u
  * | queue `queued` / `typing`            | `queued`      | one grey tick   | —               |
  * | queue `read`                        | `read`        | three accent ticks | —            |
  * | queue `failed`                      | `failed`      | small red !     | "failed"        |
+ * | queue `unconfirmed`                 | `unconfirmed` | faint question  | "unconfirmed"   |
  * | open, ledger unread (`unread`)     | `unconfirmed` | faint question  | "status unknown" |
  */
 export const sendReceipt = (record: LedgerSendRecord, answered = false): SendReceipt => {
