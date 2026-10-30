@@ -1,6 +1,6 @@
 import { type HandoffPointer, parseFerretryNotice, parsePeerEnvelope } from '@ferretry/protocol';
 import { type ReactNode, useState } from 'react';
-import { handedOverDraft, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
+import { handedOverDraft, isFerretryNoticeSend, isOwnSend, ledgerPlacementCopy } from '../lib/ledger-placement.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
 import type { LedgerSendRecord } from '../lib/send-ledger.ts';
 import type { AgentRunMark, TranscriptEntry } from '../lib/session-screens.ts';
@@ -106,6 +106,7 @@ export function TranscriptRow({
   if (entry.kind === 'ledger' && entry.ledger !== undefined) {
     return (
       <div className="fy-message fy-message-ledger" data-transcript-kind="ledger" {...rhythm}>
+        {isFerretryNoticeSend(entry.ledger) ? <span className="fy-system-label">Ferretry</span> : null}
         <LedgerMessage
           onCancel={onCancel}
           onCollapse={entry.settled === 'expanded' ? onExpand : undefined}
@@ -139,6 +140,10 @@ export function TranscriptRow({
   if (entry.kind === 'system' && entry.event !== undefined)
     return <HarnessEventRow event={entry.event} rhythm={rhythm} />;
   if (entry.kind === 'system') return <SystemNoticeRow entry={entry} rhythm={rhythm} />;
+  if (entry.kind === 'user' && entry.send !== undefined && isFerretryNoticeSend(entry.send))
+    return (
+      <SystemNoticeRow entry={{ ...entry, text: parseFerretryNotice(entry.text) ?? entry.text }} rhythm={rhythm} />
+    );
   if (entry.kind === 'user') return <OwnMessageRow answered={answered} entry={entry} rhythm={rhythm} />;
   return <TranscriptTextRow entry={entry} rhythm={rhythm} run={run} />;
 }

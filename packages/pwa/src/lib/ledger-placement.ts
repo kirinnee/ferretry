@@ -1,4 +1,4 @@
-import { type HandoffPointer, parseMessageAttachments } from '@ferretry/protocol';
+import { type HandoffPointer, parseFerretryNotice, parseMessageAttachments } from '@ferretry/protocol';
 import { markReplies } from './peer-delivery.ts';
 import { peerFrom } from './peer-message.ts';
 import { EMPTY_SEND_VIEW, type SendViewState } from './send-dismissals.ts';
@@ -435,8 +435,12 @@ const withSettledNote = (
 export const isOwnSend = (record: LedgerSendRecord): boolean =>
   record.from === undefined &&
   record.fromName === undefined &&
-  record.senderKind !== 'daemon' &&
+  !isFerretryNoticeSend(record) &&
   peerFrom(record.message).from === null;
+
+/** Ferretry's own notice, never the reader's words: a daemon sender, or text that reads as a notice. */
+export const isFerretryNoticeSend = (record: LedgerSendRecord): boolean =>
+  record.senderKind === 'daemon' || parseFerretryNotice(record.message) !== null;
 
 /**
  * What the document of a send handed over through a FILE holds, or `undefined` for a send typed into the
