@@ -33,6 +33,12 @@ export const DAEMON_FEATURES = {
    * `attention` spellings this daemon still answers.
    */
   agendaWire: 'agenda.wire.1',
+  /**
+   * An agenda add (`AddAttentionRequestSchema`) may name the board card it belongs to (`task`). A daemon
+   * without this name refuses the whole add, because the request is strict: send `task` only when the
+   * daemon advertises it, and otherwise raise the item without one.
+   */
+  agendaTask: 'agenda.task.1',
 } as const;
 
 export type DaemonFeature = (typeof DAEMON_FEATURES)[keyof typeof DAEMON_FEATURES];

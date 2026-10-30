@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { TaskRefSchema } from './board-refs.ts';
 import { InstantSchema, NonNegativeIntegerSchema, PositiveIntegerSchema } from './common.ts';
 
 export const ATTENTION_SCHEMA_VERSION = 1 as const;
@@ -596,6 +597,12 @@ const AttentionItemBaseShape = {
   ping: z.literal(true).optional(),
   /** The held configuration change the owner's Allow puts into effect (`AttentionConfirms`). */
   confirms: AttentionConfirmsSchema.optional(),
+  /**
+   * The board card this item belongs to (`board.ts`): the card derives "waiting on you" from its open,
+   * blocking items. Absent or `null` reads as "no card": an item raised before cards existed, or by a client
+   * that named none. An older app reading a newer board drops the field.
+   */
+  task: TaskRefSchema.nullable().optional(),
 };
 
 export const AttentionItemSchema = z
@@ -799,6 +806,11 @@ const AddAttentionRequestSchema = z.strictObject({
    * no held change.
    */
   confirms: singleLine(MAX_ATTENTION_CONFIRMS_PATH_LENGTH).optional(),
+  /**
+   * The board card the item belongs to. A released daemon (4.109 and older) refuses an add that carries it,
+   * so a client sends it only to a daemon that reports `DAEMON_FEATURES.agendaTask`.
+   */
+  task: TaskRefSchema.optional(),
   ...AttentionBriefShape,
 });
 
