@@ -17,6 +17,7 @@ export * from './agenda-card.ts';
 export * from './audit.ts';
 export * from './auto-resume.ts';
 export * from './board.ts';
+export * from './board-history.ts';
 export * from './board-import.ts';
 export * from './board-lanes.ts';
 export * from './board-projects.ts';

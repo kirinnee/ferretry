@@ -5,5 +5,6 @@ export * from './migrate.ts';
 export * from './probe.ts';
 export * from './recommend.ts';
 export * from './routing.ts';
+export * from './routing-keep.ts';
 export * from './scratch.ts';
 export * from './service.ts';

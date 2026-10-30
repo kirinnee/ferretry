@@ -5,6 +5,7 @@ import {
   type BoardResponse,
   type BoardTaskEvent,
   type BoardTaskView,
+  describeBoardEvent,
   formatAgendaRef,
   formatTaskRef,
   type Lane,
@@ -194,51 +195,9 @@ const actorLabel = (actor: BoardTaskEvent['actor'], names: SessionNames): string
   return `${actor.kind}${via}`;
 };
 
-/** One history line's wording; the closed union means every event this build can read is spelled here. */
-export function describeEvent(event: BoardTaskEvent, laneSet: LaneSet | null, names: SessionNames): string {
-  const lane = (id: string): string => laneName(laneSet, id);
-  switch (event.type) {
-    case 'created':
-      return `created in ${lane(event.laneId)}`;
-    case 'moved': {
-      const why = event.reason === null ? '' : `: ${event.reason}`;
-      const auto = event.auto === true ? ` (auto${event.trigger === undefined ? '' : `, ${event.trigger}`})` : '';
-      return `${event.backward ? 'moved back' : 'moved'} ${lane(event.from)} → ${lane(event.to)}${auto}${why}`;
-    }
-    case 'reopened':
-      return `reopened ${lane(event.from)} → ${lane(event.to)}: ${event.reason} — ask: ${event.ask.text}`;
-    case 'note':
-      return `note: ${event.text}`;
-    case 'clarified':
-      return `clarified: ${event.text}`;
-    case 'linked':
-      return `linked ${event.field}: ${event.value}`;
-    case 'assigned':
-      return `assigned ${event.from === null ? 'nobody' : names(event.from)} → ${event.to === null ? 'nobody' : names(event.to)}`;
-    case 'depended':
-      return `depends on ${refOf(event.task)} until ${event.until}${event.override === undefined ? '' : ` (owner override: ${event.override.reason})`}`;
-    case 'undepended':
-      return `no longer depends on ${refOf(event.task)}: ${event.reason}`;
-    case 'blocked':
-      return `blocked: ${event.reason}`;
-    case 'unblocked':
-      return `unblocked${event.reason === null ? '' : `: ${event.reason}`}`;
-    case 'field-edited':
-      return `edited ${event.field}`;
-    case 'file-claimed':
-      return `claimed ${event.path}`;
-    case 'file-released':
-      return `released ${event.path}${event.reason === null ? '' : `: ${event.reason}`}`;
-    case 'ordered':
-      return `ranked ${event.from === null ? '—' : String(event.from)} → ${event.to === null ? '—' : String(event.to)}`;
-    case 'refiled':
-      return `refiled to ${event.toProject} (${lane(event.toLane)})${event.reason === null ? '' : `: ${event.reason}`}`;
-    case 'dropped':
-      return `dropped: ${event.reason}`;
-    case 'migrated':
-      return `migrated from ${event.legacyRef}`;
-  }
-}
+/** One history line's wording, as the protocol spells it for every surface. */
+export const describeEvent = (event: BoardTaskEvent, laneSet: LaneSet | null, names: SessionNames): string =>
+  describeBoardEvent(event, id => laneName(laneSet, id), names);
 
 const section = (title: string, body: string): string[] => ['', title, ...body.split('\n').map(line => `  ${line}`)];
 

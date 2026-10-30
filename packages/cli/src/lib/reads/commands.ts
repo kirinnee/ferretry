@@ -107,7 +107,11 @@ export function registerReadsCommands(program: Command, controller: ReadsCommand
     .argument('<id>', 'session id')
     .option('--json', 'print the session state as one line of JSON')
     .option('--timeout <seconds>', 'give up after this many seconds (exit 124)', Number)
-    .option('--interval <seconds>', 'how often to ask the daemon again', Number)
+    .option(
+      '--interval <seconds>',
+      'how often to ask the daemon again (default: after 1 s, slowing to every 5 s while the session is still)',
+      Number,
+    )
     .option('--until-marker <file>', 'wait for this file rather than trusting a completion claim')
     .option('--keep', 'leave the session running after its result is collected (a settled wait stops it otherwise)')
     .action(async (id: string, options: WaitOptions) => {

@@ -22,9 +22,13 @@ import type { WardenRecommendation, WardenVerdictKind } from './verdicts.ts';
 /** Carrying out a verdict. Each method throws when the act did not take. */
 export interface WardenRemedyPort {
   nudge(sessionId: string, message: string): Promise<void>;
-  resume(sessionId: string): Promise<void>;
+  /**
+   * Resume the ferret. `message`, when given, is the turn it is handed instead of the resume domain's default
+   * one: the Warden gives one only to a ferret with a focus card, naming the card (`focus-card.ts`).
+   */
+  resume(sessionId: string, message?: string): Promise<void>;
   /** Relaunch a dead or frozen process with its conversation intact, even over a pane that looks alive. */
-  restart(sessionId: string): Promise<void>;
+  restart(sessionId: string, message?: string): Promise<void>;
   stop(sessionId: string, reason: string): Promise<void>;
   failover(sessionId: string, agent: string): Promise<void>;
   /**

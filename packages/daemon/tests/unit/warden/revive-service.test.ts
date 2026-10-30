@@ -7,11 +7,14 @@ import {
   type ReviveEvent,
   type ReviveState,
   WARDEN_LABEL,
+  type WardenFocusCard,
   type WardenResumeOutcome,
   type WardenReviveNotice,
   WardenReviveService,
   type WardenSessionView,
 } from '../../../src/lib/warden/index.ts';
+import { lanes, PROJECT } from '../board/support.ts';
+import { cardView } from './board-fixtures.ts';
 
 const NOW = Date.parse('2026-10-30T12:00:00.000Z');
 const ago = (seconds: number): string => new Date(NOW - seconds * 1000).toISOString();
@@ -71,6 +74,7 @@ const harness = (
   options: {
     resume?: (id: string) => WardenResumeOutcome;
     tmux?: (probe: number) => boolean;
+    focusCard?: (id: string) => Promise<WardenFocusCard | undefined>;
   } = {},
 ): Harness => {
   const resumed: { id: string; message: string }[] = [];
@@ -99,6 +103,7 @@ const harness = (
       notices.push(notice);
     },
     journal: { record: (type, data) => journal.push({ type, data }) },
+    ...(options.focusCard === undefined ? {} : { focusCard: options.focusCard }),
   });
   return {
     service,
@@ -389,5 +394,65 @@ describe('the circuit breaker', () => {
     // Assert
     should(result.revive.breaker).not.be.undefined();
     should(h.notices).have.length(1);
+  });
+});
+
+describe('the card a revived ferret carries on', () => {
+  const card: WardenFocusCard = { task: cardView({ title: 'Ship the thing' }), laneSet: lanes(PROJECT) };
+
+  it('should hand an auto ferret its focus card with the notice', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const h = harness(
+      { a: [gone()] },
+      {
+        focusCard: async id => {
+          asked.push(id);
+          return card;
+        },
+      },
+    );
+
+    // Act
+    await run(h, [view('a')]);
+
+    // Assert
+    should(asked).eql(['a']);
+    should(h.resumed[0]?.message).containEql(
+      'continue where you left off, on the card below.\n\nYour card: &F1 — Ship the thing',
+    );
+  });
+
+  it('should never put a card into an interactive ferret’s terminal, nor look one up', async () => {
+    // Arrange
+    const asked: string[] = [];
+    const h = harness(
+      { p: [gone()] },
+      {
+        focusCard: async id => {
+          asked.push(id);
+          return card;
+        },
+      },
+    );
+
+    // Act
+    await run(h, [view('p', { mode: 'interactive' })]);
+
+    // Assert
+    should(asked).be.empty();
+    should(h.resumed[0]?.message).not.containEql('Your card');
+  });
+
+  it('should revive with the plain notice when the card cannot be read', async () => {
+    // Arrange
+    const h = harness({ a: [gone()] }, { focusCard: async () => await Promise.reject(new Error('board unreadable')) });
+
+    // Act
+    const result = await run(h, [view('a')]);
+
+    // Assert
+    should([...result.revived]).eql(['a']);
+    should(h.resumed[0]?.message).endWith('Re-read your last turn file and continue where you left off.');
   });
 });

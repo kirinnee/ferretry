@@ -1,3 +1,9 @@
+## [4.122.0](https://github.com/kirinnee/ferretry/compare/v4.121.0...v4.122.0) (2026-10-30)
+
+### Features
+
+* **daemon:** board activity, staleness nudges and quiet events to the lead ([#945](https://github.com/kirinnee/ferretry/issues/945)) ([89bdc97](https://github.com/kirinnee/ferretry/commit/89bdc97530271613d1be81c88b021a9f56ecab7e))
+
 ## [4.121.0](https://github.com/kirinnee/ferretry/compare/v4.120.2...v4.121.0) (2026-10-30)
 
 ### Features

@@ -162,7 +162,11 @@ import { FileAcceptedConfigStore, FileConfigDirectory } from '../src/adapters/co
 import { unrefFileEventTimers } from '../src/adapters/file-events/bun-file-event-source.ts';
 import { platformFileEventSource } from '../src/adapters/file-events/platform.ts';
 // U12 launch policy: old runtime names, and what a Codex runtime leaves behind when its session ends.
-import { fileFleetCatalogDeps, readDeclaredAccountModel } from '../src/adapters/fleet/account-model-files.ts';
+import {
+  fileFleetCatalogDeps,
+  readDeclaredAccountModel,
+  sessionStatusOf,
+} from '../src/adapters/fleet/account-model-files.ts';
 import { readFleetManifest } from '../src/adapters/fleet/manifest-file.ts';
 import { RuntimeAwareAccountInventory, RuntimeIdsFile } from '../src/adapters/fleet/runtime-ids-file.ts';
 import { RuntimeSessionRecords } from '../src/adapters/fleet/runtime-session-records.ts';
@@ -958,6 +962,7 @@ import {
   runtimeQuarantineState,
   type ScratchReclamation,
   SESSION_ROSTER_MAX_AGE_MS,
+  SESSION_STATUS_TALLY_MAX_AGE_MS,
   SESSION_TRANSCRIPT_MESSAGE_TOKEN_SELECTION_DOMAIN,
   type SecretCloneIdentitySource,
   SecretDirectory,
@@ -1021,6 +1026,7 @@ import {
   type SessionResumeSubsystem,
   type SessionRootPinner,
   SessionRoster,
+  SessionStatusTally,
   SessionRuntimeControlService,
   type SessionRuntimeStartupHeldPort,
   SessionSendError,
@@ -1117,11 +1123,13 @@ import {
   usageProbeUrls,
   usageRefreshMs,
   verifySessionTranscriptMessageToken,
+  WARDEN_ESCALATION_SOURCE,
   WARDEN_LABEL,
   WATCHDOG_VARIABLE,
   WardenCallsignTakenError,
   type WardenFleetSession,
   type WardenJournal,
+  type WardenBoardPort,
   WardenLivenessMonitor,
   type WardenRevivePorts,
   WardenReviveService,
@@ -1156,6 +1164,8 @@ import {
   JevPackRanker,
   type PackParent,
   type PackProbeRequest,
+  PACK_ROUTING_MAX_AGE_MS,
+  PackRoutingKeep,
   PackService,
   PackStartRefused,
   ProbeCache,
@@ -1888,6 +1898,8 @@ interface BoardWorld {
   readonly store: FileBoardStore;
   readonly board: BoardService;
   readonly cards: SessionCards;
+  /** Which card each session works on (`config.focusTask`): what the Warden tells a ferret it starts again. */
+  readonly focus: StorageSessionFocus;
 }
 
 /**
@@ -1951,7 +1963,7 @@ function createBoardWorld(
     diagnostics,
     bin,
   });
-  return { store, board, cards };
+  return { store, board, cards, focus };
 }
 
 /**
@@ -4150,6 +4162,8 @@ interface WardenParts {
   readonly ledgers: { read: LivenessLedgerReader };
   /** What auto-revive reaches the rest of the daemon through: the journal, the resume, the tmux probe, the clock. */
   readonly revive: Pick<WardenRevivePorts, 'events' | 'resume' | 'tmuxReady' | 'sleep'>;
+  /** The project boards: the cards the Warden reports orphaned, and the card a ferret it starts again carries on. */
+  readonly board: WardenBoardPort;
 }
 
 /**
@@ -4207,6 +4221,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const revive = new WardenReviveService({
     ...parts.revive,
     journal: wardenJournal,
+    focusCard: async sessionId => await parts.board.focusCard(sessionId),
     // The breaker's one notice lands on the session that tripped it, as a plain notification that buzzes.
     notifyOwner: async notice => {
       await parts.attention
@@ -4235,6 +4250,7 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
   const service = new WardenSweepService(
     {
       revive,
+      board: parts.board,
       guard: parts.guard,
       // The tail and the screen as an operator would read them — already masked by the vault redactor.
       // A ferret whose transcript or pane cannot be read is simply shown with less evidence.
@@ -4258,17 +4274,24 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
         nudge: async (sessionId, message) => {
           await parts.sends.send({ id: parseSessionId(sessionId), sendId: crypto.randomUUID(), message });
         },
-        resume: async sessionId => {
-          await parts.resume.resume({ id: parseSessionId(sessionId), actor: 'warden' });
+        // A message is the turn the ferret is handed (its focus card, `focus-card.ts`); without one the resume
+        // domain hands its own default turn.
+        resume: async (sessionId, message) => {
+          await parts.resume.resume({
+            id: parseSessionId(sessionId),
+            actor: 'warden',
+            ...(message === undefined ? {} : { message }),
+          });
         },
         // A restart is the resume path told to replace the pane even when it looks alive: a frozen process
         // is still "alive", and typing into it would hand the turn to the very thing that is stuck. The
         // conversation is resumed in the new process, and the warden policy keeps every automatic guard.
-        restart: async sessionId => {
+        restart: async (sessionId, message) => {
           await parts.resume.resume({
             id: parseSessionId(sessionId),
             actor: 'warden',
             policy: { ...resolveResumePolicy('warden'), replaceLiveTerminal: true },
+            ...(message === undefined ? {} : { message }),
           });
         },
         stop: async (sessionId, reason) => {
@@ -4395,6 +4418,31 @@ function createWardenSubsystem(parts: WardenParts): WardenSubsystem {
                 kind: 'info',
                 premise: request.premise,
                 ...(request.terms === undefined ? {} : { terms: [...request.terms] }),
+              },
+              WARDEN_ESCALATION_ACTOR,
+            )
+            .catch(() => undefined);
+          if (mutation === undefined || !mutation.ok) return 'rejected';
+          return mutation.change === 'created' || mutation.change === 'refreshed' ? mutation.change : 'unchanged';
+        },
+        // A plain notice about a CARD (an orphaned one): tied to it, so the card and the Inbox name each other.
+        notice: async (sessionId, notice) => {
+          const mutation = await parts.attention
+            .raise(
+              sessionId,
+              {
+                source: WARDEN_ESCALATION_SOURCE,
+                sourceRef: notice.sourceRef,
+                subject: notice.subject,
+                why: notice.why,
+                context: notice.context,
+                waitingSince: notice.waitingSince,
+                howToResolve: notice.howToResolve,
+                notice: true,
+                title: notice.title,
+                kind: 'info',
+                premise: notice.premise,
+                task: notice.task,
               },
               WARDEN_ESCALATION_ACTOR,
             )
@@ -9128,8 +9176,11 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       let adoptLearning: (sessionId: SessionId) => Promise<void> = async () => undefined;
       // A new ferret's agenda-mode default (docs/agenda.md), assigned once the agenda switch below exists.
       let adoptAgenda: (sessionId: SessionId, eligible: boolean) => Promise<void> = async () => undefined;
-      // Pack mode (docs/pack-mode.md): read fresh per use, so a saved pack.yaml applies to the next start.
-      const packConfig = async (): Promise<PackConfig> => (await configFiles.load()).evaluation.effective.pack;
+      // Pack mode (docs/pack-mode.md): the load in effect, which the watcher replaces the moment a file changes
+      // and a write through the daemon replaces before it answers — so a saved pack.yaml applies to the next
+      // start. Never a load of its own: every running ferret's view builds a relaunch environment, which reads
+      // this, and a load rescans and reparses the whole configuration tree.
+      const packConfig = async (): Promise<PackConfig> => (await configFiles.inEffect()).evaluation.effective.pack;
       const packTree = createPackTree(sessions);
       // The routing line comes from Pack's service, composed further down; until then a launch carries none.
       let packRouting = async (): Promise<string | undefined> => undefined;
@@ -10015,6 +10066,25 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // the usage feed each asked for it on their own, and each list reads every login's status.
         listCache: { now: () => millisecondClock.now(), freshMs: CREDENTIAL_LIST_FRESH_MS },
       });
+      // Every session's status for the catalogue's running count, read once and then kept current from the
+      // storage's own state feed: read per catalogue, ~600 state documents parsed for every runtimes view and
+      // every Pack routing line held the main thread. A hand edit is read within the tally's age bound.
+      const sessionStatusTally = new SessionStatusTally({
+        read: async () =>
+          new Map(
+            (
+              await Promise.all(
+                storage.listSessions().map(async session => {
+                  const status = sessionStatusOf(await storage.readState(session.id).catch(() => undefined));
+                  return status === undefined ? [] : [[session.id, status] as const];
+                }),
+              )
+            ).flat(),
+          ),
+        now: () => millisecondClock.now(),
+        maxAgeMs: SESSION_STATUS_TALLY_MAX_AGE_MS,
+      });
+      storage.subscribeStates((id, state) => sessionStatusTally.heard(id, sessionStatusOf(state)));
       // The account model's catalogue and its setup share ONE set of collaborators, so the two read and
       // write one machine the same way (docs/design/account-model.md §7).
       const fleetCatalogDeps = {
@@ -10022,10 +10092,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           paths,
           userHome,
           ...(credentialHostCodexHome === undefined ? {} : { hostCodexHome: credentialHostCodexHome }),
-          sessionStates: async () =>
-            await Promise.all(
-              storage.listSessions().map(async session => await storage.readState(session.id).catch(() => undefined)),
-            ),
+          sessionStatuses: async () => await sessionStatusTally.statuses(),
           sessionRecords: new RuntimeSessionRecords(storage),
           credentials: fleetCredentials,
           locate: locateHarness,
@@ -10269,7 +10336,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         }).catalogs;
       const packService = new PackService({
         settings: async () => {
-          const effective = (await configFiles.load()).evaluation.effective;
+          const effective = (await configFiles.inEffect()).evaluation.effective;
           return {
             config: effective.pack,
             guideFile: effective.modelsGuide,
@@ -10354,7 +10421,16 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         bin: CLIENT_NAME,
         now: () => clock.now(),
       });
-      packRouting = async () => await packService.routingLine();
+      // Derived once per configuration load and shared by every ferret: each running ferret's "outdated" mark
+      // builds the environment a relaunch would, routing line included, and deriving it reads the fleet's
+      // runtime catalogue, which reads every session's state (see `PackRoutingKeep`).
+      const packRoutingKeep = new PackRoutingKeep({
+        generation: async () => await configFiles.inEffect(),
+        derive: async () => await packService.routingLine(),
+        now: () => millisecondClock.now(),
+        maxAgeMs: PACK_ROUTING_MAX_AGE_MS,
+      });
+      packRouting = async () => await packRoutingKeep.line();
       /**
        * Clean up (docs/pack-mode.md § Clean up): the routing prompt's ONE generator, a short-lived hidden ferret
        * started through the session start every surface uses and probed like any sub-ferret, and the writes of
@@ -10369,7 +10445,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
             ? undefined
             : { wrapper: runtime.wrapper, harness: runtime.harness, defaultModel: runtime.models?.default };
         },
-        probeSettings: async () => (await configFiles.load()).evaluation.effective.pack.probe,
+        probeSettings: async () => (await configFiles.inEffect()).evaluation.effective.pack.probe,
         probe: packProbe,
         start: async request =>
           await withSystemCallsign(sessionControl, systemCallsigns, 'pack').start(
@@ -10972,6 +11048,18 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         warden: createWardenSubsystem({
           machineName: () => analyticsMachineName ?? hostname(),
           ledgers: wardenLedgers,
+          // The board as the Warden reads it: every card with its derived activity (the orphans), and the card
+          // a session works on (what a ferret it starts again carries on). Each read is total.
+          board: {
+            read: async () => await boardWorld.board.sweepBoard().catch(() => undefined),
+            focusCard: async sessionId => {
+              const ref = await boardWorld.focus.focusOf(sessionId).catch(() => null);
+              if (ref === null || (ref.machineId !== undefined && ref.machineId !== attachmentDaemonId))
+                return undefined;
+              const found = await boardWorld.board.task(ref.id).catch(() => undefined);
+              return found === undefined ? undefined : { task: found.task, laneSet: found.laneSet };
+            },
+          },
           activities,
           sessions,
           documents: createSessionDirectorySubsystem(paths, storage),
