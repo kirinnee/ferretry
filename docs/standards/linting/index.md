@@ -49,6 +49,7 @@ nix develop .#ci -c ./scripts/ci/pre-commit.sh   # exactly what CI runs (CI spli
 | `a-relay-config`             | relay code, bindings, discovery and deployment configuration agree            |
 | `a-route-agreement`          | client paths and daemon routes agree both ways; unreadable verbs are debt     |
 | `a-test-tiers`               | every test lives in a tier; integration asserts no wall-clock or memory bound |
+| `a-job-ceilings`             | every workflow job states `timeout-minutes`, so a wedged job fails in minutes |
 | `a-commit-msg`               | conventional commit subject (`commit-msg` stage)                              |
 
 Two Knip passes exist on purpose: the production view starts from the binary entry point and

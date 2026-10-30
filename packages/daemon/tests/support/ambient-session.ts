@@ -85,7 +85,7 @@ function defaultStateHome(userHome: string): string | undefined {
 /** Every protected path this process knows of: what it inherited, and the account's default home. */
 export function protectedPaths(
   environment: Environment = process.env,
-  userHome: string = homedir(),
+  userHome: string = process.env.FY_TEST_REAL_HOME ?? homedir(),
 ): readonly string[] {
   const recorded = (environment[PROTECTED_PATHS_VARIABLE] ?? '').split(delimiter).filter(isAbsolute);
   const home = defaultStateHome(userHome);
@@ -98,7 +98,7 @@ export function protectedPaths(
  */
 export function shedAmbientSession(
   environment: Environment = process.env,
-  userHome: string = homedir(),
+  userHome: string = process.env.FY_TEST_REAL_HOME ?? homedir(),
   temporary: string = tmpdir(),
 ): readonly string[] {
   if (environment[PROTECTED_PATHS_VARIABLE] === undefined) {
@@ -129,7 +129,7 @@ export function assertDisposable(
   path: string,
   what: string,
   environment: Environment = process.env,
-  userHome: string = homedir(),
+  userHome: string = process.env.FY_TEST_REAL_HOME ?? homedir(),
 ): void {
   if (!isAbsolute(path)) throw new Error(`refusing to touch ${what} ${JSON.stringify(path)}: it is not absolute`);
   const target = canonical(path);

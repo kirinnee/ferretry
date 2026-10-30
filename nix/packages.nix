@@ -12,6 +12,7 @@
     pre-commit
     ripgrep
     shellcheck
+    tmux
     treefmt
     wrangler
     yq-go
