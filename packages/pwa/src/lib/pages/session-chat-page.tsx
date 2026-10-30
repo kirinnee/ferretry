@@ -1607,6 +1607,7 @@ export function SessionChatPage({
               daemon={connection}
               disabled={TERMINAL_STATUSES.has(session.state.status) || !canControl}
               onSent={onSentWithAgenda}
+              {...(agendaComposer.onEscape === undefined ? {} : { onEscape: agendaComposer.onEscape })}
               connectionLive={connectionState?.kind === 'connected'}
               quota={quota}
               sessionId={session.config.id}

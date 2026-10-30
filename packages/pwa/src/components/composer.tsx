@@ -29,6 +29,7 @@ import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
 import { useMdComposePref } from '../lib/md-compose.ts';
+import { escapeCloses } from '../lib/escape-closes.ts';
 import { registerComposerQuoteTarget } from '../lib/quote.ts';
 import { findReferences } from '../lib/references.ts';
 import { carrierDelivery } from '../lib/relay-carrier.ts';
@@ -115,6 +116,8 @@ export interface ComposerProps {
   readonly quota?: ComposerQuotaProps['quota'];
   readonly draftStore?: DaemonDraftStore;
   readonly onSent?: () => void;
+  /** Escape in the composer, when no completion list or Vim mode used it: set while an agenda item is open, to go back. */
+  readonly onEscape?: () => void;
   /** Told the draft's text whenever it changes — the agenda sends it along as the note of an option picked outside the composer. */
   readonly onDraftChange?: (text: string) => void;
   /** A new value empties the draft: the text was used by an answer sent from outside the composer. */
@@ -362,6 +365,7 @@ export function Composer({
   quota,
   draftStore = documentDraftStore,
   onSent,
+  onEscape,
   onDraftChange,
   clearSignal = 0,
   connectionLive = false,
@@ -1175,6 +1179,7 @@ export function Composer({
         event.preventDefault();
         setDropping(true);
       }}
+      onKeyDown={onEscape === undefined ? undefined : escapeCloses(onEscape)}
       onDrop={event => {
         setDropping(false);
         if (!hasFiles(event.dataTransfer)) return;

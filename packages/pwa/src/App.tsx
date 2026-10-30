@@ -228,6 +228,7 @@ import {
   supportsWebPush,
 } from './lib/push-enrolment.ts';
 import { frameQrDetector } from './lib/qr-frame-decoder.ts';
+import { readItemConversation } from './lib/item-conversation.ts';
 import { RECENT_MESSAGE_COUNT, type RecentMessagesMemory, readRecentMessages } from './lib/recent-messages.ts';
 import { isCarrierOutage } from './lib/relay-carrier.ts';
 import { RELEASE_WORKER_RELEASE } from './lib/release-manifest.ts';
@@ -2009,6 +2010,11 @@ function AgendaRoute({ connection }: DaemonPageProps) {
             view={card.view}
           />
         );
+      }}
+      readConversation={async card => {
+        const target = inbox.connectionFor(card.daemonId);
+        if (target === undefined) throw new Error('That machine is no longer paired with this browser.');
+        return await readItemConversation(await store.clients.client(target), card.view.config.id, card.item.id);
       }}
       readRecent={async card => {
         const target = inbox.connectionFor(card.daemonId);

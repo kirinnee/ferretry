@@ -165,7 +165,11 @@ export interface Agenda {
   /** The composer's placeholder while an item is open ("Reply about !A57…"); absent in plain chat. */
   readonly placeholder: string | undefined;
   /** Wire this into the Composer: a message went, so the open item closes. */
-  readonly composer: { readonly onSent: () => void };
+  readonly composer: {
+    readonly onSent: () => void;
+    /** Escape in the composer goes back to the chat; absent while no item is open. */
+    readonly onEscape?: () => void;
+  };
 }
 
 export const useAgenda = ({
@@ -358,6 +362,7 @@ export const useAgenda = ({
           onAct={action => act(cardItem, action, composerDraft(scope))}
           onClose={() => update(() => ({ card: null }))}
           position={{ index: at, total: agenda.length }}
+          quoteScope={scope}
           renderProse={proseText => <ChatProse copyable={copyWriter} text={proseText} />}
           swipeable={swipeable}
           {...(now === undefined ? {} : { now })}
@@ -410,6 +415,6 @@ export const useAgenda = ({
     dockButton,
     references: () => aboutRef.current,
     placeholder: cardId === null ? undefined : `Reply about ${agendaReference(cardId)}…`,
-    composer: { onSent },
+    composer: { onSent, ...(cardId === null ? {} : { onEscape: () => update(() => ({ card: null })) }) },
   };
 };
