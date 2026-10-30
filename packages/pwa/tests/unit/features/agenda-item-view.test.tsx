@@ -83,6 +83,27 @@ const one = <T extends Element>(selector: string): T => must(root().querySelecto
 const press = (key: string, init: KeyboardEventInit = {}, target: EventTarget = one('[data-agenda-view]')) =>
   interact(() => pressKey(target, key, init));
 
+describe('the item view snooze control', () => {
+  test('draws no clock when it is given nothing to snooze with', async () => {
+    await draw(richItem);
+    expect(root().querySelector('[data-agenda-snooze]')).toBeNull();
+  });
+
+  test('puts a clock in the header pager that snoozes, and is off while busy', async () => {
+    const snoozed: string[] = [];
+    await draw(richItem, { onSnooze: until => snoozed.push(until) });
+    const clock = one<HTMLButtonElement>('[data-agenda-top] .fy-item-view__nav [data-agenda-snooze]');
+    expect(clock.className).toBe('fy-item-view__step');
+    await interact(() => clock.click());
+    await interact(() => must(root().querySelector<HTMLElement>('[role="menuitem"]'), '1 hour').click());
+    expect(snoozed).toEqual([new Date(NOW + 3_600_000).toISOString()]);
+    await view?.unmount();
+    view = null;
+    await draw(richItem, { onSnooze: () => undefined, busy: true });
+    expect(one<HTMLButtonElement>('[data-agenda-snooze]').disabled).toBe(true);
+  });
+});
+
 describe('the item view', () => {
   test('is a dialog laid over the message list, with the top, ONE scrolling body and the quick replies as its three parts', async () => {
     await draw(richItem);

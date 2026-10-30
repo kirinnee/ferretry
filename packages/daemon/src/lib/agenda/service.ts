@@ -166,8 +166,15 @@ export class AgendaService {
     return this.apply(sessionId, { action: 'answer', actor, id, response, note, at: this.clock.now() }, via);
   }
 
-  async edit(sessionId: string, id: AgendaId, patch: EditAgendaPatch, actor: AgendaActor): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'edit', actor, id, patch, at: this.clock.now() });
+  /** `now`: the ferret says it is urgent, so an item the owner snoozed wakes too (at most once an hour). */
+  async edit(
+    sessionId: string,
+    id: AgendaId,
+    patch: EditAgendaPatch,
+    actor: AgendaActor,
+    now = false,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'edit', actor, id, patch, ...(now ? { now } : {}), at: this.clock.now() });
   }
 
   /** Tick (or untick) one step of an open item; never resolves it, pushes or tells the ferret. */
@@ -200,8 +207,34 @@ export class AgendaService {
    * An item leaves discussion for the owner's queue. The raising ferret, the owner or the daemon's timer may
    * say so; surfacing an item already in the queue is no change.
    */
-  async surface(sessionId: string, id: AgendaId, actor: AgendaActor, why?: string | null): Promise<AgendaMutation> {
-    return this.apply(sessionId, { action: 'surface', actor, id, why, at: this.clock.now() });
+  async surface(
+    sessionId: string,
+    id: AgendaId,
+    actor: AgendaActor,
+    why?: string | null,
+    now = false,
+  ): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'surface', actor, id, why, ...(now ? { now } : {}), at: this.clock.now() });
+  }
+
+  /** The owner puts an open item away until a time still ahead (docs/agenda.md § Parked items). */
+  async snooze(sessionId: string, id: AgendaId, until: string, actor: AgendaActor): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'snooze', actor, id, until, at: this.clock.now() });
+  }
+
+  /** The owner brings a parked item (snoozed, or replied to) back to their queue now. */
+  async unsnooze(sessionId: string, id: AgendaId, actor: AgendaActor): Promise<AgendaMutation> {
+    return this.apply(sessionId, { action: 'unsnooze', actor, id, at: this.clock.now() });
+  }
+
+  /** The daemon's timer: a snoozed item whose time has come is back on the owner's queue, fresh. */
+  async wake(sessionId: string, id: AgendaId): Promise<AgendaMutation> {
+    return this.apply(sessionId, {
+      action: 'wake',
+      actor: { kind: 'daemon', cause: 'system' },
+      id,
+      at: this.clock.now(),
+    });
   }
 
   async resolve(

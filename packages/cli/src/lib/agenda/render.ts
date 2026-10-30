@@ -6,6 +6,7 @@ import {
   agendaCardAnswers,
   agendaInDiscussion,
   agendaTurn,
+  agendaWakeAt,
   hasOwnTitle,
   type ResolvedAgendaItem,
   unswipedChoices,
@@ -93,6 +94,14 @@ function itemLines(item: AgendaItem): string[] {
   lines.push(`${INDENT}since ${item.waitingSince} · raised by ${actor(item.raisedBy, item.raisedByName)}`);
   if (item.notice === true) {
     lines.push(`${INDENT}notice: read, not answered${item.ping === true ? ' (pinged)' : ''}`);
+  } else if (item.parked?.reason === 'snoozed') {
+    lines.push(
+      `${INDENT}snoozed by the owner until ${agendaWakeAt(item) ?? item.parked.until}: it comes back then — \`agenda surface --now\` only if it is urgent`,
+    );
+  } else if (item.parked?.reason === 'replied') {
+    lines.push(
+      `${INDENT}replied ${item.parked.at}: parked — \`agenda surface\` it if the owner still has to act, or \`agenda done\` it`,
+    );
   } else if (agendaInDiscussion(item)) {
     lines.push(
       `${INDENT}ferret's turn: the owner wrote about this — \`agenda edit\` it, \`agenda surface\` it back, or \`agenda done\` it ${item.askedAt ?? ''}`.trimEnd(),

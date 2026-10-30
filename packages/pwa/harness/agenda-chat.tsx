@@ -25,7 +25,16 @@ const CONNECTION = daemonConnection({
 });
 
 const noop = async (): Promise<void> => undefined;
-const CLIENT = { respond: noop, resolve: noop, dismiss: noop, needsInfo: noop, discuss: noop, progress: noop };
+const CLIENT = {
+  respond: noop,
+  resolve: noop,
+  dismiss: noop,
+  needsInfo: noop,
+  discuss: noop,
+  snooze: noop,
+  unsnooze: noop,
+  progress: noop,
+};
 
 /** A wide screen with a mouse: the card has no swipe arrows and the agenda also shows as a section beside the chat. */
 const harnessIsDesktop = (): boolean => window.innerWidth >= 1_024;

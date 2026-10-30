@@ -624,6 +624,7 @@ import {
   AgendaResurfacer,
   AgendaService,
   AgendaTurnNudge,
+  AgendaWaker,
   AgentSendFailureNotifier,
   AgentToolService,
   ANALYTICS_BACKSTOP_MS,
@@ -9488,6 +9489,14 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
           agendaConfig.resurfaceAfterMinutes,
         ).start();
       }
+      // Always on: a snoozed item wakes when its time (or its deadline) comes, fresh on the owner's queue.
+      new AgendaWaker(
+        agendaBoards,
+        agenda,
+        () => storage.listSessions().map(session => session.id),
+        new KeyedAgendaReplyTimers(),
+        () => clock.now(),
+      ).start();
       // A ferret that goes idle with an agenda item on the owner is STOPPED on them: pushed once for that stop,
       // and its summary says so. Learned from the fleet as it stands first, so a daemon that starts announces nobody.
       const turnChanges = new TurnChanges();

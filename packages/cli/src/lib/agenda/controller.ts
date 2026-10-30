@@ -65,6 +65,8 @@ export interface AgendaAddOptions extends AgendaCommandOptions, Omit<BriefFlags,
 
 /** Flags that reword an open item. */
 export interface AgendaEditOptions extends AgendaCommandOptions, Omit<EditFlags, 'neededBy'> {
+  /** `--now`: it is urgent — an item the owner snoozed wakes too (at most once an hour). */
+  readonly now?: boolean;
   /** `--by`: when it is needed, as typed (ISO, "in 3h", "17:00"). */
   readonly by?: string;
   /** A Markdown file for the new body; `-` reads standard input. */
@@ -84,6 +86,16 @@ export interface AgendaResolveOptions extends AgendaCommandOptions, AnswerFlags 
 /** Flags that surface an item. */
 export interface AgendaSurfaceOptions extends AgendaCommandOptions {
   readonly why?: string;
+  /** `--now`: it is urgent — an item the owner snoozed wakes too (at most once an hour). */
+  readonly now?: boolean;
+}
+
+/** Flags that snooze an item: exactly one of them. */
+export interface AgendaSnoozeOptions extends AgendaCommandOptions {
+  /** `--for`: how long, as typed ("4h", "90m", "1d"). */
+  readonly for?: string;
+  /** `--until`: when it comes back, as typed (ISO, "in 3h", "17:00"). */
+  readonly until?: string;
 }
 
 /** The one line the deprecated `fy attention` prints to stderr before it does what `fy agenda` does. */
@@ -176,14 +188,15 @@ export class AgendaController {
     const wording = (options.question ?? []).some(question => question.trim() !== '');
     const current = wording ? (await this.gateway.snapshot(sessionId)).items.find(item => item.id === id) : undefined;
     const [, body] = await this.#inputs(undefined, options.bodyFile);
-    const snapshot = await this.gateway.apply(
-      sessionId,
-      composeEditRequest(
-        id,
-        { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
-        current,
-      ),
+    const request = composeEditRequest(
+      id,
+      { ...withoutBy(options), ...this.#neededBy(options.by), ...(body === undefined ? {} : { body }) },
+      current,
     );
+    const snapshot = await this.gateway.apply(sessionId, {
+      ...request,
+      ...(options.now === true ? { now: true as const } : {}),
+    });
     this.#report(snapshot, options, () => renderAgendaMutation('edited', agendaReference(id), snapshot, id));
   }
 
@@ -251,8 +264,34 @@ export class AgendaController {
       action: 'surface',
       id,
       ...(why === undefined ? {} : { why }),
+      ...(options.now === true ? { now: true as const } : {}),
     });
     this.#report(snapshot, options, () => renderAgendaMutation('surfaced', agendaReference(id), snapshot));
+  }
+
+  /** The owner puts an item away for a while (`--for 4h`) or until a time (`--until 17:00`); it comes back fresh. */
+  async snooze(reference: string, options: AgendaSnoozeOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const span = text(options.for);
+    const at = text(options.until);
+    if ((span === undefined) === (at === undefined)) {
+      throw new Error('say how long or until when: --for <time> (like 4h) or --until <time> (like 17:00), not both');
+    }
+    const until =
+      span === undefined
+        ? parseNeededBy(at ?? '', this.now(), '--until')
+        : parseNeededBy(`in ${span}`, this.now(), '--for');
+    const snapshot = await this.gateway.apply(this.#target(options), { action: 'snooze', id, until });
+    this.#report(snapshot, options, () =>
+      renderAgendaMutation(`snoozed until ${until}`, agendaReference(id), snapshot),
+    );
+  }
+
+  /** The owner brings a parked item (snoozed, or replied to) back to their list now. */
+  async unsnooze(reference: string, options: AgendaCommandOptions): Promise<void> {
+    const id = parseAgendaReference(reference);
+    const snapshot = await this.gateway.apply(this.#target(options), { action: 'unsnooze', id });
+    this.#report(snapshot, options, () => renderAgendaMutation('back on the list', agendaReference(id), snapshot));
   }
 
   async dismiss(reference: string, options: AgendaResolveOptions): Promise<void> {

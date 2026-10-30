@@ -51,7 +51,9 @@ export type InboxAction =
   | { readonly kind: 'resolve'; readonly label: string; readonly note?: string }
   | { readonly kind: 'dismiss'; readonly label: string; readonly note?: string }
   | { readonly kind: 'needs-info'; readonly label: string; readonly note?: string }
-  | { readonly kind: 'discuss'; readonly label: string; readonly note?: string };
+  | { readonly kind: 'discuss'; readonly label: string; readonly note?: string }
+  | { readonly kind: 'snooze'; readonly label: string; readonly until: string }
+  | { readonly kind: 'unsnooze'; readonly label: string };
 
 /** The item fields the answers are read from. */
 export type AnswerSource = AgendaCardSource &

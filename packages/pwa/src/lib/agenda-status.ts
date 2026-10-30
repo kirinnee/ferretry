@@ -4,9 +4,9 @@
  * no status. Nothing here draws anything.
  */
 
-import { type AgendaItem, type AgendaTurn, agendaTurn } from '@ferretry/protocol';
+import { type AgendaItem, type AgendaTurn, agendaTurn, agendaWakeAt } from '@ferretry/protocol';
 
-type AgendaTone = 'blocking' | 'needs-you' | 'will-block' | 'needed-by' | 'ferret' | 'done';
+type AgendaTone = 'blocking' | 'needs-you' | 'will-block' | 'needed-by' | 'ferret' | 'parked' | 'done';
 
 export interface AgendaStatus {
   readonly turn: AgendaTurn;
@@ -51,6 +51,24 @@ export const neededByWords = (item: Timed, now: number): string | null => {
 
 const isNotice = (item: Pick<AgendaItem, 'notice'>): boolean => item.notice === true;
 
+/**
+ * Where a parked item waits: "Snoozed until Thu 15:00" (or the deadline that wakes it sooner), or "Replied 14:02 —
+ * waiting on Johnnie". An instant that cannot be read is left unsaid rather than guessed.
+ */
+export const parkedWords = (
+  item: Pick<AgendaItem, 'parked' | 'neededBy'>,
+  ferret: string,
+  now = Date.now(),
+): string => {
+  if (item.parked === undefined) return '';
+  if (item.parked.reason === 'replied') {
+    const at = clockWords(item.parked.at, now);
+    return at === null ? `Replied — waiting on ${ferret}` : `Replied ${at} — waiting on ${ferret}`;
+  }
+  const until = clockWords(agendaWakeAt(item) ?? item.parked.until, now);
+  return until === null ? 'Snoozed' : `Snoozed until ${until}`;
+};
+
 /** The status of one item; `null` for a plain notification, which has no turn. `ferret` is the ferret's name. */
 export const agendaStatus = (item: AgendaItem, ferret: string, now = Date.now()): AgendaStatus | null => {
   if (isNotice(item)) return null;
@@ -60,6 +78,15 @@ export const agendaStatus = (item: AgendaItem, ferret: string, now = Date.now())
   if (turn === 'done') return { turn, tone: 'done', label: 'Done', deadline: null, overdue: false, dimmed: true };
   if (turn === 'ferret')
     return { turn, tone: 'ferret', label: `With ${ferret}`, deadline: null, overdue: false, dimmed: true };
+  if (turn === 'parked')
+    return {
+      turn,
+      tone: 'parked',
+      label: parkedWords(item, ferret, now),
+      deadline: null,
+      overdue: false,
+      dimmed: true,
+    };
   const base = { turn, overdue, dimmed: false } as const;
   if (item.blockingNow === true) return { ...base, tone: 'blocking', label: 'Blocking now', deadline };
   if (item.willBlock !== undefined && item.willBlock.trim() !== '')
@@ -74,7 +101,8 @@ const RANK: Readonly<Record<AgendaTone, number>> = {
   'will-block': 2,
   'needs-you': 3,
   ferret: 4,
-  done: 5,
+  parked: 5,
+  done: 6,
 };
 
 /** Notifications sort with the plain "needs you" items, after everything that blocks or is due. */
@@ -89,7 +117,7 @@ const deadlineOf = (item: AgendaItem): number => {
 /**
  * The agenda's order: blocking now, then what is due (the nearest deadline first), then what will block, then
  * what plainly needs the owner (the one that has waited longest first), then what is with the ferret, then what is
- * done. Returns a new array.
+ * parked, then what is done. Returns a new array.
  */
 export const sortAgenda = (items: readonly AgendaItem[]): readonly AgendaItem[] =>
   [...items].sort(

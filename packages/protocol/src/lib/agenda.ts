@@ -472,7 +472,8 @@ export const MAX_AGENDA_HISTORY = 20;
  * One thing that happened to an item after it was raised, for "You asked for more info 10:42 · updated 10:44":
  * the owner asked for more information (`needs-info`) or to talk it through (`discuss`), the ferret
  * updated it (`updated`), the item left discussion for the queue (`surfaced`, the why as its note), or the
- * owner replied and closed it (`replied`, their words as its note; the ferret's `surface` or `edit` reopens it).
+ * owner replied and it was PARKED as replied (`replied`, their words as its note; the ferret's `surface` or
+ * `edit` brings it back, its `done` closes it).
  */
 export const AgendaHistoryEntrySchema = z.strictObject({
   at: InstantSchema,
@@ -480,6 +481,40 @@ export const AgendaHistoryEntrySchema = z.strictObject({
   note: z.string().trim().min(1).max(MAX_AGENDA_DETAIL_LENGTH).optional(),
 });
 export type AgendaHistoryEntry = z.infer<typeof AgendaHistoryEntrySchema>;
+
+/**
+ * WHY AN OPEN ITEM IS PARKED — off the owner's queue for now, with its way back (docs/agenda.md § Parked items):
+ *
+ * - `snoozed` — the owner put it away `until` a time ("waiting for approval"); the daemon wakes it then, or at
+ *   its `neededBy` when that is sooner, as a fresh item. The ferret's `edit` or `surface` leaves it asleep
+ *   unless it says it is urgent (`now`).
+ * - `replied` — the owner wrote about it in the chat; it waits for the ferret to bring it back (`surface` or
+ *   `edit`) if the owner still has to act, or to close it (`done`).
+ *
+ * `at` is when it was parked. A parked item is nobody's turn (`agendaTurn`): it is never "needs you", never a
+ * badge, never in the Inbox's open list.
+ */
+export const AgendaParkedSchema = z.discriminatedUnion('reason', [
+  z.strictObject({ reason: z.literal('snoozed'), at: InstantSchema, until: InstantSchema }),
+  z.strictObject({ reason: z.literal('replied'), at: InstantSchema }),
+]);
+export type AgendaParked = z.infer<typeof AgendaParkedSchema>;
+
+/**
+ * When a SNOOZED item wakes: its `until`, or its `neededBy` when that comes first — a deadline is never slept
+ * through. `null` for an item that is not snoozed.
+ */
+export const agendaWakeAt = (item: {
+  readonly parked?: AgendaParked | undefined;
+  readonly neededBy?: string | undefined;
+}): string | null => {
+  if (item.parked?.reason !== 'snoozed') return null;
+  const { until } = item.parked;
+  return item.neededBy !== undefined && Date.parse(item.neededBy) < Date.parse(until) ? item.neededBy : until;
+};
+
+/** How often a ferret may wake an item the owner snoozed (`now`): once an hour per item. */
+export const AGENDA_URGENT_WAKE_MS = 60 * 60_000;
 
 /** The most revisions an item keeps, oldest dropped. */
 export const MAX_AGENDA_REVISIONS = 10;
@@ -689,6 +724,10 @@ const AgendaItemBaseShape = {
   history: z.array(AgendaHistoryEntrySchema).min(1).max(MAX_AGENDA_HISTORY).optional(),
   /** Bounded, oldest first: every edit since the item was raised (`AgendaRevision`). Absent: never edited. */
   revisions: z.array(AgendaRevisionSchema).min(1).max(MAX_AGENDA_REVISIONS).optional(),
+  /** Off the owner's queue for now, and why (`AgendaParked`); absent on an item in play. */
+  parked: AgendaParkedSchema.optional(),
+  /** When the ferret last woke a snoozed item as urgent (`now`): it may again only `AGENDA_URGENT_WAKE_MS` later. */
+  urgentAt: InstantSchema.optional(),
   /** The owner's last action on this item never reached the ferret; present only on an open item. */
   undelivered: AgendaUndeliveredSchema.optional(),
   /**
@@ -965,6 +1004,8 @@ export const AgendaActionRequestSchema = z
       ...AgendaBriefShape,
       /** Agenda fields to take off the item (`--not-blocking`, `--clear-will-block`, `--clear-by`). */
       clear: z.array(AgendaClearableFieldSchema).min(1).max(3).optional(),
+      /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
+      now: z.literal(true).optional(),
     }),
     z.strictObject({
       action: z.literal('resolve'),
@@ -1004,6 +1045,19 @@ export const AgendaActionRequestSchema = z
       action: z.literal('surface'),
       id: AgendaIdSchema,
       why: singleLine(MAX_AGENDA_SUBJECT_LENGTH).optional(),
+      /** `--now`: it is urgent — an item the owner SNOOZED wakes too, at most once an hour (`AGENDA_URGENT_WAKE_MS`). */
+      now: z.literal(true).optional(),
+    }),
+    /** The owner puts an open item away `until` a time still ahead; it comes back then as a fresh item. */
+    z.strictObject({
+      action: z.literal('snooze'),
+      id: AgendaIdSchema,
+      until: InstantSchema,
+    }),
+    /** The owner brings a parked item (snoozed, or replied to) back to their queue now. */
+    z.strictObject({
+      action: z.literal('unsnooze'),
+      id: AgendaIdSchema,
     }),
     z.strictObject({
       action: z.literal('dismiss'),

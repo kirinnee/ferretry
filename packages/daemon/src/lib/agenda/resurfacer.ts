@@ -46,7 +46,9 @@ export class AgendaResurfacer {
       const ledger = await this.boards.read(sessionId).catch(() => null);
       if (ledger === null) continue;
       for (const item of agendaSnapshot(ledger).items) {
-        if (!agendaInDiscussion(item) || item.askedAt === undefined || Date.parse(item.askedAt) > limit) continue;
+        // A parked item (snoozed, or replied to) is off the queue on purpose: the timer leaves it where it is.
+        if (item.parked !== undefined || !agendaInDiscussion(item)) continue;
+        if (item.askedAt === undefined || Date.parse(item.askedAt) > limit) continue;
         const surfaced = await this.agenda
           .surface(
             sessionId,

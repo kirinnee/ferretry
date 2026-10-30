@@ -30,8 +30,9 @@ import {
   type SessionAgendaSummary,
   type SessionView,
 } from '@ferretry/protocol';
-import { sessionAgendaSummary } from './agenda-wire.ts';
 import { answerActions, type InboxAction, type SwipeDirection, swipeTargets } from './agenda-answers.ts';
+import { clockWords } from './agenda-status.ts';
+import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { DaemonId } from './daemon-connection.ts';
 import { daemonSessionPath } from './pages/routes.ts';
 
@@ -78,8 +79,8 @@ export const unreadCount = (view: SessionView): number => {
 };
 
 /** How many of an open board's items need the owner: the pinned panel's header count. */
-export const needsYouItems = (items: readonly Pick<AgendaItem, 'waitingOn' | 'waitingFor'>[]): number =>
-  items.filter(item => !agendaInDiscussion(item)).length;
+export const needsYouItems = (items: readonly Pick<AgendaItem, 'waitingOn' | 'waitingFor' | 'parked'>[]): number =>
+  items.filter(item => !agendaInDiscussion(item) && item.parked === undefined).length;
 
 /** The badge's text: a count, capped so it never widens a row. */
 export const badgeText = (count: number): string => (count > 99 ? '99+' : String(count));
@@ -217,6 +218,39 @@ export const withFerretCards = (
   hidden: ReadonlySet<string> = new Set(),
 ): readonly InboxCard[] => collectCards(entries, boardFor, hidden, item => agendaTurn(item) === 'ferret');
 
+/**
+ * Every PARKED item (snoozed, or replied and waiting on its ferret) of every listed conversation whose board has
+ * been read, newest parked first. The daemon's summary leaves parked items out, so a conversation with nothing
+ * else open has no unread entry: these are read from the boards themselves, like the resolved records. `hidden`
+ * holds the keys of answers still undoable or in flight (an Unsnooze the reader just pressed): they leave at once.
+ */
+export const inboxParked = (
+  sources: readonly AgendaInboxSource[],
+  boardFor: (daemonId: DaemonId, sessionId: string) => AgendaSnapshot | undefined,
+  hidden: ReadonlySet<string> = new Set(),
+): readonly InboxCard[] => {
+  const cards: InboxCard[] = [];
+  for (const source of sources) {
+    for (const view of source.sessions ?? []) {
+      for (const item of boardFor(source.daemonId, view.config.id)?.items ?? []) {
+        const key = inboxCardKey(source.daemonId, view.config.id, item.id);
+        if (item.parked === undefined || hidden.has(key)) continue;
+        cards.push({
+          key,
+          daemonId: source.daemonId,
+          machineName: source.name,
+          view,
+          item,
+        });
+      }
+    }
+  }
+  return cards.sort(
+    (left, right) =>
+      instant(right.item.parked?.at ?? '') - instant(left.item.parked?.at ?? '') || left.key.localeCompare(right.key),
+  );
+};
+
 export type { InboxAction, SwipeDirection };
 
 /** One resolved item in the inbox's Resolved filter: the record, its conversation and its machine. */
@@ -277,6 +311,12 @@ export const sessionsToReadForResolved = (
     .filter(entry => !hasBoard(entry.daemonId, entry.view.config.id))
     .map(entry => ({ daemonId: entry.daemonId, sessionId: entry.view.config.id }));
 };
+
+/** Park an item until `until` (an instant): it leaves the list and comes back by itself. */
+export const snoozeAction = (until: string): InboxAction => ({ kind: 'snooze', label: 'Snooze', until });
+
+/** Put a snoozed or replied item back on the owner's list now. */
+export const UNSNOOZE_ACTION: InboxAction = { kind: 'unsnooze', label: 'Back to my list' };
 
 export const DONE_ACTION: InboxAction = { kind: 'resolve', label: 'Done' };
 export const DISMISS_ACTION: InboxAction = { kind: 'dismiss', label: 'Dismiss' };
@@ -476,7 +516,9 @@ export const swipeIntent = (
 };
 
 /** The words an undo toast uses for an action it is holding. */
-export const actionSentence = (action: InboxAction, id: AgendaId): string => {
+export const actionSentence = (action: InboxAction, id: AgendaId, now = Date.now()): string => {
+  if (action.kind === 'snooze') return `Snoozed !${id} until ${clockWords(action.until, now) ?? 'later'}`;
+  if (action.kind === 'unsnooze') return `!${id} is back on your list`;
   if (action.kind === 'dismiss') return `Dismissed !${id}`;
   if (action.kind === 'needs-info') return `Asked for more info on !${id}`;
   if (action.kind === 'discuss') return `Asked to discuss !${id}`;

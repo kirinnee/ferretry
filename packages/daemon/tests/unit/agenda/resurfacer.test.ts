@@ -93,6 +93,30 @@ describe('Attention resurfacer', () => {
     });
   });
 
+  it('should leave a parked item where it is, however long it has sat', async () => {
+    // Arrange
+    const { attention: agenda, clock, resurfacer } = world(30);
+    await agenda.raise(SESSION, ASK, AGENT);
+    await agenda.discuss(SESSION, 'A1', HUMAN);
+    await agenda.snooze(SESSION, 'A1', '2026-10-30T10:00:00.000Z', HUMAN);
+    await agenda.raise(SESSION, { ...ASK, subject: 'Which cluster?' }, AGENT);
+    await agenda.discuss(SESSION, 'A2', HUMAN);
+    await agenda.reply(SESSION, 'A2', HUMAN);
+    clock.at = '2026-10-24T10:00:00.000Z';
+
+    // Act
+    const moved = await resurfacer.sweep();
+    const board = await agenda.list(SESSION);
+
+    // Assert
+    should(moved).equal(0);
+    if (!board.ok) throw new Error('board unreadable');
+    should(board.value.items.map(item => [item.id, item.parked?.reason ?? null])).deepEqual([
+      ['A1', 'snoozed'],
+      ['A2', 'replied'],
+    ]);
+  });
+
   it('should leave an ask that is still inside the limit, one on the owner’s turn, and surface nothing twice', async () => {
     // Arrange
     const { attention: agenda, clock, resurfacer } = world(30);

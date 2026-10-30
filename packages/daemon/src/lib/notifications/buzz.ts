@@ -16,6 +16,8 @@ export interface BuzzSink {
   deadline(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
   /** A notice was raised: it buzzes only when it asked to (`--ping`). */
   raised(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
+  /** A snoozed item woke and it blocks the ferret or has a deadline: its one push for this wake. */
+  woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void>;
 }
 
 /** The deadline an item's `neededBy` is warned at: this long before it, by default (`attention.deadlineWarnHours`). */
@@ -27,7 +29,9 @@ export const DEFAULT_DEADLINE_WARN_HOURS = 3;
  *  1. the ferret is STOPPED on the owner: idle with an agenda item on the owner's turn — ONE grouped push
  *     per stop;
  *  2. an item's `neededBy` is within the warning window — ONE push per item;
- *  3. a notice with `ping`.
+ *  3. a notice with `ping`;
+ *  4. a SNOOZED item woke and it blocks the ferret or has a deadline — ONE push per wake (an item already
+ *     inside its deadline's window gets the deadline's push instead, never both).
  *
  * Everything else — a new item while the ferret works, an edit, a change of whose turn it is, a notice
  * without `ping` — only moves the Inbox badge. This replaces the push every raise used to make.
@@ -55,7 +59,16 @@ export class AgendaBuzz implements AgendaRaisedObserver, AgendaChangeObserver {
 
   /** The owner's own moves never buzz their own phone: only a ferret's, the warden's or a source's can. */
   async changed(sessionId: string, change: AgendaBoardChange): Promise<void> {
+    if (change.change === 'woke' && change.item !== undefined) await this.woke(sessionId, change.item, change.snapshot);
     if (change.actor.kind !== 'human') await this.settle(sessionId, true);
+  }
+
+  /** A woken item buzzes only when it blocks or has a deadline, and not when the deadline's own push will. */
+  private async woke(sessionId: string, item: AgendaItem, snapshot: AgendaSnapshot): Promise<void> {
+    const horizon = Date.parse(this.clock.now()) + this.warnHours * 3_600_000;
+    if (item.neededBy !== undefined && Date.parse(item.neededBy) <= horizon) return;
+    if (item.blockingNow !== true && item.neededBy === undefined) return;
+    await this.sink.woke(sessionId, item, snapshot).catch(() => undefined);
   }
 
   /** The session's turn moved: if it just went idle on the owner, this is the stop. */
