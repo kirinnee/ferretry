@@ -20,6 +20,8 @@ const failed: TmuxCommandResult = { code: 1, stdout: '', stderr: "can't find pan
 
 interface World {
   proof: string;
+  command: string;
+  cursor: number;
   display: TmuxCommandResult | undefined;
   capture: TmuxCommandResult;
   write: TmuxCommandResult;
@@ -27,12 +29,18 @@ interface World {
   ps: string | undefined;
   echo: 'off' | 'on' | 'unknown';
   located: boolean;
+  /** Runs before tmux answers a call: the world changing under the daemon while it is looking or writing. */
+  before: ((call: readonly string[], w: World) => void) | undefined;
   calls: (readonly string[])[];
+  /** What tmux actually typed: the keys of a send-keys its own condition let through. */
+  typed: (readonly string[])[];
   ran: (readonly string[])[];
 }
 
 const world = (): World => ({
   proof: '%3|4242|0|1700000000',
+  command: 'sudo',
+  cursor: 7,
   display: undefined,
   capture: ok('[sudo] password for kirin:                       \n'),
   write: ok(''),
@@ -40,19 +48,38 @@ const world = (): World => ({
   ps: PS,
   echo: 'off',
   located: true,
+  before: undefined,
   calls: [],
+  typed: [],
   ran: [],
 });
+
+const GUARD = /#\{==:#\{(\w+)\},([^}]*)\}/gu;
+
+/** tmux evaluating an `if-shell -F` condition in its own server: every comparison must hold of the world NOW. */
+function holds(condition: string, w: World): boolean {
+  const live: Record<string, string> = {
+    pane_pid: w.proof.split('|')[1] ?? '',
+    pane_current_command: w.command,
+    cursor_y: String(w.cursor),
+    pane_dead: (w.proof.split('|')[2] ?? '0') === '1' ? '1' : '0',
+  };
+  const comparisons = [...condition.matchAll(GUARD)];
+  return comparisons.length > 0 && comparisons.every(([, name = '', value = '']) => live[name] === value);
+}
 
 function target(w: World): TmuxInputTarget {
   const tmux: TmuxCommandPort = {
     execute: async args => {
       w.calls.push(args);
-      if (args[0] === 'display-message')
-        return w.display ?? ok(args.at(-1)?.includes('pane_tty') ? `${w.proof}\t/dev/pts/9\t7\n` : `${w.proof}\n`);
+      w.before?.(args, w);
+      if (args[0] === 'display-message') return w.display ?? ok(`${w.proof}\t/dev/pts/9\t${w.cursor}\t${w.command}\n`);
       if (args[0] === 'capture-pane') return w.capture;
-      if (args[0] === 'send-keys') {
+      if (args[0] === 'if-shell') {
         if (w.throwOnSend) throw new Error('socket closed');
+        if (w.write.code !== 0) return w.write;
+        if (!holds(args[4] ?? '', w)) return ok(`${args[6]?.split(' ').at(-1)}\n`);
+        w.typed.push((args[5] ?? '').split(' '));
         return w.write;
       }
       return failed;
@@ -107,17 +134,28 @@ describe('observing a terminal an input request aims at', () => {
     should(facts.recognisedConsumer).be.false();
   });
 
-  it('should strip control characters from the prompt line and the argv and cut both', async () => {
+  it('should strip control characters from the prompt line and the argv and keep them whole up to a generous bound', async () => {
     const w = world();
     w.capture = ok(`ok\u001b[31m${'x'.repeat(300)}\n`);
     w.ps = ` 9  9  9 prog ${'a\u0007'.repeat(300)}\n`;
 
     const facts = await observed(w);
 
-    should(facts.promptLine.length).equal(200);
+    should(facts.promptLine.length).equal(306);
     should(facts.promptLine.includes('\u001b')).be.false();
-    should(facts.foreground.argv.length).equal(200);
+    should(facts.foreground.argv.length).equal(300);
     should(facts.foreground.argv.includes('\u0007')).be.false();
+  });
+
+  it('should cut raw text only at a generous bound, so the service masks it BEFORE it is shortened', async () => {
+    const w = world();
+    w.capture = ok(`${'x'.repeat(5_000)}\n`);
+    w.ps = ` 9  9  9 prog ${'a'.repeat(5_000)}\n`;
+
+    const facts = await observed(w);
+
+    should(facts.promptLine.length).equal(4_096);
+    should(facts.foreground.argv.length).equal(4_096);
   });
 
   it('should name a program whose name is only control characters with a placeholder', async () => {
@@ -155,9 +193,9 @@ describe('observing a terminal an input request aims at', () => {
     const badProof = world();
     badProof.proof = 'nonsense';
     const noTty = world();
-    noTty.display = ok(`${noTty.proof}\tpts/9\t7\n`);
+    noTty.display = ok(`${noTty.proof}\tpts/9\t7\tsudo\n`);
     const noCursor = world();
-    noCursor.display = ok(`${noCursor.proof}\t/dev/pts/9\tx\n`);
+    noCursor.display = ok(`${noCursor.proof}\t/dev/pts/9\tx\tsudo\n`);
     const noPs = world();
     noPs.ps = undefined;
     const noForeground = world();
@@ -184,7 +222,7 @@ describe('observing a terminal an input request aims at', () => {
     const echo = world();
     echo.echo = 'on';
     const cursor = world();
-    cursor.display = ok(`${cursor.proof}\t/dev/pts/9\t8\n`);
+    cursor.cursor = 8;
     const line = world();
     line.capture = ok('Password:\n');
 
@@ -205,18 +243,41 @@ describe('parsing the foreground of a terminal', () => {
 });
 
 describe('typing into a terminal an input request aims at', () => {
-  it('should write value and Enter as ONE hex send-keys, never as argv text', async () => {
+  const sends = (w: World) => w.calls.filter(call => call[0] === 'if-shell');
+  const keysOf = (text: string, ...more: number[]) =>
+    [...new TextEncoder().encode(text), ...more].map(b => b.toString(16).padStart(2, '0'));
+
+  it('should write value and Enter as ONE guarded hex send-keys, never as argv text', async () => {
     const w = world();
     const expected = await observed(w);
     w.calls.length = 0;
 
     const result = await target(w).type('s1', dev, SECRET, true, expected);
 
-    const bytes = [...new TextEncoder().encode(SECRET), 0x0d].map(b => b.toString(16).padStart(2, '0'));
-    const sends = w.calls.filter(call => call[0] === 'send-keys');
     should(result).equal('typed');
-    should(sends).deepEqual([['send-keys', '-H', '-t', '%3', ...bytes]]);
+    should(sends(w)).have.length(1);
+    should(sends(w)[0]?.slice(0, 4)).deepEqual(['if-shell', '-F', '-t', '%3']);
+    should(sends(w)[0]?.[5]).equal(['send-keys', '-H', '-t', '%3', ...keysOf(SECRET, 0x0d)].join(' '));
+    should(w.typed).deepEqual([['send-keys', '-H', '-t', '%3', ...keysOf(SECRET, 0x0d)]]);
     should(w.calls.flat().filter(arg => arg.includes(SECRET))).deepEqual([]);
+    should(w.calls.some(call => call[0] === 'send-keys')).be.false();
+  });
+
+  it('should make tmux itself check the pane pid, program name, cursor row and liveness in the writing command', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.calls.length = 0;
+
+    await target(w).type('s1', dev, SECRET, false, expected);
+
+    const condition = sends(w)[0]?.[4] ?? '';
+    for (const part of [
+      '#{==:#{pane_pid},4242}',
+      '#{==:#{pane_current_command},sudo}',
+      '#{==:#{cursor_y},7}',
+      '#{==:#{pane_dead},0}',
+    ])
+      should(condition.includes(part)).be.true();
   });
 
   it('should write a long value in a single call and no Enter when not submitting', async () => {
@@ -226,10 +287,9 @@ describe('typing into a terminal an input request aims at', () => {
 
     await target(w).type('s1', dev, 'p'.repeat(1_000), false, expected);
 
-    const sends = w.calls.filter(call => call[0] === 'send-keys');
-    should(sends).have.length(1);
-    should(sends[0]).have.length(4 + 1_000);
-    should(sends[0]?.includes('0d')).be.false();
+    should(w.typed).have.length(1);
+    should(w.typed[0]).have.length(4 + 1_000);
+    should(w.typed[0]?.includes('0d')).be.false();
   });
 
   it('should write nothing when the pane, its process or its creation time changed', async () => {
@@ -244,7 +304,7 @@ describe('typing into a terminal an input request aims at', () => {
 
     for (const w of [pane, pid, created]) {
       should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
-      should(w.calls.some(call => call[0] === 'send-keys')).be.false();
+      should(w.typed).deepEqual([]);
     }
   });
 
@@ -259,7 +319,7 @@ describe('typing into a terminal an input request aims at', () => {
 
     for (const w of [foreground, echo, prompt]) {
       should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
-      should(w.calls.some(call => call[0] === 'send-keys')).be.false();
+      should(w.typed).deepEqual([]);
     }
   });
 
@@ -274,7 +334,7 @@ describe('typing into a terminal an input request aims at', () => {
 
     for (const w of [dead, unreadable, missing]) {
       should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_gone');
-      should(w.calls.some(call => call[0] === 'send-keys')).be.false();
+      should(w.typed).deepEqual([]);
     }
   });
 
@@ -289,7 +349,7 @@ describe('typing into a terminal an input request aims at', () => {
     should(await target(w).type('s1', dev, SECRET, true, browserFacts)).equal('target_gone');
   });
 
-  it('should report an uncertain write when the send fails or throws, and never retry', async () => {
+  it('should report an uncertain write when the command fails or throws, and never retry', async () => {
     const expected = await observed(world());
     const writeFails = world();
     writeFails.write = failed;
@@ -297,7 +357,89 @@ describe('typing into a terminal an input request aims at', () => {
     throws.throwOnSend = true;
 
     should(await target(writeFails).type('s1', dev, SECRET, true, expected)).equal('uncertain');
-    should(writeFails.calls.filter(call => call[0] === 'send-keys')).have.length(1);
+    should(sends(writeFails)).have.length(1);
     should(await target(throws).type('s1', dev, SECRET, true, expected)).equal('uncertain');
+  });
+});
+
+describe('the write is bound at the injection boundary (a change DURING the final observation or the write)', () => {
+  const finalWrite = (change: (w: World) => void) => (call: readonly string[], w: World) => {
+    if (call[0] === 'if-shell') change(w);
+  };
+
+  it('should type nothing when the program changes between the final observation and the write', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.before = finalWrite(live => {
+      live.command = 'bash';
+    });
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
+    should(w.typed).deepEqual([]);
+  });
+
+  it('should type nothing when the cursor moves or the pane dies between the final observation and the write', async () => {
+    for (const change of [
+      (live: World) => {
+        live.cursor = 9;
+      },
+      (live: World) => {
+        live.proof = '%3|4242|1|1700000000';
+      },
+      (live: World) => {
+        live.proof = '%3|9999|0|1700000000';
+      },
+    ]) {
+      const w = world();
+      const expected = await observed(w);
+      w.before = finalWrite(change);
+
+      should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
+      should(w.typed).deepEqual([]);
+    }
+  });
+
+  it('should refuse when the program changes WHILE the final look reads the prompt line', async () => {
+    const w = world();
+    const expected = await observed(w);
+    let looks = 0;
+    w.before = (call, live) => {
+      if (call[0] !== 'capture-pane') return;
+      looks += 1;
+      if (looks === 1) live.command = 'ssh';
+    };
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_gone');
+    should(w.typed).deepEqual([]);
+  });
+
+  it('should refuse when the cursor moves WHILE the final look reads the prompt line', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.before = (call, live) => {
+      if (call[0] === 'capture-pane') live.cursor = 8;
+    };
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_gone');
+    should(w.typed).deepEqual([]);
+  });
+
+  it('should refuse a program whose name tmux cannot be asked to compare safely', async () => {
+    const w = world();
+    w.command = 'a,b}';
+    const expected = await observed(w);
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('target_changed');
+    should(w.typed).deepEqual([]);
+  });
+
+  it('DECLARED LIMIT: a same-named program that replaces the foreground after ps is not caught', async () => {
+    const w = world();
+    const expected = await observed(w);
+    w.before = (call, live) => {
+      if (call[0] === 'if-shell') live.ps = ' 5000  5000  5000 sudo sudo -v\n';
+    };
+
+    should(await target(w).type('s1', dev, SECRET, true, expected)).equal('typed');
   });
 });

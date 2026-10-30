@@ -83,15 +83,20 @@ press keys"). `plain` allows Tab. `inputValueProblem` is that rule.
   `surface.input_delivering` (the id and the fact that a write is about to start, never a value)
   **before** it writes, and fails closed if it cannot. A daemon that restarts with a delivery started
   and not finished restores the request as **interrupted**, never pending, and never retries it. A
-  second id after delivery is 409 `already_delivered`.
-- **Re-observe at the write.** Deliver compares the target with the facts the owner was shown
-  (`observedDigest`, a keyed HMAC whose key lives only in this daemon process). The pane, the
-  foreground program, the echo state and the prompt line are checked again **at the injection
-  boundary**, immediately before the write, not only earlier in the handler. Any difference is 409
-  `target_changed` (or `target_gone`) and nothing is written. Three failed checks end the request.
-- **One write, never repeated.** A terminal delivery is **one** hex `send-keys -H` call carrying the
-  value and, when the owner wants Enter pressed, the `\r` in the same call (on by default for a
-  terminal secret, off for a browser). If that call fails or throws, the outcome is _uncertain_: the
+  second id after delivery is 409 `already_delivered`. The WHOLE attempt (observe, compare, write) runs
+  under the session lock, so two Sends with different ids that arrive together queue: the first types,
+  the second finds the request delivered and is refused.
+- **The write is guarded by tmux itself.** Deliver looks at the target, compares it with the facts the
+  owner was shown (`observedDigest`, a keyed HMAC whose key lives only in this daemon process), and
+  then sends **one** `tmux if-shell -F` command whose condition tmux evaluates in its own server in the
+  same step as the write: the pane (by id), the pane's shell pid, the foreground command name, the
+  cursor row and "the pane is not dead". Any mismatch types nothing and answers 409 `target_changed`;
+  a refused or failed command is _uncertain_. A foreground program whose name tmux cannot compare
+  safely is refused. Three failed checks end the request. **What tmux cannot bind** is in the honest
+  limits below.
+- **One write, never repeated.** A terminal delivery is **one** hex `send-keys -H` carrying the
+  value and, when the owner wants Enter pressed, the `\r` in the same command (on by default for a
+  terminal secret, off for a browser). If that command fails or throws, the outcome is _uncertain_: the
   value may or may not have been typed. That is a terminal `interrupted` outcome. It is never
   retried, whatever `deliveryId` the next Send carries.
 - **Serialised per session.** Raising a request, an agent's own `terminal.send`/`close`, a delivery
@@ -125,16 +130,28 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
   through it, so an owner read never shows what an agent read hides.
 - **`terminal.wait` tests scrubbed text.** Its predicate runs on the redacted screen, so waiting for a
   prefix of the value never reveals whether the screen holds it.
-- **The operator's list is a projection.** A request's `promptLine` and foreground `argv` are scrubbed
-  before they leave, and nothing that is a digest of a value is returned.
+- **What the daemon saw is a projection, made once.** The prompt line, the program name (`comm`) and
+  the argv are masked WHOLE first and only then cut to their limits (200, 64 and 200 characters), so a
+  clipped echo cannot leave the front of a value. A prompt line that ends with the start of a value, or
+  starts with its end (three characters or more), is a value that wrapped over a row: no exact match
+  finds half a value, so the line is replaced outright. The card, the agent's view, the journal, the
+  audit record and the owner's list all use the projection. The raw facts are digested and handed to
+  the write, then dropped: a request that ends keeps no observed facts and no digest.
+- **The viewer's stream is scrubbed too.** The live terminal the app draws goes through
+  `RedactingTerminalStreamService`: each capture is masked before the stream diffs it, so a delta, a
+  full redraw and a re-attach all carry the masked screen. A value that wrapped over rows is masked in
+  the rows it sat in, and only those rows lose their colours. A redactor that fails closes the stream.
+- **The text an agent reads keeps its trailing spaces.** tmux pads a line with spaces; only blank
+  _rows_ at the bottom are trimmed, so a value typed with trailing spaces still matches when it is masked.
 - **Digests are keyed.** `observedDigest` and the prompt-line digest are HMACs under a per-process key,
   so a leaked digest cannot be used to test guesses against a low-entropy prompt line.
 - **Values are really dropped.** Each purge replaces the stored array with only the unexpired entries.
   A clock-driven sweep purges every session, not only the one that was just read, and a session that
   ends drops its values at once. Neither depends on someone reading the window.
 - **An input card takes no free text.** Resolving or dismissing an `input` card from a human actor
-  ignores any note, and the app clears the composer draft for it, because a note is the one place a
-  value could be pasted into the ledger by mistake.
+  ignores any note, and the app empties the composer when such an action is taken (and the next card
+  starts with no note), because a note is the one place a value could be pasted into the ledger by
+  mistake.
 
 ## Honest limits
 
@@ -148,6 +165,14 @@ and the agent's `terminal.read` and `terminal.wait`. Redaction fails closed.
 - **A browser `private` code can appear in an after-screenshot** (a later phase).
 - **Not zeroed, not locked.** Strings are immutable in the runtime. "Dropped" means unreachable. Swap
   and core dumps are out of scope.
+- **The guard is tmux's, and tmux does not know everything.** The pane, its shell pid, the foreground
+  _command name_, the cursor row and liveness are compared atomically with the write. The terminal's
+  **echo flag** and the foreground **process group** are not formats tmux can compare: they are read
+  just before the command, so a program that replaces another of the **same name** in the foreground, or
+  echo turning on, in the instant between that last read and the write is not caught. A unit test pins
+  this as a declared limit. The remaining defences are the owner's warning card, the trusted-program
+  gate and the masking above. The `if-shell` syntax itself is exercised against real tmux only in CI;
+  if a tmux build rejects it the write fails closed as _uncertain_, never as a silent type.
 - **An uncertain write is not a retry.** If the single write fails or throws the owner is told the
   value may have been typed, and must raise a new request. Typing it again could put the password in
   the wrong place twice.

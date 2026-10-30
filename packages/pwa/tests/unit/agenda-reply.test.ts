@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import { DISMISS_ACTION, type InboxAction } from '../../src/lib/agenda-inbox.ts';
-import { composerNoteFor, withComposerNote } from '../../src/lib/agenda-reply.ts';
+import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../src/lib/agenda-reply.ts';
 
 const pick: InboxAction = {
   kind: 'respond',
@@ -43,5 +43,17 @@ describe('composerNoteFor', () => {
 
   it('hands the composer through for every other kind of item', () => {
     expect(composerNoteFor({ kind: 'task' }, 'already shipped')).toBe('already shipped');
+  });
+});
+
+describe('inputDraftDiscarded', () => {
+  it('empties the composer for an input card with anything in it, spaces included', () => {
+    expect(inputDraftDiscarded({ kind: 'input' }, 'hunter2')).toBe(true);
+    expect(inputDraftDiscarded({ kind: 'input' }, '   ')).toBe(true);
+  });
+
+  it('leaves an empty composer, and every other kind, alone', () => {
+    expect(inputDraftDiscarded({ kind: 'input' }, '')).toBe(false);
+    expect(inputDraftDiscarded({ kind: 'task' }, 'text')).toBe(false);
   });
 });

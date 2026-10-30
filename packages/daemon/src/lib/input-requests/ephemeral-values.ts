@@ -13,6 +13,7 @@ import type { InputClock } from './ports.ts';
  */
 
 const MIN_MASKED_LENGTH = 1;
+const MIN_FRAGMENT = 3;
 
 interface Held {
   readonly value: string;
@@ -68,6 +69,21 @@ export class EphemeralValues {
     return sessionId === undefined
       ? [...this.held.values()].reduce((total, entries) => total + entries.length, 0)
       : (this.held.get(sessionId)?.length ?? 0);
+  }
+
+  /**
+   * Whether `text` ends with the START of a value this session holds, or starts with the END of one (three
+   * characters or more): the piece of a value that wrapped over a row boundary, which no whole-value match can
+   * find. A yes/no for the daemon's own projection, never a position or a character: nothing returns a value.
+   */
+  fragments(sessionId: string, text: string): boolean {
+    this.purge();
+    return (this.held.get(sessionId) ?? []).some(({ value }) => {
+      for (let size = Math.min(MIN_FRAGMENT, value.length); size < value.length; size += 1) {
+        if (text.endsWith(value.slice(0, size)) || text.startsWith(value.slice(value.length - size))) return true;
+      }
+      return false;
+    });
   }
 
   /** The sessions that hold a value now. */

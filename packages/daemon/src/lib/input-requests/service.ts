@@ -76,6 +76,8 @@ import { SessionLock } from './session-lock.ts';
 const HOUR_MS = 3_600_000;
 const WAIT_CEILING_MS = 600_000;
 const FACT_TEXT_LIMIT = 200;
+const COMM_TEXT_LIMIT = 64;
+const HIDDEN_PROMPT = '[hidden: part of a value typed here is on this line]';
 
 const FINAL = new Set<InputRequest['state']>(['delivered', 'refused', 'expired', 'cancelled']);
 
@@ -141,12 +143,13 @@ export class InputRequestService {
           : 'that target cannot take an input request',
       );
     }
+    const shown = await this.project(sessionId, seen.facts);
     const expiresAt = instant(now + (raise.expiresInSeconds ?? INPUT_DEFAULT_EXPIRY_SECONDS) * 1000);
     const requestId = this.deps.ids.requestId();
     const card = await this.deps.agenda.raise(sessionId, {
       requestId,
       title: TITLES[raise.sensitivity],
-      ask: askOf(seen.facts),
+      ask: askOf(shown),
       prompt: raise.prompt,
       blocking: raise.blocking ?? raise.sensitivity === 'secret',
       expiresAt,
@@ -164,7 +167,7 @@ export class InputRequestService {
       raisedAt: instant(now),
       expiresAt,
       ...(raise.chain === undefined ? {} : { chain: raise.chain }),
-      observed: seen.facts,
+      observed: shown,
       observedDigest: digestFacts(seen.facts),
       state: 'pending',
     };
@@ -214,17 +217,29 @@ export class InputRequestService {
   private async exposed(request: InputRequest): Promise<InputRequest> {
     const facts = request.observed;
     const prompt = (await this.deps.redact(request.prompt)).slice(0, INPUT_PROMPT_MAX_LENGTH);
-    if (facts?.kind !== 'terminal') return { ...request, prompt };
+    if (facts === undefined) return { ...request, prompt };
+    return { ...request, prompt, observed: await this.project(request.sessionId, facts) };
+  }
+
+  /**
+   * What the daemon saw, as it may be shown, stored and audited. The raw text (a prompt line, an argv, a
+   * program name) is masked WHOLE and only then cut to its limit, so a clipped echo cannot leave a prefix
+   * of a value. A prompt line is one physical row, so a value that wrapped leaves only a piece of itself
+   * there that no exact match can find: such a line is replaced outright.
+   * The raw facts are the binding material; they are digested and handed to the write, never kept.
+   */
+  private async project(sessionId: string, facts: InputTargetFacts): Promise<InputTargetFacts> {
+    if (facts.kind !== 'terminal') return facts;
+    const clip = async (text: string, limit: number): Promise<string> => (await this.deps.redact(text)).slice(0, limit);
     return {
-      ...request,
-      prompt,
-      observed: {
-        ...facts,
-        promptLine: (await this.deps.redact(facts.promptLine)).slice(0, FACT_TEXT_LIMIT),
-        foreground: {
-          ...facts.foreground,
-          argv: (await this.deps.redact(facts.foreground.argv)).slice(0, FACT_TEXT_LIMIT),
-        },
+      ...facts,
+      promptLine: this.deps.values.fragments(sessionId, facts.promptLine)
+        ? HIDDEN_PROMPT
+        : await clip(facts.promptLine, FACT_TEXT_LIMIT),
+      foreground: {
+        ...facts.foreground,
+        comm: await clip(facts.foreground.comm, COMM_TEXT_LIMIT),
+        argv: await clip(facts.foreground.argv, FACT_TEXT_LIMIT),
       },
     };
   }
@@ -261,8 +276,15 @@ export class InputRequestService {
       throw new InputRequestError('not_found', 'no such input request');
     const earlier = held.deliveries.get(body.deliveryId);
     if (earlier !== undefined) return await earlier;
-    this.guardDeliverable(held);
-    const attempt = this.attempt(held, body, owner);
+    const attempt = this.lock.run(sessionId, async () => {
+      try {
+        this.guardDeliverable(held);
+      } catch (error) {
+        held.deliveries.delete(body.deliveryId);
+        throw error;
+      }
+      return await this.attempt(held, body, owner);
+    });
     held.deliveries.set(body.deliveryId, attempt);
     return await attempt;
   }
@@ -355,7 +377,11 @@ export class InputRequestService {
       await this.finish(held, 'cancelled', 'interrupted', undefined, { closeCard: true, tellAgent: true });
       return;
     }
-    held.request = { ...request, observed: seen.facts, observedDigest: digestFacts(seen.facts) };
+    held.request = {
+      ...request,
+      observed: await this.project(request.sessionId, seen.facts),
+      observedDigest: digestFacts(seen.facts),
+    };
   }
 
   /** A write was begun and never recorded as done: it may have landed, so the request ends and never types again. */
@@ -432,22 +458,25 @@ export class InputRequestService {
       if (problem !== undefined) throw new InputRequestError('bad_request', problem);
       if (body.observedDigest !== request.observedDigest) return await fail('target_changed', targetChanged());
       const submitted = body.submit && request.submit !== 'agent';
-      const typed = await this.lock.run(request.sessionId, async (): Promise<TypeResult> => {
-        const seen = await this.deps.target.observe(request.sessionId, request.target);
-        if (!seen.ok) return await fail('target_gone', targetChanged());
-        if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', targetChanged());
-        const refusal = this.consumerRefusal(request, seen.facts, body);
-        if (refusal !== undefined) return await fail(refusal.reason, refusal.error);
-        try {
-          await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
-        } catch {
-          throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
-        }
-        this.deps.values.hold(request.sessionId, value, request.agendaItemId);
-        return await this.deps.target
-          .type(request.sessionId, request.target, value, submitted, seen.facts)
-          .catch((): TypeResult => 'uncertain');
-      });
+      const seen = await this.deps.target.observe(request.sessionId, request.target);
+      if (!seen.ok) return await fail('target_gone', targetChanged());
+      if (digestFacts(seen.facts) !== request.observedDigest) return await fail('target_changed', targetChanged());
+      const refusal = this.consumerRefusal(
+        request,
+        seen.facts,
+        await this.project(request.sessionId, seen.facts),
+        body,
+      );
+      if (refusal !== undefined) return await fail(refusal.reason, refusal.error);
+      try {
+        await this.journal(request, 'delivering', undefined, undefined, body.deliveryId);
+      } catch {
+        throw new InputRequestError('unavailable', 'Ferretry could not record the attempt, so nothing was typed');
+      }
+      this.deps.values.hold(request.sessionId, value, request.agendaItemId);
+      const typed: TypeResult = await this.deps.target
+        .type(request.sessionId, request.target, value, submitted, seen.facts)
+        .catch((): TypeResult => 'uncertain');
       if (typed === 'uncertain') {
         await this.finish(held, 'refused', 'interrupted', undefined, {
           closeCard: true,
@@ -479,6 +508,7 @@ export class InputRequestService {
   private consumerRefusal(
     request: InputRequest,
     facts: InputTargetFacts,
+    shown: InputTargetFacts,
     body: InputDeliverBody,
   ): { reason: InputReason; error: InputRequestError } | undefined {
     if (facts.kind !== 'terminal') return undefined;
@@ -503,7 +533,7 @@ export class InputRequestService {
           reason: 'not_secret_field',
           error: new InputRequestError(
             'conflict',
-            `${facts.foreground.comm} is not a program Ferretry knows asks for secrets; tick "I trust this program" to type anyway`,
+            `${shown.kind === 'terminal' ? shown.foreground.comm : 'this program'} is not a program Ferretry knows asks for secrets; tick "I trust this program" to type anyway`,
             'trust_required',
           ),
         };
@@ -533,8 +563,10 @@ export class InputRequestService {
       state === 'delivered' && by !== undefined
         ? { at, by, submitted: options.submitted ?? false, source: 'typed' as const }
         : undefined;
+    const seenDetail = auditDetail(held.request);
+    const { observed: _seen, observedDigest: _digest, ...rest } = held.request;
     held.request = {
-      ...held.request,
+      ...rest,
       state,
       ...(outcome === undefined ? {} : { outcome }),
     };
@@ -549,7 +581,7 @@ export class InputRequestService {
             : 'cancelled';
     await this.journalQuietly(request, kind, reason, options.submitted);
     await this.record(request, `input.${kind}`, by ?? { kind: 'daemon' }, {
-      ...auditDetail(request),
+      ...seenDetail,
       ...(reason === undefined ? {} : { reason }),
       ...(state === 'delivered' ? { source: 'typed' as const, submitted: options.submitted ?? false } : {}),
     });

@@ -70,3 +70,33 @@ describe('EphemeralValues', () => {
     should(values.heldCount('never-held')).equal(0);
   });
 });
+
+describe('EphemeralValues.fragments', () => {
+  it('should say yes for a line ending with the start of a held value, or starting with its end', () => {
+    const values = build();
+    values.hold('s1', 'hunter2-UNIQUE', 'A1');
+
+    should(values.fragments('s1', 'Password: hunter2-UN')).be.true();
+    should(values.fragments('s1', 'IQUE rest of the line')).be.true();
+  });
+
+  it('should say no for an ordinary line, for fewer than three characters, for the whole value and for another session', () => {
+    const values = build();
+    values.hold('s1', 'hunter2-UNIQUE', 'A1');
+
+    should(values.fragments('s1', '[sudo] password for kirin:')).be.false();
+    should(values.fragments('s1', 'Password: hu')).be.false();
+    should(values.fragments('s1', 'Password: hunter2-UNIQUE')).be.false();
+    should(values.fragments('s2', 'Password: hunter2-UN')).be.false();
+  });
+
+  it('should compare a value shorter than three characters whole, and forget an expired value', () => {
+    const values = build();
+    values.hold('s1', 'ab', 'A1');
+    values.hold('s1', 'gone-value', 'A2', 1);
+    clock.ms += 5_000;
+
+    should(values.fragments('s1', 'xa')).be.false();
+    should(values.fragments('s1', 'gone-va')).be.false();
+  });
+});

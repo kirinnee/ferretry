@@ -31,7 +31,7 @@ import { agendaCounts, agendaItems } from '../../lib/agenda-chat.ts';
 import type { DaemonAgendaClient } from '../../lib/agenda-client.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import { actionSentence } from '../../lib/agenda-inbox.ts';
-import { composerNoteFor, withComposerNote } from '../../lib/agenda-reply.ts';
+import { composerNoteFor, inputDraftDiscarded, withComposerNote } from '../../lib/agenda-reply.ts';
 import { sortAgenda } from '../../lib/agenda-status.ts';
 import type { AgendaLoadStatus } from '../../lib/agenda-store.ts';
 import type { DaemonConnection } from '../../lib/daemon-connection.ts';
@@ -239,7 +239,7 @@ export const useAgenda = ({
       () => {
         setCard(item.id, undefined);
         setAnnouncement(actionSentence(sent, item.id));
-        if (note.trim() !== '') spendDraft(scope);
+        if (note.trim() !== '' || inputDraftDiscarded(item, composer)) spendDraft(scope);
         // The answer is a message in the conversation: the view closes and the chat returns to it.
         update(current => (current.card === item.id ? { card: null } : {}));
         onAnswered?.();

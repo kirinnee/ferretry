@@ -265,7 +265,8 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
 
   /**
    * The pane's last `lines` lines as plain text — no colour codes, wrapped lines joined — which is what
-   * an agent reads. Trailing blank rows are the unused bottom of the screen, not output, so they go.
+   * an agent reads. Trailing blank ROWS are the unused bottom of the screen, not output, so they go. The
+   * spaces ending the last line stay: a value typed with trailing spaces must still match when it is masked.
    */
   async text(record: TerminalRecord, lines: number): Promise<string> {
     const result = await this.tmux.execute([
@@ -278,7 +279,9 @@ export class TmuxTerminalRuntime implements TerminalRuntimePort {
       terminalPaneTarget(record),
     ]);
     if (result.code !== 0) throw new TerminalRuntimeError('terminal no longer exists');
-    return result.stdout.replace(/\s+$/u, '');
+    const rows = result.stdout.split('\n');
+    while (rows.length > 0 && /^\s*$/u.test(rows.at(-1) ?? '')) rows.pop();
+    return rows.join('\n');
   }
 
   /** The name of the program in the pane's foreground — the shell itself when nothing is running. */

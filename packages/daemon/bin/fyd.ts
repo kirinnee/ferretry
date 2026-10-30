@@ -485,6 +485,7 @@ import { ProcIoPressure } from '../src/adapters/system/proc-io-pressure.ts';
 import { KeyedSerialExecutor as LearningSerialExecutor } from '../src/adapters/atomic-file/index.ts';
 import {
   ManagedTerminalService,
+  RedactingTerminalStreamService,
   runProgram,
   systemLoginShell,
   TerminalRuntimeError,
@@ -1087,6 +1088,7 @@ import {
   type TerminalRuntimePort,
   type TerminalSessionResolver,
   type TerminalSubsystem,
+  type TextRedactor,
   TmuxController,
   type TmuxLaunchGuard,
   type TranscriptEvent,
@@ -6146,6 +6148,7 @@ function createTerminalSubsystem(
   storage: DaemonStorage,
   runtime: TerminalRuntimePort,
   clock: MillisecondClockPort,
+  redactor: TextRedactor,
 ): TerminalSubsystem {
   const sessions: TerminalSessionResolver = {
     resolve: async reference => {
@@ -6213,7 +6216,13 @@ function createTerminalSubsystem(
      * mount hands it a socket and nothing more.
      */
     stream: async (sessionId, terminalId, downstream) =>
-      new TerminalStreamBridge(service, sessionId, terminalId, downstream, terminalScheduler),
+      new TerminalStreamBridge(
+        new RedactingTerminalStreamService(service, redactor),
+        sessionId,
+        terminalId,
+        downstream,
+        terminalScheduler,
+      ),
   };
 }
 
@@ -10262,7 +10271,7 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       // with its last known word rather than a "Checking" that would outlive the read.
       credentialList = async () => await fleetCredentials.list({ settled: true });
       paneLimits = async () => await storagePaneLimits(storage, Date.now());
-      const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() });
+      const terminalSubsystem = createTerminalSubsystem(storage, terminals, { now: () => Date.now() }, secretRedactor);
       // A session browser nobody watches or drives stops after this long, so a forgotten one does not
       // hold the one shared profile away from every other session.
       const browserService = new BrowserSessionService(sessions, browserLauncher, () => Date.now(), {

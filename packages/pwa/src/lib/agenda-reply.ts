@@ -37,3 +37,11 @@ export const withReferences = (text: string, ids: readonly AgendaItem['id'][]): 
  */
 export const composerNoteFor = (item: Pick<AgendaItem, 'kind'>, composer: string): string =>
   item.kind === 'input' ? '' : composer;
+
+/**
+ * Whether answering this item must empty the composer even though none of it rides along. An input card's
+ * answer takes no note, so the draft would otherwise stay in the composer and ride on the NEXT ordinary
+ * action: a password pasted there by mistake would reach the agenda history one card later.
+ */
+export const inputDraftDiscarded = (item: Pick<AgendaItem, 'kind'>, composer: string): boolean =>
+  item.kind === 'input' && composer !== '';

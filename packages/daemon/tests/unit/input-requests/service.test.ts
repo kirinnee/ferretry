@@ -326,7 +326,7 @@ describe('InputRequestService.deliver', () => {
     should(w.writes.length).equal(0);
   });
 
-  it('should refuse a second delivery while the first is typing, and answer a same-id retry with the first', async () => {
+  it('should queue a second delivery behind the first, then refuse it, and answer a same-id retry with the first', async () => {
     const { w, service, id, digest } = await raised();
     let release: () => void = () => undefined;
     w.gate = new Promise<void>(resolve => {
@@ -334,17 +334,40 @@ describe('InputRequestService.deliver', () => {
     });
     const body = bodyFor(digest);
     const first = service.deliver(SESSION, id, body, HOST);
-    await Promise.resolve();
     await new Promise(resolve => setTimeout(resolve, 0));
-    const second = await refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
+    const second = refused(service.deliver(SESSION, id, bodyFor(digest), HOST));
     const retry = service.deliver(SESSION, id, body, HOST);
-    const cancel = await refused(service.cancel(SESSION, id, HOST));
+    const cancel = refused(service.cancel(SESSION, id, HOST));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    should(w.writes.length).equal(1);
     release();
 
-    should(second.reason).equal('already_delivered');
-    should(cancel.reason).equal('already_delivered');
+    should((await second).reason).equal('already_delivered');
+    should((await cancel).reason).equal('already_delivered');
     should(await retry).eql(await first);
     should(w.writes.length).equal(1);
+  });
+
+  it('should type once when two Sends with distinct ids race, even with a slow observation', async () => {
+    const { w, service, id, digest } = await raised();
+    let open: () => void = () => undefined;
+    w.observeGate = new Promise<void>(resolve => {
+      open = resolve;
+    });
+    const results = Promise.allSettled([
+      service.deliver(SESSION, id, bodyFor(digest), HOST),
+      service.deliver(SESSION, id, bodyFor(digest), HOST),
+      service.deliver(SESSION, id, bodyFor(digest), DEVICE),
+    ]);
+    await new Promise(resolve => setTimeout(resolve, 0));
+    open();
+    const settled = await results;
+
+    should(w.writes.length).equal(1);
+    should(settled.filter(r => r.status === 'fulfilled').length).equal(1);
+    for (const r of settled) {
+      if (r.status === 'rejected') should((r.reason as InputRequestError).reason).equal('already_delivered');
+    }
   });
 
   it('should refuse a digest the card did not show: target_changed, zero writes', async () => {
@@ -917,5 +940,94 @@ describe('review regressions: what the operator reads and how long values live',
     should(w.closed.length).equal(1);
     should(w.told.length).equal(0);
     should((await service.list(HOST)).length).equal(0);
+  });
+});
+
+describe('review regressions: what is shown is masked whole, then clipped, and nothing raw is kept', () => {
+  const everything = (w: World, extra: unknown): string => JSON.stringify([w.cards, w.events, w.audits, w.told, extra]);
+
+  it('should mask a long value whole before clipping, so no prefix of it survives the limit', async () => {
+    const built = build();
+    const long = `L${'0123456789'.repeat(37)}Z`;
+    built.values.hold(SESSION, long, 'A9');
+    built.w.facts = {
+      ...FACTS,
+      promptLine: `Password: ${long}`,
+      foreground: { ...FACTS.foreground, argv: `sudo ${long}` },
+    } as InputTargetFacts;
+    await built.service.raise(SESSION, RAISE);
+    const [request] = await built.service.list(HOST);
+    const terminal = request?.observed?.kind === 'terminal' ? request.observed : undefined;
+
+    should(terminal?.promptLine).equal('Password: [redacted:input A9]');
+    should(terminal?.foreground.argv).equal('sudo [redacted:input A9]');
+    should(everything(built.w, request)).not.containEql('0123456789');
+  });
+
+  it('should hide a prompt line that holds only a piece of a value, and show an ordinary one', async () => {
+    const built = build();
+    built.values.hold(SESSION, 'hunter2-UNIQUE', 'A9');
+    built.w.facts = { ...FACTS, promptLine: 'Password: hunter2-UN' } as InputTargetFacts;
+    await built.service.raise(SESSION, RAISE);
+    const [wrapped] = await built.service.list(HOST);
+    const piece = wrapped?.observed?.kind === 'terminal' ? wrapped.observed.promptLine : '';
+
+    should(piece).startWith('[hidden:');
+    should(piece).not.containEql('hunter2');
+
+    const plain = build();
+    plain.values.hold(SESSION, 'hunter2-UNIQUE', 'A9');
+    await plain.service.raise(SESSION, RAISE);
+    const [ordinary] = await plain.service.list(HOST);
+    should(ordinary?.observed?.kind === 'terminal' ? ordinary.observed.promptLine : '').equal(
+      '[sudo] password for kirin:',
+    );
+  });
+
+  it('should show a program name that carries a value masked and clipped in the view, the card, the audit and the list', async () => {
+    const built = build();
+    built.values.hold(SESSION, 'leaked-LEAK', 'A9');
+    built.w.facts = {
+      ...FACTS,
+      foreground: { ...FACTS.foreground, comm: `su-leaked-LEAK-${'x'.repeat(100)}` },
+    } as InputTargetFacts;
+    const view = await built.service.raise(SESSION, RAISE);
+    const [request] = await built.service.list(HOST);
+    const terminal = request?.observed?.kind === 'terminal' ? request.observed : undefined;
+
+    should(view.observed?.consumer).equal(terminal?.foreground.comm);
+    should(view.observed?.consumer).startWith('su-[redacted:input A9]-');
+    should(view.observed?.consumer?.length).be.belowOrEqual(64);
+    should(built.w.cards[0]?.ask).startWith('Type it into su-[redacted:input A9]');
+    should(built.w.audits[0]?.detail.consumer).equal(view.observed?.consumer);
+    should(everything(built.w, [view, request])).not.containEql('leaked-LEAK');
+  });
+
+  it('should keep no observed facts once a request ends, however it ends', async () => {
+    const built = build();
+    built.values.hold(SESSION, 'leaked-LEAK', 'A9');
+    built.w.facts = {
+      ...FACTS,
+      promptLine: 'Password: leaked-LEAK',
+      foreground: { ...FACTS.foreground, comm: 'leaked-LEAK' },
+    } as InputTargetFacts;
+    await built.service.raise(SESSION, RAISE);
+    const [open] = await built.service.list(HOST);
+    const cancelled = await built.service.cancel(SESSION, open?.id ?? '', HOST);
+
+    should(cancelled.observed).be.undefined();
+    should(cancelled.observedDigest).be.undefined();
+    should(everything(built.w, cancelled)).not.containEql('leaked-LEAK');
+
+    const ended = build();
+    ended.values.hold(SESSION, 'leaked-LEAK', 'A9');
+    ended.w.facts = { ...FACTS, foreground: { ...FACTS.foreground, comm: 'leaked-LEAK' } } as InputTargetFacts;
+    await ended.service.raise(SESSION, RAISE);
+    ended.w.now += 601_000;
+    ended.w.sessions.length = 0;
+    await ended.service.sweep();
+    await ended.service.sessionEnded(SESSION);
+
+    should(everything(ended.w, await ended.service.list(HOST))).not.containEql('leaked-LEAK');
   });
 });

@@ -544,6 +544,40 @@ describe('what the item view sends', () => {
     dispose();
   });
 
+  test('an input card takes no note, and empties a credential left in the composer so the next card cannot carry it', async () => {
+    const { state, dispose } = composer('hunter2-PASSWORD');
+    const view = mount({
+      snapshot: board([item('A1', { kind: 'input' }), item('A2')]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    await runAsync(async () => {
+      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' });
+    });
+    expect(calls).toEqual(['dismiss:A1:']);
+    expect(state.draft).toBe('');
+    expect(state.replaced).toEqual(['']);
+
+    run(() => view.update(<Host snapshot={board([item('A2')])} focus={{ target: 'A2' as AgendaId, seq: 2 }} />));
+    await runAsync(async () => {
+      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' });
+    });
+    expect(calls).toEqual(['dismiss:A1:', 'dismiss:A2:']);
+    dispose();
+  });
+
+  test('a card with nothing typed in the composer leaves it alone, input or not', async () => {
+    const { state, dispose } = composer('');
+    const view = mount({
+      snapshot: board([item('A1', { kind: 'input' })]),
+      focus: { target: 'A1' as AgendaId, seq: 1 },
+    });
+    await runAsync(async () => {
+      view.root.findByType(AgendaItemView).props.onAct({ kind: 'dismiss' });
+    });
+    expect(state.replaced).toEqual([]);
+    dispose();
+  });
+
   test('a quick reply with nothing typed carries no note and leaves the composer alone', async () => {
     const { state, dispose } = composer('   ');
     const view = open();
