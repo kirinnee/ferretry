@@ -42,6 +42,7 @@ import { configFilesConfirmations } from './attention-confirms.ts';
 import { type AuditSubsystem, auditRoutes } from './audit.ts';
 import { type BrowserMountedSubsystem, browserLoginRoutes, browserSocketRoutes } from './browser-login.ts';
 import { carrierRoutes } from './carriers.ts';
+import { type BoardSubsystem, boardRoutes } from './board.ts';
 import { type CatalogSubsystem, catalogRoutes } from './catalogs.ts';
 import { type CgroupSubsystem, cgroupRoutes } from './cgroups.ts';
 import { type ConfigFilesSubsystem, configFilesRoutes } from './config-files.ts';
@@ -331,6 +332,8 @@ export interface MountedSubsystems {
   readonly quotaFailover: QuotaFailoverLoop;
   /** The task record boards: one per session, plus the fleet-wide read across all of them. */
   readonly tasks: TaskSubsystem;
+  /** The project boards (v2): every project's cards, one file per card, written under ownership and lineage. */
+  readonly board: BoardSubsystem;
   /** The shared task-board MEMBERSHIP lifecycle — who is on a board and what they may do — as
    *  distinct from `tasks`, which is the records themselves. Three of the CLI's eleven board routes
    *  are not served; the mount's own header names each one and why. */
@@ -616,6 +619,9 @@ export function mountedDaemonRoutes(base: DaemonApiDependencies, subsystems: Mou
         ),
         ...pinRoutes(subsystems.pins),
         ...taskRoutes(subsystems.tasks),
+        // The project boards live under `/v1/board`, which no other subsystem uses, and their fixed
+        // literals are registered before the patterns beneath them.
+        ...boardRoutes(subsystems.board),
         // The board membership surface registers beside the records it governs. Every path is under
         // `/v1/task-boards`, which no other subsystem uses, so it can neither shadow nor be shadowed —
         // and its own fixed literals are registered before its deeper patterns.

@@ -129,6 +129,15 @@ plain semver while the tag keeps its `v` prefix.
 
 A no-release cycle simply stops after step 3 with no tag, and CD never runs.
 
+### A push that lands mid-release
+
+`@semantic-release/git` pushes the release commit to `main` before the tag exists, so anything that
+reached `main` after the run checked it out gets that push rejected ("fetch first") with nothing
+tagged. `scripts/ci/release.sh` reads what landed against CI's own `paths-ignore`. When only ignored
+files landed (CD's cask commit, a release stamp), no CI run, and so no Release, will follow, and it
+releases again from the new head, at most three times. When code landed, that commit's own CI run
+releases it, so this run stops green with a notice rather than ship code no CI run has passed.
+
 ## Acceptance gate
 
 ```bash
