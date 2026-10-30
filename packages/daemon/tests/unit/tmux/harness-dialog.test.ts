@@ -116,6 +116,19 @@ const EXPECTED: Readonly<Record<string, Shape>> = {
     escape: 'cancel',
     selected: 1,
   },
+  'claude-2.1.281-spend-limit': {
+    harness: 'claude',
+    kind: 'usage-limit',
+    title: 'What do you want to do?',
+    body: "You've hit your org's monthly spend limit · run /usage-credits to ask your admin for a higher limit",
+    options: [
+      opt(1, 'Stop and wait for limit to reset'),
+      opt(2, 'Wait here, then continue automatically at Nov 1, 12am'),
+      opt(3, 'Ask your admin for more usage'),
+    ],
+    escape: 'cancel',
+    selected: 1,
+  },
   'codex-0.145.0-hooks-review': {
     harness: 'codex',
     kind: 'hooks-review',
@@ -862,5 +875,65 @@ describe('paneBlockingDialog', () => {
     // Assert
     should(actual.length).equal(200);
     should(actual.endsWith('…')).be.true();
+  });
+});
+
+describe('the usage-limit dialog', () => {
+  it('should read the live spend-limit frame as a usage-limit dialog carrying the notice', () => {
+    // Act
+    const dialog = parseHarnessDialog(fixture('claude-2.1.281-spend-limit'));
+
+    // Assert
+    should(dialog?.kind).equal('usage-limit');
+    should(dialog?.title).equal('What do you want to do?');
+    should(dialog?.body).startWith("You've hit your org's monthly spend limit");
+    should(dialog?.body).containEql('admin for a higher limit');
+    should(dialog?.options.map(option => option.label)).deepEqual([
+      'Stop and wait for limit to reset',
+      'Wait here, then continue automatically at Nov 1, 12am',
+      'Ask your admin for more usage',
+    ]);
+    should(HarnessDialogSchema.safeParse(dialog).success).be.true();
+  });
+
+  it('should still read the dialog when the notice is not on screen', () => {
+    // Arrange
+    const frame = [
+      '❯ /rate-limit-options',
+      '',
+      RULE,
+      '  What do you want to do?',
+      '',
+      '  ❯ 1. Stop and wait for limit to reset',
+      '    2. Ask your admin for more usage',
+      '',
+      '  Enter to confirm · Esc to cancel',
+    ].join('\n');
+
+    // Act
+    const dialog = parseHarnessDialog(frame);
+
+    // Assert
+    should(dialog?.kind).equal('usage-limit');
+    should(dialog?.body).be.undefined();
+  });
+
+  it('should not call another dialog a usage limit just because the title is generic', () => {
+    // Arrange
+    const frame = [
+      RULE,
+      '  What do you want to do?',
+      '',
+      '  ❯ 1. Open the file',
+      '    2. Close the file',
+      '',
+      '  Enter to confirm · Esc to cancel',
+    ].join('\n');
+
+    // Act
+    const dialog = parseHarnessDialog(frame);
+
+    // Assert
+    should(dialog?.kind).not.equal('usage-limit');
   });
 });

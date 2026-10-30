@@ -503,3 +503,31 @@ describe('automaticOrder', () => {
     should(automaticOrder([option('x', { ready: false })])).deepEqual([]);
   });
 });
+
+describe('runtimeRefusal for a login a pane proved spent', () => {
+  it('should refuse out_of_quota for the limited login only', () => {
+    // Arrange
+    const known = facts({
+      runtimes: [readyClaude],
+      credentials: [credential('claude-main-login')],
+      tools: [tool('claude', true)],
+      paneLimits: new Map([
+        ['claude-main-login', { notice: "You've hit your org's monthly spend limit", spend: true }],
+      ]),
+    });
+    const free = facts({
+      runtimes: [readyClaude],
+      credentials: [credential('claude-main-login')],
+      tools: [tool('claude', true)],
+    });
+
+    // Act
+    const refusal = runtimeRefusal(readyClaude, 'opus', known);
+    const ready = runtimeRefusal(readyClaude, 'opus', free);
+
+    // Assert
+    should(refusal?.code).equal('out_of_quota');
+    should(refusal?.message).containEql('spend limit');
+    should(ready).be.undefined();
+  });
+});

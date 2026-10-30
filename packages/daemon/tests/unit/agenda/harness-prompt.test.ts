@@ -643,3 +643,47 @@ describe('HarnessPromptAnswerDelivery', () => {
     should(unwritable.failures.length).equal(1);
   });
 });
+
+describe('harnessWait for a login that hit its limit', () => {
+  const limited = (extra: Record<string, unknown> = {}) =>
+    running({
+      status: 'rate_limited',
+      turnState: 'needs-input',
+      turnStateAt: NOW,
+      quota: { atLimit: true, resetAt: Date.parse('2026-11-01T00:00:00.000Z') },
+      harnessDialog: {
+        id: 'd1',
+        kind: 'usage-limit',
+        title: 'What do you want to do?',
+        body: "You've hit your org's monthly spend limit · run /usage-credits",
+      },
+      ...extra,
+    });
+
+  it('should say the login hit its spend limit and when it resets, not that the ferret is stuck', () => {
+    // Act
+    const wait = harnessWait(limited());
+
+    // Assert
+    should(wait?.request.title).equal('Login hit its spend limit');
+    should(wait?.request.subject).containEql('Nov 1, 00:00 UTC');
+    should(wait?.request.subject).not.containEql('stuck');
+    should(wait?.request.waitingSince).equal(NOW);
+  });
+
+  it('should tolerate a limit with no reset time', () => {
+    // Act
+    const wait = harnessWait(limited({ quota: { atLimit: true } }));
+
+    // Assert
+    should(wait?.request.subject).equal("The ferret's login hit its spend limit. Raise the limit or switch logins.");
+  });
+
+  it('should keep the generic wording for any other dialog', () => {
+    // Act
+    const wait = harnessWait(limited({ harnessDialog: { id: 'd2', kind: 'other', title: 'Pick one' } }));
+
+    // Assert
+    should(wait?.request.title).equal('Ferret stuck on a prompt');
+  });
+});

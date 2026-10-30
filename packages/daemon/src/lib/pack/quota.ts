@@ -10,6 +10,7 @@
  * Pure: a credential and the time in, a value out.
  */
 import type { FleetCredentialView, PackQuota, PackQuotaState, PackQuotaWindow } from '@ferretry/protocol';
+import { type PaneLimit, paneLimitHolds } from '../usage/pane-limit.ts';
 
 /** At or above this share left, a login has plenty; below {@link LOW_LEFT_PERCENT}, it is low. */
 const PLENTY_LEFT_PERCENT = 50;
@@ -83,9 +84,27 @@ function windowsOf(credential: FleetCredentialView, now: string | undefined): re
 const stateOf = (left: number): PackQuotaState =>
   left <= 0 ? 'exhausted' : left < LOW_LEFT_PERCENT ? 'low' : left < PLENTY_LEFT_PERCENT ? 'some' : 'plenty';
 
-/** A credential's headroom now. No credential, or nothing measured: `unknown`, never full or empty. */
-export function quotaOf(credential: FleetCredentialView | undefined, now: string | undefined): PackQuota {
+/**
+ * A credential's headroom now. No credential, or nothing measured: `unknown`, never full or empty.
+ *
+ * `limit` is what a session's pane proved about the login ("You've hit your org's monthly spend limit"):
+ * the login is exhausted until the time the harness gave, whatever its windows last measured.
+ */
+export function quotaOf(
+  credential: FleetCredentialView | undefined,
+  now: string | undefined,
+  limit?: PaneLimit,
+): PackQuota {
   if (credential === undefined) return { state: 'unknown', windows: [], summary: 'not measured' };
+  if (limit !== undefined && (now === undefined || paneLimitHolds(limit, Date.parse(now)))) {
+    const until = limit.retryAt === undefined ? undefined : new Date(limit.retryAt).toISOString();
+    const what = limit.spend ? 'its spend limit' : 'its usage limit';
+    return {
+      state: 'exhausted',
+      windows: windowsOf(credential, now),
+      summary: until === undefined ? `hit ${what}` : `hit ${what} until ${shortInstant(until, now)}`,
+    };
+  }
   const windows = windowsOf(credential, now);
   const measured = windows.filter(
     (window): window is PackQuotaWindow & { leftPercent: number } => window.leftPercent !== undefined,
