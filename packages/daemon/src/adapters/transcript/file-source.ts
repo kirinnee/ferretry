@@ -420,6 +420,7 @@ function sourceIssue(
     | 'source-read-failed'
     | 'source-truncated'
     | 'source-watch-failed'
+    | 'window-capped'
   >,
   message: string,
   extras: Pick<TranscriptIssue, 'line' | 'byteOffset' | 'byteLength'> = {},
@@ -1024,7 +1025,7 @@ class NodeTranscriptWindow implements TranscriptWindow {
       this.owed = sourceIssue(
         this.parser,
         this.file,
-        'source-truncated',
+        'window-capped',
         'transcript window reached its byte limit before the requested instant',
         { byteOffset: 0, byteLength: seek.byteOffset },
       );

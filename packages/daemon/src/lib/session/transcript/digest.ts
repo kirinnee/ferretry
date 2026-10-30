@@ -127,6 +127,7 @@ function makesTranscriptIncomplete(issue: TranscriptIssue): boolean {
     'source-missing',
     'source-read-failed',
     'source-truncated',
+    'window-capped',
     'oversized-record',
   ].includes(issue.code);
 }
