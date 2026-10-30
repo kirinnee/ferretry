@@ -1,3 +1,11 @@
+## [4.141.3](https://github.com/kirinnee/ferretry/compare/v4.141.2...v4.141.3) (2026-10-30)
+
+### Fixes
+
+* **agenda:** offer snooze only to a machine that can do it ([#1056](https://github.com/kirinnee/ferretry/issues/1056)) ([e535ff6](https://github.com/kirinnee/ferretry/commit/e535ff6c9d452b80754ec3d677aec1a71d8901ef))
+* **board:** any open PR pulls a shipped card back to Review/CI ([#1055](https://github.com/kirinnee/ferretry/issues/1055)) ([7e6a0fe](https://github.com/kirinnee/ferretry/commit/7e6a0febc36f33b427c098f2222b8c44a6b70124))
+* **daemon:** re-prove the old "not delivered" sends, and read a paste Claude lifted an image out of ([#1054](https://github.com/kirinnee/ferretry/issues/1054)) ([bb6b5dc](https://github.com/kirinnee/ferretry/commit/bb6b5dc773d337a62da6bcd3f508a389b2dc2175)), closes [#967](https://github.com/kirinnee/ferretry/issues/967) [#N](https://github.com/kirinnee/ferretry/issues/N)
+
 ## [4.141.2](https://github.com/kirinnee/ferretry/compare/v4.141.1...v4.141.2) (2026-10-30)
 
 ### Fixes
