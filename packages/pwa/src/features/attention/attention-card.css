@@ -389,7 +389,9 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
 /* Terms: ALWAYS a two-column table — Term | Meaning, the term bold on the left — wherever terms are drawn. */
 .fy-attn-terms-table {
   width: 100%;
-  table-layout: fixed;
+  /* Auto layout: the term column is at least as wide as its longest word, so a term only ever wraps between
+     words. 30% is its preferred width, never a cap that splits a word. */
+  table-layout: auto;
   border-collapse: collapse;
   font-size: var(--text-sm);
   line-height: var(--leading-base);
@@ -400,7 +402,10 @@ details[open] > .fy-attn-sec__title > .fy-attn-sec__chevron {
   padding: 4px 0;
   text-align: left;
   vertical-align: top;
-  overflow-wrap: anywhere;
+  /* break-word, never anywhere: a word is split only when it alone is wider than the whole table. */
+  overflow-wrap: break-word;
+  word-break: normal;
+  hyphens: manual;
 }
 .fy-attn-terms-table thead th {
   padding-bottom: 2px;
