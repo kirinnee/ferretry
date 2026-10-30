@@ -297,8 +297,8 @@ describe('InlineObserverHost — armed', () => {
     observer.arm();
     ticks[0]?.tick();
     for (let wait = 0; wait < 100 && (await turnStateOf(subject, A)) === undefined; wait += 1) await Bun.sleep(5);
-    observer.close();
-    observer.close();
+    await observer.close();
+    await observer.close();
 
     // Assert
     should(ticks.map(armed => [armed.intervalMs, armed.cancelled])).deepEqual([[observer.turns.intervalMs, true]]);

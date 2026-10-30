@@ -113,7 +113,9 @@ export type ToSessionWorker =
       readonly request: number;
       readonly ask: WorkerAsk;
     }
-  | { readonly kind: 'detach'; readonly session: string; readonly generation: number };
+  | { readonly kind: 'detach'; readonly session: string; readonly generation: number }
+  /** The daemon is stopping: end every tmux client, and answer `stopped` once each has EXITED. */
+  | { readonly kind: 'stop' };
 
 export type FromSessionWorker =
   | WorkerProbe
@@ -150,6 +152,8 @@ export type FromSessionWorker =
    * that it can no longer say the pane is alive: the main thread proves the exit, and settles it (3d).
    */
   | { readonly kind: 'exited'; readonly session: string; readonly generation: number }
+  /** Every tmux client this worker started has exited, or was killed: the answer to `stop`. */
+  | { readonly kind: 'stopped' }
   /** Something went wrong outside a look; `fatal` ends the worker and restarts what it hosted. */
   | {
       readonly kind: 'fault';

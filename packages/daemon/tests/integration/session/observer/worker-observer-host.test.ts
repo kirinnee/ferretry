@@ -98,6 +98,7 @@ class AnsweringWorker implements ObserverWorker {
     this.sent.push(message);
     queueMicrotask(() => {
       if ('probe' in message) this.emit({ probe: true });
+      else if (message.kind === 'stop') this.emit({ kind: 'stopped' });
       else if (message.kind === 'request') {
         const answer = this.answer(message);
         if (answer !== undefined) this.emit(answer);
@@ -255,7 +256,7 @@ async function rig(
     },
   });
   const host = subject;
-  cleanups.push(async () => host.close());
+  cleanups.push(async () => await host.close());
   /** One tick, then long enough for the thread to answer its probe, then another: hosted from here on. */
   const hostAll = async () => {
     await host.turns.run();
