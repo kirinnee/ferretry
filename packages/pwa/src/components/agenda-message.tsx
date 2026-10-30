@@ -125,7 +125,7 @@ function AgendaPart({ part }: { readonly part: AgendaMessagePart }) {
       )}
       {part.note === undefined ? null : (
         <p className="fy-agenda-msg-note">
-          <span className="fy-agenda-msg-note-label">Note</span> {part.note}
+          <span className="fy-agenda-msg-note-label">Note:</span> {part.note}
         </p>
       )}
     </section>
