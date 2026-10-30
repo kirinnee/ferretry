@@ -218,3 +218,36 @@ describe('FileAgendaFilesMigrationMarker', () => {
     });
   });
 });
+
+describe('the agenda file store and marker at their edges', () => {
+  it('should refuse to say whether the migration ran when the marker cannot be read', async () => {
+    // Arrange — a directory where the marker file should be is not "no run": it is an error to report.
+    const { home } = await createHome();
+    const path = join(home, 'agenda-files-migration.json');
+    await mkdir(path);
+
+    // Act
+    const actual = await new FileAgendaFilesMigrationMarker(path).ran().then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+
+    // Assert
+    should(actual).be.instanceOf(Error);
+    should((actual as NodeJS.ErrnoException).code).equal('EISDIR');
+  });
+
+  it('should remove a file, and remove nothing quietly when it is already gone', async () => {
+    // Arrange
+    const { directory, put } = await createHome();
+    const store = new FileAgendaFileStore(directory);
+    await put('session-1', 'agenda.json', '{}');
+
+    // Act
+    await store.remove('session-1', 'agenda.json');
+    await store.remove('session-1', 'agenda.json');
+
+    // Assert
+    should(await readdir(directory('session-1'))).deepEqual([]);
+  });
+});
