@@ -58,6 +58,7 @@ import { windowPermissionsHost } from './lib/device-permissions.ts';
 import { createBrowserInstallPrompt } from './lib/install-prompt.ts';
 import { browserLocationShareHost } from './lib/location-share.ts';
 import { attachNotificationOpens, NotificationOpenInbox } from './lib/notification-open.ts';
+import { familyOfThemeAttribute, preloadThemeFonts } from './lib/theme-fonts.ts';
 import workerUrl from './worker/parakeet-worker.ts?worker&url';
 import sherpaWorkerUrl from './worker/sherpa-worker.ts?worker&url';
 import voskWorkerUrl from './worker/vosk-worker.ts?worker&url';
@@ -69,6 +70,10 @@ const host = document.getElementById('root');
 // not this app's document, and a silent fallback would hide the fact that
 // something else is serving the HTML.
 if (!host) throw new Error('missing #root — the host document is not this app’s index.html');
+
+// pre-paint.js has already published the family: ask for its fonts now, before React and the
+// stylesheet's own discovery would.
+preloadThemeFonts(familyOfThemeAttribute(document.documentElement.dataset.theme));
 
 const installPrompt = createBrowserInstallPrompt(window);
 const devicePermissions = windowPermissionsHost(window as unknown as Parameters<typeof windowPermissionsHost>[0]);

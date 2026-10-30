@@ -28,6 +28,7 @@
 retain packages/pwa/src/features/settings/dictation-shortcut.ts:captureDepth # a re-entrancy counter for the shortcut capture field. It counts nested captures in this document; a daemon cannot observe it, let alone set it.
 retain packages/pwa/src/hooks/use-density.ts:firstLoadDefault # the reader's density, resolved once from a pointer media query. It describes the device holding the browser, which every paired daemon shares.
 retain packages/pwa/src/hooks/use-dialog-focus.ts:ESCAPE_LAYERS # the Escape-key layering stack, holding opaque DOM tokens in arrival order. Entries are identities of mounted overlays, never daemon records.
+retain packages/pwa/src/lib/theme-fonts.ts:preloaded # the font files already hinted in one document's head. It describes this page's own <link> elements, never a daemon's records, and a font file is the same whichever daemon is paired.
 retain packages/pwa/src/hooks/use-project-scope.ts:browserNavigation # the lazily built window-navigation adapter. A stable identity is required because it is an effect dependency; it wraps `window` and reads nothing from a daemon.
 retain packages/pwa/src/lib/md-compose.ts:volatilePref # the markdown-composer preference when localStorage refuses a write. A reader preference for their own composer, not a daemon's answer.
 retain packages/pwa/src/lib/pin-bridge.ts:controllers # mounted pin-jump controllers, held by identity for dispatch. The bridge routes to a controller; the SCOPE it routes with is the argument, not the set.

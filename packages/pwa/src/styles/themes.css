@@ -594,8 +594,10 @@
   --bubble-radius: 0px;
   --bubble-shadow: var(--shadow-sm);
 
-  --font-display: 'Aptos Display', 'Avenir Next Condensed', 'Franklin Gothic Medium', 'Segoe UI', system-ui, sans-serif;
-  --font-body: 'Aptos', 'Avenir Next', 'Segoe UI', system-ui, -apple-system, sans-serif;
+  /* Aptos is Microsoft's and not freely licensed, so it is named first and NOT shipped: where it is
+     installed it wins, everywhere else the bundled Public Sans (OFL) is the look-alike. */
+  --font-display: 'Aptos Display', 'Public Sans', system-ui, sans-serif;
+  --font-body: 'Aptos', 'Public Sans', system-ui, -apple-system, sans-serif;
   --font-mono: 'Cascadia Code', 'Cascadia Mono', 'SFMono-Regular', Consolas, 'Liberation Mono', ui-monospace, monospace;
   --tracking-display: 0.01em;
   --chrome-font-size: 11px;
@@ -1902,7 +1904,7 @@
 }
 :root[data-theme^='blueprint-'],
 [data-swatch^='blueprint-'] {
-  --font-ui: 'DIN Condensed', 'Arial Narrow', var(--font-body);
+  --font-ui: 'DIN Condensed', 'Barlow Condensed', 'Arial Narrow', var(--font-body);
   --font-prose: var(--font-ui);
   --label-transform: uppercase;
   --tracking-label: 0.12em;
@@ -1927,8 +1929,8 @@
 }
 :root[data-theme^='broadsheet-'],
 [data-swatch^='broadsheet-'] {
-  --font-display: Georgia, 'Times New Roman', serif;
-  --font-prose: Georgia, 'Times New Roman', serif;
+  --font-display: Georgia, Gelasio, 'Times New Roman', serif;
+  --font-prose: Georgia, Gelasio, 'Times New Roman', serif;
   --label-variant: all-small-caps;
   --label-transform: none;
   --tracking-label: 0.08em;
@@ -1962,7 +1964,7 @@
 }
 :root[data-theme^='wayfinding-'],
 [data-swatch^='wayfinding-'] {
-  --font-ui: 'Arial Black', Impact, var(--font-body);
+  --font-ui: 'Arial Black', 'Archivo Black', Impact, var(--font-body);
   --font-display: var(--font-ui);
   --weight-normal: 600;
   --weight-strong: 800;
@@ -1989,6 +1991,8 @@
 }
 :root[data-theme^='ledger-'],
 [data-swatch^='ledger-'] {
+  /* Plex Mono (bundled) rather than the shared default, so a ledger reads differently from phosphor. */
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, Consolas, monospace;
   --font-ui: var(--font-mono);
   --font-prose: var(--font-mono);
   --label-transform: uppercase;
@@ -2010,7 +2014,7 @@
 }
 :root[data-theme^='ma-'],
 [data-swatch^='ma-'] {
-  --font-display: Georgia, 'Times New Roman', serif;
+  --font-display: Georgia, Gelasio, 'Times New Roman', serif;
   --font-prose: var(--font-display);
   --label-transform: none;
   --label-weight: 500;
