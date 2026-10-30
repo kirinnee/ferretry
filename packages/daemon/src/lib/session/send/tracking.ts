@@ -1,4 +1,5 @@
 import { ferretryNotice, parseHandoffPointer, type SendEvidence } from '@ferretry/protocol';
+import { PASTE_PLACEHOLDER_PATTERN } from '../../tmux/composer.ts';
 import type { ObservedHumanInput } from '../../transcript/types.ts';
 import type { SendRecord, SendSenderKind } from './types.ts';
 
@@ -163,7 +164,64 @@ const CONTAINED_MATCH_MIN = 12;
 
 function carries(observed: string, needle: string): boolean {
   if (observed === needle) return true;
-  return needle.length >= CONTAINED_MATCH_MIN && observed.includes(needle);
+  if (needle.length >= CONTAINED_MATCH_MIN && observed.includes(needle)) return true;
+  return carriesThroughPlaceholders(observed, needle);
+}
+
+/** An exact match, or one that differs only where the harness swapped something for a placeholder. */
+function sameText(observed: string, needle: string): boolean {
+  return observed === needle || carriesThroughPlaceholders(observed, needle);
+}
+
+const PLACEHOLDER = new RegExp(PASTE_PLACEHOLDER_PATTERN, 'giu');
+
+/** A file path the harness turned into an attachment is ONE token; pasted text it elided can be many. */
+const FILE_PLACEHOLDER = /^\[(?:image|audio)/iu;
+
+/**
+ * Whether the harness recorded this send with part of it swapped for a placeholder.
+ *
+ * Claude Code turns an image path typed into its composer into `[Image #5]` and records THAT, so a
+ * message that ends in "- /…/shot.png (image/png)" is written down as "- [Image #5] (image/png)" and
+ * no longer contains what was typed. Pasted text it elides shows up as `[...Truncated text #1 +40
+ * lines...]`. Every piece of the record that is NOT a placeholder must still sit in the send, in
+ * order and anchored at both ends, and the send's remainder between two pieces must be exactly what
+ * a placeholder can stand for: one token per file placeholder, anything for elided text. That is
+ * strict enough that another message cannot prove this one, and loose enough that the placeholder
+ * does not make a delivered send look lost.
+ */
+function carriesThroughPlaceholders(observed: string, needle: string): boolean {
+  const found = [...observed.matchAll(PLACEHOLDER)];
+  if (found.length === 0) return false;
+  // The record cut at each placeholder: the piece before it, then the piece after the last.
+  const pieces: string[] = [];
+  let from = 0;
+  for (const match of found) {
+    pieces.push(observed.slice(from, match.index).trim());
+    from = (match.index ?? 0) + match[0].length;
+  }
+  pieces.push(observed.slice(from).trim());
+  let cursor = 0;
+  let matched = 0;
+  let pending: string[] = [];
+  for (const [index, piece] of pieces.entries()) {
+    if (index > 0) pending.push((found[index - 1] as RegExpMatchArray)[0]);
+    if (piece === '') continue;
+    const at = needle.indexOf(piece, cursor);
+    if (at === -1 || !gapIsExplained(needle.slice(cursor, at), pending)) return false;
+    cursor = at + piece.length;
+    matched += piece.length;
+    pending = [];
+  }
+  return matched >= CONTAINED_MATCH_MIN && gapIsExplained(needle.slice(cursor), pending);
+}
+
+function gapIsExplained(gap: string, placeholders: readonly string[]): boolean {
+  const left = gap.trim();
+  if (left === '') return true;
+  if (placeholders.length === 0) return false;
+  if (!placeholders.every(placeholder => FILE_PLACEHOLDER.test(placeholder))) return true;
+  return left.split(' ').length <= placeholders.length;
 }
 
 const ENTERED = new Set(['normal-user-record', 'native-queue-drain']);
@@ -211,7 +269,7 @@ export function judgeSends(
         carries(normalized(input.text), needle),
     );
     const queue = inputs.filter(
-      input => !ENTERED.has(input.proof) && after(input) && normalized(input.text) === needle,
+      input => !ENTERED.has(input.proof) && after(input) && sameText(normalized(input.text), needle),
     );
     const firstHold = queue.find(input => input.proof === 'native-queue-hold');
     const last = queue.at(-1);
