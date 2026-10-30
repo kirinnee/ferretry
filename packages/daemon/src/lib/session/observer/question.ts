@@ -11,6 +11,7 @@ import {
   type QuestionDocument,
   reconcileAnswerEvidence,
 } from '../question/answer-ledger.ts';
+import { type AskedQuestion, withAskedQuestion } from '../question/asked.ts';
 import {
   projectStructuredQuestion,
   type StructuredQuestionProjection,
@@ -39,6 +40,8 @@ export interface QuestionLook {
   readonly events: readonly TranscriptEvent[];
   /** The answer ledger, by request id. */
   readonly answers: ReadonlyMap<string, AnswerOperationRecord>;
+  /** The question Claude's hook recorded as asked, which its transcript holds back while the form is open. */
+  readonly asked?: AskedQuestion | undefined;
 }
 
 /**
@@ -72,7 +75,7 @@ export interface QuestionPatch {
  * over whatever the document already holds, so neither can erase the other's fields.
  */
 export function stepQuestion(look: QuestionLook): QuestionPatch | undefined {
-  const projection = projectStructuredQuestion(look.events);
+  const projection = projectStructuredQuestion(withAskedQuestion(look.events, look.asked));
   const answerEvidence = reconcileAnswerEvidence(look.answers, look.state, {
     ...(projection.kind === 'pending' ? { activeToolUseId: projection.question.toolUseId } : {}),
     ...(projection.kind === 'resolved' ? { resolvedToolUseId: projection.toolUseId } : {}),

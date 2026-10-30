@@ -16,7 +16,7 @@ import path from 'node:path';
 import should from 'should';
 import { FileFleetProvisioner } from '../../src/adapters/file-provisioner.ts';
 import { FileSharedHistoryFileSystem } from '../../src/adapters/file-shared-history.ts';
-import { codexTrustOverride } from '../../src/lib/account/fixed-layer.ts';
+import { CLAUDE_QUESTION_HOOKS, codexTrustOverride } from '../../src/lib/account/fixed-layer.ts';
 import { EMPTY_RUNTIME_IDS, type RuntimeIds } from '../../src/lib/account/ids.ts';
 import { materialiseFleet } from '../../src/lib/account/materialise.ts';
 import { type AccountModelDocument, parseAccountModel } from '../../src/lib/account/schema.ts';
@@ -167,6 +167,7 @@ describe('materialising the account model onto disk', () => {
       permissions: { defaultMode: 'bypassPermissions' },
       remoteControlAtStartup: false,
       skipDangerousModePermissionPrompt: true,
+      hooks: CLAUDE_QUESTION_HOOKS,
     });
     should(JSON.parse(await readFile(path.join(host.claudeHome, '.fy', 'materialised.json'), 'utf8'))).eql({
       version: 1,

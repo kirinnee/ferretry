@@ -44,7 +44,7 @@ beforeAll(async () => {
   await writeFile(join(home, 'idle.txt'), IDLE);
   // Listen first — a harness is already taking keys raw when its prompt appears, so a pane showing the
   // whole prompt is one a key can answer (`opost` keeps each newline returning the carriage). Then draw
-  // the prompt, take one key, then whatever else lands within half a second, log it all as hex, and
+  // the prompt, take one key, then whatever else lands within a moment, log it all as hex, and
   // redraw as idle — the harness acting on the key the moment it is pressed.
   await writeFile(
     harness,
@@ -53,7 +53,7 @@ beforeAll(async () => {
       'stty raw -echo opost',
       `printf '\\033[H\\033[2J'; cat "$1"`,
       'first="$(dd bs=1 count=1 2>/dev/null | od -An -tx1)"',
-      'rest="$(timeout 0.5 dd bs=1 count=8 2>/dev/null | od -An -tx1)"',
+      'rest="$(timeout 0.15 dd bs=1 count=8 2>/dev/null | od -An -tx1)"',
       'stty sane',
       `echo $first $rest > "$2"`,
       `printf '\\033[H\\033[2J'; cat '${join(home, 'idle.txt')}'`,
@@ -96,7 +96,7 @@ async function pane(fixture: string) {
   const service = new SessionPermissionService(
     { capture: async id => await capture.capture(id), write: async (id, bytes) => await typing.write(id, bytes) },
     milliseconds => Bun.sleep(milliseconds),
-    { settleReads: 25, settleMs: 100 },
+    { settleReads: 100, settleMs: 20 },
   );
   // Until the harness has drawn the WHOLE prompt, there is nothing to read. A frame caught mid-paint
   // already parses — as a different prompt, its last row cut short — so "parses" is not "drawn". A
@@ -110,7 +110,7 @@ async function pane(fixture: string) {
         return last(frame) === final ? frame : undefined;
       },
       `${fixture} to be drawn`,
-      { every: 100 },
+      { every: 10 },
     );
   };
   return { session, service, drawn, capture, keys: async () => (await readFile(keys, 'utf8')).trim() };

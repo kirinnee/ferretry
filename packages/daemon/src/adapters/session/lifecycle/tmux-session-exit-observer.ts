@@ -199,6 +199,7 @@ export class TmuxSessionExitObserver implements SessionExitPort {
       status: transition.status,
       pane: observation.exit.kind,
       exitCode: transition.exitCode ?? null,
+      signal: observation.exit.kind === 'exited' ? (observation.exit.signal ?? null) : null,
     });
     return true;
   }

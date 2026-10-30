@@ -1,3 +1,34 @@
+## [4.118.0](https://github.com/kirinnee/ferretry/compare/v4.117.0...v4.118.0) (2026-10-30)
+
+### Features
+
+* **warden:** revive sessions that died abnormally ([#960](https://github.com/kirinnee/ferretry/issues/960)) ([bf113ef](https://github.com/kirinnee/ferretry/commit/bf113ef0885355666cbe6fbe379a114774cf8f0f))
+
+## [4.117.0](https://github.com/kirinnee/ferretry/compare/v4.116.0...v4.117.0) (2026-10-30)
+
+### Features
+
+* **daemon:** warn in fy doctor when tmux is older than 3.7 ([#959](https://github.com/kirinnee/ferretry/issues/959)) ([bb7a51e](https://github.com/kirinnee/ferretry/commit/bb7a51ef42ee59dd0ff9c70d597830430992302f))
+
+### Fixes
+
+* **daemon:** release control clients before killing a session so tmux 3.6a cannot crash ([#958](https://github.com/kirinnee/ferretry/issues/958)) ([540fd82](https://github.com/kirinnee/ferretry/commit/540fd829934672cc186d863d906ce681f2481719))
+* **daemon:** stop the restart queue, downloads and session lists stalling the loop ([#950](https://github.com/kirinnee/ferretry/issues/950)) ([a0e4036](https://github.com/kirinnee/ferretry/commit/a0e40360481a56d6fced45359304da7416c3fb06))
+* **question:** see an open Claude question while its form is on screen ([#952](https://github.com/kirinnee/ferretry/issues/952)) ([4cf70c2](https://github.com/kirinnee/ferretry/commit/4cf70c2c44223c801cade8f0bc22f5eb12686b3a))
+* **scripts:** rename a stale old-name reference beside its new name instead of refusing it as a collision ([#954](https://github.com/kirinnee/ferretry/issues/954)) ([59b527f](https://github.com/kirinnee/ferretry/commit/59b527fe28b414215b418bb03738d94ddc2e136c))
+
+## [4.116.0](https://github.com/kirinnee/ferretry/compare/v4.115.0...v4.116.0) (2026-10-30)
+
+### Features
+
+* **board:** starts make cards, signal done moves them, agenda items tie to cards (U7) ([#946](https://github.com/kirinnee/ferretry/issues/946)) ([713b120](https://github.com/kirinnee/ferretry/commit/713b12075f5ee0466d9f525b0bec3144ee941971))
+* **pwa:** board data layer with live updates, filters and write verbs (U10) ([#948](https://github.com/kirinnee/ferretry/issues/948)) ([44b8848](https://github.com/kirinnee/ferretry/commit/44b884898daea2800ede165cc358bd7e9d648e5a)), closes [#932](https://github.com/kirinnee/ferretry/issues/932)
+
+### Fixes
+
+* **daemon:** close the tunnel listener before stopping cloudflared ([#951](https://github.com/kirinnee/ferretry/issues/951)) ([f837a1d](https://github.com/kirinnee/ferretry/commit/f837a1d07088b10bcc4565cf1aebdde7085b7bd8))
+* **fleet:** compare directory devices when judging a shared-history rename ([#947](https://github.com/kirinnee/ferretry/issues/947)) ([6c9c42c](https://github.com/kirinnee/ferretry/commit/6c9c42c4f1f3ddd7ccb0db4445f321a613ad123b))
+
 ## [4.115.0](https://github.com/kirinnee/ferretry/compare/v4.114.0...v4.115.0) (2026-10-30)
 
 ### Features

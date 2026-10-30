@@ -285,6 +285,7 @@ describe('tmux session exit observer', () => {
           status: 'failed',
           pane: 'exited',
           exitCode: 3,
+          signal: null,
         },
       },
     ]);
@@ -324,7 +325,7 @@ describe('tmux session exit observer', () => {
     const settled = await state(subject);
     should(settled).match({ status: 'failed', health: 'unknown' });
     should(settled).not.have.property('exitCode');
-    should(subject.events[0]).match({ data: { pane: 'gone', exitCode: null } });
+    should(subject.events[0]).match({ data: { pane: 'gone', exitCode: null, signal: null } });
   }, 20_000);
 
   it('should observe nothing while the harness is alive, launching, or no longer claimed running', async () => {

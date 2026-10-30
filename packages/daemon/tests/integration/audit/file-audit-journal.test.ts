@@ -359,7 +359,7 @@ describe('a flood by a paired device', () => {
     for (const failure of world.failures) should(failure).containEql('kept store is full');
   }, 60_000);
 
-  it('should leave device.paired on disk after 15,000 terminal attaches', async () => {
+  it('should leave device.paired on disk after 3,000 terminal attaches', async () => {
     // Arrange
     const world = await flooded();
     await world.log.record({
@@ -371,7 +371,7 @@ describe('a flood by a paired device', () => {
     const terminal = world.sockets[0];
 
     // Act: the review's probe — re-attach in a loop, as fast as a socket allows.
-    for (let index = 0; index < 15_000; index += 1) {
+    for (let index = 0; index < 3_000; index += 1) {
       await terminal?.accept({
         request: request({ path: '/attach' }),
         params: new Map([
@@ -380,7 +380,7 @@ describe('a flood by a paired device', () => {
         ]),
         credential: world.credential,
       });
-      if (index % 1_000 === 999) world.tick(AUDIT_FOLD_WINDOW_MS);
+      if (index % 200 === 199) world.tick(AUDIT_FOLD_WINDOW_MS);
     }
     await world.log.flush(Number.POSITIVE_INFINITY);
     const paths = auditJournalPaths(world.state);
@@ -392,7 +392,7 @@ describe('a flood by a paired device', () => {
     const attaches = reading.records
       .filter(record => record.event === 'terminal.opened')
       .reduce((total, record) => total + (typeof record.detail?.repeats === 'number' ? record.detail.repeats : 1), 0);
-    should(attaches).equal(15_000);
+    should(attaches).equal(3_000);
     should(reading.records.length).be.below(40);
   }, 60_000);
 

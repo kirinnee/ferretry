@@ -117,6 +117,31 @@ describe('startFleetFeed', () => {
     control.stop();
   });
 
+  it('should hand every event to onEvent, and let a board event move no list row', async () => {
+    // Arrange
+    const time = handTime();
+    const feed = daemon();
+    const seen: string[] = [];
+    let reads = 0;
+    const control = startFleetFeed({
+      open: feed.open,
+      onChange: () => (reads += 1),
+      onEvent: event => seen.push(event.type),
+      environment: time.environment,
+    });
+
+    // Act
+    feed.opened[0]?.idle();
+    feed.opened[0]?.event('board.changed');
+    feed.opened[0]?.event('surface.driving');
+    await time.advance(10_000);
+
+    // Assert
+    should(seen).eql(['board.changed', 'surface.driving']);
+    should(reads).equal(0);
+    control.stop();
+  });
+
   it('should leave at least the minimum gap between two reads, however busy the fleet', async () => {
     // Arrange
     const time = handTime();

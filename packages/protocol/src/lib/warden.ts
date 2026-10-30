@@ -239,8 +239,28 @@ export const WardenInvestigationConfigSchema = z.object({
 });
 export type WardenInvestigationConfig = z.infer<typeof WardenInvestigationConfigSchema>;
 
+/** Recovery bounds are independent of investigation budgets: no model judges a recorded exit. */
+export const WardenReviveConfigSchema = z.object({
+  enabled: z.boolean(),
+  windowMinutes: PositiveIntegerSchema,
+  cooldownMinutes: PositiveIntegerSchema,
+  waveSize: z.number().int().min(1).max(3),
+  waveGapSeconds: z.number().int().min(10),
+  breakerMinutes: PositiveIntegerSchema,
+});
+export type WardenReviveConfig = z.infer<typeof WardenReviveConfigSchema>;
+export const DEFAULT_WARDEN_REVIVE = {
+  enabled: true,
+  windowMinutes: 15,
+  cooldownMinutes: 30,
+  waveSize: 3,
+  waveGapSeconds: 10,
+  breakerMinutes: 30,
+};
+
 const WardenConfigShape = z.object({
   enabled: z.boolean(),
+  revive: WardenReviveConfigSchema.default(DEFAULT_WARDEN_REVIVE),
   layers: WardenLayersSchema,
   guard: WardenGuardConfigSchema,
   caps: WardenCapsSchema,
@@ -276,6 +296,7 @@ export const WARDEN_BLESSING_CEILING_MINUTES = 240;
 
 export const WardenConfigPatchSchema = z.strictObject({
   enabled: z.boolean().optional(),
+  revive: WardenReviveConfigSchema.strict().partial().optional(),
   layers: WardenLayersSchema.strict().partial().optional(),
   guard: WardenGuardConfigSchema.strict().partial().optional(),
   caps: WardenCapsSchema.strict().partial().optional(),
@@ -300,6 +321,7 @@ export type WardenConfigPatch = z.infer<typeof WardenConfigPatchSchema>;
 
 /** The nested sections a patch merges into rather than replaces. */
 export const WARDEN_CONFIG_SECTIONS = [
+  'revive',
   'layers',
   'guard',
   'caps',
@@ -679,6 +701,7 @@ export const WardenActionKindSchema = z.enum([
   'failover',
   /** A browser a finished ferret left running, closed by rule — no investigation was involved. */
   'close_leftover',
+  'revive',
 ]);
 export type WardenActionKind = z.infer<typeof WardenActionKindSchema>;
 
@@ -760,6 +783,7 @@ export function wardenActionOutcome(action: Pick<WardenAction, 'action' | 'outco
     case 'bless':
       return 'cleared';
     case 'nudge':
+    case 'revive':
     case 'resume':
     case 'restart':
     case 'failover':
@@ -838,7 +862,7 @@ export const WardenJevCheckSchema = z.object({
   anomalyKind: WardenAnomalyKindSchema,
   verdict: WardenJevCheckVerdictSchema,
   /** `acted`: the act carried out. `handed_on`: the act Jev chose and did not carry out alone. */
-  act: WardenActionKindSchema.exclude(['bless', 'close_leftover']).optional(),
+  act: WardenActionKindSchema.exclude(['bless', 'close_leftover', 'revive']).optional(),
   /** `handed_on` and `skipped`: why. */
   why: WardenJevCheckWhySchema.optional(),
   /** `handed_on` and `skipped`: who looks at it next. */

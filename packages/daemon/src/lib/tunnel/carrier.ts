@@ -179,15 +179,22 @@ export class TunnelCarrier {
     await this.#work;
   }
 
-  /** Withdraws the tunnel, stops the connector and closes the listener. The held tunnel is kept. */
+  /**
+   * Withdraws the tunnel, closes the listener and stops the connector. The held tunnel is kept.
+   *
+   * THE LISTENER CLOSES FIRST. Asked to stop, `cloudflared` waits for the requests it has in flight to the
+   * origin — a browser's open session socket among them — and those sockets end only when the listener does.
+   * Stopped the other way round, every daemon restart with a browser connected waited out the connector's
+   * whole kill grace (5 s) before the listener closed: the update gap the app showed was half that wait.
+   */
   async stop(): Promise<void> {
     this.#stopped = true;
     this.#cancelTimer();
     await this.#work;
-    await this.#supervisor?.stop();
     this.#publishAs(undefined);
     await this.#listener?.close();
     this.#listener = undefined;
+    await this.#supervisor?.stop();
   }
 
   /**

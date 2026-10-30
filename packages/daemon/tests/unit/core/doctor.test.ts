@@ -298,3 +298,58 @@ describe('doctor report over a manifest the daemon could not read', () => {
     should(result.checks.some(check => check.name === 'fleet manifest')).be.false();
   });
 });
+
+describe('doctor tmux release row', () => {
+  const withTmux = (tmuxRelease: { program?: string; server?: string } | undefined) =>
+    readDoctorReport({
+      platform: 'linux',
+      harnesses,
+      directorySyscalls: true,
+      executables: { resolve: name => `/bin/${name}` },
+      ...(tmuxRelease === undefined ? {} : { tmuxRelease }),
+    });
+  const row = (result: DoctorReport) => result.checks.find(check => check.name === 'tmux release');
+
+  it('should leave the row out when tmux could not be asked', () => {
+    should(row(withTmux(undefined))).be.undefined();
+    should(row(withTmux({}))).be.undefined();
+    should(row(withTmux({ program: 'not a version' }))).be.undefined();
+  });
+
+  it('should pass a host whose installed tmux and running server are both 3.7 or newer', () => {
+    // Act
+    const actual = row(withTmux({ program: 'tmux 3.8', server: '3.7b' }));
+
+    // Assert
+    should(actual?.status).equal('present');
+    should(actual?.summary).equal('installed 3.8, running server 3.7b');
+  });
+
+  it('should warn on tmux 3.6a without making the host not ready', () => {
+    // Act
+    const result = withTmux({ program: 'tmux 3.6a', server: '3.6a' });
+
+    // Assert — 3.6a starts sessions perfectly; it can crash the whole server when one ends.
+    should(row(result)).containEql({ requirement: 'capability', status: 'missing' });
+    should(row(result)?.summary).equal('installed 3.6a, running server 3.6a — 3.7 or newer is needed');
+    should(row(result)?.impact).match(/crash its whole server/u);
+    should(row(result)?.impact).match(/Do not kill the tmux server/u);
+    should(result.ready).be.true();
+  });
+
+  it('should say an upgrade takes over at the next server start rather than ask for a restart', () => {
+    // Act
+    const actual = row(withTmux({ program: 'tmux 3.7b', server: '3.6a' }));
+
+    // Assert — the running server keeps its old binary, and it is the server that crashes.
+    should(actual?.status).equal('missing');
+    should(actual?.summary).equal('installed 3.7b, running server 3.6a — the server still runs the old release');
+    should(actual?.impact).match(/3\.7b is installed already/u);
+    should(actual?.impact).match(/next time the server starts/u);
+  });
+
+  it('should judge the installed program alone when no server is running', () => {
+    should(row(withTmux({ program: 'tmux 3.6a' }))?.summary).equal('installed 3.6a — 3.7 or newer is needed');
+    should(row(withTmux({ program: 'tmux 3.8' }))?.status).equal('present');
+  });
+});

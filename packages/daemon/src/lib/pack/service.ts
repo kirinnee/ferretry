@@ -19,15 +19,17 @@ import type {
   PackInventory,
   PackModelOption,
   PackNewOutcome,
+  PackChildCard,
   PackNewRequest,
   PackRecommendation,
   PackRefusal,
   PackView,
   RoutingPromptView,
   SessionView,
-  StartSessionRequest,
+  StartSessionRequestInput,
 } from '@ferretry/protocol';
-import { taskTitleFor } from '@ferretry/protocol';
+import { formatTaskRef, taskTitleFor } from '@ferretry/protocol';
+import { cardFooterLine, type Delegation, type SessionCards } from '../board/index.ts';
 import { admitChild, type ParentFacts } from './admission.ts';
 import { buildInventory } from './cleanup/inventory.ts';
 import { PACK_JEV_LIMITS, type PackJevPort } from './jev.ts';
@@ -68,8 +70,13 @@ export interface PackPorts {
   /** Whether a folder a caller NAMED is a temporary or scratch one (`./scratch.ts`). */
   scratch(cwd: string): Promise<boolean>;
   probe(request: PackProbeRequest, ttlMs: number): Promise<CachedProbe>;
-  /** Starts the sub-ferret; throws {@link PackStartRefused} when admission refuses it. */
-  start(request: StartSessionRequest): Promise<SessionView>;
+  /**
+   * Starts the sub-ferret; throws {@link PackStartRefused} when admission refuses it. `delegation` is its
+   * board card, reserved under the lead's focus card; the start writes it with the session.
+   */
+  start(request: StartSessionRequestInput, delegation?: Delegation): Promise<SessionView>;
+  /** The lead's side of the sub-ferret's card (`SessionCards.delegate`), taken just before the first start. */
+  cards: Pick<SessionCards, 'delegate'>;
   jev: PackJevPort;
   /** Jev's spend on Pack mode today (UTC), and recording one more answer's. */
   spend: { today(): Promise<number>; record(usd: number): Promise<void> };
@@ -101,10 +108,41 @@ const refused = (refusal: PackRefusal, attempts: readonly PackAttempt[]): PackNe
   attempts,
 });
 
-/** What a sub-ferret is told after its brief: who started it, and how its result reaches them. */
-export function subFerretFooter(bin: string, parent: string | undefined): string {
+/**
+ * What a sub-ferret is told after its brief: who started it, its board card when it has one
+ * (`cardFooterLine`), and how its result reaches them.
+ */
+export function subFerretFooter(bin: string, parent: string | undefined, card?: string): string {
   const who = parent === undefined ? 'with `new`' : `by ferret ${parent}`;
-  return `\n\n---\nYou are a sub-ferret, started ${who} (Pack mode). When the work is done, finish with \`${bin} signal done "<your result: what you did, what you found, what is left>"\` — that message is what is handed back.`;
+  const named = card === undefined ? '' : ` ${card}`;
+  return `\n\n---\nYou are a sub-ferret, started ${who} (Pack mode).${named} When the work is done, finish with \`${bin} signal done "<your result: what you did, what you found, what is left>"\` — that message is what is handed back.`;
+}
+
+/**
+ * What `fy new` says about the sub-ferret's card: the one its new session focuses — which the start made —
+ * the lead's own when one was made for it, and whatever the board could not do. `undefined` when there is
+ * nothing to say (a daemon whose starts make no cards).
+ */
+export function startedCard(
+  view: SessionView,
+  delegation: Delegation | undefined,
+  notes: readonly string[],
+): PackChildCard | undefined {
+  const focus = view.config.focusTask;
+  const made = focus !== undefined && (delegation === undefined || focus.id === delegation.id);
+  const said = [
+    ...notes,
+    ...(delegation === undefined || made
+      ? []
+      : [`${formatTaskRef(delegation)} could not be made, so the sub-ferret started without a card.`]),
+  ];
+  if (!made && said.length === 0) return undefined;
+  return {
+    ...(made ? { id: focus.id } : {}),
+    ...(made && delegation?.project !== undefined ? { project: delegation.project } : {}),
+    ...(delegation?.leadCard === undefined ? {} : { leadCard: delegation.leadCard }),
+    ...(said.length === 0 ? {} : { note: said.join(' ') }),
+  };
 }
 
 /** How Jev is told what a candidate is: its label and tier, and where the routing prompt names it. */
@@ -312,6 +350,7 @@ export class PackService {
   ): Promise<PackNewOutcome> {
     const attempts: PackAttempt[] = [];
     let last: PackRefusal | undefined;
+    let card: Awaited<ReturnType<PackPorts['cards']['delegate']>> | undefined;
     for (const choice of ordered.choices) {
       const model = choice.model ?? choice.runtime.models?.default;
       const probed = await this.ports.probe(
@@ -337,25 +376,38 @@ export class PackService {
         attempts.push({ runtime, ...named, outcome: 'refused', refusal: last, probe, probeMs: probed.outcome.ms });
         continue;
       }
+      // The card is the LEAD's delegation (board-design.md §3.1): reserved once, just before the first start
+      // that will run, so a refusal before any start costs the board nothing.
+      if (parent !== undefined && card === undefined)
+        card = await this.ports.cards.delegate(parent, request.task, request.cwd === undefined);
+      const delegation = card?.delegation;
       try {
-        const view = await this.ports.start({
-          mode: request.mode ?? 'auto',
-          agent: choice.runtime.wrapper,
-          prompt: `${request.task}${subFerretFooter(this.ports.bin, parent)}`,
-          boardAccess: 'none',
-          cwd,
-          ...(parent === undefined ? {} : { parent }),
-          ...(choice.model === undefined ? {} : { model: choice.model }),
-          ...(choice.effort === undefined ? {} : { effort: choice.effort }),
-          name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
-        });
+        const view = await this.ports.start(
+          {
+            mode: request.mode ?? 'auto',
+            agent: choice.runtime.wrapper,
+            prompt: `${request.task}${subFerretFooter(
+              this.ports.bin,
+              parent,
+              delegation === undefined ? undefined : cardFooterLine(delegation.id, delegation.project, this.ports.bin),
+            )}`,
+            cwd,
+            ...(parent === undefined ? {} : { parent }),
+            ...(choice.model === undefined ? {} : { model: choice.model }),
+            ...(choice.effort === undefined ? {} : { effort: choice.effort }),
+            name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
+          },
+          delegation,
+        );
         attempts.push({ runtime, ...named, outcome: 'started', probe, probeMs: probed.outcome.ms });
+        const childCard = startedCard(view, delegation, card?.notes ?? []);
         return {
           outcome: 'started',
           view,
           decidedBy: ordered.decidedBy,
           attempts,
           ...(ordered.note === undefined ? {} : { note: ordered.note }),
+          ...(childCard === undefined ? {} : { card: childCard }),
         };
       } catch (error) {
         if (!(error instanceof PackStartRefused)) throw error;

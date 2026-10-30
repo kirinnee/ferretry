@@ -1,8 +1,8 @@
 import { describe, it } from 'bun:test';
 import should from 'should';
 import {
-  captureRowsArguments,
   capturePaneArguments,
+  captureRowsArguments,
   deleteBufferArguments,
   hasSessionArguments,
   killPaneArguments,
@@ -10,21 +10,25 @@ import {
   listSessionsArguments,
   loadBufferArguments,
   newSessionArguments,
-  pasteBufferName,
   paneIdentityArguments,
   paneMetadataArguments,
   paneProofArguments,
+  paneSessionClientsArguments,
   paneTarget,
+  parseControlClients,
   parsePaneMetadata,
+  pasteBufferName,
   promptIsReady,
+  releasedKillArguments,
   retryDelays,
   sendKeyArguments,
   sendLiteralArguments,
+  sessionClientsArguments,
   sessionTarget,
   TmuxAddressError,
-  TmuxController,
   type TmuxCommandPort,
   type TmuxCommandResult,
+  TmuxController,
   windowTarget,
 } from '../../../src/lib/index.ts';
 
@@ -200,6 +204,7 @@ describe('TmuxController', () => {
       ok(),
       ok(),
       ok(),
+      ok(),
     ]);
     const subject = new TmuxController(fake);
 
@@ -249,6 +254,7 @@ describe('TmuxController', () => {
       ['send-keys', '-t', 'work', '-l', 'hello'],
       ['send-keys', '-t', 'work', 'Enter'],
       ['has-session', '-t', 'work'],
+      ['list-clients', '-t', 'work', '-F', '#{client_control_mode} #{client_name}'],
       ['kill-session', '-t', 'work'],
     ]);
   });
@@ -276,7 +282,7 @@ describe('TmuxController', () => {
     );
     const sendFailure = new TmuxController(new FakeTmux([{ code: 1, stdout: '', stderr: '' }]));
     const keyFailure = new TmuxController(new FakeTmux([{ code: 1, stdout: '', stderr: '' }]));
-    const stopFailure = new TmuxController(new FakeTmux([ok(), { code: 1, stdout: '', stderr: '' }]));
+    const stopFailure = new TmuxController(new FakeTmux([ok(), ok(), { code: 1, stdout: '', stderr: '' }]));
 
     // Act + Assert
     should(await unavailable.listSessions()).deepEqual([]);
@@ -410,14 +416,17 @@ describe('tmux bracketed paste', () => {
   it('should kill an exact pane and report a tmux refusal rather than swallowing it', async () => {
     // Arrange
     const killed = new FakeTmux([ok()]);
-    const refused = new FakeTmux([{ code: 1, stdout: '', stderr: "can't find pane: %12\n" }]);
-    const silent = new FakeTmux([{ code: 1, stdout: '', stderr: '   ' }]);
+    const refused = new FakeTmux([ok(), { code: 1, stdout: '', stderr: "can't find pane: %12\n" }]);
+    const silent = new FakeTmux([ok(), { code: 1, stdout: '', stderr: '   ' }]);
 
     // Act
     await new TmuxController(killed).killPaneExact('%12');
 
     // Assert
-    should(killed.received).deepEqual([['kill-pane', '-t', '%12']]);
+    should(killed.received).deepEqual([
+      ['list-clients', '-t', '%12', '-F', '#{client_control_mode} #{client_name}'],
+      ['kill-pane', '-t', '%12'],
+    ]);
     await should(new TmuxController(refused).killPaneExact('%12')).rejectedWith("can't find pane: %12");
     await should(new TmuxController(silent).killPaneExact('%12')).rejectedWith('tmux could not kill the pane');
   });
@@ -458,5 +467,126 @@ describe('capturing composer rows with attributes', () => {
     should(captured).equal('\u001b[2mhello\u001b[0m\n');
     should(missing).be.undefined();
     should(fake.received[0]).deepEqual([...captureRowsArguments('work', 1, 1)]);
+  });
+});
+
+describe('releasing control clients before a kill', () => {
+  const listing = ['list-clients', '-t', 'work', '-F', '#{client_control_mode} #{client_name}'];
+  const release = (client: string): string[] => ['refresh-client', '-t', client, '-B', 'fy-pane', ';'];
+
+  it('should list a session or a pane-held session by its validated target', () => {
+    // Act / Assert
+    should(sessionClientsArguments('work')).deepEqual(listing);
+    should(paneSessionClientsArguments('%7')).deepEqual([
+      'list-clients',
+      '-t',
+      '%7',
+      '-F',
+      '#{client_control_mode} #{client_name}',
+    ]);
+    should(() => paneSessionClientsArguments('%7 ; kill-server')).throw(TmuxAddressError);
+  });
+
+  it('should read only control clients, and only names it can address', () => {
+    // Act
+    const actual = parseControlClients(
+      ['1 client-41', '0 /dev/pts/3', '1 client-42', '1 two words', '1', '', '1 client;kill-server'].join('\n'),
+    );
+
+    // Assert
+    should(actual).deepEqual(['client-41', 'client-42']);
+  });
+
+  it('should drop every subscription in the same command list as the kill', () => {
+    // Act / Assert
+    should(releasedKillArguments(['client-41', 'client-42'], ['kill-session', '-t', 'work'])).deepEqual([
+      ...release('client-41'),
+      ...release('client-42'),
+      'kill-session',
+      '-t',
+      'work',
+    ]);
+    should(releasedKillArguments([], ['kill-pane', '-t', '%3'])).deepEqual(['kill-pane', '-t', '%3']);
+    should(() => releasedKillArguments(['client;x'], ['kill-session', '-t', 'work'])).throw(TmuxAddressError);
+  });
+
+  it('should release a subscribed worker client before stopping its session', async () => {
+    // Arrange — tmux 3.6a crashes the whole server if this client outlives the session subscribed.
+    const fake = new FakeTmux([ok(), ok('1 client-41\n0 /dev/pts/3\n'), ok()]);
+
+    // Act
+    await new TmuxController(fake).stop('work');
+
+    // Assert
+    should(fake.received).deepEqual([
+      ['has-session', '-t', 'work'],
+      listing,
+      [...release('client-41'), 'kill-session', '-t', 'work'],
+    ]);
+  });
+
+  it('should list again and retry when a client left between the listing and the kill', async () => {
+    // Arrange
+    const fake = new FakeTmux([
+      ok(),
+      ok('1 client-41\n1 client-42\n'),
+      { code: 1, stdout: '', stderr: "can't find client: client-41\n" },
+      ok('1 client-42\n'),
+      ok(),
+    ]);
+
+    // Act
+    await new TmuxController(fake).stop('work');
+
+    // Assert
+    should(fake.received.slice(1)).deepEqual([
+      listing,
+      [...release('client-41'), ...release('client-42'), 'kill-session', '-t', 'work'],
+      listing,
+      [...release('client-42'), 'kill-session', '-t', 'work'],
+    ]);
+  });
+
+  it('should answer the failure after a bounded number of attempts', async () => {
+    // Arrange
+    const refused = { code: 1, stdout: '', stderr: 'refused\n' };
+    const fake = new FakeTmux([
+      ok(),
+      ok('1 client-41'),
+      refused,
+      ok('1 client-41'),
+      refused,
+      ok('1 client-41'),
+      refused,
+    ]);
+
+    // Act / Assert
+    await should(new TmuxController(fake).stop('work')).rejectedWith('refused');
+    should(fake.received).length(7);
+  });
+
+  it('should kill without a release when tmux will not list the clients', async () => {
+    // Arrange
+    const fake = new FakeTmux([ok(), { code: 1, stdout: '', stderr: "can't find session: work\n" }, ok()]);
+
+    // Act
+    await new TmuxController(fake).stop('work');
+
+    // Assert
+    should(fake.received.at(-1)).deepEqual(['kill-session', '-t', 'work']);
+  });
+
+  it('should release the clients of the session that holds a pane before killing that pane', async () => {
+    // Arrange — killing a session's last pane destroys the session, which is the same crash.
+    const fake = new FakeTmux([ok('1 client-9\n'), ok()]);
+
+    // Act
+    await new TmuxController(fake).killPaneExact('%12');
+
+    // Assert
+    should(fake.received).deepEqual([
+      ['list-clients', '-t', '%12', '-F', '#{client_control_mode} #{client_name}'],
+      [...release('client-9'), 'kill-pane', '-t', '%12'],
+    ]);
   });
 });

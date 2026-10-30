@@ -50,6 +50,10 @@
  *   still turns it on for the one ferret that asks (`remoteControlArgs`), and only an org policy lock
  *   can outrank us. Codex has nothing to switch: its `remote_control` feature is removed (0.156.1) and
  *   its remote control is a separate `codex remote-control` daemon, not a session startup behaviour.
+ * - The overlay carries one `PreToolUse` hook for `AskUserQuestion` ({@link CLAUDE_QUESTION_HOOKS}).
+ *   Claude Code 2.1.281 writes an `AskUserQuestion` call to its transcript only once the form is answered,
+ *   so the daemon, which reads the transcript, never saw an open question; the hook hands it the call as
+ *   it is asked. Fast mode's replacement overlay copies the whole file, hooks included.
  * - Codex's one-shot notices (the full-access warning, the rate-limit model nudge, the model
  *   migration prompts) are hidden with ONE `-c notice={…}` inline table, which merges with
  *   `config.toml`'s own `[notice]` like the trust table does.
@@ -207,6 +211,32 @@ export const CLAUDE_NO_QUESTIONS_FLAG = '--disallowed-tools=AskUserQuestion';
 
 /** Claude's "start Remote Control in every session" preference. */
 export const CLAUDE_REMOTE_CONTROL_KEY = 'remoteControlAtStartup';
+
+/**
+ * The launch variable naming the file a ferret's question hook writes, set by the daemon per session
+ * (its own state folder). Unset — a person's own terminal, an older daemon — the hook writes nothing.
+ */
+export const QUESTION_ASKED_FILE_ENV = 'FY_QUESTION_FILE';
+
+/**
+ * The hook that tells the daemon a question is open. Claude Code 2.1.281 keeps an `AskUserQuestion` call
+ * out of its transcript until the form is answered, so the daemon — which reads the transcript — saw no
+ * question at all and offered only the Console. `PreToolUse` fires before the form is drawn, with the real
+ * `tool_use_id` and the whole input on stdin: copied whole into {@link QUESTION_ASKED_FILE_ENV} (a rename,
+ * so a reader never sees half a file). Its exit is always 0 and it prints nothing, even when the file
+ * cannot be written, so it never changes what Claude decides; stdin is drained on every path, so Claude
+ * never writes into a closed pipe.
+ */
+export const CLAUDE_QUESTION_HOOK_COMMAND = `if [ -n "$${QUESTION_ASKED_FILE_ENV}" ] && cat 2>/dev/null > "$${QUESTION_ASKED_FILE_ENV}.tmp" && mv -f "$${QUESTION_ASKED_FILE_ENV}.tmp" "$${QUESTION_ASKED_FILE_ENV}" 2>/dev/null; then :; else cat > /dev/null 2>&1; fi; exit 0`;
+
+/**
+ * The overlay's `hooks` block. In the OVERLAY only, never a `settings` entry: an entry is written over the
+ * profile's settings, and would replace whatever `PreToolUse` hooks a person keeps there. Claude merges the
+ * hooks of every settings source, so the overlay adds one beside theirs.
+ */
+export const CLAUDE_QUESTION_HOOKS: SettingsObject = {
+  PreToolUse: [{ matcher: 'AskUserQuestion', hooks: [{ type: 'command', command: CLAUDE_QUESTION_HOOK_COMMAND }] }],
+};
 
 /** Codex gates `request_user_input` outside Plan mode behind this feature; only interactive ferrets enable it. */
 export const CODEX_QUESTIONS_FEATURE = 'default_mode_request_user_input';
@@ -554,6 +584,7 @@ export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
           permissions: { defaultMode: mode },
           [CLAUDE_REMOTE_CONTROL_KEY]: false,
           ...(skip ? { skipDangerousModePermissionPrompt: true } : { skipAutoPermissionPrompt: true }),
+          hooks: CLAUDE_QUESTION_HOOKS,
         },
         claudeJson: {
           hasCompletedOnboarding: true,
