@@ -8,6 +8,7 @@ import {
   type DaemonRestartPatience,
   DaemonStartingError,
   daemonRestartBackoffMs,
+  daemonStartingOf,
   waitOutDaemonRestart,
 } from '../../src/lib/daemon-restart.ts';
 
@@ -107,6 +108,42 @@ describe('classifyDaemonUnreachable', () => {
 
     // Assert
     should(actual).deepEqual([undefined, undefined, undefined, undefined, undefined]);
+  });
+});
+
+describe('daemonStartingOf', () => {
+  it('should read a 503 the daemon coded as starting as a DaemonStartingError in its own words', async () => {
+    // Arrange
+    const response = Response.json(
+      { error: 'the daemon is starting (reading capability grants); ask again shortly', code: DAEMON_STARTING_CODE },
+      { status: 503 },
+    );
+
+    // Act
+    const actual = await daemonStartingOf(response);
+
+    // Assert — and the body is still there for a caller that reads it.
+    should(actual).be.instanceOf(DaemonStartingError);
+    should(actual?.message).equal('the daemon is starting (reading capability grants); ask again shortly');
+    should(classifyDaemonUnreachable(actual)).equal('refused');
+    should(response.bodyUsed).be.false();
+  });
+
+  it('should leave every other answer alone: another status, another 503, or a body that is not an error', async () => {
+    // Arrange
+    const answers = [
+      Response.json({ error: 'the daemon is starting', code: DAEMON_STARTING_CODE }, { status: 200 }),
+      Response.json({ error: 'the browser worker is down', code: 'browser_unavailable' }, { status: 503 }),
+      Response.json({ error: 'overloaded' }, { status: 503 }),
+      new Response('Service Unavailable', { status: 503 }),
+    ];
+
+    // Act
+    const actual = await Promise.all(answers.map(daemonStartingOf));
+
+    // Assert
+    should(actual).deepEqual([undefined, undefined, undefined, undefined]);
+    should(answers.map(each => each.bodyUsed)).deepEqual([false, false, false, false]);
   });
 });
 

@@ -1,3 +1,5 @@
+import { ApiErrorResponseSchema } from './common.ts';
+
 /**
  * RIDING OUT A DAEMON RESTART — the client half of "the daemon may restart at any time"
  * (`docs/updating.md` § Ferrets keep running).
@@ -57,6 +59,26 @@ export class DaemonStartingError extends Error {
     super(message);
     this.name = 'DaemonStartingError';
   }
+}
+
+/**
+ * The daemon's "still starting" answer as the {@link DaemonStartingError} it is; `undefined` for any
+ * other response, which is left unread.
+ *
+ * EVERY CLIENT THAT WAITS OUT A RESTART READS ITS ANSWERS THROUGH THIS. A restarted daemon binds its
+ * address before it mounts its routes, so the first thing a waiting client meets after the refused
+ * connections is this 503 — and a client that took it for an answer would end its wait one boot step
+ * short and hand the caller "ask again shortly" as a failure. The MCP tools did exactly that.
+ */
+export async function daemonStartingOf(response: Response): Promise<DaemonStartingError | undefined> {
+  if (response.status !== 503) return undefined;
+  const body = ApiErrorResponseSchema.safeParse(
+    await response
+      .clone()
+      .json()
+      .catch(() => undefined),
+  );
+  return body.success && body.data.code === DAEMON_STARTING_CODE ? new DaemonStartingError(body.data.error) : undefined;
 }
 
 const REFUSED_CODES: ReadonlySet<string> = new Set([
