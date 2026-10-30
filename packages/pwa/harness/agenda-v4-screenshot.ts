@@ -149,6 +149,10 @@ const shot = async (page: Page, name: string, form: Form, theme: string, series 
   await page.mouse.move(1, 1);
   await page.waitForTimeout(120);
   const path = join(outDir, `${series}-${name}-${form}-${theme}.png`);
+  // A page that mounts the theme picker publishes the theme it resolves itself (`useTheme`): a "-dark" shot that
+  // is really light is a lie, so every picture is checked against the theme it is named for.
+  const shown = await page.evaluate(() => document.documentElement.dataset.theme ?? '');
+  check(shown === theme, `${series}-${name} ${form}: drawn in ${shown}, named ${theme}`);
   await page.screenshot({ path });
   process.stdout.write(`📸 ${path}\n`);
 };
@@ -316,7 +320,12 @@ const openItem = async (page: Page, id: string): Promise<void> => {
 };
 
 const scenes = async (form: Form, theme: string): Promise<void> => {
-  const browserContext = await browser.newContext({ ...(form === 'phone' ? PHONE : DESKTOP), ...LOCALE });
+  // The OS colour scheme matches the theme: with no stored choice, the app's theme follows it (`useTheme`).
+  const browserContext = await browser.newContext({
+    ...(form === 'phone' ? PHONE : DESKTOP),
+    ...LOCALE,
+    colorScheme: theme.endsWith('-dark') ? 'dark' : 'light',
+  });
   const phone = form === 'phone';
 
   // the pill alone, the drawer, and the composer not moving for either
