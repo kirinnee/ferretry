@@ -2,12 +2,10 @@
    `recommend` become (`pack-call.tsx`), and the sub-ferret rows the session bar's indicator and Info list
    (`sub-ferrets.tsx`). Every colour, stroke, corner and shadow is a theme role (the card roles in `themes.css`), so a Neo transcript draws these square and inked and a Studio one soft. */
 
-/* A SUB-FERRET START: the assistant's side, in a card of its own like "Sent to", with the accent edge a
-   peer message wears — a ferret was made, which is more than a shell command ran. */
+/* A SUB-FERRET START: the assistant's side, in a card of its own like "Sent to" — a ferret was made, which is more than a shell command ran. */
 .fy-message-pack {
   background: var(--card-bg);
   border: var(--card-stroke) solid var(--card-border);
-  border-left: var(--card-edge) solid var(--fy-accent);
   border-radius: var(--card-radius) var(--card-radius) var(--card-radius) var(--card-tail-radius);
   box-shadow: var(--card-shadow);
   margin-right: auto;
@@ -17,13 +15,11 @@
 }
 .fy-message-pack[data-pack-state='refused'],
 .fy-message-pack[data-pack-state='failed'] {
-  border-left-color: var(--err);
+  border-color: var(--err);
 }
 .fy-message-pack[data-pack-kind='recommend'],
 .fy-message-pack[data-pack-kind='wait'] {
-  border-left-color: var(--fy-border);
   border-style: dashed;
-  border-left-style: solid;
 }
 .fy-message-pack header {
   align-items: center;
@@ -158,7 +154,6 @@ li[data-pack-attempt='refused'] .fy-pack-attempt-outcome {
   display: none;
 }
 .fy-pack-fold-body {
-  border-left: var(--stroke-heavy) solid var(--fy-border);
   margin-top: 4px;
   padding-left: 10px;
 }

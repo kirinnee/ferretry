@@ -436,13 +436,7 @@ function ResolutionAudit({ items }: { readonly items: readonly ResolvedAgendaIte
             const badge = resolutionBadge(item);
             const BadgeIcon = badge.icon;
             return (
-              <li
-                key={`${item.id}:${item.resolvedAt}`}
-                className={cn(
-                  'min-w-0 border-l-heavy pl-sm text-meta leading-base',
-                  item.resolvedBy === 'agent' ? 'border-warn/60' : 'border-border-soft',
-                )}
-              >
+              <li key={`${item.id}:${item.resolvedAt}`} className="min-w-0 text-meta leading-base">
                 <p className="m-0 font-medium text-muted">{item.subject}</p>
                 <p className="m-0 flex flex-wrap items-center gap-x-sm gap-y-xs text-faint">
                   <span

@@ -356,19 +356,19 @@ describe('<DictationSheet>', () => {
     await view.unmount();
   });
 
-  it('tints the left edge per stage', async () => {
+  it('colours the whole border per stage', async () => {
     const edge = (container: HTMLElement): string =>
       must(container.querySelector('[data-dictation-panel]'), 'the panel').className;
     const view = await mount(<DictationSheet {...sheetProps()} />);
-    expect(edge(view.container)).toContain('border-l-err');
+    expect(edge(view.container)).toContain('border-err');
     await view.render(<DictationSheet {...sheetProps({ stage: 'transcribing' })} />);
-    expect(edge(view.container)).toContain('border-l-accent');
+    expect(edge(view.container)).toContain('border-accent');
     await view.render(
       <DictationSheet {...sheetProps({ stage: 'review', review: { id: 1, raw: 'a', cleaned: 'a' } })} />,
     );
-    expect(edge(view.container)).toContain('border-l-accent');
+    expect(edge(view.container)).toContain('border-accent');
     await view.render(<DictationSheet {...sheetProps({ stage: 'error' })} />);
-    expect(edge(view.container)).toContain('border-l-warn');
+    expect(edge(view.container)).toContain('border-warn');
     await view.unmount();
   });
 
