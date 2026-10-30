@@ -3637,7 +3637,13 @@ describe('daemon boot lifecycle', () => {
         { mode: 0o600 },
       );
     let asked = 0;
-    // Each move is asked of a session at its prompt, with nothing in flight, so only the conversation decides.
+    // Each move is asked of a session at its prompt, with nothing in flight, so only the conversation
+    // decides. FORCED past the in-flight gate, because the patch below cannot hold it shut: every move
+    // that relaunches starts the session's monitor, which reads the carried transcript — a user line,
+    // so "working" — and can rewrite this status to a busy one between the patch and the request. The
+    // gate then refused first and the case failed on a refusal it is not about; the gate has its own
+    // cases above. Forcing writes nothing before the conversation is decided, so the refusal below
+    // still leaves the session untouched.
     const migrate = async (id: SessionId, body: Record<string, unknown>): Promise<Response> => {
       await patch(id, 'state.json', { status: 'rate_limited', openTools: [] });
       reviver.pane = { alive: true, dead: false, promptReady: true };
@@ -3645,7 +3651,7 @@ describe('daemon boot lifecycle', () => {
       return await fetch(`${sessions}/${id}/migrate`, {
         method: 'POST',
         headers: { ...cli, 'x-fy-request-id': `req-restart-resume-${asked}` },
-        body: JSON.stringify({ allowContextDowngrade: true, ...body }),
+        body: JSON.stringify({ allowContextDowngrade: true, forceInflight: true, ...body }),
       });
     };
     const transcriptOf = async (id: SessionId): Promise<Record<string, unknown>> =>

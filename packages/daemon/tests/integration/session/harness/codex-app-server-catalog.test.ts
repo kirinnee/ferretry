@@ -378,15 +378,19 @@ describe('the Codex app-server catalog probe', () => {
 });
 
 /**
- * A real child whose stderr stream and exit report fail the way a platform stream can.
+ * A real child whose stdin, stderr stream and exit report fail the way a platform stream can.
  *
  * Neither failure can be provoked from a script — a pipe a process wrote and closed always ends
- * cleanly, and a process always exits — so the real spawn is kept for stdin, stdout and signals and
- * only the two reports are replaced. `Bun.spawn` is the one seam this class owns.
+ * cleanly, and a process always exits — so the real spawn is kept for stdout and signals and only
+ * the failing parts are replaced. A broken stdin CAN come from a script that exits at once, but only
+ * when it wins a race against the first write, which is exactly why it is forced here instead.
+ * `Bun.spawn` is the one seam this class owns.
  */
 function withFailingReports(options: {
   readonly stderr: (() => ReadableStream<Uint8Array>) | undefined;
   readonly exitReport: 'rejects' | 'resolves';
+  /** `broken`: every write and the final end throw the `EPIPE` a closed pipe gives. */
+  readonly stdin?: 'broken';
 }): { readonly children: ReturnType<typeof Bun.spawn>[]; readonly restore: () => void } {
   const original = Bun.spawn.bind(Bun);
   const children: ReturnType<typeof Bun.spawn>[] = [];
@@ -394,7 +398,7 @@ function withFailingReports(options: {
     const real = original(...args);
     children.push(real);
     return {
-      stdin: real.stdin,
+      stdin: options.stdin === 'broken' ? brokenPipe(real.stdin) : real.stdin,
       stdout: real.stdout,
       stderr: options.stderr === undefined ? real.stderr : options.stderr(),
       get exited() {
@@ -406,7 +410,36 @@ function withFailingReports(options: {
   return { children, restore: () => spy.mockRestore() };
 }
 
+/** A sink whose reader already left: closes the real pipe so nothing leaks, then fails like one. */
+function brokenPipe(real: unknown) {
+  const epipe = () => Object.assign(new Error('EPIPE: broken pipe, write'), { code: 'EPIPE' });
+  return {
+    write: () => {
+      throw epipe();
+    },
+    end: () => {
+      (real as { end(): unknown }).end();
+      throw epipe();
+    },
+  };
+}
+
 describe('the Codex app-server catalog probe when the platform reports fail', () => {
+  it("should quote the child's complaint, not the broken pipe, when it stopped reading at once", async () => {
+    // Arrange — the child complains and exits before the first request lands, so its stdin is gone.
+    const { binary, cwd } = wrapper('echo "codex: auth expired" >&2; exit 1');
+    const failing = withFailingReports({ stderr: undefined, exitReport: 'resolves', stdin: 'broken' });
+
+    // Act
+    const failure = await subject()
+      .models(binary, cwd)
+      .catch(error => error)
+      .finally(failing.restore);
+
+    // Assert: the pipe error is the symptom; what the child said is the answer.
+    should(failure).match({ message: /ended before the catalog was complete: codex: auth expired$/u });
+  });
+
   it('should still quote what stderr said before its stream errored', async () => {
     // Arrange — the child complains and exits; its stderr stream then errors instead of ending.
     const { binary, cwd } = wrapper('echo "codex: auth expired" >&2; exit 1');
