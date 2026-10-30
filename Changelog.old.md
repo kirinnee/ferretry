@@ -1,3 +1,25 @@
+## [4.110.0](https://github.com/kirinnee/ferretry/compare/v4.109.0...v4.110.0) (2026-10-30)
+
+### Features
+
+* **agenda:** Allow on a card confirms a held config change ([#920](https://github.com/kirinnee/ferretry/issues/920)) ([6af4ec0](https://github.com/kirinnee/ferretry/commit/6af4ec0d241b8c9997b4094811dcac1087063f64))
+* **agenda:** default Agenda mode on for new ferrets ([#910](https://github.com/kirinnee/ferretry/issues/910)) ([9c9e1d7](https://github.com/kirinnee/ferretry/commit/9c9e1d746cbbac25bb7ee988b7621d7e6b5c7bed))
+* **pwa:** draw agenda answers and replies as compact cards ([#912](https://github.com/kirinnee/ferretry/issues/912)) ([f1eae7d](https://github.com/kirinnee/ferretry/commit/f1eae7d35f7e66bf15a4a251aeabd083108d4bdc))
+* **pwa:** keep tool-returned pictures behind the tool row's chevron ([#909](https://github.com/kirinnee/ferretry/issues/909)) ([d72b7ec](https://github.com/kirinnee/ferretry/commit/d72b7ec44bfc6b2c0cfe77d5ca3c7bce7449a602))
+* **pwa:** theme quick switch in the top-right corner ([#902](https://github.com/kirinnee/ferretry/issues/902)) ([de4f677](https://github.com/kirinnee/ferretry/commit/de4f67713741fe85c1e4c203ada9efb9a89e45de))
+* restart ferrets whose instructions are out of date ([#918](https://github.com/kirinnee/ferretry/issues/918)) ([7a7e32c](https://github.com/kirinnee/ferretry/commit/7a7e32c5838e36e4f6fd29069df7411920e2e390))
+* say agenda, not attention, everywhere people and agents read it ([#914](https://github.com/kirinnee/ferretry/issues/914)) ([2d578ca](https://github.com/kirinnee/ferretry/commit/2d578cab9239fac33b8a960feb519a5877a000be))
+* **warden:** show Jev's result beside every LLM investigation, and Jev cost at a glance ([#917](https://github.com/kirinnee/ferretry/issues/917)) ([a68eacc](https://github.com/kirinnee/ferretry/commit/a68eacc32d8f922dafeb4c23fb22d590dfa2c1dc))
+
+### Fixes
+
+* **daemon:** never attach a session worker's tmux client read-only ([#919](https://github.com/kirinnee/ferretry/issues/919)) ([7824b3e](https://github.com/kirinnee/ferretry/commit/7824b3e10a2fce15eb539ec62fe15c4ab655065a))
+* **daemon:** prove a dead pane tmux 3.8 prints no pid for ([#927](https://github.com/kirinnee/ferretry/issues/927)) ([6656f8b](https://github.com/kirinnee/ferretry/commit/6656f8bda0f533079adbac4c20458ce6a5f2a3db))
+* **daemon:** wait out the session workers' tmux clients when the daemon stops ([#921](https://github.com/kirinnee/ferretry/issues/921)) ([85d0c39](https://github.com/kirinnee/ferretry/commit/85d0c394628ee09f7426e7969bc6387c51c84314))
+* **pwa:** drop the Done / Dismiss strip from the sidebar's Needs you rows ([#906](https://github.com/kirinnee/ferretry/issues/906)) ([05c00f5](https://github.com/kirinnee/ferretry/commit/05c00f5371dc833fba249bf5370b335668b033c3))
+* **relay:** back-pressure a request burst instead of ending the session ([#925](https://github.com/kirinnee/ferretry/issues/925)) ([8fb4d74](https://github.com/kirinnee/ferretry/commit/8fb4d742ebc8caf7211cee80239eeafa46cd6b0c))
+* **warden:** keep held edits through app saves, and make Jev's checks visible ([#907](https://github.com/kirinnee/ferretry/issues/907)) ([c381fd5](https://github.com/kirinnee/ferretry/commit/c381fd5154f5448ff1344b911db402313b1c6a5d))
+
 ## [4.109.0](https://github.com/kirinnee/ferretry/compare/v4.108.1...v4.109.0) (2026-10-30)
 
 ### Features
