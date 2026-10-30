@@ -5,7 +5,7 @@
  */
 
 import { Maximize2, Minimize2, X } from 'lucide-react';
-import { type ReactNode, useId } from 'react';
+import { type ReactNode, useEffect, useId, useRef } from 'react';
 import { Badge } from '../../shell/primitives.tsx';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
 import { INFO_TAB_LABEL, INFO_TABS_WITHOUT_BOARD, type InfoTab } from './info-model.ts';
@@ -42,6 +42,18 @@ export function InfoPanel({
   titleId,
 }: InfoPanelProps) {
   const id = useId().replace(/:/gu, '');
+  const strip = useRef<HTMLDivElement>(null);
+
+  // The strip scrolls sideways on a narrow screen; keep the shown tab inside it.
+  useEffect(() => {
+    const row = strip.current;
+    const active = row?.querySelector<HTMLElement>(`[role="tab"][id$="-tab-${tab}"]`);
+    if (row === null || row === undefined || active === null || active === undefined) return;
+    const left = active.offsetLeft;
+    if (left < row.scrollLeft) row.scrollLeft = left;
+    else if (left + active.offsetWidth > row.scrollLeft + row.clientWidth)
+      row.scrollLeft = left + active.offsetWidth - row.clientWidth;
+  }, [tab]);
   return (
     <div className="fy-info" data-info-panel="" data-info-tab={tab}>
       <div className="fy-info__head">
@@ -68,7 +80,7 @@ export function InfoPanel({
           <X aria-hidden="true" size={16} />
         </button>
       </div>
-      <div className="fy-info__tabs">
+      <div className="fy-info__tabs" ref={strip}>
         <SheetTabs
           current={tab}
           label="Info sections"

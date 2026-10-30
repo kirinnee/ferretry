@@ -184,7 +184,7 @@ function Harness() {
             signals: () => null,
             surfaces: () => null,
           }}
-          tab="tasks"
+          tab={params.get('tab') === 'surfaces' ? 'surfaces' : 'tasks'}
           tabs={INFO_TABS}
         />
       </div>

@@ -78,15 +78,15 @@ const PHONE = {
 } as const;
 const DESKTOP = { viewport: { width: 1_440, height: 900 } } as const;
 
-const open = async (context: BrowserContext, theme: string, state: 'card' | 'none'): Promise<Page> => {
+const open = async (context: BrowserContext, theme: string, state: 'card' | 'none', tab = 'tasks'): Promise<Page> => {
   const page = await context.newPage();
   await page.route('**/*', route =>
     route.request().url().startsWith(server.url.origin) ? route.continue() : route.abort(),
   );
-  await page.goto(`${server.url}?theme=${theme}&state=${state}`);
+  await page.goto(`${server.url}?theme=${theme}&state=${state}&tab=${tab}`);
   await page.locator('[data-fixture]').waitFor({ state: 'visible' });
   await page.locator('[data-card-chip]').first().waitFor({ state: 'visible' });
-  if (state === 'card') await page.locator('.fy-board-card').first().waitFor({ state: 'visible' });
+  if (state === 'card' && tab === 'tasks') await page.locator('.fy-board-card').first().waitFor({ state: 'visible' });
   await page.waitForTimeout(200);
   const wide = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   if (wide > 0) fail(`${state} scrolls sideways by ${wide}px`);
@@ -114,6 +114,22 @@ try {
         await page.close();
       }
       if (scheme === 'light') {
+        const last = await open(phone, theme, 'card', 'surfaces');
+        const strip = await last.evaluate(() => {
+          const row = document.querySelector('.fy-info__tabs');
+          const tab = row?.querySelector<HTMLElement>('[aria-selected="true"]');
+          if (!row || !tab) return null;
+          const box = tab.getBoundingClientRect();
+          const bounds = row.getBoundingClientRect();
+          return {
+            scrolls: row.scrollWidth > row.clientWidth,
+            inView: box.left >= bounds.left - 1 && box.right <= bounds.right + 1,
+          };
+        });
+        if (strip === null || !strip.scrolls || !strip.inView)
+          fail(`the Info tab row does not keep the shown tab in view: ${JSON.stringify(strip)}`);
+        await shot(last, 'light-phone-last-tab');
+        await last.close();
         const page = await open(desktop, theme, 'none');
         await shot(page, 'no-card-desktop');
         await page.close();
