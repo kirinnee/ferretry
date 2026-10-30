@@ -3,6 +3,7 @@ import { Cog } from 'lucide-react';
 import { type MouseEvent, type ReactNode, useState } from 'react';
 import { displayCallsign } from '../lib/callsign.ts';
 import { clockOfInstant } from '../lib/message-clock.ts';
+import { ferretryChip, stripFraming } from '../lib/message-framing.ts';
 import { daemonSessionPath } from '../lib/pages/routes.ts';
 import type { PeerFrom } from '../lib/peer-message.ts';
 import type { ResolvedAgent } from '../lib/references.ts';
@@ -115,7 +116,7 @@ export function PeerMessageRow({
           </span>
         )}
       </header>
-      {body ?? <Markdown className="fy-peer-body" text={entry.text} {...surface} />}
+      {body ?? <Markdown className="fy-peer-body" text={stripFraming(entry.text).body} {...surface} />}
       {/* Where this send is, as the same small receipt mark the reader's own bubbles wear. */}
       <MessageFooter clock={clockOfInstant(entry.at)} record={entry.send} side="other" />
       {agent === null ? null : <OpenConversation agent={agent} surface={surface} />}
@@ -124,6 +125,7 @@ export function PeerMessageRow({
 }
 
 export function SystemNoticeRow({ entry, rhythm }: { readonly entry: TranscriptEntry; readonly rhythm: Rhythm }) {
+  const framed = stripFraming(entry.text);
   return (
     <div
       className="fy-message fy-message-system fy-message-chrome"
@@ -131,8 +133,10 @@ export function SystemNoticeRow({ entry, rhythm }: { readonly entry: TranscriptE
       role="note"
       {...rhythm}
     >
-      <span className="fy-system-label">Ferretry</span>
-      <Markdown className="fy-system-text" text={entry.text} />
+      <span className="fy-system-label" data-sender-chip>
+        {ferretryChip(framed)}
+      </span>
+      <Markdown className="fy-system-text" text={framed.body} />
       <MessageFooter clock={clockOfInstant(entry.at)} side="other" />
     </div>
   );

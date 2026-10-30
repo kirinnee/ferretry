@@ -61,8 +61,30 @@ this page, which is still how a message reaches the pane.
   owner's agenda answers are no longer batched, held for a working ferret or held for a draft: the queue
   does all three (&C38); their receipt and reopen-as-a-card still come from the agenda outbox. A send
   failure told back to a ferret, and a held message released after a revive, keep the direct path.
-- **Until the app shows ticks** — a queued message has no send-ledger row until it is handed over, so the
-  app keeps its own "sending" bubble for it until then.
+- **What the app shows** — the app reads `GET …/queue` on the same beat as the send ledger
+  (`readSessionQueue`; an older daemon's 404 is "no queue", never an error, and a failed read keeps the last
+  queue) and joins the two BY ID (`joinQueue`, `packages/pwa/src/lib/send-queue.ts`). One message is one
+  bubble for its whole life: a queue message with no ledger row yet becomes a bubble of its own, and the
+  ledger row of the same id wears the queue's view once it exists. The ticks:
+
+  | Queue state | Mark           | Words under the bubble                                                                                                                                                                  |
+  | ----------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+  | `queued`    | ✓              | `waiting: <reason>` — it is still starting / the ferret is busy / a question is open / a dialog is on its screen / its box holds a draft / its screen can’t be read / it is not running |
+  | `typing`    | ✓              | `sending`                                                                                                                                                                               |
+  | `delivered` | ✓✓             | `delivered`                                                                                                                                                                             |
+  | `read`      | ✓✓✓            | `read`                                                                                                                                                                                  |
+  | `failed`    | failed mark    | the daemon's failure sentence                                                                                                                                                           |
+  | `cancelled` | cancelled mark | `taken back before it was typed; the agent never saw it`                                                                                                                                |
+
+  A queue-backed row never shows the red "retry did not go through" copy and never offers a resend or retry:
+  the tick and its reason replace them. Two rules keep it honest. A queue state of `delivered` or `read`
+  WINS over any ledger fate, and a ledger row that already says `delivered` outranks a queue that has not
+  caught up — a message the agent received is never shown as "not delivered". And a ledger `timed_out` row
+  whose `unaccountedReason` is `session_ended` is shown as `unconfirmed` (quiet, not red): the session ended
+  before the proof arrived, so the message may well have landed. While a message is `queued` its bubble menu
+  offers **Edit** (an inline editor that PATCHes) and **Cancel** (DELETE). A `409` says "it was just typed into
+  the agent" and a `404` says the queue no longer has it; both refresh the row.
+
 - **Read it** — `GET /v1/sessions/:sessionId/queue` (operator), `fy queue <ferret> [--json]`.
 - **Edit or cancel** — only while `queued`: `PATCH /v1/sessions/:sessionId/queue/:messageId` `{ "text" }` and
   `DELETE …/queue/:messageId` (operator, audited as `agent.prompted` without the text), `fy queue edit
