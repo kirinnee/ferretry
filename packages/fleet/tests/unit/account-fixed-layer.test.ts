@@ -3,6 +3,7 @@ import should from 'should';
 import {
   AGENDA_ENV,
   AGENDA_INSTRUCTION,
+  AGENT_BASE_INSTRUCTION,
   AGENT_INSTRUCTION,
   AGENT_TOOLS_INSTRUCTION,
   ALWAYS_ON_SECTIONS,
@@ -27,6 +28,7 @@ import {
   HYPERMEDIA_INSTRUCTION,
   instructionDigest,
   LESSONS_INSTRUCTION,
+  LEAD_RULES_INSTRUCTION,
   launchInstructions,
   NOTIFY_INSTRUCTION,
   PACK_ENV,
@@ -35,6 +37,8 @@ import {
   PASSIVE_LEARNING_ENV,
   SESSION_MODE_ENV,
   SET_UP_FERRETRY_INSTRUCTION,
+  SUB_FERRET_ENV,
+  SUB_FERRET_INSTRUCTION,
   tomlString,
 } from '../../src/lib/account/fixed-layer.ts';
 import { type ResolvedProfile, resolveProfile } from '../../src/lib/account/layering.ts';
@@ -44,7 +48,7 @@ import type { HarnessKind } from '../../src/lib/manifest.ts';
 const CWD = '/home/me/work.repo';
 const FY = '/opt/fy/bin/fy';
 /** What every agent runtime is told, for the binary {@link FY} names. */
-const INSTRUCTION = AGENT_INSTRUCTION('fy');
+const INSTRUCTION = AGENT_BASE_INSTRUCTION('fy');
 /** What every Claude agent launch ends with: the tools server, and the instruction that names it. */
 const CLAUDE_TOOL_ARGS = [
   `--mcp-config={"mcpServers":{"ferretry":{"type":"stdio","command":"${FY}","args":["mcp","serve"],"env":{"FY_TOKEN":""}}}}`,
@@ -776,8 +780,9 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
     should(text).containEql('"[answer to !A3 …]" is the answer;');
-    should(text).containEql('"[re !A3 …]" is chat that closes it');
-    should(text).containEql('re-raise (`zz agenda surface <id>`) only if the owner must still decide or act');
+    // A reply PARKS the item: the ferret surfaces it if the owner must still act, or closes it.
+    should(text).containEql('"[re !A3 …]" is chat that parks it as replied');
+    should(text).containEql('`zz agenda surface <id>` if the owner must still act, else done it');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
     should(text).containEql('KEEP ITEMS CURRENT this turn');
     should(text).containEql('agenda `edit <id>` if changed');
@@ -1011,5 +1016,57 @@ describe('launchInstructions', () => {
 
     // Assert
     should(on.sections.slice(0, 4)).deepEqual(off.sections.slice(0, 4));
+  });
+});
+
+describe('SUB_FERRET_INSTRUCTION', () => {
+  it('should replace the notify, board and agenda rules with two short lines that name the real verbs', () => {
+    // Act
+    const text = SUB_FERRET_INSTRUCTION('zz');
+
+    // Assert
+    should(text.split('\n')).have.length(2);
+    should(text).containEql('`zz send <lead-callsign> "<message>"`');
+    should(text).containEql('`zz task link <id> --pr <url>` (or `--branch`)');
+    should(text).containEql('`zz task note`');
+    should(text).not.containEql('agenda add');
+    should(text).not.containEql('task move');
+  });
+
+  it('should leave the lead prompt byte-identical and make the sub-ferret prompt the smaller one', () => {
+    // Assert
+    should(AGENT_INSTRUCTION('fy')).equal(`${AGENT_BASE_INSTRUCTION('fy')}\n\n${LEAD_RULES_INSTRUCTION('fy')}`);
+    const lead = AGENT_INSTRUCTION('fy').length;
+    const sub = `${AGENT_BASE_INSTRUCTION('fy')}\n\n${SUB_FERRET_INSTRUCTION('fy')}`.length;
+    should(sub).be.below(lead);
+    should(SUB_FERRET_INSTRUCTION('fy').length).be.below(400);
+  });
+
+  it('should keep the agenda section out of a sub-ferret launch record, whatever FY_AGENDA says', () => {
+    // Act
+    const launched = launchInstructions('zz', {
+      [SUB_FERRET_ENV]: '1',
+      [AGENDA_ENV]: '1',
+      [PACK_ENV]: '1',
+    });
+
+    // Assert
+    should(launched.sections.map(section => section.id)).deepEqual(['tools', 'settings', 'sub-ferret', 'pack']);
+    should(launched.sections.find(section => section.id === 'sub-ferret')?.chars).equal(
+      SUB_FERRET_INSTRUCTION('zz').length,
+    );
+  });
+
+  it('should name the sub-ferret always-on sections in order, and the lead ones when the switch is off', () => {
+    // Assert
+    should(ALWAYS_ON_SECTIONS('zz', true).map(section => section.id)).deepEqual(['tools', 'settings', 'sub-ferret']);
+    should(ALWAYS_ON_SECTIONS('zz', false)).deepEqual(ALWAYS_ON_SECTIONS('zz'));
+    should(launchInstructions('zz', { [SUB_FERRET_ENV]: '0', [AGENDA_ENV]: '1' }).sections.map(s => s.id)).deepEqual([
+      'tools',
+      'settings',
+      'notify',
+      'board',
+      'agenda',
+    ]);
   });
 });

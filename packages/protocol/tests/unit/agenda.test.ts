@@ -3,7 +3,10 @@ import should from 'should';
 import {
   AgendaActionRequestSchema,
   AgendaClearableFieldSchema,
+  AGENDA_URGENT_WAKE_MS,
   AgendaItemSchema,
+  AgendaParkedSchema,
+  agendaWakeAt,
   agendaBriefRequiredProblems,
   agendaNoticeProblems,
 } from '../../src/lib/agenda.ts';
@@ -252,5 +255,111 @@ describe('an item that is a notice', () => {
 
     // Assert
     should(item).containDeep({ notice: true, ping: true });
+  });
+});
+
+describe('AgendaParkedSchema', () => {
+  const LATER = '2026-10-27T09:00:00.000Z';
+
+  it('should read a snoozed park with its wake time and a replied park without one', () => {
+    // Assert
+    should(AgendaParkedSchema.parse({ reason: 'snoozed', at: AT, until: LATER })).deepEqual({
+      reason: 'snoozed',
+      at: AT,
+      until: LATER,
+    });
+    should(AgendaParkedSchema.parse({ reason: 'replied', at: AT })).deepEqual({ reason: 'replied', at: AT });
+  });
+
+  it('should refuse a snooze with no wake time, a reply with one, and any other reason', () => {
+    // Assert
+    should(AgendaParkedSchema.safeParse({ reason: 'snoozed', at: AT }).success).be.false();
+    should(AgendaParkedSchema.safeParse({ reason: 'replied', at: AT, until: LATER }).success).be.false();
+    should(AgendaParkedSchema.safeParse({ reason: 'later', at: AT }).success).be.false();
+  });
+
+  it('should ride on an item with the instant a ferret last woke it as urgent', () => {
+    // Act
+    const item = AgendaItemSchema.parse({
+      id: 'A1',
+      source: 'agent-raised',
+      sourceRef: null,
+      subject: 'Pick a plan',
+      why: 'Two plans fit.',
+      waitingSince: AT,
+      howToResolve: 'Choose one.',
+      raisedBy: 'agent',
+      raisedBySession: 'session-1',
+      raisedByName: 'Olivier',
+      parked: { reason: 'snoozed', at: AT, until: LATER },
+      urgentAt: AT,
+    });
+
+    // Assert
+    should(item).containDeep({ parked: { reason: 'snoozed', until: LATER }, urgentAt: AT });
+  });
+});
+
+describe('agendaWakeAt', () => {
+  const until = '2026-10-27T09:00:00.000Z';
+  const snoozed = { reason: 'snoozed', at: AT, until } as const;
+
+  it('should be the snooze time when nothing is needed sooner, or by when', () => {
+    // Assert
+    should(agendaWakeAt({ parked: snoozed })).equal(until);
+    should(agendaWakeAt({ parked: snoozed, neededBy: '2026-10-28T09:00:00.000Z' })).equal(until);
+    should(agendaWakeAt({ parked: snoozed, neededBy: until })).equal(until);
+  });
+
+  it('should be the deadline when it comes before the snooze ends', () => {
+    // Assert
+    should(agendaWakeAt({ parked: snoozed, neededBy: '2026-10-26T12:00:00.000Z' })).equal('2026-10-26T12:00:00.000Z');
+  });
+
+  it('should be null for an item that is not snoozed', () => {
+    // Assert
+    should(agendaWakeAt({})).be.null();
+    should(agendaWakeAt({ neededBy: until })).be.null();
+    should(agendaWakeAt({ parked: { reason: 'replied', at: AT }, neededBy: until })).be.null();
+  });
+
+  it('should let a ferret wake a snoozed item as urgent once an hour', () => {
+    // Assert
+    should(AGENDA_URGENT_WAKE_MS).equal(3_600_000);
+  });
+});
+
+describe('parked turns and requests', () => {
+  it('should give a parked open item to nobody, unless it is a notice or resolved', () => {
+    // Assert
+    should(agendaTurn({ parked: { reason: 'replied' } })).equal('parked');
+    should(agendaTurn({ parked: { reason: 'snoozed' }, waitingOn: 'ferret' })).equal('parked');
+    should(agendaTurn({ parked: { reason: 'replied' }, notice: true })).equal('done');
+    should(agendaTurn({ parked: { reason: 'replied' }, resolvedAt: AT })).equal('done');
+  });
+
+  it('should read snooze, unsnooze, and `now` on an edit or a surface', () => {
+    // Assert
+    should(AgendaActionRequestSchema.parse({ action: 'snooze', id: 'A1', until: AT })).deepEqual({
+      action: 'snooze',
+      id: 'A1',
+      until: AT,
+    });
+    should(AgendaActionRequestSchema.parse({ action: 'unsnooze', id: 'A1' })).deepEqual({
+      action: 'unsnooze',
+      id: 'A1',
+    });
+    should(AgendaActionRequestSchema.parse({ action: 'edit', id: 'A1', subject: 'x', now: true })).containDeep({
+      now: true,
+    });
+    should(AgendaActionRequestSchema.parse({ action: 'surface', id: 'A1', now: true })).containDeep({ now: true });
+  });
+
+  it('should refuse a snooze with no time, a `now` that is not true, and a stray field', () => {
+    // Assert
+    should(AgendaActionRequestSchema.safeParse({ action: 'snooze', id: 'A1' }).success).be.false();
+    should(AgendaActionRequestSchema.safeParse({ action: 'snooze', id: 'A1', until: 'tomorrow' }).success).be.false();
+    should(AgendaActionRequestSchema.safeParse({ action: 'surface', id: 'A1', now: false }).success).be.false();
+    should(AgendaActionRequestSchema.safeParse({ action: 'unsnooze', id: 'A1', until: AT }).success).be.false();
   });
 });

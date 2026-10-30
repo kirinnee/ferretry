@@ -1,5 +1,5 @@
 /**
- * THE BOARD'S FIVE VIEWS of one model: Kanban (the default), List, Tree, Dependencies and Archive.
+ * THE BOARD'S VIEWS of one model: Kanban (the default), Table (see `board-table.tsx`), Tree, Dependencies and Archive.
  *
  * Every view draws the same `BoardCard`; they differ only in how the cards are arranged. The page owns
  * the data, the drag and the move flow and hands each view a `BoardCardEnv`, so a view never reads the
@@ -17,16 +17,21 @@ import {
   type BoardGroupOf,
   buildTree,
   flattenTree,
-  LIST_SORT_LABEL,
-  LIST_SORTS,
-  type ListSort,
   laneOfCategory,
-  listRows,
-  sortRows,
 } from '../../lib/board-view.ts';
+import type { BoardDone } from '../../lib/board-done.ts';
 import { BoardCard, type BoardCardMoves } from './board-card.tsx';
 import { BoardIcon } from './board-icons.tsx';
 import { BoardLane } from './board-lane.tsx';
+import { archiveRowsOf, TableRows } from './board-table.tsx';
+
+/** The Done control of one card: which one it is, and what a press does. */
+export interface BoardDoneControl {
+  readonly done: BoardDone;
+  readonly press: () => void;
+  /** The card sits in the release lane, where the Done row is drawn on the card itself. */
+  readonly atRelease: boolean;
+}
 
 /** What every view needs to draw and wire a card. */
 export interface BoardCardEnv {
@@ -38,6 +43,11 @@ export interface BoardCardEnv {
   /** `undefined` for a card the owner cannot move from here (the Archive). */
   readonly movesFor: (card: BoardCardOf, place: BoardCardPlace) => BoardCardMoves | undefined;
   readonly places: ReadonlyMap<string, BoardCardPlace>;
+  /**
+   * The owner's "Done ✓" (or "Reopen", on a closed card) for a card, and what pressing it does; `undefined` where
+   * this view is not the owner's to close from, such as a ferret's own scope.
+   */
+  readonly doneFor?: (card: BoardCardOf, place: BoardCardPlace) => BoardDoneControl | undefined;
   /** The card being dragged, and the board it came from: only that board's lanes take the drop. */
   readonly dragging: { readonly cardKey: string; readonly groupKey: string } | null;
   /** A phone: thumb-sized cards and the To test buttons spelled out. */
@@ -54,6 +64,7 @@ interface PlacedProps {
 export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
   const place = env.places.get(card.key);
   const moves = place === undefined ? undefined : env.movesFor(card, place);
+  const done = place === undefined ? undefined : env.doneFor?.(card, place);
   return (
     <BoardCard
       card={card}
@@ -67,6 +78,7 @@ export function PlacedCard({ card, env, lane, depth }: PlacedProps) {
       showMachine={env.showMachine}
       touch={env.touch === true}
       {...(moves === undefined ? {} : { moves })}
+      {...(done === undefined ? {} : { done })}
       {...(lane === undefined ? {} : { lane })}
       {...(depth === undefined ? {} : { depth })}
     />
@@ -174,56 +186,8 @@ export function KanbanView({ model, env, projectName, hideClosed, onDropCard, on
   );
 }
 
-// ---------------------------------------------------------------------------------------------------
-// List
-// ---------------------------------------------------------------------------------------------------
-
-export interface ListViewProps {
-  readonly model: BoardModel;
-  readonly env: BoardCardEnv;
-  readonly sort: ListSort;
-  readonly onSort: (sort: ListSort) => void;
-}
-
-function SortPicker({ sort, onSort }: { readonly sort: ListSort; readonly onSort: (sort: ListSort) => void }) {
-  return (
-    <div aria-label="Sort the list" className="fy-board-sort" role="toolbar">
-      {LIST_SORTS.map(option => (
-        <button
-          aria-pressed={sort === option}
-          className="fy-board-sort__option"
-          data-sort={option}
-          key={option}
-          onClick={() => onSort(option)}
-          type="button"
-        >
-          {LIST_SORT_LABEL[option]}
-        </button>
-      ))}
-    </div>
-  );
-}
-
 function Empty({ children }: { readonly children: ReactNode }) {
   return <p className="fy-board-empty">{children}</p>;
-}
-
-export function ListView({ model, env, sort, onSort }: ListViewProps) {
-  const rows = useMemo(() => sortRows(listRows(model), sort), [model, sort]);
-  return (
-    <div className="fy-board-list">
-      <SortPicker onSort={onSort} sort={sort} />
-      {rows.length === 0 ? (
-        <Empty>No cards match.</Empty>
-      ) : (
-        <ul className="fy-board-list__cards">
-          {rows.map(row => (
-            <PlacedCard card={row.card} env={env} key={row.card.key} lane={row.laneName} />
-          ))}
-        </ul>
-      )}
-    </div>
-  );
 }
 
 // ---------------------------------------------------------------------------------------------------
@@ -326,16 +290,7 @@ export function ArchiveView({ shown, remaining, total, query, onQuery, onMore, l
           {loading ? 'Reading the archive…' : query.trim() === '' ? 'Nothing closed yet.' : 'No archived card matches.'}
         </Empty>
       ) : (
-        <ul className="fy-board-archive__cards">
-          {shown.map(card => (
-            <PlacedCard
-              card={card}
-              env={env}
-              key={card.key}
-              lane={env.places.get(card.key)?.laneName ?? card.task.laneId}
-            />
-          ))}
-        </ul>
+        <TableRows env={env} rows={archiveRowsOf(shown, env)} />
       )}
       {remaining > 0 ? (
         <button className="kt-btn fy-board-archive__more" data-variant="ghost" onClick={onMore} type="button">

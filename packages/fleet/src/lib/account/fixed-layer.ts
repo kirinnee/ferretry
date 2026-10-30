@@ -362,13 +362,15 @@ export interface FerretSection {
   readonly id: Extract<LaunchInstructionSectionId, 'hypermedia' | 'pack' | 'agenda' | 'learning'>;
   readonly env: string;
   readonly text: string;
+  /** A switch that, when `1`, keeps the section out even though {@link env} is on: a sub-ferret has no agenda. */
+  readonly unlessEnv?: string;
 }
 
 /** The per-ferret sections, in the order the wrapper appends them, each with the variable that turns it on. */
 export const FERRET_SECTIONS = (fy: string): readonly FerretSection[] => [
   { id: 'hypermedia', env: HYPERMEDIA_ENV, text: HYPERMEDIA_INSTRUCTION(fy) },
   { id: 'pack', env: PACK_ENV, text: PACK_INSTRUCTION(fy) },
-  { id: 'agenda', env: AGENDA_ENV, text: AGENDA_INSTRUCTION(fy) },
+  { id: 'agenda', env: AGENDA_ENV, text: AGENDA_INSTRUCTION(fy), unlessEnv: SUB_FERRET_ENV },
   { id: 'learning', env: PASSIVE_LEARNING_ENV, text: LESSONS_INSTRUCTION(fy) },
 ];
 
@@ -446,7 +448,7 @@ export const AGENDA_INSTRUCTION = (fy: string): string =>
     `Agenda mode: keep an agenda of what ONLY the owner can do or decide. To ask them to decide or DO anything, add each ask as its OWN item: \`${fy} agenda add --title "<topic>" --premise "<situation>" --context "<why now>" "<the ask>"\` (required). Title ≤40 chars; ask ≤120. Read cold: no "as above", ticket/PR numbers, paths or unexplained acronyms (\`--term "X=meaning"\`).`,
     `Each item stands ALONE: full Markdown (\`code\` names, **bold** key point), \`--decided\` = settled, \`--still-open\` = left; \`--body\`: hypermedia (fy-render image|chart|mermaid|svg). \`--kind todo|yesno|permission|choice|review|info\`. Choice: 2–3 \`--option "Label: why"\`; \`--recommend <label> --recommend-why <line>\`. To-do: \`--step "<md>"\`.`,
     `\`--blocking\`: you cannot go on; \`--will-block\`: blocks later; \`--by <time>\`: when needed.`,
-    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat that closes it: re-raise (\`${fy} agenda surface <id>\`) only if the owner must still decide or act. KEEP ITEMS CURRENT this turn: agenda \`edit <id>\` if changed, \`done <id>\` if settled; \`ls\` = open.`,
+    `"[answer to !A3 …]" is the answer; "[re !A3 …]" is chat that parks it as replied: \`${fy} agenda surface <id>\` if the owner must still act, else done it. KEEP ITEMS CURRENT this turn: agenda \`edit <id>\` if changed, \`done <id>\` if settled; \`ls\` = open.`,
   ].join('\n');
 
 /**
@@ -467,16 +469,41 @@ export const BOARD_INSTRUCTION = (fy: string): string =>
   `Board: all work is a card (&F412) on its project's board (new repo: \`${fy} project add .\`); agenda items are !A48. Before your first edit for a new ask, have one: \`${fy} task create -k <kind> -t "<≤5 words>" --summary "<line>" --ask "<owner's words verbatim>"\` (${fy} new/start make one). Move it: \`${fy} task move <id> <lane> --reason "<why>"\`. Blocked on owner: \`${fy} agenda add --task <id>\`; a card: \`${fy} task depend\`; outside: \`${fy} task block\`. Dropped: \`${fy} task drop --reason\`; switched: \`${fy} task focus <id>\`. Owner finds a problem: \`${fy} task reopen <id> --to <lane> --ask "<their words>"\`. Never move what a PR or release moves; only the owner closes.`;
 
 /**
- * Everything every agent runtime is told, as ONE appended system prompt section: the tools, the
- * settings rules, the notify rule, then the board rules. A ferret's own sections follow it
- * (`FERRET_SECTIONS`), added by its wrapper.
+ * SUB-FERRET LIMITS (docs/pack-mode.md § Sub-ferret limits): a ferret another ferret started. The daemon
+ * writes {@link SUB_FERRET_ENV} `1` from the session's `parent`, and the wrapper then swaps the notify and
+ * board rules for {@link SUB_FERRET_INSTRUCTION} and leaves out the agenda section: the daemon refuses a
+ * sub-ferret the agenda and the board's moves, so a prompt that taught them would only teach refusals.
+ */
+export const SUB_FERRET_ENV = 'FY_SUB_FERRET';
+
+/** What a sub-ferret is told in place of the notify, board and agenda rules. Two lines on purpose. */
+export const SUB_FERRET_INSTRUCTION = (fy: string): string =>
+  [
+    `Sub-ferret: you were started by a lead ferret. Report to it with \`${fy} send <lead-callsign> "<message>"\`; you cannot raise agenda items, notify the owner or move cards.`,
+    `Link your PR to your card: \`${fy} task link <id> --pr <url>\` (or \`--branch\`); add progress with \`${fy} task note\`.`,
+  ].join('\n');
+
+/** What a lead is told after the base instruction: the notify rule, then the board rules. */
+export const LEAD_RULES_INSTRUCTION = (fy: string): string => `${NOTIFY_INSTRUCTION(fy)}\n\n${BOARD_INSTRUCTION(fy)}`;
+
+/**
+ * What every agent runtime is told, whoever it is: the tools and the settings rules. The wrapper appends
+ * a lead's {@link LEAD_RULES_INSTRUCTION} or a sub-ferret's {@link SUB_FERRET_INSTRUCTION} after it.
+ */
+export const AGENT_BASE_INSTRUCTION = (fy: string): string =>
+  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}`;
+
+/**
+ * Everything a LEAD agent is told, as ONE appended system prompt section: the tools, the settings rules,
+ * the notify rule, then the board rules. A ferret's own sections follow it (`FERRET_SECTIONS`), added by
+ * its wrapper.
  */
 export const AGENT_INSTRUCTION = (fy: string): string =>
-  `${AGENT_TOOLS_INSTRUCTION}\n\n${SET_UP_FERRETRY_INSTRUCTION(fy)}\n\n${NOTIFY_INSTRUCTION(fy)}\n\n${BOARD_INSTRUCTION(fy)}`;
+  `${AGENT_BASE_INSTRUCTION(fy)}\n\n${LEAD_RULES_INSTRUCTION(fy)}`;
 
 /** One section every agent runtime is told, whatever its switches: its id and its exact text. */
 export interface AlwaysOnSection {
-  readonly id: 'tools' | 'settings' | 'notify' | 'board';
+  readonly id: 'tools' | 'settings' | 'notify' | 'board' | 'sub-ferret';
   readonly text: string;
 }
 
@@ -484,11 +511,15 @@ export interface AlwaysOnSection {
  * The sections of {@link AGENT_INSTRUCTION}, in order. They depend on nothing but the binary's name, so the
  * daemon can tell a running ferret what changed in them since its launch (docs/launch-settings.md).
  */
-export const ALWAYS_ON_SECTIONS = (fy: string): readonly AlwaysOnSection[] => [
+export const ALWAYS_ON_SECTIONS = (fy: string, subFerret = false): readonly AlwaysOnSection[] => [
   { id: 'tools', text: AGENT_TOOLS_INSTRUCTION },
   { id: 'settings', text: SET_UP_FERRETRY_INSTRUCTION(fy) },
-  { id: 'notify', text: NOTIFY_INSTRUCTION(fy) },
-  { id: 'board', text: BOARD_INSTRUCTION(fy) },
+  ...(subFerret
+    ? [{ id: 'sub-ferret' as const, text: SUB_FERRET_INSTRUCTION(fy) }]
+    : [
+        { id: 'notify' as const, text: NOTIFY_INSTRUCTION(fy) },
+        { id: 'board' as const, text: BOARD_INSTRUCTION(fy) },
+      ]),
 ];
 
 /**
@@ -521,15 +552,16 @@ export function instructionDigest(text: string): string {
  */
 export function launchInstructions(fy: string, env: Readonly<Record<string, string>>): SessionLaunchInstructions {
   const mode = env[SESSION_MODE_ENV] === 'interactive' ? 'interactive' : 'auto';
+  const subFerret = env[SUB_FERRET_ENV] === '1';
   return {
     sections: [
-      ...ALWAYS_ON_SECTIONS(fy).map(section => ({
+      ...ALWAYS_ON_SECTIONS(fy, subFerret).map(section => ({
         id: section.id,
         chars: section.text.length,
         digest: instructionDigest(section.text),
       })),
       ...FERRET_SECTIONS(fy)
-        .filter(section => env[section.env] === '1')
+        .filter(section => env[section.env] === '1' && !(subFerret && section.unlessEnv === SUB_FERRET_ENV))
         .map(section => {
           const routing = section.env === PACK_ENV ? (env[PACK_ROUTING_ENV] ?? '') : '';
           const text = routing === '' ? section.text : `${section.text}\n${routing}`;
@@ -555,7 +587,7 @@ export const binaryName = (fyCommand: string): string => fyCommand.split('/').po
 /** The fixed layer for an agent runtime of `input.harness`, or the reason it cannot launch (O4). */
 export function fixedLayerFor(input: FixedLayerInput): FixedLayerResult {
   const { agentPermissions, cwd, fyCommand } = input;
-  const instruction = AGENT_INSTRUCTION(binaryName(fyCommand));
+  const instruction = AGENT_BASE_INSTRUCTION(binaryName(fyCommand));
   if (input.harness === 'claude') {
     if (agentPermissions === 'auto' && !input.acceptsAutoPermissionMode) {
       return { ok: false, refusal: { kind: 'claude-auto-mode-unsupported', message: AUTO_MODE_REFUSAL } };

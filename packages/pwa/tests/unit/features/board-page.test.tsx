@@ -102,7 +102,8 @@ const open = async (
 
 const click = (root: HTMLElement, selector: string) =>
   interact(() => must(root.querySelector<HTMLElement>(selector), selector).click());
-const titles = (root: HTMLElement) => [...root.querySelectorAll('.fy-board-card__title')].map(node => node.textContent);
+const titles = (root: HTMLElement) =>
+  [...root.querySelectorAll('.fy-board-card__title, .fy-board-table__title-text')].map(node => node.textContent);
 /** The advanced filters start folded behind "Filters"; this opens them. */
 const unfold = (root: HTMLElement) => click(root, '.fy-board-filters__toggle');
 const typeInto = async (input: HTMLInputElement, value: string) => {
@@ -225,12 +226,49 @@ describe('BoardPage — views', () => {
     expect(searches).toEqual(['']);
   });
 
-  it('draws the List sorted, and keeps the sort in the URL', async () => {
+  it('draws the Table in lane order, and keeps the sort and the grouping in the URL', async () => {
     const { root, searches } = await open({ props: { search: 'view=list' } });
-    expect(titles(root)[0]).toBe('Build the thing');
-    await click(root, '[data-sort="lane"]');
+    const rowTitles = () => titles(root);
+    expect(rowTitles()).toEqual(['Plan the thing', 'Build the thing', 'Review the thing', 'Try the thing']);
     await click(root, '[data-sort="stale"]');
-    expect(searches).toEqual(['view=list&sort=lane', 'view=list']);
+    await click(root, '[data-group-by-lane]');
+    expect(searches).toEqual(['view=list&sort=stale', 'view=list&group=lane']);
+  });
+
+  it('drops the grouping from the URL when it is turned off', async () => {
+    const { root, searches } = await open({ props: { search: 'view=list&group=lane' } });
+    await click(root, '[data-group-by-lane]');
+    expect(searches).toEqual(['view=list']);
+  });
+
+  it('drops the sort from the URL when it goes back to status order', async () => {
+    const { root, searches } = await open({ props: { search: 'view=list&sort=stale' } });
+    await click(root, '[data-sort="status"]');
+    expect(searches).toEqual(['view=list']);
+  });
+
+  it('closes a card from its Table row with Done, without opening it', async () => {
+    const { root, acts, navigated } = await open({ props: { search: 'view=list' } });
+    await click(root, '[data-task="F2"] .fy-board-done');
+    expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F2', request: { action: 'move', to: 'closed' } }]);
+    expect(navigated).toEqual([]);
+  });
+
+  it('reopens a closed card from the Archive, asking why first', async () => {
+    const { root, acts } = await open({ props: { search: 'view=archive' } });
+    const button = must(root.querySelector<HTMLButtonElement>('[data-task="F8"] .fy-board-done'), 'Reopen');
+    expect(button.textContent).toBe('Reopen');
+    await interact(() => button.click());
+    expect(acts).toEqual([]);
+    const dialog = must(root.querySelector('[role="dialog"]'), 'the reason box');
+    await typeInto(
+      must(dialog.querySelector<HTMLInputElement>('input[aria-label="Reason"]'), 'reason'),
+      'it broke again',
+    );
+    await interact(() => dialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })));
+    expect(acts).toEqual([
+      { daemonId: 'daemon/laptop', id: 'F8', request: { action: 'move', to: 'implement', reason: 'it broke again' } },
+    ]);
   });
 
   it('draws the Tree and the Dependencies views', async () => {
@@ -468,9 +506,9 @@ describe('BoardPage — moving cards', () => {
     expect(root.querySelector('.fy-board__notice')).toBeNull();
   });
 
-  it('closes a card from To test in one tap with "Works → Close"', async () => {
+  it('closes a card from To test in one tap with Done', async () => {
     const { root, acts } = await open();
-    await click(root, '[data-task="F4"] [data-verdict="works"]');
+    await click(root, '[data-task="F4"] .fy-board-done');
     expect(acts).toEqual([{ daemonId: 'daemon/laptop', id: 'F4', request: { action: 'move', to: 'closed' } }]);
   });
 

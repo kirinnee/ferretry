@@ -370,3 +370,98 @@ describe('an agenda item belongs to a card', () => {
     should(await NO_AGENDA_FOCUS.focusOf(SESSION)).be.null();
   });
 });
+
+describe('Agenda service: parking', () => {
+  const HUMAN = { kind: 'human' as const };
+  const LATER = '2026-08-01T10:00:00Z';
+  const board = async (service: AgendaService) => {
+    const listed = await service.list(SESSION);
+    if (!listed.ok) throw new Error('board unreadable');
+    return listed.value;
+  };
+
+  it('should snooze an item, bring it back on unsnooze, and park it on a reply', async () => {
+    // Arrange
+    const { service } = createService();
+    await service.raise(SESSION, request, AGENT);
+
+    // Act
+    const snoozed = await service.snooze(SESSION, 'A1', LATER, HUMAN);
+    const unsnoozed = await service.unsnooze(SESSION, 'A1', HUMAN);
+    const replied = await service.reply(SESSION, 'A1', HUMAN, 'Later');
+
+    // Assert
+    should(snoozed).containDeep({ ok: true, change: 'parked', item: { parked: { reason: 'snoozed', until: LATER } } });
+    should(unsnoozed).containDeep({ ok: true, change: 'unparked' });
+    should(replied).containDeep({ ok: true, change: 'replied', item: { parked: { reason: 'replied', at: NOW } } });
+  });
+
+  it('should refuse a snooze from a ferret or into the past', async () => {
+    // Arrange
+    const { service } = createService();
+    await service.raise(SESSION, request, AGENT);
+
+    // Act
+    const byAgent = await service.snooze(SESSION, 'A1', LATER, AGENT);
+    const past = await service.snooze(SESSION, 'A1', NOW, HUMAN);
+
+    // Assert
+    should(byAgent).containDeep({ ok: false, error: { code: 'forbidden' } });
+    should(past).containDeep({ ok: false, error: { code: 'invalid' } });
+  });
+
+  it('should wake a snoozed item only once its time has come, through the daemon’s timer alone', async () => {
+    // Arrange
+    const repository = new MemoryRepository();
+    const clock = { at: NOW };
+    const service = new AgendaService(repository, { now: () => clock.at }, { has: async () => true }, new Observer());
+    await service.raise(SESSION, request, AGENT);
+    await service.snooze(SESSION, 'A1', LATER, HUMAN);
+
+    // Act
+    const early = await service.wake(SESSION, 'A1');
+    clock.at = LATER;
+    const due = await service.wake(SESSION, 'A1');
+
+    // Assert
+    should(early).containDeep({ ok: true, change: 'unchanged' });
+    should(due).containDeep({ ok: true, change: 'woke', item: { waitingSince: LATER } });
+    should(due.ok ? due.item?.parked : 'refused').be.undefined();
+  });
+
+  it('should pass now through edit and surface, and leave it out when it is not said', async () => {
+    // Arrange
+    const { service } = createService();
+    await service.raise(SESSION, request, AGENT);
+    await service.snooze(SESSION, 'A1', LATER, HUMAN);
+
+    // Act
+    const quietEdit = await service.edit(SESSION, 'A1', { stillOpen: 'Which region?' }, AGENT);
+    const quietSurface = await service.surface(SESSION, 'A1', AGENT);
+    const urgentSurface = await service.surface(SESSION, 'A1', AGENT, 'Closes today', true);
+    const afterwards = await board(service);
+    await service.snooze(SESSION, 'A1', LATER, HUMAN);
+    const tooSoon = await service.edit(SESSION, 'A1', { stillOpen: 'Which cluster?' }, AGENT, true);
+
+    // Assert
+    should(quietEdit).containDeep({ ok: true, item: { parked: { reason: 'snoozed' } } });
+    should(quietSurface).containDeep({ ok: true, change: 'unchanged' });
+    should(urgentSurface).containDeep({ ok: true, change: 'unparked', item: { urgentAt: NOW } });
+    should(afterwards.items[0]?.parked).be.undefined();
+    should(tooSoon).containDeep({ ok: false, error: { code: 'rate-limited' } });
+  });
+
+  it('should wake a snoozed item on an edit with now', async () => {
+    // Arrange
+    const { service } = createService();
+    await service.raise(SESSION, request, AGENT);
+    await service.snooze(SESSION, 'A1', LATER, HUMAN);
+
+    // Act
+    const urgent = await service.edit(SESSION, 'A1', { stillOpen: 'Which region?' }, AGENT, true);
+
+    // Assert
+    should(urgent).containDeep({ ok: true, item: { stillOpen: 'Which region?', urgentAt: NOW } });
+    should(urgent.ok ? urgent.item?.parked : 'refused').be.undefined();
+  });
+});

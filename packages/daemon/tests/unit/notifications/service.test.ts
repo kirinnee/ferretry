@@ -222,6 +222,28 @@ describe('NotificationService deadline push', () => {
   });
 });
 
+describe('NotificationService woke push', () => {
+  it('should push once per wake, however often the wake is seen, and again for the next wake', async () => {
+    // Arrange
+    const world = fixture();
+    const nextWake = AgendaItemSchema.parse({ ...item, waitingSince: '2026-08-07T09:00:00.000Z' });
+
+    // Act
+    await world.service.woke(SESSION, item, snapshot);
+    await world.service.woke(SESSION, item, snapshot);
+    await world.service.woke(SESSION, nextWake, snapshot);
+
+    // Assert
+    should(world.push.calls).equal(2);
+    should(world.push.dispatches[0]?.payload.body).equal('Back from snooze: Choose a release window');
+    should(requested(world)[0]).containDeep({ woke: AT });
+    should(requested(world).map(record => record.key)).deepEqual([
+      `agenda:${SESSION}:A1:woke:${AT}`,
+      `agenda:${SESSION}:A1:woke:2026-08-07T09:00:00.000Z`,
+    ]);
+  });
+});
+
 describe('NotificationService ping push', () => {
   it('should push a notice that asked to, once, and nothing for one that did not', async () => {
     // Arrange

@@ -1,6 +1,11 @@
 import { describe, it } from 'bun:test';
 import type { AgendaAsk, AgendaCardAnswer, AgendaId, AgendaItem, AgendaResponse } from '@ferretry/protocol';
-import { AgendaItemSchema, MAX_AGENDA_PER_SESSION, MAX_AGENDA_REVISIONS } from '@ferretry/protocol';
+import {
+  AGENDA_URGENT_WAKE_MS,
+  AgendaItemSchema,
+  MAX_AGENDA_PER_SESSION,
+  MAX_AGENDA_REVISIONS,
+} from '@ferretry/protocol';
 import should from 'should';
 import {
   type AgendaActor,
@@ -18,6 +23,7 @@ import {
   isWardenEscalationAgenda,
   MAX_AGENT_AGENDA_PER_SESSION,
   parseAgendaLedger,
+  parkOwnerReplies,
   type RaiseAgendaRequest,
 } from '../../../src/lib/agenda/state-machine.ts';
 
@@ -26,6 +32,7 @@ const OTHER_SESSION_ID = 'session-2';
 const FIRST = '2026-07-30T10:00:00Z';
 const SECOND = '2026-07-30T11:00:00Z';
 const THIRD = '2026-07-30T12:00:00Z';
+const LATER = '2026-07-31T10:00:00Z';
 
 const HUMAN: AgendaActor = { kind: 'human' };
 const AGENT: AgendaActor = { kind: 'agent', sessionId: SESSION_ID, name: 'Ada' };
@@ -1770,7 +1777,7 @@ describe('Agenda state machine reply', () => {
   const surfacing = (ledger: AgendaLedger, actor: AgendaActor = AGENT, why?: string, at = THIRD) =>
     applyAgendaCommand(ledger, { action: 'surface', actor, id: 'A1', ...(why === undefined ? {} : { why }), at });
 
-  it('should close the item as replied, keeping the words in its history, and leave every open list', () => {
+  it('should park the item as replied, keeping the words in its history, and leave it open', () => {
     // Arrange
     const created = raised();
 
@@ -1781,22 +1788,16 @@ describe('Agenda state machine reply', () => {
     const snapshot = agendaSnapshot(replied.ledger);
     should(replied.change).equal('replied');
     should(replied.changed).be.true();
-    should(snapshot.items).have.length(0);
-    should(snapshot.count).equal(0);
-    should(snapshot.resolved).have.length(1);
-    should(replied.addressed).containDeep({
-      disposition: 'replied',
-      resolvedAt: SECOND,
-      resolvedBy: 'human',
-      resolutionNote: 'Use eu-west-1',
-    });
-    should(replied.addressed?.history).deepEqual([{ at: SECOND, kind: 'replied', note: 'Use eu-west-1' }]);
-    should(replied.addressed?.waitingOn).be.undefined();
-    should(replied.addressed?.infoRequests).be.undefined();
-    should(replied.addressed?.response).be.undefined();
+    should(snapshot.items.map(item => item.id)).deepEqual(['A1']);
+    should(snapshot.resolved).have.length(0);
+    should(replied.addressed).be.undefined();
+    should(replied.item?.parked).deepEqual({ reason: 'replied', at: SECOND });
+    should(replied.item?.history).deepEqual([{ at: SECOND, kind: 'replied', note: 'Use eu-west-1' }]);
+    should(replied.item).not.have.property('resolvedAt');
+    should(replied.item?.infoRequests).be.undefined();
   });
 
-  it('should close an item the ferret was asked for information on, and drop that wait', () => {
+  it('should park an item the ferret was asked for information on, and drop that wait', () => {
     // Arrange
     const asked = succeeded(
       applyAgendaCommand(raised().ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: SECOND }),
@@ -1806,12 +1807,43 @@ describe('Agenda state machine reply', () => {
     const replied = succeeded(reply(asked.ledger, HUMAN, THIRD));
 
     // Assert
-    should(replied.addressed).containDeep({ disposition: 'replied', infoRequests: 1 });
-    should(replied.addressed?.waitingOn).be.undefined();
-    should(replied.addressed?.waitingFor).be.undefined();
-    should(replied.addressed?.askedAt).be.undefined();
-    should(replied.addressed?.history?.map(entry => entry.kind)).deepEqual(['needs-info', 'replied']);
-    should(agendaSnapshot(replied.ledger).items).have.length(0);
+    should(replied.item).containDeep({ parked: { reason: 'replied', at: THIRD }, infoRequests: 1 });
+    should(replied.item?.waitingOn).be.undefined();
+    should(replied.item?.waitingFor).be.undefined();
+    should(replied.item?.askedAt).be.undefined();
+    should(replied.item?.history?.map(entry => entry.kind)).deepEqual(['needs-info', 'replied']);
+  });
+
+  it('should drop the discussion an item was in, and replace a snooze, when the owner replies', () => {
+    // Arrange
+    const discussing = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const snoozed = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+    );
+
+    // Act
+    const fromDiscussion = succeeded(reply(discussing.ledger, HUMAN, THIRD));
+    const fromSnooze = succeeded(reply(snoozed.ledger, HUMAN, THIRD));
+
+    // Assert
+    should(fromDiscussion.item?.waitingFor).be.undefined();
+    should(fromDiscussion.item?.parked).deepEqual({ reason: 'replied', at: THIRD });
+    should(fromSnooze.item?.parked).deepEqual({ reason: 'replied', at: THIRD });
+    should(fromSnooze.item?.history?.map(entry => entry.kind)).deepEqual(['replied']);
+  });
+
+  it('should leave a parked item out of the board count a badge shows, and keep it in the items', () => {
+    // Act
+    const snoozed = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+    );
+
+    // Assert
+    should(raised().snapshot.count).equal(1);
+    should(snoozed.snapshot.count).equal(0);
+    should(snoozed.snapshot.items.map(item => item.id)).deepEqual(['A1']);
   });
 
   it('should keep no note when the owner sent no words', () => {
@@ -1820,22 +1852,21 @@ describe('Agenda state machine reply', () => {
     const none = succeeded(reply(raised().ledger));
 
     // Assert
-    should(blank.addressed?.resolutionNote).be.null();
-    should(blank.addressed?.history).deepEqual([{ at: SECOND, kind: 'replied' }]);
-    should(none.addressed?.history).deepEqual([{ at: SECOND, kind: 'replied' }]);
+    should(blank.item?.history).deepEqual([{ at: SECOND, kind: 'replied' }]);
+    should(none.item?.history).deepEqual([{ at: SECOND, kind: 'replied' }]);
   });
 
-  it('should be idempotent: a reply to an item already replied to is no change', () => {
+  it('should park again at the new time when the owner replies to a parked item once more', () => {
     // Arrange
-    const once = succeeded(reply(raised().ledger));
+    const once = succeeded(reply(raised().ledger, HUMAN, SECOND, 'A1', 'First'));
 
     // Act
-    const again = succeeded(reply(once.ledger, HUMAN, THIRD));
+    const again = succeeded(reply(once.ledger, HUMAN, THIRD, 'A1', 'Second'));
 
     // Assert
-    should(again.changed).be.false();
-    should(again.change).equal('unchanged');
-    should(again.ledger).deepEqual(once.ledger);
+    should(again.change).equal('replied');
+    should(again.item?.parked).deepEqual({ reason: 'replied', at: THIRD });
+    should(again.item?.history?.map(entry => entry.note)).deepEqual(['First', 'Second']);
   });
 
   it('should be the owner’s alone: an agent, the ferret that raised it and the daemon are refused', () => {
@@ -1862,15 +1893,15 @@ describe('Agenda state machine reply', () => {
     should(failed(reply(notice.ledger)).error.code).equal('invalid');
   });
 
-  it('should reply to an item nobody in particular raised: the owner may close any open item', () => {
+  it('should reply to an item nobody in particular raised: the owner may park any open item', () => {
     // Act
     const replied = succeeded(reply(raised(HUMAN).ledger));
 
     // Assert
-    should(replied.addressed?.disposition).equal('replied');
+    should(replied.item?.parked?.reason).equal('replied');
   });
 
-  it('should close a daemon-raised Warden item the same way', () => {
+  it('should park a daemon-raised Warden item the same way', () => {
     // Arrange
     const created = raised(WARDEN, { sourceRef: null });
 
@@ -1878,11 +1909,11 @@ describe('Agenda state machine reply', () => {
     const replied = succeeded(reply(created.ledger));
 
     // Assert
-    should(replied.addressed?.disposition).equal('replied');
-    should(agendaSnapshot(replied.ledger).items).have.length(0);
+    should(replied.item?.parked?.reason).equal('replied');
+    should(agendaSnapshot(replied.ledger).resolved).have.length(0);
   });
 
-  it('should come back on the owner’s turn when the ferret surfaces it, keeping its id and history', () => {
+  it('should come back fresh on the owner’s turn when the ferret surfaces it, keeping its id and history', () => {
     // Arrange
     const replied = succeeded(reply(raised().ledger, HUMAN, SECOND, 'A1', 'Why us?'));
 
@@ -1891,17 +1922,20 @@ describe('Agenda state machine reply', () => {
 
     // Assert
     const snapshot = agendaSnapshot(back.ledger);
-    should(back.change).equal('reopened');
+    should(back.change).equal('unparked');
     should(snapshot.items.map(item => item.id)).deepEqual(['A1']);
     should(snapshot.resolved).have.length(0);
+    should(back.item?.parked).be.undefined();
     should(back.item?.waitingOn).be.undefined();
+    should(back.item?.waitingSince).equal(THIRD);
+    should(back.item?.urgentAt).be.undefined();
     should(back.item?.history).deepEqual([
       { at: SECOND, kind: 'replied', note: 'Why us?' },
       { at: THIRD, kind: 'surfaced', note: 'Still need the region' },
     ]);
   });
 
-  it('should come back with the new wording when the ferret edits it', () => {
+  it('should come back with the new wording, fresh, when the ferret edits it', () => {
     // Arrange
     const replied = succeeded(reply(raised().ledger));
 
@@ -1919,8 +1953,34 @@ describe('Agenda state machine reply', () => {
     // Assert
     should(agendaSnapshot(back.ledger).items.map(item => item.id)).deepEqual(['A1']);
     should(back.item?.stillOpen).equal('Which region?');
+    should(back.item?.parked).be.undefined();
     should(back.item?.waitingOn).be.undefined();
-    should(back.item?.history?.map(entry => entry.kind)).deepEqual(['replied', 'updated']);
+    should(back.item?.waitingSince).equal(THIRD);
+    should(back.change).equal('refreshed');
+    should(back.item?.revisions?.map(revision => revision.changed)).deepEqual([['stillOpen']]);
+    should(back.item?.history?.map(entry => entry.kind)).deepEqual(['replied']);
+  });
+
+  it('should bring it back even when the ferret’s edit changes nothing', () => {
+    // Arrange
+    const replied = succeeded(reply(raised().ledger));
+    const unchangedPatch: EditAgendaPatch = { subject: 'Approve the deployment?' };
+
+    // Act
+    const back = succeeded(
+      applyAgendaCommand(replied.ledger, {
+        action: 'edit',
+        actor: AGENT,
+        id: 'A1',
+        patch: unchangedPatch,
+        at: THIRD,
+      }),
+    );
+
+    // Assert
+    should(back.change).equal('unparked');
+    should(back.item?.parked).be.undefined();
+    should(back.item?.waitingSince).equal(THIRD);
   });
 
   it('should let the resurface timer bring it back, and refuse another ferret and the Warden', () => {
@@ -1930,12 +1990,114 @@ describe('Agenda state machine reply', () => {
     // Act + Assert
     should(failed(surfacing(replied.ledger, OTHER_AGENT)).error.code).equal('forbidden');
     should(failed(surfacing(replied.ledger, WARDEN)).error.code).equal('forbidden');
-    should(succeeded(surfacing(replied.ledger, { kind: 'daemon', cause: 'system' })).change).equal('reopened');
+    should(succeeded(surfacing(replied.ledger, { kind: 'daemon', cause: 'system' })).change).equal('unchanged');
   });
 
-  it('should not reopen into a full board', () => {
+  it('should leave it parked when the owner or another non-agent actor surfaces it', () => {
     // Arrange
-    let ledger = succeeded(reply(raised().ledger)).ledger;
+    const replied = succeeded(reply(raised().ledger));
+
+    // Act
+    const byOwner = succeeded(surfacing(replied.ledger, HUMAN));
+
+    // Assert
+    should(byOwner.changed).be.false();
+    should(agendaSnapshot(byOwner.ledger).items[0]?.parked?.reason).equal('replied');
+  });
+
+  it('should reopen a legacy closed replied item into the board when the ferret surfaces it', () => {
+    // Arrange
+    const created = raised();
+    const closed = succeeded(
+      applyAgendaCommand(created.ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const legacy: AgendaLedger = {
+      ...closed.ledger,
+      entries: closed.ledger.entries.map(entry =>
+        entry.lifecycle === 'addressed'
+          ? { ...entry, item: { ...entry.item, disposition: 'replied' as const } }
+          : entry,
+      ),
+    };
+
+    // Act
+    const back = succeeded(surfacing(legacy, AGENT, 'Still need it'));
+
+    // Assert
+    should(back.change).equal('reopened');
+    should(agendaSnapshot(back.ledger).items.map(item => item.id)).deepEqual(['A1']);
+    should(back.item?.history?.at(-1)).deepEqual({ at: THIRD, kind: 'surfaced', note: 'Still need it' });
+  });
+
+  it('should reopen a legacy closed replied item into the board when the ferret edits it, and apply the edit', () => {
+    // Arrange
+    const closed = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const legacy: AgendaLedger = {
+      ...closed.ledger,
+      entries: closed.ledger.entries.map(entry =>
+        entry.lifecycle === 'addressed'
+          ? { ...entry, item: { ...entry.item, disposition: 'replied' as const } }
+          : entry,
+      ),
+    };
+
+    // Act
+    const back = succeeded(
+      applyAgendaCommand(legacy, { action: 'edit', actor: AGENT, id: 'A1', patch: { subject: 'Reworded' }, at: THIRD }),
+    );
+
+    // Assert
+    should(agendaSnapshot(back.ledger).items.map(item => item.subject)).deepEqual(['Reworded']);
+    should(back.item?.history?.map(entry => entry.kind)).containEql('updated');
+  });
+
+  it('should refuse the edit of a legacy closed replied item into a full board', () => {
+    // Arrange
+    const closed = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    let ledger: AgendaLedger = {
+      ...closed.ledger,
+      entries: closed.ledger.entries.map(entry =>
+        entry.lifecycle === 'addressed'
+          ? { ...entry, item: { ...entry.item, disposition: 'replied' as const } }
+          : entry,
+      ),
+    };
+    for (let index = 0; index < MAX_AGENDA_PER_SESSION; index += 1) {
+      const next = applyAgendaCommand(ledger, raiseCommand(HUMAN, { subject: `Filler ${index}` }));
+      if (!next.ok) break;
+      ledger = next.ledger;
+    }
+
+    // Act
+    const result = applyAgendaCommand(ledger, {
+      action: 'edit',
+      actor: AGENT,
+      id: 'A1',
+      patch: { subject: 'Reworded' },
+      at: THIRD,
+    });
+
+    // Assert
+    should(failed(result).error.code).equal('full');
+  });
+
+  it('should not reopen a legacy closed replied item into a full board', () => {
+    // Arrange
+    const closed = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    let ledger: AgendaLedger = {
+      ...closed.ledger,
+      entries: closed.ledger.entries.map(entry =>
+        entry.lifecycle === 'addressed'
+          ? { ...entry, item: { ...entry.item, disposition: 'replied' as const } }
+          : entry,
+      ),
+    };
     for (let index = 0; index < MAX_AGENDA_PER_SESSION; index += 1) {
       const next = applyAgendaCommand(ledger, raiseCommand(HUMAN, { subject: `Filler ${index}` }));
       if (!next.ok) break;
@@ -1991,25 +2153,22 @@ describe('Agenda ledger migration: an owner reply an earlier daemon left on the 
     };
   };
 
-  it('should close it as replied at the instant of the reply when the board is read', () => {
+  it('should park it as replied at the instant of the reply when the board is read', () => {
     // Act
     const parsed = parseAgendaLedger(JSON.parse(JSON.stringify(legacyReply())), SESSION_ID);
 
     // Assert
     const snapshot = agendaSnapshot(parsed as AgendaLedger);
-    should(snapshot.items).have.length(0);
-    should(snapshot.resolved).have.length(1);
-    should(snapshot.resolved[0]).containDeep({
-      id: 'A1',
-      disposition: 'replied',
-      resolvedAt: SECOND,
-      resolvedBy: 'human',
-    });
-    should(snapshot.resolved[0]?.history?.map(entry => entry.kind)).deepEqual(['replied']);
-    should(snapshot.resolved[0]?.waitingOn).be.undefined();
+    should(snapshot.resolved).have.length(0);
+    should(snapshot.items).have.length(1);
+    should(snapshot.items[0]).containDeep({ id: 'A1', parked: { reason: 'replied', at: SECOND } });
+    should(snapshot.items[0]?.history?.map(entry => entry.kind)).deepEqual(['replied']);
+    should(snapshot.items[0]?.waitingOn).be.undefined();
+    should(snapshot.items[0]?.askedAt).be.undefined();
+    should(snapshot.items[0]?.waitingFor).be.undefined();
   });
 
-  it('should close only the replied item on a board that also holds an ordinary open one', () => {
+  it('should park only the replied item on a board that also holds an ordinary open one', () => {
     // Arrange
     const withSecond = succeeded(
       applyAgendaCommand(legacyReply(), raiseCommand(AGENT, { subject: 'Rotate the signing key?' }, SECOND)),
@@ -2020,8 +2179,11 @@ describe('Agenda ledger migration: an owner reply an earlier daemon left on the 
 
     // Assert
     const snapshot = agendaSnapshot(parsed as AgendaLedger);
-    should(snapshot.items.map(item => item.id)).deepEqual(['A2']);
-    should(snapshot.resolved.map(item => item.id)).deepEqual(['A1']);
+    should(snapshot.items.map(item => [item.id, item.parked?.reason])).deepEqual([
+      ['A1', 'replied'],
+      ['A2', undefined],
+    ]);
+    should(snapshot.resolved).have.length(0);
   });
 
   it('should be idempotent: reading it again changes nothing', () => {
@@ -2915,5 +3077,510 @@ describe('Agenda state machine — an input card never keeps free text from the 
 
     // Assert
     should(closed.snapshot.resolved[0]?.resolutionNote).equal('Done by hand.');
+  });
+});
+
+describe('Agenda state machine: snooze, unsnooze and wake', () => {
+  const SYSTEM: AgendaActor = { kind: 'daemon', cause: 'system' };
+  const apply = (ledger: AgendaLedger, command: Record<string, unknown>) =>
+    applyAgendaCommand(ledger, command as unknown as AgendaCommand);
+  const snoozed = (overrides: Partial<RaiseAgendaRequest> = {}, until = LATER) =>
+    succeeded(apply(raised(AGENT, overrides).ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until, at: SECOND }));
+
+  it('should park an open item as snoozed until a time, keeping it open', () => {
+    // Act
+    const result = snoozed();
+
+    // Assert
+    should(result.change).equal('parked');
+    should(result.changed).be.true();
+    should(result.item?.parked).deepEqual({ reason: 'snoozed', at: SECOND, until: LATER });
+    should(agendaSnapshot(result.ledger).items.map(item => item.id)).deepEqual(['A1']);
+    should(result.ledger.updatedAt).equal(SECOND);
+  });
+
+  it('should snooze an item that is in discussion, leaving its wait as it was', () => {
+    // Arrange
+    const discussing = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const result = succeeded(
+      apply(discussing.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: THIRD }),
+    );
+
+    // Assert
+    should(result.item).containDeep({ waitingFor: 'discussion', parked: { reason: 'snoozed' } });
+  });
+
+  it('should be the owner’s alone to snooze', () => {
+    // Arrange
+    const created = raised();
+
+    // Act + Assert
+    for (const actor of [AGENT, OTHER_AGENT, DAEMON, WARDEN, SYSTEM]) {
+      should(
+        failed(apply(created.ledger, { action: 'snooze', actor, id: 'A1', until: LATER, at: SECOND })).error.code,
+      ).equal('forbidden');
+    }
+  });
+
+  it('should refuse to snooze a missing item, a closed one and a notice', () => {
+    // Arrange
+    const created = raised();
+    const closed = succeeded(
+      applyAgendaCommand(created.ledger, { action: 'resolve', actor: AGENT, id: 'A1', at: SECOND }),
+    );
+    const notice = raised(AGENT, { notice: true, kind: 'info', ask: undefined });
+
+    // Act + Assert
+    const snooze = (ledger: AgendaLedger, id: string) =>
+      apply(ledger, { action: 'snooze', actor: HUMAN, id, until: LATER, at: SECOND });
+    should(failed(snooze(created.ledger, 'A9')).error.code).equal('not-found');
+    should(failed(snooze(closed.ledger, 'A1')).error.code).equal('not-found');
+    should(failed(snooze(notice.ledger, 'A1')).error.code).equal('invalid');
+  });
+
+  it('should refuse a time that is not after now', () => {
+    // Arrange
+    const created = raised();
+
+    // Act + Assert
+    for (const until of [SECOND, FIRST]) {
+      should(
+        failed(apply(created.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until, at: SECOND })).error.code,
+      ).equal('invalid');
+    }
+  });
+
+  it('should unsnooze a snoozed item and a replied one, with no other change to the item', () => {
+    // Arrange
+    const asleep = snoozed();
+    const replied = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'reply', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const woken = succeeded(apply(asleep.ledger, { action: 'unsnooze', actor: HUMAN, id: 'A1', at: THIRD }));
+    const back = succeeded(apply(replied.ledger, { action: 'unsnooze', actor: HUMAN, id: 'A1', at: THIRD }));
+
+    // Assert
+    should(woken.change).equal('unparked');
+    should(woken.item?.parked).be.undefined();
+    should(woken.item?.waitingSince).equal(FIRST);
+    should(back.change).equal('unparked');
+    should(back.item?.parked).be.undefined();
+    should(back.item?.history?.map(entry => entry.kind)).deepEqual(['replied']);
+  });
+
+  it('should leave an item that is not parked as it is when unsnoozed', () => {
+    // Act
+    const result = succeeded(apply(raised().ledger, { action: 'unsnooze', actor: HUMAN, id: 'A1', at: THIRD }));
+
+    // Assert
+    should(result.change).equal('unchanged');
+    should(result.changed).be.false();
+  });
+
+  it('should refuse to unsnooze for anyone but the owner, and for a missing item', () => {
+    // Arrange
+    const asleep = snoozed();
+
+    // Act + Assert
+    for (const actor of [AGENT, DAEMON, SYSTEM]) {
+      should(failed(apply(asleep.ledger, { action: 'unsnooze', actor, id: 'A1', at: THIRD })).error.code).equal(
+        'forbidden',
+      );
+    }
+    should(failed(apply(asleep.ledger, { action: 'unsnooze', actor: HUMAN, id: 'A9', at: THIRD })).error.code).equal(
+      'not-found',
+    );
+  });
+
+  it('should wake a snoozed item once its time has come, fresh and unread', () => {
+    // Arrange
+    const asleep = snoozed();
+
+    // Act
+    const woke = succeeded(apply(asleep.ledger, { action: 'wake', actor: SYSTEM, id: 'A1', at: LATER }));
+
+    // Assert
+    should(woke.change).equal('woke');
+    should(woke.item?.parked).be.undefined();
+    should(woke.item?.waitingSince).equal(LATER);
+    should(woke.item?.urgentAt).be.undefined();
+  });
+
+  it('should wake at the deadline when it is sooner than the snooze', () => {
+    // Arrange
+    const asleep = snoozed({ neededBy: THIRD });
+
+    // Act
+    const early = succeeded(apply(asleep.ledger, { action: 'wake', actor: SYSTEM, id: 'A1', at: SECOND }));
+    const due = succeeded(apply(asleep.ledger, { action: 'wake', actor: SYSTEM, id: 'A1', at: THIRD }));
+
+    // Assert
+    should(early.change).equal('unchanged');
+    should(due.change).equal('woke');
+    should(due.item?.waitingSince).equal(THIRD);
+  });
+
+  it('should not wake an item early, one that is not snoozed, one that is replied to or one that is missing', () => {
+    // Arrange
+    const asleep = snoozed();
+    const replied = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'reply', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const wake = (ledger: AgendaLedger, id: string, at: string) =>
+      succeeded(apply(ledger, { action: 'wake', actor: SYSTEM, id, at }));
+
+    // Act + Assert
+    should(wake(asleep.ledger, 'A1', THIRD).change).equal('unchanged');
+    should(wake(raised().ledger, 'A1', LATER).change).equal('unchanged');
+    should(wake(replied.ledger, 'A1', LATER).change).equal('unchanged');
+    should(wake(asleep.ledger, 'A9', LATER).change).equal('unchanged');
+  });
+
+  it('should wake only for the daemon’s own timer', () => {
+    // Arrange
+    const asleep = snoozed();
+
+    // Act + Assert
+    for (const actor of [HUMAN, AGENT, DAEMON, WARDEN]) {
+      should(failed(apply(asleep.ledger, { action: 'wake', actor, id: 'A1', at: LATER })).error.code).equal(
+        'forbidden',
+      );
+    }
+  });
+});
+
+describe('Agenda state machine: a ferret’s edit or surface of a parked item', () => {
+  const apply = (ledger: AgendaLedger, command: Record<string, unknown>) =>
+    applyAgendaCommand(ledger, command as unknown as AgendaCommand);
+  const asleep = (overrides: Partial<RaiseAgendaRequest> = {}) =>
+    succeeded(
+      apply(raised(AGENT, overrides).ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+    );
+  const editing = (
+    ledger: AgendaLedger,
+    patch: EditAgendaPatch,
+    at = THIRD,
+    extra: Record<string, unknown> = {},
+    actor: AgendaActor = AGENT,
+  ) => apply(ledger, { action: 'edit', actor, id: 'A1', patch, at, ...extra });
+  const surfacing = (
+    ledger: AgendaLedger,
+    at = THIRD,
+    extra: Record<string, unknown> = {},
+    actor: AgendaActor = AGENT,
+  ) => apply(ledger, { action: 'surface', actor, id: 'A1', at, ...extra });
+
+  it('should apply an edit to a snoozed item without waking it', () => {
+    // Act
+    const result = succeeded(editing(asleep().ledger, { stillOpen: 'Which region?' }));
+
+    // Assert
+    should(result.item?.stillOpen).equal('Which region?');
+    should(result.item?.parked).deepEqual({ reason: 'snoozed', at: SECOND, until: LATER });
+    should(result.item?.waitingSince).equal(FIRST);
+    should(result.item?.urgentAt).be.undefined();
+  });
+
+  it('should leave a snoozed item asleep when the ferret surfaces it without now', () => {
+    // Act
+    const result = succeeded(surfacing(asleep().ledger));
+
+    // Assert
+    should(result.change).equal('unchanged');
+    should(agendaSnapshot(result.ledger).items[0]?.parked?.reason).equal('snoozed');
+  });
+
+  it('should wake a snoozed item on a surface with now, as urgent and fresh', () => {
+    // Act
+    const result = succeeded(surfacing(asleep().ledger, THIRD, { now: true, why: 'Deploy window closes' }));
+
+    // Assert
+    should(result.change).equal('unparked');
+    should(result.item?.parked).be.undefined();
+    should(result.item?.urgentAt).equal(THIRD);
+    should(result.item?.waitingSince).equal(THIRD);
+    should(result.item?.history).deepEqual([{ at: THIRD, kind: 'surfaced', note: 'Deploy window closes' }]);
+  });
+
+  it('should note no words when a surface with now gives none', () => {
+    // Act
+    const result = succeeded(surfacing(asleep().ledger, THIRD, { now: true }));
+
+    // Assert
+    should(result.item?.history).deepEqual([{ at: THIRD, kind: 'surfaced' }]);
+  });
+
+  it('should wake a snoozed item on an edit with now, then apply the edit', () => {
+    // Act
+    const result = succeeded(editing(asleep().ledger, { stillOpen: 'Which region?' }, THIRD, { now: true }));
+
+    // Assert
+    should(result.item?.parked).be.undefined();
+    should(result.item?.urgentAt).equal(THIRD);
+    should(result.item?.waitingSince).equal(THIRD);
+    should(result.item?.stillOpen).equal('Which region?');
+  });
+
+  it('should still wake a snoozed item when the edit with now changes nothing', () => {
+    // Act
+    const result = succeeded(editing(asleep().ledger, { subject: 'Approve the deployment?' }, THIRD, { now: true }));
+
+    // Assert
+    should(result.change).equal('unparked');
+    should(result.item?.parked).be.undefined();
+    should(result.item?.urgentAt).equal(THIRD);
+  });
+
+  it('should take a snoozed item out of discussion when it is surfaced with now', () => {
+    // Arrange
+    const discussing = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'discuss', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const sleeping = succeeded(
+      apply(discussing.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+    );
+
+    // Act
+    const result = succeeded(surfacing(sleeping.ledger, THIRD, { now: true }));
+
+    // Assert
+    should(result.item?.parked).be.undefined();
+    should(result.item?.waitingOn).be.undefined();
+    should(result.item?.waitingFor).be.undefined();
+    should(result.item?.askedAt).be.undefined();
+  });
+
+  it('should keep a snoozed item that waits on more information waiting when it is woken as urgent', () => {
+    // Arrange
+    const asked = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'needs-info', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+    const sleeping = succeeded(
+      apply(asked.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+    );
+
+    // Act
+    const result = succeeded(surfacing(sleeping.ledger, THIRD, { now: true }));
+
+    // Assert
+    should(result.item?.parked).be.undefined();
+    should(result.item?.waitingOn).equal('ferret');
+  });
+
+  it('should refuse a second urgent wake within an hour and allow it after', () => {
+    // Arrange
+    const woken = succeeded(surfacing(asleep().ledger, THIRD, { now: true }));
+    const again = succeeded(
+      apply(woken.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: '2026-07-30T12:10:00Z' }),
+    );
+    const soon = new Date(Date.parse(THIRD) + AGENDA_URGENT_WAKE_MS - 1).toISOString();
+    const later = new Date(Date.parse(THIRD) + AGENDA_URGENT_WAKE_MS).toISOString();
+
+    // Act
+    const tooSoonSurface = failed(surfacing(again.ledger, soon, { now: true }));
+    const tooSoonEdit = failed(editing(again.ledger, { stillOpen: 'Again?' }, soon, { now: true }));
+    const allowed = succeeded(surfacing(again.ledger, later, { now: true }));
+
+    // Assert
+    should(tooSoonSurface.error.code).equal('rate-limited');
+    should(tooSoonEdit.error.code).equal('rate-limited');
+    should(allowed.item?.urgentAt).equal(later);
+    should(allowed.item?.parked).be.undefined();
+  });
+
+  it('should never unpark a parked item for the owner, the daemon or another ferret', () => {
+    // Arrange
+    const sleeping = asleep();
+    const replied = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'reply', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act + Assert
+    for (const actor of [HUMAN, { kind: 'daemon', cause: 'system' } as AgendaActor]) {
+      should(succeeded(surfacing(sleeping.ledger, THIRD, { now: true }, actor)).changed).be.false();
+      should(succeeded(surfacing(replied.ledger, THIRD, {}, actor)).changed).be.false();
+    }
+    const humanEdit = succeeded(editing(sleeping.ledger, { stillOpen: 'x' }, THIRD, { now: true }, HUMAN));
+    should(agendaSnapshot(humanEdit.ledger).items[0]?.parked?.reason).equal('snoozed');
+    const humanEditReplied = succeeded(editing(replied.ledger, { stillOpen: 'x' }, THIRD, {}, HUMAN));
+    should(agendaSnapshot(humanEditReplied.ledger).items[0]?.parked?.reason).equal('replied');
+    should(failed(surfacing(sleeping.ledger, THIRD, { now: true }, OTHER_AGENT)).error.code).equal('forbidden');
+    should(failed(editing(sleeping.ledger, { stillOpen: 'x' }, THIRD, { now: true }, OTHER_AGENT)).error.code).equal(
+      'forbidden',
+    );
+  });
+
+  it('should surface a parked item for its Warden by the Warden’s own item only', () => {
+    // Arrange
+    const created = raised(WARDEN, { sourceRef: null });
+    const parked = succeeded(
+      apply(created.ledger, { action: 'snooze', actor: HUMAN, id: 'A1', until: LATER, at: SECOND }),
+    );
+
+    // Act
+    const result = succeeded(surfacing(parked.ledger, THIRD, { now: true }, WARDEN));
+
+    // Assert
+    should(result.item?.parked).be.undefined();
+  });
+});
+
+describe('Agenda ledger migration: the replies earlier daemons left open or closed', () => {
+  const template = (id: AgendaId, origin: 'agent' | 'human') => {
+    const entry = activeEntry(raised(origin === 'agent' ? AGENT : HUMAN).ledger);
+    return { origin: entry.origin, item: { ...entry.item, id, subject: `Item ${id}` } };
+  };
+  const open = (id: AgendaId, origin: 'agent' | 'human' = 'human'): AgendaEntry => ({
+    lifecycle: 'active',
+    ...template(id, origin),
+  });
+  const closedReply = (id: AgendaId, resolvedAt: string, origin: 'agent' | 'human' = 'human'): AgendaEntry => {
+    const { origin: entryOrigin, item } = template(id, origin);
+    return {
+      lifecycle: 'addressed',
+      origin: entryOrigin,
+      item: {
+        ...item,
+        resolvedAt,
+        resolutionNote: 'Use eu-west-1',
+        disposition: 'replied',
+        resolvedBy: 'human',
+        resolvedBySession: null,
+        resolvedByName: null,
+        history: [{ at: resolvedAt, kind: 'replied', note: 'Use eu-west-1' }],
+      },
+    } as AgendaEntry;
+  };
+  const board = (entries: AgendaEntry[]): AgendaLedger => ({
+    sessionId: SESSION_ID,
+    nextId: 100,
+    entries,
+    updatedAt: THIRD,
+  });
+  const parse = (ledger: AgendaLedger) =>
+    parseAgendaLedger(JSON.parse(JSON.stringify(ledger)), SESSION_ID) as AgendaLedger;
+  const ids = (entries: readonly AgendaEntry[]) => entries.map(entry => entry.item.id);
+
+  it('should reopen an item closed as replied, parked as replied at its close, with its history kept', () => {
+    // Act
+    const parsed = parse(board([closedReply('A1', SECOND)]));
+
+    // Assert
+    const snapshot = agendaSnapshot(parsed);
+    should(snapshot.resolved).have.length(0);
+    should(snapshot.items).have.length(1);
+    should(snapshot.items[0]).containDeep({ id: 'A1', parked: { reason: 'replied', at: SECOND } });
+    should(snapshot.items[0]?.history).deepEqual([{ at: SECOND, kind: 'replied', note: 'Use eu-west-1' }]);
+    should(snapshot.items[0]).not.have.property('resolvedAt');
+    should(snapshot.items[0]).not.have.property('disposition');
+  });
+
+  it('should leave items closed any other way closed', () => {
+    // Arrange
+    const done = succeeded(
+      applyAgendaCommand(raised().ledger, { action: 'resolve', actor: HUMAN, id: 'A1', at: SECOND }),
+    );
+
+    // Act
+    const parsed = parse(done.ledger);
+
+    // Assert
+    should(agendaSnapshot(parsed).items).have.length(0);
+    should(agendaSnapshot(parsed).resolved.map(item => item.id)).deepEqual(['A1']);
+  });
+
+  it('should reopen the newest first and only while the board has room', () => {
+    // Arrange
+    const filled = Array.from({ length: MAX_AGENDA_PER_SESSION - 1 }, (_, index) => open(`A${index + 1}` as AgendaId));
+    const entries = [...filled, closedReply('A20', FIRST), closedReply('A22', THIRD), closedReply('A21', SECOND)];
+
+    // Act
+    const parsed = parse(board(entries));
+
+    // Assert
+    should(ids(parsed.entries.filter(isActiveAgenda))).containEql('A22');
+    should(parsed.entries.filter(isActiveAgenda)).have.length(MAX_AGENDA_PER_SESSION);
+    should(ids(parsed.entries.filter(entry => entry.lifecycle === 'addressed')))
+      .containDeep(['A20', 'A21'])
+      .and.have.length(2);
+  });
+
+  it('should keep a closed reply of a ferret closed once the agent cap is reached, but reopen a person’s', () => {
+    // Arrange
+    const agents = Array.from({ length: MAX_AGENT_AGENDA_PER_SESSION }, (_, index) =>
+      open(`A${index + 1}` as AgendaId, 'agent'),
+    );
+    const entries = [...agents, closedReply('A30', THIRD, 'agent'), closedReply('A31', SECOND, 'human')];
+
+    // Act
+    const parsed = parse(board(entries));
+
+    // Assert
+    should(ids(parsed.entries.filter(entry => entry.lifecycle === 'addressed'))).deepEqual(['A30']);
+    should(ids(parsed.entries.filter(isActiveAgenda))).containEql('A31');
+  });
+
+  it('should count a reopened ferret item towards the agent cap', () => {
+    // Arrange
+    const agents = Array.from({ length: MAX_AGENT_AGENDA_PER_SESSION - 1 }, (_, index) =>
+      open(`A${index + 1}` as AgendaId, 'agent'),
+    );
+    const entries = [...agents, closedReply('A30', THIRD, 'agent'), closedReply('A31', SECOND, 'agent')];
+
+    // Act
+    const parsed = parse(board(entries));
+
+    // Assert
+    should(ids(parsed.entries.filter(entry => entry.lifecycle === 'addressed'))).deepEqual(['A31']);
+    should(ids(parsed.entries.filter(isActiveAgenda))).containEql('A30');
+  });
+
+  it('should park a reply left on the ferret’s turn and reopen a closed one in the same read', () => {
+    // Arrange
+    const stranded = open('A1', 'agent');
+    if (stranded.lifecycle !== 'active') throw new Error('expected an open entry');
+    const left: AgendaEntry = {
+      ...stranded,
+      item: { ...stranded.item, waitingOn: 'ferret', askedAt: SECOND, waitingFor: 'discussion' },
+    };
+
+    // Act
+    const parsed = parse(board([left, closedReply('A2', THIRD)]));
+
+    // Assert
+    const items = agendaSnapshot(parsed).items;
+    should(items.map(item => [item.id, item.parked])).deepEqual([
+      ['A1', { reason: 'replied', at: SECOND }],
+      ['A2', { reason: 'replied', at: THIRD }],
+    ]);
+  });
+
+  it('should be idempotent, and return a board with nothing to move as it came', () => {
+    // Arrange
+    const once = parse(board([closedReply('A1', SECOND), open('A2')]));
+    const plain = board([open('A1')]);
+
+    // Act + Assert
+    should(parse(once)).deepEqual(once);
+    should(parkOwnerReplies(plain)).equal(plain);
+  });
+
+  it('should leave a closed reply closed when it no longer reads as an item', () => {
+    // Arrange
+    const reply = closedReply('A1', SECOND);
+    if (reply.lifecycle !== 'addressed') throw new Error('expected a closed entry');
+    const broken: AgendaEntry = { ...reply, item: { ...reply.item, subject: '' } };
+
+    // Act
+    const parked = parkOwnerReplies(board([broken]));
+
+    // Assert
+    should(parked.entries.map(entry => entry.lifecycle)).deepEqual(['addressed']);
   });
 });

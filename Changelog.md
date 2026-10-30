@@ -1,3 +1,38 @@
+## [4.138.0](https://github.com/kirinnee/ferretry/compare/v4.137.0...v4.138.0) (2026-10-30)
+
+### Features
+
+* **agenda:** snooze an agenda item, and park replied ones instead of closing them ([#1043](https://github.com/kirinnee/ferretry/issues/1043)) ([e303aa9](https://github.com/kirinnee/ferretry/commit/e303aa9e8f51f4b1bc0eb5257732058ac2dc9250))
+* **daemon:** sub-ferrets report to their lead, no agenda items or card moves ([#1037](https://github.com/kirinnee/ferretry/issues/1037)) ([95839c1](https://github.com/kirinnee/ferretry/commit/95839c1ec64309e60320428ac0a966404f5b4fb5))
+* **pwa:** device outbox as tick one, and queue views ([#1042](https://github.com/kirinnee/ferretry/issues/1042)) ([4693608](https://github.com/kirinnee/ferretry/commit/4693608d8c0d39a396a5655aa1062c4d46b1c332))
+* **pwa:** redesign the board card detail as one flowing page ([#1040](https://github.com/kirinnee/ferretry/issues/1040)) ([3595920](https://github.com/kirinnee/ferretry/commit/35959208c6a781efdf929bc925183c672e75c972))
+
+### Fixes
+
+* **daemon:** quote a dying codex probe, not its broken pipe; deflake three tests ([#1044](https://github.com/kirinnee/ferretry/issues/1044)) ([8d9e3fb](https://github.com/kirinnee/ferretry/commit/8d9e3fbe6addd7fffd88b6375026941b23055b67))
+* **pwa:** let the Board Table use the full page width ([#1041](https://github.com/kirinnee/ferretry/issues/1041)) ([6e5c846](https://github.com/kirinnee/ferretry/commit/6e5c8462364fd75ddedaebed80faa685dd0b2aba))
+
+## [4.137.0](https://github.com/kirinnee/ferretry/compare/v4.136.0...v4.137.0) (2026-10-30)
+
+### Features
+
+* **daemon:** interrupt is a flag on a queued message, not a separate path (F155) ([#1039](https://github.com/kirinnee/ferretry/issues/1039)) ([4d8411f](https://github.com/kirinnee/ferretry/commit/4d8411f5879279364ce5b77fd889aa4dfc3556b2))
+* **pwa:** Board Table view with an owner Done and Reopen ([#1035](https://github.com/kirinnee/ferretry/issues/1035)) ([1b8659d](https://github.com/kirinnee/ferretry/commit/1b8659db5e75cde9b6ba724f541b012e42d856aa))
+
+## [4.136.0](https://github.com/kirinnee/ferretry/compare/v4.135.0...v4.136.0) (2026-10-30)
+
+### Features
+
+* **pwa:** agenda card acts like the chat (quote, History bubbles, Esc) ([#1031](https://github.com/kirinnee/ferretry/issues/1031)) ([167a9a3](https://github.com/kirinnee/ferretry/commit/167a9a3f40b08d833a5f92b9f9d6b6845c86144e))
+* **pwa:** declutter the chat top bar ([#1032](https://github.com/kirinnee/ferretry/issues/1032)) ([eae6af7](https://github.com/kirinnee/ferretry/commit/eae6af7874964039c28fd2643ccc2305bb73c05c))
+* **pwa:** read a chat's tasks from the board; retire per-session task code ([#1030](https://github.com/kirinnee/ferretry/issues/1030)) ([06c80b8](https://github.com/kirinnee/ferretry/commit/06c80b83da817cb0a08b64ef795570119883c88f))
+
+### Fixes
+
+* **board:** type no board news into chats; keep only actionable nudges, as plain sentences ([#1026](https://github.com/kirinnee/ferretry/issues/1026)) ([92a69a0](https://github.com/kirinnee/ferretry/commit/92a69a0630a667ba2388d529b5b5464407466d2c))
+* **pwa:** a queue message typed and not proven reads unconfirmed, never 'sending' ([#1038](https://github.com/kirinnee/ferretry/issues/1038)) ([725267f](https://github.com/kirinnee/ferretry/commit/725267f801a5be6fe30bfdbc0a5e3de923fb4012))
+* **pwa:** remove left accent rails everywhere ([#1036](https://github.com/kirinnee/ferretry/issues/1036)) ([dd41c0d](https://github.com/kirinnee/ferretry/commit/dd41c0ddf91dbb65633102ff1609bcc21d6d77b3))
+
 ## [4.135.0](https://github.com/kirinnee/ferretry/compare/v4.134.1...v4.135.0) (2026-10-30)
 
 ### Features

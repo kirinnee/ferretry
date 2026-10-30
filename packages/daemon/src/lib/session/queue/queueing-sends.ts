@@ -71,7 +71,7 @@ export class QueueingSends {
     if (target === undefined) throw new SendRefused(`session ${request.id} does not exist`);
     const sender: SendSenderKind =
       request.origin === 'daemon' ? 'daemon' : request.senderReference !== undefined ? 'agent' : this.kind;
-    if (request.now === true || boardOnly({ sender }, target.mode)) return await this.ports.direct.send(request);
+    if (boardOnly({ sender }, target.mode)) return await this.ports.direct.send(request);
     await this.ports.direct.authorize(request.id, request.attachmentIds ?? []);
     const { message } = await this.ports.queue.enqueue(request.id, {
       id: request.sendId,
@@ -81,6 +81,8 @@ export class QueueingSends {
       text: request.message,
       ...(request.attachmentIds === undefined ? {} : { attachmentIds: request.attachmentIds }),
       ...(request.replyExpected === true ? { replyExpected: true } : {}),
+      // `now` keeps its place in the queue: the deliverer stops the turn when this message's turn comes.
+      ...(request.now === true ? { interrupt: true } : {}),
     });
     await Promise.race([
       this.ports.deliverer.enqueued(request.id).catch(() => undefined),

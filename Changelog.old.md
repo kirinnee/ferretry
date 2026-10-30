@@ -1,3 +1,37 @@
+## [4.137.0](https://github.com/kirinnee/ferretry/compare/v4.136.0...v4.137.0) (2026-10-30)
+
+### Features
+
+* **daemon:** interrupt is a flag on a queued message, not a separate path (F155) ([#1039](https://github.com/kirinnee/ferretry/issues/1039)) ([4d8411f](https://github.com/kirinnee/ferretry/commit/4d8411f5879279364ce5b77fd889aa4dfc3556b2))
+* **pwa:** Board Table view with an owner Done and Reopen ([#1035](https://github.com/kirinnee/ferretry/issues/1035)) ([1b8659d](https://github.com/kirinnee/ferretry/commit/1b8659db5e75cde9b6ba724f541b012e42d856aa))
+
+## [4.136.0](https://github.com/kirinnee/ferretry/compare/v4.135.0...v4.136.0) (2026-10-30)
+
+### Features
+
+* **pwa:** agenda card acts like the chat (quote, History bubbles, Esc) ([#1031](https://github.com/kirinnee/ferretry/issues/1031)) ([167a9a3](https://github.com/kirinnee/ferretry/commit/167a9a3f40b08d833a5f92b9f9d6b6845c86144e))
+* **pwa:** declutter the chat top bar ([#1032](https://github.com/kirinnee/ferretry/issues/1032)) ([eae6af7](https://github.com/kirinnee/ferretry/commit/eae6af7874964039c28fd2643ccc2305bb73c05c))
+* **pwa:** read a chat's tasks from the board; retire per-session task code ([#1030](https://github.com/kirinnee/ferretry/issues/1030)) ([06c80b8](https://github.com/kirinnee/ferretry/commit/06c80b83da817cb0a08b64ef795570119883c88f))
+
+### Fixes
+
+* **board:** type no board news into chats; keep only actionable nudges, as plain sentences ([#1026](https://github.com/kirinnee/ferretry/issues/1026)) ([92a69a0](https://github.com/kirinnee/ferretry/commit/92a69a0630a667ba2388d529b5b5464407466d2c))
+* **pwa:** a queue message typed and not proven reads unconfirmed, never 'sending' ([#1038](https://github.com/kirinnee/ferretry/issues/1038)) ([725267f](https://github.com/kirinnee/ferretry/commit/725267f801a5be6fe30bfdbc0a5e3de923fb4012))
+* **pwa:** remove left accent rails everywhere ([#1036](https://github.com/kirinnee/ferretry/issues/1036)) ([dd41c0d](https://github.com/kirinnee/ferretry/commit/dd41c0ddf91dbb65633102ff1609bcc21d6d77b3))
+
+## [4.135.0](https://github.com/kirinnee/ferretry/compare/v4.134.1...v4.135.0) (2026-10-30)
+
+### Features
+
+* **pwa:** queue ticks, wait reasons, edit and cancel on chat bubbles (S5) ([#1016](https://github.com/kirinnee/ferretry/issues/1016)) ([81b3b33](https://github.com/kirinnee/ferretry/commit/81b3b332100836fb9aa42928c5beaeb69d07c824))
+
+### Fixes
+
+* **daemon:** a long transcript is still being read, not unreadable — no false 'unconfirmed', no resend notice ([#1033](https://github.com/kirinnee/ferretry/issues/1033)) ([4925ce1](https://github.com/kirinnee/ferretry/commit/4925ce1b6bae70589bc3a237221ec36e0d96b09a))
+* **daemon:** Ferretry's own notices are plain sentences; who a turn is from is metadata (B66) ([#1028](https://github.com/kirinnee/ferretry/issues/1028)) ([c165225](https://github.com/kirinnee/ferretry/commit/c165225a86ca4bc5d8c301416b80ba06244beb1a))
+* **pwa:** one compact row of agenda actions, a one-line phone head and composer ([#1023](https://github.com/kirinnee/ferretry/issues/1023)) ([6b337fe](https://github.com/kirinnee/ferretry/commit/6b337feecf9e24e9e71ecddf4c7b286496188d19))
+* **pwa:** wrap board card titles to two lines and keep meta items whole ([#1017](https://github.com/kirinnee/ferretry/issues/1017)) ([efcf07d](https://github.com/kirinnee/ferretry/commit/efcf07dc396824278f3637bad239949fc6284be7))
+
 ## [4.134.1](https://github.com/kirinnee/ferretry/compare/v4.134.0...v4.134.1) (2026-10-30)
 
 ### Fixes

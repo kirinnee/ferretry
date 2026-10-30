@@ -8,6 +8,7 @@ import {
 } from '@ferretry/protocol';
 import type { BoardChangeSink, SessionFocus, SessionParents } from '../../lib/board/index.ts';
 import { jsonObject } from '../../lib/json.ts';
+import type { SubFerretDirectory } from '../../lib/sub-ferret/index.ts';
 import { withAutoTitle } from '../../lib/names/auto-title.ts';
 import { tryParseSessionId } from '../../lib/session-id.ts';
 import type { DaemonStorage } from '../storage/session-storage.ts';
@@ -116,5 +117,21 @@ export class JournalBoardChecks {
   async record(sessionId: string, seen: readonly string[]): Promise<void> {
     const id = known(this.storage, sessionId);
     if (id !== undefined) await this.storage.append(id, BOARD_CHECKED_EVENT, { seen: [...seen] });
+  }
+}
+
+/** The sub-ferret limits' lineage fact, read from the session's own configuration: `parent` is the lead. */
+export class StorageSubFerretDirectory implements SubFerretDirectory {
+  constructor(private readonly storage: SessionDocuments) {}
+
+  async leadOf(sessionId: string): Promise<string | undefined> {
+    return await new StorageSessionParents(this.storage).parentOf(sessionId);
+  }
+
+  async addressOf(sessionId: string): Promise<string> {
+    const id = known(this.storage, sessionId);
+    if (id === undefined) return sessionId;
+    const teammate = jsonObject(await this.storage.readConfig(id))?.teammate;
+    return typeof teammate === 'string' && teammate !== '' ? teammate : sessionId;
   }
 }

@@ -50,12 +50,12 @@ A new ask is the owner's turn. Nothing starts "in discussion": the ferret raises
 
 Internally the ferret's turn is `waitingOn: 'ferret'` with `waitingFor` either `'discussion'` (the owner
 asked to discuss it) or `'info'` (the owner asked for more information). Clients read the turn, not those two
-fields. **A chat reply is not a turn at all: it closes the item** (see "Replying closes the item").
+fields. **A chat reply is not a turn at all: it parks the item** (see "Parked items").
 
 ## Handing it back
 
 On the ferret's turn there are three ways out. The same two verbs also bring back an item the owner's
-reply closed (see "Replying closes the item"). **None of the first two pings the owner.**
+reply parked (see "Parked items"). **None of the first two pings the owner.**
 
 - `fy agenda edit <id> …` — change the card (settled answers, what is still open, new options). Any edit by
   the raising agent on its own turn hands the item back to the owner, even one that changes nothing.
@@ -82,33 +82,56 @@ referenced. If the ferret finishes a turn without touching a referenced item, th
 Picking an option on the card (`respond`) still answers the item, exactly as before. `--other "<words>"`
 remains on the CLI and in the app for "none of the options"; chat no longer guesses it.
 
-## Replying closes the item
+## Parked items
 
-An item the owner replied to leaves the owner's open list, the Inbox, the badge counts and "Needs you" the
-moment the message is accepted. Otherwise an item a ferret never touches would hang there for ever.
+A parked item is still open, but it is **nobody's turn** for now: it leaves the owner's open list, the Inbox's open
+sections, the badge counts and "Needs you", and the session summary does not count it. It carries
+`parked: { reason, at, until? }` and reads as the `parked` turn (`agendaTurn`). There are two reasons, one
+mechanism: why it is parked, and its way back.
 
-- **The outcome is its own resolution**, `disposition: 'replied'`: "the owner replied; nothing more is needed
-  unless the ferret asks again". It sits in the resolved list ("Replied" in the app, "replied by you" in
-  `fy agenda show`). Buttons, options and `[answer to !A…]` are unchanged: they still resolve with a
-  response, as `done`.
-- **The words are kept.** The reply text is a `replied` entry in the item's history (the resolution note
-  too), cut at the detail limit. A reply with no words (a bare chip) records the entry without a note.
-- **The ferret can bring it back.** `fy agenda surface <id> [--why "…"]` and the raising ferret's
-  `fy agenda edit <id> …` reopen a `replied` item on the owner's turn, keeping its id, history and edits
-  (change: `reopened`; `surface` records a `surfaced` entry, `edit` an `updated` one with the new
-  wording). The resurface timer may reopen one too. A board that already holds the per-session cap refuses
-  (`full`). Only a `replied` item comes back this way; a done or dismissed one is final.
-- **Warden items follow the same rule.** A daemon-raised item ("&F118 has nobody on it") the owner replied to
-  closes like any other. It is not raised again for the same anomaly: the Warden's "already told" record
-  holds until the anomaly clears.
-- **Discuss is separate.** The owner's explicit Discuss (and a request for more information) still puts the
-  item on the ferret's turn and counts as a request.
+### Replied
 
-**Migration.** An item an earlier daemon left on the ferret's turn _only_ because of an owner reply
-(`waitingFor: 'discussion'`, asked after it was raised, with no `discuss` entry at that instant) is closed as
-`replied` when its board is read, at the instant of the reply, and the next write persists it. A Discuss
-or information request, and an item born in discussion, are left alone. It is pure and idempotent
-(`closeOwnerReplies`).
+An item the owner replied to in the chat (`[re !A5 «title»] …`) is **parked as `replied`** the moment the message
+is accepted. Otherwise an item a ferret never touches would hang on the owner's list for ever, and closing it
+would lose it when the ferret still needs something.
+
+- **The words are kept.** The reply text is a `replied` entry in the item's history, cut at the detail limit. A
+  reply with no words (a bare chip) records the entry without a note. Any wait (more information, a discussion)
+  ends: the reply answered it.
+- **The ferret decides what happens next.** `fy agenda surface <id> [--why "…"]` or its own
+  `fy agenda edit <id> …` brings it back on the owner's turn — **fresh**: `waitingSince` is now, so it reads as
+  new and unread. `fy agenda done <id>` closes it when the reply settled it.
+- The app lists it under **Replied (n)**; the owner can bring it back themselves ("Back to my list").
+- Buttons, options and `[answer to !A…]` are unchanged: they still resolve with a response, as `done`.
+- **Warden items follow the same rule.** A daemon-raised item the owner replied to parks like any other; it is
+  not raised again for the same anomaly while the Warden's "already told" record holds.
+- **Discuss is separate.** The owner's explicit Discuss (and a request for more information) still puts the item
+  on the ferret's turn and counts as a request.
+
+### Snoozed
+
+The owner can put an open item away ("we are waiting for approval"): **for** a while or **until** a time — 1 hour,
+4 hours, tomorrow 9:00 in their own time zone, or a time they pick. In the app it is the clock in the item's head
+(never a button in the answer row); on the command line `fy agenda snooze <id> --for 4h | --until 17:00`, and
+`fy agenda unsnooze <id>` brings it back now.
+
+- **It wakes on its own** at `until`, or at its `neededBy` when that is sooner — a deadline is never slept
+  through (`agendaWakeAt`). The daemon's waker sweeps every minute and reads only the boards, so a snooze
+  outlives a restart and an item that fell due while the daemon was down wakes on the first sweep.
+- **It comes back fresh** (`waitingSince` is the wake), unread, on the owner's turn. The phone buzzes only when
+  it blocks the ferret or has a deadline, once per wake (see [notifications.md](notifications.md)).
+- **The ferret is told without text tags**: the state is the item's own field, and `fy agenda ls` says
+  "snoozed by the owner until …". A ferret's `edit` or `surface` leaves a snoozed item asleep (an edit still
+  changes its words). Only `--now` — it is urgent — wakes it, and a ferret may do that **once an hour per item**
+  (`urgentAt`; a second try inside the hour is refused as `rate-limited`).
+- Only the owner snoozes and unsnoozes; only the daemon's own timer wakes. A notice is read, not snoozed.
+
+**Migration.** Replies used to close items (`disposition: 'replied'`), and before that they left an item on the
+ferret's turn. When a board is read, an item still waiting on the ferret only because of an owner reply is
+parked as `replied` at the reply, and an item closed as `replied` is open again, parked as `replied` at its
+close — newest first, and only while the board has room (the per-session cap, and the agent cap for a ferret's
+item); the rest stay closed, and `surface` or `edit` still reopens one. It is pure and idempotent
+(`parkOwnerReplies`), and the next write persists it.
 
 ## What an item blocks
 
@@ -195,17 +218,28 @@ cryptographic one — the same boundary `fy config confirm` has.
 
 ## Verbs
 
-`fy agenda add | edit | step | show | ls | history | surface | done | dismiss | needs-info | discuss | send-now`
+`fy agenda add | edit | step | show | ls | history | surface | snooze | unsnooze | done | dismiss | needs-info | discuss | send-now`
 
-| Verb                    | Does                                                                    |
-| ----------------------- | ----------------------------------------------------------------------- |
-| `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.   |
-| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner. |
-| `surface <id>`          | Hand it back to the owner, or reopen a replied one, unchanged (silent). |
-| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…) |
-| `dismiss <id>`          | Close without answering; agents only their own.                         |
-| `ls` / `show`           | Open items with turn and blocking fields / one item in full.            |
-| `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn. |
+| Verb                    | Does                                                                         |
+| ----------------------- | ---------------------------------------------------------------------------- |
+| `add`                   | Raise an item (the owner's turn). `--title` and the ask are required.        |
+| `edit <id>`             | Reword; on the ferret's turn, or a replied item, hands it to the owner.      |
+| `surface <id>`          | Hand it back to the owner, or bring back a replied one, unchanged (silent).  |
+| `snooze <id>`           | The owner's: put it away `--for 4h` or `--until 17:00`; it comes back fresh. |
+| `unsnooze <id>`         | The owner's: bring a snoozed or replied item back to the list now.           |
+| `done <id>`             | Resolve, optionally answering its ask (`--choice`, `--yes`, `--other`…)      |
+| `dismiss <id>`          | Close without answering; agents only their own.                              |
+| `ls` / `show`           | Open items with turn and blocking fields / one item in full.                 |
+| `needs-info`, `discuss` | The owner's side, kept for old clients. They make it the ferret's turn.      |
+
+`edit` and `surface` take `--now` when it is urgent: it wakes an item the owner snoozed, once an hour per item.
+
+**Sub-ferrets raise nothing.** A session another ferret started (`config.parent`) is refused `add`, `edit`,
+`surface`, `done` and `dismiss` (and `fy notify`, the same owner-facing channel) with `forbidden`: `Sub-ferrets don't
+raise agenda items or notify the owner; tell your lead: fy send <lead-callsign> "…"`. They report to the lead with
+`fy send`; the lead decides what the owner must see. `AgendaService.apply` is the one choke point; reads stay open.
+Their prompt carries no Agenda mode section even when the switch is on
+([pack-mode.md](pack-mode.md#sub-ferret-limits)).
 
 `fy attention …` runs the same handlers and prints one line to stderr first
 (its text says `fy attention` is now `fy agenda`). It is hidden from help and will be removed.

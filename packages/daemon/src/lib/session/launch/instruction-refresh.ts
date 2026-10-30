@@ -71,7 +71,7 @@ export function recordTold(
   const kept = recorded.sections.filter(
     section => !ids.has(section.id as AlwaysOnSection['id']) && section.id !== 'attention',
   );
-  const order = ['tools', 'settings', 'notify', 'board'];
+  const order = ['tools', 'settings', 'notify', 'board', 'sub-ferret'];
   const always = [...kept.filter(section => order.includes(section.id)), ...fresh].toSorted(
     (left, right) => order.indexOf(left.id) - order.indexOf(right.id),
   );
@@ -80,8 +80,8 @@ export function recordTold(
 
 /** What the refresh reads and writes. */
 export interface InstructionRefreshPorts {
-  /** The words every agent is told now. */
-  readonly sections: () => readonly AlwaysOnSection[];
+  /** The words every agent is told now: a sub-ferret's are not a lead's. */
+  readonly sections: (subFerret: boolean) => readonly AlwaysOnSection[];
   /** What the session's launch was told, or `undefined` when nothing was recorded or it cannot be read. */
   readonly recorded: (sessionId: string) => Promise<SessionLaunchInstructions | undefined>;
   /** Rewrites the session's launch record under its lock; `undefined` from `update` leaves it alone. */
@@ -107,7 +107,8 @@ export class InstructionRefresh {
 
   async queueIfStale(sessionId: string): Promise<void> {
     const recorded = await this.ports.recorded(sessionId).catch(() => undefined);
-    const told = changedInstructions(recorded, this.ports.sections());
+    const subFerret = recorded?.sections.some(section => section.id === 'sub-ferret') ?? false;
+    const told = changedInstructions(recorded, this.ports.sections(subFerret));
     if (told.length === 0) return;
     const note = instructionsUpdatedNote(told);
     const queued = await this.ports.queue(sessionId, instructionDigest(note), note).then(

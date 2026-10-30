@@ -10,6 +10,7 @@ import {
   JournalBoardChecks,
   StorageSessionFocus,
   StorageSessionParents,
+  StorageSubFerretDirectory,
 } from '../../../src/adapters/board/session-board-adapters.ts';
 import {
   BunSqliteIndexFactory,
@@ -50,7 +51,12 @@ async function openStorage() {
   return storage;
 }
 
-async function session(storage: Awaited<ReturnType<typeof openStorage>>, id: string, parent?: string) {
+async function session(
+  storage: Awaited<ReturnType<typeof openStorage>>,
+  id: string,
+  parent?: string,
+  teammate?: string,
+) {
   const sessionId = parseSessionId(id);
   await storage.writeConfig(sessionId, {
     id,
@@ -64,6 +70,7 @@ async function session(storage: Awaited<ReturnType<typeof openStorage>>, id: str
     createdAt: NOW,
     updatedAt: NOW,
     ...(parent === undefined ? {} : { parent }),
+    ...(teammate === undefined ? {} : { teammate }),
   });
   await storage.writeState(sessionId, { id, status: 'running', turn: 1 });
   return sessionId;
@@ -218,5 +225,36 @@ describe('the board session adapters', () => {
 
     // Assert
     should(journal.map(entry => entry.data)).eql([{ seen: ['Edit', 'git push'] }]);
+  });
+});
+
+describe('the sub-ferret directory over a real state home', () => {
+  it('should read the lead from config.parent and the lead callsign from config.teammate, else the session id', async () => {
+    // Arrange
+    const storage = await openStorage();
+    await session(storage, 'lead', undefined, 'lizzette');
+    await session(storage, 'plain');
+    await session(storage, 'child', 'lead');
+    const directory = new StorageSubFerretDirectory(storage);
+
+    // Act
+    const leadOfChild = await directory.leadOf('child');
+    const leadOfLead = await directory.leadOf('lead');
+
+    // Assert
+    should(leadOfChild).equal('lead');
+    should(leadOfLead).be.undefined();
+    should(await directory.addressOf('lead')).equal('lizzette');
+    should(await directory.addressOf('plain')).equal('plain');
+  });
+
+  it('should answer a session it does not hold with the id it was given', async () => {
+    // Arrange
+    const directory = new StorageSubFerretDirectory(await openStorage());
+
+    // Act + Assert
+    should(await directory.leadOf('ghost')).be.undefined();
+    should(await directory.addressOf('ghost')).equal('ghost');
+    should(await directory.addressOf('not a session id!')).equal('not a session id!');
   });
 });

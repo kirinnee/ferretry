@@ -129,6 +129,21 @@ describe('delivering a reopen', () => {
     should(messenger.sent).deepEqual([['lead', LINE, 'board-reopen-F412-2']]);
   });
 
+  it("should send the owner's reopen through the owner's messenger, and a ferret's through the plain one", async () => {
+    // Arrange
+    const plain = new FakeMessenger({ child: 'delivered' });
+    const owned = new FakeMessenger({ child: 'delivered' });
+    const subject = new ReopenDeliveryLadder(plain, { warn: () => undefined }, owned);
+
+    // Act
+    await subject.reopened(notice());
+    await subject.reopened({ ...notice(), by: { kind: 'ferret', sessionId: 'lead' } });
+
+    // Assert
+    should(owned.sent.map(([to]) => to)).deepEqual(['child']);
+    should(plain.sent.map(([to]) => to)).deepEqual(['child']);
+  });
+
   it('should key a reopen by its card and the history event that reopened it', () => {
     // Act / Assert
     should(reopenKey(notice())).equal('board-reopen-F412-2');

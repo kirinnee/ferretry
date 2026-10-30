@@ -8,6 +8,7 @@ import type {
   AgendaEditOptions,
   AgendaResolveOptions,
   AgendaStepOptions,
+  AgendaSnoozeOptions,
   AgendaSurfaceOptions,
 } from './controller.ts';
 
@@ -227,7 +228,8 @@ function mountVerbs(
       .option('--will-block <thing>', 'what this will block, in a few words')
       .option('--clear-will-block', 'drop what this will block')
       .option('--by <time>', 'when it is needed: ISO, "in 3h" or a clock time like 17:00')
-      .option('--clear-by', 'drop when it is needed'),
+      .option('--clear-by', 'drop when it is needed')
+      .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.edit(id, merged<AgendaEditOptions>(command));
   });
@@ -288,12 +290,33 @@ function mountVerbs(
     agenda
       .command('surface')
       .description(
-        'hand an item back to the owner, or bring back one their reply closed: it is their turn again (never pings)',
+        'hand an item back to the owner, or bring back one their reply parked: it is their turn again (never pings)',
       )
       .argument('<id>', 'the item reference, like !A3')
-      .option('-w, --why <line>', 'one line on why the owner must look now, for example what is still open'),
+      .option('-w, --why <line>', 'one line on why the owner must look now, for example what is still open')
+      .option('--now', 'it is urgent: wake the item even though the owner snoozed it (at most once an hour)'),
   ).action(async (id: string, _flags: unknown, command: Command) => {
     await controller.surface(id, merged<AgendaSurfaceOptions>(command));
+  });
+
+  scoped(
+    agenda
+      .command('snooze')
+      .description('put an item away until later (owner): it leaves the list and comes back as new')
+      .argument('<id>', 'the item reference, like !A3')
+      .option('--for <time>', 'how long: like 4h, 90m or 1d')
+      .option('--until <time>', 'until when: ISO, "in 3h" or a clock time like 17:00'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.snooze(id, merged<AgendaSnoozeOptions>(command));
+  });
+
+  scoped(
+    agenda
+      .command('unsnooze')
+      .description('bring a snoozed or replied-to item back to the list now (owner)')
+      .argument('<id>', 'the item reference, like !A3'),
+  ).action(async (id: string, _flags: unknown, command: Command) => {
+    await controller.unsnooze(id, merged<AgendaCommandOptions>(command));
   });
 
   scoped(

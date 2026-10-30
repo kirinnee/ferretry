@@ -5,14 +5,13 @@ import { MAX_BOARD_NOTE_LENGTH } from '@ferretry/protocol';
 import {
   activityText,
   askOrigin,
+  askWords,
   assignedMessage,
   askSessions,
   collectAsks,
   commentNote,
   commentTag,
-  FOLD_MINIMUM,
   ferretComment,
-  foldHistory,
   hasLinks,
   type HistoryContext,
   historyRows,
@@ -20,7 +19,6 @@ import {
   kindLabel,
   laneCategoryOf,
   laneNameOf,
-  laneStepper,
   linkLabel,
   NEW_CARD_PROBLEM_TEXT,
   newCardProblems,
@@ -36,34 +34,6 @@ import { card, laneSetFor } from './board-support.ts';
 
 const lanes = laneSetFor();
 const AT = '2026-07-01T10:00:00.000Z';
-
-describe('laneStepper', () => {
-  it('has no steps without a lane set', () => {
-    expect(laneStepper(null, 'implement')).toEqual([]);
-  });
-
-  it('marks the lanes behind, at and ahead of the card, the Closed lane last', () => {
-    const steps = laneStepper(lanes, 'implement');
-    const at = steps.findIndex(step => step.id === 'implement');
-    expect(steps[at]?.state).toBe('current');
-    expect(steps.slice(0, at).every(step => step.state === 'done')).toBe(true);
-    expect(steps.slice(at + 1).every(step => step.state === 'next')).toBe(true);
-    expect(steps[steps.length - 1]?.category).toBe('closed');
-  });
-
-  it('puts a closed lane last even when the set lists it first', () => {
-    const closedFirst = { lanes: [...lanes.lanes].sort(lane => (lane.category === 'closed' ? -1 : 1)) };
-    const steps = laneStepper(closedFirst, 'implement');
-    expect(steps[steps.length - 1]?.category).toBe('closed');
-    expect(steps.filter(step => step.category === 'closed')).toHaveLength(1);
-  });
-
-  it('reads every step as ahead for a lane the set does not have', () => {
-    const steps = laneStepper(lanes, 'gone');
-    expect(steps.length).toBeGreaterThan(0);
-    expect(steps.every(step => step.state === 'next')).toBe(true);
-  });
-});
 
 describe('lane lookups', () => {
   it('name the category and the lane, and fall back to the id', () => {
@@ -299,36 +269,6 @@ describe('history', () => {
     });
     expect(rowOf('ordered')).toMatchObject({ text: 'reordered it in its lane', minor: true });
   });
-
-  describe('foldHistory', () => {
-    const rows = (...minor: boolean[]) =>
-      minor.map((isMinor, index) => ({
-        seq: index,
-        at: AT,
-        actor: 'a',
-        text: `t${index}`,
-        detail: null,
-        minor: isMinor,
-        type: 'note' as const,
-      }));
-
-    it('folds a run of at least the minimum into one line', () => {
-      const items = foldHistory(rows(false, true, true, true, false));
-      expect(items.map(item => item.kind)).toEqual(['row', 'fold', 'row']);
-      expect(items[1]).toMatchObject({ kind: 'fold', label: '3 small changes' });
-      expect(FOLD_MINIMUM).toBe(3);
-    });
-
-    it('keeps a shorter run as rows', () => {
-      const items = foldHistory(rows(true, true, false, true));
-      expect(items.map(item => item.kind)).toEqual(['row', 'row', 'row', 'row']);
-    });
-
-    it('folds a run at the very end, and nothing from nothing', () => {
-      expect(foldHistory(rows(false, true, true, true, true)).map(item => item.kind)).toEqual(['row', 'fold']);
-      expect(foldHistory([])).toEqual([]);
-    });
-  });
 });
 
 describe('nonBlockingAsks', () => {
@@ -504,7 +444,7 @@ describe('askOrigin', () => {
       names,
       '3h',
     );
-    expect(origin).toEqual({ who: 'The owner', sessionId: 's1', chat: "denisha's chat", via: null, age: '3h' });
+    expect(origin).toEqual({ who: 'you', sessionId: 's1', chat: "denisha's chat", via: null, age: '3h' });
   });
 
   it('says a ferret by name, and keeps a source that is neither a session nor the owner', () => {
@@ -513,7 +453,7 @@ describe('askOrigin', () => {
       names,
       null,
     );
-    expect(origin).toEqual({ who: 'From ottilie', sessionId: null, chat: null, via: 'cli', age: null });
+    expect(origin).toEqual({ who: 'ottilie', sessionId: null, chat: null, via: 'cli', age: null });
   });
 
   it('drops the owner’s own source label and names the daemon when it opened the card', () => {
@@ -522,7 +462,19 @@ describe('askOrigin', () => {
       names,
       null,
     );
-    expect(origin.who).toBe('The daemon');
+    expect(origin.who).toBe('the daemon');
     expect(origin.via).toBeNull();
+  });
+});
+
+describe('askWords', () => {
+  it('drops the raw note a ferret leaves in front of the ask', () => {
+    expect(askWords('(sada, found live) Fix the login')).toBe('Fix the login');
+    expect(askWords('  (note)\nFix the login  ')).toBe('Fix the login');
+  });
+
+  it('keeps words that do not start with a note, and a parenthesis that is all there is', () => {
+    expect(askWords('Fix the login (again)')).toBe('Fix the login (again)');
+    expect(askWords('(just this)')).toBe('(just this)');
   });
 });

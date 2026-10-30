@@ -8,6 +8,7 @@ import {
   buildTree,
   cardPlaces,
   flattenTree,
+  groupRowsByLane,
   laneNames,
   laneOfCategory,
   listRows,
@@ -33,16 +34,17 @@ const data = (cards: ReturnType<typeof card>[]): BoardMachineData => ({
 const model = (cards: ReturnType<typeof card>[]) => mergeBoard([data(cards)], NO_BOARD_FILTERS);
 
 describe('parsing', () => {
-  it('falls back to Kanban and to stale-first', () => {
+  it('falls back to Kanban and to status order', () => {
     expect(parseBoardView('list')).toBe('list');
     expect(parseBoardView('nope')).toBe('kanban');
     expect(parseBoardView(null)).toBe('kanban');
-    expect(parseListSort('lane')).toBe('lane');
-    expect(parseListSort(null)).toBe('stale');
+    expect(parseListSort('stale')).toBe('stale');
+    expect(parseListSort('lane')).toBe('status');
+    expect(parseListSort(null)).toBe('status');
   });
 });
 
-describe('the List', () => {
+describe('the Table', () => {
   const cards = [
     card('F1', { activity: 'active', laneId: 'review', lastTouchedAt: '2026-08-01T10:00:00.000Z' }),
     card('F2', { activity: 'stale', laneId: 'implement', lastTouchedAt: '2026-08-01T05:00:00.000Z' }),
@@ -65,7 +67,7 @@ describe('the List', () => {
     expect(order).toEqual(['F3', 'F2', 'F4', 'F5', 'F1']);
   });
 
-  it('sorts by last touched and by lane, with the id breaking a tie', () => {
+  it('sorts by last touched and by status then recency, with the id breaking a tie', () => {
     expect(sortRows(listRows(model(cards)), 'touched').map(row => row.card.task.id)).toEqual([
       'F1',
       'F4',
@@ -73,13 +75,34 @@ describe('the List', () => {
       'F2',
       'F3',
     ]);
-    expect(sortRows(listRows(model(cards)), 'lane').map(row => row.card.task.id)).toEqual([
+    expect(sortRows(listRows(model(cards)), 'status').map(row => row.card.task.id)).toEqual([
       'F4',
       'F2',
       'F3',
       'F1',
       'F5',
     ]);
+  });
+});
+
+describe('grouping the Table by lane', () => {
+  it('makes one group per lane in board order, rows keeping their order', () => {
+    const rows = sortRows(
+      listRows(
+        model([
+          card('F1', { laneId: 'review', lastTouchedAt: '2026-08-01T10:00:00.000Z' }),
+          card('F2', { laneId: 'implement', lastTouchedAt: '2026-08-01T05:00:00.000Z' }),
+          card('F3', { laneId: 'implement', lastTouchedAt: '2026-08-01T09:00:00.000Z' }),
+        ]),
+      ),
+      'touched',
+    );
+    const groups = groupRowsByLane(rows);
+    expect(groups.map(group => [group.laneName, group.rows.map(row => row.card.task.id)])).toEqual([
+      ['Implement', ['F3', 'F2']],
+      ['Review/CI', ['F1']],
+    ]);
+    expect(groups[0]?.category).toBe('active');
   });
 });
 

@@ -4,9 +4,9 @@ import {
   type BoardCardEnv,
   DependenciesView,
   KanbanView,
-  ListView,
   TreeView,
 } from '../../../src/features/board/board-views.tsx';
+import { TableView } from '../../../src/features/board/board-table.tsx';
 import type { BoardModel } from '../../../src/lib/board-model.ts';
 import { ferretNamer } from '../../../src/lib/board-present.ts';
 import { cardPlaces } from '../../../src/lib/board-view.ts';
@@ -33,7 +33,7 @@ const envOf = (model: BoardModel, extra: Partial<BoardCardEnv> = {}): BoardCardE
   ...extra,
 });
 
-const ids = (root: HTMLElement, selector = '.fy-board-card') =>
+const ids = (root: HTMLElement, selector = '.fy-board-card, .fy-board-table__row') =>
   [...root.querySelectorAll<HTMLElement>(selector)].map(node => node.dataset.task);
 
 describe('KanbanView', () => {
@@ -176,30 +176,143 @@ describe('KanbanView', () => {
   });
 });
 
-describe('ListView', () => {
+describe('TableView', () => {
   const cards = [
-    card('F1', { activity: 'active', laneId: 'review' }),
-    card('F2', { activity: 'stale', laneId: 'implement' }),
+    card('F1', { activity: 'active', laneId: 'review', title: 'Title that must wrap whole', summary: 'Short summary' }),
+    card('F2', { activity: 'stale', laneId: 'implement', assignee: 'mvuc7tsf-0c3d50df' }),
   ];
+  const doneFor: BoardCardEnv['doneFor'] = (entry, place) =>
+    place.category === 'closed'
+      ? undefined
+      : { done: { kind: 'done', laneId: 'closed' }, press: () => pressed.push(entry.task.id), atRelease: false };
+  const pressed: string[] = [];
+  const table = (model: BoardModel, props: Partial<Parameters<typeof TableView>[0]> = {}) => (
+    <TableView
+      env={envOf(model, { doneFor })}
+      grouped={false}
+      model={model}
+      onGroup={() => undefined}
+      onSort={() => undefined}
+      sort="status"
+      {...props}
+    />
+  );
 
-  it('lists every card with its lane, stale first, and sorts on request', async () => {
+  it('lists every card whole, in lane order, with its summary, lane pill and Done', async () => {
     const model = await boardModelOf(cards);
-    const sorts: string[] = [];
-    view = await mount(
-      <ListView env={envOf(model)} model={model} onSort={sort => void sorts.push(sort)} sort="stale" />,
-    );
+    view = await mount(table(model));
     const root = view.container;
     expect(ids(root)).toEqual(['F2', 'F1']);
-    expect(root.querySelector('[data-task="F2"] [data-seg="lane"]')?.textContent).toBe('Implement');
-    expect(root.querySelector('[data-sort="stale"]')?.getAttribute('aria-pressed')).toBe('true');
-    expect(root.querySelector('[data-sort="lane"]')?.getAttribute('aria-pressed')).toBe('false');
+    expect(root.querySelector('[data-task="F1"] .fy-board-table__title')?.textContent).toContain(
+      'Title that must wrap whole',
+    );
+    expect(root.querySelector('[data-task="F1"] .fy-board-table__summary-text')?.textContent).toBe('Short summary');
+    expect(root.querySelector('[data-task="F2"] .fy-board-table__summary')).toBeNull();
+    expect(root.querySelector('[data-task="F2"] .fy-board-pill')?.textContent).toBe('Implement');
+    expect(root.querySelector('[data-task="F2"] .fy-board-done')?.textContent).toBe('Done');
+    expect(root.querySelector('[data-task="F1"] .fy-board-table__title')?.getAttribute('href')).toBe(
+      '/d/laptop/board/F1',
+    );
+  });
+
+  it('presses Done without opening the card, and offers none when the view gives no way to close', async () => {
+    const model = await boardModelOf(cards);
+    const navigated: string[] = [];
+    view = await mount(
+      <TableView
+        env={envOf(model, { doneFor, onNavigate: to => void navigated.push(to) })}
+        grouped={false}
+        model={model}
+        onGroup={() => undefined}
+        onSort={() => undefined}
+        sort="status"
+      />,
+    );
+    await interact(() =>
+      must(view?.container.querySelector<HTMLButtonElement>('[data-task="F2"] .fy-board-done'), 'Done').click(),
+    );
+    expect(pressed).toEqual(['F2']);
+    expect(navigated).toEqual([]);
+    await view.render(
+      <TableView
+        env={envOf(model)}
+        grouped={false}
+        model={model}
+        onGroup={() => undefined}
+        onSort={() => undefined}
+        sort="status"
+      />,
+    );
+    expect(view.container.querySelector('.fy-board-done')).toBeNull();
+  });
+
+  it('sorts and groups on request', async () => {
+    const model = await boardModelOf(cards);
+    const sorts: string[] = [];
+    const groups: boolean[] = [];
+    view = await mount(
+      table(model, { onSort: sort => void sorts.push(sort), onGroup: next => void groups.push(next) }),
+    );
+    const root = view.container;
+    expect(root.querySelector('[data-sort="status"]')?.getAttribute('aria-pressed')).toBe('true');
     await interact(() => must(root.querySelector<HTMLButtonElement>('[data-sort="touched"]'), 'Last touched').click());
+    await interact(() => must(root.querySelector<HTMLButtonElement>('[data-group-by-lane]'), 'Group by lane').click());
     expect(sorts).toEqual(['touched']);
+    expect(groups).toEqual([true]);
+  });
+
+  it('draws a heading per lane when grouped', async () => {
+    const model = await boardModelOf(cards);
+    view = await mount(table(model, { grouped: true }));
+    const root = view.container;
+    expect([...root.querySelectorAll('.fy-board-table__group')].map(node => node.getAttribute('aria-label'))).toEqual([
+      'Implement',
+      'Review/CI',
+    ]);
+    expect(root.querySelector('.fy-board-table__group-count')?.textContent).toBe('1');
+  });
+
+  it('shows the blocked, sub-task and shipped marks under the title', async () => {
+    const model = await boardModelOf([
+      card('F3', {
+        blockedBy: [{ id: 'F9' }],
+        rollup: {
+          children: 2,
+          byCategory: { backlog: 0, active: 1, review: 0, shipped: 0, verify: 0, closed: 1 },
+          active: 1,
+          lastTouchedAt: null,
+        },
+        shippedIn: { version: '4.110.0', tag: 'v4.110.0', at: '2026-08-01T09:00:00.000Z' },
+      }),
+    ]);
+    view = await mount(table(model));
+    const extras = view.container.querySelectorAll('[data-task="F3"] .fy-board-table__extras [data-seg]');
+    expect([...extras].map(node => node.getAttribute('data-seg'))).toEqual(['blocked', 'subs', 'shipped']);
+  });
+
+  it('offers "more" only when the summary is really cut', async () => {
+    const heights = { scroll: 80, client: 40 };
+    const scroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
+    const client = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    Object.defineProperty(HTMLElement.prototype, 'scrollHeight', { configurable: true, get: () => heights.scroll });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => heights.client });
+    try {
+      const model = await boardModelOf([card('F4', { summary: 'A summary that runs past two lines' })]);
+      view = await mount(table(model));
+      const more = view.container.querySelector('[data-task="F4"] .fy-board-table__more');
+      expect(more?.textContent).toBe('more');
+      expect(more?.getAttribute('href')).toBe('/d/laptop/board/F4');
+    } finally {
+      if (scroll !== undefined) Object.defineProperty(HTMLElement.prototype, 'scrollHeight', scroll);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollHeight');
+      if (client !== undefined) Object.defineProperty(HTMLElement.prototype, 'clientHeight', client);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'clientHeight');
+    }
   });
 
   it('says so when no card matches', async () => {
     const model = await boardModelOf([]);
-    view = await mount(<ListView env={envOf(model)} model={model} onSort={() => undefined} sort="lane" />);
+    view = await mount(table(model));
     expect(view.container.querySelector('.fy-board-empty')?.textContent).toBe('No cards match.');
   });
 });

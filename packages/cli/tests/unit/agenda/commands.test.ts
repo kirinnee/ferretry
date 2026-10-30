@@ -625,6 +625,18 @@ describe('agenda surface command', () => {
     should(bare.gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A2' });
   });
 
+  it('should send --now when the ferret says it is urgent, on surface and on edit', async () => {
+    // Arrange + Act
+    const surfaced = run(['agenda', 'surface', '!A1', '--now'], snapshot([]));
+    await surfaced.parsed;
+    const edited = run(['agenda', 'edit', '!A1', '--summary', 'Still need the key', '--now'], snapshot([]));
+    await edited.parsed;
+
+    // Assert
+    should(surfaced.gateway.applied[0]?.request).deepEqual({ action: 'surface', id: 'A1', now: true });
+    should(edited.gateway.applied[0]?.request).match({ action: 'edit', id: 'A1', now: true });
+  });
+
   it('should no longer take --surface on add: a new ask is the owner’s turn', async () => {
     // Arrange + Act
     const { parsed, gateway } = run(
@@ -635,6 +647,54 @@ describe('agenda surface command', () => {
     // Assert
     await should(parsed).be.rejectedWith(/unknown option '--surface'/u);
     should(gateway.applied).be.empty();
+  });
+});
+
+describe('agenda snooze and unsnooze commands', () => {
+  it('should snooze until a time given, or for a while from now', async () => {
+    // Arrange + Act
+    const until = run(['agenda', 'snooze', '!A1', '--until', '2030-01-01T09:00:00Z'], snapshot([]));
+    await until.parsed;
+    const before = Date.now();
+    const span = run(['agenda', 'snooze', 'A2', '--for', '4h'], snapshot([]));
+    await span.parsed;
+    const after = Date.now();
+
+    // Assert
+    should(until.gateway.applied[0]?.request).deepEqual({
+      action: 'snooze',
+      id: 'A1',
+      until: '2030-01-01T09:00:00.000Z',
+    });
+    const request = span.gateway.applied[0]?.request as { action: string; until: string };
+    should(request.action).equal('snooze');
+    should(Date.parse(request.until)).be.within(before + 4 * 3_600_000, after + 4 * 3_600_000);
+    should(until.out.messages.join('\n')).containEql('snoozed until 2030-01-01T09:00:00.000Z');
+  });
+
+  it('should refuse a snooze that says neither how long nor until when, or both, or no time at all', async () => {
+    // Arrange + Act
+    const neither = run(['agenda', 'snooze', '!A1'], snapshot([]));
+    const both = run(['agenda', 'snooze', '!A1', '--for', '4h', '--until', '17:00'], snapshot([]));
+    const nonsense = run(['agenda', 'snooze', '!A1', '--for', 'a while'], snapshot([]));
+    const badUntil = run(['agenda', 'snooze', '!A1', '--until', 'soon'], snapshot([]));
+
+    // Assert
+    await should(neither.parsed).be.rejectedWith(/--for <time> \(like 4h\) or --until <time>/u);
+    await should(both.parsed).be.rejectedWith(/not both/u);
+    await should(nonsense.parsed).be.rejectedWith(/--for "in a while" is not a time/u);
+    await should(badUntil.parsed).be.rejectedWith(/--until "soon" is not a time/u);
+    for (const each of [neither, both, nonsense, badUntil]) should(each.gateway.applied).be.empty();
+  });
+
+  it('should bring a parked item back with unsnooze', async () => {
+    // Arrange + Act
+    const { parsed, gateway, out } = run(['agenda', 'unsnooze', '!A3'], snapshot([]));
+    await parsed;
+
+    // Assert
+    should(gateway.applied[0]?.request).deepEqual({ action: 'unsnooze', id: 'A3' });
+    should(out.messages.join('\n')).containEql('back on the list');
   });
 });
 

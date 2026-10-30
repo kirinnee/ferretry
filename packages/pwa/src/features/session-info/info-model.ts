@@ -187,6 +187,7 @@ export const LAUNCH_SECTION_LABEL: Readonly<Record<LaunchInstructionSectionId, s
   attention: 'Notify rule',
   notify: 'Notify rule',
   board: 'Board rules',
+  'sub-ferret': 'Sub-ferret rules',
   hypermedia: 'Hypermedia',
   pack: 'Pack mode',
   agenda: 'Agenda mode',

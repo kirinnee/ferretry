@@ -15,7 +15,7 @@ export type BoardViewId = (typeof BOARD_VIEWS)[number];
 
 export const BOARD_VIEW_LABEL: Readonly<Record<BoardViewId, string>> = {
   kanban: 'Kanban',
-  list: 'List',
+  list: 'Table',
   tree: 'Tree',
   dependencies: 'Dependencies',
   archive: 'Archive',
@@ -28,16 +28,19 @@ export const parseBoardView = (value: string | null): BoardViewId =>
 // List
 // ---------------------------------------------------------------------------------------------------
 
-export const LIST_SORTS = ['stale', 'touched', 'lane'] as const;
+export const LIST_SORTS = ['status', 'touched', 'stale'] as const;
 export type ListSort = (typeof LIST_SORTS)[number];
 
 export const LIST_SORT_LABEL: Readonly<Record<ListSort, string>> = {
-  stale: 'Stale first',
+  status: 'Status',
   touched: 'Last touched',
-  lane: 'Lane',
+  stale: 'Needs a look',
 };
 
-export const parseListSort = (value: string | null): ListSort => LIST_SORTS.find(sort => sort === value) ?? 'stale';
+export const DEFAULT_LIST_SORT: ListSort = 'status';
+
+export const parseListSort = (value: string | null): ListSort =>
+  LIST_SORTS.find(sort => sort === value) ?? DEFAULT_LIST_SORT;
 
 /** A row of the List: the card, and where it sits on its board. */
 export interface BoardListRow {
@@ -91,18 +94,51 @@ const byId = (left: BoardListRow, right: BoardListRow): number =>
   left.card.task.id.localeCompare(right.card.task.id, undefined, { numeric: true });
 
 /**
- * The List in one of its three orders. `stale` puts what needs a look first and, inside one state, the
- * longest-untouched first; `touched` is newest activity first; `lane` follows the board (project, then
- * lane order). Equal rows fall back to the card id so the order never jitters between reads.
+ * The Table in one of its three orders. `status` follows the board (project, then lane order) and, inside
+ * one lane, puts the newest activity first; `touched` is newest activity first; `stale` puts what needs a
+ * look first and, inside one state, the longest-untouched first. Equal rows fall back to the card id so the
+ * order never jitters between reads.
  */
 export const sortRows = (rows: readonly BoardListRow[], sort: ListSort): readonly BoardListRow[] => {
   const compare = (left: BoardListRow, right: BoardListRow): number => {
     if (sort === 'touched') return byTouchedDescending(left, right);
-    if (sort === 'lane') return left.place[0] - right.place[0] || left.place[1] - right.place[1];
+    if (sort === 'status')
+      return left.place[0] - right.place[0] || left.place[1] - right.place[1] || byTouchedDescending(left, right);
     const rank = ACTIVITY_RANK[left.card.task.activity] - ACTIVITY_RANK[right.card.task.activity];
     return rank !== 0 ? rank : -byTouchedDescending(left, right);
   };
   return [...rows].sort((left, right) => compare(left, right) || byId(left, right));
+};
+
+/** The rows of one lane of one board, for the Table's "group by lane". */
+export interface BoardRowGroup {
+  readonly key: string;
+  readonly projectId: string;
+  readonly laneName: string;
+  readonly category: LaneCategory | null;
+  readonly rows: readonly BoardListRow[];
+}
+
+/** The rows split into one group per lane in board order; inside a group the rows keep the order they came in. */
+export const groupRowsByLane = (rows: readonly BoardListRow[]): readonly BoardRowGroup[] => {
+  const groups = new Map<string, { place: readonly [number, number]; group: BoardRowGroup; rows: BoardListRow[] }>();
+  for (const row of rows) {
+    const key = `${row.place[0]}:${row.place[1]}`;
+    const found = groups.get(key);
+    if (found !== undefined) {
+      found.rows.push(row);
+      continue;
+    }
+    const members = [row];
+    groups.set(key, {
+      place: row.place,
+      rows: members,
+      group: { key, projectId: row.projectId, laneName: row.laneName, category: row.category, rows: members },
+    });
+  }
+  return [...groups.values()]
+    .sort((left, right) => left.place[0] - right.place[0] || left.place[1] - right.place[1])
+    .map(entry => entry.group);
 };
 
 // ---------------------------------------------------------------------------------------------------

@@ -149,6 +149,14 @@ call.
    loops up to 120 s), URLs `http`/`https` only and 2 KiB, selectors 1 KiB; terminal creation is
    serialized, so two opens racing for one name leave one terminal.
 
+## Sub-ferrets and the Ferretry verbs
+
+The same tools server serves a lead and a sub-ferret; the **daemon** tells them apart by session identity
+(`config.parent`). A sub-ferret may read everything and report with `fy send`, `fy task note` and `fy task link
+--pr` / `--branch`; agenda writes, `fy notify` and card moves are refused with `forbidden` and the line to tell its lead
+([pack-mode.md](pack-mode.md#sub-ferret-limits)). Nothing here is a tool the model is withheld: the refusal is on
+the route, so it holds for an MCP call and a shell `fy` alike.
+
 ## Declared gaps
 
 - **The shared admin token.** An agent runs as the same user as the daemon and can read the admin token

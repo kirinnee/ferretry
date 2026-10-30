@@ -191,3 +191,21 @@ describe('AgendaCard error', () => {
     expect(view.container.querySelector('[role="alert"]')?.textContent).toBe('Not sent: offline');
   });
 });
+
+describe('AgendaCard snooze control', () => {
+  test('draws no clock without a way to snooze', async () => {
+    view = await mount(<AgendaCard item={rich} onAct={() => {}} />);
+    expect(view.container.querySelector('[data-agenda-snooze]')).toBeNull();
+  });
+
+  test('draws a clock in the header that snoozes until the chosen time', async () => {
+    const snoozed: string[] = [];
+    view = await mount(<AgendaCard item={rich} onAct={() => {}} onSnooze={until => snoozed.push(until)} />);
+    const clock = must(view.container.querySelector<HTMLButtonElement>('[data-agenda-snooze]'), 'the clock');
+    expect(clock.className).toBe('fy-attn-card__snooze');
+    await interact(() => clock.click());
+    await interact(() => must(view?.container.querySelector<HTMLElement>('[role="menuitem"]'), '1 hour').click());
+    expect(snoozed).toHaveLength(1);
+    expect(Date.parse(snoozed[0] ?? '')).toBeGreaterThan(Date.now());
+  });
+});

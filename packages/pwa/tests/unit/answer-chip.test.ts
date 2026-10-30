@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test';
 import type { AgendaId } from '@ferretry/protocol';
-import { withReferencePrefix } from '../../src/lib/answer-chip.ts';
+import { referencesOf, withReferencePrefix } from '../../src/lib/answer-chip.ts';
 
 const id = (value: string): AgendaId => value as AgendaId;
 
@@ -30,6 +30,16 @@ describe('withReferencePrefix', () => {
     await wrapped.send('s', { message: 'hi' });
     expect(sent).toEqual(['!A4 !A7 hi', 'hi']);
     expect(wrapped.who()).toBe('x');
+  });
+
+  it('says which chips it would prefix right now, and a plain client says none', () => {
+    const { client } = fakeClient();
+    let chips: readonly AgendaId[] = [id('A4')];
+    const wrapped = withReferencePrefix(client, () => chips);
+    expect(referencesOf(wrapped)).toEqual(['A4']);
+    chips = [];
+    expect(referencesOf(wrapped)).toEqual([]);
+    expect(referencesOf(client)).toEqual([]);
   });
 
   it('never prefixes a reference the message already carries', async () => {

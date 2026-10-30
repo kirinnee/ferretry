@@ -48,6 +48,12 @@ class Sink implements BuzzSink {
   async raised(_session: string, item: AgendaItem): Promise<void> {
     this.notices.push(item.id);
   }
+
+  readonly woken: string[] = [];
+
+  async woke(_session: string, item: AgendaItem): Promise<void> {
+    this.woken.push(item.id);
+  }
 }
 
 const ASK = {
@@ -270,5 +276,76 @@ describe('AgendaBuzz notices', () => {
     // Assert
     should(sink.notices).deepEqual(['A9']);
     should(sink.stops).deepEqual([]);
+  });
+});
+
+describe('AgendaBuzz wake', () => {
+  const SYSTEM = { kind: 'daemon', cause: 'system' } as const;
+  const woken = (extra: Record<string, unknown> = {}): AgendaItem =>
+    AgendaItemSchema.parse({ ...notice(false), id: 'A1', notice: undefined, ...extra });
+  const wake = (item: AgendaItem | undefined, snapshot: AgendaSnapshot): AgendaBoardChange =>
+    ({
+      change: 'woke',
+      actor: SYSTEM,
+      via: 'board',
+      snapshot,
+      ...(item === undefined ? {} : { item }),
+    }) as AgendaBoardChange;
+
+  it('should push a woken item that blocks the ferret, once, and say nothing of an item that neither blocks nor has a deadline', async () => {
+    // Arrange
+    const { attention: agenda, buzz, sink, snapshot } = world();
+    await agenda.raise(SESSION, ASK, AGENT);
+
+    // Act
+    await buzz.changed(SESSION, wake(woken({ id: 'A1', blockingNow: true }), snapshot()));
+    await buzz.changed(SESSION, wake(woken({ id: 'A2' }), snapshot()));
+
+    // Assert
+    should(sink.woken).deepEqual(['A1']);
+  });
+
+  it('should push a woken item with a deadline outside the warning window, and leave one inside it to the deadline push', async () => {
+    // Arrange
+    const { attention: agenda, buzz, sink, snapshot } = world();
+    await agenda.raise(SESSION, ASK, AGENT);
+
+    // Act
+    await buzz.changed(SESSION, wake(woken({ id: 'A1', neededBy: '2026-10-23T20:00:00.000Z' }), snapshot()));
+    await buzz.changed(SESSION, wake(woken({ id: 'A2', neededBy: '2026-10-23T12:00:00.000Z' }), snapshot()));
+    await buzz.changed(
+      SESSION,
+      wake(woken({ id: 'A3', blockingNow: true, neededBy: '2026-10-23T09:00:00.000Z' }), snapshot()),
+    );
+
+    // Assert
+    should(sink.woken).deepEqual(['A1']);
+  });
+
+  it('should push nothing for a wake that carries no item, and swallow a sink that fails', async () => {
+    // Arrange
+    const { attention: agenda, buzz, sink, snapshot } = world();
+    await agenda.raise(SESSION, ASK, AGENT);
+    sink.woke = async () => {
+      throw new Error('push service down');
+    };
+
+    // Act + Assert
+    await should(buzz.changed(SESSION, wake(undefined, snapshot()))).be.fulfilled();
+    await should(buzz.changed(SESSION, wake(woken({ id: 'A1', blockingNow: true }), snapshot()))).be.fulfilled();
+    should(sink.woken).deepEqual([]);
+  });
+
+  it('should still settle a stop when a woken item brings the ferret idle onto the owner', async () => {
+    // Arrange
+    const { attention: agenda, buzz, sink, snapshot } = world({ idleSince: NOW });
+    await agenda.raise(SESSION, ASK, AGENT);
+
+    // Act
+    await buzz.changed(SESSION, wake(woken({ id: 'A1', blockingNow: true }), snapshot()));
+
+    // Assert
+    should(sink.woken).deepEqual(['A1']);
+    should(sink.stops).deepEqual([`${NOW}:A1`]);
   });
 });

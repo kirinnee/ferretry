@@ -6,6 +6,7 @@ import {
   BoardIndex,
   BoardSweep,
   boardCheckMessage,
+  doneMessage,
   EMPTY_SWEEP_MEMORY,
   planSweep,
   reopenMessage,
@@ -129,6 +130,11 @@ const keptMessages = (): Readonly<Record<string, string>> => {
     'board turn-end check': boardCheckMessage('fy'),
     'board reopen (owner)': reopenMessage({ id: 'F412' }, { kind: 'owner' }, 'not good'),
     'board reopen (ferret)': reopenMessage({ id: 'F412' }, { kind: 'ferret', sessionId: 'lead' }, 'not good'),
+    'board done (owner)': doneMessage([{ id: 'F412', title: 'Board Table View' }]),
+    'board done (owner, several cards)': doneMessage([
+      { id: 'F412', title: 'Board Table View' },
+      { id: 'F413', title: 'Chat queue' },
+    ]),
     'board PR closed unmerged': prNudges.find(nudge => nudge.reason === 'closed-unmerged')?.message ?? '',
     'board PR CI red': prNudges.find(nudge => nudge.reason === 'ci-failing')?.message ?? '',
     'warden orphaned card': orphan.message,
@@ -235,7 +241,7 @@ describe('who a kept message is from', () => {
   const ID = parseSessionId('session-1');
   const AT = '2026-10-30T16:30:00.000Z';
 
-  const front = (feature: string) => {
+  const front = (kind: 'daemon' | 'human', feature: string) => {
     const enqueued: QueueRequest[] = [];
     const sends = new QueueingSends(
       {
@@ -263,7 +269,7 @@ describe('who a kept message is from', () => {
         clock: { now: () => AT },
         sleep: async () => undefined,
       },
-      'daemon',
+      kind,
       feature,
     );
     return { sends, enqueued };
@@ -272,19 +278,32 @@ describe('who a kept message is from', () => {
   it("should carry Ferretry and the feature as the queue item's metadata, and the words untouched", async () => {
     // Arrange
     const messages = keptMessages();
-    const board = front('Board');
-    const warden = front('Warden');
+    const board = front('daemon', 'Board');
+    const boardOwner = front('human', 'Board');
+    const warden = front('daemon', 'Warden');
+    const ownerWords = Object.keys(messages).filter(producer => producer.includes('(owner'));
 
     // Act
     for (const [producer, message] of Object.entries(messages)) {
-      const sends = producer.startsWith('warden') ? warden.sends : board.sends;
+      const sends = producer.startsWith('warden')
+        ? warden.sends
+        : ownerWords.includes(producer)
+          ? boardOwner.sends
+          : board.sends;
       await sends.send({ id: ID, sendId: producer, message });
     }
 
     // Assert
-    should(board.enqueued.length + warden.enqueued.length).equal(Object.keys(messages).length);
+    should(board.enqueued.length + boardOwner.enqueued.length + warden.enqueued.length).equal(
+      Object.keys(messages).length,
+    );
     for (const request of board.enqueued) {
       should(request.by).eql({ kind: 'ferretry', feature: 'Board' });
+      should(request.text).equal(messages[request.id]);
+    }
+    should(boardOwner.enqueued.map(request => request.id)).eql(ownerWords);
+    for (const request of boardOwner.enqueued) {
+      should(request.by).eql({ kind: 'owner', feature: 'Board' });
       should(request.text).equal(messages[request.id]);
     }
     should(warden.enqueued).have.length(1);

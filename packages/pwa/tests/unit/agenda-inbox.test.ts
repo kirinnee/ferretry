@@ -17,6 +17,7 @@ import {
   inboxCardKey,
   inboxCards,
   inboxOptions,
+  inboxParked,
   inboxResolved,
   NEEDS_INFO_ACTION,
   needsYouCount,
@@ -25,10 +26,12 @@ import {
   SWIPE_SLOP_PX,
   sessionAgenda,
   sessionsToReadForResolved,
+  snoozeAction,
   swipeIntent,
   swipeMap,
   swipeThreshold,
   UNDO_WINDOW_MS,
+  UNSNOOZE_ACTION,
   unreadCount,
   unreadSessions,
   unreadTotal,
@@ -245,6 +248,11 @@ describe('swipes', () => {
 describe('replies', () => {
   test('says what it is holding', () => {
     expect(actionSentence(DISMISS_ACTION, 'A3')).toBe('Dismissed !A3');
+    expect(actionSentence(UNSNOOZE_ACTION, 'A3')).toBe('!A3 is back on your list');
+    expect(
+      actionSentence(snoozeAction(new Date(2026, 9, 30, 15).toISOString()), 'A3', new Date(2026, 9, 30, 9).getTime()),
+    ).toBe('Snoozed !A3 until 15:00');
+    expect(actionSentence(snoozeAction('nonsense'), 'A3')).toBe('Snoozed !A3 until later');
     expect(actionSentence(DONE_ACTION, 'A3')).toBe('Marked !A3 done');
     expect(actionSentence({ kind: 'resolve', label: 'Reply', note: 'x' }, 'A3')).toBe('Replied to !A3');
     expect(actionSentence(inboxOptions(card({ ask: choice('Wait', 'Go') }))[0] ?? DONE_ACTION, 'A3')).toBe(
@@ -571,5 +579,60 @@ describe('the session summary under either name', () => {
     const sourcesBoth = [{ daemonId: STUDIO, name: 'Studio', sessions: [agendaOnly, both] }];
     expect(unreadSessions(sourcesBoth).map(entry => entry.view.config.id)).toEqual(['both', 'new']);
     expect(withFerretSessions(sourcesBoth).map(entry => entry.view.config.id)).toEqual(['new', 'both']);
+  });
+});
+
+describe('parked items', () => {
+  const snoozedItem = (id: string, minutes: number, parkedAt: number): AgendaItem =>
+    ({
+      ...item(id, minutes),
+      parked: { reason: 'snoozed', at: at(parkedAt), until: at(parkedAt + 60) },
+    }) as AgendaItem;
+  const repliedItem = (id: string, parkedAt: number): AgendaItem =>
+    ({ ...item(id, 1), parked: { reason: 'replied', at: at(parkedAt) } }) as AgendaItem;
+
+  const sources = [
+    { daemonId: STUDIO, name: 'Studio', sessions: [waiting('s'), waiting('quiet')] },
+    { daemonId: LAPTOP, name: 'Laptop', sessions: [waiting('s'), waiting('none')] },
+  ];
+  const boards = new Map([
+    [`${STUDIO}/s`, board('s', [item('A1', 1), snoozedItem('A2', 2, 10), repliedItem('A3', 20)])],
+    [`${STUDIO}/quiet`, board('quiet', [snoozedItem('A1', 1, 20)])],
+    [`${LAPTOP}/s`, board('s', [snoozedItem('A1', 1, 5)])],
+  ]);
+  const boardFor = (daemonId: DaemonId, sessionId: string) => boards.get(`${daemonId}/${sessionId}`);
+
+  test('should collect every parked item of every held board, newest parked first, key breaking a tie', () => {
+    expect(
+      inboxParked(sources, boardFor).map(card => `${card.daemonId}/${card.view.config.id}/${card.item.id}`),
+    ).toEqual(['studio/quiet/A1', 'studio/s/A3', 'studio/s/A2', 'laptop/s/A1']);
+  });
+
+  test('should carry the machine name and the conversation with each card', () => {
+    const [first] = inboxParked(sources, boardFor);
+    expect(first).toMatchObject({ machineName: 'Studio', key: inboxCardKey(STUDIO, 'quiet', 'A1') });
+    expect(first?.view.config.id).toBe('quiet');
+  });
+
+  test('should let a card the reader just acted on leave at once', () => {
+    const hidden = new Set([inboxCardKey(STUDIO, 'quiet', 'A1'), inboxCardKey(STUDIO, 's', 'A3')]);
+    expect(inboxParked(sources, boardFor, hidden).map(card => card.item.id)).toEqual(['A2', 'A1']);
+  });
+
+  test('should list nothing for a source whose conversations have not been read', () => {
+    expect(inboxParked([{ daemonId: STUDIO, name: 'Studio', sessions: null }], boardFor)).toEqual([]);
+  });
+
+  test('should not count a parked item as needing the owner', () => {
+    expect(needsYouItems([item('A1', 1), snoozedItem('A2', 2, 10), repliedItem('A3', 20)])).toBe(1);
+  });
+
+  test('should build the snooze and unsnooze actions', () => {
+    expect(snoozeAction('2026-10-30T15:00:00.000Z')).toEqual({
+      kind: 'snooze',
+      label: 'Snooze',
+      until: '2026-10-30T15:00:00.000Z',
+    });
+    expect(UNSNOOZE_ACTION).toEqual({ kind: 'unsnooze', label: 'Back to my list' });
   });
 });

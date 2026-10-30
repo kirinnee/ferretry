@@ -1,5 +1,6 @@
-/* THE CARD DETAIL: a drawer beside the Board on a wide screen, a page of its own on a phone.
-   Neutral borders only: status is an icon and words, never a coloured stripe. */
+/* THE CARD DETAIL: one flowing page, a drawer beside the Board on a wide screen and a page of its own on a
+   phone. Plain sections under small muted headings: no boxes, no chevrons, no rails. Colours, sizes and radii
+   are tokens only; status is an icon and words. */
 
 .fy-board-detail__scrim {
   position: fixed;
@@ -16,16 +17,15 @@
 .fy-board-detail {
   position: relative;
   display: flex;
-  width: min(34rem, 100%);
+  width: min(36rem, 100%);
   min-width: 0;
   height: 100%;
   flex-direction: column;
-  gap: var(--gap-sm);
-  padding: var(--gap-md);
-  overflow-y: auto;
   border-inline-start: var(--stroke) solid var(--border-soft);
   background: var(--bg);
   color: var(--fg);
+  font-family: var(--font-body);
+  font-size: var(--text-md);
   box-shadow: var(--shadow-popover);
 }
 .fy-board-detail[data-mode='page'] {
@@ -35,138 +35,223 @@
 }
 .fy-board-detail__bar {
   display: flex;
+  flex: none;
   align-items: center;
-  justify-content: space-between;
-  gap: var(--gap-sm);
+  padding: var(--gap-sm) var(--gap-md) 0;
 }
 .fy-board-detail__close {
   display: inline-flex;
   min-height: 32px;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
   padding: 0 var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
+  border: 0;
   border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--fg);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
   font-size: var(--text-sm);
   cursor: pointer;
 }
-.fy-board-detail__ref {
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
+.fy-board-detail__close:hover,
+.fy-board-detail__close:focus-visible {
+  background: var(--accent-soft);
+  color: var(--fg);
 }
+
+/* The scrolling document: header, sections, history. The comment box below it never scrolls away. */
 .fy-board-detail__content {
   display: flex;
+  min-height: 0;
   min-width: 0;
+  flex: 1 1 auto;
   flex-direction: column;
-  gap: var(--gap-sm);
+  gap: calc(var(--space-unit) * 4);
+  padding: var(--gap-md) var(--gap-md) var(--gap-md);
+  overflow-y: auto;
 }
 .fy-board-detail__empty {
   margin: 0;
+  padding: var(--gap-md);
   color: var(--muted);
   font-size: var(--text-sm);
 }
+
+/* ---- Header --------------------------------------------------------------------------------------- */
+.fy-board-detail__head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+}
+.fy-board-detail__headline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--gap-sm) var(--gap-md);
+}
 .fy-board-detail__title {
+  min-width: 0;
+  flex: 1 1 14rem;
   margin: 0;
-  font-size: var(--text-lg, 1.1rem);
-  line-height: 1.25;
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  line-height: var(--leading-tight);
   overflow-wrap: anywhere;
+}
+.fy-board-detail__id {
+  margin-inline-end: var(--gap-xs);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-normal);
+}
+.fy-board-detail__tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: var(--gap-xs);
+}
+.fy-board-detail__tools .fy-board-done[data-size='primary'] {
+  min-height: 32px;
+  padding: 0 var(--gap-md);
+  border-radius: var(--radius-pill);
 }
 .fy-board-detail__meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 2px 0;
-  margin: 4px 0 0;
-  color: var(--muted);
-  font-size: var(--text-xs);
-}
-.fy-board-detail__meta > span + span::before {
-  content: '·';
-  margin: 0 6px;
-  color: var(--faint);
-}
-.fy-board-detail__activity {
-  display: flex;
   align-items: center;
-  gap: 4px;
-  margin: 4px 0 0;
+  gap: var(--gap-xs) var(--gap-md);
+  margin: 0;
+  color: var(--muted);
   font-size: var(--text-sm);
 }
-.fy-board-detail__notice {
-  margin: 0;
-  padding: var(--gap-xs) var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  font-size: var(--text-xs);
-}
-
-/* ---- Sections ------------------------------------------------------------------------------------- */
-.fy-board-detail__section {
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-}
-.fy-board-detail__summary {
-  display: flex;
-  min-height: 32px;
+.fy-board-detail__meta > * {
+  display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 var(--gap-sm);
+  gap: var(--gap-xs);
+}
+.fy-board-detail__lane {
+  position: relative;
+}
+.fy-board-detail__pill {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  gap: var(--gap-xs);
+  padding: 0 var(--gap-sm) 0 var(--gap-md);
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--fg);
+  font: inherit;
   font-size: var(--text-sm);
   font-weight: var(--weight-medium);
   cursor: pointer;
-  list-style: none;
 }
-.fy-board-detail__summary::-webkit-details-marker {
-  display: none;
+.fy-board-detail__pill[data-static] {
+  padding-inline-end: var(--gap-md);
+  cursor: default;
 }
-.fy-board-detail__chevron {
-  transition: transform 0.12s;
+.fy-board-detail__pill:not([data-static]):hover {
+  background: var(--surface);
 }
-.fy-board-detail__section[open] > .fy-board-detail__summary .fy-board-detail__chevron {
-  transform: rotate(90deg);
+.fy-board-detail__metalink {
+  color: inherit;
+  text-decoration: none;
 }
-.fy-board-detail__count {
-  padding: 0 6px;
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
+.fy-board-detail__metalink:hover,
+.fy-board-detail__metalink:focus-visible {
+  color: var(--fg);
+  text-decoration: underline;
+}
+.fy-board-detail__faint {
+  color: var(--faint);
+}
+.fy-board-avatar {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-dot);
+  background: var(--accent-soft);
+  color: var(--fg);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-strong);
+  line-height: 1;
+}
+.fy-board-detail__menu {
+  position: relative;
+}
+.fy-board-detail__lane .fy-board-menu {
+  right: auto;
+  left: 0;
+  margin-top: var(--gap-xs);
+}
+.fy-board-detail__menu .fy-board-menu {
+  margin-top: var(--gap-xs);
+}
+
+/* ---- Sections: a small muted heading, then plain text ---------------------------------------------- */
+.fy-board-detail__section {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+.fy-board-detail__heading {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  margin: 0;
   color: var(--muted);
   font-size: var(--text-xs);
-  font-weight: normal;
+  font-weight: var(--weight-medium);
+}
+.fy-board-detail__count {
+  color: var(--faint);
+  font-weight: var(--weight-normal);
 }
 .fy-board-detail__body {
   display: flex;
   min-width: 0;
   flex-direction: column;
   gap: var(--gap-xs);
-  padding: 0 var(--gap-sm) var(--gap-sm);
-  font-size: var(--text-sm);
+  font-size: var(--text-md);
+  line-height: var(--leading-base);
   overflow-wrap: anywhere;
-  --md-font-size: var(--text-sm);
+  --md-font-size: var(--text-md);
 }
 .fy-board-detail__quiet {
   margin: 0;
   color: var(--muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 .fy-board-detail__detail {
-  display: block;
+  margin: 0;
   color: var(--muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
+  white-space: pre-wrap;
 }
 .fy-board-detail__ask {
   margin: 0;
-  padding: var(--gap-xs) var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-control);
-  background: var(--bg);
+  color: var(--fg);
+  font-size: var(--text-lg);
+  line-height: var(--leading-tight);
   white-space: pre-wrap;
+  quotes: '\201C' '\201D';
+}
+.fy-board-detail__ask::before {
+  content: open-quote;
+  color: var(--faint);
+}
+.fy-board-detail__ask::after {
+  content: close-quote;
+  color: var(--faint);
 }
 .fy-board-detail__list,
-.fy-board-detail__history,
 .fy-board-detail__waiting,
 .fy-board-detail__running {
   display: flex;
@@ -176,10 +261,16 @@
   gap: var(--gap-xs);
   list-style: none;
 }
+.fy-board-detail__list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--gap-xs);
+}
 .fy-board-detail__running {
   padding-inline-start: var(--gap-md);
   color: var(--muted);
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 .fy-board-detail__running [data-has='no'] {
   opacity: 0.7;
@@ -188,45 +279,48 @@
 .fy-board-detail__anchor {
   display: inline-flex;
   align-items: center;
-  gap: 3px;
+  gap: var(--gap-xs);
   padding: 0;
   border: 0;
   background: transparent;
   color: var(--accent);
   font: inherit;
   text-align: left;
-  text-decoration: underline;
+  text-decoration: none;
   cursor: pointer;
+}
+.fy-board-detail__link:hover,
+.fy-board-detail__link:focus-visible,
+.fy-board-detail__anchor:hover,
+.fy-board-detail__anchor:focus-visible {
+  text-decoration: underline;
 }
 .fy-board-detail__terms {
   width: 100%;
   border-collapse: collapse;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
 }
 .fy-board-detail__terms th,
 .fy-board-detail__terms td {
-  padding: 4px var(--gap-xs);
-  border-bottom: var(--stroke) solid var(--border-soft);
+  padding: var(--gap-xs) var(--gap-sm) var(--gap-xs) 0;
   text-align: left;
   vertical-align: top;
 }
-.fy-board-detail__list li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 4px;
+.fy-board-detail__terms th {
+  font-weight: var(--weight-medium);
 }
+
+/* ---- Dependencies --------------------------------------------------------------------------------- */
 .fy-board-chip {
   display: inline-flex;
   align-items: center;
-  border: var(--stroke) solid var(--border-soft);
   border-radius: var(--radius-pill);
-  background: var(--surface);
-  font-size: var(--text-xs);
+  background: var(--accent-soft);
+  font-size: var(--text-sm);
 }
 .fy-board-chip__open,
 .fy-board-chip__x {
-  padding: 2px var(--gap-sm);
+  padding: var(--gap-xs) var(--gap-sm);
   border: 0;
   background: transparent;
   color: inherit;
@@ -234,7 +328,7 @@
   cursor: pointer;
 }
 .fy-board-chip__x {
-  padding-left: 2px;
+  padding-inline-start: 0;
   color: var(--muted);
 }
 .fy-board-detail__chips {
@@ -243,8 +337,7 @@
   gap: var(--gap-xs);
 }
 fieldset.fy-board-detail__chiprow,
-fieldset.fy-board-detail__verdict,
-fieldset.fy-board-detail__actions {
+fieldset.fy-board-detail__verdict {
   min-width: 0;
   margin: 0;
   padding: 0;
@@ -254,81 +347,54 @@ fieldset.fy-board-detail__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 4px;
+  gap: var(--gap-xs);
 }
 
-/* ---- Lane stepper: where the card is, among its project's lanes ------------------------------------ */
-.fy-board-stepper {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.fy-board-stepper__step {
-  padding: 2px var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-pill);
-  color: var(--muted);
-  font-size: var(--text-xs);
-}
-.fy-board-stepper__step[data-state='current'] {
-  background: var(--accent-soft);
-  color: var(--fg);
-  font-weight: var(--weight-medium);
-}
-.fy-board-stepper__step[data-state='done'] {
-  color: var(--fg);
-}
-
-/* ---- Verdict and actions -------------------------------------------------------------------------- */
+/* ---- Verdict -------------------------------------------------------------------------------------- */
 .fy-board-detail__verdict {
   display: flex;
-  gap: var(--gap-sm);
-}
-.fy-board-detail__big {
-  display: inline-flex;
-  min-width: 0;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  white-space: nowrap;
-  min-height: 44px;
-  flex: 1 1 0;
-  padding: 0 var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-panel);
-  background: var(--surface);
-  color: var(--fg);
-  font-size: var(--text-sm);
-  font-weight: var(--weight-medium);
-  cursor: pointer;
-}
-.fy-board-detail__big[data-verdict='works'] {
-  border-color: var(--ok);
-  background: var(--ok-bg);
-  color: var(--ok);
-}
-.fy-board-detail__big:disabled {
-  opacity: 0.6;
-  cursor: default;
-}
-.fy-board-detail__actions {
-  display: flex;
   flex-wrap: wrap;
-  align-items: center;
   gap: var(--gap-sm);
 }
-.fy-board-detail__menu {
-  position: relative;
+
+/* ---- Timeline: avatar dot, who and what and how long ago, the note muted below --------------------- */
+.fy-board-timeline {
+  display: flex;
+  margin: 0;
+  padding: 0;
+  flex-direction: column;
+  gap: var(--gap-md);
+  list-style: none;
 }
-.fy-board-detail__menu .fy-board-menu {
-  right: auto;
-  left: 0;
-  top: auto;
-  bottom: 100%;
+.fy-board-timeline__row {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--gap-sm);
 }
+.fy-board-timeline__row .fy-board-avatar {
+  margin-top: 1px;
+}
+.fy-board-timeline__what {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+.fy-board-timeline__line {
+  margin: 0;
+  font-size: var(--text-md);
+}
+.fy-board-timeline__row[data-minor] {
+  color: var(--muted);
+}
+.fy-board-timeline__row[data-minor] .fy-board-timeline__line {
+  font-size: var(--text-sm);
+}
+.fy-board-timeline__row[data-minor] strong {
+  font-weight: var(--weight-normal);
+}
+
+/* ---- Forms, the notice and the pinned comment box -------------------------------------------------- */
 .fy-board-detail__form {
   display: flex;
   flex-wrap: wrap;
@@ -342,10 +408,6 @@ fieldset.fy-board-detail__actions {
 .fy-board-detail__form > .fy-board-reason__error {
   flex-basis: 100%;
 }
-.fy-board-detail__form[data-form='comment'] textarea {
-  padding-block: var(--gap-xs);
-  resize: vertical;
-}
 .fy-board-detail__asktitle {
   margin: 0;
   font-weight: var(--weight-medium);
@@ -354,10 +416,53 @@ fieldset.fy-board-detail__actions {
   display: flex;
   flex-direction: column;
   gap: var(--gap-xs);
-  padding: var(--gap-xs) var(--gap-sm);
-  border: var(--stroke) solid var(--border-soft);
-  border-radius: var(--radius-control);
+}
+.fy-board-detail__foot {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  padding: var(--gap-sm) var(--gap-md) var(--gap-md);
   background: var(--bg);
+}
+.fy-board-detail__notice {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--text-sm);
+}
+.fy-board-detail__composer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--gap-sm);
+  padding: var(--gap-sm);
+  border: var(--stroke) solid var(--border-soft);
+  border-radius: var(--radius-panel);
+  background: var(--surface);
+}
+.fy-board-detail__composer-input {
+  min-width: 0;
+  max-height: 8rem;
+  flex: 1 1 10rem;
+  padding: var(--gap-xs) var(--gap-sm);
+  border: 0;
+  background: transparent;
+  color: var(--fg);
+  font: inherit;
+  font-size: var(--text-input);
+  line-height: var(--leading-base);
+  field-sizing: content;
+  resize: none;
+}
+.fy-board-detail__composer-input:focus-visible {
+  outline: none;
+}
+.fy-board-detail__composer:focus-within {
+  border-color: var(--accent);
+}
+.fy-board-detail__composer > .fy-board-reason__error {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 /* ---- "+ Card" ------------------------------------------------------------------------------------- */
@@ -387,21 +492,6 @@ fieldset.fy-board-detail__actions {
   align-items: center;
   gap: var(--gap-xs) !important;
 }
-.fy-board-detail__link {
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  text-decoration: underline;
-  cursor: pointer;
-}
-.fy-board-detail__titled {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 /* The error a card threw, verbatim, so the reader can say what failed (CardErrorBoundary). */
 .fy-board-detail__error {
   margin-top: var(--gap-xs);

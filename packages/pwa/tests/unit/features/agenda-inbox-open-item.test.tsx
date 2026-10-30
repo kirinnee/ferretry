@@ -217,7 +217,9 @@ describe('the open Inbox item', () => {
       'Ship',
     );
     await interact(() => ship.click());
-    expect(fake.deferred.getSnapshot().pending.map(entry => entry.action.note)).toEqual(['only after the smoke test']);
+    expect(
+      fake.deferred.getSnapshot().pending.map(entry => ('note' in entry.action ? entry.action.note : undefined)),
+    ).toEqual(['only after the smoke test']);
     expect(draft).toBe('');
     unregister();
     await mounted.unmount();

@@ -1002,3 +1002,88 @@ describe('agenda route progress', () => {
     should(response.status).equal(400);
   });
 });
+
+describe('agenda route snooze', () => {
+  const until = '2024-05-02T10:00:00.000Z';
+  const items = (response: ApiResponse) => jsonBody(response).items as readonly Record<string, unknown>[];
+
+  it('should let the owner snooze an item until a time and bring it back, answering the board each time', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+
+    // Act
+    const snoozed = await dispatch(post({ action: 'snooze', id: 'A1', until }));
+    const unsnoozed = await dispatch(post({ action: 'unsnooze', id: 'A1' }));
+
+    // Assert
+    should(snoozed.status).equal(200);
+    should(items(snoozed)[0]).containDeep({ id: 'A1', parked: { reason: 'snoozed', until } });
+    should(unsnoozed.status).equal(200);
+    should(items(unsnoozed)[0]).not.have.property('parked');
+  });
+
+  it('should refuse a ferret snoozing, a time already past, and an unknown item', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+
+    // Act
+    const byAgent = await dispatch(post({ action: 'snooze', id: 'A1', until }, agentIn('s1')));
+    const past = await dispatch(post({ action: 'snooze', id: 'A1', until: '2024-04-30T10:00:00.000Z' }));
+    const unknown = await dispatch(post({ action: 'snooze', id: 'A9', until }));
+    const unparkedByAgent = await dispatch(post({ action: 'unsnooze', id: 'A1' }, agentIn('s1')));
+
+    // Assert
+    should(byAgent.status).equal(403);
+    should(past.status).equal(400);
+    should(unknown.status).equal(404);
+    should(unparkedByAgent.status).equal(403);
+  });
+
+  it('should keep a snoozed item parked through a ferret’s edit, and let `now` wake it once an hour', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+    await dispatch(post({ action: 'snooze', id: 'A1', until }));
+
+    // Act
+    const quiet = await dispatch(
+      post({ action: 'edit', id: 'A1', subject: 'which of three base branches?' }, agentIn('s1')),
+    );
+    const urgent = await dispatch(
+      post({ action: 'edit', id: 'A1', subject: 'production is down', now: true }, agentIn('s1')),
+    );
+    await dispatch(post({ action: 'snooze', id: 'A1', until }));
+    const again = await dispatch(post({ action: 'edit', id: 'A1', subject: 'still down', now: true }, agentIn('s1')));
+
+    // Assert
+    should(quiet.status).equal(200);
+    should(items(quiet)[0]).containDeep({ subject: 'which of three base branches?', parked: { reason: 'snoozed' } });
+    should(urgent.status).equal(200);
+    should(items(urgent)[0]).containDeep({ subject: 'production is down', urgentAt: '2024-05-01T10:00:00.000Z' });
+    should(items(urgent)[0]).not.have.property('parked');
+    should(items(urgent)[0]).not.have.property('now');
+    should(again.status).equal(429);
+  });
+
+  it('should let a ferret surface a snoozed item with `now`, once an hour', async () => {
+    // Arrange
+    const dispatch = fixture();
+    await dispatch(post(raise, agentIn('s1')));
+    await dispatch(post({ action: 'snooze', id: 'A1', until }));
+
+    // Act
+    const quiet = await dispatch(post({ action: 'surface', id: 'A1', why: 'still waiting' }, agentIn('s1')));
+    const urgent = await dispatch(post({ action: 'surface', id: 'A1', why: 'it is urgent', now: true }, agentIn('s1')));
+    await dispatch(post({ action: 'snooze', id: 'A1', until }));
+    const again = await dispatch(post({ action: 'surface', id: 'A1', now: true }, agentIn('s1')));
+
+    // Assert
+    should(items(quiet)[0]).containDeep({ parked: { reason: 'snoozed' } });
+    should(urgent.status).equal(200);
+    should(items(urgent)[0]).containDeep({ urgentAt: '2024-05-01T10:00:00.000Z' });
+    should(items(urgent)[0]).not.have.property('parked');
+    should(again.status).equal(429);
+  });
+});

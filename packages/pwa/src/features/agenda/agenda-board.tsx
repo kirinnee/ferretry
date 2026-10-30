@@ -195,7 +195,7 @@ export function AgendaBoard({
   onAction,
 }: AgendaBoardProps) {
   const [background, setBackground] = useState<Record<string, boolean>>({});
-  const items = snapshot?.items ?? [];
+  const items = (snapshot?.items ?? []).filter(item => item.parked === undefined);
   const resolved = snapshot?.resolved ?? [];
   const healthyEmpty = snapshot !== null && !error && items.length === 0 && (snapshot.parseErrors ?? 0) === 0;
   return (

@@ -25,6 +25,8 @@ import {
 import { initialVimState, normalVimState, type VimState, vimReduce } from '../lib/composer-vim.ts';
 import type { DaemonConnection } from '../lib/daemon-connection.ts';
 import { daemonSessionKey, daemonSessionScope } from '../lib/daemon-scope.ts';
+import { referencesOf } from '../lib/answer-chip.ts';
+import { useSendOutbox } from '../lib/store.tsx';
 import { type DaemonDraftStore, documentDraftStore } from '../lib/drafts.ts';
 import { applyFormat, type FormatCommand, formatShortcut } from '../lib/live-markdown.ts';
 import { asLocationError, formatLocationBlock } from '../lib/location-share.ts';
@@ -739,6 +741,7 @@ export function Composer({
     onSent?.();
   };
 
+  const outbox = useSendOutbox();
   const submit = async (interrupt = false) => {
     if (!canSubmit || submitLock.current) return;
     submitLock.current = true;
@@ -754,11 +757,34 @@ export function Composer({
         location?.kind === 'ready'
           ? `${typed === '' ? 'Here is where I am.' : typed}\n\n${formatLocationBlock(location.fix)}`
           : typed || 'See the attached files.';
-      const sent = (await api.send(sessionId, {
+      const input = {
         message,
         ...(attachmentIds.length === 0 ? {} : { attachmentIds: [...attachmentIds] }),
         now: interrupt,
-      })) as { readonly disposition?: unknown } | undefined;
+      };
+      let sent: { readonly disposition?: unknown } | undefined;
+      if (outbox === null) {
+        sent = (await api.send(sessionId, input)) as typeof sent;
+      } else {
+        // Saved on this device first; the machine hears of it second. Offline, it stays and goes later.
+        const { entry, outcome } = await outbox.submit(
+          {
+            daemonId: daemon.daemonId,
+            sessionId,
+            message,
+            attachmentIds: input.attachmentIds ?? [],
+            now: interrupt,
+            // The "re" chips, kept with the message so a later attempt is still about the same item.
+            references: referencesOf(api),
+          },
+          { send: (target, body, requestId) => api.send(target, body, requestId) },
+        );
+        if (outcome.kind === 'refused') {
+          await outbox.cancel(entry.id);
+          throw outcome.error;
+        }
+        sent = outcome.kind === 'sent' ? (outcome.result as typeof sent) : undefined;
+      }
       // Remembered only while it waits in the agent's queue: ↑ in an empty box brings it back.
       lastQueued.current = isQueuedDisposition(sent?.disposition) ? { key: scopeKey, text: message } : null;
       finishSent();

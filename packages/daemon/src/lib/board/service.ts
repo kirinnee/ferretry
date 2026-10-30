@@ -33,6 +33,7 @@ import {
   UNFILED_PROJECT_ID,
 } from '@ferretry/protocol';
 import type { SerialExecutor } from '../ports.ts';
+import { NO_SUB_FERRETS, type SubFerretDirectory, subFerretRefusal } from '../sub-ferret/index.ts';
 import { type BoardCaller, effectiveAssignee, standingOf } from './authority.ts';
 import {
   applyAction,
@@ -57,6 +58,7 @@ import type {
   BoardStore,
   LaneSetSource,
   ProjectAdopter,
+  DoneNotifier,
   ReopenNotifier,
   SessionFocus,
   SessionParents,
@@ -71,6 +73,8 @@ export interface BoardServiceDependencies {
   readonly parents: SessionParents;
   readonly focus: SessionFocus;
   readonly reopen: ReopenNotifier;
+  /** Tells a card's ferret the owner marked it done. */
+  readonly done: DoneNotifier;
   readonly activity: ActivityDeriver;
   readonly agenda: AgendaLinkSource;
   readonly changes: BoardChangeSink;
@@ -84,6 +88,8 @@ export interface BoardServiceDependencies {
   readonly serial: Pick<SerialExecutor, 'run'>;
   /** Moves a ferret on the Unfiled board onto the board of the repository it stands in, at its first card. */
   readonly adoption?: ProjectAdopter;
+  /** Who started whom: a sub-ferret may only note and link PRs on its own card. Absent, every caller is a lead. */
+  readonly subFerrets?: SubFerretDirectory;
 }
 
 /** What `fy signal done` did to the ferret's focus card. */
@@ -102,6 +108,17 @@ export const DEPENDENCY_SECTION = 'board:dependencies';
 /** The line a reopened card's ferret is told (§2.9): a plain sentence, with no tag around it. */
 export const reopenMessage = (task: Pick<BoardTask, 'id'>, by: BoardActor, reason: string): string =>
   `${formatTaskRef(task)} was reopened by ${by.kind === 'owner' ? 'the owner' : (by.sessionId ?? `the ${by.kind}`)}: ${reason}`;
+
+/**
+ * The line a card's ferret is told the owner closed it: a plain sentence, with no tag around it. A batch
+ * (one ferret's cards closed together) lists them.
+ */
+export const doneMessage = (tasks: readonly Pick<BoardTask, 'id' | 'title'>[]): string => {
+  const named = tasks.map(task => `${formatTaskRef(task)} “${task.title}”`);
+  return named.length === 1
+    ? `The owner marked ${named[0]} done.`
+    : `The owner marked these cards done: ${named.join(', ')}.`;
+};
 
 /** The board actor a caller is recorded as. */
 export const actorOf = (caller: BoardCaller): BoardActor => {
@@ -123,6 +140,36 @@ const requireValidCard = (task: BoardTask): BoardTask => {
     `that would leave ${formatTaskRef(task)} invalid (${where}${issue?.message ?? 'unknown problem'})`,
   );
 };
+
+/**
+ * What a sub-ferret may still write: a note on its own card, and a PR or branch link, so the PR's facts move
+ * the card on their own. Authority still decides WHICH card; everything else is its lead's to do.
+ */
+const subFerretMay = (request: BoardTaskActionRequest): boolean =>
+  request.action === 'note' ||
+  (request.action === 'link' && (request.pr !== undefined || request.branch !== undefined));
+
+const SUB_FERRET_DOING: Readonly<Record<BoardTaskActionRequest['action'], string>> = {
+  move: 'move cards',
+  focus: 'change which card they work on',
+  block: 'block cards',
+  unblock: 'unblock cards',
+  depend: 'add dependencies to cards',
+  undepend: 'remove dependencies from cards',
+  drop: 'drop cards',
+  reopen: 'reopen cards',
+  clarify: 'clarify cards',
+  link: 'link a commit or doc to cards',
+  assign: 'reassign cards',
+  note: 'note on cards',
+  edit: 'edit cards',
+  file: 'claim files on cards',
+  order: 'reorder cards',
+  reparent: 'move cards under another card',
+  refile: 'refile cards',
+};
+
+const subFerretDoing = (request: BoardTaskActionRequest): string => SUB_FERRET_DOING[request.action];
 
 export class BoardService {
   constructor(private readonly ports: BoardServiceDependencies) {}
@@ -197,6 +244,7 @@ export class BoardService {
    * the caller's project unless one is named, and the variant's first backlog lane unless one is named.
    */
   async create(request: BoardTaskCreateRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
+    await this.refuseSubFerret(caller, 'create cards');
     const machineId = this.requireMachine();
     const owner = sessionOf(caller) ?? request.assignee;
     if (owner === undefined || owner === null) {
@@ -342,6 +390,7 @@ export class BoardService {
 
   /** One action on one card. */
   async act(id: BoardTaskId, request: BoardTaskActionRequest, caller: BoardCaller): Promise<BoardTaskResponse> {
+    if (!subFerretMay(request)) await this.refuseSubFerret(caller, subFerretDoing(request));
     if (request.action === 'focus' && caller.kind !== 'ferret') {
       throw new BoardError('invalid', 'focus is for a ferret: it names the card its session works on');
     }
@@ -365,6 +414,7 @@ export class BoardService {
     if (outcome.task !== null) {
       await this.afterWrite(caller, outcome.task, [...new Set([card.projectId, outcome.task.projectId])]);
       await this.deliverReopen(caller, outcome, outcome.task);
+      await this.deliverDone(caller, request, card, outcome.task);
     }
     return await this.view(await this.ports.store.read(), id);
   }
@@ -550,6 +600,13 @@ export class BoardService {
     return current;
   }
 
+  /** A sub-ferret reports to its lead instead of writing the board: the refusal says whom to tell. */
+  private async refuseSubFerret(caller: BoardCaller, doing: string): Promise<void> {
+    if (caller.kind !== 'ferret') return;
+    const refusal = await subFerretRefusal(this.ports.subFerrets ?? NO_SUB_FERRETS, caller.sessionId, doing);
+    if (refusal !== null) throw new BoardError('forbidden', refusal);
+  }
+
   private requireMachine(): string {
     const machineId = this.ports.machineId();
     if (machineId === undefined) throw new BoardUnavailableError('the daemon identity is not open yet');
@@ -643,6 +700,21 @@ export class BoardService {
     await this.ports.reopen
       .reopened({ task, ...reopened, by: actorOf(caller) })
       .catch((error: unknown) => this.warn(`could not deliver the reopen of ${formatTaskRef(task)}`, error));
+  }
+
+  /** Tells the card's ferret the owner closed it: only the owner's move into a closed lane from an open one. */
+  private async deliverDone(
+    caller: BoardCaller,
+    request: BoardTaskActionRequest,
+    before: BoardTask,
+    after: BoardTask,
+  ): Promise<void> {
+    if (caller.kind !== 'owner' || request.action !== 'move') return;
+    const laneSets = await this.laneSetsOf([after.projectId]);
+    if (cardCategory(after, laneSets) !== 'closed' || cardCategory(before, laneSets) === 'closed') return;
+    await this.ports.done
+      .done([{ task: after }])
+      .catch((error: unknown) => this.warn(`could not tell the ferret ${formatTaskRef(after)} is done`, error));
   }
 
   private warn(what: string, error: unknown): void {

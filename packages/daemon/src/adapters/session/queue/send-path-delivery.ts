@@ -42,6 +42,8 @@ export class SendPathQueueTransport implements QueueTransport {
         sendId: message.id,
         message: message.text,
         ...(message.replyExpected === true ? { replyExpected: true } : {}),
+        // An interrupt is the send path's own stop-then-type, done when this message's turn has come.
+        ...(message.interrupt === true ? { now: true } : {}),
         ...(message.sender === 'agent' && message.from !== undefined ? { senderReference: message.from } : {}),
         ...(message.sender === 'daemon' ? { origin: 'daemon' as const } : {}),
       });

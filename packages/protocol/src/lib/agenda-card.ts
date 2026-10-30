@@ -282,13 +282,21 @@ export const hasOwnTitle = (item: Pick<AgendaCardSource, 'title' | 'subject'>): 
  * ferret on the owner), the FERRET's (the owner replied, asked for more, or wants to talk it through, and the
  * ferret has not updated it yet), or DONE (resolved or dismissed). The internal discussion state is the ferret's
  * turn; the app shows no separate "in discussion" mode. A NOTICE (`fy notify`) is nobody's turn: it is read,
- * not answered, so it reads as `done` and never counts toward what waits on the owner.
+ * not answered, so it reads as `done` and never counts toward what waits on the owner. A PARKED item (snoozed,
+ * or replied to — `AgendaParked`) is nobody's turn until it comes back: never "needs you", never a badge.
  */
-export type AgendaTurn = 'owner' | 'ferret' | 'done';
+export type AgendaTurn = 'owner' | 'ferret' | 'parked' | 'done';
 
 export const agendaTurn = (item: {
   readonly waitingOn?: 'ferret' | undefined;
   readonly resolvedAt?: string | undefined;
   readonly notice?: true | undefined;
+  readonly parked?: { readonly reason: string } | undefined;
 }): AgendaTurn =>
-  item.resolvedAt !== undefined || item.notice === true ? 'done' : item.waitingOn === 'ferret' ? 'ferret' : 'owner';
+  item.resolvedAt !== undefined || item.notice === true
+    ? 'done'
+    : item.parked !== undefined
+      ? 'parked'
+      : item.waitingOn === 'ferret'
+        ? 'ferret'
+        : 'owner';

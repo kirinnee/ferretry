@@ -89,6 +89,16 @@ export interface DaemonBoardRoute {
   readonly taskId?: string;
 }
 
+/**
+ * The message queue: every message still waiting, across this machine's ferrets and on this device. `sessionId` narrows
+ * it to one ferret; the page stays the same page when it changes, so it is not part of the page key.
+ */
+export interface DaemonQueueRoute {
+  readonly kind: 'queue';
+  readonly daemonId: DaemonId;
+  readonly sessionId?: string;
+}
+
 export interface DaemonSettingsRoute {
   readonly kind: 'settings';
   readonly daemonId: DaemonId;
@@ -137,6 +147,7 @@ export type DaemonPageRoute =
   | DaemonSessionRoute
   | DaemonAgendaRoute
   | DaemonBoardRoute
+  | DaemonQueueRoute
   | DaemonSettingsRoute
   | DaemonWardenRoute
   | DaemonAnalyticsRoute
@@ -244,6 +255,10 @@ export const daemonBoardForFerretPath = (id: DaemonId, sessionId: string, highli
   return `${daemonBoardPath(id)}?${query.toString()}`;
 };
 
+/** Builds the message-queue pathname: `/d/<id>/queue`, or one ferret's `/d/<id>/queue/<sessionId>`. */
+export const daemonQueuePath = (id: DaemonId, sessionId?: string): string =>
+  `${daemonSessionsPath(id)}/queue${sessionId === undefined ? '' : `/${encodeURIComponent(sessionId)}`}`;
+
 /** Builds the canonical settings pathname for one daemon. */
 export const daemonSettingsPath = (id: DaemonId): string => `${daemonSessionsPath(id)}/settings`;
 
@@ -291,8 +306,12 @@ export const parseRoute = (pathname: string): Route => {
     if (destination === 'history') return { kind: 'imported-history', daemonId: id };
     if (destination === 'setup') return { kind: 'machine-setup', daemonId: id };
     if (destination === 'board') return { kind: 'board', daemonId: id };
+    if (destination === 'queue') return { kind: 'queue', daemonId: id };
     if (destination === 'tasks') return { kind: 'legacy-tasks-redirect', to: { kind: 'board', daemonId: id } };
   }
+
+  if (destination === 'queue' && sessionSegment !== undefined && remainder.length === 0)
+    return { kind: 'queue', daemonId: id, sessionId: decodeRouteSegment(sessionSegment) };
 
   if (destination === 'board' && sessionSegment !== undefined && remainder.length === 0) {
     const taskId = decodeRouteSegment(sessionSegment);
@@ -357,6 +376,8 @@ export const routePath = (route: Route): string => {
       return route.taskId === undefined
         ? daemonBoardPath(route.daemonId)
         : daemonBoardCardPath(route.daemonId, route.taskId);
+    case 'queue':
+      return daemonQueuePath(route.daemonId, route.sessionId);
     case 'settings':
       return daemonSettingsPath(route.daemonId);
     case 'warden':
