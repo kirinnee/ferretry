@@ -46,8 +46,8 @@ describe('the terminal board', () => {
 
     // Assert
     should(actual[0]).equal('NEEDS YOU');
-    should(actual[1]).containEql('#F4');
-    should(actual.slice(2).join('\n')).containEql('#F2');
+    should(actual[1]).containEql('&F4');
+    should(actual.slice(2).join('\n')).containEql('&F2');
     should(actual.filter(line => line === 'NEEDS YOU')).have.length(1);
   });
 
@@ -66,7 +66,7 @@ describe('the terminal board', () => {
       .map(line => line.split(' ')[0]);
 
     // Assert — F2 before F10 proves the numeric collation, not lexicographic.
-    should(ids).eql(['#F4', '#F3', '#F2', '#F10']);
+    should(ids).eql(['&F4', '&F3', '&F2', '&F10']);
   });
 
   it('should break ties among blocked tasks by how long they have been blocked', () => {
@@ -80,11 +80,11 @@ describe('the terminal board', () => {
     // Act
     const ids = renderTaskBoard(board(tasks))
       .split('\n')
-      .filter(line => line.startsWith('#'))
+      .filter(line => line.startsWith('&'))
       .map(line => line.split(' ')[0]);
 
     // Assert
-    should(ids).eql(['#F2', '#F1', '#F3']);
+    should(ids).eql(['&F2', '&F1', '&F3']);
   });
 
   it('should break ties among stale tasks by how long they have been quiet', () => {
@@ -101,7 +101,7 @@ describe('the terminal board', () => {
       .map(line => line.split(' ')[0]);
 
     // Assert
-    should(ids).eql(['#F2', '#F1']);
+    should(ids).eql(['&F2', '&F1']);
   });
 
   it('should show the lane, the assignee and both badges on a summary line', () => {
@@ -120,7 +120,7 @@ describe('the terminal board', () => {
     const actual = renderTaskBoard(board([task]));
 
     // Assert
-    should(actual).containEql('#F7');
+    should(actual).containEql('&F7');
     should(actual).containEql('BLOCKED');
     should(actual).containEql('ada');
     should(actual).containEql('🚧 waiting on review');
@@ -189,7 +189,7 @@ describe('the dependency view', () => {
     const actual = renderTaskDag(board([summary({ id: 'F1' })]));
 
     // Assert
-    should(actual).equal('#F1 → ∅  Rename the widget');
+    should(actual).equal('&F1 → ∅  Rename the widget');
   });
 
   it('should list the tasks a task waits on', () => {
@@ -197,7 +197,7 @@ describe('the dependency view', () => {
     const actual = renderTaskDag(board([summary({ id: 'F1', dependsOn: ['F2', 'B3'] })]));
 
     // Assert
-    should(actual).containEql('#F1 → #F2, #B3');
+    should(actual).containEql('&F1 → &F2, &B3');
   });
 
   it('should not print a null blocked reason, which kteam rendered as "🚧 null"', () => {
@@ -227,7 +227,7 @@ describe('one task in the terminal', () => {
     });
 
     // Assert
-    should(actual).containEql('#F7  Rename the widget');
+    should(actual).containEql('&F7  Rename the widget');
     should(actual).containEql('workflow  quick');
     should(actual).containEql('status    todo — in review');
     should(actual).containEql('assignee  ada');
@@ -299,7 +299,7 @@ describe('one task in the terminal', () => {
     should(actual).containEql('source chat://1');
     should(actual).containEql('make it blue — chat://4');
     should(actual).containEql('the long brief');
-    should(actual).containEql('depends   #F2');
+    should(actual).containEql('depends   &F2');
     should(actual).containEql('files     src/a.ts (advisory)');
   });
 
@@ -340,7 +340,7 @@ describe('what a mutation prints', () => {
     const actual = renderTaskAction(view({ id: 'F7', phase: 'build', status: 'in_progress' }));
 
     // Assert
-    should(actual).equal('#F7  build');
+    should(actual).equal('&F7  build');
   });
 
   it('should append the reason and any derived warning', () => {
@@ -350,7 +350,7 @@ describe('what a mutation prints', () => {
     );
 
     // Assert
-    should(actual).containEql('#F7  todo — waiting');
+    should(actual).containEql('&F7  todo — waiting');
     should(actual).containEql('no activity for a while');
   });
 });

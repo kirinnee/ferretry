@@ -1,252 +1,293 @@
-import { TaskKindSchema, TaskPhaseSchema, TaskStatusSchema, TaskWorkflowSchema } from '@ferretry/protocol';
+import { TaskKindSchema, TaskWorkflowSchema } from '@ferretry/protocol';
+import { DependencyUntilSchema } from '@ferretry/protocol';
 import type { Command } from 'commander';
-import type { ITaskOutput, ITaskGateway, ITextFileReader } from '../../lib/tasks/ports';
-import {
-  TaskActionController,
-  TaskCreateController,
-  TaskListController,
-  TaskShowController,
-} from '../../lib/tasks/task-controllers';
-import {
-  buildAssignAction,
-  buildClarifyAction,
-  buildDependencyAction,
-  buildFileAction,
-  buildLinkAction,
-  buildOrderAction,
-  buildPhaseAction,
-  buildReopenAction,
-  buildStatusAction,
-  buildTextAction,
-  TASK_LIST_VIEWS,
-  type TaskCreateOptions,
-  type TaskLinkOptions,
-  type TaskListOptions,
-} from '../../lib/tasks/task-request';
-import { resolveTaskScope, type TaskScope } from '../../lib/tasks/task-scope';
+import type {
+  BoardController,
+  TaskCreateFlags,
+  TaskEditFlags,
+  TaskLinkFlags,
+  TaskListShimFlags,
+} from '../../lib/board/board-controllers';
+import type { ITaskGateway, ITaskOutput } from '../../lib/tasks/ports';
+import { TaskListController } from '../../lib/tasks/task-controllers';
+import { TASK_LIST_VIEWS, type TaskListOptions } from '../../lib/tasks/task-request';
+import { resolveTaskScope } from '../../lib/tasks/task-scope';
 import { TASK_TITLE_GUIDANCE } from '../../lib/tasks/task-title';
 
 /** Everything the task command group is wired from; the composition root owns the concrete instances. */
 export interface TaskCommandDependencies {
-  readonly gateway: ITaskGateway;
+  readonly board: BoardController;
+  /** The v1 per-session routes, kept for `fy task list --legacy` until they are removed. */
+  readonly legacyGateway: ITaskGateway;
   readonly io: ITaskOutput;
-  readonly files: ITextFileReader;
   /** `FY_SESSION_ID`, as the daemon exported it into the agent's environment. */
   readonly environmentSessionId: string | undefined;
 }
 
-interface ScopeOptions {
+interface SessionOptions {
   readonly session?: string;
-  readonly all?: boolean;
   readonly json?: boolean;
-  readonly md?: boolean;
 }
 
 const collect = (value: string, previous: readonly string[]): readonly string[] => [...previous, value];
 
 const choices = (values: readonly string[]): string => values.join(' | ');
 
-/** `--session` and `--json` belong to every task command; `--md` only to the two that render prose. */
-const scoped = (command: Command): Command =>
+/** `--session` and `--json` belong to every task command. */
+const acting = (command: Command): Command =>
   command
-    .option('--session <id>', 'target this session instead of the ambient FY_SESSION_ID')
+    .option('--session <id>', 'act as this session instead of the ambient FY_SESSION_ID')
     .option('--json', 'print the daemon response as JSON');
 
+const ID_HELP = 'the task id: &F21 (or F21)';
+
 export function registerTaskCommands(program: Command, dependencies: TaskCommandDependencies): Command {
-  const { gateway, io, files, environmentSessionId } = dependencies;
-  const create = new TaskCreateController(gateway, io, files);
-  const list = new TaskListController(gateway, io);
-  const show = new TaskShowController(gateway, io);
-  const act = new TaskActionController(gateway, io);
+  const { board, legacyGateway, io, environmentSessionId } = dependencies;
+  const legacyList = new TaskListController(legacyGateway, io);
 
-  const scope = (options: ScopeOptions): TaskScope =>
-    resolveTaskScope({ session: options.session, all: options.all, environmentSessionId });
+  const group = program.command('task').description("create and move the cards of a project's board");
 
-  const group = program.command('task').description('create and move the tasks of a session');
-
-  scoped(group.command('create'))
-    .description('record a task, preserving the human ask verbatim')
+  acting(group.command('create'))
+    .description('record a task on the project board, preserving the human ask verbatim')
     .argument('[title...]', 'the title, if you would rather not repeat --title')
     .requiredOption('-k, --kind <kind>', `one of ${choices(TaskKindSchema.options)}`)
     .option('-t, --title <title>', TASK_TITLE_GUIDANCE)
+    .option('--summary <line>', 'one line for the card face')
     .option('--ask <text>', "the human's words, verbatim")
     .option('--ask-source <link>', 'where those words came from')
+    .option('--premise <text>', 'why this work exists')
+    .option('--context <text>', 'what a newcomer needs to know')
+    .option('--term <term=meaning>', 'a glossary entry (repeatable)', collect, [])
+    .option('--brief <text>', 'the full description or plan')
+    .option('--brief-file <path>', 'read the brief from a file instead')
     .option('--workflow <workflow>', `one of ${choices(TaskWorkflowSchema.options)}`)
     .option('--depends-on <id>', 'a task this one waits on (repeatable)', collect, [])
+    .option('--parent <id>', 'the task this one is part of')
+    .option('--assignee <who>', 'the ferret doing it: a callsign or a session id')
+    .option('--project <name>', 'the board to create it on; default: the board of the calling session')
+    .option('--lane <lane>', "the lane to start in; default: the workflow's first")
     .option('--file <path>', 'an advisory file claim (repeatable)', collect, [])
-    .option('--description <text>', 'the brief')
-    .option('--description-file <path>', 'read the brief from a file instead')
-    .option('--status <status>', `one of ${choices(TaskStatusSchema.options)}`)
-    .option('--reason <why>', 'required when creating blocked or dropped')
-    .option('--repo <path>', 'the repository this task lives in')
-    .option('--assignee <who>', 'the teammate who owns it')
-    .option('--order <n>', 'manual rank')
     .option('--pr <url>', 'a pull request link (repeatable)', collect, [])
     .option('--branch <branch>', 'the branch it is built on')
-    .option('--commit <sha>', 'a commit link (repeatable)', collect, [])
     .option('--doc <path>', 'a document link (repeatable)', collect, [])
-    .action(async (titleWords: string[], options: TaskCreateOptions & ScopeOptions) => {
-      await create.run({ scope: scope(options), options, titleWords, json: options.json === true });
+    .action(async (titleWords: string[], options: TaskCreateFlags) => {
+      await board.create(titleWords, options);
     });
 
-  scoped(group.command('list'))
-    .description('the board for one session, or the fleet with --all')
-    .option('--view <view>', `one of ${choices(TASK_LIST_VIEWS)}`)
-    .option('--repo <path>', 'only tasks in this repository')
-    .option('--assignee <who>', 'only tasks owned by this teammate')
-    .option('--kind <kind>', `only ${choices(TaskKindSchema.options)}`)
-    .option('--status <status>', 'only this status (repeatable)', collect, [])
-    .option('--query <text>', 'only tasks whose number, title, description, ask or clarifications contain this text')
-    .option('--md', 'render the board as markdown')
+  acting(group.command('show'))
+    .description('one task in full: ask, premise, context, terms, brief, children, dependencies, links, asks, history')
+    .argument('<id>', ID_HELP)
+    .action(async (id: string, options: SessionOptions) => {
+      await board.show(id, options);
+    });
+
+  acting(group.command('list'))
+    .description(
+      'retired: this is `fy board --mine` (`--all` for everybody); `--legacy` reads the old per-session list',
+    )
+    .option('--legacy', 'read the old per-session task routes')
     .option('--all', 'read every session on this host')
-    .action(async (options: TaskListOptions & ScopeOptions) => {
-      await list.run({ scope: scope(options), options, markdown: options.md === true, json: options.json === true });
-    });
-
-  scoped(group.command('show'))
-    .description('one task in full, with its history')
-    .argument('<id>', 'the task id, for example F21')
-    .option('--after <seq>', 'only history after this sequence number')
-    .option('--md', 'render the task as markdown')
-    .action(async (id: string, options: { after?: string } & ScopeOptions) => {
-      await show.run({
-        scope: scope(options),
-        id,
-        after: options.after,
+    .option('--view <view>', `legacy only: one of ${choices(TASK_LIST_VIEWS)}`)
+    .option('--repo <path>', 'legacy only: only tasks in this repository')
+    .option('--assignee <who>', 'legacy only: only tasks owned by this teammate')
+    .option('--kind <kind>', `only ${choices(TaskKindSchema.options)}`)
+    .option('--status <status>', 'legacy only: only this status (repeatable)', collect, [])
+    .option('--query <text>', 'only tasks whose text contains this')
+    .option('--md', 'render as markdown')
+    .action(async (options: TaskListOptions & TaskListShimFlags & { readonly legacy?: boolean }) => {
+      if (options.legacy !== true) return await board.listShim(options);
+      await legacyList.run({
+        scope: resolveTaskScope({ session: options.session, all: options.all, environmentSessionId }),
+        options,
         markdown: options.md === true,
         json: options.json === true,
       });
     });
 
-  scoped(group.command('status'))
-    .description('move a task, recording why')
-    .argument('<id>', 'the task id')
-    .argument('<status>', `one of ${choices(TaskStatusSchema.options)}`)
-    .requiredOption('--reason <why>', 'why it moved; the history keeps this')
-    .option('--note <text>', 'extra context for the move')
-    .action(async (id: string, status: string, options: { reason?: string; note?: string } & ScopeOptions) => {
-      await act.run({
-        scope: scope(options),
-        id,
-        request: buildStatusAction(status, options),
-        json: options.json === true,
-      });
+  acting(group.command('move'))
+    .description("move a card to another lane of its project's board")
+    .argument('<id>', ID_HELP)
+    .argument('<lane>', "the lane's id or name (see `fy board lanes show`)")
+    .option('--reason <why>', 'why it moved; required for a move back')
+    .action(async (id: string, lane: string, options: SessionOptions & { reason?: string }) => {
+      await board.move(id, lane, options);
     });
 
-  scoped(group.command('phase'))
-    .description('move a task to an audit phase, recording why')
-    .argument('<id>', 'the task id')
-    .argument('<phase>', `one of ${choices(TaskPhaseSchema.options)}`)
-    .requiredOption('--reason <why>', 'why it moved')
-    .action(async (id: string, phase: string, options: { reason?: string } & ScopeOptions) => {
-      await act.run({
-        scope: scope(options),
-        id,
-        request: buildPhaseAction(phase, options),
-        json: options.json === true,
-      });
+  acting(group.command('focus'))
+    .description("make this the card the calling session's work is attributed to")
+    .argument('<id>', ID_HELP)
+    .action(async (id: string, options: SessionOptions) => {
+      await board.focus(id, options);
     });
 
-  scoped(group.command('reopen'))
-    .description('reopen a finished task together with the new ask that reopened it')
-    .argument('<id>', 'the task id')
-    .requiredOption('--reason <why>', 'why it is being reopened')
-    .requiredOption('--ask <text>', 'the new human ask, verbatim')
-    .requiredOption('--source <link>', 'where that ask came from')
-    .action(async (id: string, options: { reason?: string; ask?: string; source?: string } & ScopeOptions) => {
-      await act.run({ scope: scope(options), id, request: buildReopenAction(options), json: options.json === true });
+  acting(group.command('block'))
+    .description('mark a card blocked on something outside the board, saying what')
+    .argument('<id>', ID_HELP)
+    .argument('<why...>', 'what it is waiting on')
+    .action(async (id: string, why: string[], options: SessionOptions) => {
+      await board.block(id, why, options);
     });
 
-  scoped(group.command('clarify'))
+  acting(group.command('unblock'))
+    .description('clear an external block')
+    .argument('<id>', ID_HELP)
+    .option('--reason <why>', 'what changed')
+    .action(async (id: string, options: SessionOptions & { reason?: string }) => {
+      await board.unblock(id, options);
+    });
+
+  acting(group.command('depend'))
+    .description('make a card wait on another')
+    .argument('<id>', ID_HELP)
+    .argument('<dependency>', 'the task it waits on')
+    .option('--until <when>', `${choices(DependencyUntilSchema.options)} (default shipped)`)
+    .option('--override <why>', 'owner only: let it advance although the dependency is not done')
+    .action(async (id: string, dependency: string, options: SessionOptions & { until?: string; override?: string }) => {
+      await board.depend(id, dependency, options);
+    });
+
+  acting(group.command('undepend'))
+    .description('drop a dependency')
+    .argument('<id>', ID_HELP)
+    .argument('<dependency>', 'the task it no longer waits on')
+    .option('--reason <why>', 'why the dependency goes away')
+    .action(async (id: string, dependency: string, options: SessionOptions & { reason?: string }) => {
+      await board.undepend(id, dependency, options);
+    });
+
+  acting(group.command('drop'))
+    .description('abandon or supersede a card, saying why')
+    .argument('<id>', ID_HELP)
+    .requiredOption('--reason <why>', 'why it is dropped; the history keeps this')
+    .action(async (id: string, options: SessionOptions & { reason?: string }) => {
+      await board.drop(id, options);
+    });
+
+  acting(group.command('reopen'))
+    .description("reopen a finished card in a lane, together with the owner's new ask")
+    .argument('<id>', ID_HELP)
+    .requiredOption('--to <lane>', 'the lane to reopen it into')
+    .requiredOption('--ask <words>', "the owner's new words, verbatim")
+    .option('--source <link>', 'where those words came from')
+    .option('--reason <why>', 'why it is being reopened')
+    .action(
+      async (id: string, options: SessionOptions & { to?: string; ask?: string; source?: string; reason?: string }) => {
+        await board.reopen(id, options);
+      },
+    );
+
+  acting(group.command('clarify'))
     .description('append a verbatim clarification to the original ask')
-    .argument('<id>', 'the task id')
+    .argument('<id>', ID_HELP)
     .argument('<text...>', 'the clarification, verbatim')
     .requiredOption('--source <link>', 'where it came from')
-    .action(async (id: string, text: string[], options: { source?: string } & ScopeOptions) => {
-      await act.run({
-        scope: scope(options),
-        id,
-        request: buildClarifyAction(text, options),
-        json: options.json === true,
-      });
+    .action(async (id: string, text: string[], options: SessionOptions & { source?: string }) => {
+      await board.clarify(id, text, options);
     });
 
-  scoped(group.command('depend'))
-    .description('declare or drop a dependency on another task')
-    .argument('<id>', 'the task id')
-    .argument('<dependency>', 'the task it waits on')
-    .option('--remove', 'drop the dependency instead of adding it')
-    .action(async (id: string, dependency: string, options: { remove?: boolean } & ScopeOptions) => {
-      await act.run({
-        scope: scope(options),
-        id,
-        request: buildDependencyAction(dependency, options),
-        json: options.json === true,
-      });
-    });
-
-  scoped(group.command('file'))
-    .description('claim or release a file; claims are advisory, never a lock')
-    .argument('<id>', 'the task id')
-    .argument('<path>', 'the file being claimed')
-    .option('--remove', 'release the claim instead of taking it')
-    .option('--reason <why>', 'optional context for the claim')
-    .action(async (id: string, path: string, options: { remove?: boolean; reason?: string } & ScopeOptions) => {
-      await act.run({
-        scope: scope(options),
-        id,
-        request: buildFileAction(path, options),
-        json: options.json === true,
-      });
-    });
-
-  for (const kind of ['note', 'feedback'] as const) {
-    scoped(group.command(kind))
-      .description(kind === 'note' ? 'append a note to the history' : 'append reviewer feedback to the history')
-      .argument('<id>', 'the task id')
-      .argument('<text...>', 'what to record')
-      .action(async (id: string, text: string[], options: ScopeOptions) => {
-        await act.run({ scope: scope(options), id, request: buildTextAction(kind, text), json: options.json === true });
-      });
-  }
-
-  scoped(group.command('link'))
+  acting(group.command('link'))
     .description('attach exactly one link to a task')
-    .argument('<id>', 'the task id')
+    .argument('<id>', ID_HELP)
     .option('--pr <url>', 'a pull request')
     .option('--branch <branch>', 'the branch')
     .option('--commit <sha>', 'a commit')
     .option('--doc <path>', 'a document')
-    .action(async (id: string, options: TaskLinkOptions & ScopeOptions) => {
-      await act.run({ scope: scope(options), id, request: buildLinkAction(options), json: options.json === true });
+    .action(async (id: string, options: TaskLinkFlags) => {
+      await board.link(id, options);
     });
 
-  scoped(group.command('assign'))
-    .description('hand a task to a teammate, or take it back')
-    .argument('<id>', 'the task id')
-    .argument('[who]', 'the teammate to assign it to')
+  acting(group.command('assign'))
+    .description('hand a task to a ferret, or take it back')
+    .argument('<id>', ID_HELP)
+    .argument('[who]', 'the ferret: a callsign or a session id')
     .option('--none', 'unassign instead')
-    .action(async (id: string, who: string | undefined, options: { none?: boolean } & ScopeOptions) => {
-      await act.run({
-        scope: scope(options),
-        id,
-        request: buildAssignAction(who, options),
-        json: options.json === true,
-      });
+    .action(async (id: string, who: string | undefined, options: SessionOptions & { none?: boolean }) => {
+      await board.assign(id, who, options);
     });
 
-  scoped(group.command('order'))
-    .description('rank a task on the board, or clear its rank')
-    .argument('<id>', 'the task id')
+  acting(group.command('note'))
+    .description('append a note to the history')
+    .argument('<id>', ID_HELP)
+    .argument('<text...>', 'what to record')
+    .action(async (id: string, text: string[], options: SessionOptions) => {
+      await board.note(id, text, options);
+    });
+
+  acting(group.command('order'))
+    .description('rank a card within its lane, or clear its rank')
+    .argument('<id>', ID_HELP)
     .argument('[rank]', 'a whole number')
     .option('--none', 'clear the rank instead')
-    .action(async (id: string, rank: string | undefined, options: { none?: boolean } & ScopeOptions) => {
-      await act.run({
-        scope: scope(options),
-        id,
-        request: buildOrderAction(rank, options),
-        json: options.json === true,
-      });
+    .action(async (id: string, rank: string | undefined, options: SessionOptions & { none?: boolean }) => {
+      await board.order(id, rank, options);
+    });
+
+  acting(group.command('file'))
+    .description('claim or release a file; claims are advisory, never a lock')
+    .argument('<id>', ID_HELP)
+    .argument('<path>', 'the file being claimed')
+    .option('--remove', 'release the claim instead of taking it')
+    .option('--reason <why>', 'optional context')
+    .action(async (id: string, path: string, options: SessionOptions & { remove?: boolean; reason?: string }) => {
+      await board.file(id, path, options);
+    });
+
+  acting(group.command('edit'))
+    .description("change a card's title, summary, premise, context, glossary or brief")
+    .argument('<id>', ID_HELP)
+    .option('--title <title>', TASK_TITLE_GUIDANCE)
+    .option('--summary <line>', 'one line for the card face')
+    .option('--premise <text>', 'why this work exists')
+    .option('--context <text>', 'what a newcomer needs to know')
+    .option('--term <term=meaning>', 'replace the glossary with these entries (repeatable)', collect, [])
+    .option('--brief <text>', 'the full description or plan')
+    .option('--brief-file <path>', 'read the brief from a file instead')
+    .action(async (id: string, options: TaskEditFlags) => {
+      await board.edit(id, options);
+    });
+
+  acting(group.command('refile'))
+    .description("move a card to another project's board")
+    .argument('<id>', ID_HELP)
+    .requiredOption('--project <name>', 'the board it moves to')
+    .option('--lane <lane>', 'the lane there; default: the same-category lane')
+    .option('--reason <why>', 'why it moves')
+    .action(async (id: string, options: SessionOptions & { project?: string; lane?: string; reason?: string }) => {
+      await board.refile(id, options);
+    });
+
+  // The v1 spellings. They print what replaced them and exit non-zero, so a script that still calls one fails loudly.
+  group
+    .command('status')
+    .description('retired: use `fy task move`')
+    .argument('<id>', 'the task id')
+    .argument('<status>', 'the old status')
+    .option('--reason <why>', 'why it moved')
+    .option('--note <text>', 'ignored')
+    .option('--session <id>', 'ignored')
+    .option('--json', 'ignored')
+    .action((id: string, status: string, options: { reason?: string }) => {
+      board.retiredStatus(id, status, options.reason);
+    });
+
+  group
+    .command('phase')
+    .description('retired: use `fy task move`')
+    .argument('<id>', 'the task id')
+    .argument('<phase>', 'the old phase')
+    .option('--reason <why>', 'why it moved')
+    .option('--session <id>', 'ignored')
+    .option('--json', 'ignored')
+    .action((id: string, phase: string, options: { reason?: string }) => {
+      board.retiredPhase(id, phase, options.reason);
+    });
+
+  acting(group.command('feedback'))
+    .description('retired: recorded as a note')
+    .argument('<id>', ID_HELP)
+    .argument('<text...>', 'what to record')
+    .action(async (id: string, text: string[], options: SessionOptions) => {
+      await board.feedback(id, text, options);
     });
 
   return group;

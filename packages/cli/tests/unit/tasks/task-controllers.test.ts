@@ -92,7 +92,7 @@ describe('creating a task', () => {
     await controller.run({ scope, options: minimalCreate, titleWords: [], json: false });
 
     // Assert
-    should(output.lines).eql(['#F9']);
+    should(output.lines).eql(['&F9']);
     should(gateway.calls[0]?.arguments[0]).equal('session-7');
   });
 
@@ -180,7 +180,7 @@ describe('listing tasks', () => {
     await controller.run({ scope, options: { assignee: 'ada' }, markdown: false, json: false });
 
     // Assert
-    should(output.lines[0]).containEql('#F1');
+    should(output.lines[0]).containEql('&F1');
     should(gateway.calls[0]?.arguments[1]).eql([['assignee', 'ada']]);
   });
 
@@ -295,7 +295,7 @@ describe('showing one task', () => {
 
     // Assert
     should(gateway.calls[0]?.arguments).eql(['session-7', 'F7', 0]);
-    should(output.lines[0]).containEql('#F7');
+    should(output.lines[0]).containEql('&F7');
   });
 
   it('should pass --after through as a cursor', async () => {
@@ -335,7 +335,7 @@ describe('showing one task', () => {
     });
 
     // Assert
-    should(markdown.lines[0]).startWith('# #F7');
+    should(markdown.lines[0]).startWith('# &F7');
     should(JSON.parse(json.lines[0] ?? '{}')).have.property('sessionId', 'session-7');
   });
 
@@ -365,7 +365,7 @@ describe('acting on a task', () => {
 
     // Assert
     should(gateway.calls[0]?.arguments).eql(['session-7', 'F7', request]);
-    should(output.lines).eql(['#F7  build']);
+    should(output.lines).eql(['&F7  build']);
   });
 
   it('should print the whole record when --json is asked for', async () => {

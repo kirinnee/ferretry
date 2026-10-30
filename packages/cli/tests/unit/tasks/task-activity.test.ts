@@ -73,7 +73,7 @@ describe('history summaries', () => {
 
   it('should describe dependency and file changes by their operation', () => {
     // Act + Assert
-    should(summarizeTaskActivity(activity('dependency', { taskId: 'F12', operation: 'remove' }))).equal('remove #F12');
+    should(summarizeTaskActivity(activity('dependency', { taskId: 'F12', operation: 'remove' }))).equal('remove &F12');
     should(summarizeTaskActivity(activity('file', { path: 'src/a.ts', operation: 'add', reason: 'claimed' }))).equal(
       'add `src/a.ts` (claimed)',
     );
