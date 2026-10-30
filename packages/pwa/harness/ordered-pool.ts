@@ -73,7 +73,21 @@ export const runOrderedPool = async (tasks: readonly PoolTask[], limit: number):
       flush();
     }
   };
-  await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, tasks.length)) }, worker));
+  // A harness that calls process.exit (its `fail` does) would take every held line with it, including
+  // the message that says why. Release what is held, in list order, before the process goes.
+  const exit = process.exit.bind(process);
+  process.exit = ((code?: number): never => {
+    held.exit(() => {
+      for (let index = printed; index < tasks.length; index += 1)
+        for (const chunk of buffers[index] ?? []) process[chunk.stream].write(chunk.text);
+    });
+    return exit(code);
+  }) as typeof process.exit;
+  try {
+    await Promise.all(Array.from({ length: Math.max(1, Math.min(limit, tasks.length)) }, worker));
+  } finally {
+    process.exit = exit as typeof process.exit;
+  }
   // Tasks that never started (a failure stopped the queue) print nothing and are not waited for.
   for (const [index] of tasks.entries()) if (!settled[index]) settled[index] = true;
   flush();
