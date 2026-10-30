@@ -1657,7 +1657,11 @@ describe('SessionChatPage', () => {
   });
 
   describe('the Tasks tab expanded over the chat', () => {
-    const expandedOn = async (formFactor: 'desktop' | 'phone') => {
+    const expandedOn = async (
+      formFactor: 'desktop' | 'phone',
+      expanded = true,
+      presentation: 'pane' | 'sheet' = 'pane',
+    ) => {
       const expansions: boolean[] = [];
       const board = new DaemonBoardStore(
         fakePort({
@@ -1677,10 +1681,10 @@ describe('SessionChatPage', () => {
           formFactor={formFactor}
           initialInfo="tasks"
           onSessionChange={() => undefined}
-          presentation="pane"
+          presentation={presentation}
           session={current}
           tasksView={{
-            expanded: true,
+            expanded,
             agents: false,
             setAgents: () => undefined,
             setExpanded: next => void expansions.push(next),
@@ -1711,6 +1715,47 @@ describe('SessionChatPage', () => {
         expect(page.root.findAllByProps({ 'data-board-full': '' })).toHaveLength(1);
         run(() => page.root.findByType(SessionTopBar).props.onToggleInfo());
         expect(expansions).toEqual([]);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('Collapse on a desktop steps back to the panel without opening anything', async () => {
+      const { page, expansions } = await expandedOn('desktop');
+      try {
+        run(() => page.root.findByType(BoardSideTab).props.onExpand());
+        expect(expansions).toEqual([false]);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('Collapse on a phone steps back and brings the Tasks tab back', async () => {
+      const { page, expansions } = await expandedOn('phone');
+      try {
+        const full = page.root.findAllByType(BoardSideTab).find(tab => tab.props.density === 'page');
+        run(() => full?.props.onExpand());
+        expect(expansions).toEqual([false]);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('Expand from the panel expands the board', async () => {
+      const { page, expansions } = await expandedOn('desktop', false);
+      try {
+        run(() => page.root.findByType(BoardSideTab).props.onExpand());
+        expect(expansions).toEqual([true]);
+      } finally {
+        run(() => page.unmount());
+      }
+    });
+
+    test('Expand from the phone sheet closes the sheet and expands the board', async () => {
+      const { page, expansions } = await expandedOn('phone', false, 'sheet');
+      try {
+        run(() => page.root.findByType(BoardSideTab).props.onExpand());
+        expect(expansions).toEqual([true]);
       } finally {
         run(() => page.unmount());
       }
