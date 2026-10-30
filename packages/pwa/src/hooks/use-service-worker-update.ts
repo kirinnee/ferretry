@@ -11,7 +11,8 @@
  * needs four sequential deploys — so it has to be provable without a browser.
  *
  * WHAT THE READER SEES: one chip in the app bar (`shell/app-bar.tsx` owns its
- * wording). Never a modal, never an automatic reload. A reload discards unsent
+ * wording), and only while it is TRUE: recovery clears as soon as a page renders
+ * cleanly again (`clearRecovery`). Never a modal, never an automatic reload. A reload discards unsent
  * composer text and scroll position, so it only ever happens because someone
  * clicked.
  *
@@ -69,6 +70,17 @@ export interface ServiceWorkerUpdate {
    */
   readonly raiseRecovery: () => void;
   /**
+   * Withdraws recovery once the tab has shown it is not stuck: the pane boundary
+   * calls it when a page it holds renders cleanly after a change. Only recovery
+   * goes; a waiting update keeps its chip.
+   *
+   * WITHOUT THIS THE CHIP OUTLIVED THE FAILURE. On 2026-10-30 a chat that had
+   * failed was fixed and drew normally, and "Reload to recover" stayed at the top
+   * of the sidebar for the rest of the tab's life, asking the reader to fix a
+   * problem the page no longer had.
+   */
+  readonly clearRecovery: () => void;
+  /**
    * Raises the update chip from outside the hook: the release checker
    * (`use-release-integrity.ts`) installs a verified release WITHOUT a new worker, so no
    * `installed` state change exists for this hook to hear.
@@ -77,19 +89,20 @@ export interface ServiceWorkerUpdate {
 }
 
 /**
- * The chip's state transition, as a pure function so the priority rule is
- * assertable without a React tree.
+ * The chip, from the two facts it summarises, as a pure function so the priority
+ * rule is assertable without a React tree.
  *
- * TWO RULES, AND THEY POINT THE SAME WAY: recovery is never downgraded to
- * update, and update is always UPGRADED to recovery. `recovery` is a statement
- * about this tab — something in it has already failed to load and it is stuck
- * until reloaded — which stays true no matter what the worker does afterwards.
- * Telling a stuck reader "Update ready" would be a lie about the state of their
- * tab in exactly the case where they most need the truth.
+ * RECOVERY WINS WHILE IT IS TRUE. `recovery` is a statement about this tab —
+ * something in it failed to load — which no worker event can make false, so an
+ * update never hides it: telling a stuck reader "Update ready" would be a lie
+ * about their tab in exactly the case where they most need the truth. The two
+ * facts are kept apart rather than folded into one value, so that when recovery
+ * IS withdrawn (`clearRecovery`) an update that arrived meanwhile is still
+ * offered instead of being lost under it.
  */
-export const nextUpdateReason = (previous: UpdateReason | null, next: UpdateReason): UpdateReason => {
-  if (previous === 'recovery' || next === 'recovery') return 'recovery';
-  return previous ?? next;
+export const chipReason = (updateWaiting: boolean, recovering: boolean): UpdateReason | null => {
+  if (recovering) return 'recovery';
+  return updateWaiting ? 'update' : null;
 };
 
 /**
@@ -291,6 +304,13 @@ export const startWorkerLifecycle = (deps: WorkerLifecycleDeps): (() => void) =>
 /** The bundler event a dead lazy chunk surfaces as. */
 export const PRELOAD_ERROR_EVENT = 'vite:preloadError';
 
+/** The bundler's words for a stylesheet that failed to preload, ahead of the module it belongs to. */
+const STYLESHEET_PRELOAD_MISS = 'Unable to preload CSS for ';
+
+/** Whether a preload failure is only one of an import's stylesheets — not the module itself. */
+export const isStylesheetPreloadMiss = (payload: unknown): boolean =>
+  payload instanceof Error && payload.message.startsWith(STYLESHEET_PRELOAD_MISS);
+
 /**
  * Raises recovery when a lazy chunk cannot be fetched.
  *
@@ -303,11 +323,18 @@ export const PRELOAD_ERROR_EVENT = 'vite:preloadError';
  *
  * Watched unconditionally, with no service-worker gate: a preload can fail on a
  * plain redeploy with no worker involved at all, and the reader is just as stuck.
+ *
+ * A STYLESHEET THAT DID NOT PRELOAD IS NOT A STUCK TAB. The bundler fires this
+ * event for each of an import's stylesheets that failed, and then — because it
+ * was prevented — goes on to load the module itself. If the module loads, the
+ * feature works and nothing needs a reload; if it does not, the module's own
+ * failure fires this event again, and THAT raises recovery. So a stylesheet miss
+ * is claimed (no unhandled rejection) but never raises the chip.
  */
 export const startPreloadErrorWatch = (win: ListenerTarget, onRecovery: () => void): (() => void) => {
   const onPreloadError = (event: Event): void => {
     event.preventDefault();
-    onRecovery();
+    if (!isStylesheetPreloadMiss((event as Event & { readonly payload?: unknown }).payload)) onRecovery();
   };
   win.addEventListener(PRELOAD_ERROR_EVENT, onPreloadError);
   return () => win.removeEventListener(PRELOAD_ERROR_EVENT, onPreloadError);
@@ -366,7 +393,8 @@ export interface ServiceWorkerUpdateEnvironment {
 }
 
 export const useServiceWorkerUpdate = (environment: ServiceWorkerUpdateEnvironment): ServiceWorkerUpdate => {
-  const [updateReady, setUpdateReady] = useState<UpdateReason | null>(null);
+  const [updateWaiting, setUpdateWaiting] = useState(false);
+  const [recovering, setRecovering] = useState(false);
   const { release, basePath, container, doc, win, reload, onError } = environment;
 
   /**
@@ -380,13 +408,15 @@ export const useServiceWorkerUpdate = (environment: ServiceWorkerUpdateEnvironme
   const armed = useRef(false);
 
   const raise = useCallback((reason: UpdateReason) => {
-    setUpdateReady(previous => nextUpdateReason(previous, reason));
+    if (reason === 'recovery') setRecovering(true);
+    else setUpdateWaiting(true);
   }, []);
 
   // ONE recovery entry point for both halves of the failure surface: the preload
   // watch below and the chunk error boundary's render-time catch.
   const raiseRecovery = useCallback(() => raise('recovery'), [raise]);
   const raiseUpdate = useCallback(() => raise('update'), [raise]);
+  const clearRecovery = useCallback(() => setRecovering(false), []);
 
   useEffect(() => {
     if (container === null) return;
@@ -409,5 +439,5 @@ export const useServiceWorkerUpdate = (environment: ServiceWorkerUpdateEnvironme
     );
   }, [basePath, container, reload]);
 
-  return { updateReady, applyUpdate, raiseRecovery, raiseUpdate };
+  return { updateReady: chipReason(updateWaiting, recovering), applyUpdate, raiseRecovery, clearRecovery, raiseUpdate };
 };

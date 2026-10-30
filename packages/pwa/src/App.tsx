@@ -2396,7 +2396,8 @@ export function AppShell() {
     }),
     [workerContainer],
   );
-  const { updateReady, applyUpdate, raiseRecovery, raiseUpdate } = useServiceWorkerUpdate(workerEnvironment);
+  const { updateReady, applyUpdate, raiseRecovery, clearRecovery, raiseUpdate } =
+    useServiceWorkerUpdate(workerEnvironment);
   const releaseEnvironment = useMemo(() => {
     const container = releaseContainer({
       navigator: workerContainer === null ? undefined : navigator,
@@ -2623,7 +2624,12 @@ export function AppShell() {
     content = (
       <div className="kt-shell flex flex-col overflow-hidden">
         <DeviceRefusedGate connection={connection}>
-          <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate} resetKey={pageKey}>
+          <ChunkErrorBoundary
+            onChunkError={raiseRecovery}
+            onRecovered={clearRecovery}
+            onReload={applyUpdate}
+            resetKey={pageKey}
+          >
             <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
           </ChunkErrorBoundary>
         </DeviceRefusedGate>
@@ -2710,7 +2716,12 @@ export function AppShell() {
                       onOpen={openPalette}
                     >
                       <DeviceRefusedGate connection={connection}>
-                        <ChunkErrorBoundary onChunkError={raiseRecovery} onReload={applyUpdate} resetKey={pageKey}>
+                        <ChunkErrorBoundary
+                          onChunkError={raiseRecovery}
+                          onRecovered={clearRecovery}
+                          onReload={applyUpdate}
+                          resetKey={pageKey}
+                        >
                           <PageScrollRegion entryKey={entryKey} memory={store.scrollMemory}>
                             <PageHost key={pageKey} route={pageRoute} connection={connection} slots={PAGE_SLOTS} />
                           </PageScrollRegion>
