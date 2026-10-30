@@ -1,3 +1,14 @@
+## [4.139.0](https://github.com/kirinnee/ferretry/compare/v4.138.0...v4.139.0) (2026-10-30)
+
+### Features
+
+* **pwa:** Done on Kanban cards in To test and Released and in the ⋯ menu ([#1045](https://github.com/kirinnee/ferretry/issues/1045)) ([07649b9](https://github.com/kirinnee/ferretry/commit/07649b9e6aaf71ba025a26f8e01ee28c211822f6))
+
+### Fixes
+
+* **pwa:** keep a reply's agenda reference on every outbox attempt ([#1047](https://github.com/kirinnee/ferretry/issues/1047)) ([ebdda55](https://github.com/kirinnee/ferretry/commit/ebdda55c5e99367ad77f61efbf2d5b27b4bf1508))
+* **pwa:** space the card detail sections apart ([#1046](https://github.com/kirinnee/ferretry/issues/1046)) ([6d00e4d](https://github.com/kirinnee/ferretry/commit/6d00e4d56bdd4c2ae9bfdd35e20be9ae1d3f6377))
+
 ## [4.138.0](https://github.com/kirinnee/ferretry/compare/v4.137.0...v4.138.0) (2026-10-30)
 
 ### Features
