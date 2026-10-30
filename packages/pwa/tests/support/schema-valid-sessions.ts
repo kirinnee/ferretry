@@ -12,7 +12,6 @@ export const schemaValidSessionView = (id: string): SessionView =>
     config: {
       incarnation: `incarnation-${id}`,
       runtimeGeneration: 1,
-      boardAccess: 'none',
       remoteControl: false,
       harnessFlags: [],
       turn: 4,

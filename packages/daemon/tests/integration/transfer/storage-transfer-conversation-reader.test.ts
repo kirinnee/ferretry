@@ -155,7 +155,6 @@ describe('StorageTransferConversationReader', () => {
       incarnation: 'i1',
       runtimeGeneration: 1,
       name: 'source',
-      boardAccess: 'none',
       agent: 'claude-auto-loge',
       harness: 'claude',
       modelHint: 'sonnet',

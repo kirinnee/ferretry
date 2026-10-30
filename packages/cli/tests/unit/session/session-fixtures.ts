@@ -5,7 +5,6 @@ const CONFIG: SessionConfig = {
   incarnation: 'inc-1',
   runtimeGeneration: 1,
   name: 'Fix Transcript Scrolling',
-  boardAccess: 'none',
   agent: 'claude-alpha',
   harness: 'claude',
   modelHint: 'opus',

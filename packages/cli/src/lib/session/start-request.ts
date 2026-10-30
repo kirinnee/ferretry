@@ -1,4 +1,4 @@
-import type { StartSessionRequestInput, TaskBoardAccess } from '@ferretry/protocol';
+import type { StartSessionRequestInput } from '@ferretry/protocol';
 import { SessionCommandError } from './errors.ts';
 import type { SessionEnvironment } from './ports.ts';
 
@@ -30,7 +30,6 @@ export interface StartFlags extends StartNumericFlags {
   readonly teammateFallback?: boolean;
   readonly label?: string;
   readonly parent?: string;
-  readonly boardAccess?: TaskBoardAccess;
   readonly model?: string;
   /** Only set when the caller typed `--fast`/`--no-fast`; unset leaves the harness's own default (off). */
   readonly fast?: boolean;
@@ -44,7 +43,6 @@ export interface StartFlags extends StartNumericFlags {
 
 export interface StartPlan {
   readonly request: StartSessionRequestInput;
-  readonly boardCapability?: string;
   /** Advisory notes for stderr — never a refusal, and never on stdout where `--json` would break. */
   readonly warnings: readonly string[];
 }
@@ -101,8 +99,7 @@ function assertNumericFlags(flags: StartNumericFlags): void {
  * "kill a turn that overruns", while a separately spelled `--kill-after` meant "kill a session with
  * no life signs" — one letter apart, opposite subjects. They are now `--turn-timeout` and
  * `--stall-kill-after`, with the small-value hint kept. Numeric flags are validated here instead of
- * failing on the wire. And a board-access start states plainly that it needs a capability instead
- * of asking the client library to notice.
+ * failing on the wire.
  */
 export function buildStartRequest(flags: StartFlags, environment: SessionEnvironment): StartPlan {
   assertNumericFlags(flags);
@@ -114,13 +111,6 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
   if (prompt === '' && flags.mode !== 'interactive')
     throw new SessionCommandError(
       'provide a prompt (arguments and/or --prompt-file), or use --mode interactive to start bare',
-    );
-
-  const boardAccess = flags.boardAccess ?? 'none';
-  const boardCapability = environment.boardCapability?.trim();
-  if (boardAccess !== 'none' && (boardCapability === undefined || boardCapability === ''))
-    throw new SessionCommandError(
-      `--board-access ${boardAccess} needs the caller's own board capability; run it from a session whose FY_BOARD_CAPABILITY is set`,
     );
 
   const warnings =
@@ -139,7 +129,6 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
     // Omitted entirely, not sent as `agent: undefined`, so the daemon reads "nothing was named"
     // and resolves its own default (T) — never a client guessing at one.
     ...(flags.agent === undefined ? {} : { agent: flags.agent }),
-    boardAccess,
     cwd: flags.cwd ?? environment.cwd,
     harnessFlags: [...(flags.harnessFlags ?? [])],
     ...(flags.name === undefined ? {} : { name: flags.name }),
@@ -168,5 +157,5 @@ export function buildStartRequest(flags: StartFlags, environment: SessionEnviron
       ? { ...common, mode: 'auto', prompt }
       : { ...common, mode: 'interactive', ...(prompt === '' ? {} : { prompt }) };
 
-  return { request, warnings, ...(boardAccess === 'none' ? {} : { boardCapability }) };
+  return { request, warnings };
 }

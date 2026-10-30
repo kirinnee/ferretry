@@ -15,14 +15,14 @@ export function withSystemCallsign(
   prefix: SystemCallsignPrefix,
 ): SessionControlSubsystem {
   return {
-    start: async (request, requestId, _payload, boardCapability) =>
+    start: async (request, requestId, _payload) =>
       await startWithSystemCallsign(
         issuer,
         prefix,
         error => error instanceof SessionControlError && error.failure === 'callsign_taken',
         async teammate => {
           const named = { ...request, teammate };
-          return await control.start(named, requestId, JSON.stringify(named), boardCapability);
+          return await control.start(named, requestId, JSON.stringify(named));
         },
       ),
     stop: async (sessionId, reason) => await control.stop(sessionId, reason),

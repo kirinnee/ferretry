@@ -39,12 +39,8 @@ export class FySessionApi implements ISessionApi {
     return (await this.client()).suggestNames(count);
   }
 
-  async start(
-    input: StartSessionRequestInput,
-    requestId?: string,
-    boardCapability?: string,
-  ): ReturnType<ISessionApi['start']> {
-    return (await this.client()).start(input, requestId, boardCapability);
+  async start(input: StartSessionRequestInput, requestId?: string): ReturnType<ISessionApi['start']> {
+    return (await this.client()).start(input, requestId);
   }
 
   async send(id: string, input: SendRequest): ReturnType<ISessionApi['send']> {

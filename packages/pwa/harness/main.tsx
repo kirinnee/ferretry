@@ -8419,7 +8419,6 @@ const WORKSPACE_PAGE_CLIENT: SessionChatClient = WORKSPACE_PICKERS
 const HARNESS_WIRE_CONFIG = {
   incarnation: 'harness-1',
   runtimeGeneration: 1,
-  boardAccess: 'none',
   remoteControl: false,
   harnessFlags: [],
   turn: 4,

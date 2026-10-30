@@ -88,9 +88,7 @@ describe('ProjectLaunch', () => {
     await press(submit(view));
 
     // Assert
-    expect(started).toEqual([
-      { agent: 'claude-auto-loge', cwd: '/work/ferretry', mode: 'interactive', boardAccess: 'none' },
-    ]);
+    expect(started).toEqual([{ agent: 'claude-auto-loge', cwd: '/work/ferretry', mode: 'interactive' }]);
   });
 
   it('states a refused launch verbatim and offers the retry rather than losing the draft', async () => {

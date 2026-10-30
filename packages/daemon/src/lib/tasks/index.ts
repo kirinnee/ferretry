@@ -1,3 +1,4 @@
+export * from './exact-worker-assignee.ts';
 export * from './task-attestation.ts';
 export * from './task-error.ts';
 export * from './task-graph.ts';

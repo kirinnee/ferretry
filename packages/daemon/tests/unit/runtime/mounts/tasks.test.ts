@@ -68,18 +68,6 @@ const legacyTask = () =>
     updatedAt: AT,
   }) as Task;
 
-/** What the board authorizer resolves for a peer that really does hold `mark_done`. */
-const RESOLVED_GRANT = {
-  boardId: 'board-1',
-  grantId: 'grant-1',
-  sessionId: 's1',
-  role: 'top_agent',
-  allowedActions: ['mark_done'],
-  boardEpoch: 4,
-  coordinatorEpoch: 2,
-  runtimeGeneration: 7,
-} as const;
-
 /** The dispatcher a request is driven through, over the routes and the credentials the daemon uses. */
 function dispatcher(world: TaskWorld = {}): ApiDispatcher {
   return new ApiDispatcher(new ApiRouter(taskRoutes(taskSubsystem(world))), CREDENTIALS, NO_GOVERNED_ROUTES_GUARD);
@@ -1000,172 +988,8 @@ describe('the task board mount', () => {
       should(response.status).equal(403);
     });
 
-    it('should require an explicit daemon-checked board grant before a peer marks shared live work done', async () => {
-      // The button is a human action. This path is for a peer, whose capability
-      // must reach the board domain before its task transaction is allowed.
-      // Arrange
-      const calls: { targetSessionId: string; capability: string; action: string }[] = [];
-      const dispatch = dispatcher({
-        boardActions: {
-          authorize: async input => {
-            calls.push(input);
-            return RESOLVED_GRANT;
-          },
-        },
-      });
-      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
-      for (const phase of ['build', 'built', 'live'] as const) {
-        await dispatch.dispatch(
-          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
-        );
-      }
-
-      // Act
-      const missing = await dispatch.dispatch(
-        post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase: 'done', reason: 'claimed complete' }, agentIn('s1')),
-      );
-      const anonymous = await dispatch.dispatch(
-        post(
-          '/v1/sessions/s1/tasks/F1',
-          { action: 'phase', phase: 'done', reason: 'claimed complete' },
-          { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability' },
-        ),
-      );
-      const done = await dispatch.dispatch(
-        post(
-          '/v1/sessions/s1/tasks/F1',
-          { action: 'phase', phase: 'done', reason: 'claimed complete' },
-          { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability', 'x-fy-request-id': 'click-1' },
-        ),
-      );
-
-      // Assert
-      should(missing.status).equal(401);
-      // A grant with no caller-supplied id would journal provenance nothing can be joined back to
-      // one decision, so the completion is refused rather than recorded against an invented key.
-      should(anonymous.status).equal(400);
-      should(jsonBody(anonymous)).have.property('code', 'missing_request_id');
-      should(done.status).equal(200);
-      should((jsonBody(done) as unknown as ScopedTaskView).phase).equal('done');
-      should(calls).deepEqual([
-        { targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' },
-        { targetSessionId: 's1', capability: 'peer-capability', action: 'mark_done' },
-      ]);
-    });
-
-    it('should reacquire cross-board scope before replaying one durable peer completion', async () => {
-      // A response-loss retry arrives after the task is already done. The mount must find the exact
-      // durable receipt before deciding that this peer is allowed to reacquire scope to another
-      // member's board; otherwise the reducer would either bypass board scope or refuse the replay.
-      // Arrange
-      const calls: { targetSessionId: string; capability: string; action: string }[] = [];
-      const dispatch = dispatcher({
-        boardActions: {
-          authorize: async input => {
-            calls.push(input);
-            return RESOLVED_GRANT;
-          },
-        },
-      });
-      await dispatch.dispatch(post('/v1/sessions/s2/tasks', { ...CREATE, status: 'live' }));
-      const completion = { action: 'phase', phase: 'done', reason: 'checked another board' } as const;
-      const headers = {
-        ...agentIn('s1'),
-        'x-fy-board-capability': 'peer-capability',
-        'x-fy-request-id': 'cross-board-click-1',
-      };
-
-      // Act
-      const completed = await dispatch.dispatch(post('/v1/sessions/s2/tasks/F1', completion, headers));
-      const replayed = await dispatch.dispatch(post('/v1/sessions/s2/tasks/F1', completion, headers));
-      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s2/tasks/F1', headers: human }));
-
-      // Assert
-      should(completed.status).equal(200);
-      should(replayed.status).equal(200);
-      should(calls).deepEqual([
-        { targetSessionId: 's2', capability: 'peer-capability', action: 'mark_done' },
-        { targetSessionId: 's2', capability: 'peer-capability', action: 'mark_done' },
-      ]);
-      const activity = (jsonBody(detail) as unknown as ScopedTaskDetailResponse).activity;
-      should(activity.filter(entry => entry.type === 'status')).have.length(1);
-      should(activity.filter(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).have.length(
-        1,
-      );
-    });
-
-    it('should refuse a grant whose peer disagrees with the completion actor without changing the task', async () => {
-      // The session header is only attribution; the capability is the board's identity proof.
-      // Letting them name different peers would journal a completion under an actor the board did
-      // not authorize, which is false provenance even though the capability itself is valid.
-      // Arrange
-      const dispatch = dispatcher({
-        boardActions: {
-          authorize: async () => ({ ...RESOLVED_GRANT, sessionId: 's2' }),
-        },
-      });
-      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
-      for (const phase of ['build', 'built', 'live'] as const) {
-        await dispatch.dispatch(
-          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
-        );
-      }
-
-      // Act
-      const refused = await dispatch.dispatch(
-        post(
-          '/v1/sessions/s1/tasks/F1',
-          { action: 'phase', phase: 'done', reason: 'claimed complete' },
-          { ...agentIn('s1'), 'x-fy-board-capability': 's2-capability', 'x-fy-request-id': 'click-2' },
-        ),
-      );
-      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
-
-      // Assert
-      should(refused.status).equal(403);
-      should(jsonBody(refused)).have.property('code', 'forbidden');
-      const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
-      should(body.task.phase).equal('live');
-      should(body.activity).have.length(4);
-      should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
-    });
-
-    it('should refuse malformed board evidence without creating a trusted top-agent attestation', async () => {
-      // Arrange — a mount adapter is still a trust boundary: a broken authorizer must not become a
-      // positively stamped completion merely because it returned an object of the broad grant shape.
-      const dispatch = dispatcher({
-        boardActions: {
-          authorize: async () => ({ ...RESOLVED_GRANT, role: 'read', allowedActions: ['read'] }),
-        },
-      });
-      await dispatch.dispatch(post('/v1/sessions/s1/tasks', CREATE));
-      for (const phase of ['build', 'built', 'live'] as const) {
-        await dispatch.dispatch(
-          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
-        );
-      }
-
-      // Act
-      const refused = await dispatch.dispatch(
-        post(
-          '/v1/sessions/s1/tasks/F1',
-          { action: 'phase', phase: 'done', reason: 'claimed complete' },
-          { ...agentIn('s1'), 'x-fy-board-capability': 'malformed-capability', 'x-fy-request-id': 'click-3' },
-        ),
-      );
-      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
-
-      // Assert
-      should(refused.status).equal(409);
-      const body = jsonBody(detail) as unknown as ScopedTaskDetailResponse;
-      should(body.task.phase).equal('live');
-      should(body.activity).have.length(4);
-      should(body.activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
-    });
-
-    it('should keep a shared live completion unavailable when the board authorizer cannot mount', async () => {
-      // Arrange — no fallback to the task route is allowed when the permission
-      // source is unavailable: that would turn damaged board state into a grant.
+    it('should let an agent close its own live task as a claim, with no board capability', async () => {
+      // Arrange — authority over a session's tasks is ownership: the agent's own header is the whole proof.
       const { dispatch } = await withTask();
       for (const phase of ['build', 'built', 'live'] as const) {
         await dispatch.dispatch(
@@ -1174,17 +998,35 @@ describe('the task board mount', () => {
       }
 
       // Act
-      const response = await dispatch.dispatch(
-        post(
-          '/v1/sessions/s1/tasks/F1',
-          { action: 'phase', phase: 'done', reason: 'claimed complete' },
-          { ...agentIn('s1'), 'x-fy-board-capability': 'peer-capability' },
-        ),
+      const done = await dispatch.dispatch(
+        post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase: 'done', reason: 'finished' }, agentIn('s1')),
+      );
+      const detail = await dispatch.dispatch(request({ path: '/v1/sessions/s1/tasks/F1', headers: human }));
+
+      // Assert
+      should(done.status).equal(200);
+      should((jsonBody(done) as unknown as ScopedTaskView).phase).equal('done');
+      const activity = (jsonBody(detail) as unknown as ScopedTaskDetailResponse).activity;
+      should(activity.filter(entry => entry.type === 'status' && entry.data.completionClaim === true)).have.length(1);
+      should(activity.some(entry => entry.type === 'status' && entry.data.verifiedByTopAgent === true)).be.false();
+    });
+
+    it('should refuse an agent closing another session live task', async () => {
+      // Arrange
+      const { dispatch } = await withTask();
+      for (const phase of ['build', 'built', 'live'] as const) {
+        await dispatch.dispatch(
+          post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase, reason: `move to ${phase}` }),
+        );
+      }
+
+      // Act
+      const refused = await dispatch.dispatch(
+        post('/v1/sessions/s1/tasks/F1', { action: 'phase', phase: 'done', reason: 'not mine' }, agentIn('s2')),
       );
 
       // Assert
-      should(response.status).equal(503);
-      should(jsonBody(response)).have.property('code', 'unavailable');
+      should(refused.status).equal(403);
     });
   });
 

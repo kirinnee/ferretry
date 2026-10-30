@@ -119,7 +119,6 @@ describe('a real Pack start', () => {
         mode: 'auto',
         cwd,
         agent: 'claude-auto-work',
-        boardAccess: 'none',
         model: 'claude-opus-5-5',
         name: 'Review packages/daemon/src/lib/pack for races',
       },

@@ -42,7 +42,6 @@ const plan = {
     cwd: '/work/repo',
     mode: 'auto' as const,
     parentSessionId: null,
-    boardAccess: 'none' as const,
     label: null,
     harnessFlags: [] as readonly string[],
     remoteControl: true,

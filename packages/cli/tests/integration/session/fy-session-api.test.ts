@@ -89,7 +89,7 @@ describe('FySessionApi', () => {
       await subject.list(),
       await subject.get('ses-1'),
       await subject.suggestNames(3),
-      await subject.start({ mode: 'auto', prompt: 'go', agent: 'a' }, 'req-1', 'cap-1'),
+      await subject.start({ mode: 'auto', prompt: 'go', agent: 'a' }, 'req-1'),
       await subject.send('ses-1', { message: 'hi' }),
       await subject.answer('ses-1', 'tool-1', ['yes'], 'other', ['yes']),
       await subject.interrupt('ses-1'),
@@ -116,7 +116,7 @@ describe('FySessionApi', () => {
       'sendStatus',
     ]);
     should(client.calls[2]?.args).deepEqual([3]);
-    should(client.calls[3]?.args).deepEqual([{ mode: 'auto', prompt: 'go', agent: 'a' }, 'req-1', 'cap-1']);
+    should(client.calls[3]?.args).deepEqual([{ mode: 'auto', prompt: 'go', agent: 'a' }, 'req-1']);
     should(client.calls[5]?.args).deepEqual(['ses-1', 'tool-1', ['yes'], 'other', ['yes']]);
     should(client.calls[8]?.args).deepEqual(['ses-1', 'waiting', undefined, { peer: 'ses-2' }]);
     should(results[0]).deepEqual([view]);
