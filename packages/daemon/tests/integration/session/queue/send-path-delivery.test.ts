@@ -39,14 +39,16 @@ const message = (overrides: Partial<QueuedMessage> = {}): QueuedMessage => ({
 
 type SendRequest = Parameters<SessionSendService['send']>[0];
 
-function transport(answer: SendDisposition | Error, records: readonly SendRecord[] = []) {
+function transport(answer: SendDisposition | Error, records: readonly SendRecord[] = [], untyped = false) {
   const requests: SendRequest[] = [];
   const subject = new SendPathQueueTransport(
     {
       send: async request => {
         requests.push(request);
         if (answer instanceof Error) throw answer;
-        return { disposition: answer } as Awaited<ReturnType<SessionSendService['send']>>;
+        return { disposition: answer, record: { untyped } } as unknown as Awaited<
+          ReturnType<SessionSendService['send']>
+        >;
       },
     },
     { list: async () => records },
@@ -88,6 +90,11 @@ describe('SendPathQueueTransport', () => {
     should(await transport(new SendUnconfirmed('typed, not shown', 'q-1')).subject.handOver(ID, message())).deepEqual({
       kind: 'unproven',
     });
+  });
+
+  it('should call a send the send path kept open, untyped, unproven — whatever its disposition says', async () => {
+    // An idle pane's kept send still answers `delivered`: nothing was typed, and the ledger will say when.
+    should(await transport('delivered', [], true).subject.handOver(ID, message())).deepEqual({ kind: 'unproven' });
   });
 
   it('should turn each refusal that typed nothing into the reason the message waits', async () => {

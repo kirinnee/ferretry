@@ -44,6 +44,10 @@ export class SendPathQueueTransport implements QueueTransport {
         ...(message.sender === 'agent' && message.from !== undefined ? { senderReference: message.from } : {}),
         ...(message.sender === 'daemon' ? { origin: 'daemon' as const } : {}),
       });
+      // A person's send the screen refused before any key is kept open and `untyped` by the send path,
+      // which types it itself once the screen reads clear; its disposition then says nothing about the
+      // pane. Unproven, so the ledger — keyed by this id — moves the message on.
+      if (outcome.record.untyped === true) return { kind: 'unproven' };
       return LANDED.has(outcome.disposition) ? { kind: 'landed' } : { kind: 'unproven' };
     } catch (error) {
       if (error instanceof SendUnconfirmed) return { kind: 'unproven' };
