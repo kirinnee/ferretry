@@ -1224,6 +1224,60 @@ describe('backpressure on a relayed session', () => {
     should(sent.frames.filter(frame => frame.kind === FRAME_KINDS.data).length).be.greaterThan(records.length);
   });
 
+  it('should keep the session when a small answer queues behind a large answer of more parts than one window', async () => {
+    // Arrange — the mirror of the browser's photo case: one answer is far more parts than the window,
+    // the browser has returned no credit yet, and another request finishes behind it. Counting the
+    // parts against the window ended the session here, failing every request on it.
+    const big = 'x'.repeat(MAX_PLAINTEXT_BYTES * (CREDIT_WINDOW_FRAMES * 2 + 8));
+    const { link, wire: sent } = harness(async request =>
+      request.path === '/v1/big' ? { status: 200, headers: new Map(), body: big } : json(200, { small: true }),
+    );
+    await link.receiveBinary(challenge());
+    await link.receiveBinary(claimed());
+    const session = await openSession(link, sent, sessionOne());
+    let channel = await clientSend(link, session.channel, {
+      t: 'auth',
+      protocol: SESSION_PROTOCOL_ID,
+      deviceToken: DEVICE_TOKEN,
+    });
+
+    // Act
+    channel = await clientSend(link, channel, { t: 'req', id: 1, method: 'GET', path: '/v1/big' });
+    await link.receiveBinary(claimed());
+    channel = await clientSend(link, channel, { t: 'req', id: 2, method: 'GET', path: '/v1/small' });
+    await link.receiveBinary(claimed());
+
+    // Assert — still open, and once the browser returns credit both answers arrive whole.
+    should(sent.frames.some(frame => controlOf(frame)?.t === 'closed')).be.false();
+    should(link.report().sessions).equal(1);
+    // Like a browser reading promptly: return credit for exactly what was delivered, until nothing is left.
+    const delivered = (): number => sent.frames.filter(frame => frame.kind === FRAME_KINDS.data).length;
+    let credited = 0;
+    while (delivered() > credited) {
+      const owed = delivered() - credited;
+      credited += owed;
+      await link.receiveBinary(
+        encodeFrame({
+          kind: FRAME_KINDS.credit,
+          sessionId: sessionOne(),
+          sequence: 0,
+          payload: encodeCreditPayload(owed),
+        }),
+      );
+      await link.receiveBinary(claimed());
+    }
+    const read = await clientReadAll(sent, session.channel);
+    const answers = read.messages as Array<{ t: string; id?: number; body?: string }>;
+    should(
+      answers
+        .filter(message => message.id === 1)
+        .map(message => message.body ?? '')
+        .join(''),
+    ).equal(big);
+    should(answers.find(message => message.id === 2)).containDeep({ t: 'res', status: 200 });
+    should(sent.frames.some(frame => controlOf(frame)?.t === 'closed')).be.false();
+  });
+
   it('should end a session over malformed credit, or a grant that changes nothing', async () => {
     // Arrange
     const malformed = harness();
