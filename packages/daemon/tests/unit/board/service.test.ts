@@ -1,11 +1,11 @@
 import { describe, it } from 'bun:test';
 import {
+  BoardQuerySchema,
   type BoardTask,
   type BoardTaskActionRequestInput,
   BoardTaskActionRequestSchema,
   type BoardTaskCreateRequestInput,
   BoardTaskCreateRequestSchema,
-  BoardQuerySchema,
 } from '@ferretry/protocol';
 import should from 'should';
 import {
@@ -15,6 +15,7 @@ import {
   BoardService,
   BoardUnavailableError,
   DEPENDENCY_SECTION,
+  LivenessActivityDeriver,
   OWNER_MOVE_SOURCE,
   reopenMessage,
 } from '../../../src/lib/board/index.ts';
@@ -24,6 +25,7 @@ import {
   FakeFocus,
   FakeLanes,
   FakeReopen,
+  FakeSessions,
   lanes,
   MemoryBoardStore,
   NOW,
@@ -619,6 +621,23 @@ describe('dependencies', () => {
   });
 });
 
+describe('reading a card by the old task it came from', () => {
+  it('should serve the card whose legacyRef matches, and say when none does', async () => {
+    // Arrange
+    const store = new MemoryBoardStore([card({ legacyRef: 'abc:F12' }), card({ id: 'F2', legacyRef: 'abc:F13' })]);
+    const { service } = serviceWith([], { store });
+
+    // Act
+    const found = await service.taskByLegacyRef('abc:F13');
+    const missing = await refusal(service.taskByLegacyRef('abc:F14'));
+
+    // Assert
+    should(found.task.id).equal('F2');
+    should(missing.code).equal('not-found');
+    should(missing.message).containEql('abc:F14');
+  });
+});
+
 describe('everything else on a card', () => {
   it('should focus the calling ferret without writing the card', async () => {
     // Arrange
@@ -1077,6 +1096,23 @@ describe('reading the board', () => {
     should(found.laneSet).be.null();
     should(missing.code).equal('not-found');
     should(damaged.message).containEql('quarantined');
+  });
+
+  it('should hand the sweep every card, closed and dropped included, with every lane set, in one roster read', async () => {
+    // Arrange
+    const sessions = new FakeSessions();
+    const activity = new LivenessActivityDeriver({ sessions, clock: { now: () => NOW } });
+
+    // Act
+    const swept = await serviceWith(board(), { activity }).service.sweepBoard();
+    const unidentified = await serviceWith(board(), { machineId: () => undefined }).service.sweepBoard();
+
+    // Assert
+    should(swept.views.map(view => view.id)).eql(['F1', 'F2', 'F3', 'F4', 'F5']);
+    should([...swept.laneSets.keys()].sort()).eql([PROJECT, OTHER_PROJECT].sort());
+    should(swept.views[0]).match({ activity: 'idle', lastTouchedAt: NOW, touchedBy: 'lead' });
+    should(sessions.reads).equal(1);
+    should(unidentified.views).have.length(5);
   });
 });
 

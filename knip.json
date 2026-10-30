@@ -43,6 +43,8 @@
         "harness/screenshot.ts",
         "harness/agenda-cards-screenshot.ts",
         "harness/agenda-cards-page.tsx",
+        "harness/board-screenshot.ts",
+        "harness/board-page.tsx",
         "harness/agenda-v3-screenshot.ts",
         "harness/allow-confirm-screenshot.tsx",
         "harness/agenda-page.tsx",

@@ -21,6 +21,7 @@ import {
   type BoardTaskId,
   type BoardTaskResponse,
   BoardTaskSchema,
+  type BoardTaskView,
   formatTaskRef,
   type Lane,
   type LaneSet,
@@ -147,9 +148,26 @@ export class BoardService {
     };
   }
 
+  /** Every card's view, closed and dropped included, with every board's lanes: the board sweep's one read. */
+  async sweepBoard(): Promise<{ readonly views: readonly BoardTaskView[]; readonly laneSets: LaneSets }> {
+    const snapshot = await this.ports.store.read();
+    const laneSets = await this.laneSetsOf(snapshot.cards.map(card => card.projectId));
+    const index = new BoardIndex(snapshot.cards, this.ports.machineId() ?? '');
+    const derivation = await gatherDerivation(snapshot.cards, index, laneSets, this.ports);
+    return { views: snapshot.cards.map(card => deriveView(card, derivation)), laneSets };
+  }
+
   /** One card, in full, with its board's lanes. */
   async task(id: BoardTaskId): Promise<BoardTaskResponse> {
     return await this.view(await this.ports.store.read(), id);
+  }
+
+  /** The card an old task became: `<session>:<old id>`, as `legacyRef` records it. */
+  async taskByLegacyRef(legacyRef: string): Promise<BoardTaskResponse> {
+    const snapshot = await this.ports.store.read();
+    const card = snapshot.cards.find(candidate => candidate.legacyRef === legacyRef);
+    if (card === undefined) throw new BoardError('not-found', `no card came from the old task ${legacyRef}`);
+    return await this.view(snapshot, card.id);
   }
 
   // -------------------------------------------------------------------------------------------------

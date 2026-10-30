@@ -6,7 +6,6 @@ import {
   BoardUnavailableError,
   BOARD_UNAVAILABLE_MESSAGE,
   NoLaneProposals,
-  NoPendingContext,
   STUB_LANE_SET_PROPOSER,
   StubLaneSetSource,
 } from '../../../src/lib/board/index.ts';
@@ -32,14 +31,12 @@ describe('the stubs later units replace', () => {
     should(laneSet.lanes.map(lane => lane.id)).eql(LANE_TEMPLATES['pr-release-verify'].lanes.map(lane => lane.id));
   });
 
-  it('should propose no lanes and drop every quiet line', async () => {
+  it('should propose no lanes', async () => {
     // Act
     const proposed = await new NoLaneProposals().propose();
-    const appended = await new NoPendingContext().append();
 
     // Assert
     should(proposed).be.null();
-    should(appended).be.undefined();
   });
 });
 

@@ -58,6 +58,8 @@ import { registerBoardCommands } from '../src/adapters/board/board-commands';
 import { FyBoardGateway } from '../src/adapters/board/fy-board-gateway';
 import { BoardController } from '../src/lib/board/board-controllers';
 import { FyTaskGateway } from '../src/adapters/tasks/fy-task-gateway';
+import { registerBoardImportCommand } from '../src/adapters/board-import/board-import-command';
+import { FyBoardImportGateway } from '../src/adapters/board-import/fy-board-import-gateway';
 import { FyLaneGateway } from '../src/adapters/board-lanes/fy-lane-gateway';
 import { registerLaneCommands } from '../src/adapters/board-lanes/lane-commands';
 import { registerTaskCommands } from '../src/adapters/tasks/task-commands';
@@ -912,6 +914,8 @@ const DOMAIN_REGISTRARS: ReadonlyArray<(wiring: DomainWiring) => void> = [
   },
   ({ program, world, client }) =>
     registerLaneCommands(program, { gateway: new FyLaneGateway(client), io: world.io, binaryName: BINARY_NAME }),
+  ({ program, world, client }) =>
+    registerBoardImportCommand(program, { gateway: new FyBoardImportGateway(client), io: world.io }),
   ({ program, world, client, ownSessionId }) =>
     registerStopCommands(
       program,

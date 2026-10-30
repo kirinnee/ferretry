@@ -19,6 +19,7 @@ import {
   type SendRecord,
   type SendRepository,
   SendRetypeWithheld,
+  type SendTarget,
   type SendTerminal,
   type SendTracking,
   TERMINAL_SEND_STATUSES,
@@ -403,6 +404,11 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
     // already typed into a mid-turn pane is proven absent only once the turn ends — when the harness
     // has either submitted what it held, and the transcript says so, or holds nothing at all.
     if (waitsForTurnEnd) return await this.wait(id, record, now);
+    // The agent took a turn AFTER this send went in. Whatever the transcript matcher could not read, a
+    // message that was typed or queued and then followed by a turn was what that turn worked on: typing
+    // it again is the duplicate in the receiver's chat. Waiting is safe — the transcript can still prove
+    // it, and the hold ceiling still ends it as unconfirmed rather than as lost.
+    if (turnStartedAfter(record, target)) return await this.wait(id, record, now);
     // PROVEN ABSENT: not in the transcript, not in the harness's queue, not on screen.
     const reason: SendUnaccountedReason = verdict?.released === true ? 'composer_discarded' : 'not_delivered';
     if ((record.attempt ?? 1) < attemptsAllowed(record, this.settings)) {
@@ -486,6 +492,25 @@ export class SendTracker implements SendTracking, SendTrackingLoop {
       await this.ports.notifier.notify(record.from, id, next).catch(() => undefined);
     return next;
   }
+}
+
+/**
+ * Whether the session's turn clock moved after this send's current attempt reached the agent.
+ *
+ * A QUEUED send is measured from the moment the harness held it — the turn running then ends and the
+ * next one starts on it. Any other is measured from its attempt, and only a turn that is `working`
+ * counts: an idle boundary after a send typed into a composer says nothing about it. An unreadable
+ * clock proves nothing, so it never withholds a retry.
+ */
+function turnStartedAfter(record: SendRecord, target: SendTarget): boolean {
+  if (target.turnStateAt === undefined) return false;
+  const queued = record.fate === 'queued' || record.queueProof !== undefined;
+  if (!queued && target.turnState !== 'working') return false;
+  const since = Date.parse(
+    queued ? (record.queuedAt ?? record.attemptAt ?? record.acceptedAt) : (record.attemptAt ?? record.acceptedAt),
+  );
+  const changed = Date.parse(target.turnStateAt);
+  return Number.isFinite(since) && Number.isFinite(changed) && changed > since;
 }
 
 /**

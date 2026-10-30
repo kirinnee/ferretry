@@ -3,7 +3,7 @@
  * plus what follows from the other cards, session liveness and the agenda.
  *
  * - `blockedBy`, `blocks`, `rollup`, `suggestedLane` and `shippedIn` are computed here, from the cards.
- * - `lastTouchedAt`, `touchedBy` and `activity` come from the {@link ActivityDeriver} port (U5).
+ * - `lastTouchedAt`, `touchedBy` and `activity` come from the {@link ActivityDeriver} port.
  * - `waitingOnOwner` and `openAsks` come from the {@link AgendaLinkSource} port (U7).
  */
 import {
@@ -119,13 +119,17 @@ export const deriveView = (card: BoardTask, inputs: DerivationInputs): BoardTask
   };
 };
 
-/** Asks the two ports about a set of cards at once, so a page costs one call to each. */
+/**
+ * Asks the two ports about a set of cards at once, so a page costs one call to each. The agenda
+ * answers first: a blocking ask is part of what makes a card `waiting`.
+ */
 export const gatherDerivation = async (
   cards: readonly BoardTask[],
   index: BoardIndex,
   laneSets: LaneSets,
   ports: { readonly activity: ActivityDeriver; readonly agenda: AgendaLinkSource },
 ): Promise<DerivationInputs> => {
-  const [activity, asks] = await Promise.all([ports.activity.derive(cards), ports.agenda.asksFor(cards)]);
+  const asks = await ports.agenda.asksFor(cards);
+  const activity = await ports.activity.derive({ cards, index, laneSets, asks });
   return { index, laneSets, activity, asks };
 };
