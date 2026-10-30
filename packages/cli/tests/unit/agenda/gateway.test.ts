@@ -152,3 +152,22 @@ describe('the features the daemon offers', () => {
     should(await down.features()).deepEqual([]);
   });
 });
+
+describe('protocol agenda gateway: clearing the agent ferrets', () => {
+  it('should post a dry run as a count and a clear as an empty body, attributed to the CLI', async () => {
+    // Arrange
+    const calls: Call[] = [];
+    const gateway = new ProtocolAgendaGateway(fakeClient({ cleared: 4, sessions: 2 }, calls));
+
+    // Act
+    const counted = await gateway.clearAgents(true);
+    const cleared = await gateway.clearAgents(false);
+
+    // Assert
+    should(counted).deepEqual({ cleared: 4, sessions: 2 });
+    should(cleared).deepEqual({ cleared: 4, sessions: 2 });
+    should(calls.map(call => call.path)).deepEqual(['/v1/agenda/clear-agents', '/v1/agenda/clear-agents']);
+    should(calls.map(call => call.init?.body)).deepEqual([JSON.stringify({ dryRun: true }), '{}']);
+    should(calls[0]?.init?.method).equal('POST');
+  });
+});

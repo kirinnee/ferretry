@@ -82,7 +82,7 @@ The full "Set up Ferretry" skill (4.2 KB) is no longer in any prompt; the settin
 7.4 KB (the old always-on Agenda section became the short Notify rule, and its words moved into the Agenda section, which only a ferret in agenda mode carries — [notifications.md](notifications.md#agenda-mode); Hypermedia grew by 335 to teach `chart`) and the Pack section itself under 1,050 characters. The always-on Board
 section (640) was paid for, not added on top: the tools are named by prefix (`terminal_*`, `browser_*`), map, media
 and chart's full spec moved behind `fy render guide <type>`, and the lessons rule was compressed. The measured total
-is 7,242 (the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule and the reply-parks-the-item rule, paid for in its own words), and the test keeps at least 150 characters of headroom under the 7.4 KB cap. The routing line grew from a 150-character
+is 7,245 (the Agenda section carries the required `--premise` and `--context`, the self-contained, full-Markdown, hypermedia rule and the reply-parks-the-item rule — bring it back by editing the whole card, `--summary`, `--premise` and `--context` — paid for in its own words), and the test keeps at least 150 characters of headroom under the 7.4 KB cap. The routing line grew from a 150-character
 summary to the whole prompt when the use-case guide became one routing prompt, so the agent decides with
 exactly what Jev is told.
 

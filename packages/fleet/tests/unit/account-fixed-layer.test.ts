@@ -780,13 +780,14 @@ describe('AGENDA_INSTRUCTION', () => {
     should(text).containEql('`--by <time>`');
     // The answer and discussion loops, then resolving and reading.
     should(text).containEql('"[answer to !A3 …]" is the answer;');
-    // A reply PARKS the item: the ferret surfaces it if the owner must still act, or closes it.
-    should(text).containEql('"[re !A3 …]" is chat that parks it as replied');
-    should(text).containEql('`zz agenda surface <id>` if the owner must still act, else done it');
+    // A reply PARKS the item: the ferret brings it back by refreshing the WHOLE card with edit, or closes it.
+    should(text).containEql('"[re !A3 …]" is chat, parking it as replied');
+    should(text).containEql('reopen with `zz agenda edit <id>` refreshing --summary/--premise/--context, else done it');
+    should(text).not.containEql('agenda surface');
     // Every item stays current, in the turn the facts changed: edited or closed, never left stale.
     should(text).containEql('KEEP ITEMS CURRENT this turn');
-    should(text).containEql('agenda `edit <id>` if changed');
-    should(text).containEql('`done <id>` if settled');
+    should(text).containEql('`edit` if changed');
+    should(text).containEql('`done` if settled');
     should(text).containEql('`ls` = open');
     should(text).not.containEql('Attention');
     should(text).not.containEql('`fy ');

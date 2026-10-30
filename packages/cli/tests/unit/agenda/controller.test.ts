@@ -643,3 +643,126 @@ describe('agenda controller needs-info', () => {
     should(gateway.applied).have.length(1);
   });
 });
+
+describe('agenda controller clear --agents', () => {
+  const NEW_DAEMON = ['agenda.clear-agents.1'];
+  const owner = (answer: string | null, interactive = true) => {
+    const gateway = new RecordingAgendaGateway(board);
+    gateway.offered = NEW_DAEMON;
+    gateway.clearing = { cleared: 3, sessions: 2 };
+    const out = new CapturingOutput();
+    const asked: string[] = [];
+    const prompt = {
+      interactive: () => interactive,
+      ask: async (message: string) => {
+        asked.push(message);
+        return answer ?? '';
+      },
+    };
+    return {
+      gateway,
+      out,
+      asked,
+      controller: new AgendaController(gateway, out, undefined, undefined, undefined, prompt),
+    };
+  };
+
+  it('should count, ask, and clear when the owner says yes', async () => {
+    // Arrange
+    const { controller, gateway, out, asked } = owner('y');
+
+    // Act
+    await controller.clearAgents({ agents: true });
+
+    // Assert
+    should(gateway.clears).deepEqual([true, false]);
+    should(asked).deepEqual(['Dismiss 3 open agenda items on 2 agent ferrets? [y/N]']);
+    should(out.messages).deepEqual(['cleared 3 open agenda items on 2 agent ferrets']);
+  });
+
+  it('should clear without asking under --yes, and print the payload under --json', async () => {
+    // Arrange
+    const { controller, gateway, out, asked } = owner(null);
+
+    // Act
+    await controller.clearAgents({ agents: true, yes: true, json: true });
+
+    // Assert
+    should(asked).be.empty();
+    should(gateway.clears).deepEqual([true, false]);
+    should(JSON.parse(out.messages[0] ?? '')).deepEqual({ cleared: 3, sessions: 2 });
+  });
+
+  it('should clear nothing when the owner declines', async () => {
+    // Arrange
+    const { controller, gateway, out } = owner('no');
+
+    // Act
+    await controller.clearAgents({ agents: true });
+
+    // Assert
+    should(gateway.clears).deepEqual([true]);
+    should(out.messages).deepEqual(['Nothing was cleared.']);
+  });
+
+  it('should refuse to go ahead where nobody can be asked, saying how', async () => {
+    // Arrange
+    const { controller, gateway } = owner('y', false);
+    const bare = new AgendaController(gateway, new CapturingOutput(), undefined);
+
+    // Act + Assert
+    await should(controller.clearAgents({ agents: true })).be.rejectedWith(/re-run with --yes/u);
+    await should(bare.clearAgents({ agents: true })).be.rejectedWith(/re-run with --yes/u);
+    should(gateway.clears).deepEqual([true, true]);
+  });
+
+  it('should say there is nothing to clear and ask nothing', async () => {
+    // Arrange
+    const { controller, gateway, out, asked } = owner('y');
+    gateway.clearing = { cleared: 0, sessions: 0 };
+
+    // Act
+    await controller.clearAgents({ agents: true });
+
+    // Assert
+    should(out.messages).deepEqual(['nothing to clear: the agent ferrets have no open agenda items']);
+    should(asked).be.empty();
+    should(gateway.clears).deepEqual([true]);
+  });
+
+  it('should use the singular for one item on one ferret', async () => {
+    // Arrange
+    const { controller, gateway, asked } = owner('y');
+    gateway.clearing = { cleared: 1, sessions: 1 };
+
+    // Act
+    await controller.clearAgents({ agents: true });
+
+    // Assert
+    should(asked).deepEqual(['Dismiss 1 open agenda item on 1 agent ferret? [y/N]']);
+  });
+
+  it('should refuse inside a ferret session without calling the daemon', async () => {
+    // Arrange
+    const { gateway, out } = build(SESSION);
+    gateway.offered = NEW_DAEMON;
+    const inside = new AgendaController(gateway, out, SESSION);
+
+    // Act + Assert
+    await should(inside.clearAgents({ agents: true, yes: true })).be.rejectedWith(/only the owner.*FY_SESSION_ID/u);
+    should(gateway.clears).be.empty();
+  });
+
+  it('should refuse without --agents and on a daemon that cannot do it', async () => {
+    // Arrange
+    const { controller, gateway } = owner('y');
+    const old = new RecordingAgendaGateway(board);
+    const oldDaemon = new AgendaController(old, new CapturingOutput(), undefined);
+
+    // Act + Assert
+    await should(controller.clearAgents({})).be.rejectedWith(/clear --agents/u);
+    await should(oldDaemon.clearAgents({ agents: true, yes: true })).be.rejectedWith(/older than clearing/u);
+    should(gateway.clears).be.empty();
+    should(old.clears).be.empty();
+  });
+});

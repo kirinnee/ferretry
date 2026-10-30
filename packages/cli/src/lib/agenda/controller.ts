@@ -1,5 +1,6 @@
 import {
   type AgendaActionRequest,
+  type AgendaClearAgentsResult,
   type AgendaId,
   type AgendaSnapshot,
   agendaBriefRequiredProblems,
@@ -17,7 +18,7 @@ import {
   type EditFlags,
   parseBriefFile,
 } from './brief.ts';
-import type { IAgendaBriefInput, IAgendaGateway, IAgendaOutput } from './ports.ts';
+import type { IAgendaBriefInput, IAgendaGateway, IAgendaOutput, IAgendaPrompt } from './ports.ts';
 import { agendaReference, parseAgendaReference } from './reference.ts';
 import {
   renderAgendaHistory,
@@ -90,6 +91,14 @@ export interface AgendaSurfaceOptions extends AgendaCommandOptions {
   readonly now?: boolean;
 }
 
+/** Flags that clear a backlog in bulk. */
+export interface AgendaClearOptions extends AgendaCommandOptions {
+  /** `--agents`: every open item on the agent ferrets' boards. */
+  readonly agents?: boolean;
+  /** `--yes`: go ahead without asking. */
+  readonly yes?: boolean;
+}
+
 /** Flags that snooze an item: exactly one of them. */
 export interface AgendaSnoozeOptions extends AgendaCommandOptions {
   /** `--for`: how long, as typed ("4h", "90m", "1d"). */
@@ -118,6 +127,8 @@ export class AgendaController {
     private readonly input?: IAgendaBriefInput,
     /** The clock `--by` reads relative and clock times against; injected so it is testable. */
     private readonly now: () => number = Date.now,
+    /** Asks `clear --agents` for its yes; absent, only `--yes` goes ahead. */
+    private readonly prompt?: IAgendaPrompt,
   ) {}
 
   /** Said once on stderr by the deprecated `attention` spelling; stdout stays the command's own. */
@@ -294,6 +305,44 @@ export class AgendaController {
     this.#report(snapshot, options, () => renderAgendaMutation('back on the list', agendaReference(id), snapshot));
   }
 
+  /**
+   * The owner clears the agent ferrets' backlog: every open item on every non-interactive session's board
+   * is dismissed. Refused inside a ferret (`FY_SESSION_ID` set): the daemon refuses an agent too, but a
+   * ferret should hear why before it asks. The count is shown and confirmed first unless `--yes`.
+   */
+  async clearAgents(options: AgendaClearOptions): Promise<void> {
+    if (options.agents !== true) {
+      throw new Error('say what to clear: `agenda clear --agents` clears every open item on the agent ferrets’ boards');
+    }
+    if ((this.ownSessionId?.trim() ?? '') !== '') {
+      throw new Error(
+        'only the owner can clear the agent ferrets’ agenda items — this is running inside a ferret session (FY_SESSION_ID is set); ask the owner to run it at their own shell',
+      );
+    }
+    if (!(await this.gateway.features()).includes(DAEMON_FEATURES.agendaClearAgents)) {
+      throw new Error('this daemon is older than clearing the agent ferrets’ agenda items; update the daemon first');
+    }
+    const found = await this.gateway.clearAgents(true);
+    if (found.cleared === 0) {
+      this.out.success('nothing to clear: the agent ferrets have no open agenda items');
+      return;
+    }
+    if (options.yes !== true && !(await this.#confirmed(`Dismiss ${describeClear(found)}?`))) {
+      this.out.success('Nothing was cleared.');
+      return;
+    }
+    const done = await this.gateway.clearAgents(false);
+    this.out.success(options.json === true ? JSON.stringify(done, null, 2) : `cleared ${describeClear(done)}`);
+  }
+
+  async #confirmed(question: string): Promise<boolean> {
+    if (this.prompt?.interactive() !== true) {
+      throw new Error('this needs a yes and nobody can be asked here: re-run with --yes to go ahead');
+    }
+    const answer = (await this.prompt.ask(`${question} [y/N]`)).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes';
+  }
+
   async dismiss(reference: string, options: AgendaResolveOptions): Promise<void> {
     const id = parseAgendaReference(reference);
     const note = text(options.note);
@@ -361,6 +410,13 @@ export class AgendaController {
   #report(snapshot: AgendaSnapshot, options: AgendaCommandOptions, human: () => string): void {
     this.out.success(options.json === true ? JSON.stringify(snapshot, null, 2) : human());
   }
+}
+
+/** "3 open agenda items on 2 agent ferrets", in the number it is. */
+function describeClear(result: AgendaClearAgentsResult): string {
+  const items = result.cleared === 1 ? 'item' : 'items';
+  const ferrets = result.sessions === 1 ? 'ferret' : 'ferrets';
+  return `${result.cleared} open agenda ${items} on ${result.sessions} agent ${ferrets}`;
 }
 
 /** The options minus `--by`, which is read separately into `neededBy`. */
