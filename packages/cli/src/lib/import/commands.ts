@@ -120,6 +120,7 @@ export function registerNewCommand(
     )
     .option('--cwd <dir>', "its folder (defaults to its parent ferret's; a person's start runs here)")
     .option('--name <title>', 'its task title')
+    .option('--card <id>', 'an existing card of yours it works on (assigned to it; no second card is made)')
     .option('--allow-scratch', 'run it in a temporary or scratch folder anyway (refused otherwise)')
     .addOption(new Option('--mode <mode>', 'auto (default) or interactive').choices(['auto', 'interactive']))
     .option('--prompt-file <file>', 'read the brief from a file')

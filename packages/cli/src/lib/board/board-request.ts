@@ -254,6 +254,20 @@ export function buildLinkAction(options: BoardLinkOptions): BoardTaskActionReque
 export const buildAssignAction = (assignee: string | null): BoardTaskActionRequest =>
   action({ action: 'assign', assignee }, 'cannot assign');
 
+export function buildReparentAction(
+  parent: string | undefined,
+  none: boolean | undefined,
+  reason: string | undefined,
+): BoardTaskActionRequest {
+  if (none === true && present(parent) !== undefined) refuse('pass --parent <id> or --none, not both');
+  const target =
+    none === true ? null : requireCardRef(present(parent) ?? refuse('reparent needs --parent <id>, or --none'));
+  return action(
+    { action: 'reparent', parent: target, ...(present(reason) === undefined ? {} : { reason: present(reason) }) },
+    'cannot reparent',
+  );
+}
+
 export const buildNoteAction = (text: readonly string[]): BoardTaskActionRequest =>
   action({ action: 'note', text: words(text) }, 'cannot note (say something)');
 

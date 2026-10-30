@@ -177,7 +177,19 @@ const cases: SchemaCase[] = [
   {
     name: 'child card',
     schema: pack.PackChildCardSchema,
-    value: { id: 'F413', project: 'Ferretry', leadCard: 'F412', note: 'You had no card, so &F412 was made.' },
+    value: {
+      id: 'F413',
+      project: 'Ferretry',
+      parent: 'F412',
+      parentFrom: 'brief',
+      existing: true,
+      note: 'You already had &F413 for this work.',
+    },
+  },
+  {
+    name: 'new request on an existing card',
+    schema: pack.PackNewRequestSchema,
+    value: { task: 'do it', auto: true, card: 'F9' },
   },
   {
     name: 'started',
@@ -234,6 +246,16 @@ describe('pack schemas', () => {
         name: 'the old use-case pick',
         schema: pack.PackNewRequestSchema,
         value: { task: 'x', auto: true, useCase: 'bulk' },
+      },
+      {
+        name: 'a card that is not an id',
+        schema: pack.PackNewRequestSchema,
+        value: { task: 'x', auto: true, card: '&F9' },
+      },
+      {
+        name: 'a parent source nobody has',
+        schema: pack.PackChildCardSchema,
+        value: { id: 'F1', parentFrom: 'last-touched' },
       },
       { name: 'an unknown code', schema: pack.PackRefusalCodeSchema, value: 'busy' },
       { name: 'a blank prompt', schema: pack.RoutingPromptSchema, value: '   ' },

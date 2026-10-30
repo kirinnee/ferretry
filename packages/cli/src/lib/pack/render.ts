@@ -104,12 +104,26 @@ const DECIDED_BY: Readonly<Record<Extract<PackNewOutcome, { outcome: 'started' }
   jev: 'jev',
 };
 
+const PARENT_WHY: Readonly<Record<NonNullable<PackChildCard['parentFrom']>, string>> = {
+  brief: 'named in the brief',
+  focus: 'your focus card',
+};
+
+/** Where the card sits: under which card and why, that it already existed, or nothing for a top-level card. */
+function cardWhy(card: PackChildCard): string {
+  const under =
+    card.parent === undefined
+      ? ''
+      : `, under ${formatTaskRef({ id: card.parent })}${card.parentFrom === undefined ? '' : ` (${PARENT_WHY[card.parentFrom]})`}`;
+  return `${card.existing === true ? ' (an existing card, now assigned to it)' : ''}${under}`;
+}
+
 /** What `new` says about the sub-ferret's board card: which it is, and what the board could not do. */
 function cardLines(card: PackChildCard | undefined): readonly string[] {
   if (card === undefined) return [];
   const where = card.project === undefined ? '' : ` on the ${card.project} board`;
   return [
-    ...(card.id === undefined ? [] : [`Its card is ${formatTaskRef({ id: card.id })}${where}.`]),
+    ...(card.id === undefined ? [] : [`Its card is ${formatTaskRef({ id: card.id })}${where}${cardWhy(card)}.`]),
     ...(card.note === undefined ? [] : [card.note]),
   ];
 }

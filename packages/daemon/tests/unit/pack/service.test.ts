@@ -19,7 +19,7 @@ import {
   PackStartRefused,
   subFerretFooter,
 } from '../../../src/lib/pack/service.ts';
-import type { Delegation } from '../../../src/lib/board/index.ts';
+import type { Delegation, DelegationRequest } from '../../../src/lib/board/index.ts';
 import { sessionView } from '../runtime/mounts/support.ts';
 import { catalog, choice, entry, facts, packConfig, runtime } from './support.ts';
 
@@ -74,7 +74,7 @@ function build(options: Options = {}) {
   const probes: Array<readonly [PackProbeRequest, number]> = [];
   const starts: StartSessionRequestInput[] = [];
   const delegations: Array<Delegation | undefined> = [];
-  const delegated: Array<readonly [string, string, boolean]> = [];
+  const delegated: Array<readonly [string, DelegationRequest, boolean]> = [];
   const ranks: Array<readonly [string, readonly RankableCandidate[], JevGuidance | undefined]> = [];
   const recorded: number[] = [];
   let spent = options.spent ?? 0;
@@ -783,9 +783,10 @@ describe("a sub-ferret's card", () => {
     lead: 'p1',
     brief: 'fix the bug',
     id: 'F413',
+    existing: false,
     parent: { id: 'F412' },
+    parentFrom: 'brief',
     project: 'Ferretry',
-    notes: [],
     ...extra,
   });
 
@@ -802,21 +803,26 @@ describe("a sub-ferret's card", () => {
     const outcome = await subject.newChild(request({ runtime: 'claude-main' }));
 
     // Assert
-    should(delegated).deepEqual([['p1', 'fix the bug', true]]);
+    should(delegated).match([['p1', { brief: 'fix the bug' }, true]]);
     should(delegations).deepEqual([reserved]);
     should(starts[0]?.prompt).containEql(
-      'Your card is &F413 on the Ferretry board; move it as you work (`fy task …`).',
+      'Your card is &F413 on the Ferretry board, under &F412; move it as you work (`fy task …`).',
     );
     should(starts[0]).not.have.property('boardAccess');
-    should(outcome.outcome === 'started' && outcome.card).deepEqual({ id: 'F413', project: 'Ferretry' });
+    should(outcome.outcome === 'started' && outcome.card).deepEqual({
+      id: 'F413',
+      project: 'Ferretry',
+      parent: 'F412',
+      parentFrom: 'brief',
+    });
   });
 
-  it("should say the lead's card was made for it, and not name a board a named folder may not be on", async () => {
+  it('should report a card with no parent as the top level, and not name a board a named folder may not be on', async () => {
     // Arrange
-    const notes = ['You had no card, so &F412 was made for you.'];
+    const notes = ["The sub-ferret's card has no parent, so it is at the top level of the board."];
     const { subject, starts, delegated } = build({
       parents: { p1: PARENT },
-      delegate: { delegation: delegation({ leadCard: 'F412', project: undefined, notes }), notes },
+      delegate: { delegation: delegation({ parent: null, parentFrom: undefined, project: undefined }), notes },
       child: sessionView('child-1', { focusTask: { id: 'F413' } }),
     });
 
@@ -825,8 +831,51 @@ describe("a sub-ferret's card", () => {
 
     // Assert
     should(delegated[0]?.[2]).be.false();
-    should(starts[0]?.prompt).containEql("Your card is &F413 on the project's board");
-    should(outcome.outcome === 'started' && outcome.card).deepEqual({ id: 'F413', leadCard: 'F412', note: notes[0] });
+    should(starts[0]?.prompt).containEql("Your card is &F413 on the project's board; move it");
+    should(outcome.outcome === 'started' && outcome.card).deepEqual({ id: 'F413', note: notes[0] });
+  });
+
+  it('should pass --card on, and report the existing card it was given', async () => {
+    // Arrange
+    const { subject, delegated, starts } = build({
+      parents: { p1: PARENT },
+      delegate: {
+        delegation: delegation({ id: 'F9', existing: true, parent: { id: 'F1' }, parentFrom: undefined }),
+        notes: [],
+      },
+      child: sessionView('child-1', { focusTask: { id: 'F9' } }),
+    });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', card: 'F9' }));
+
+    // Assert
+    should(delegated[0]?.[1].card).equal('F9');
+    should(starts[0]?.prompt).containEql('Your card is &F9 on the Ferretry board, under &F1;');
+    should(outcome.outcome === 'started' && outcome.card).deepEqual({
+      id: 'F9',
+      project: 'Ferretry',
+      parent: 'F1',
+      existing: true,
+    });
+  });
+
+  it('should refuse the start, starting nothing, when the card named cannot be handed over', async () => {
+    // Arrange
+    const { subject, starts } = build({
+      parents: { p1: PARENT },
+      delegate: { refusal: '&F9 is dropped; reopen it before you hand it to a sub-ferret', notes: [] },
+    });
+
+    // Act
+    const outcome = await subject.newChild(request({ runtime: 'claude-main', card: 'F9' }));
+
+    // Assert
+    should(starts).be.empty();
+    should(outcome.outcome === 'refused' && outcome.refusal).match({
+      code: 'card_unavailable',
+      message: '&F9 is dropped; reopen it before you hand it to a sub-ferret',
+    });
   });
 
   it('should say so when the start made no card, and the footer then names none', async () => {

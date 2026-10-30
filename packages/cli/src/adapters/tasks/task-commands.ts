@@ -205,6 +205,16 @@ export function registerTaskCommands(program: Command, dependencies: TaskCommand
       await board.order(id, rank, options);
     });
 
+  acting(group.command('reparent'))
+    .description('move a card under another card, or to the top level of its board')
+    .argument('<id>', ID_HELP)
+    .option('--parent <id>', 'the card it goes under: &F21 (or F21)')
+    .option('--none', 'make it a top-level card instead')
+    .option('--reason <why>', 'why it moves; kept in its history')
+    .action(async (id: string, options: SessionOptions & { parent?: string; none?: boolean; reason?: string }) => {
+      await board.reparent(id, options);
+    });
+
   acting(group.command('file'))
     .description('claim or release a file; claims are advisory, never a lock')
     .argument('<id>', ID_HELP)

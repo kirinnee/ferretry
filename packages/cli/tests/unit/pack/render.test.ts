@@ -155,16 +155,22 @@ describe('renderPackNewOutcome', () => {
     // Act
     const named = renderPackNewOutcome(
       started({
-        card: { id: 'F413', project: 'Ferretry', leadCard: 'F412', note: 'You had no card, so &F412 was made.' },
+        card: { id: 'F413', project: 'Ferretry', parent: 'F412', parentFrom: 'brief', note: 'Mind the board.' },
       }),
       'fy',
     );
+    const focused = renderPackNewOutcome(started({ card: { id: 'F413', parent: 'F85', parentFrom: 'focus' } }), 'fy');
+    const existing = renderPackNewOutcome(started({ card: { id: 'F9', parent: 'F1', existing: true } }), 'fy');
     const bare = renderPackNewOutcome(started({ card: { id: 'F413' } }), 'fy');
     const unmade = renderPackNewOutcome(started({ card: { note: 'No card was made: the board is down' } }), 'fy');
     const none = renderPackNewOutcome(started(), 'fy');
 
     // Assert
-    should(named).containEql('Its card is &F413 on the Ferretry board.\nYou had no card, so &F412 was made.');
+    should(named).containEql(
+      'Its card is &F413 on the Ferretry board, under &F412 (named in the brief).\nMind the board.',
+    );
+    should(focused).containEql('Its card is &F413, under &F85 (your focus card).');
+    should(existing).containEql('Its card is &F9 (an existing card, now assigned to it), under &F1.');
     should(bare).containEql('Its card is &F413.');
     should(unmade).containEql('No card was made: the board is down');
     should(unmade).not.containEql('Its card is');

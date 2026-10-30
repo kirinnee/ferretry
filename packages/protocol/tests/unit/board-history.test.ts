@@ -130,6 +130,16 @@ describe('describeBoardEvent', () => {
     ).equal('refiled to unfiled (Todo): wrong board');
   });
 
+  it('should describe a re-parent, with the old place and the reason', () => {
+    // Act + Assert
+    should(say({ type: 'reparented', from: null, to: { id: 'F85' }, reason: 'it belongs to the board work' })).equal(
+      're-parented under &F85 (was top level): it belongs to the board work',
+    );
+    should(say({ type: 'reparented', from: { id: 'F85' }, to: null, reason: null })).equal(
+      're-parented now top level (was &F85)',
+    );
+  });
+
   it('should describe a drop and a migration', () => {
     // Act + Assert
     should(say({ type: 'dropped', reason: 'superseded' })).equal('dropped: superseded');

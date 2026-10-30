@@ -68,6 +68,7 @@ describe('the authority matrix', () => {
     { operation: 'drop', expected: ['owner-human', 'owner', 'ancestor'] },
     { operation: 'assign', expected: ['owner-human', 'owner', 'ancestor'] },
     { operation: 'order', expected: ['owner-human', 'owner', 'ancestor'] },
+    { operation: 'reparent', expected: ['owner-human', 'owner', 'ancestor'] },
     { operation: 'replan', expected: ['owner-human', 'owner', 'ancestor'] },
     { operation: 'override', expected: ['owner-human'] },
     { operation: 'pass-gate', expected: ['owner-human'] },

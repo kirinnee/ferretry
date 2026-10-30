@@ -144,8 +144,9 @@ const HISTORY = [
     toLane: 'implement',
     reason: 'found its repo',
   }),
-  event(19, { type: 'dropped', reason: 'superseded by &F20' }),
-  { ...event(20, { type: 'migrated', legacyRef: `${LEAD}:F12` }), actor: DAEMON },
+  event(19, { type: 'reparented', from: null, to: { id: 'F85' }, reason: 'it is part of the board work' }),
+  event(20, { type: 'dropped', reason: 'superseded by &F20' }),
+  { ...event(21, { type: 'migrated', legacyRef: `${LEAD}:F12` }), actor: DAEMON },
 ];
 
 const CARD: BoardTask = BoardTaskSchema.parse({
@@ -644,6 +645,8 @@ describe('board mutations', () => {
       { action: 'file', path: 'a.ts', release: true, reason: 'done' },
       { action: 'order', order: 2 },
       { action: 'refile', projectId: PROJECT },
+      { action: 'reparent', parent: { id: 'F85' }, reason: 'fits' },
+      { action: 'reparent', parent: null },
     ];
     should(accepted.filter(value => !action(value))).deepEqual([]);
     should(BoardTaskActionRequestSchema.parse({ action: 'depend', task: { id: 'F18' } })).deepEqual({

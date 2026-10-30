@@ -29,7 +29,7 @@ import type {
   StartSessionRequestInput,
 } from '@ferretry/protocol';
 import { formatTaskRef, taskTitleFor } from '@ferretry/protocol';
-import { cardFooterLine, type Delegation, type SessionCards } from '../board/index.ts';
+import { cardFooterLine, type Delegation, type DelegationOutcome, type SessionCards } from '../board/index.ts';
 import { admitChild, type ParentFacts } from './admission.ts';
 import { buildInventory } from './cleanup/inventory.ts';
 import { PACK_JEV_LIMITS, type PackJevPort } from './jev.ts';
@@ -140,7 +140,9 @@ export function startedCard(
   return {
     ...(made ? { id: focus.id } : {}),
     ...(made && delegation?.project !== undefined ? { project: delegation.project } : {}),
-    ...(delegation?.leadCard === undefined ? {} : { leadCard: delegation.leadCard }),
+    ...(made && delegation?.parent != null ? { parent: delegation.parent.id } : {}),
+    ...(made && delegation?.parentFrom !== undefined ? { parentFrom: delegation.parentFrom } : {}),
+    ...(made && delegation?.existing === true ? { existing: true as const } : {}),
     ...(said.length === 0 ? {} : { note: said.join(' ') }),
   };
 }
@@ -350,7 +352,7 @@ export class PackService {
   ): Promise<PackNewOutcome> {
     const attempts: PackAttempt[] = [];
     let last: PackRefusal | undefined;
-    let card: Awaited<ReturnType<PackPorts['cards']['delegate']>> | undefined;
+    let card: DelegationOutcome | undefined;
     for (const choice of ordered.choices) {
       const model = choice.model ?? choice.runtime.models?.default;
       const probed = await this.ports.probe(
@@ -379,7 +381,25 @@ export class PackService {
       // The card is the LEAD's delegation (board-design.md §3.1): reserved once, just before the first start
       // that will run, so a refusal before any start costs the board nothing.
       if (parent !== undefined && card === undefined)
-        card = await this.ports.cards.delegate(parent, request.task, request.cwd === undefined);
+        card = await this.ports.cards.delegate(
+          parent,
+          {
+            brief: request.task,
+            name: request.name ?? taskTitleFor(request.task, 'Sub-ferret'),
+            card: request.card,
+          },
+          request.cwd === undefined,
+        );
+      if (card?.refusal !== undefined) {
+        return refused(
+          {
+            code: 'card_unavailable',
+            message: card.refusal,
+            remedy: `Name a card you own that is open, or leave --card off to make a new one.`,
+          },
+          attempts,
+        );
+      }
       const delegation = card?.delegation;
       try {
         const view = await this.ports.start(
@@ -389,7 +409,9 @@ export class PackService {
             prompt: `${request.task}${subFerretFooter(
               this.ports.bin,
               parent,
-              delegation === undefined ? undefined : cardFooterLine(delegation.id, delegation.project, this.ports.bin),
+              delegation === undefined
+                ? undefined
+                : cardFooterLine(delegation.id, delegation.project, this.ports.bin, delegation.parent),
             )}`,
             cwd,
             ...(parent === undefined ? {} : { parent }),

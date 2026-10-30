@@ -15,6 +15,7 @@ import {
   buildMoveAction,
   buildNoteAction,
   buildOrderAction,
+  buildReparentAction,
   buildRefileAction,
   buildReopenAction,
   buildUnblockAction,
@@ -338,6 +339,22 @@ describe('the action builders', () => {
     for (const bad of ['-1', '1.5', 'abc']) {
       should(() => buildOrderAction(bad, undefined)).throw(/the rank must be a whole number/u);
     }
+  });
+
+  it('should build a re-parent under a card, or to the top level with --none', () => {
+    // Act + Assert
+    should(buildReparentAction('&F85', undefined, undefined)).eql({ action: 'reparent', parent: { id: 'F85' } });
+    should(buildReparentAction('f85', false, ' it fits ')).eql({
+      action: 'reparent',
+      parent: { id: 'F85' },
+      reason: 'it fits',
+    });
+    should(buildReparentAction(undefined, true, undefined)).eql({ action: 'reparent', parent: null });
+    should(() => buildReparentAction('F85', true, undefined)).throw(/pass --parent <id> or --none, not both/u);
+    should(() => buildReparentAction(undefined, undefined, undefined)).throw(
+      /reparent needs --parent <id>, or --none/u,
+    );
+    should(() => buildReparentAction('nonsense', undefined, undefined)).throw(/expected a task id like &F21/u);
   });
 
   it('should build a file claim, and a release with --remove', () => {

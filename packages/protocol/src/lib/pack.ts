@@ -268,6 +268,7 @@ export type PackCleanUpStatus = z.infer<typeof PackCleanUpStatusSchema>;
  * - `jev_unavailable` / `jev_cap_reached`: Jev decides, and could not.
  * - `scratch_cwd`: the folder named is a temporary or scratch folder, not a project; a sub-ferret runs in
  *   its parent's folder, so this comes only from an explicit `--cwd` or a start with no parent.
+ * - `card_unavailable`: the card `--card` named does not exist here, or the caller may not hand it to a sub-ferret.
  */
 export const PACK_REFUSAL_CODES = [
   'pack_off',
@@ -285,6 +286,7 @@ export const PACK_REFUSAL_CODES = [
   'jev_unavailable',
   'jev_cap_reached',
   'scratch_cwd',
+  'card_unavailable',
 ] as const;
 export const PackRefusalCodeSchema = z.enum(PACK_REFUSAL_CODES);
 export type PackRefusalCode = z.infer<typeof PackRefusalCodeSchema>;
@@ -429,6 +431,8 @@ export const PackNewRequestSchema = z
     allowScratch: z.boolean().optional(),
     name: NonEmpty.max(120).optional(),
     mode: InteractionModeSchema.optional(),
+    /** An existing card the sub-ferret works on (`--card`): assigned to it, never copied into a second card. */
+    card: BoardTaskIdSchema.optional(),
   })
   .superRefine((value, context) => {
     if (value.auto === true && value.runtime !== undefined)
@@ -452,15 +456,20 @@ export type PackAttempt = z.infer<typeof PackAttemptSchema>;
 
 /**
  * The board card a started sub-ferret works on (`board-design.md` §3.1): made with the session, owned by
- * the lead and named in the sub-ferret's brief. `leadCard` is set when the lead had no focus card and one
- * was made for it first, so the child's card has a parent. `note` says what the start could not do on the
- * board; the session started all the same, because a board failure never fails a start.
+ * the lead and named in the sub-ferret's brief. Its parent comes from the lead's intent (`parentFrom`), never
+ * from the card the lead touched last. `note` says what the start could not do on the board; the session
+ * started all the same, because a board failure never fails a start.
  */
 export const PackChildCardSchema = z.strictObject({
   id: BoardTaskIdSchema.optional(),
   /** The board's name as the owner reads it: the project's, or `Unfiled`. */
   project: NonEmpty.optional(),
-  leadCard: BoardTaskIdSchema.optional(),
+  /** The card it sits under; absent when it is at the top level. */
+  parent: BoardTaskIdSchema.optional(),
+  /** Why it sits there: `brief` (the brief names it) or `focus` (the lead's explicit focus card). */
+  parentFrom: z.enum(['brief', 'focus']).optional(),
+  /** The card was the lead's existing one (`--card` or a same-titled open card), now assigned to the sub-ferret. */
+  existing: z.literal(true).optional(),
   note: NonEmpty.optional(),
 });
 export type PackChildCard = z.infer<typeof PackChildCardSchema>;

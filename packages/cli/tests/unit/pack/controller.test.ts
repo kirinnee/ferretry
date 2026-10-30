@@ -167,6 +167,33 @@ describe('PackController.newChild', () => {
     ]);
   });
 
+  it('should send --card as the existing card the sub-ferret works on, in any spelling', async () => {
+    // Arrange
+    const { controller, gateway } = build({ parent: 'parent-1' });
+
+    // Act
+    await controller.newChild(['x'], { runtime: 'r', card: '&F138' });
+    await controller.newChild(['x'], { runtime: 'r', card: 'f9' });
+
+    // Assert
+    should(gateway.newCalls).eql([
+      { task: 'x', parent: 'parent-1', runtime: 'r', card: 'F138' },
+      { task: 'x', parent: 'parent-1', runtime: 'r', card: 'F9' },
+    ]);
+  });
+
+  it('should refuse a --card that is not a card id, before asking the daemon anything', async () => {
+    // Arrange
+    const { controller, gateway } = build({ parent: 'parent-1' });
+
+    // Act
+    const failed = controller.newChild(['x'], { runtime: 'r', card: 'the board' });
+
+    // Assert
+    await should(failed).be.rejectedWith(/expected a card id like &F21/u);
+    should(gateway.newCalls).eql([]);
+  });
+
   it('should send an explicit --cwd whether or not there is a parent', async () => {
     // Arrange
     const person = build();

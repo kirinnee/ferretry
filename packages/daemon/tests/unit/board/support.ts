@@ -190,6 +190,7 @@ export class FakeSessions implements SessionLivenessSource {
 
 export class FakeFocus implements SessionFocus {
   readonly focused = new Map<string, TaskRef>();
+  readonly anchors = new Map<string, TaskRef>();
   readonly skips = new Map<string, BoardSkip>();
 
   constructor(
@@ -197,16 +198,26 @@ export class FakeFocus implements SessionFocus {
     private readonly failing = false,
   ) {}
 
-  async setFocus(sessionId: string, task: TaskRef): Promise<boolean> {
+  async setFocus(
+    sessionId: string,
+    task: TaskRef,
+    _title?: string,
+    options: { readonly anchor?: boolean } = {},
+  ): Promise<boolean> {
     if (this.failing) throw new Error('config is read-only');
     if (!this.sessions.has(sessionId)) return false;
     this.focused.set(sessionId, task);
+    if (options.anchor === true) this.anchors.set(sessionId, task);
     this.skips.delete(sessionId);
     return true;
   }
 
   async focusOf(sessionId: string): Promise<TaskRef | null> {
     return this.focused.get(sessionId) ?? null;
+  }
+
+  async anchorOf(sessionId: string): Promise<TaskRef | null> {
+    return this.anchors.get(sessionId) ?? null;
   }
 
   async skip(sessionId: string, skip: BoardSkip): Promise<boolean> {

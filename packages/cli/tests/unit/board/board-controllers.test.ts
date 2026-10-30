@@ -859,6 +859,21 @@ describe('the action verbs', () => {
     ]);
   });
 
+  it('should send a re-parent, under a card or with --none', async () => {
+    // Arrange
+    const { controller, gateway } = harness();
+
+    // Act
+    await controller.reparent('F1', { parent: 'F85', reason: 'fits' });
+    await controller.reparent('F1', { none: true });
+
+    // Assert
+    should(sent(gateway)).eql([
+      { action: 'reparent', parent: { id: 'F85' }, reason: 'fits' },
+      { action: 'reparent', parent: null },
+    ]);
+  });
+
   it('should edit with fields, or with the brief read from --brief-file', async () => {
     // Arrange
     const { controller, gateway, files } = harness();

@@ -343,6 +343,13 @@ export const BoardTaskEventSchema = z.discriminatedUnion('type', [
     toLane: LaneIdSchema,
     reason: reason.nullable(),
   }),
+  z.object({
+    ...EventBase,
+    type: z.literal('reparented'),
+    from: TaskRefSchema.nullable(),
+    to: TaskRefSchema.nullable(),
+    reason: reason.nullable(),
+  }),
   z.object({ ...EventBase, type: z.literal('dropped'), reason }),
   z.object({ ...EventBase, type: z.literal('migrated'), legacyRef: z.string().min(1) }),
 ]);
@@ -707,6 +714,8 @@ export const BoardTaskActionRequestSchema = z.discriminatedUnion('action', [
     reason: reason.optional(),
   }),
   z.strictObject({ action: z.literal('order'), order: NonNegativeIntegerSchema.nullable() }),
+  /** Move the card under another card (or to the top level with `parent: null`); the reason goes in its history. */
+  z.strictObject({ action: z.literal('reparent'), parent: TaskRefSchema.nullable(), reason: reason.optional() }),
   /** Move the card to another project's board; absent `laneId` means the same-category lane there. */
   z.strictObject({
     action: z.literal('refile'),
