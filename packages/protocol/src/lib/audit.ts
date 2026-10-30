@@ -59,6 +59,7 @@ export const AUDIT_EVENTS = [
   'warden.configured',
   'warden.ran',
   'browser.opened',
+  'browser.proxy-tested',
   'worktree.removed',
   'agent.prompted',
   'agent.tool',

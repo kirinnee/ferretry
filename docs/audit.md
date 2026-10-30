@@ -100,6 +100,7 @@ actor phrases (`this computer`, `a supervising agent`, …).
 | `terminal.input`       | keystroke frames on a terminal stream, a Console write, and a Processes-tab Stop (`detail.mode: 'process-stop'`) — counted, never their bytes |
 | `link.opened`          | `POST /v1/system/open-url` — a link handed to this computer's browser; the host only, never the path or query                                 |
 | `browser.opened`       | browser sign-in window, browser control, and every browser stream attach                                                                      |
+| `browser.proxy-tested` | `POST /v1/browser/proxy/test` — a test of the browser proxy; the outcome and its error class in `detail`, never an address or a credential    |
 | `secrets.used`         | `POST /v1/secrets/use` — the `used` names only, never the output                                                                              |
 | `secrets.changed`      | secret put and delete — the name only                                                                                                         |
 | `warden.configured`    | `PATCH /v1/warden/config`                                                                                                                     |

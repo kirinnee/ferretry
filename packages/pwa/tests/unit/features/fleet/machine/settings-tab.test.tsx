@@ -39,16 +39,6 @@ const click = async (element: Element | null, what: string): Promise<void> => {
   await settle();
 };
 
-const typeInto = async (element: Element | null, value: string): Promise<void> => {
-  const field = must(element as HTMLInputElement | HTMLTextAreaElement | null, 'the field');
-  const prototype = field instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-  await interact(() => {
-    Object.getOwnPropertyDescriptor(prototype, 'value')?.set?.call(field, value);
-    field.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await settle();
-};
-
 const fakeWindow = (hash: string): Window =>
   Object.assign(new EventTarget(), { location: { hash } }) as unknown as Window;
 
@@ -386,155 +376,24 @@ describe('MachineSettingsTab', () => {
     });
   });
 
-  it('hides Browser mode for a daemon that predates it, and never sends it one', async () => {
-    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
-      expect(q('[data-setup-section="browser-mode"]')).toBeNull();
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      await click(q('[data-change-submit]'), 'save');
-      const staged = must(
-        calls.find(call => call.path === '/v1/fleet/proposals'),
-        'the staged change call',
-      );
-      expect(JSON.stringify(staged.body)).not.toContain('browserMode');
-    });
-  });
-
-  it('offers Headless and Real window, and Save sends the chosen Browser mode', async () => {
+  it('holds no browser settings: mode and proxy are the Browser tab’s, and a save here carries the mode on', async () => {
     await withTab(
       {
-        machine: machineView({ browserMode: 'headless' }),
+        machine: machineView({ browserMode: 'window', browserProxy: null }),
         answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
       },
-      async ({ q, calls, retried }) => {
-        const section = must(q('[data-setup-section="browser-mode"]'), 'browser mode');
-        expect(section.querySelector('[data-setup-choice="headless"]')?.textContent).toContain('Headless');
-        expect(section.querySelector('[data-setup-choice="window"]')?.textContent).toContain('Real window');
-        expect(section.querySelector('[data-setup-choice="window"]')?.textContent).toContain('needs Xvfb');
-        expect(section.querySelector<HTMLInputElement>('[data-setup-choice="headless"] input')?.checked).toBe(true);
-        expect(q('[data-browser-mode-hint]')?.textContent).toContain(
-          'Applies the next time the browser on studio-mac starts.',
-        );
-        expect(q('[data-change-submit]')).toBeNull();
-
-        await click(q('[data-setup-choice="window"] input'), 'window radio');
-        expect(q('[data-change-submit]')?.textContent).toBe('Save browser mode');
-        expect(q('[data-browser-mode-undo]')?.textContent).toBe('Keep Headless');
+      async ({ q, calls }) => {
+        expect(q('[data-setup-section="browser-mode"]')).toBeNull();
+        expect(q('[data-setup-section="browser-proxy"]')).toBeNull();
+        await click(q('[data-setup-choice="skip"] input'), 'skip radio');
         await click(q('[data-change-submit]'), 'save');
         const staged = must(
           calls.find(call => call.path === '/v1/fleet/proposals'),
           'the staged change call',
         );
         expect(JSON.stringify(staged.body)).toContain('"browserMode":"window"');
-        expect(JSON.stringify(staged.body)).toContain('"agentPermissions":"auto"');
-        expect(retried.count).toBe(1);
       },
     );
-  });
-
-  it('keeps a Real window machine’s mode, and Keep puts a pending switch back', async () => {
-    await withTab(
-      {
-        machine: machineView({ browserMode: 'window' }),
-        answers: { '/v1/fleet/proposals': new Error('unreachable') },
-      },
-      async ({ q, retried }) => {
-        expect(q('[data-setup-choice="window"] input') as HTMLInputElement).toHaveProperty('checked', true);
-        await click(q('[data-setup-choice="headless"] input'), 'headless radio');
-        expect(q('[data-browser-mode-undo]')?.textContent).toBe('Keep Real window');
-        await click(q('[data-change-submit]'), 'save');
-        expect(q('[data-change-refusal]')?.textContent).toContain('didn’t answer');
-        expect(retried.count).toBe(0);
-        await click(q('[data-browser-mode-undo]'), 'keep');
-        expect(q('[data-change-submit]')).toBeNull();
-        expect(q('[data-setup-choice="window"] input') as HTMLInputElement).toHaveProperty('checked', true);
-      },
-    );
-  });
-
-  it('hides Browser proxy for a daemon that predates it, and never sends it one', async () => {
-    await withTab({ answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME } }, async ({ q, calls }) => {
-      expect(q('[data-setup-section="browser-proxy"]')).toBeNull();
-      await click(q('[data-setup-choice="skip"] input'), 'skip radio');
-      await click(q('[data-change-submit]'), 'save');
-      const staged = must(
-        calls.find(call => call.path === '/v1/fleet/proposals'),
-        'the staged change call',
-      );
-      expect(JSON.stringify(staged.body)).not.toContain('browserProxy');
-    });
-  });
-
-  it('saves a proxy that names its secrets, and Keep puts the saved form back', async () => {
-    await withTab(
-      {
-        machine: machineView({ browserProxy: null }),
-        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
-      },
-      async ({ q, calls, retried }) => {
-        expect(q('[data-setup-section="browser-proxy"]')).not.toBeNull();
-        expect(q('[data-browser-proxy-hint]')?.textContent).toContain(
-          'Applies the next time the browser on studio-mac',
-        );
-        expect(q('[data-change-submit]')).toBeNull();
-
-        await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
-        await typeInto(q('[data-browser-proxy-bypass]'), '*.internal.example, 10.0.0.0/8');
-        await typeInto(q('[data-browser-proxy-username]'), 'PROXY_USER');
-        await typeInto(q('[data-browser-proxy-password]'), 'PROXY_PASSWORD');
-        expect(q('[data-change-submit]')?.textContent).toBe('Save browser proxy');
-
-        await click(q('[data-browser-proxy-undo]'), 'keep');
-        expect(q('[data-change-submit]')).toBeNull();
-        expect((q('[data-browser-proxy-url]') as HTMLInputElement).value).toBe('');
-
-        await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
-        await typeInto(q('[data-browser-proxy-bypass]'), '*.internal.example, 10.0.0.0/8');
-        await typeInto(q('[data-browser-proxy-username]'), 'PROXY_USER');
-        await typeInto(q('[data-browser-proxy-password]'), 'PROXY_PASSWORD');
-        await click(q('[data-change-submit]'), 'save');
-        const staged = must(
-          calls.find(call => call.path === '/v1/fleet/proposals'),
-          'the staged change call',
-        );
-        const body = JSON.stringify(staged.body);
-        expect(body).toContain('"url":"http://proxy.example:8080"');
-        expect(body).toContain('"bypass":["*.internal.example","10.0.0.0/8"]');
-        expect(body).toContain('${secret:PROXY_USER}');
-        expect(body).toContain('${secret:PROXY_PASSWORD}');
-        expect(retried.count).toBe(1);
-      },
-    );
-  });
-
-  it('turns a saved proxy off by emptying the address, sending null', async () => {
-    await withTab(
-      {
-        machine: machineView({ browserProxy: { url: 'socks5://proxy.example:1080', bypass: [] } }),
-        answers: { '/v1/fleet/proposals': STAGED, [APPLY_PATH]: OUTCOME },
-      },
-      async ({ q, calls }) => {
-        expect((q('[data-browser-proxy-url]') as HTMLInputElement).value).toBe('socks5://proxy.example:1080');
-        await typeInto(q('[data-browser-proxy-url]'), '');
-        expect(q('[data-change-submit]')?.textContent).toBe('Turn the browser proxy off');
-        await click(q('[data-change-submit]'), 'save');
-        const staged = must(
-          calls.find(call => call.path === '/v1/fleet/proposals'),
-          'the staged change call',
-        );
-        expect(JSON.stringify(staged.body)).toContain('"browserProxy":null');
-      },
-    );
-  });
-
-  it('says what to fix and offers no save while the proxy is not valid', async () => {
-    await withTab({ machine: machineView({ browserProxy: null }) }, async ({ q }) => {
-      await typeInto(q('[data-browser-proxy-url]'), 'ftp://proxy.example');
-      expect(q('[data-setup-note="browser-proxy-problem"]')).not.toBeNull();
-      expect(q('[data-change-submit]')).toBeNull();
-      await typeInto(q('[data-browser-proxy-url]'), 'http://proxy.example:8080');
-      expect(q('[data-setup-note="browser-proxy-problem"]')).toBeNull();
-      expect(q('[data-change-submit]')).not.toBeNull();
-    });
   });
 
   it('hides Auto-resume for a daemon that predates it, and never sends it one', async () => {

@@ -9,7 +9,7 @@
  */
 
 /**
- * The five tabs, in the prototype's order. The ids are the words in the link.
+ * The six tabs, in the prototype's order plus Browser before Machine. The ids are the words in the link.
  *
  * THIS IS THE ONE PLACE A TAB IS NAMED: every label a reader sees for a machine view comes from here, so
  * renaming one is a one-line change. The last tab was "Settings" — a Settings inside Settings — and is
@@ -20,6 +20,11 @@ export const MACHINE_TABS = [
   { id: 'credentials', label: 'Credentials', description: 'The logins kept on this machine.' },
   { id: 'profiles', label: 'Profiles', description: 'Layered setups a runtime uses.' },
   { id: 'components', label: 'Components', description: 'The pieces profiles are built from.' },
+  {
+    id: 'browser',
+    label: 'Browser',
+    description: 'The shared browser: its mode, its proxy (with a test) and whether it is running.',
+  },
   {
     id: 'machine',
     label: 'Machine',

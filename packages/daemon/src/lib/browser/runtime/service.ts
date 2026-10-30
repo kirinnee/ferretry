@@ -8,6 +8,7 @@ import {
   type BrowserPageSnapshot,
   type BrowserPageSummary,
   type BrowserScreencastFrame,
+  type BrowserStateView,
   type BrowserStatus,
   type BrowserViewport,
   type SurfaceOpener,
@@ -283,6 +284,17 @@ export class BrowserSessionService implements BrowserSubsystem {
     const pageId = this.viewedPage(run, sessionId);
     if (pageId === undefined) throw new BrowserSessionError('not_running', 'this session has no browser page open');
     await run.driver.dispatchInput(pageId, input);
+  }
+
+  /** The machine browser as a whole: whether it runs, since when, and the proxy it started with. */
+  overview(): BrowserStateView {
+    const run = this.run;
+    if (run === undefined) return { state: this.starting === undefined ? 'stopped' : 'starting' };
+    return {
+      state: 'running',
+      startedAt: run.startedAt,
+      ...(run.driver.proxy === undefined ? {} : { proxy: run.driver.proxy }),
+    };
   }
 
   async closeAll(): Promise<void> {

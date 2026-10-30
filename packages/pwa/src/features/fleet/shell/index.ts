@@ -1,4 +1,4 @@
-// The Machines shell (docs/design/account-model.md §4.1, §4.2): the switcher, the five tabs, the
+// The Machines shell (docs/design/account-model.md §4.1, §4.2): the switcher, the six tabs, the
 // stepper every flow renders inside, and the four status shapes. U17–U19 fill the tabs.
 export * from './account-status.tsx';
 export * from './apply-change.ts';

@@ -679,6 +679,39 @@ describe('auditedRoutes', () => {
     ]);
   });
 
+  it('should audit a proxy test by name with its outcome class, never the proxy, a credential or an address', async () => {
+    // Arrange
+    const { journal, routes } = decorated({
+      'POST /v1/browser/proxy/test': async () =>
+        jsonResponse({
+          reachable: false,
+          tested: 'unsaved',
+          errorClass: 'auth',
+          message: 'The proxy refused the username and password.',
+          egressIp: '203.0.113.7',
+          roundTripMs: 12,
+        }),
+    });
+    const api = await dispatcher(routes);
+
+    // Act
+    await api.dispatch(
+      request({
+        method: 'POST',
+        path: '/v1/browser/proxy/test',
+        headers: ADMIN,
+        loopback: true,
+        body: JSON.stringify({ proxy: { url: 'http://user:pw@proxy.example:8080', bypass: [] } }),
+      }),
+    );
+
+    // Assert
+    const [record] = records(journal);
+    should(record).containEql({ event: 'browser.proxy-tested', subject: 'browser-proxy', outcome: 'succeeded' });
+    should(JSON.stringify(record)).not.match(/proxy\.example|user:pw|203\.0\.113\.7|username and password/u);
+    should((record as { detail: Record<string, unknown> }).detail).containEql({ errorClass: 'auth', roundTripMs: 12 });
+  });
+
   it('should record a refusal and a fault, and pass each through untouched', async () => {
     // Arrange
     const { journal, routes } = decorated({

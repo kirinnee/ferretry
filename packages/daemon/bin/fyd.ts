@@ -14,7 +14,6 @@ import { hostname, tmpdir, userInfo } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import {
   AGENDA_ENV,
-  SUB_FERRET_ENV,
   ALWAYS_ON_SECTIONS,
   agendaNudgeEnabled,
   CredentialStatusService,
@@ -35,6 +34,7 @@ import {
   PASSIVE_LEARNING_ENV,
   resolveDefaultRuntime,
   runtimeIdsPath,
+  SUB_FERRET_ENV,
   sanitizeHarnessEnv,
   sharedHistoryPoolDirectory,
   wrapperNameOf,
@@ -312,6 +312,7 @@ import {
   stackSamplerEnabled,
   systemLegacyWireTimers,
   TmuxPaneSnapshot,
+  TunnelProxyProbe,
   type ViewerSocket,
   WebCryptoPasskeyCrypto,
   WebCryptoRelayIdentityKeys,
@@ -552,8 +553,8 @@ import {
   BoardService,
   BoardSweep,
   BoardTurnCheck,
-  LivenessActivityDeriver,
   DoneDeliveryLadder,
+  LivenessActivityDeriver,
   ReopenDeliveryLadder,
   SessionCards,
   type SessionLivenessSource,
@@ -583,6 +584,7 @@ import { type RuntimeNamesPort, resolveStartAccount } from '../src/lib/fleet/sta
 import { polledDirectoryLimitations } from '../src/lib/performance/fallbacks.ts';
 import { withSystemCallsign } from '../src/lib/runtime/mounts/system-session-control.ts';
 import { ProcessHistory, SessionProcessService } from '../src/lib/session/processes/index.ts';
+import { isSubFerret, nudgeTarget } from '../src/lib/sub-ferret/index.ts';
 import { OpenUrlService } from '../src/lib/system/open-url.ts';
 
 /** The ordinary revive a send uses, as the auto-resume pass sees it. */
@@ -671,6 +673,7 @@ import {
   BootProgress,
   type BootRefusal,
   type BrowserLoginLifecycle,
+  BrowserProxyTester,
   type BrowserSessionLauncher,
   BrowserSessionService,
   type BrowserViewerHost,
@@ -808,9 +811,9 @@ import {
   harnessOverrideFailures,
   harnessPreflightSummary,
   harnessQuirks,
+  INSTRUCTIONS_FEATURE,
   InferredLaneProposer,
   InitialAttachmentError,
-  INSTRUCTIONS_FEATURE,
   InstructionRefresh,
   type InterruptedLaunchOutcome,
   InterruptedLaunchReconciler,
@@ -11037,6 +11040,15 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         terminals: terminalSubsystem,
         browserLogin,
         browser: browserHost,
+        browserProxy: {
+          tester: new BrowserProxyTester({
+            saved: async () => (await declaredAccountModel())?.machine.browserProxy,
+            secrets: async () => await secretVault.values(),
+            probe: new TunnelProxyProbe(),
+            now: () => performance.now(),
+          }),
+          state: () => browserService.overview(),
+        },
         agentTools: createAgentToolsSubsystem({
           storage,
           terminals: terminalSubsystem,

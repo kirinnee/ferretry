@@ -218,6 +218,26 @@ describe('the machine agent browser — one Chrome, pages by session', () => {
     should(goes).not.have.property('proxy');
   });
 
+  it('should describe the machine browser as a whole: stopped, then running with its proxy, then stopped again', async () => {
+    // Arrange
+    const tabs = new Tabs();
+    const proxy = { url: 'http://proxy.example:8080', authenticated: true, bypassCount: 0 };
+    Object.assign(tabs.automation, { proxy });
+    const { service } = harness(tabs);
+
+    // Act
+    const before = service.overview();
+    await service.openPage('s1', 'app');
+    const during = service.overview();
+    await service.closeAll();
+    const after = service.overview();
+
+    // Assert
+    should(before).eql({ state: 'stopped' });
+    should(during).eql({ state: 'running', startedAt: '2026-10-16T10:00:00.000Z', proxy });
+    should(after).eql({ state: 'stopped' });
+  });
+
   it('should let a guard refuse an act from inside the page’s own queue', async () => {
     const { tabs, service } = harness();
     await service.openPage('s1', 'app');

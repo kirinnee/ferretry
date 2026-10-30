@@ -1,6 +1,6 @@
-import type { IFyApiClient } from '@ferretry/protocol';
+import type { BrowserProxySetting, IFyApiClient } from '@ferretry/protocol';
 
-/** Every browser verb the CLI can issue. `login` is deliberately session-free — see `request.ts`. */
+/** Every browser verb the CLI can issue. `login` and `proxy test` are session-free (see `request.ts`); no proxy on a test means the saved one. */
 export type BrowserCommand =
   | { readonly command: 'status'; readonly session?: string }
   | { readonly command: 'start'; readonly session?: string }
@@ -21,7 +21,8 @@ export type BrowserCommand =
   | { readonly command: 'login'; readonly action: 'status' }
   | { readonly command: 'login'; readonly action: 'start'; readonly minutes?: number }
   | { readonly command: 'login'; readonly action: 'stop'; readonly primed?: boolean }
-  | { readonly command: 'login'; readonly action: 'confirm' };
+  | { readonly command: 'login'; readonly action: 'confirm' }
+  | { readonly command: 'proxy'; readonly action: 'test'; readonly proxy?: BrowserProxySetting };
 
 export interface BrowserRequest {
   readonly method: 'GET' | 'POST';

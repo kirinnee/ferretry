@@ -52,6 +52,7 @@ import { NewDeviceNotices } from './features/device-notice/new-device-notice.tsx
 import { ComponentsSurface } from './features/fleet/components/components-tab.tsx';
 import { CredentialsTab } from './features/fleet/credentials/credentials-tab.tsx';
 import type { FleetClientFactory } from './features/fleet/fleet-client.ts';
+import { BrowserTab } from './features/fleet/machine/browser-tab.tsx';
 import { MachineSettingsSurface } from './features/fleet/machine/settings-tab.tsx';
 import { ProfilesTab } from './features/fleet/profiles/profiles-tab.tsx';
 import { RuntimesTab } from './features/fleet/runtimes/runtimes-tab.tsx';
@@ -1695,6 +1696,7 @@ const MACHINE_TAB_SURFACES: MachineTabSurfaces = {
   credentials: CredentialsTab,
   profiles: ProfilesTab,
   components: ComponentsSurface,
+  browser: BrowserTab,
   machine: MachineSettingsSurface,
 };
 

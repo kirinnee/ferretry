@@ -89,9 +89,10 @@ export function forwardedHead(head: RequestHead, target: string, proxyAuthorizat
   return `${head.method} ${target} ${head.version}\r\n${lines.join('\r\n')}\r\n\r\n`;
 }
 
-export function connectHead(destination: Destination, proxyAuthorization: string): string {
+export function connectHead(destination: Destination, proxyAuthorization?: string): string {
   const authority = destination.host.includes(':') ? `[${destination.host}]` : destination.host;
-  return `CONNECT ${authority}:${destination.port} HTTP/1.1\r\nHost: ${authority}:${destination.port}\r\nProxy-Authorization: ${proxyAuthorization}\r\n\r\n`;
+  const auth = proxyAuthorization === undefined ? '' : `Proxy-Authorization: ${proxyAuthorization}\r\n`;
+  return `CONNECT ${authority}:${destination.port} HTTP/1.1\r\nHost: ${authority}:${destination.port}\r\n${auth}\r\n`;
 }
 
 /** The status code of an HTTP response head, or `undefined` while it is incomplete or not HTTP. */
