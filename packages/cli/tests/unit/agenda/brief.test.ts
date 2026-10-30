@@ -471,22 +471,22 @@ describe('agenda brief card kinds and answers', () => {
     should(request).not.have.property('answers');
   });
 
-  it('should lay a two-option choice out with the first option on the right', () => {
+  it('should lay a two-option choice out with the first option in the middle', () => {
     // Act + Assert
-    should(answersOf({ option: ['Ship', 'Hold'] })).deepEqual(['left:choose:Hold', 'right:choose:Ship']);
+    should(answersOf({ option: ['Ship', 'Hold'] })).deepEqual(['left:choose:Hold', 'up:choose:Ship']);
   });
 
-  it('should lay a three-option choice out left, up and right, recommended on the right', () => {
+  it('should lay a three-option choice out left, up and right, recommended in the middle', () => {
     // Act + Assert
-    should(answersOf({ option: ['A', 'B', 'C'] })).deepEqual(['left:choose:C', 'up:choose:B', 'right:choose:A']);
+    should(answersOf({ option: ['A', 'B', 'C'] })).deepEqual(['left:choose:B', 'up:choose:A', 'right:choose:C']);
     should(answersOf({ option: ['A', 'B', 'C'], recommend: 'B' })).deepEqual([
-      'left:choose:C',
-      'up:choose:A',
-      'right:choose:B',
+      'left:choose:A',
+      'up:choose:B',
+      'right:choose:C',
     ]);
   });
 
-  it('should put a recommended option from a JSON body on the right too', () => {
+  it('should put a recommended option from a JSON body in the middle too', () => {
     // Arrange
     const file = parseBriefFile(JSON.stringify({ options: ['A', 'B'], recommendation: 'B' }));
 
@@ -495,7 +495,7 @@ describe('agenda brief card kinds and answers', () => {
 
     // Assert
     should(request.answers?.map(a => a.label)).deepEqual(['A', 'B']);
-    should(request.answers?.find(a => a.direction === 'right')?.label).equal('B');
+    should(request.answers?.find(a => a.direction === 'up')?.label).equal('B');
   });
 
   it('should carry the option descriptions from a JSON body onto the answers', () => {

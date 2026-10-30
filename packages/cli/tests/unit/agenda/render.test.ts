@@ -187,7 +187,7 @@ describe('attention listing', () => {
     should(permission).containEql('answers: ← Deny · → Allow');
     should(review).containEql('answers: ← Needs changes · → Looks good');
     should(open).containEql('answer: write a full answer');
-    should(choice).containEql('answers: ← hold · → ship it');
+    should(choice).containEql('answers: ← hold · ↑ ship it');
   });
 
   it('should omit the answer hint for an item with no ask', () => {

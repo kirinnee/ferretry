@@ -13,14 +13,15 @@
  * | task       | Need more info | e.g. Skip         | Done          |
  * | yesno      | No             |                   | Yes           |
  * | permission | Deny           | e.g. Always allow | Allow         |
- * | choice (2) | the other      |                   | recommended   |
- * | choice (3) | the third      | the second        | recommended   |
+ * | choice (2) | the other      | recommended       |               |
+ * | choice (3) | the first other| recommended       | the next other|
  * | review     | Needs changes  |                   | Looks good    |
  * | info       |                |                   | Got it        |
  * | reply      |                |                   |               |
  *
- * The recommended answer is always on the right; a choice with no recommendation recommends its first
- * option.
+ * A choice's recommended answer is always in the MIDDLE (↑): the swipe row reads left · middle · right, and the
+ * pick sits where the thumb goes first. A choice with no recommendation recommends its first option. Swipe ↓ is
+ * never an answer: it skips the card.
  */
 import {
   AGENDA_PUSH_TITLE_LENGTH,
@@ -143,17 +144,17 @@ const optionLabel = (options: readonly AgendaAskOption[], wanted: string): Agend
   options.find(option => option.label.trim().toLowerCase() === wanted.trim().toLowerCase());
 
 /**
- * A choice's answers: the recommended option (or the first) on the right, then the rest in the order
- * the ferret listed them — the next one up, the one after left. With two options there is no up.
- * Options past the third have no direction; the card still offers them as buttons.
+ * A choice's answers: the recommended option (or the first) in the MIDDLE (↑), then the rest in the order the
+ * ferret listed them — the first other on the left, the next on the right. Options past the third have no
+ * direction; the card offers them under "…" and by their letter in the Options section.
  */
 const choiceAnswers = (options: readonly AgendaAskOption[], recommended: string | undefined): AgendaCardAnswer[] => {
-  const right = (recommended === undefined ? undefined : optionLabel(options, recommended)) ?? options[0];
-  if (right === undefined) return [];
-  const rest = options.filter(option => option !== right);
-  const directions: readonly AgendaDirection[] = rest.length === 1 ? ['left'] : ['up', 'left'];
+  const middle = (recommended === undefined ? undefined : optionLabel(options, recommended)) ?? options[0];
+  if (middle === undefined) return [];
+  const rest = options.filter(option => option !== middle);
+  const directions: readonly AgendaDirection[] = ['left', 'right'];
   return [
-    answer('right', 'choose', right.label, right.description),
+    answer('up', 'choose', middle.label, middle.description),
     ...rest
       .slice(0, MAX_AGENDA_CARD_ANSWERS - 1)
       .map((option, index) => answer(directions[index] ?? 'left', 'choose', option.label, option.description)),
