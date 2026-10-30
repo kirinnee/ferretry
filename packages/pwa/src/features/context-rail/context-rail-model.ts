@@ -12,18 +12,8 @@
  * many rows does each hold under the current search, and which rows are showing.
  */
 
-import type {
-  AgendaItem,
-  AgendaSnapshot,
-  McpInventoryServer,
-  ResolvedAgendaItem,
-  SessionFsEntry,
-  SkillEntry,
-  SkillScope,
-} from '@ferretry/protocol';
+import type { McpInventoryServer, SessionFsEntry, SkillEntry, SkillScope } from '@ferretry/protocol';
 import { formatBytes } from '../../components/files-model.ts';
-import { relativeTime } from '../../lib/session-screens.ts';
-import { agendaKindMeta, describeResponse } from '../agenda/agenda-board.tsx';
 import {
   checkResultOf,
   MCP_SCOPE_LABEL,
@@ -34,15 +24,14 @@ import {
 
 // ── The sub-tabs ─────────────────────────────────────────────────────────────────────────────────
 
-export type ContextRailTab = 'signals' | 'files' | 'mcp' | 'skills' | 'docs';
+export type ContextRailTab = 'files' | 'mcp' | 'skills' | 'docs';
 
-export const CONTEXT_RAIL_TABS: readonly ContextRailTab[] = ['signals', 'mcp', 'skills', 'docs'];
+export const CONTEXT_RAIL_TABS: readonly ContextRailTab[] = ['mcp', 'skills', 'docs'];
 
 /** Info › Folder's sub-tabs: the folder itself, then what the agent reads and reaches from it. */
 export const FOLDER_TABS: readonly ContextRailTab[] = ['files', 'docs', 'skills', 'mcp'];
 
 export const CONTEXT_RAIL_TAB_LABEL: Readonly<Record<ContextRailTab, string>> = {
-  signals: 'Signals',
   files: 'Files',
   mcp: 'MCP',
   skills: 'Skills',
@@ -51,7 +40,6 @@ export const CONTEXT_RAIL_TAB_LABEL: Readonly<Record<ContextRailTab, string>> = 
 
 /** What the search box says it searches, per sub-tab. */
 export const CONTEXT_RAIL_SEARCH_LABEL: Readonly<Record<ContextRailTab, string>> = {
-  signals: 'Search signals',
   files: 'Search files',
   mcp: 'Search MCP servers',
   skills: 'Search skills',
@@ -79,69 +67,6 @@ const chipsFor = <K extends string, R>(
   inChip: (row: R, chip: K) => boolean,
 ): ContextChip<K>[] =>
   order.map(key => ({ key, label: labels[key], count: rows.filter(row => inChip(row, key)).length }));
-
-// ── Signals ──────────────────────────────────────────────────────────────────────────────────────
-
-export type SignalChip = 'open' | 'answered';
-
-const SIGNAL_CHIPS: readonly SignalChip[] = ['open', 'answered'];
-const SIGNAL_CHIP_LABEL: Readonly<Record<SignalChip, string>> = { open: 'Open', answered: 'Answered' };
-
-export type SignalRow =
-  | { readonly state: 'open'; readonly item: AgendaItem }
-  | { readonly state: 'answered'; readonly item: ResolvedAgendaItem };
-
-/** Open items first, oldest wait first; answered ones after, most recent first. A parked item (snoozed, or replied
- * to) is neither: it waits on nobody, and the Inbox lists it under Snoozed or Replied. */
-export const signalRows = (snapshot: AgendaSnapshot): SignalRow[] => [
-  ...snapshot.items
-    .filter(item => item.parked === undefined)
-    .sort((left, right) => Date.parse(left.waitingSince) - Date.parse(right.waitingSince))
-    .map(item => ({ state: 'open' as const, item })),
-  ...[...snapshot.resolved]
-    .sort((left, right) => Date.parse(right.resolvedAt) - Date.parse(left.resolvedAt))
-    .map(item => ({ state: 'answered' as const, item })),
-];
-
-/** What the row says it is: "question", "permission", "pick one". */
-export const signalKind = (item: AgendaItem): string => agendaKindMeta(item).label.toLocaleLowerCase();
-
-/** Who raised it: the agent that did, else the agent whose rail this is. */
-export const signalAuthor = (item: AgendaItem, agentName: string): string =>
-  item.raisedBy === 'agent' ? (item.raisedByName ?? agentName) : item.raisedBy === 'daemon' ? 'Ferretry' : 'You';
-
-/** How an answered item ended, in a few words: “Start over”, "Approved", "dismissed". */
-export const signalOutcome = (item: ResolvedAgendaItem): string => {
-  if (item.response !== undefined) return describeResponse(item.response);
-  if (item.disposition === 'replied') return 'Replied';
-  return item.disposition === 'dismissed' ? 'Dismissed' : 'Done';
-};
-
-/** The line under a signal's title: "Hadi · 2m ago · question". */
-export const signalMeta = (row: SignalRow, agentName: string, nowMs: number): string =>
-  row.state === 'open'
-    ? `${signalAuthor(row.item, agentName)} · ${relativeTime(row.item.waitingSince, nowMs)} · ${signalKind(row.item)}`
-    : `${signalAuthor(row.item, agentName)} · ${relativeTime(row.item.resolvedAt, nowMs)} · answered`;
-
-const signalMatches = (row: SignalRow, query: string): boolean =>
-  matchesQuery(
-    query,
-    row.item.subject,
-    row.item.why,
-    row.item.raisedByName,
-    row.state === 'answered' ? signalOutcome(row.item) : undefined,
-  );
-
-export const signalChips = (rows: readonly SignalRow[], query: string): ContextChip<SignalChip>[] =>
-  chipsFor(
-    SIGNAL_CHIPS,
-    SIGNAL_CHIP_LABEL,
-    rows.filter(row => signalMatches(row, query)),
-    (row, chip) => row.state === chip,
-  );
-
-export const visibleSignals = (rows: readonly SignalRow[], query: string, chip: SignalChip): SignalRow[] =>
-  rows.filter(row => row.state === chip && signalMatches(row, query));
 
 // ── MCP ──────────────────────────────────────────────────────────────────────────────────────────
 
@@ -276,7 +201,6 @@ export const contextEmptyCopy = (tab: ContextRailTab, total: number, query: stri
   if (total > 0 && needle !== '') return `Nothing under ${chipLabel} matches “${needle}”.`;
   if (total > 0) return `Nothing under ${chipLabel}.`;
   return {
-    signals: 'Nothing is waiting on you here.',
     files: 'This folder is empty.',
     mcp: 'This agent has no MCP servers.',
     skills: 'No skills are installed for this agent.',

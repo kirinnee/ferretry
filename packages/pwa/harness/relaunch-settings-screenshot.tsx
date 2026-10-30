@@ -83,7 +83,7 @@ createRoot(root).render(
       onTabChange={() => undefined}
       tab="runtime"
       render={{
-        overview: nothing, usage: nothing, folder: nothing, signals: nothing, surfaces: nothing,
+        overview: nothing, usage: nothing, folder: nothing, surfaces: nothing,
         runtime: () => (
           <InfoRuntime
             instructions={{ kind: 'ready', items: ['CLAUDE.md'] }}

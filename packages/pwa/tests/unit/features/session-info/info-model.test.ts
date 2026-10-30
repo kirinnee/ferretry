@@ -27,9 +27,9 @@ import {
 import { sessionView } from '../../../support/sessions.ts';
 
 describe('INFO_TABS', () => {
-  it('orders the seven tabs, names each one, and drops Tasks for a host with no board', () => {
-    expect(INFO_TABS).toEqual(['overview', 'tasks', 'runtime', 'usage', 'folder', 'signals', 'surfaces']);
-    expect(INFO_TABS_WITHOUT_BOARD).toEqual(['overview', 'runtime', 'usage', 'folder', 'signals', 'surfaces']);
+  it('orders the six tabs, names each one, and drops Tasks for a host with no board', () => {
+    expect(INFO_TABS).toEqual(['overview', 'tasks', 'runtime', 'usage', 'folder', 'surfaces']);
+    expect(INFO_TABS_WITHOUT_BOARD).toEqual(['overview', 'runtime', 'usage', 'folder', 'surfaces']);
     expect(INFO_TAB_LABEL.tasks).toBe('Tasks');
     expect(INFO_TAB_LABEL.overview).toBe('Overview');
     expect(INFO_TAB_LABEL.folder).toBe('Context');

@@ -6,7 +6,6 @@
 
 import { Maximize2, Minimize2, X } from 'lucide-react';
 import { type ReactNode, useEffect, useId, useRef } from 'react';
-import { Badge } from '../../shell/primitives.tsx';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
 import { INFO_TAB_LABEL, INFO_TABS_WITHOUT_BOARD, type InfoTab, scrollToShow } from './info-model.ts';
 
@@ -19,8 +18,6 @@ export interface InfoPanelProps {
   readonly onClose: () => void;
   /** Each tab's body, rendered only while it is shown. */
   readonly render: Readonly<Record<InfoTab, () => ReactNode>>;
-  /** Open signals, as a count on the Signals tab. */
-  readonly openSignals?: number;
   /** The tabs offered, in order. Absent: every tab but Tasks (the host has no board). */
   readonly tabs?: readonly InfoTab[];
   /** Phone: the sheet's height, and the control that switches it. */
@@ -35,7 +32,6 @@ export function InfoPanel({
   onTabChange,
   onClose,
   render,
-  openSignals = 0,
   tabs = INFO_TABS_WITHOUT_BOARD,
   sheetSize,
   onSheetSizeChange,
@@ -84,19 +80,7 @@ export function InfoPanel({
           onChange={onTabChange}
           order={tabs}
           sheetId={id}
-          tabs={tabs.map(key => ({
-            key,
-            label: INFO_TAB_LABEL[key],
-            ...(key === 'signals' && openSignals > 0
-              ? {
-                  badge: (
-                    <Badge aria-label={`${openSignals} open`} data-info-signals-count="" tone="warn">
-                      {openSignals}
-                    </Badge>
-                  ),
-                }
-              : {}),
-          }))}
+          tabs={tabs.map(key => ({ key, label: INFO_TAB_LABEL[key] }))}
         />
       </div>
       <div

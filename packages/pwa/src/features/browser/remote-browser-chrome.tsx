@@ -29,6 +29,7 @@ import type { BrowserAction, BrowserPageSummary, BrowserProxyStatus, BrowserStat
 
 import { remotePageLabel, type RemoteViewportMode } from '../../lib/remote-browser.ts';
 import { Badge, Button } from '../../shell/primitives.tsx';
+import { useSettledBusy } from './use-settled-busy.ts';
 
 export type RemoteBrowserConnection = 'detached' | 'connecting' | 'connected' | 'disconnected';
 
@@ -54,19 +55,35 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
   const lastActor = status?.lastActor;
   const page = remoteBrowserPage(status);
   const loading = page?.pageState === 'loading';
+  const working = useSettledBusy(busy || loading);
+  const workingText = busy ? 'Working…' : loading ? 'Loading page…' : null;
+  const lastWorkingText = useRef('Working…');
+  if (workingText !== null) lastWorkingText.current = workingText;
+  const activity = working ? lastWorkingText.current : page?.pageState === 'error' ? 'Page failed' : '';
   return (
-    <div className="flex shrink-0 flex-wrap items-center gap-xs border-b border-border-soft px-2 py-2">
-      <Badge tone={status?.state === 'running' ? 'ok' : status?.state === 'error' ? 'err' : 'pend'}>
+    // One line, always: the label slot below is reserved, so Working… appearing can neither wrap the
+    // row nor move the toolbar and page view beneath it.
+    <div
+      className="flex shrink-0 flex-nowrap items-center gap-xs overflow-hidden border-b border-border-soft px-2 py-2"
+      data-browser-status-row=""
+    >
+      <Badge
+        tone={status?.state === 'running' ? 'ok' : status?.state === 'error' ? 'err' : 'pend'}
+        className="shrink-0"
+      >
         {status?.state ?? 'checking'}
       </Badge>
-      <Badge tone={lastActor?.kind === 'human' ? 'accent' : 'pend'} className="inline-flex items-center gap-1">
+      <Badge
+        tone={lastActor?.kind === 'human' ? 'accent' : 'pend'}
+        className="inline-flex min-w-0 shrink items-center gap-1 truncate"
+      >
         {lastActor?.kind === 'human' ? <UserRound size={13} /> : <Bot size={13} />}
         {lastActor ? `${lastActor.kind === 'human' ? 'You' : 'Agent'} · ${lastActor.action}` : 'No input yet'}
       </Badge>
       {status?.state === 'running' && status.proxy !== undefined ? (
         <Badge
           tone="accent"
-          className="inline-flex items-center gap-1"
+          className="inline-flex shrink-0 items-center gap-1"
           title={remoteBrowserProxyTitle(status.proxy)}
           data-browser-proxy-chip=""
         >
@@ -74,10 +91,14 @@ export function RemoteBrowserStatusBar({ status, connection, busy = false }: Rem
           via proxy
         </Badge>
       ) : null}
-      <span className="text-meta text-muted" aria-live="polite">
-        {busy ? 'Working…' : loading ? 'Loading page…' : page?.pageState === 'error' ? 'Page failed' : ''}
+      <span
+        className={`min-w-[5.5rem] flex-1 truncate text-meta text-muted transition-opacity ${activity === '' ? 'opacity-0' : 'opacity-100'}`}
+        aria-live="polite"
+        data-browser-activity=""
+      >
+        {activity}
       </span>
-      <span className="ml-auto text-meta text-muted">
+      <span className="ml-auto max-w-[45%] shrink-0 truncate text-meta text-muted">
         {connection === 'connected'
           ? 'Live'
           : connection === 'connecting'

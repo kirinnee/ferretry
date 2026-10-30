@@ -55,6 +55,7 @@ import { Button } from '../../shell/primitives.tsx';
 import { browserDestination, type BrowserDestination } from './in-app-browser-model.ts';
 import { InAppBrowserFrame, type InAppBrowserFrameProps } from './in-app-browser.tsx';
 import { remoteBrowserPage } from './remote-browser-chrome.tsx';
+import { useSettledBusy } from './use-settled-busy.ts';
 import { RemoteBrowserPane, type RemoteBrowserPaneProps, type RemoteBrowserPaneState } from './remote-browser-pane.tsx';
 import {
   browserSessionMemory,
@@ -421,6 +422,7 @@ export function UnifiedBrowserSurface({
   const forwardDisabled =
     engine === 'preview' ? !previewCanGoForward(previewHistory) : remotePage?.canGoForward === false;
   const loading = engine === 'remote' && remotePage?.pageState === 'loading';
+  const working = useSettledBusy(remoteBusy || loading);
   const menuTitle = firstNonEmpty(remoteLocation?.title, currentUrl, 'Browser controls');
   const Heading = presentation === 'pane' ? 'h2' : 'h1';
   const menuId = `${titleId}-menu`;
@@ -638,9 +640,17 @@ export function UnifiedBrowserSurface({
           </span>
         </div>
 
-        {(remoteBusy || loading) && (
-          <div className="mt-1 h-0.5 w-full overflow-hidden rounded-full bg-surface-2" role="status" aria-live="polite">
-            <span className="sr-only">{remoteBusy ? 'Working…' : 'Loading page…'}</span>
+        {/* Mounted for the whole remote engine, never on and off: a row that appears with the work
+            pushed the toolbar and page view down by its height and back, over and over. Only its opacity
+            follows the (debounced) busy flag. */}
+        {engine === 'remote' && (
+          <div
+            className={`mt-1 h-0.5 w-full overflow-hidden rounded-full bg-surface-2 transition-opacity ${working ? 'opacity-100' : 'opacity-0'}`}
+            role="status"
+            aria-live="polite"
+            data-browser-progress=""
+          >
+            <span className="sr-only">{working ? (remoteBusy ? 'Working…' : 'Loading page…') : ''}</span>
           </div>
         )}
 

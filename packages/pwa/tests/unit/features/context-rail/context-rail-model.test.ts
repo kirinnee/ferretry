@@ -11,85 +11,18 @@ import {
   loadedSkillCount,
   matchesQuery,
   mcpChips,
-  signalAuthor,
-  signalChips,
-  signalMeta,
-  signalOutcome,
-  signalRows,
   skillChips,
   visibleDocs,
   visibleMcpServers,
-  visibleSignals,
   visibleSkills,
 } from '../../../../src/features/context-rail/context-rail-model.ts';
-import { answeredItem, DOCS, MCP, NOW, openItem, SKILLS, skill, snapshot } from './context-rail-fixtures.ts';
+import { DOCS, MCP, NOW, SKILLS, skill } from './context-rail-fixtures.ts';
 
 describe('matchesQuery', () => {
   it('matches every row on a blank search and otherwise any field, ignoring case', () => {
     expect(matchesQuery('  ', 'anything')).toBe(true);
     expect(matchesQuery('LIN', 'github', 'linear')).toBe(true);
     expect(matchesQuery('notion', 'github', null, undefined)).toBe(false);
-  });
-});
-
-describe('signals', () => {
-  const board = snapshot(
-    [openItem({ id: 'A3', waitingSince: '2026-10-16T09:59:00.000Z' }), openItem()],
-    [answeredItem(), answeredItem({ id: 'A4', resolvedAt: '2026-10-16T09:30:00.000Z', subject: 'Later' })],
-  );
-
-  it('lists open items oldest first, then answered ones newest first', () => {
-    expect(signalRows(board).map(row => `${row.state}:${row.item.id}`)).toEqual([
-      'open:A1',
-      'open:A3',
-      'answered:A4',
-      'answered:A2',
-    ]);
-  });
-
-  it('leaves a parked item (snoozed, or replied to) out of the open rows', () => {
-    const parked = snapshot(
-      [
-        openItem({
-          id: 'A5',
-          parked: { reason: 'snoozed', at: '2026-10-16T10:00:00.000Z', until: '2026-10-17T09:00:00.000Z' },
-        }),
-        openItem({ id: 'A6', parked: { reason: 'replied', at: '2026-10-16T10:00:00.000Z' } }),
-        openItem(),
-      ],
-      [],
-    );
-    expect(signalRows(parked).map(row => `${row.state}:${row.item.id}`)).toEqual(['open:A1']);
-  });
-
-  it('counts each chip under the search, and shows only the chosen one', () => {
-    const rows = signalRows(board);
-    expect(signalChips(rows, '')).toEqual([
-      { key: 'open', label: 'Open', count: 2 },
-      { key: 'answered', label: 'Answered', count: 2 },
-    ]);
-    expect(signalChips(rows, 'start over').map(chip => chip.count)).toEqual([0, 2]);
-    expect(visibleSignals(rows, 'later', 'answered').map(row => row.item.id)).toEqual(['A4']);
-    expect(visibleSignals(rows, 'later', 'open')).toEqual([]);
-  });
-
-  it('names who raised it, how long ago, and what kind of ask it is', () => {
-    const [open, answered] = signalRows(snapshot());
-    expect(signalMeta(open!, 'Agent', NOW)).toBe('Hadi · 2m ago · pick one');
-    expect(signalMeta(answered!, 'Agent', NOW)).toBe('Agent · 1h ago · answered');
-    expect(signalAuthor(openItem({ raisedBy: 'daemon', raisedBySession: null, raisedByName: null }), 'Agent')).toBe(
-      'Ferretry',
-    );
-    expect(signalAuthor(openItem({ raisedBy: 'human', raisedBySession: null, raisedByName: null }), 'Agent')).toBe(
-      'You',
-    );
-  });
-
-  it('says how an answered item ended', () => {
-    expect(signalOutcome(answeredItem())).toBe('Chose “Start over”');
-    expect(signalOutcome(answeredItem({ response: undefined, disposition: 'dismissed' }))).toBe('Dismissed');
-    expect(signalOutcome(answeredItem({ response: undefined }))).toBe('Done');
-    expect(signalOutcome(answeredItem({ response: undefined, disposition: 'replied' }))).toBe('Replied');
   });
 });
 
@@ -195,13 +128,12 @@ describe('docs', () => {
 
 describe('contextEmptyCopy', () => {
   it('tells an empty list from a filtered-out one', () => {
-    expect(contextEmptyCopy('signals', 0, '', 'Open')).toBe('Nothing is waiting on you here.');
     expect(contextEmptyCopy('files', 0, '', 'All')).toBe('This folder is empty.');
     expect(contextEmptyCopy('mcp', 0, 'x', 'All')).toBe('This agent has no MCP servers.');
     expect(contextEmptyCopy('skills', 0, '', 'All')).toBe('No skills are installed for this agent.');
     expect(contextEmptyCopy('docs', 0, '', 'All')).toBe('No instruction files in this folder.');
     expect(contextEmptyCopy('docs', 2, ' agents ', 'Claude')).toBe('Nothing under Claude matches “agents”.');
-    expect(contextEmptyCopy('signals', 1, '', 'Answered')).toBe('Nothing under Answered.');
+    expect(contextEmptyCopy('skills', 1, '', 'Project')).toBe('Nothing under Project.');
   });
 });
 

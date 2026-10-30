@@ -4,130 +4,16 @@
  */
 
 import {
-  type AgendaItem,
-  type AgendaSnapshot,
-  AgendaSnapshotSchema,
   type McpInventory,
   McpInventorySchema,
   type McpInventoryServer,
-  type ResolvedAgendaItem,
   type SessionSkillsInventory,
   SessionSkillsInventorySchema,
   type SkillEntry,
 } from '@ferretry/protocol';
 import type { ContextDoc } from '../../../../src/features/context-rail/context-rail-model.ts';
-import type { ContextSignalsPort } from '../../../../src/features/context-rail/context-rail-ports.ts';
-import type { AgendaLoadStatus } from '../../../../src/lib/agenda-store.ts';
 
 export const NOW = Date.parse('2026-10-16T10:00:00.000Z');
-
-export const openItem = (overrides: Partial<AgendaItem> = {}): AgendaItem =>
-  ({
-    id: 'A1',
-    source: 'question',
-    sourceRef: null,
-    subject: 'Use the seeded test account?',
-    why: 'The login page needs a user.',
-    waitingSince: '2026-10-16T09:58:00.000Z',
-    howToResolve: 'Pick one.',
-    ask: { kind: 'multiple-choice', options: [{ label: 'Yes' }, { label: 'No' }] },
-    raisedBy: 'agent',
-    raisedBySession: 'session-a',
-    raisedByName: 'Hadi',
-    ...overrides,
-  }) as AgendaItem;
-
-export const answeredItem = (overrides: Partial<ResolvedAgendaItem> = {}): ResolvedAgendaItem =>
-  ({
-    id: 'A2',
-    source: 'question',
-    sourceRef: null,
-    subject: 'Port 1455 was busy',
-    why: 'Another server holds it.',
-    waitingSince: '2026-10-16T08:00:00.000Z',
-    howToResolve: 'Choose.',
-    ask: { kind: 'multiple-choice', options: [{ label: 'Start over' }, { label: 'Wait' }] },
-    raisedBy: 'agent',
-    raisedBySession: 'session-a',
-    raisedByName: null,
-    resolvedAt: '2026-10-16T09:00:00.000Z',
-    resolutionNote: null,
-    response: { kind: 'multiple-choice', choice: 'Start over' },
-    disposition: 'done',
-    resolvedBy: 'human',
-    resolvedBySession: null,
-    resolvedByName: null,
-    ...overrides,
-  }) as ResolvedAgendaItem;
-
-export const snapshot = (
-  items: readonly AgendaItem[] = [openItem()],
-  resolved: readonly ResolvedAgendaItem[] = [answeredItem()],
-): AgendaSnapshot =>
-  AgendaSnapshotSchema.parse({
-    v: 1,
-    sessionId: 'session-a',
-    items,
-    resolved,
-    count: items.length,
-    parseErrors: 0,
-    updatedAt: '2026-10-16T09:59:00.000Z',
-  });
-
-/** A signals port a test drives: what was answered, and a way to change what the board holds. */
-export interface FakeSignals extends ContextSignalsPort {
-  readonly responses: unknown[];
-  readonly resolved: string[];
-  loads: number;
-  set(status: AgendaLoadStatus, value?: AgendaSnapshot): void;
-  /** The next answer or resolve fails with this, once. */
-  failNext?: Error;
-  /** The next load fails, once. */
-  failLoad?: boolean;
-}
-
-export const fakeSignals = (initial?: AgendaSnapshot, status: AgendaLoadStatus = 'ready'): FakeSignals => {
-  const listeners = new Set<() => void>();
-  let state: { status: AgendaLoadStatus; value: AgendaSnapshot | undefined } = {
-    status: initial === undefined ? 'loading' : status,
-    value: initial,
-  };
-  const fake: FakeSignals = {
-    responses: [],
-    resolved: [],
-    loads: 0,
-    subscribe: listener => {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-    status: () => state.status,
-    snapshot: () => state.value,
-    load: async () => {
-      fake.loads += 1;
-      if (fake.failLoad === true) {
-        fake.failLoad = false;
-        throw new Error('the board did not load');
-      }
-    },
-    respond: async (id, response) => {
-      const failure = fake.failNext;
-      fake.failNext = undefined;
-      if (failure !== undefined) throw failure;
-      fake.responses.push({ id, response });
-    },
-    resolve: async id => {
-      const failure = fake.failNext;
-      fake.failNext = undefined;
-      if (failure !== undefined) throw failure;
-      fake.resolved.push(id);
-    },
-    set(next, value) {
-      state = { status: next, value };
-      for (const listener of listeners) listener();
-    },
-  };
-  return fake;
-};
 
 export const skill = (overrides: Partial<SkillEntry> & { name: string }): SkillEntry => ({
   description: `What ${overrides.name} does.`,

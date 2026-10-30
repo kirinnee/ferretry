@@ -23,7 +23,7 @@ import { type InfoPlacement, useInfoPlacement } from '../../../../src/features/s
 import { NO_SURFACE_DRIVING } from '../../../../src/features/workspace/use-surface-driving.ts';
 import { interact, type Mounted, must } from '../../../support/dom.ts';
 import { sessionView } from '../../../support/sessions.ts';
-import { DOCS, fakeSignals, MCP, mcpServer, SKILLS, snapshot } from '../context-rail/context-rail-fixtures.ts';
+import { DOCS, MCP, mcpServer, SKILLS } from '../context-rail/context-rail-fixtures.ts';
 import { mountSettled, settle } from '../fleet/components/view-support.tsx';
 
 const NOW = Date.parse('2026-10-16T10:00:00.000Z');
@@ -61,10 +61,8 @@ const portsOf = (overrides: Partial<SessionInfoPorts> = {}): SessionInfoPorts =>
   verdicts: counted(async () => VERDICTS),
   analytics: counted(async () => ANALYTICS),
   folder: {
-    agentName: 'Hadi',
     sessionId: 'session-a',
     machineName: 'studio-mac',
-    signals: fakeSignals(snapshot()),
     loadMcp: counted(async () => MCP),
     loadSkills: counted(async () => SKILLS),
     loadDocs: counted(async () => DOCS),
@@ -114,11 +112,11 @@ const show = async (overrides: Partial<HarnessProps> = {}) => {
 };
 
 describe('SessionInfo — reading each port only when its tab is shown', () => {
-  it('starts on Overview reading only the worktrees list', async () => {
+  it('starts on Overview reading only the worktrees list and the Warden’s verdicts', async () => {
     const ports = portsOf();
     const root = await show({ ports });
     expect((ports.worktrees as ReturnType<typeof counted>).calls).toBe(1);
-    expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(0);
+    expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(1);
     expect((ports.analytics as ReturnType<typeof counted>).calls).toBe(0);
     expect((ports.folder.loadMcp as ReturnType<typeof counted>).calls).toBe(0);
     expect((ports.folder.loadDocs as ReturnType<typeof counted>).calls).toBe(0);
@@ -135,7 +133,7 @@ describe('SessionInfo — reading each port only when its tab is shown', () => {
     expect((ports.folder.loadDocs as ReturnType<typeof counted>).calls).toBe(1);
     expect((ports.folder.loadSkills as ReturnType<typeof counted>).calls).toBe(1);
     expect((ports.worktrees as ReturnType<typeof counted>).calls).toBe(1);
-    expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(0);
+    expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(1);
     expect((ports.analytics as ReturnType<typeof counted>).calls).toBe(0);
 
     await interact(() => placement?.setTab('overview'));
@@ -151,19 +149,10 @@ describe('SessionInfo — reading each port only when its tab is shown', () => {
     await interact(() => placement?.setTab('usage'));
     await settle();
     expect((ports.analytics as ReturnType<typeof counted>).calls).toBe(1);
-    expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(0);
-  });
-
-  it('reads Signals’ verdicts only once Signals is shown', async () => {
-    const ports = portsOf();
-    await show({ ports });
-    await interact(() => placement?.setTab('signals'));
-    await settle();
     expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(1);
-    expect((ports.analytics as ReturnType<typeof counted>).calls).toBe(0);
   });
 
-  it('reads nothing extra for Folder or Surfaces — they draw from the live signals port and the driving hook directly', async () => {
+  it('reads nothing extra for Folder or Surfaces — they draw from their own loaders and the driving hook directly', async () => {
     const ports = portsOf();
     await show({ ports });
     await interact(() => placement?.setTab('folder'));
@@ -171,7 +160,7 @@ describe('SessionInfo — reading each port only when its tab is shown', () => {
     await interact(() => placement?.setTab('surfaces'));
     await settle();
     expect((ports.worktrees as ReturnType<typeof counted>).calls).toBe(1);
-    expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(0);
+    expect((ports.verdicts as ReturnType<typeof counted>).calls).toBe(1);
     expect((ports.analytics as ReturnType<typeof counted>).calls).toBe(0);
   });
 });
@@ -251,15 +240,15 @@ describe('SessionInfo — Context', () => {
   });
 });
 
-describe('SessionInfo — Signals', () => {
-  it('scopes the Warden’s verdicts to this ferret’s own session id, and badges the Signals tab', async () => {
-    const signals = fakeSignals(snapshot());
-    const ports = portsOf({ folder: { ...portsOf().folder, signals } });
+describe('SessionInfo — Warden in Overview', () => {
+  it('scopes the Warden’s verdicts to this ferret’s own session id, and has no Signals tab', async () => {
+    const ports = portsOf();
     const root = await show({ ports, view: sessionView('session-a') });
-    expect(root.querySelector('[data-info-signals-count]')?.textContent).toBe('1');
+    expect([...root.querySelectorAll('[role="tab"]')].map(tab => tab.textContent)).not.toContain('Signals');
 
-    await interact(() => placement?.setTab('signals'));
+    await interact(() => placement?.setTab('overview'));
     await settle();
+    expect(root.querySelector('[data-info-warden]')).not.toBeNull();
     expect(root.textContent).toContain('Left it alone — healthy');
   });
 });
@@ -376,7 +365,7 @@ describe('SessionInfo — a read that fails', () => {
     const ports = portsOf({ verdicts: async () => Promise.reject(new Error('warden offline')) });
     const root = await show({ ports });
 
-    await interact(() => placement?.setTab('signals'));
+    await interact(() => placement?.setTab('overview'));
     await settle();
 
     expect(root.textContent).toContain('Couldn’t read the Warden’s verdicts: warden offline');

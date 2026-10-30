@@ -12,7 +12,6 @@
 
 import type { McpInventory, SessionSkillsInventory } from '@ferretry/protocol';
 import { type ReactNode, useId, useState } from 'react';
-import { Badge } from '../../shell/primitives.tsx';
 import { SheetTabs, sheetPanelId, sheetTabId } from '../../shell/sheet-tabs.tsx';
 import { ContextDocsPanel, ContextSkillsPanel, type SkillFileLoader } from './context-rail-lists.tsx';
 import { ContextMcpPanel, type ContextMcpSignInHost } from './context-rail-mcp.tsx';
@@ -23,21 +22,16 @@ import {
   type ContextRailTab,
   type DocChip,
   type McpChip,
-  type SignalChip,
   type SkillChip,
 } from './context-rail-model.ts';
 import { useContextRead } from './context-rail-parts.tsx';
-import type { ContextLoader, ContextSignalsPort } from './context-rail-ports.ts';
-import { ContextSignalsPanel, useContextSignals } from './context-rail-signals.tsx';
+import type { ContextLoader } from './context-rail-ports.ts';
 
 export interface ContextRailBodyProps {
-  /** The agent whose folder this is, for the line under a signal it raised. */
-  readonly agentName: string;
   /** Its session id: a Check reaches each MCP server as this ferret does. */
   readonly sessionId: string;
   /** The machine's own name, for a failure said in words. */
   readonly machineName: string;
-  readonly signals: ContextSignalsPort;
   readonly loadMcp: ContextLoader<McpInventory>;
   readonly loadSkills: ContextLoader<SessionSkillsInventory>;
   /** Reads one SKILL.md for a skill row's Open. */
@@ -52,7 +46,7 @@ export interface ContextRailBodyProps {
   /** The shown sub-tab, when the host keeps it (the phone sheet remembers it between openings). */
   readonly tab?: ContextRailTab;
   readonly onTabChange?: (tab: ContextRailTab) => void;
-  /** Which sub-tabs, in order. Default: the rail's Signals, MCP, Skills, Docs. */
+  /** Which sub-tabs, in order. Default: MCP, Skills, Docs. */
   readonly tabs?: readonly ContextRailTab[];
   /** The tab strip's accessible name. */
   readonly label?: string;
@@ -65,24 +59,20 @@ export interface ContextRailBodyProps {
 }
 
 interface Filters {
-  readonly signals: { readonly query: string; readonly chip: SignalChip };
   readonly mcp: { readonly query: string; readonly chip: McpChip };
   readonly skills: { readonly query: string; readonly chip: SkillChip };
   readonly docs: { readonly query: string; readonly chip: DocChip };
 }
 
 const INITIAL_FILTERS: Filters = {
-  signals: { query: '', chip: 'open' },
   mcp: { query: '', chip: 'all' },
   skills: { query: '', chip: 'all' },
   docs: { query: '', chip: 'all' },
 };
 
 export function ContextRailBody({
-  agentName,
   sessionId,
   machineName,
-  signals: port,
   loadMcp,
   loadSkills,
   loadSkillFile,
@@ -99,9 +89,8 @@ export function ContextRailBody({
   now = Date.now,
   searchDebounceMs,
 }: ContextRailBodyProps) {
-  const signalsRead = useContextSignals(port);
   const id = useId().replace(/:/gu, '');
-  const [ownTab, setOwnTab] = useState<ContextRailTab>(tabs[0] ?? 'signals');
+  const [ownTab, setOwnTab] = useState<ContextRailTab>(tabs[0] ?? 'mcp');
   const tab = shownTab ?? ownTab;
   const [filters, setFilters] = useState<Filters>(INITIAL_FILTERS);
   const mcp = useContextRead(loadMcp, tab === 'mcp');
@@ -121,7 +110,6 @@ export function ContextRailBody({
     (chip: Filters[T]['chip']): void =>
       setFilters(previous => ({ ...previous, [key]: { ...previous[key], chip } }));
 
-  const openCount = signalsRead.snapshot?.count ?? 0;
   const shared = searchDebounceMs === undefined ? {} : { searchDebounceMs };
 
   return (
@@ -132,19 +120,7 @@ export function ContextRailBody({
         current={tab}
         order={tabs}
         onChange={choose}
-        tabs={tabs.map(key => ({
-          key,
-          label: CONTEXT_RAIL_TAB_LABEL[key],
-          ...(key === 'signals' && openCount > 0
-            ? {
-                badge: (
-                  <Badge tone="warn" aria-label={`${openCount} open`} data-context-signals-count="">
-                    {openCount}
-                  </Badge>
-                ),
-              }
-            : {}),
-        }))}
+        tabs={tabs.map(key => ({ key, label: CONTEXT_RAIL_TAB_LABEL[key] }))}
       />
       <div
         role="tabpanel"
@@ -155,18 +131,6 @@ export function ContextRailBody({
       >
         {tab === 'files' ? (
           (renderFiles?.() ?? null)
-        ) : tab === 'signals' ? (
-          <ContextSignalsPanel
-            port={port}
-            read={signalsRead}
-            agentName={agentName}
-            query={filters.signals.query}
-            onQueryChange={setQuery('signals')}
-            chip={filters.signals.chip}
-            onChipChange={setChip('signals')}
-            now={now}
-            {...shared}
-          />
         ) : tab === 'mcp' ? (
           <ContextMcpPanel
             read={mcp}

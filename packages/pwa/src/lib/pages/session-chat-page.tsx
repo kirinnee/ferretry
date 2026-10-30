@@ -40,7 +40,6 @@ import {
   useAgenda,
 } from '../../features/agenda/agenda.tsx';
 import { AgendaRepliesNotice } from '../../features/agenda/agenda-replies-notice.tsx';
-import { AGENDA_RESOLVED_ACTION_ID, resolvedActionContribution } from '../../features/agenda/agenda-resolved.tsx';
 import { fetchSessionAnalytics } from '../../features/analytics/analytics-api.ts';
 import { analyticsIdQuery } from '../../features/analytics/session-analytics-query.ts';
 import { SessionAnalyticsSurface } from '../../features/analytics/session-analytics-surface.tsx';
@@ -51,7 +50,6 @@ import { InAppBrowserWorkspace } from '../../features/browser/in-app-browser.tsx
 import type { UnifiedBrowserDependencies } from '../../features/browser/unified-browser-surface.tsx';
 import { browserPageForKey, useSessionBrowser } from '../../features/browser/use-session-browser.ts';
 import {
-  agendaSignalsPort,
   instructionDocsLoader,
   sessionMcpLoader,
   sessionSkillsInventoryLoader,
@@ -548,15 +546,12 @@ export function SessionChatPage({
     [referenceFetch],
   );
   const skills = useSessionSkills(connection, scope, referenceFetch);
-  const agendaId = useId();
   // THE LATEST REQUEST TO SHOW ONE ITEM (a `?attention=` link, a `!A3` click): the agenda opens its card.
   // It belongs to this session and resets with it.
   const [agendaFocus, setAgendaFocus] = useState<AgendaFocus | null>(null);
   const showAgenda = useCallback((target: AgendaId | null, onEntry = false): void => {
     setAgendaFocus(current => ({ target, seq: (current?.seq ?? 0) + 1, ...(onEntry ? { onEntry } : {}) }));
   }, []);
-  // The resolved item a link named, so the list the header menu opens rings it. Cleared with the form.
-  const [resolvedTarget, setResolvedTarget] = useState<AgendaId | null>(null);
   const openAgendaReference = useCallback((id: AgendaId): void => showAgenda(id), [showAgenda]);
   // Dictation clean-up reads the conversation on screen instead of fetching the session's history again.
   const entriesRef = useRef(entries);
@@ -732,7 +727,6 @@ export function SessionChatPage({
     // would open one session's id on another session's board, so it resets with the pairing and the
     // session id.
     setAgendaFocus(null);
-    setResolvedTarget(null);
   }, [connection, session.config.id]);
 
   // `?attention=A3` opens the conversation AT that item. Declared after the reset above so that, on a
@@ -1136,10 +1130,6 @@ export function SessionChatPage({
       <AddMcpForm agentName={agentName} host={host} login={runtime} ports={mcpPorts} project={project} />
     ),
   };
-  const openResolved = useCallback((id: AgendaId): void => {
-    setResolvedTarget(id);
-    setActionForm(AGENDA_RESOLVED_ACTION_ID);
-  }, []);
   const finePointer = useFinePointer();
   const agendaMode = agendaModel !== undefined && sessionAgendaSummary(session.state)?.agendaMode === true;
   const agenda = useAgenda({
@@ -1148,7 +1138,6 @@ export function SessionChatPage({
     connection,
     ferret: sessionDisplayName(session),
     focus: agendaFocus,
-    onOpenResolved: openResolved,
     repliesSlot:
       agendaReplies === undefined ||
       (agendaReplies.secondsLeft === null &&
@@ -1179,10 +1168,6 @@ export function SessionChatPage({
     status: agendaModel?.status ?? 'idle',
     swipeable: !finePointer,
   });
-  const changeActionForm = useCallback((next: string | null): void => {
-    setActionForm(next);
-    if (next !== AGENDA_RESOLVED_ACTION_ID) setResolvedTarget(null);
-  }, []);
   // THE BAR'S ONE OVERFLOW (`session-top-bar.tsx`): on a phone Interrupt is the top of ▾ — a phone's bar is ☰,
   // the name, one status dot, the theme icon, ⓘ and ▾. The theme picker is the bar's own icon, not a form in ▾.
   const interruptSpec = barActions.find(spec => spec.action === 'interrupt');
@@ -1210,7 +1195,6 @@ export function SessionChatPage({
   const contributions: readonly SessionActionContribution<CoreActionContext>[] = [
     ...barOverflowActions,
     ...CORE_SESSION_ACTIONS,
-    resolvedActionContribution(agendaModel?.snapshot?.resolved ?? [], agendaId, resolvedTarget),
     ...actionContributions,
   ];
   const actionSections = sessionActionSections(contributions, coreContext);
@@ -1224,7 +1208,7 @@ export function SessionChatPage({
         else setActionFailure(detail === undefined ? { sentence } : { sentence, detail });
       }}
       onNotice={setActionNotice}
-      onFormChange={changeActionForm}
+      onFormChange={setActionForm}
       sections={actionSections}
     />
   );
@@ -1304,10 +1288,8 @@ export function SessionChatPage({
         await fetchSessionAnalytics(connection, scope, `sum ${analyticsIdQuery(scope.sessionId)}`, referenceFetch),
       relaunch: async signal => await readRelaunchSettings(connection, scope, referenceFetch, signal),
       folder: {
-        agentName,
         sessionId: scope.sessionId,
         machineName: contextDependencies.machineName,
-        signals: agendaSignalsPort(contextDependencies.attention, connection, scope),
         loadMcp: sessionMcpLoader(connection, createClient, scope.sessionId),
         loadSkills: sessionSkillsInventoryLoader(connection, createClient, scope.sessionId),
         loadSkillFile: skillFileLoader(connection, createClient, scope.sessionId),
@@ -1320,7 +1302,7 @@ export function SessionChatPage({
         onAddMcp: () => setActionForm(SESSION_ACTION_IDS.addMcp),
       },
     };
-  }, [contextDependencies, connection, scope, referenceFetch, openFile, agentName, routedClient]);
+  }, [contextDependencies, connection, scope, referenceFetch, openFile, routedClient]);
   const tasksFull = tasks.expanded && cardChat !== null && board !== undefined;
   // The board takes the whole chat column on a desktop: the side panel steps out of the way.
   const panelCovered = tasksFull && formFactor === 'desktop';

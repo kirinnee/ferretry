@@ -107,13 +107,18 @@ never rewritten.
 | `:agent`     | That agent's session, **on the daemon the reference was proved against**              |
 | `@file`      | A file tab in the session workspace, scrolled to the referenced line or range         |
 | `&task`      | The card detail on **this machine's board** (`/d/<daemon>/board/<id>`), in a chat too |
-| `!attention` | The agenda panel at the top of this conversation, at that item                        |
+| `!attention` | That item's view over this conversation (a full page on a phone), whatever its state  |
 | `/skill`     | The Skills tab of this session's "This folder" context                                |
 | `%terminal:` | That exact terminal instance's workspace tab, opened if it is not open                |
 | `%browser:`  | That page's workspace tab, opened if it is not open, with the page in view            |
 
 The `!attention` reference kind keeps its name in the grammar and in the proof table below; it points at the
 agenda (renamed in a later release).
+
+Every id the proof accepts opens the SAME view — the one the agenda line, Info's agenda list, the Inbox and a
+card's "Agenda asks" open. An open item is answered there; a parked one (snoozed, or replied to) says so and offers
+"Back to my list"; a resolved one is read-only. Agenda mode does not gate it. A proved `!A3` is therefore never a dead
+click, and no click switches a tab or a menu instead of opening the item (#B76).
 
 A modifier-click or middle-click is never intercepted: it is the reader asking their browser for a
 new tab.

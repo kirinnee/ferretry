@@ -22,18 +22,17 @@ import { ContextRailBody, type ContextRailBodyProps } from '../context-rail/cont
 import { FOLDER_TABS, loadedSkillCount } from '../context-rail/context-rail-model.ts';
 import { useContextRead } from '../context-rail/context-rail-parts.tsx';
 import type { ContextLoader } from '../context-rail/context-rail-ports.ts';
-import { useContextSignals } from '../context-rail/context-rail-signals.tsx';
 import type { ClipboardWriter } from '../onboarding/copy-button.tsx';
 import type { SurfaceDriving } from '../workspace/use-surface-driving.ts';
 import type { InfoAboutProps } from './info-about.tsx';
-import { InfoOverview } from './info-overview.tsx';
 import { INFO_TABS } from './info-model.ts';
+import { InfoOverview } from './info-overview.tsx';
 import { InfoPanel } from './info-panel.tsx';
 import type { InfoRelaunchRead } from './info-relaunch.tsx';
 import { type InfoListRead, InfoRuntime } from './info-runtime.tsx';
-import { InfoSignals, type InfoVerdictsRead } from './info-signals.tsx';
 import { InfoSurfaces } from './info-surfaces.tsx';
 import { type InfoAnalyticsRead, InfoUsage } from './info-usage.tsx';
+import { type InfoVerdictsRead, InfoWarden } from './info-warden.tsx';
 import type { InfoPlacement } from './use-info-placement.ts';
 
 /** The Context tab's data: the context rail's, minus what Info decides itself. */
@@ -133,13 +132,12 @@ export function SessionInfo({
 }: SessionInfoProps) {
   const { tab } = placement;
   const worktrees = useContextRead(ports.worktrees, tab === 'overview');
-  const verdicts = useContextRead(ports.verdicts, tab === 'signals');
+  const verdicts = useContextRead(ports.verdicts, tab === 'overview');
   const analytics = useContextRead(ports.analytics, tab === 'usage');
   const mcp = useContextRead(ports.folder.loadMcp, tab === 'runtime');
   const docs = useContextRead(ports.folder.loadDocs, tab === 'runtime');
   const skills = useContextRead(ports.folder.loadSkills, tab === 'runtime');
   const relaunch = useContextRead(ports.relaunch ?? NO_RELAUNCH, tab === 'runtime' && ports.relaunch !== undefined);
-  const signals = useContextSignals(ports.folder.signals);
 
   const verdictsRead: InfoVerdictsRead =
     verdicts.load.kind === 'ready'
@@ -159,7 +157,6 @@ export function SessionInfo({
       name={name}
       onClose={placement.close}
       onTabChange={placement.setTab}
-      openSignals={signals.snapshot?.count ?? 0}
       tab={tab}
       titleId={titleId}
       {...(card === undefined ? {} : { tabs: INFO_TABS })}
@@ -188,6 +185,7 @@ export function SessionInfo({
                   },
                 })}
             {...(about === undefined ? {} : { about })}
+            warden={<InfoWarden agentName={name} now={now} sessionId={view.config.id} verdicts={verdictsRead} />}
           />
         ),
         tasks: () => card?.tasks ?? null,
@@ -230,15 +228,6 @@ export function SessionInfo({
             onTabChange={placement.setFolderTab}
             tab={placement.folderTab}
             tabs={FOLDER_TABS}
-          />
-        ),
-        signals: () => (
-          <InfoSignals
-            agentName={name}
-            now={now}
-            port={ports.folder.signals}
-            sessionId={view.config.id}
-            verdicts={verdictsRead}
           />
         ),
         surfaces: () => (
