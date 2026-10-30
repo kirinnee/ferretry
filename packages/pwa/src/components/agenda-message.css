@@ -85,7 +85,7 @@
   align-items: center;
   background: var(--accent);
   /* A pill on one line; a long choice that wraps keeps soft corners rather than becoming a lozenge. */
-  border-radius: min(var(--radius-pill), 1.2em);
+  border-radius: var(--radius-lg);
   color: var(--accent-fg);
   display: inline-flex;
   font-weight: var(--weight-strong);
