@@ -2769,6 +2769,14 @@ const HARNESS_BOARD_CARDS: readonly BoardTaskView[] = [
     legacyRef: `${HARNESS_BOARD_OWNER}:C1`,
     lastTouchedAt: '2026-07-30T09:00:00.000Z',
   }),
+  // The truncated-index session owns one card, so its task half is seen to survive a short file index.
+  boardCard('F40', {
+    title: 'Port the file walk',
+    summary: 'Reads the files the walk never reached.',
+    laneId: 'implement',
+    owner: 'harness-partial-session',
+    lastTouchedAt: '2026-07-29T09:00:00.000Z',
+  }),
 ];
 
 /** The real browser board port, over this page's patched network: the search reads cards the way the app does. */
