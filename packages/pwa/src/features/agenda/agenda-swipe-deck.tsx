@@ -14,8 +14,6 @@
  * - DOWN IS NOTHING — unless the host can SKIP (`onSkip`, the Inbox): then a drag down past the threshold moves on
  *   to the next card without answering (stamped "↓ Skip"), and the card follows it down. Without `onSkip` the card
  *   does not follow a downward drag and the browser keeps it as a scroll.
- * - THE HOST MAY REMAP THE DIRECTIONS (`targetsFor`): the Inbox puts the primary answer on ↑. The stamp, the fly-off,
- *   the keys and the hint all read the same remapped targets.
  * - A SWIPE STARTS ONLY FROM THE CARD'S HEAD ({@link startsInHandle}): its header and title (on a full item view:
  *   its sticky top, the Inbox's who-and-what line and the quick-reply bar). The detail
  *   below is its own scroller and the answer bar is for pressing, so a drag there is the reader scrolling
@@ -325,22 +323,17 @@ export interface AgendaSwipeDeckProps {
   readonly onAct: (card: InboxCard, action: InboxAction) => void;
   /** The reader moved on from the card on top without answering it (↓). Absent: the deck cannot skip. */
   readonly onSkip?: (card: InboxCard) => void;
-  /** Which answer each direction gives on a card; the card's own (`swipeTargets`) otherwise. */
-  readonly targetsFor?: (card: InboxCard) => SwipeTargets;
   /** Forces reduced motion on or off; the reader's preference otherwise. */
   readonly reducedMotion?: boolean;
 }
 
 const NO_ACT = (): void => undefined;
 
-const ownTargets = (card: InboxCard): SwipeTargets => swipeTargets(card.item);
-
 export function AgendaSwipeDeck({
   cards,
   renderCard,
   onAct,
   onSkip,
-  targetsFor = ownTargets,
   reducedMotion,
 }: AgendaSwipeDeckProps) {
   const reduced = useReducedMotion(reducedMotion);
@@ -352,7 +345,7 @@ export function AgendaSwipeDeck({
   const refocus = useRef(false);
   const swallowClick = useRef(false);
   const top = cards[0];
-  const targets: SwipeTargets = top === undefined ? {} : targetsFor(top);
+  const targets: SwipeTargets = top === undefined ? {} : swipeTargets(top.item);
   const canSkip = onSkip !== undefined;
 
   const topKey = top?.key;
@@ -377,7 +370,7 @@ export function AgendaSwipeDeck({
   }, [leaving]);
 
   const answer = (card: InboxCard, action: InboxAction, from: Drag): void => {
-    const direction = directionOf(targetsFor(card), action);
+    const direction = directionOf(swipeTargets(card.item), action);
     refocus.current = deck.current?.contains(document.activeElement) === true;
     gesture.current = null;
     setDrag(null);

@@ -14,8 +14,8 @@
  *   it as its note. Every row is still a real link to the conversation at the item (`?attention=<id>`), so a
  *   modified click opens the chat, and the open item has "Open chat". A tapped notification opens the chat and
  *   clears itself.
- * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) ↑ for the primary answer — "to
- *   the top" — ← and → for the others, and ↓ to SKIP to the next without answering; the item stays open. A swipe
+ * - THE OPEN ITEMS ARE A DECK, on a phone and a wide screen alike: SWIPE (or press) in the direction of an answer — the
+ *   card's own row: ← left, ↑ the middle (the recommended), → right — and ↓ to SKIP to the next without answering; the item stays open. A swipe
  *   starts on the item's head, its who-and-what line or its quick replies (the body scrolls), is stamped with what
  *   it would do (no hint line: the stamp and the row say it), and goes into the same undo window as a tap. Reduced motion drops the fly-off. A phone also gets
  *   "Answer quickly", the deck from the top; a wide screen walks the rows with j/k (or ↑/↓) and Enter opens one.
@@ -32,7 +32,7 @@ import { ChatProse } from '../../components/chat-prose.tsx';
 import { Spinner } from '../../components/spinner.tsx';
 
 import type { AgendaInbox } from '../../hooks/use-agenda-inbox.ts';
-import { CLEAR_ACTION, kindWord, type SwipeTargets, swipeTargets } from '../../lib/agenda-answers.ts';
+import { CLEAR_ACTION, kindWord } from '../../lib/agenda-answers.ts';
 import { itemHistory } from '../../lib/agenda-history.ts';
 import {
   actionSentence,
@@ -42,7 +42,6 @@ import {
   type InboxCard,
   type InboxResolved,
   RESOLVED_READ_LIMIT,
-  type SwipeMap,
 } from '../../lib/agenda-inbox.ts';
 import {
   type FerretGroup,
@@ -55,7 +54,6 @@ import {
   inboxRowAsk,
   inboxRowTitle,
   inboxSections,
-  inboxSwipeTargets,
   inboxWho,
   nextSelection,
   QUEUE_END,
@@ -149,17 +147,6 @@ const renderInboxCard = (
   />
 );
 
-/** The open item's swipes: the card's own answers, the primary on ↑ ({@link inboxSwipeTargets}). */
-const openItemTargets = (card: InboxCard): SwipeTargets => inboxSwipeTargets(swipeTargets(card.item));
-
-/** The same swipes as the item view's keys take them: each direction's action, where it has one. */
-const swipeMapOf = (targets: SwipeTargets): SwipeMap =>
-  Object.fromEntries(
-    Object.entries(targets).flatMap(([direction, target]) =>
-      target?.action == null ? [] : [[direction, target.action]],
-    ),
-  );
-
 /** The conversation an item belongs to, as the composer registers itself under it. */
 const scopeOf = (card: InboxCard) => daemonSessionScope({ daemonId: card.daemonId }, card.view.config.id);
 
@@ -250,12 +237,10 @@ const renderOpenItem = (
       onAct={act}
       onClose={place.onClose}
       onNext={skip}
-      onSkip={skip}
       position={{ index: place.index, total: place.total }}
       renderProse={text => <ChatProse copyable={copyWriter} text={text} />}
-      // The deck owns the gestures (the stamp, the fly-off, ↓ to skip); the view takes the keys.
+      // The deck owns the gestures (the stamp, the fly-off, ↓ to skip); the view takes the keys, ↓ going to "next".
       swipeable={false}
-      swipes={swipeMapOf(openItemTargets(card))}
       {...(now === undefined ? {} : { now })}
       {...(place.onPrevious === undefined ? {} : { onPrevious: place.onPrevious })}
     />
@@ -983,7 +968,6 @@ export function AgendaInboxPage({
               cards={deck}
               onAct={(card, action) => answerWithDraft(host, card, action)}
               onSkip={card => setDeckAt(skipSelection(order, card.key))}
-              targetsFor={openItemTargets}
               {...(reducedMotion === undefined ? {} : { reducedMotion })}
               renderCard={(card, act, skipCard) => {
                 const index = order.indexOf(card.key);

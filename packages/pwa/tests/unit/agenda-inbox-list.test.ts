@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'bun:test';
 import type { SessionTranscriptMessage, SessionTranscriptPage } from '@ferretry/protocol';
-import { swipeTargets } from '../../src/lib/agenda-answers.ts';
 import type { InboxResolved } from '../../src/lib/agenda-inbox.ts';
 import {
   filterInboxCards,
@@ -11,7 +10,6 @@ import {
   inboxRowTitle,
   inboxSections,
   inboxSourceFromSearch,
-  inboxSwipeTargets,
   inboxWho,
   isFromWarden,
   NO_FILTER,
@@ -22,7 +20,7 @@ import {
 } from '../../src/lib/agenda-inbox-list.ts';
 import { daemonId } from '../../src/lib/daemon-connection.ts';
 import { type MessagesClient, readRecentMessages } from '../../src/lib/recent-messages.ts';
-import { agendaItem, choices, inboxCard } from '../support/agenda-inbox.tsx';
+import { agendaItem, inboxCard } from '../support/agenda-inbox.tsx';
 import { sessionView } from '../support/sessions.ts';
 
 const MIGRATE = sessionView('dm', { config: { teammate: 'johnnie', name: 'diene-migrate' } });
@@ -290,23 +288,6 @@ describe('inboxSections reading a stopped ferret under the agenda name', () => {
     } as never);
     const sections = inboxSections([inboxCard(agendaItem('A1'), view)], []);
     expect(sections.stopped.map(group => group.ferret)).toEqual(['Moe']);
-  });
-});
-
-describe('the open item’s swipes', () => {
-  const labels = (targets: ReturnType<typeof swipeTargets>) =>
-    Object.fromEntries(Object.entries(targets).map(([direction, target]) => [direction, target?.label]));
-
-  it('puts the primary answer on ↑, keeps ←, and gives → what ↑ gave', () => {
-    const three = swipeTargets(agendaItem('A1', { ask: choices('Rebase now', 'Wait', 'Later') }));
-    expect(labels(inboxSwipeTargets(three))).toEqual({ left: 'Later', up: 'Rebase now', right: 'Wait' });
-  });
-
-  it('keeps → on the primary when nothing was on ↑, and leaves a card with no primary alone', () => {
-    const two = swipeTargets(agendaItem('A2', { ask: choices('Ship', 'Hold') }));
-    expect(labels(inboxSwipeTargets(two))).toEqual({ left: 'Hold', up: 'Ship', right: 'Ship' });
-    const none = swipeTargets(agendaItem('A3', { answers: [] } as never));
-    expect(inboxSwipeTargets(none)).toBe(none);
   });
 });
 

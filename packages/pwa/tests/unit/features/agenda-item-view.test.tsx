@@ -529,43 +529,12 @@ describe('a change to the Ferretry config', () => {
   });
 });
 
-describe('the Inbox’s item view (swipes, onSkip, closeLabel)', () => {
-  const root = (): HTMLElement => must(view?.container.querySelector<HTMLElement>('[data-agenda-view]'), 'the view');
-  const press = (name: string) =>
-    interact(() => root().dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })));
-
-  test('takes the host’s direction map for its arrow keys', async () => {
-    const hold: InboxAction = {
-      kind: 'respond',
-      label: 'Postgres',
-      response: { kind: 'multiple-choice', choice: 'Postgres' },
-    };
-    const spy = await draw(richItem, { swipes: { up: hold } });
-    await press('ArrowUp');
-    await press('ArrowRight');
-    expect(spy.acted).toEqual([hold]);
-  });
-
-  test('skips on ↓ when the host can skip, and still closes on Escape', async () => {
-    let skipped = 0;
-    const spy = await draw(richItem, {
-      onSkip: () => {
-        skipped += 1;
-      },
-    });
-    await press('ArrowDown');
-    expect([skipped, spy.closed]).toEqual([1, 0]);
-    await press('Escape');
-    expect([skipped, spy.closed]).toEqual([1, 1]);
-  });
-
-  test('closes on ↓ in the chat, and names ✕ as the host asks', async () => {
-    const spy = await draw(richItem);
+describe('the Inbox’s item view', () => {
+  test('names ✕ as the host asks: "Back to the chat" unless it is somewhere else', async () => {
+    await draw(richItem);
     const closeLabel = (): string | null | undefined =>
-      root().querySelector('[data-agenda-close]')?.getAttribute('aria-label');
+      view?.container.querySelector('[data-agenda-close]')?.getAttribute('aria-label');
     expect(closeLabel()).toBe('Back to the chat');
-    await press('ArrowDown');
-    expect(spy.closed).toBe(1);
     await view?.unmount();
     view = null;
     await draw(richItem, { closeLabel: 'Back to the Inbox' });

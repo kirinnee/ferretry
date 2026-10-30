@@ -14,14 +14,10 @@
  *
  * WHO AND WHAT, never the callsign alone: a group, and the open item, say the ferret, what it is working on (its
  * task's name and its card, `&F12`) and the machine ({@link inboxWho}).
- *
- * THE OPEN ITEM'S SWIPES ({@link inboxSwipeTargets}): ↑ is the primary answer — "to the top" — ← and → the others,
- * and ↓ skips to the next item without answering.
  */
 
 import { type AgendaItem, agendaTitle, formatTaskRef, type SessionView } from '@ferretry/protocol';
 import { sessionsBarNames } from '../shell/sessions-bar-model.ts';
-import type { SwipeTargets } from './agenda-answers.ts';
 import { sortAgenda } from './agenda-status.ts';
 import { sessionAgendaSummary } from './agenda-wire.ts';
 import type { InboxCard, InboxResolved } from './agenda-inbox.ts';
@@ -79,16 +75,6 @@ export const inboxWho = (card: InboxCard): InboxWho => {
   };
 };
 
-/**
- * The open item's swipes in the Inbox: ↑ — "to the top" — is the PRIMARY answer (the one on the right, the
- * recommended), ← stays, and → takes what ↑ used to give (a third option, "Always allow"); with nothing there, →
- * is the primary too, so the hand that learned → for Yes is never wrong. A card with no primary is unchanged.
- */
-export const inboxSwipeTargets = (targets: SwipeTargets): SwipeTargets => {
-  const { left, up, right } = targets;
-  if (right === undefined) return targets;
-  return { ...(left === undefined ? {} : { left }), up: right, right: up ?? right };
-};
 
 /** The cards grouped by ferret. Each group's items are in the agenda's order; its notices keep their (newest-first) order. */
 const buildGroups = (cards: readonly InboxCard[]): readonly FerretGroup[] => {

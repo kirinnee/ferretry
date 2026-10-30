@@ -3,7 +3,6 @@ import { AgendaInboxPage, type AgendaInboxPageProps } from '../../../src/feature
 import { AgendaSwipeDeck, deckIntent, dragOffset } from '../../../src/features/agenda/agenda-swipe-deck.tsx';
 import { swipeTargets } from '../../../src/lib/agenda-answers.ts';
 import type { InboxCard } from '../../../src/lib/agenda-inbox.ts';
-import { inboxSwipeTargets } from '../../../src/lib/agenda-inbox-list.ts';
 import { daemonId } from '../../../src/lib/daemon-connection.ts';
 import { registerComposerQuoteTarget } from '../../../src/lib/quote.ts';
 import {
@@ -254,7 +253,7 @@ describe('the deck that skips', () => {
 
   it('skips the focused card on ↓ and says so to a screen reader, and flies it down with motion on', async () => {
     const skipped: string[] = [];
-    const cards = [inboxCard(agendaItem('A1', { ask: choices('Yes', 'No') }))];
+    const cards = [inboxCard(agendaItem('A1', { ask: choices('Ship', 'Hold') }))];
     const mounted = await mount(
       <AgendaSwipeDeck
         cards={cards}
@@ -266,12 +265,12 @@ describe('the deck that skips', () => {
             {card.item.id}
           </button>
         )}
-        targetsFor={card => inboxSwipeTargets(swipeTargets(card.item))}
       />,
     );
     const frame = must(mounted.container.querySelector<HTMLElement>('[data-agenda-frame]'), 'the frame');
     expect(frame.textContent).toContain('Arrow down: skip.');
-    expect(frame.textContent).toContain('Arrow up: Yes.');
+    // The card's own row: the recommended (here the first) option in the middle, on ↑.
+    expect(frame.textContent).toContain('Arrow up: Ship.');
     await key(frame, 'ArrowDown');
     expect(skipped).toEqual(['A1']);
     expect(mounted.container.querySelector('.fy-attn-deck__leaving')?.getAttribute('data-direction')).toBe('down');
