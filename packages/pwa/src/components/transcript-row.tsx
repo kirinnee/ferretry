@@ -221,10 +221,8 @@ function OwnSendRow({
               reading={pointer === undefined ? ON_ITS_WAY : reading}
               source={source}
             />
-          ) : travelling ? (
-            <OnItsWayWords text={record.message} />
           ) : (
-            <OwnWords text={entry.text} />
+            <OwnWords onItsWay={travelling} text={travelling ? record.message : entry.text} />
           )}
           {boundary === undefined ? null : (
             <span className="sr-only" data-ledger-boundary>
@@ -348,16 +346,11 @@ function OwnMessageRow({
  * The reader's own words, literal — or, when the daemon worded them about agenda items (an answer from a card, a
  * reply naming `!A45`), the compact agenda card that reads them (`agenda-message.tsx`).
  */
-function OwnWords({ text }: { readonly text: string }) {
-  return <AgendaMessageOr fallback={<p>{text}</p>} text={text} />;
-}
-
-/**
- * The reader's words while they are still on their way: worded as the ferret will receive them, so a reply about
- * an open item (`!A5 …`) shows as its agenda card at once instead of turning into one when it lands.
- */
-function OnItsWayWords({ text }: { readonly text: string }) {
-  return <OwnWords text={useAgendaChatReply(text)} />;
+function OwnWords({ text, onItsWay = false }: { readonly text: string; readonly onItsWay?: boolean }) {
+  // Still on its way: worded as the ferret will receive it, so a reply about an open item (`!A5 …`) shows as its
+  // agenda card at once. One component either way, so the bubble stays ONE element from sent to answered.
+  const worded = useAgendaChatReply(text);
+  return <AgendaMessageOr fallback={<p>{text}</p>} text={onItsWay ? worded : text} />;
 }
 
 function TranscriptTextRow({
