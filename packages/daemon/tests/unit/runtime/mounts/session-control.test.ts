@@ -4,7 +4,11 @@ import { FY_REQUEST_ID_HEADER, SessionViewSchema } from '@ferretry/protocol';
 import should from 'should';
 import { ApiDispatcher } from '../../../../src/lib/api/dispatcher.ts';
 import { ApiRouter } from '../../../../src/lib/api/router.ts';
-import { knownLaunchRoots, sessionControlRoutes } from '../../../../src/lib/runtime/mounts/session-control.ts';
+import {
+  knownLaunchRoots,
+  SessionControlError,
+  sessionControlRoutes,
+} from '../../../../src/lib/runtime/mounts/session-control.ts';
 import { TaskBoardError } from '../../../../src/lib/task-boards/error.ts';
 import { jsonBody, request } from '../../api/support.ts';
 import { CREDENTIALS, fakePayloadDigest, FakeSessionControl, human } from './support.ts';
@@ -317,6 +321,28 @@ describe('the session control mount', () => {
     // A parameter that regains a separator never reaches the service.
     should(unusable.status).equal(400);
     should(jsonBody(unusable)).have.property('code', 'invalid_session_id');
+  });
+
+  it('should answer a stop that found a launch still in flight as pending, not as a launch failure', async () => {
+    // Arrange
+    const control = new FakeSessionControl();
+    control.stop = async sessionId => {
+      throw new SessionControlError(
+        'pending',
+        `session ${sessionId} is still launching after 45s; nothing was stopped`,
+      );
+    };
+    const subject = dispatcher(control);
+
+    // Act
+    const response = await subject.dispatch(request({ method: 'POST', path: '/v1/sessions/s1/stop', headers: human }));
+
+    // Assert
+    should(response.status).equal(409);
+    should(jsonBody(response)).containDeep({
+      code: 'session_launch_pending',
+      error: 'session s1 is still launching after 45s; nothing was stopped',
+    });
   });
 
   it('should let no warden-scoped caller start or stop anything', async () => {

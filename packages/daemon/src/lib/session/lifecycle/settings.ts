@@ -12,6 +12,14 @@ export interface SessionLifecycleSettings {
   /** Reason recorded when a client stops a session without giving one. */
   readonly defaultStopReason: string;
   /**
+   * How long a stop waits for a launch THIS process has in flight before it answers "pending".
+   *
+   * A launch holds the session's queue until it settles, and a stop queued behind one that never does
+   * would never answer. Short enough to answer inside a client's request timeout; a stop with no launch
+   * in flight waits for nothing.
+   */
+  readonly stopLaunchWaitMs: number;
+  /**
    * A version-1 fleet auto-wrapper basename (`claude-auto-<name>`). Without a launcher rule the
    * lifecycle is a remote shell — `agent: '/bin/sh'` would be accepted verbatim.
    */
@@ -30,6 +38,7 @@ export const defaultSessionLifecycleSettings: SessionLifecycleSettings = {
   maxTmuxSessionNameLength: 80,
   launchAttempts: 3,
   defaultStopReason: 'stopped by client',
+  stopLaunchWaitMs: 45_000,
   agentWrapperPattern: /^(?:claude|codex)-auto-[a-z0-9][a-z0-9-]*$/u,
   runtimeLauncherPattern: /^\/(?:(?!\.\.?\/)[^/\0]+\/)*fleet\/bin\/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*$/u,
 };

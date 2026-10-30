@@ -784,6 +784,8 @@ import {
   harnessQuirks,
   InitialAttachmentError,
   InstructionRefresh,
+  type InterruptedLaunchOutcome,
+  InterruptedLaunchReconciler,
   InvalidDeadlineRefused,
   type IoPressurePort,
   type IoPressureSourcePort,
@@ -1005,6 +1007,7 @@ import {
   SessionSignalError,
   SessionSignalService,
   type SessionSignalSubsystem,
+  SessionStopPending,
   type SessionTranscriptMessageTokenCodec,
   SessionTranscriptReader,
   SessionTranscriptResolver,
@@ -1137,6 +1140,7 @@ import {
   packInstructed,
   packLaunchDefault,
   RoutingMigration,
+  runningChildCount,
 } from '../src/lib/pack/index.ts';
 import { IDLE_DAEMON_BUDGETS } from '../src/lib/performance/budgets.ts';
 import { PerformanceProfiler, sampleIntervalMs } from '../src/lib/performance/profiler.ts';
@@ -1435,6 +1439,18 @@ export interface DaemonWorld {
    * terminal is gone, and those are the ones that were running when the host went down.
    */
   readonly createAutoResume: (storage: DaemonStorage, resume: AutoResumeRevive) => AutoResumeBoot;
+  /**
+   * Settles every launch the previous daemon process left in flight (`InterruptedLaunchReconciler`).
+   *
+   * Run ONCE per boot, BEFORE the daemon serves: nothing in this process can be launching yet, so a
+   * record still saying `created` or `starting` with no live pane is a launch that died with the
+   * old process. Without it such a session is stuck for good — it holds a Pack slot, holds its
+   * conversation lease, and no exit settle will ever move it on.
+   */
+  readonly reconcileInterruptedLaunches: (
+    storage: DaemonStorage,
+    panes: Pick<ResumeLauncher, 'observe'>,
+  ) => Promise<InterruptedLaunchOutcome>;
   /**
    * The terminal a revive replaces: tmux panes on the daemon's own private socket, never the host's
    * default one.
@@ -2719,7 +2735,10 @@ function createSessionControlSubsystem(
       try {
         await lifecycle.stop(id, reason);
       } catch (error) {
-        throw new SessionControlError('failed', error instanceof Error ? error.message : String(error));
+        throw new SessionControlError(
+          error instanceof SessionStopPending ? 'pending' : 'failed',
+          error instanceof Error ? error.message : String(error),
+        );
       }
       return await view(id);
     },
@@ -3869,9 +3888,10 @@ function createPackTree(sessions: SessionDirectorySubsystem): PackTree {
         id: view.config.id,
         interactive: view.config.mode === 'interactive',
         depth: await depth(view.config.id),
-        runningChildren: all.filter(
-          child => child.config.parent === view.config.id && !HYPERMEDIA_NOT_RUNNING.has(child.state.status),
-        ).length,
+        runningChildren: runningChildCount(
+          view.config.id,
+          all.map(child => ({ parent: child.config.parent, status: child.state.status })),
+        ),
         cwd: view.config.cwd,
         pack: view.config.pack,
       };
@@ -7703,6 +7723,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
       new GitRepositoryProbe(),
       [...COMMON_SCRATCH_ROOTS, tmpdir()],
     );
+  /**
+   * ONE launch gate and ONE turn store for every path that relaunches or hands over a turn.
+   *
+   * The gate is a process-wide ledger of launches in flight, and its whole value is that a caller
+   * arriving mid-bootstrap WAITS instead of fighting for the same terminal name — which a second gate
+   * would not know to do, because it would see no launches at all. The turn store owns the numbered
+   * turn document and the exact set of markers a relaunch clears; a second one is how the revive and
+   * the send drift until a marker one writes is one the other does not clear.
+   */
+  const launchGate = new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds));
+  const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** The lifecycle factory, held as a local so the mounted subsystems get the same one the world
    *  publishes rather than a second construction that could drift from it. */
   const createSessionLifecycle: DaemonWorld['createSessionLifecycle'] = (storage, launcher, envelope, id) =>
@@ -7729,6 +7760,9 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         // and a retried start of the SAME session interleave, and the loser's write would overwrite a
         // live session's record. The service is per request; the serialization is not.
         serial: sessionMutations,
+        // The SAME gate a revive registers in, so a stop waits boundedly for a relaunch in flight
+        // instead of queueing forever behind one that never settles.
+        launches: launchGate,
       },
       defaultSessionLifecycleSettings,
     );
@@ -7898,17 +7932,6 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
   const codexRuntimeModels = new CodexRuntimeCatalogCache((binary, cwd) =>
     new CodexAppServerCatalog({ clientName: DAEMON_NAME, clientVersion: daemonVersion }).models(binary, cwd),
   );
-  /**
-   * ONE launch gate and ONE turn store for every path that relaunches or hands over a turn.
-   *
-   * The gate is a process-wide ledger of launches in flight, and its whole value is that a caller
-   * arriving mid-bootstrap WAITS instead of fighting for the same terminal name — which a second gate
-   * would not know to do, because it would see no launches at all. The turn store owns the numbered
-   * turn document and the exact set of markers a relaunch clears; a second one is how the revive and
-   * the send drift until a marker one writes is one the other does not clear.
-   */
-  const launchGate = new InMemoryLaunchGate(milliseconds => Bun.sleep(milliseconds));
-  const resumeTurns = new FileResumeTurnStore(id => createSessionPaths(paths, id).directory);
   /** Set by `createSessionHealth`; read by `createAutoResume` — the two halves of one boot-time observation. */
   let bootExits: BootExitRecorder | undefined;
   /**
@@ -8118,6 +8141,17 @@ export function buildWorld(overrides: RunOverrides, seams: WorldSeams): DaemonWo
         run: async () => await service.run(),
       };
     },
+    reconcileInterruptedLaunches: async (storage, panes) =>
+      await new InterruptedLaunchReconciler({
+        repository: new StorageResumeRepository(storage),
+        // The same gate, queue and leases a start, a revive and a stop use, so the settle can never
+        // overwrite a launch this process did begin, nor interleave with a stop or a revive.
+        gate: launchGate,
+        panes,
+        serial: sessionMutations,
+        leases: conversationLeases(storage),
+        clock,
+      }).reconcile(),
     createSessionHealth: (storage, settings, loop) =>
       new SessionHealthService(
         {
@@ -11483,19 +11517,21 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // whether the boot completes or not.
   cleanups.push(async () => await tunnel.stop());
   progress.enter('mounting subsystems');
+  // Built here rather than inside `createSubsystems` because it needs the storage this boot opened,
+  // and threading it through the same seam as the other host adapters is what lets a test replace
+  // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane. The
+  // boot's interrupted-launch pass asks the same launcher whether a pane is there.
+  const reviver = world.createResumeLauncher(
+    opened.storage,
+    async id => await world.createSessionLaunch(opened.storage).relaunch(id),
+  );
   const createdSubsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
     usage,
     health,
     world.sessionLauncher,
-    // Built here rather than inside `createSubsystems` because it needs the storage this boot opened,
-    // and threading it through the same seam as the other host adapters is what lets a test replace
-    // the one thing a revive cannot do twice on a developer's machine: kill and respawn a real pane.
-    world.createResumeLauncher(
-      opened.storage,
-      async id => await world.createSessionLaunch(opened.storage).relaunch(id),
-    ),
+    reviver,
     world.migratePreflight,
     world.browserLogin.window,
     world.sttEnhancement,
@@ -11579,6 +11615,16 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     );
   progress.enter('first self-check (reconciling the session index)');
   await health.selfCheck().catch(() => undefined);
+  // Launches the previous process had in flight died with it. Settled here, before anything serves and
+  // so before anything in this process can be launching: a record left `starting` is otherwise stuck
+  // for good. A pass that cannot run leaves them as they were, which the next boot looks at again.
+  progress.enter('settling launches a restart interrupted');
+  const interrupted = await world.reconcileInterruptedLaunches(opened.storage, reviver).catch(() => undefined);
+  if (interrupted !== undefined && interrupted.failed.length > 0)
+    world.notices.state(
+      `${String(interrupted.failed.length)} launch${interrupted.failed.length === 1 ? '' : 'es'} interrupted by the restart ` +
+        `recorded as failed — resume or stop: ${interrupted.failed.join(', ')}`,
+    );
   // Written down BEFORE anything is attempted: the host can go down again mid-pass, and what is owed
   // must survive that. Nothing is resumed yet — the daemon is not serving.
   const autoResume = world.createAutoResume(opened.storage, async (id, message) => {

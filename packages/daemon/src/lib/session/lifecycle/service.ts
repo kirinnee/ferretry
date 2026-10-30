@@ -10,6 +10,7 @@ import type {
   SessionEffectKey,
   SessionEffectLedger,
 } from '../effects/index.ts';
+import type { LaunchGate } from '../resume/types.ts';
 import {
   assignedTaskDocument,
   createSessionRecord,
@@ -31,6 +32,7 @@ import {
   type SessionLifecycleRecord,
   type SessionLifecycleRepository,
   type SessionProjectResolver,
+  SessionStopPending,
   type SessionTaskStore,
   type WorkingDirectoryResolver,
 } from './types.ts';
@@ -78,6 +80,13 @@ export interface SessionLifecyclePorts {
    * then created without one and a reader resolves it from the cwd.
    */
   readonly projects?: SessionProjectResolver;
+  /**
+   * The launches THIS process has in flight — the gate a revive registers its relaunch in. A stop asks
+   * it first, so it waits boundedly for a live launch and not at all when none holds the session, rather
+   * than queueing forever behind a relaunch that never settles. Optional: without it a stop queues as
+   * it always did.
+   */
+  readonly launches?: Pick<LaunchGate, 'launching' | 'awaitSettled'>;
 }
 
 function failureMessage(error: unknown): string {
@@ -210,6 +219,7 @@ export class SessionLifecycleService {
 
   async stop(id: string, reason = this.settings.defaultStopReason): Promise<SessionLifecycleRecord> {
     const parsed = lifecycleSessionId(id);
+    await this.awaitLaunchSettled(parsed);
     return await this.ports.serial.run(parsed, async () => {
       const current = await this.require(parsed);
       if (lifecyclePhase(current.state.status) === 'stopped') return current;
@@ -233,6 +243,22 @@ export class SessionLifecycleService {
       await this.releaseLeases(parsed);
       return stopped;
     });
+  }
+
+  /**
+   * Waits, boundedly, for a launch this process has in flight, before the stop takes the session's queue.
+   *
+   * That launch HOLDS the queue until it settles, so queueing behind one that hangs — a relaunch waiting
+   * on a harness that never becomes ready — was a stop that never answered and changed nothing. A launch
+   * that settles in time is waited for exactly as before; one that does not is answered as pending.
+   * Nothing in flight means nothing to wait for: a record still saying `starting` after a restart is not
+   * a launch, and its stop proceeds at once.
+   */
+  private async awaitLaunchSettled(id: SessionId): Promise<void> {
+    const launches = this.ports.launches;
+    if (launches === undefined || !launches.launching(id)) return;
+    if (await launches.awaitSettled(id, this.settings.stopLaunchWaitMs)) return;
+    throw new SessionStopPending(id, this.settings.stopLaunchWaitMs);
   }
 
   /**

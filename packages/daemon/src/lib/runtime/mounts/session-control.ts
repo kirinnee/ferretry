@@ -98,6 +98,8 @@ export type SessionControlFailure =
   | 'callsign_unavailable'
   /** The launch itself failed, and the session records why. */
   | 'failed'
+  /** A stop found a launch of the same session still in flight and stopped nothing; ask again once it settles. */
+  | 'pending'
   /** The parent already runs as many sub-ferrets as Pack mode's limit allows (docs/pack-mode.md). */
   | 'limit_reached'
   /** A sub-ferret this deep may not start its own (docs/pack-mode.md). */
@@ -166,6 +168,8 @@ const REFUSALS: Readonly<Record<SessionControlFailure, { readonly status: number
   callsign_taken: { status: 409, code: 'callsign_taken' },
   callsign_unavailable: { status: 503, code: 'callsign_unavailable' },
   failed: { status: 500, code: 'session_launch_failed' },
+  // 409: nothing was attempted, and the same stop succeeds once the launch it waited for settles.
+  pending: { status: 409, code: 'session_launch_pending' },
   // 409: the request is well formed and would be served once the parent has fewer running children,
   // or by a shallower ferret — not by retrying it as it is.
   limit_reached: { status: 409, code: 'limit_reached' },
