@@ -131,6 +131,8 @@ import type {
   TaskBoardTaskActionAuthorizer,
 } from '../../../../src/lib/runtime/mounts/task-boards.ts';
 import type { AssigneeObservation, TaskBoardPort, TaskSubsystem } from '../../../../src/lib/runtime/mounts/tasks.ts';
+import type { BoardSubsystem } from '../../../../src/lib/runtime/mounts/board.ts';
+import { BoardError } from '../../../../src/lib/board/index.ts';
 import { TerminalMountError, type TerminalSubsystem } from '../../../../src/lib/runtime/mounts/terminals.ts';
 import type { WardenError, WardenSubsystem } from '../../../../src/lib/runtime/mounts/warden.ts';
 import {
@@ -2379,3 +2381,24 @@ export const NO_HELD_REPLIES: AttentionRepliesSubsystem = {
   delivery: async () => undefined,
   sendNow: async () => undefined,
 };
+
+/** A board with no cards: every card read or write answers `not-found`. */
+export function boardSubsystem(overrides: Partial<BoardSubsystem> = {}): BoardSubsystem {
+  const missing = async (): Promise<never> => {
+    throw new BoardError('not-found', 'there is no card on this machine');
+  };
+  return {
+    board: async () => ({
+      projectId: null,
+      laneSet: null,
+      cards: [],
+      counts: { closedHidden: 0, stale: 0, orphaned: 0, active: 0, toTest: 0, waitingOnYou: 0 },
+      nextCursor: null,
+      quarantined: [],
+    }),
+    task: missing,
+    create: missing,
+    act: missing,
+    ...overrides,
+  };
+}
