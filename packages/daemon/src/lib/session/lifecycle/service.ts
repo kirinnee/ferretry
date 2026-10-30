@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { SESSION_MODE_ENV } from '@ferretry/fleet';
-import type { SessionLaunchInstructions } from '@ferretry/protocol';
+import type { BoardProjectId, SessionLaunchInstructions } from '@ferretry/protocol';
 import type { ClockPort, SerialExecutor } from '../../ports.ts';
 import type { SessionId } from '../../session-id.ts';
 import type { SessionConversationLeases } from '../conversation-lease.ts';
@@ -30,6 +30,7 @@ import {
   type SessionLifecycleLauncher,
   type SessionLifecycleRecord,
   type SessionLifecycleRepository,
+  type SessionProjectResolver,
   type SessionTaskStore,
   type WorkingDirectoryResolver,
 } from './types.ts';
@@ -71,6 +72,12 @@ export interface SessionLifecyclePorts {
    * a daemon wired without it launches exactly as before.
    */
   readonly leases?: SessionConversationLeases;
+  /**
+   * Names the board a new session works on (its parent's project, else the cwd's repository, else the
+   * longest registered path, else `unfiled`). Optional, and a failure never blocks a start: the session is
+   * then created without one and a reader resolves it from the cwd.
+   */
+  readonly projects?: SessionProjectResolver;
 }
 
 function failureMessage(error: unknown): string {
@@ -98,9 +105,16 @@ export class SessionLifecycleService {
       // Minted before either credential-bearing write, so the exact plaintext/hash pair is fixed
       // for this attempt. The reservation below carries neither; plaintext still precedes the hash.
       const credential = this.ports.credentials?.issue();
+      const projectId = await this.projectOf(cwd, request.parent);
       const created = createSessionRecord(
         { ...request, ...(credential === undefined ? {} : { sessionCapabilityHash: credential.hash }) },
-        { id, cwd, at: this.ports.clock.now(), settings: this.settings },
+        {
+          id,
+          cwd,
+          ...(projectId === undefined ? {} : { projectId }),
+          at: this.ports.clock.now(),
+          settings: this.settings,
+        },
       );
       if (await this.ports.launcher.alive(created.record))
         throw new Error(`tmux session ${created.record.config.tmuxSession} is already live`);
@@ -118,6 +132,14 @@ export class SessionLifecycleService {
       await this.ports.repository.write(created.record, created.event);
       return created.record;
     });
+  }
+
+  private async projectOf(cwd: string, parent: string | undefined): Promise<BoardProjectId | undefined> {
+    try {
+      return await this.ports.projects?.projectForStart({ cwd, ...(parent === undefined ? {} : { parent }) });
+    } catch {
+      return undefined;
+    }
   }
 
   async start(id: string, beforeFirstTurn?: SessionBeforeFirstTurn): Promise<SessionLifecycleRecord> {

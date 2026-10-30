@@ -497,7 +497,7 @@ describe('a notification tap opens its conversation on the machine that sent it'
    * A DAEMON THAT NAMES NO PAGE. Before #768 every push carried `url: '/'`, an ask included, and
    * `fy attention notify` still did; a machine that has not been updated sends exactly that.
    */
-  test.each([
+  const UNNAMED_PAGES = [
     {
       name: 'an older daemon’s ask (url "/", a session)',
       payload: { sessionId: 'mvb9x0-c0ffee01', kind: 'question', title: 'Needs you', tag: 't', url: '/' },
@@ -519,23 +519,32 @@ describe('a notification tap opens its conversation on the machine that sent it'
       payload: { kind: 'device-paired', title: 'A new device was paired', tag: 't', url: '/' },
       expected: '/d/beta',
     },
-  ])(
-    '$name opens $expected',
-    async ({ payload, expected }) => {
-      const browserProfile = await profile();
-      const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
-      await retire(browserProfile);
-      await push(browserProfile, 'beta', payload);
+  ] as const;
+  // Three independent profiles, so the cases run side by side instead of paying each boot in turn.
+  test('a daemon that names no page still opens the conversation the push is about, or that machine’s sessions', async () => {
+    const outcomes = await Promise.allSettled(
+      UNNAMED_PAGES.map(async ({ name, payload, expected }) => {
+        const browserProfile = await profile();
+        try {
+          const app = await appAt(browserProfile, '/d/alpha/session/mva1-aaaa0001');
+          await retire(browserProfile);
+          await push(browserProfile, 'beta', payload);
 
-      await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
-      const landed = await settledOn(app, expected);
+          await tap(browserProfile, MACHINES.beta.scope, MACHINES.beta.script);
+          const landed = await settledOn(app, expected);
 
-      expect(landed.path).toBe(expected);
-      expect(landed.route?.daemonId).toBe('beta');
-      await browserProfile.context.close();
-    },
-    120_000,
-  );
+          expect(landed.path).toBe(expected);
+          expect(landed.route?.daemonId).toBe('beta');
+        } catch (error) {
+          if (error instanceof Error) error.message = `[${name} → ${expected}] ${error.message}`;
+          throw error;
+        } finally {
+          await browserProfile.context.close();
+        }
+      }),
+    );
+    for (const outcome of outcomes) if (outcome.status === 'rejected') throw outcome.reason;
+  }, 120_000);
 
   test('a window still starting when the tap lands is routed once the app is up, without a second window', async () => {
     const browserProfile = await profile();
@@ -615,9 +624,19 @@ describe('a notification tap opens its conversation on the machine that sent it'
       const app = await appAt(browserProfile, '/d/alpha');
       await app.reload();
       await settledOn(app, '/d/alpha');
-      // A negative: nothing re-checks the machine's worker. A late check could only turn this into a
-      // false pass, never a false failure, and the positive half below proves the update path works.
-      await pause(1_500);
+      // A negative: nothing re-checks the machine's worker. The page load re-checked the app's own worker
+      // in the same navigation, so the moment that one reports release 2 the loads' checks have run —
+      // waiting for it replaces a guessed pause. The positive half below proves the update path works.
+      await waitFor(
+        async () => {
+          const own = browserProfile.context
+            .serviceWorkers()
+            .filter(worker => worker.url() === `${origin()}/sw.verified.js`);
+          return (await Promise.all(own.map(releaseOf))).includes(2) || undefined;
+        },
+        'the page load to re-check the app’s own worker',
+        { pollMs: 50 },
+      );
       const untouched = await marked();
 
       // What the app's reconcile does for every machine it is still paired with.

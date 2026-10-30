@@ -269,15 +269,65 @@ const toolsOpacity = async (page: Page): Promise<number> =>
     return tools === null ? -1 : Number(getComputedStyle(tools).opacity);
   });
 
-/** Lets the tools' 120 ms fade settle before a reading or a capture. */
-const settleFade = async (page: Page): Promise<void> => {
-  await page.waitForTimeout(250);
+/**
+ * Waits until the corner tools are fully visible. A CONDITION, not a sleep: the tools fade in over 120 ms
+ * and the reading below it is "fully shown", so the moment the computed opacity is 1 is exactly when it
+ * may be read.
+ */
+const waitForToolsShown = async (page: Page): Promise<void> => {
+  await page.waitForFunction(
+    () => {
+      const tools = document.querySelector('.fy-render-tools');
+      return tools !== null && Number(getComputedStyle(tools).opacity) === 1;
+    },
+    undefined,
+    { timeout: 40_000 },
+  );
+};
+
+/**
+ * A pause that exists ONLY so a PNG shows the settled picture (a finished animation, a faded-in tooltip).
+ * No assertion reads what it waits for, so without an evidence directory there is nothing to wait for.
+ */
+const forCapture = async (page: Page, milliseconds: number): Promise<void> => {
+  if (evidenceDir !== null) await page.waitForTimeout(milliseconds);
+};
+
+/**
+ * Waits until the chart canvas has stopped changing: six animation frames in a row with identical pixels.
+ * Chart.js repaints every frame while its 420 ms draw animation runs, so identical frames mean it ended.
+ */
+const waitForCanvasSettled = async (page: Page): Promise<void> => {
+  await page.evaluate(
+    async () =>
+      await new Promise<void>(resolve => {
+        const canvas = document.querySelector('.fy-render-chart canvas') as HTMLCanvasElement;
+        const context = canvas.getContext('2d') as CanvasRenderingContext2D;
+        const fingerprint = (): number => {
+          const data = context.getImageData(0, 0, canvas.width, canvas.height).data;
+          let sum = 0;
+          for (let index = 0; index < data.length; index += 7) sum = (sum * 31 + (data[index] ?? 0)) % 2_147_483_647;
+          return sum;
+        };
+        let last = fingerprint();
+        let same = 0;
+        const tick = (): void => {
+          const now = fingerprint();
+          same = now === last ? same + 1 : 0;
+          last = now;
+          if (same >= 6) resolve();
+          else requestAnimationFrame(tick);
+        };
+        requestAnimationFrame(tick);
+      }),
+  );
 };
 
 const waitForMermaidDiagram = async (page: Page): Promise<void> => {
   const terminal = await page.waitForFunction(
     () => {
-      if (document.querySelector('img[data-fy-render-diagram="true"]') !== null) return { kind: 'diagram' };
+      const picture = document.querySelector<HTMLImageElement>('img[data-fy-render-diagram="true"]');
+      if (picture !== null && picture.complete) return { kind: 'diagram' };
       const failed = document.querySelector('[data-fy-render-failure]');
       return failed === null ? null : { kind: 'failed', why: failed.getAttribute('data-fy-render-failure') };
     },
@@ -317,7 +367,6 @@ describe('fy-render component evidence — Mermaid', () => {
         // Assert — nothing to press: it renders, and the frame that compiled it is gone.
         should(await page.getByRole('button', { name: /Render/ }).count()).equal(0);
         await waitForMermaidDiagram(page);
-        await page.waitForTimeout(300);
         const diagram = await page.locator('img[data-fy-render-diagram="true"]').boundingBox();
         await shot('mermaid-01-inline', { diagramBox: diagram, overflow: await overflow(page) });
         should(await page.locator('iframe').count()).equal(0);
@@ -350,9 +399,8 @@ describe('fy-render component evidence — Mermaid', () => {
         } else {
           // A long press on touch: a press held still.
           await page.locator('figure.fy-render').dispatchEvent('pointerdown', { pointerType: 'touch' });
-          await page.waitForTimeout(600);
         }
-        await settleFade(page);
+        await waitForToolsShown(page);
         should(await toolsOpacity(page)).equal(1);
         await shot('mermaid-02-tools', { tools: await page.locator('.fy-render-tool').count() });
 
@@ -364,7 +412,7 @@ describe('fy-render component evidence — Mermaid', () => {
         await page.getByRole('button', { name: 'Mermaid source' }).click();
         await page.getByRole('button', { name: 'Fullscreen' }).click();
         await page.waitForSelector('[role="dialog"]');
-        await page.waitForTimeout(200);
+        await forCapture(page, 200);
         await shot('mermaid-04-fullscreen', { overflow: await overflow(page) });
         should(await overflow(page)).equal(0);
         await page.getByRole('button', { name: 'Exit fullscreen' }).click();
@@ -383,7 +431,6 @@ describe('fy-render component evidence — Mermaid', () => {
     try {
       // Act
       await page.waitForSelector('[data-fy-render-failure="render"]', { timeout: 40_000 });
-      await page.waitForTimeout(200);
 
       // Assert — the source as a fence, no sentence in the app's voice, the parse
       // dump kept as a title for whoever is debugging.
@@ -427,7 +474,7 @@ describe('fy-render component evidence — Lottie', () => {
 
     try {
       await page.waitForSelector('[data-fy-render-playing="true"]', { state: 'attached', timeout: 40_000 });
-      await page.waitForTimeout(900);
+      await forCapture(page, 900);
       const frame = await page.locator('iframe[data-fy-render-frame="lottie"]').boundingBox();
       await shot('lottie-01-playing', { frameBox: frame, overflow: await overflow(page) });
       should(await overflow(page)).equal(0);
@@ -443,13 +490,15 @@ describe('fy-render component evidence — Lottie', () => {
       const before = await page.locator('iframe[data-fy-render-frame="lottie"]').getAttribute('src');
       await page.locator('figure.fy-render').hover();
       await page.getByRole('button', { name: 'Pause animation' }).click();
-      await page.waitForTimeout(300);
+      await page.waitForSelector('[data-fy-render-playing="false"]', { state: 'attached', timeout: 40_000 });
 
       // Assert — a port command, never a remount; and the tools stay up while paused.
       should(await page.locator('[data-fy-render-playing="false"]').count()).equal(1);
       should(await page.locator('iframe[data-fy-render-frame="lottie"]').getAttribute('src')).equal(before);
       await page.mouse.move(0, 0);
-      await settleFade(page);
+      // A NEGATIVE proof: the tools must NOT fade out once the pointer leaves. Reading at once would pass
+      // before a fade could begin, so the fade's own 120 ms (plus a frame of margin) is waited out.
+      await page.waitForTimeout(200);
       should(await toolsOpacity(page)).equal(1);
       await shot('lottie-02-paused', { playing: 'false' });
     } finally {
@@ -465,7 +514,7 @@ describe('fy-render component evidence — Lottie', () => {
     try {
       // Act
       await page.waitForSelector('[data-fy-render-playing]', { state: 'attached', timeout: 40_000 });
-      await settleFade(page);
+      await waitForToolsShown(page);
 
       // Assert — Play is not behind a hover the reader may not have.
       should(await page.locator('[data-fy-render-playing="false"]').count()).equal(1);
@@ -564,7 +613,7 @@ describe('fy-render component evidence — layout and focus', () => {
 
       // Act — the keyboard reaches a tool nobody hovered.
       await trigger.focus();
-      await settleFade(page);
+      await waitForToolsShown(page);
 
       // Assert — visible on focus, not only on hover.
       should(await toolsOpacity(page)).equal(1);
@@ -573,7 +622,8 @@ describe('fy-render component evidence — layout and focus', () => {
       await trigger.press('Enter');
       await page.waitForSelector('[role="dialog"]');
       await page.keyboard.press('Escape');
-      await page.waitForTimeout(200);
+      await page.waitForSelector('[role="dialog"]', { state: 'detached' });
+      await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === 'Fullscreen');
 
       // Assert — back on the trigger.
       should(await page.locator('[role="dialog"]').count()).equal(0);
@@ -597,7 +647,7 @@ describe('fy-render component evidence — Map', () => {
           // Act — nothing to press: the map is near the viewport, so it draws by itself.
           await page.waitForSelector('[data-fy-render-map="drawn"]', { timeout: 40_000 });
           await page.waitForSelector('img.leaflet-tile-loaded');
-          await page.waitForTimeout(500);
+          await forCapture(page, 500);
 
           // Assert — pins, one route, loaded tiles, and the reader's mode.
           should(await page.locator('.fy-map-pin').count()).equal(3);
@@ -641,7 +691,7 @@ describe('fy-render component evidence — Map', () => {
       // Act — tap a pin that has a popup.
       await page.locator('.fy-map-pin').first().click();
       await page.waitForSelector('.fy-map-popup');
-      await page.waitForTimeout(500);
+      await forCapture(page, 500);
       await shot('map-02-popup');
 
       // Assert — the popup is text in the page, and Zoom in asks for closer tiles.
@@ -656,8 +706,8 @@ describe('fy-render component evidence — Map', () => {
 
       // Act / Assert — Fullscreen gives the map the whole window and Exit returns it.
       await page.getByRole('button', { name: 'Fullscreen' }).click();
-      await page.waitForSelector('[role="dialog"]');
-      await page.waitForTimeout(400);
+      await page.waitForSelector('[role="dialog"] .leaflet-container');
+      await forCapture(page, 400);
       should(await page.locator('[role="dialog"] .leaflet-container').count()).equal(1);
       should(await overflow(page)).equal(0);
       await shot('map-03-fullscreen');
@@ -706,10 +756,14 @@ const pixelsOf = async (page: Page, hex: string): Promise<number> =>
     return count;
   }, hex);
 
-const waitForChart = async (page: Page): Promise<void> => {
+/**
+ * The chart is drawn. `settled` additionally waits out the 420 ms draw animation: a pixel reading or a
+ * capture before it ends sees half-grown bars. A test that reads only text, geometry or state does not
+ * need the animation over, so it does not pay for it.
+ */
+const waitForChart = async (page: Page, settled = false): Promise<void> => {
   await page.waitForSelector('[data-fy-render-chart="drawn"]', { timeout: 40_000 });
-  // The draw animation is 420 ms; a capture before it ends shows half-grown bars.
-  await page.waitForTimeout(700);
+  if (settled || evidenceDir !== null) await waitForCanvasSettled(page);
 };
 
 describe('fy-render component evidence — Chart', () => {
@@ -722,7 +776,7 @@ describe('fy-render component evidence — Chart', () => {
 
         try {
           // Act — nothing to press: it is near, so it draws by itself.
-          await waitForChart(page);
+          await waitForChart(page, true);
 
           // Assert — painted by the theme: the first series is the first palette slot, the muted series the
           // muted token, both found as exact pixels on the canvas.
@@ -764,13 +818,13 @@ describe('fy-render component evidence — Chart', () => {
           const at = { x: plot.x + plot.width * 0.62, y: plot.y + plot.height * 0.6 };
           if (viewport.width <= 480) await page.touchscreen.tap(at.x, at.y);
           else await page.mouse.move(at.x, at.y);
-          await page.waitForTimeout(400);
+          await forCapture(page, 400);
           await shot(`chart-02-tooltip-${theme}`);
 
           // Act — the legend hides a series, and says so.
           const key = page.getByRole('button', { name: 'Reports' });
           await key.click();
-          await page.waitForTimeout(600);
+          await forCapture(page, 600);
 
           // Assert
           should(await key.getAttribute('aria-pressed')).equal('false');
@@ -799,7 +853,7 @@ describe('fy-render component evidence — Chart', () => {
 
           // Act — Next.
           await page.getByRole('button', { name: 'Next step' }).click();
-          await page.waitForTimeout(700);
+          await forCapture(page, 700);
 
           // Assert — the frame's own title and series.
           should(await step.textContent()).equal('2 / 3 Four workers');
@@ -809,7 +863,7 @@ describe('fy-render component evidence — Chart', () => {
           // Act — the slider, from the keyboard.
           await page.getByRole('slider', { name: 'Step' }).focus();
           await page.keyboard.press('ArrowRight');
-          await page.waitForTimeout(700);
+          await forCapture(page, 700);
 
           // Assert
           should(await step.textContent()).equal('3 / 3 Autoscaled');
@@ -844,14 +898,15 @@ describe('fy-render component evidence — Chart', () => {
       await page.mouse.down();
       await page.mouse.move(plot.x + plot.width * 0.65, plot.y + plot.height * 0.5, { steps: 8 });
       await page.mouse.up();
-      await page.waitForTimeout(600);
+      const reset = page.getByRole('button', { name: 'Reset zoom' });
+      await reset.waitFor({ state: 'attached', timeout: 40_000 });
+      await forCapture(page, 600);
 
       // Assert — zoomed, with a way back.
-      const reset = page.getByRole('button', { name: 'Reset zoom' });
       should(await reset.count()).equal(1);
       await shot('chart-07-zoomed');
       await reset.click();
-      await page.waitForTimeout(300);
+      await reset.waitFor({ state: 'detached', timeout: 40_000 });
       should(await reset.count()).equal(0);
     } finally {
       await scene.close();
@@ -883,7 +938,7 @@ describe('fy-render component evidence — Chart', () => {
       const { page, shot } = scene;
 
       try {
-        await waitForChart(page);
+        await waitForChart(page, true);
 
         // Assert — every slice is a palette slot, in order, and the legend names the slices.
         for (const slot of ['viz-1', 'viz-2', 'viz-3', 'viz-4'])
@@ -907,7 +962,7 @@ describe('fy-render component evidence — Chart', () => {
     const { page, shot } = scene;
 
     try {
-      await waitForChart(page);
+      await waitForChart(page, true);
       const before = await page.locator('[data-fy-render-chart]').getAttribute('data-fy-render-chart-palette');
 
       // Act — a different family in the same mode: "dark" alone would not notice.
@@ -917,7 +972,7 @@ describe('fy-render component evidence — Chart', () => {
           document.querySelector('[data-fy-render-chart]')?.getAttribute('data-fy-render-chart-palette') !== previous,
         before,
       );
-      await page.waitForTimeout(700);
+      await waitForCanvasSettled(page);
 
       // Assert
       should(await pixelsOf(page, await resolvedToken(page, 'viz-1'))).be.above(200);
@@ -1014,7 +1069,6 @@ describe('fy-render component evidence — Mermaid in the theme', () => {
         try {
           // Act
           await waitForMermaidDiagram(page);
-          await page.waitForTimeout(300);
 
           // Assert — the node fill, its border and the text are the theme's own.
           const svg = await diagramSvg(page);
@@ -1109,7 +1163,6 @@ describe('fy-render component evidence — Mermaid on a phone', () => {
         try {
           // Act
           await waitForMermaidDiagram(page);
-          await page.waitForTimeout(300);
           const actual = await laidOut(page);
           await shot(`mermaid-08-left-to-right-${theme}`, { laidOut: actual, overflow: await overflow(page) });
 
@@ -1160,7 +1213,6 @@ describe('fy-render component evidence — Mermaid on a phone', () => {
       // Act — rotated to landscape, across the 520px line.
       await page.setViewportSize({ height: 390, width: 900 });
       await drawnAs('wide');
-      await page.waitForTimeout(300);
       await shot('mermaid-09-rotated-landscape', { overflow: await overflow(page) });
       should(await overflow(page)).equal(0);
 

@@ -93,6 +93,16 @@ A notice is a plain notification: `notice: true` on the raise request. No ask, n
 reference it. `ping: true` asks for the phone to buzz and is only valid on a notice. `fy notify` raises one
 (the older `fy attention notify` still works, deprecated).
 
+## Lane proposals
+
+A ferret that works in a project with no lanes runs `fy board lanes propose --template <t> [--rename old=new]…`.
+The daemon stores the set at once (unconfirmed, live) and raises **one** choice on the proposer's agenda,
+`Lanes for <project>: A → B → … · Accept / Edit`, with `source: 'task'` and the stable `sourceRef`
+`lanes:<projectId>:<version>`, so proposing the same version twice is one card. **Accept** confirms the set
+as the owner; **Edit** points at the Board lane editor. A ferret's own edit leaves a set unconfirmed, an
+owner's edit confirms it. The routes are `GET /v1/board/projects` and `GET|POST /v1/board/projects/:projectId/lanes`.
+If the card cannot be raised the set stays live and the response says `agenda: "failed"`.
+
 ## Confirming a configuration change
 
 An edit that loosens what the machine may spend or do is **held** until the owner confirms it

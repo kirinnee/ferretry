@@ -156,7 +156,11 @@ describe('the composer add menu', () => {
       );
       expect(await scene.page.locator(`${MENU}`).textContent()).toContain('Take photo');
 
-      await scene.page.waitForTimeout(300);
+      // The sheet slides up: measure once it has docked to the bottom edge, not after a fixed pause.
+      await scene.page.waitForFunction(selector => {
+        const panel = document.querySelector(selector);
+        return panel !== null && Math.round(panel.getBoundingClientRect().bottom) === window.innerHeight;
+      }, `${MENU} .fy-add-menu`);
       const panel = await box(scene.page, `${MENU} .fy-add-menu`);
       const viewport = scene.page.viewportSize();
       expect(panel.x).toBeLessThanOrEqual(1);

@@ -1004,6 +1004,13 @@ if (import.meta.main) {
     console.log(
       `\nAPPLIED in ${((performance.now() - started) / 1000).toFixed(1)}s. Next: format the changed files, then typecheck.`,
     );
+    // On a branch rebased after the rename, a call to a member the rename already moved (`service.attention()`
+    // whose declaration is now `agenda()`) has no declaration left to resolve, so it is kept like any unknown
+    // receiver. The typecheck names each one; the fix is the agenda spelling.
+    console.log(
+      'If the typecheck says "Property \'attentionX\' does not exist", that call names a member this rename already ' +
+        'moved: spell it agendaX.',
+    );
   } else {
     console.log(`\n(dry-run: nothing written; planned in ${((performance.now() - started) / 1000).toFixed(1)}s)`);
   }

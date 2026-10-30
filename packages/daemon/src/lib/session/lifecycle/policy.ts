@@ -1,6 +1,7 @@
 import { basename } from 'node:path';
 import { HARNESS_LABEL, HYPERMEDIA_ENV } from '@ferretry/fleet';
 import {
+  type BoardProjectId,
   assignedTaskDocument as protocolAssignedTaskDocument,
   type SessionLaunchInstructions,
   taskTitleFor,
@@ -173,6 +174,8 @@ export interface SessionRecordContext {
   readonly id: SessionId;
   /** Canonical, existing directory — never the raw request value. */
   readonly cwd: string;
+  /** The board this session works on, when the daemon could resolve one; absent leaves it to be resolved on read. */
+  readonly projectId?: BoardProjectId;
   readonly at: string;
   readonly settings: SessionLifecycleSettings;
 }
@@ -209,6 +212,7 @@ export function createSessionRecord(
       mode: request.mode,
       ...(prompt ? { prompt } : {}),
       ...(parent ? { parent } : {}),
+      ...(context.projectId === undefined ? {} : { projectId: context.projectId }),
       ...(request.sessionCapabilityHash ? { sessionCapabilityHash: request.sessionCapabilityHash } : {}),
       createdAt: context.at,
       updatedAt: context.at,

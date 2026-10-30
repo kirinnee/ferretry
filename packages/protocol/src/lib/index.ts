@@ -18,6 +18,7 @@ export * from './audit.ts';
 export * from './auto-resume.ts';
 export * from './board.ts';
 export * from './board-lanes.ts';
+export * from './board-projects.ts';
 export * from './board-refs.ts';
 export * from './browser.ts';
 export * from './browser-login.ts';
