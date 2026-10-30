@@ -82,6 +82,14 @@ unreached GET /usage # CORRECT: public usage feed for external readers
 unreached GET /metrics # CORRECT: Prometheus feed for external scrapers
 unreached POST /v1/sessions/:sessionId/notify # CORRECT: kept for older CLIs; the current CLI raises an info item through the attention route instead, so only items notify
 
+# The agenda wire (agenda.wire.1). The daemon serves the agenda spellings beside the older attention ones; the
+# PWA and CLI switch to them in the same release (phase 2 client work). TEMPORARY: each line below is stale the
+# moment a client in this repository dials that route, and a stale line fails this gate — delete it then.
+unreached GET /v1/sessions/:sessionId/agenda # TEMPORARY: the PWA and CLI dial it once their agenda-wire switch lands
+unreached POST /v1/sessions/:sessionId/agenda # TEMPORARY: the PWA and CLI dial it once their agenda-wire switch lands
+unreached POST /v1/sessions/:sessionId/agenda/replies # TEMPORARY: the PWA dials it once its agenda-wire switch lands
+unreached GET /v1/warden/agenda # TEMPORARY: the PWA dials it once its agenda-wire switch lands
+
 # Surfaces with no shipped client yet. Each is a route somebody built and nobody wired.
 unreached GET /v1/sessions/:sessionId/attachments/:attachmentId # no client asks for attachment metadata alone; list and content paths are the shipped surface
 unreached GET /v1/sessions/:sessionId/terminals/:terminalId # the PWA consumes TerminalView rows from the list/create responses; no client asks for detail alone

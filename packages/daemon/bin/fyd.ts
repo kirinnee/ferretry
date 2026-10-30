@@ -175,6 +175,8 @@ import {
   BrowserProfileStore,
   BrowserWorkerClient,
   BunApiServer,
+  FileLegacyWireUseStore,
+  systemLegacyWireTimers,
   BunConnectorProcesses,
   BunProcessProbe,
   BunRelayCarrier,
@@ -1057,6 +1059,7 @@ import {
   type WebRtcPeerEngine,
   type WebRtcSessionFactory,
   type WebRtcSignallingSubsystem,
+  LegacyWireUseCounter,
   type WorkingDirectoryResolver,
   wardenEventTrigger,
   wardenTriggerEnabled,
@@ -11109,7 +11112,7 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
   // whether the boot completes or not.
   cleanups.push(async () => await tunnel.stop());
   progress.enter('mounting subsystems');
-  const subsystems = world.createSubsystems(
+  const createdSubsystems = world.createSubsystems(
     opened.storage,
     world.terminalRuntime,
     usage,
@@ -11148,6 +11151,22 @@ export async function start(world: DaemonWorld, cleanups: Array<() => void | Pro
     config.sessionWorkers,
     config.attention,
   );
+  // The older wire names (`legacy: true` routes) are counted into `<home>/legacy-wire-use.json` and shown on
+  // `GET /v1/health`, so the release that removes them can wait for a quiet fortnight. A file that cannot be
+  // read starts the counter again; nothing here can fail a request or the boot.
+  const legacyWireDiagnostics = { warn: (message: string) => world.notices.state(message) };
+  const legacyWire = new LegacyWireUseCounter(
+    new FileLegacyWireUseStore(join(opened.paths.home, 'legacy-wire-use.json'), legacyWireDiagnostics),
+    systemLegacyWireTimers,
+    legacyWireDiagnostics,
+  );
+  await legacyWire.load();
+  cleanups.push(async () => await legacyWire.flush());
+  const subsystems: typeof createdSubsystems = {
+    ...createdSubsystems,
+    health: { ...createdSubsystems.health, legacyWire: () => legacyWire.snapshot() },
+    legacyWire,
+  };
   // Registered BEFORE the address is bound, like every other acquisition: from here on the daemon can
   // be asked to put an X server, a Chrome and a VNC listener on this host, and whatever it took must
   // be released whether the boot completes or fails part-way.

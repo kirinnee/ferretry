@@ -59,6 +59,7 @@ import { type FleetSetupSubsystem, fleetSetupRoutes } from './fleet-setup.ts';
 import { type ForeignHistorySubsystem, foreignHistoryRoutes } from './foreign-history.ts';
 import { type GrantSubsystem, grantRoutes } from './grants.ts';
 import { harnessUpdateRoutes } from './harness-update.ts';
+import type { LegacyWireUseRecorder } from '../../legacy-wire/index.ts';
 import { type DaemonHealthSubsystem, daemonHealthRoutes } from './health.ts';
 import { type LearningSubsystem, learningRoutes } from './learning.ts';
 import { type McpInventorySubsystem, mcpInventoryRoutes } from './mcp-inventory.ts';
@@ -142,6 +143,8 @@ import { type WorktreeSubsystem, worktreeRoutes } from './worktrees.ts';
 export interface MountedSubsystems {
   /** The daemon's own health, over the self-check that measures it. */
   readonly health: DaemonHealthSubsystem;
+  /** Counts the requests that reach a route kept only for older clients. Absent where nothing counts. */
+  readonly legacyWire?: LegacyWireUseRecorder;
   /** Host dependencies, diagnosed for this daemon's own machine. */
   readonly doctor: DoctorSubsystem;
   /**
@@ -686,6 +689,7 @@ export function createMountedDispatcher(base: DaemonApiDependencies, subsystems:
     subsystems.grants,
     undefined,
     subsystems.stepUp,
+    subsystems.legacyWire,
   );
 }
 

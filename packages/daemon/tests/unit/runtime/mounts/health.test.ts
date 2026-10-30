@@ -255,4 +255,47 @@ describe('the daemon health mount and the session-worker pool', () => {
     should(view.features).containEql(DAEMON_FEATURES.packIdea4000);
     should(view.features).deepEqual([...daemonFeatureList()]);
   });
+
+  it('should report the agenda wire, so a newer app knows to dial the agenda routes', async () => {
+    // Arrange / Act
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem())).body));
+
+    // Assert
+    should(view.features).containEql('agenda.wire.1');
+  });
+
+  it('should report an empty legacy-wire list when the daemon counts and nothing used an older name', async () => {
+    // Arrange / Act
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem({ legacyWire: [] }))).body));
+
+    // Assert
+    should(view.legacyWire).deepEqual([]);
+  });
+
+  it('should report each older wire name that was used, with when and by which client', async () => {
+    // Arrange
+    const used = [
+      {
+        route: 'GET /v1/sessions/:sessionId/attention',
+        firstAt: '2026-10-01T00:00:00.000Z',
+        lastAt: '2026-10-20T00:00:00.000Z',
+        count: 3,
+        lastClientVersion: '4.108.0',
+      },
+    ];
+
+    // Act
+    const view = HealthViewSchema.parse(JSON.parse((await ask(healthSubsystem({ legacyWire: used }))).body));
+
+    // Assert
+    should(view.legacyWire).deepEqual(used);
+  });
+
+  it('should leave the legacy-wire field out where this daemon counts nothing', async () => {
+    // Arrange / Act
+    const body = JSON.parse((await ask(healthSubsystem())).body) as Record<string, unknown>;
+
+    // Assert
+    should(body).not.have.property('legacyWire');
+  });
 });
