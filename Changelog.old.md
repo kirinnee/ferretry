@@ -1,3 +1,9 @@
+## [4.134.1](https://github.com/kirinnee/ferretry/compare/v4.134.0...v4.134.1) (2026-10-30)
+
+### Fixes
+
+* **pwa:** call the agenda client on itself when a card opens ([#1029](https://github.com/kirinnee/ferretry/issues/1029)) ([268b27a](https://github.com/kirinnee/ferretry/commit/268b27a3b9564339a5b482755a3768ffcba6e773))
+
 ## [4.134.0](https://github.com/kirinnee/ferretry/compare/v4.133.0...v4.134.0) (2026-10-30)
 
 ### Features
